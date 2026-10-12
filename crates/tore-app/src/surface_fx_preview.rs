@@ -517,6 +517,7 @@ fn render(
                 live::DEFAULT_OWNSHIP_SIDE,
                 &ownship.font,
                 &sprites,
+                None,
             );
             let path = out.join(format!("{name}.png"));
             std::fs::write(&path, crate::replay::png::encode_rgba(640, 480, &pixels)?)?;

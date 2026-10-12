@@ -87,6 +87,10 @@ pub struct Built {
     /// The drawn model of each aircraft type, in the order the world holds
     /// the types (`CombatView` draws them in that order).
     pub models: Vec<Airframe>,
+    /// The mission's markup for the in-flight map, read from the world as
+    /// built, before it flies: the same starts and objective area the
+    /// creator's map shows, on every machine of the game.
+    pub markup: crate::flight_map::Plan,
 }
 
 /// The build this game is, which the host's must match.
@@ -207,9 +211,11 @@ fn build_mission(spec: &MissionSpec, resources: &BTreeMap<String, Vec<u8>>) -> W
             ground_variation: None,
         },
     )?;
+    let markup = crate::quick_mission::map::mission_plan(&built.world, false, None);
     Ok(Built {
         world: built.world,
         models,
+        markup,
     })
 }
 

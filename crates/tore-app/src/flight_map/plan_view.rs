@@ -12,8 +12,8 @@
 //! no horizontal bar or arrow ends decoded); the rocker is the retail rocker's
 //! own art and tilts as the debrief's does.
 use super::{
-    INK, OBJECTIVE, Plan, PlanSide, Projection, Tile, advance, draw_ground, label_in,
-    objective_mark, place_marker_in, symbol,
+    INK, OBJECTIVE, Placed, Plan, PlanSide, Projection, Tile, advance, draw_ground, draw_objective,
+    draw_placed, objective_mark, place_marker_in, place_starts, symbol,
 };
 use crate::hud::Paint;
 use crate::menu::{Canvas, Sprite};
@@ -256,6 +256,18 @@ pub struct PlanView {
     rocker: Rocker,
     /// Which rocker half is held down.
     rocker_held: bool,
+    /// Where the rocker's top left is (the side panel differs between the
+    /// planning map and the in-flight one).
+    rocker_at: (i32, i32),
+    /// The in-flight map's view: it follows the player until the player
+    /// scrolls it away, and Home goes back to following.
+    flight: Option<Following>,
+}
+
+/// The in-flight map's following state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Following {
+    on: bool,
 }
 
 impl PlanView {
@@ -294,10 +306,44 @@ impl PlanView {
             pressed: None,
             rocker: Rocker::new(),
             rocker_held: false,
+            rocker_at: ROCKER,
+            flight: None,
         };
         view.open_on(plan);
         view.home = (view.level, view.center);
         view
+    }
+
+    /// The in-flight map's view of a theater `size` feet across (east,
+    /// north): the same zoom steps, scroll bars and rocker as the planning
+    /// map, with the rocker at `rocker_at`. It opens 100 nm across (or the
+    /// nearest step) and follows the player until the player scrolls.
+    pub fn flight(size: [f64; 2], rocker_at: (i32, i32)) -> Self {
+        let mut view = Self::over(&Plan::default(), size);
+        view.level = view
+            .levels
+            .iter()
+            .position(|width| *width <= 100.1 * NMI)
+            .unwrap_or(view.levels.len() - 1);
+        view.rocker_at = rocker_at;
+        view.flight = Some(Following { on: true });
+        view.clamp();
+        view.home = (view.level, view.center);
+        view
+    }
+
+    /// Centres the view on `position` (east, north feet) while it follows.
+    pub fn follow(&mut self, position: [f64; 2]) {
+        if self.flight.is_some_and(|f| f.on) {
+            self.center = position;
+            self.clamp();
+        }
+    }
+    /// The player moved the view by hand: it stays where it is.
+    fn let_go(&mut self) {
+        if let Some(f) = &mut self.flight {
+            f.on = false;
+        }
     }
 
     /// Zooms in past the whole theater, onto the objective area and the
@@ -411,6 +457,7 @@ impl PlanView {
         ]
     }
     fn set_first(&mut self, vertical: bool, first: f64) {
+        self.let_go();
         let extent = self.extent();
         if vertical {
             self.center[1] = self.size[1] - first - extent[1] / 2.;
@@ -445,13 +492,27 @@ impl PlanView {
                 self.zoom(false);
                 self.rocker.push(true, false, Instant::now());
             }
-            "ArrowLeft" => self.center[0] -= extent[0] * KEY_STEP,
-            "ArrowRight" => self.center[0] += extent[0] * KEY_STEP,
-            "ArrowUp" => self.center[1] += extent[1] * KEY_STEP,
-            "ArrowDown" => self.center[1] -= extent[1] * KEY_STEP,
-            "Home" => {
-                (self.level, self.center) = self.home;
+            "ArrowLeft" => {
+                self.let_go();
+                self.center[0] -= extent[0] * KEY_STEP;
             }
+            "ArrowRight" => {
+                self.let_go();
+                self.center[0] += extent[0] * KEY_STEP;
+            }
+            "ArrowUp" => {
+                self.let_go();
+                self.center[1] += extent[1] * KEY_STEP;
+            }
+            "ArrowDown" => {
+                self.let_go();
+                self.center[1] -= extent[1] * KEY_STEP;
+            }
+            "Home" => match &mut self.flight {
+                // The in-flight map goes back to following the player.
+                Some(f) => f.on = true,
+                None => (self.level, self.center) = self.home,
+            },
             _ => {}
         }
         self.clamp();
@@ -526,12 +587,13 @@ impl PlanView {
     /// Which half of the rocker a point is on: true for the top half (zoom
     /// in), false for the bottom (zoom out).
     fn rocker_half(&self, (x, y): (i32, i32)) -> Option<bool> {
-        if x < ROCKER.0 || x >= ROCKER.0 + HALF.0 {
+        let at = self.rocker_at;
+        if x < at.0 || x >= at.0 + HALF.0 {
             return None;
         }
-        if (ROCKER.1..ROCKER.1 + HALF.1).contains(&y) {
+        if (at.1..at.1 + HALF.1).contains(&y) {
             Some(true)
-        } else if (ROCKER.1 + HALF.1..ROCKER.1 + 2 * HALF.1).contains(&y) {
+        } else if (at.1 + HALF.1..at.1 + 2 * HALF.1).contains(&y) {
             Some(false)
         } else {
             None
@@ -543,12 +605,17 @@ impl PlanView {
         self.rocker.advance(now)
     }
 
-    fn projection(&self) -> Projection {
+    pub(super) fn projection(&self) -> Projection {
         Projection {
             center: self.center,
             feet_per_pixel: self.levels[self.level] / f64::from(PLOT.2),
             area: PLOT,
+            bounds: self.size,
         }
+    }
+    /// The scale bar's label: a quarter of the view's width, nm.
+    pub(super) fn scale_nmi(&self) -> f64 {
+        (self.width_nmi() / 4.).round()
     }
 
     /// Draws the plan over `world` in the in-game map's look, with
@@ -579,56 +646,20 @@ impl PlanView {
         );
         let mut labels = Vec::new();
         let mut markers = Vec::new();
-        // The objective area first, under everything else: yellow hatching
-        // edged in dark and a yellow ring between two dark ones, so it shows
-        // on sea, forest and desert alike, and never less than 7 pixels in
-        // radius so it shows at the widest zoom.
-        let mut objective_label = None;
-        if let Some((center, radius)) = plan.objective
-            && let Some(at) = projection.unclipped([center[0], 0., center[1]])
-        {
-            let r = (radius / projection.feet_per_pixel).max(7.);
-            objective_mark(pixels, at, r, PLOT);
-            let point = (at.0 as i32, at.1 as i32);
-            if projection.inside(point.0, point.1) {
-                // Nothing is placed on top of a small area.
-                if r < 20. {
-                    markers.push(point);
-                    labels.push((point.0 - 12, point.1 - 10, point.0 + 12, point.1 + 10));
-                }
-                objective_label = Some((point.0, point.1 + r.min(20.) as i32 + 3));
-            }
-        }
-        if let Some(at) = objective_label {
-            label_in(
-                PLOT,
-                pixels,
-                font,
-                "OBJECTIVE AREA",
-                at,
-                OBJECTIVE,
-                &mut labels,
-            );
-        }
-        // Where each symbol goes: the starts first, then the airfields
+        // The objective area and the route first, under everything else
+        // (shared with the in-flight map), then the starts, then the airfields
         // around them. The leaders are drawn as they are placed, so every
         // symbol and label is drawn over them.
-        let mut placed: Vec<((i32, i32), usize, Tile, &str)> = Vec::new();
-        for marker in &plan.markers {
-            let Some(point) = projection.point(marker.position) else {
-                continue;
-            };
-            let at = place_marker_in(PLOT, pixels, point, &mut markers, &mut labels);
-            let heading = (marker.heading.rem_euclid(std::f64::consts::TAU)
-                / std::f64::consts::FRAC_PI_4)
-                .round() as usize
-                % 8;
-            let tile = match marker.side {
-                PlanSide::Blue => Tile::Friendly,
-                PlanSide::Red => Tile::Hostile,
-            };
-            placed.push((at, heading, tile, &marker.label));
-        }
+        draw_objective(
+            pixels,
+            font,
+            &projection,
+            plan,
+            Some(PlanSide::Blue),
+            &mut markers,
+            &mut labels,
+        );
+        let mut placed = place_starts(pixels, &projection, plan, &mut markers, &mut labels);
         let scene = &world.airport_scene;
         for airport in &scene.airports {
             if airport
@@ -650,7 +681,7 @@ impl PlanView {
             let center: [f64; 3] = std::array::from_fn(|i| {
                 runways.iter().map(|p| p[i]).sum::<f64>() / runways.len() as f64
             });
-            let Some(point) = projection.point(center) else {
+            let Some((point, _)) = projection.locate(center) else {
                 continue;
             };
             let at = place_marker_in(PLOT, pixels, point, &mut markers, &mut labels);
@@ -659,26 +690,16 @@ impl PlanView {
                 tore_sim::airport::Allegiance::Hostile => Tile::Hostile,
                 _ => Tile::Neutral,
             };
-            placed.push((at, 15, tile, &airport.name));
+            placed.push(Placed {
+                at,
+                icon: 15,
+                tile,
+                words: &airport.name,
+                off_map: false,
+            });
         }
-        for ((x, y), icon, tile, _) in &placed {
-            symbol(pixels, icons, *x, *y, Some(*icon), *tile);
-        }
-        for ((x, y), _, _, words) in &placed {
-            label_in(PLOT, pixels, font, words, (*x, y + 12), INK, &mut labels);
-        }
-        // The scroll bars, over whatever a symbol or label spilled onto them.
-        Canvas(pixels).rect((VERTICAL.0, HORIZONTAL.1, BAR, BAR), [20, 23, 24, 255]);
-        let scrolls = self.scrolls();
-        for (axis, bar) in self.bars().into_iter().enumerate() {
-            let (total, visible, first) = scrolls[axis];
-            let held = self
-                .pressed
-                .filter(|(vertical, _)| *vertical == bar.vertical)
-                .map(|(_, part)| part)
-                .filter(|part| matches!(part, Part::Thumb | Part::Less | Part::More));
-            bar.draw(pixels, total, visible, first, held);
-        }
+        draw_placed(pixels, icons, font, &placed, &mut labels);
+        self.draw_bars(pixels);
         self.draw_legend(pixels, font, icons, plan, sprites);
         // The frame, as the in-game map redraws it.
         let mut c = Canvas(pixels);
@@ -728,6 +749,63 @@ impl PlanView {
         }
     }
 
+    /// The scroll bars, over whatever a symbol or label spilled onto them.
+    pub(super) fn draw_bars(&self, pixels: &mut [u8]) {
+        Canvas(pixels).rect((VERTICAL.0, HORIZONTAL.1, BAR, BAR), [20, 23, 24, 255]);
+        let scrolls = self.scrolls();
+        for (axis, bar) in self.bars().into_iter().enumerate() {
+            let (total, visible, first) = scrolls[axis];
+            let held = self
+                .pressed
+                .filter(|(vertical, _)| *vertical == bar.vertical)
+                .map(|(_, part)| part)
+                .filter(|part| matches!(part, Part::Thumb | Part::Less | Part::More));
+            bar.draw(pixels, total, visible, first, held);
+        }
+    }
+
+    /// The zoom rocker: the top half zooms in, the bottom half out, with the
+    /// words beside it as the debrief's PREV and NEXT stand by its.
+    pub(super) fn draw_rocker(
+        &self,
+        pixels: &mut [u8],
+        font: &Font,
+        sprites: &std::collections::BTreeMap<String, Sprite>,
+        clip: Rect,
+    ) {
+        let mut p = Paint {
+            pixels: &mut *pixels,
+            clip,
+            color: INK,
+        };
+        let at = font.height as i32;
+        let (x, y) = self.rocker_at;
+        let zoom_in = "ZOOM IN";
+        let zoom_out = "ZOOM OUT";
+        p.text(
+            font,
+            zoom_in,
+            x - 8 - advance(font, zoom_in),
+            y + (HALF.1 - at) / 2,
+        );
+        p.text(
+            font,
+            zoom_out,
+            x - 8 - advance(font, zoom_out),
+            y + HALF.1 + (HALF.1 - at) / 2,
+        );
+        match sprites.get(&self.rocker.sprite()) {
+            Some(rocker) => Canvas(pixels).blit(rocker, (x, y), 0, rocker.width, 1.),
+            None => {
+                // An import without the rocker's art gets two plain halves.
+                let mut c = Canvas(pixels);
+                for half in 0..2 {
+                    raised(&mut c, (x, y + half * HALF.1, HALF.0, HALF.1), false);
+                }
+            }
+        }
+    }
+
     /// The side panel: what each mark means, the zoom rocker and the plan's
     /// note.
     fn draw_legend(
@@ -772,34 +850,7 @@ impl PlanView {
         };
         p.text(font, "AIRFIELD TILES:", 507, 182);
         p.text(font, "BLUE, RED OR GREY", 507, 182 + font.height as i32 + 3);
-        // The zoom rocker: the top half zooms in, the bottom half out, with
-        // the words beside it as the debrief's PREV and NEXT stand by its.
-        let at = font.height as i32;
-        let (x, y) = ROCKER;
-        let zoom_in = "ZOOM IN";
-        let zoom_out = "ZOOM OUT";
-        p.text(
-            font,
-            zoom_in,
-            x - 8 - advance(font, zoom_in),
-            y + (HALF.1 - at) / 2,
-        );
-        p.text(
-            font,
-            zoom_out,
-            x - 8 - advance(font, zoom_out),
-            y + HALF.1 + (HALF.1 - at) / 2,
-        );
-        match sprites.get(&self.rocker.sprite()) {
-            Some(rocker) => Canvas(pixels).blit(rocker, (x, y), 0, rocker.width, 1.),
-            None => {
-                // An import without the rocker's art gets two plain halves.
-                let mut c = Canvas(pixels);
-                for half in 0..2 {
-                    raised(&mut c, (x, y + half * HALF.1, HALF.0, HALF.1), false);
-                }
-            }
-        }
+        self.draw_rocker(pixels, font, sprites, PANEL);
         if let Some(note) = &plan.note {
             let mut p = Paint {
                 pixels,
