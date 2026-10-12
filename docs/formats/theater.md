@@ -70,8 +70,9 @@ retaining the original textures and weather colors. Whitecaps are removed. [Sour
 ## City texture light areas (CF0 prototype)
 
 Measured 2026-10-10 over all sixteen theaters (`tore-app --city-fill-survey`);
-the reader is `tore_world::city::mask` and the opt-in fill that uses it is
-`tore_world::city` (`TORE_CITY_FILL=1`). The terrain class and colour bytes do
+the reader is `tore_world::city::mask` and the fill that uses it is
+`tore_world::city` (on by default since 2026-10-11; `TORE_CITY_FILL=0`
+turns it off in single player). The terrain class and colour bytes do
 not mark cities ([terrain materials](terrain-materials.md)); the city tile
 pictures do.
 
@@ -115,7 +116,8 @@ pictures do.
   swaps the two diagonals.
 
 The development aid `tore-app --city-fill-dump OUT [THEATER]` writes each
-city's mask and fill images and prints the counts.
+city's mask and fill images and prints the counts; its render, sequence,
+sweep and bench options are in [development](../DEVELOPMENT.md).
 
 ## Mission environment and weather modules
 
