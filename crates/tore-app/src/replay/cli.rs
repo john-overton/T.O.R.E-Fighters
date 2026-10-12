@@ -120,6 +120,9 @@ pub fn info(path: &Path, out: &mut impl Write) -> AppResult<()> {
     if world.airfield_scene != 0 {
         writeln!(out, "Airfields   scene {}", world.airfield_scene)?;
     }
+    if world.city_fill_scene != 0 {
+        writeln!(out, "City fill   scene {}", world.city_fill_scene)?;
+    }
     let frames = recording.frame_count();
     let aircraft = recording.aircraft().count().max(1) as u64;
     match recording.first_tick().zip(recording.last_tick()) {

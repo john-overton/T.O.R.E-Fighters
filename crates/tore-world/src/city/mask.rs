@@ -325,6 +325,18 @@ fn texel_roll(x: i64, z: i64) -> u64 {
     (h >> 33) % 100
 }
 
+/// Reads what [`LightMap::build`] reads, without classing anything.
+pub fn read_inputs(
+    resources: &dyn ResourceSource,
+    environment: &tore_formats::theater::Environment,
+    base: &str,
+) {
+    reference_palette(resources, &environment.map);
+    for placement in environment.textures.values() {
+        resources.get(&placement.resource_name(base));
+    }
+}
+
 impl LightMap {
     /// Reads every ground placement's picture once and keeps the city ones,
     /// classed by the theater's reference palette. A theater with no city
@@ -460,9 +472,31 @@ impl LightMap {
     /// `build_mesh`): picture row 0 is the north edge at rotation 0.
     pub fn flags_at(&self, x: i64, z: i64) -> u8 {
         let key = Self::key(x, z);
-        let Some(tile) = self.tiles.get(&key) else {
-            return 0;
-        };
+        self.tiles
+            .get(&key)
+            .map_or(0, |tile| Self::flags_in(tile, key, x, z))
+    }
+
+    /// [`Self::flags_at`] for many nearby points: it remembers the last tile
+    /// it looked up, which a lot's samples nearly always share.
+    pub fn lookup(&self) -> impl Fn(i64, i64) -> u8 + '_ {
+        type Last<'a> = Option<((i32, i32), Option<&'a PlacedTile>)>;
+        let last: std::cell::Cell<Last<'_>> = std::cell::Cell::new(None);
+        move |x, z| {
+            let key = Self::key(x, z);
+            let tile = match last.get() {
+                Some((k, tile)) if k == key => tile,
+                _ => {
+                    let tile = self.tiles.get(&key);
+                    last.set(Some((key, tile)));
+                    tile
+                }
+            };
+            tile.map_or(0, |tile| Self::flags_in(tile, key, x, z))
+        }
+    }
+
+    fn flags_in(tile: &PlacedTile, key: (i32, i32), x: i64, z: i64) -> u8 {
         let cell = TILE_FT / 4;
         let tu = ((x - i64::from(key.0) * cell) / TEXEL_FT).clamp(0, 255) as usize;
         let tv = ((z - i64::from(key.1) * cell) / TEXEL_FT).clamp(0, 255) as usize;

@@ -2154,9 +2154,11 @@ impl Parser {
             time: self.time,
             wind: self.wind,
             cloud_altitude: self.cloud_deck,
-            // The text has no airfield line: every mission it describes,
-            // a session's or a server's, flies the redrawn airports.
+            // The text has no airfield or city line: every mission it
+            // describes, a session's or a server's, flies the redrawn
+            // airports over the city fill.
             redrawn_airports: true,
+            city_fill: true,
         };
         if let Some(start) = self.start {
             spec.start = start;
@@ -2330,6 +2332,7 @@ mod tests {
             wind: Some([-90, 45]),
             cloud_altitude: Some(12_000),
             redrawn_airports: true,
+            city_fill: true,
         };
         spec.start = Start::Ground {
             runway: RUNWAY_OBJECT_BASE + 3,

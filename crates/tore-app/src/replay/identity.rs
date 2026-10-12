@@ -18,6 +18,15 @@ pub const RETAIL_AIRFIELD_SCENE: u32 = 0;
 /// touches takes a new number, so an old recording is never replayed on
 /// airfields it was not flown on.
 pub const REDRAWN_AIRFIELD_SCENE: u32 = 1;
+/// The header's city fill scene for a world without the city fill: what
+/// every recording before the fill became the default holds (docs/REPLAYS.md,
+/// "The city fill scene").
+pub const NO_CITY_FILL_SCENE: u32 = 0;
+/// The header's city fill scene for the city fill of `tore_world::city`, the
+/// default since protocol 25 (2026-10-11). A later change to the fill that
+/// moves anything an aircraft can hit takes a new number, so an old
+/// recording is never replayed over buildings it was not flown over.
+pub const CITY_FILL_SCENE: u32 = 1;
 
 /// Reads a recorded identity back into launch settings, refusing values
 /// a launch could not have produced.
@@ -70,6 +79,7 @@ pub fn recorded(identity: &tore_replay::World) -> AppResult<Recorded> {
         cloud_altitude,
         weather_seed,
         redrawn_airports: identity.airfield_scene == REDRAWN_AIRFIELD_SCENE,
+        city_fill: identity.city_fill_scene == CITY_FILL_SCENE,
         target: identity
             .ground_target
             .as_ref()
@@ -170,6 +180,11 @@ pub fn of(terrain: &Terrain) -> tore_replay::World {
         } else {
             RETAIL_AIRFIELD_SCENE
         },
+        city_fill_scene: if terrain.city_fill.is_some() {
+            CITY_FILL_SCENE
+        } else {
+            NO_CITY_FILL_SCENE
+        },
         surface: has_surface(terrain),
     }
 }
@@ -181,6 +196,10 @@ pub fn of(terrain: &Terrain) -> tore_replay::World {
 /// rebuilds the retail airfields, a newer one the redrawn airports, whatever
 /// `TORE_REDRAWN_AIRPORTS` says. A scene this build does not know (a newer
 /// build's) falls back to the retail airfields, with a warning in the log.
+/// The city fill likewise follows the header's city fill scene, whatever
+/// `TORE_CITY_FILL` says: a recording from before the fill was the default
+/// (no scene) replays without it, and so does a scene this build does not
+/// know, with a warning.
 pub fn terrain(
     resources: &BTreeMap<String, Vec<u8>>,
     identity: &tore_replay::World,
@@ -189,6 +208,12 @@ pub fn terrain(
         log::warn!(
             "Replay: the recording's airfield scene {} is not one this build draws; showing the retail airfields",
             identity.airfield_scene
+        );
+    }
+    if ![NO_CITY_FILL_SCENE, CITY_FILL_SCENE].contains(&identity.city_fill_scene) {
+        log::warn!(
+            "Replay: the recording's city fill scene {} is not one this build draws; showing no city fill",
+            identity.city_fill_scene
         );
     }
     Terrain::for_recorded(resources, &recorded(identity)?)
@@ -275,6 +300,7 @@ mod tests {
                     cloud_altitude: 12_345,
                     weather_seed: 1,
                     redrawn_airports: false,
+                    city_fill: false,
                     target: None,
                 }
             );
@@ -360,5 +386,57 @@ mod tests {
         let mut unknown = redrawn;
         unknown.airfield_scene = 7;
         assert!(!recorded(&unknown).unwrap().redrawn_airports);
+    }
+
+    /// The city fill travels in the header: a world with a fill records
+    /// scene 1 (a format 3 file) and replays with the fill; a recording
+    /// from before the fill was the default, with no scene, replays without
+    /// it, and so does a scene this build does not know.
+    #[test]
+    fn the_city_fill_scene_is_recorded_and_rebuilt() {
+        use tore_world::city;
+        let dir = crate::replay::tests::TempDir::new("city-fill-scene");
+        let through_a_file = |name: &str, world: tore_replay::World| {
+            let header = tore_replay::Header {
+                world,
+                ..Default::default()
+            };
+            let path = dir.path().join(format!("{name}.tore-replay"));
+            let writer = tore_replay::Writer::create(&path, &header).unwrap();
+            let path = writer.finish(&tore_replay::Footer::default()).unwrap();
+            let recording = tore_replay::Recording::open(path).unwrap();
+            let header = recording.header();
+            (header.format_version, header.world.clone())
+        };
+        let layout = city::Layout {
+            layout: "UKR.MM".into(),
+            map: city::mask::LightMap::default(),
+            kit: city::kit::Kit::default(),
+            cities: Vec::new(),
+            instances: Vec::new(),
+            candidates: 0,
+            inputs: Vec::new(),
+        };
+        let mut w = tore_world::test_support::terrain();
+        w.layout = "UKR.MM".into();
+        w.city_fill = Some(std::sync::Arc::new(city::CityFill::assemble(
+            std::sync::Arc::new(layout),
+            Vec::new(),
+            Vec::new(),
+        )));
+        let (format, filled) = through_a_file("filled", of(&w));
+        assert_eq!(filled.city_fill_scene, CITY_FILL_SCENE);
+        assert_eq!(format, 3);
+        assert!(recorded(&filled).unwrap().city_fill);
+
+        w.city_fill = None;
+        let (format, old) = through_a_file("old", of(&w));
+        assert_eq!(old.city_fill_scene, NO_CITY_FILL_SCENE);
+        assert_eq!(format, 2, "a world without fill or surface stays format 2");
+        assert!(!recorded(&old).unwrap().city_fill);
+
+        let mut unknown = filled;
+        unknown.city_fill_scene = 7;
+        assert!(!recorded(&unknown).unwrap().city_fill);
     }
 }

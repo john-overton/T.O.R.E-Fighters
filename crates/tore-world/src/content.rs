@@ -209,11 +209,21 @@ fn probe_aircraft(reads: &ResourceReads<'_>, id: AircraftId) -> Option<()> {
 /// each of the six weather conditions, its layout, its own grid, the
 /// condition layers, the placed objects and their shapes. `None` when the
 /// import cannot build the theater under all six.
+///
+/// The city fill's inputs are read once, without building the fill: the
+/// fill is cached per process and layout, so building it would list its
+/// files only the first time, and placing it costs seconds per theater.
 fn theater_item(resources: &BTreeMap<String, Vec<u8>>, code: &str) -> Option<Item> {
     let reads = ResourceReads::new(resources);
+    let overrides = Overrides {
+        city_fill: false,
+        ..Overrides::default()
+    };
+    let mut built = None;
     for condition in Condition::ALL {
-        Terrain::for_mission(&reads, code, Some(condition.index()), &Overrides::default()).ok()?;
+        built = Some(Terrain::for_mission(&reads, code, Some(condition.index()), &overrides).ok()?);
     }
+    crate::city::read_inputs(&reads, built.as_ref()?);
     Some(Item::new(Kind::Theater, code, reads.manifest()))
 }
 
@@ -256,6 +266,9 @@ fn weapon_items(resources: &BTreeMap<String, Vec<u8>>) -> Vec<Item> {
 /// a host builds an open mission.
 fn reference_spec(aircraft: AircraftId, theater: &str) -> MissionSpec {
     let mut spec = MissionSpec::new(theater, aircraft);
+    // The theater item lists the city fill's files; placing the fill here
+    // would only cost time.
+    spec.weather.city_fill = false;
     spec.wings[3].count = 1;
     spec.wings[3].skill = Skill::Average;
     spec.start = Start::Airborne {

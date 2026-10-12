@@ -20,6 +20,19 @@
 //!   target display draws it (camera slot 4, its zoom), off and on.
 //! - `--target-bench X,Z,HEIGHT,PITCH,YAW,ZOOM,FRAMES` times that view held
 //!   still at `--size`, off then on.
+//! - `--sequence NAME@X,Z,HEIGHT,HEADING,STEP,FRAMES[,PITCH[,ZOOM]]` flies
+//!   the offscreen camera as `--bench` does (PITCH degrees down, 6.9 by
+//!   default) with the fill on and writes every frame at 1920 by 1080 as
+//!   `NAME-0000.png` on: the transitions frame by frame. With ZOOM the
+//!   frames are the target display's (camera slot 4).
+//! - `--sweep NAME@X,Z,HEIGHT,PITCH,YAW,KIND,FROM,TO,STEPS` holds the
+//!   camera still (as `--render`) and moves one tier over STEPS frames:
+//!   KIND 0 the building detail distance (nautical miles, the blend band a
+//!   quarter beyond it, drawn to 30 nm), 1 the building distance (detail
+//!   5 nm), 2 the smallest drawn size (pixels). Nothing moves but the tier,
+//!   so the change between frames is the transition alone: it prints, per
+//!   step, how many pixels changed by more than 40 of 255 (a pop) and the
+//!   mean change, and writes `NAME-0000.png` on.
 //! - `--bench` flies the offscreen camera FRAMES frames along HEADING from
 //!   X, Z at HEIGHT ft above the ground, FEET_PER_FRAME apart, at `--size`
 //!   (3840 by 2160 by default), fill off then on, and prints each pass's
@@ -36,13 +49,14 @@ use tore_world::{
 };
 
 /// Noon, no wind, no cloud; the redrawn airports unless
-/// `TORE_REDRAWN_AIRPORTS=0`.
-fn overrides() -> AppResult<crate::terrain::Overrides> {
+/// `TORE_REDRAWN_AIRPORTS=0`; the city fill `on` or off.
+fn overrides(on: bool) -> AppResult<crate::terrain::Overrides> {
     Ok(crate::terrain::Overrides {
         time: Some([12, 0]),
         wind: None,
         cloud_altitude: Some(0),
         redrawn_airports: crate::scenery::redrawn_airports()?,
+        city_fill: on,
     })
 }
 
@@ -62,11 +76,7 @@ fn world(
     theater: &str,
     on: bool,
 ) -> AppResult<(Terrain, Scenery)> {
-    let overrides = overrides()?;
-    city::set_enabled(on);
-    let world = Terrain::for_mission(resources, theater, Some(0), &overrides);
-    city::set_enabled(false);
-    let world = world?;
+    let world = Terrain::for_mission(resources, theater, Some(0), &overrides(on)?)?;
     let scenery = Scenery::build(resources, &world)?;
     Ok((world, scenery))
 }
@@ -231,13 +241,15 @@ pub fn survey() -> AppResult<()> {
 
 pub fn run() -> AppResult<()> {
     let args: Vec<String> = std::env::args().skip(2).collect();
-    let usage = "--city-fill-dump OUT [THEATER] [--render NAME@X,Z,H,PITCH,YAW ...] [--bench X,Z,H,HEADING,STEP,FRAMES] [--size W,H]";
+    let usage = "--city-fill-dump OUT [THEATER] [--render NAME@X,Z,H,PITCH,YAW ...] [--sequence NAME@X,Z,H,HEADING,STEP,FRAMES[,PITCH[,ZOOM]] ...] [--sweep NAME@X,Z,H,PITCH,YAW,KIND,FROM,TO,STEPS ...] [--bench X,Z,H,HEADING,STEP,FRAMES] [--size W,H]";
     let out = Path::new(args.first().ok_or(usage)?);
     let mut theater = "UKR".to_owned();
     let mut renders = Vec::new();
     let mut targets = Vec::new();
     let mut target_bench = None;
     let mut bench = None;
+    let mut sequences = Vec::new();
+    let mut sweeps = Vec::new();
     let mut size = [3840u32, 2160u32];
     let mut it = args.iter().skip(1);
     while let Some(arg) = it.next() {
@@ -246,6 +258,8 @@ pub fn run() -> AppResult<()> {
             "--target" => targets.push(it.next().ok_or(usage)?.clone()),
             "--target-bench" => target_bench = Some(numbers(it.next().ok_or(usage)?)?),
             "--bench" => bench = Some(numbers(it.next().ok_or(usage)?)?),
+            "--sequence" => sequences.push(it.next().ok_or(usage)?.clone()),
+            "--sweep" => sweeps.push(it.next().ok_or(usage)?.clone()),
             "--size" => {
                 let v = numbers(it.next().ok_or(usage)?)?;
                 size = [v[0] as u32, v[1] as u32];
@@ -261,11 +275,7 @@ pub fn run() -> AppResult<()> {
     let (_, off_scenery) = world(&resources, &theater, false)?;
     let rss_off = rss_kib();
     let started = Instant::now();
-    let overrides = overrides()?;
-    city::set_enabled(true);
-    let on_world = Terrain::for_mission(&resources, &theater, Some(0), &overrides);
-    city::set_enabled(false);
-    let on_world = on_world?;
+    let on_world = Terrain::for_mission(&resources, &theater, Some(0), &overrides(true)?)?;
     let built = started.elapsed();
     let on_scenery = Scenery::build(&resources, &on_world)?;
     let rss_on = rss_kib();
@@ -472,6 +482,115 @@ pub fn run() -> AppResult<()> {
                 stats.boxes
             );
         }
+    }
+    for item in &sequences {
+        let (name, spot) = item.split_once('@').ok_or(usage)?;
+        let v = numbers(spot)?;
+        if v.len() < 6 {
+            return Err(usage.into());
+        }
+        let (world, mut scenery) = world(&resources, &theater, true)?;
+        use_gpu(&scenery, &mut gpu)?;
+        let gpu = gpu.as_mut().expect("gpu");
+        let geometry = std::sync::Arc::clone(scenery.static_geometry_where(&hidden_none));
+        gpu.sim.airports(&gpu.device, &gpu.queue, &geometry);
+        let heading = v[3].to_radians();
+        let pitch = v
+            .get(6)
+            .copied()
+            .unwrap_or(0.12f64.to_degrees())
+            .to_radians();
+        for frame in 0..v[5] as usize {
+            let along = frame as f64 * v[4];
+            let x = v[0] + along * heading.sin();
+            let z = v[1] + along * heading.cos();
+            let mut camera = Camera::new();
+            camera.yaw = heading as f32;
+            camera.pitch = -pitch as f32;
+            camera.position = [x, f64::from(world.height(x as f32, z as f32)) + v[2], z];
+            if let Some(&zoom) = v.get(7) {
+                camera.weather_slot = 4;
+                camera.zoom = zoom as f32;
+            }
+            scenery.resolve_palette(&world, camera.position[1]);
+            scenery.set_origin(camera.position);
+            let pixels = gpu.pixels(&camera, &world, &scenery)?;
+            let path = out.join(format!("{name}-{frame:04}.png"));
+            std::fs::write(
+                &path,
+                crate::replay::png::encode_rgba(crate::reel::WIDTH, crate::reel::HEIGHT, &pixels)?,
+            )?;
+        }
+        println!("sequence: {name}, {} frames in {}", v[5], out.display());
+    }
+    for item in &sweeps {
+        let (name, spot) = item.split_once('@').ok_or(usage)?;
+        let v = numbers(spot)?;
+        if v.len() < 9 {
+            return Err(usage.into());
+        }
+        let (world, mut scenery) = world(&resources, &theater, true)?;
+        use_gpu(&scenery, &mut gpu)?;
+        let gpu = gpu.as_mut().expect("gpu");
+        let geometry = std::sync::Arc::clone(scenery.static_geometry_where(&hidden_none));
+        gpu.sim.airports(&gpu.device, &gpu.queue, &geometry);
+        let camera = camera_at(&world, &v);
+        scenery.resolve_palette(&world, camera.position[1]);
+        scenery.set_origin(camera.position);
+        let steps = (v[8] as usize).max(2);
+        let mut previous: Option<Vec<u8>> = None;
+        let (mut pops, mut worst, mut change) = (0usize, 0usize, 0f64);
+        for step in 0..steps {
+            let at = v[6] + (v[7] - v[6]) * step as f64 / (steps - 1) as f64;
+            let mut tiers = crate::fill_renderer::Tiers {
+                full_nm: 5.,
+                blend_nm: 5. * crate::fill_renderer::BLEND_SHARE,
+                draw_nm: 30.,
+                min_px: 1.,
+                detail_px: 0.,
+            };
+            match v[5] as u32 {
+                0 => {
+                    tiers.full_nm = at;
+                    tiers.blend_nm = at * crate::fill_renderer::BLEND_SHARE;
+                }
+                1 => tiers.draw_nm = at,
+                _ => tiers.min_px = at,
+            }
+            if let Some(fill) = gpu.sim.fill.as_mut() {
+                fill.set_tiers(Some(tiers));
+            }
+            let pixels = gpu.pixels(&camera, &world, &scenery)?;
+            if let Some(before) = &previous {
+                let mut popped = 0usize;
+                let mut sum = 0u64;
+                for (a, b) in before.chunks_exact(4).zip(pixels.chunks_exact(4)) {
+                    let d = (0..3).map(|k| a[k].abs_diff(b[k])).max().unwrap_or(0);
+                    sum += u64::from(d);
+                    if d > 40 {
+                        popped += 1;
+                    }
+                }
+                let mean = sum as f64 / (pixels.len() / 4) as f64;
+                println!(
+                    "sweep {name} step {step} at {at:.3}: {popped} pixels popped, mean change {mean:.4}"
+                );
+                pops += popped;
+                worst = worst.max(popped);
+                change += mean;
+            }
+            std::fs::write(
+                out.join(format!("{name}-{step:04}.png")),
+                crate::replay::png::encode_rgba(crate::reel::WIDTH, crate::reel::HEIGHT, &pixels)?,
+            )?;
+            previous = Some(pixels);
+        }
+        if let Some(fill) = gpu.sim.fill.as_mut() {
+            fill.set_tiers(None);
+        }
+        println!(
+            "sweep {name}: {steps} steps, {pops} pixels popped in all, at most {worst} in one step, mean change {change:.4} in all"
+        );
     }
     if let Some(v) = target_bench {
         let frames = v[6] as usize;
