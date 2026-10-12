@@ -105,6 +105,7 @@ struct Options {
     run_on: bool,
     vulnerable: bool,
     no_relocate: bool,
+    no_front: bool,
     no_jitter: bool,
     shuttle: bool,
     follow_terrain: bool,
@@ -127,6 +128,7 @@ fn options() -> AppResult<Options> {
         run_on: false,
         vulnerable: false,
         no_relocate: false,
+        no_front: false,
         no_jitter: false,
         shuttle: false,
         follow_terrain: false,
@@ -152,6 +154,7 @@ fn options() -> AppResult<Options> {
             "--run-on" => o.run_on = true,
             "--vulnerable" => o.vulnerable = true,
             "--no-relocate" => o.no_relocate = true,
+            "--no-front" => o.no_front = true,
             "--no-jitter" => o.no_jitter = true,
             "--shuttle" => o.shuttle = true,
             "--follow-terrain" => o.follow_terrain = true,
@@ -238,6 +241,7 @@ pub fn run() -> AppResult<()> {
     let variation = tore_world::surface::layout::Variation {
         jitter: !o.no_jitter,
         relocate: !o.no_relocate,
+        front: !o.no_front,
     };
     let mut world = World::build(
         &spec,

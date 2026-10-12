@@ -10,6 +10,8 @@ use tore_formats::theater::{TerrainCell, Theater};
 
 /// Feet per terrain grid cell.
 pub const CELL_FT: i64 = 8192;
+/// Spacing of the samples of [`Ground::sees`], feet.
+pub const SIGHT_STEP_FT: i64 = 250;
 /// The terrain class byte of open water (docs/formats/theater.md).
 pub const WATER_CLASS: u8 = 1;
 /// The colour byte of the water cutout. A cell with it and no ground texture
@@ -269,6 +271,45 @@ impl<'a> Ground<'a> {
             hi = hi.max(e);
         }
         hi - lo <= units
+    }
+
+    /// The terrain height at `point` in feet times [`CELL_FT`], exact: the
+    /// grid's elevation bytes (256 ft each) interpolated over the two
+    /// triangles of a cell as the terrain does (`Terrain::height`). A point
+    /// off the grid reads the nearest cell.
+    fn height_scaled(&self, point: [i64; 2]) -> i64 {
+        let extent = self.extent();
+        let at = |axis: usize, cells: usize| {
+            let p = point[axis].clamp(0, extent[axis]);
+            let c = (p / CELL_FT).min(cells as i64 - 2).max(0);
+            (c as usize, p - c * CELL_FT)
+        };
+        let ((c, u), (r, v)) = (at(0, self.cells.cols()), at(1, self.cells.rows()));
+        let h = |dc: usize, dr: usize| i64::from(self.cells.cell(c + dc, r + dr).elevation) * 256;
+        if u + v <= CELL_FT {
+            h(0, 0) * CELL_FT + (h(1, 0) - h(0, 0)) * u + (h(0, 1) - h(0, 0)) * v
+        } else {
+            h(1, 1) * CELL_FT
+                + (h(0, 1) - h(1, 1)) * (CELL_FT - u)
+                + (h(1, 0) - h(1, 1)) * (CELL_FT - v)
+        }
+    }
+
+    /// Whether a unit at `a` sees one at `b` over the terrain: `eye_ft` above
+    /// the ground at both ends, and no sample taken every [`SIGHT_STEP_FT`]
+    /// along the line lies below the ground (the surface weapons' line of
+    /// sight rule, on the same interpolated terrain, at a finer step).
+    pub fn sees(&self, a: [i64; 2], b: [i64; 2], eye_ft: i64) -> bool {
+        let (ha, hb) = (
+            self.height_scaled(a) + eye_ft * CELL_FT,
+            self.height_scaled(b) + eye_ft * CELL_FT,
+        );
+        let length = trig::isqrt(((a[0] - b[0]).pow(2) + (a[1] - b[1]).pow(2)) as u128) as i64;
+        let n = (length / SIGHT_STEP_FT).clamp(2, 64);
+        (1..n).all(|i| {
+            let p = [a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n];
+            self.height_scaled(p) <= (ha * (n - i) + hb * i) / n
+        })
     }
 
     /// Whether any layout object (not a runway) lies within `clearance` feet

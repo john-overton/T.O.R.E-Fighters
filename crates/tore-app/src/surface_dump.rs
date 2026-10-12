@@ -47,6 +47,31 @@ use tore_world::surface::{
     resolve::{self, GroundTarget},
 };
 
+/// The world of `spec` as the weapon, radar and drive probes want it: the
+/// ground target at its seeded layout without the Quick Mission front line,
+/// whose Blue and Red units fighting each other would add contacts, losses
+/// and replay events these probes do not measure
+/// ([the front line](docs/spec/surface-defenses.md#the-front-line)).
+pub(crate) fn world_without_front(
+    spec: &tore_world::mission::MissionSpec,
+    resources: &dyn tore_world::resources::ResourceSource,
+    seating: tore_world::world::Seating,
+) -> tore_world::WorldResult<tore_world::world::World> {
+    Ok(tore_world::world::World::build(
+        spec,
+        resources,
+        seating,
+        &mut tore_world::world::Hooks {
+            ground_variation: Some(Variation {
+                front: false,
+                ..Variation::ON
+            }),
+            ..Default::default()
+        },
+    )?
+    .world)
+}
+
 /// The pack's theater resources with what the import does not keep yet: the
 /// ground target templates and the NT, OT, PT, shape and picture records,
 /// read from the retail media: `TORE_GAME_DIR`, else the source the data
@@ -151,6 +176,7 @@ pub fn run() -> AppResult<()> {
             "--classes" => classes = true,
             "--no-jitter" => variation.jitter = false,
             "--no-relocate" => variation.relocate = false,
+            "--no-front" => variation.front = false,
             "--separation" => separation = next()?.parse()?,
             "--seeds" => seeds = Some(next()?.parse()?),
             other if other.starts_with("--") => return Err(format!("unknown {other}").into()),

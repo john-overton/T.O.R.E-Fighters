@@ -14,6 +14,7 @@ use tore_formats::surface_unit::class;
 pub(super) const SITE_ORDINAL: u32 = u32::MAX;
 pub(super) const FLEET_ORDINAL: u32 = u32::MAX - 1;
 pub(super) const START_ORDINAL: u32 = u32::MAX - 2;
+pub(super) const FRONT_ORDINAL: u32 = u32::MAX - 3;
 
 /// How an object moves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -107,7 +107,9 @@ pub fn rule(
             Some(best.map_or(range, |b| b.max(range)))
         });
     let surface = radar_weapons()
-        .filter(|w| w.aims_at_any_surface())
+        // A land AAA gun that fires at the ground by John's ruling aims by
+        // eye: its air-search radar stays off for ground units.
+        .filter(|w| w.aims_at_any_surface() && !w.ground_fire)
         .map(|w| w.detection.max_range)
         .fold(None, |best: Option<f64>, range| {
             Some(best.map_or(range, |b| b.max(range)))
@@ -191,7 +193,9 @@ pub(super) fn step(
                     ground.iter().any(|contact| {
                         live::opposed(arms.side, contact.side)
                             && arms.weapons.iter().any(|w| {
-                                w.aims_at_surface(contact.category) && w.detection.max_range > 0.
+                                w.aims_at_surface(contact.category)
+                                    && !w.ground_fire
+                                    && w.detection.max_range > 0.
                             })
                             && {
                                 let d = [

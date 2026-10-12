@@ -42,9 +42,11 @@
 //! - A weapon aims at what its record's target flags allow (retail): the air
 //!   flag for aircraft, the surface flag for ground units and ships
 //!   ([`WeaponArms::aims_at_aircraft`], [`WeaponArms::aims_at_surface`]). So
-//!   tank, armoured car and small-arms guns fight both, AAA, flak and SAMs
-//!   stay anti-aircraft, and the SS-N-9 fights ships (agent decision: it is
-//!   anti-ship).
+//!   tank, armoured car and small-arms guns fight both, flak and SAMs stay
+//!   anti-aircraft, the SS-N-9 fights ships (agent decision: it is
+//!   anti-ship), and a land AAA gun, whose record has only the air flag, may
+//!   also fire at the ground after any aircraft (John, 2026-10-11: "If it can
+//!   shoot at ground targets let it"; [`WeaponArms::ground_fire`]).
 //! - What it may aim at is a unit of the other side that the scene holds:
 //!   a ground vehicle, a site, a truck, a radar or a ship, never a building,
 //!   a parked aircraft or the invisible barrage zone ([`surface_contacts`]).
@@ -209,6 +211,11 @@ pub struct WeaponArms {
     pub magazine: u32,
     /// Fired by its battery's controller, not its own.
     pub battery: bool,
+    /// A land anti-aircraft gun whose record carries only the air flag, which
+    /// may still fire at ground units and ships in reach, after any aircraft
+    /// (opinionated, John 2026-10-11: "If it can shoot at ground targets let
+    /// it").
+    pub ground_fire: bool,
 }
 
 /// One surface unit's arms: its weapons, its radar and its place.
@@ -570,11 +577,11 @@ impl WeaponArms {
         live::engages_aircraft(&self.record)
     }
     /// Whether the weapon may be aimed at some ground unit or ship: its
-    /// record's surface target flag ([`live::engages_surface`], retail), for
-    /// a gun whose rounds strike (not flak, not the barrage zone) or a
-    /// missile.
+    /// record's surface target flag ([`live::engages_surface`], retail) or
+    /// [`Self::ground_fire`] (a land AAA gun), for a gun whose rounds strike
+    /// (not flak, not the barrage zone) or a missile.
     pub fn aims_at_any_surface(&self) -> bool {
-        live::engages_surface(&self.record)
+        (live::engages_surface(&self.record) || self.ground_fire)
             && match self.kind {
                 Kind::Gun { flak, .. } => !flak,
                 Kind::Barrage { .. } => false,
@@ -656,6 +663,11 @@ impl WeaponArms {
                 mounts: vec![arc],
                 magazine: row.magazine,
                 battery: false,
+                // A land gun that aims at aircraft only (a ship's AAA keeps
+                // to the air).
+                ground_fire: !ship
+                    && !live::engages_surface(&record)
+                    && matches!(kind, Kind::Gun { flak: false, .. }),
                 record,
             },
             stock,
@@ -698,6 +710,7 @@ impl WeaponArms {
             mounts: vec![arc],
             magazine: 0,
             battery,
+            ground_fire: false,
             record,
         })
     }

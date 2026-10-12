@@ -8,7 +8,7 @@
 //!     [--enemy-nationality N] [--aircraft ID] [--over TYPE [--index N] | --unit ID]
 //!     [--altitude FT] [--speed KT] [--pass FT] [--from NM] [--seconds S]
 //!     [--condition NAME] [--chaff S] [--flares S] [--harm-at NM] [--kill-at S]
-//!     [--player-side red] [--invulnerable] [--quiet-shots] [--no-relocate]
+//!     [--player-side red] [--invulnerable] [--quiet-shots] [--no-relocate] [--front]
 //!     [--drain] [--drain-reserve] [--kill-truck-at S]
 //! ```
 //!
@@ -89,6 +89,7 @@ struct Options {
     invulnerable: bool,
     quiet_shots: bool,
     no_relocate: bool,
+    no_front: bool,
     all_units: bool,
     near: f64,
     skill: Option<i32>,
@@ -125,6 +126,9 @@ fn options() -> AppResult<Options> {
         invulnerable: false,
         quiet_shots: false,
         no_relocate: false,
+        // A trace follows one unit's own behaviour: the front line's fighting
+        // would draw from the surface's random stream and add contacts.
+        no_front: true,
         all_units: false,
         near: 0.,
         skill: None,
@@ -176,6 +180,8 @@ fn options() -> AppResult<Options> {
             "--invulnerable" => o.invulnerable = true,
             "--quiet-shots" => o.quiet_shots = true,
             "--no-relocate" => o.no_relocate = true,
+            "--front" => o.no_front = false,
+            "--no-front" => o.no_front = true,
             "--all-units" => o.all_units = true,
             "--near" => o.near = next()?.parse()?,
             "--skill" => o.skill = Some(next()?.parse()?),
@@ -408,6 +414,7 @@ pub fn run() -> AppResult<()> {
             ground_variation: Some(tore_world::surface::layout::Variation {
                 jitter: true,
                 relocate: !o.no_relocate,
+                front: !o.no_front,
             }),
             ..Default::default()
         },
