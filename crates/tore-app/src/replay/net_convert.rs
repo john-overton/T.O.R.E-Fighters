@@ -495,6 +495,7 @@ mod tests {
             airborne: true,
             wreck: Some(tore_sim::wreck::Phase::Falling),
             crashed: false,
+            stores: Vec::new(),
         };
         let data = convert::FlightData {
             airspeed: 310.,

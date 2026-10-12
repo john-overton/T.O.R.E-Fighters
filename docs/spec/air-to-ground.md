@@ -1523,7 +1523,8 @@ cue plus the retail page; 10 Maverick boresight; 11 retail A-G mode only; 12
 real rocket counts and a pipper; 13 retail cluster splash plus flashes; 14 no
 ripple settings; 15 LOW and FRAG warnings; 17 data over manual; 18 no AI strike
 this round; 19 replay events without a format change; 20 stores on pylons stay
-undrawn; 21 Tab and Ctrl+X.
+undrawn (reversed by John on 2026-10-12: they are drawn and leave from their
+own pylons, [stores on pylons](stores-on-pylons.md)); 21 Tab and Ctrl+X.
 
 ## Fold-in record
 
