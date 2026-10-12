@@ -272,7 +272,9 @@ impl Events {
                 | WireEvent::Feedback { .. }
                 | WireEvent::YourAircraftExploded { .. }
                 | WireEvent::Sound { .. }
-                | WireEvent::SurfaceBurstEnd { .. } => Vec::new(),
+                | WireEvent::SurfaceBurstEnd { .. }
+                // Recordings do not yet show knocked-down fill buildings.
+                | WireEvent::CityFlattened { .. } => Vec::new(),
             };
             out.extend(events.into_iter().map(|put| (tick, put)));
         }

@@ -203,7 +203,7 @@ fn the_theater_item_reads_the_city_fills_inputs_exactly() {
     };
     let terrain = Terrain::for_mission(&map, THEATER, Some(0), &overrides).unwrap();
     let built = ResourceReads::new(&map);
-    crate::city::build_layout(&built, &terrain);
+    crate::city::build_layout(&built, &terrain, crate::city::fill::MAX_INSTANCES);
     let listed = ResourceReads::new(&map);
     crate::city::read_inputs(&listed, &terrain);
     assert!(!listed.names().is_empty());

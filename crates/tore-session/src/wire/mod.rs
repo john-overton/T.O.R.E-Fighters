@@ -162,9 +162,13 @@ pub fn path_words(path: Path) -> &'static str {
 /// FX-T) and the readout's Guided sight group's level T, 15 to 18 values
 /// (slice FX-H). 25 since the surface close-out (slice CL-CF): every game
 /// builds the city fill (`tore_world::city`), whose buildings aircraft
-/// crash into and ground bursts knock flat, which a 24 game lacks; no byte
-/// layout changed for it. Folded under 25: the mission text's
-/// `enemy-start` line (slice CL-R), which a 24 game refuses.
+/// crash into and ground bursts knock flat, which a 24 game lacks. Folded
+/// under 25: the mission text's `enemy-start` line (slice CL-R), which a 24
+/// game refuses; `ground_trim` in the AI airfield sequence's checkpoint
+/// (slice CL-AP); the front line in the surface digest (slice CL-FL); and
+/// the City flattened event (code 21) with the world checkpoint's city fill
+/// section (section 12), which carry the buildings ground bursts knocked
+/// flat (review fixes).
 pub const PROTOCOL_VERSION: u16 = 25;
 
 /// Section kinds after the transport's own Messages (kind 1).
@@ -280,4 +284,7 @@ pub mod limits {
     pub const STEMS: usize = 32;
     /// Hardpoints of one surface unit in a Surface unit event (protocol 22).
     pub const MOUNTS: usize = 64;
+    /// Buildings in one City flattened event (protocol 25); more go in
+    /// several.
+    pub const FLATTENED: usize = 256;
 }

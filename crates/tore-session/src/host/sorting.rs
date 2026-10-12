@@ -8,6 +8,11 @@
 //! the new things become events. It reads combat's shared state after the
 //! step, so it needs no seat and runs whether or not anyone is connected.
 //!
+//! The city fill's knocked-down buildings (protocol 25) are City flattened
+//! events: the buildings that fell at a tick, and at a seat every building
+//! already flat, so each game knocks the same ones down in its copy of the
+//! mission.
+//!
 //! Surface units' rounds (protocol 22, slice N1) are kept apart from the
 //! aircraft's: a surface gun's burst is one Surface burst event with its
 //! schedule (from the surface tick's burst notes), closed early by a Surface
@@ -102,6 +107,10 @@ pub struct Tracker {
     destroyed: BTreeSet<u32>,
     /// Each surface unit's state as last told, by unit.
     views: BTreeMap<u32, SurfaceUnitView>,
+    /// The city fill's buildings told knocked flat, and the fill's version
+    /// when they were (protocol 25).
+    flattened: BTreeSet<u32>,
+    fill_version: u64,
 }
 
 impl Tracker {
@@ -120,6 +129,17 @@ impl Tracker {
                 .into_iter()
                 .map(|view| (view.unit, view))
                 .collect(),
+            flattened: world
+                .terrain
+                .city_fill
+                .as_ref()
+                .map(|fill| fill.flattened().into_iter().collect())
+                .unwrap_or_default(),
+            fill_version: world
+                .terrain
+                .city_fill
+                .as_ref()
+                .map_or(0, |fill| fill.version()),
         }
     }
 
@@ -251,6 +271,21 @@ impl Tracker {
             }
         }
 
+        // City fill buildings knocked flat this tick.
+        if let Some(fill) = &world.terrain.city_fill
+            && fill.version() != self.fill_version
+        {
+            self.fill_version = fill.version();
+            let fell: Vec<u32> = fill
+                .flattened()
+                .into_iter()
+                .filter(|id| self.flattened.insert(*id))
+                .collect();
+            for event in flattened_events(&fell) {
+                push(tick, event);
+            }
+        }
+
         // Sounds.
         for emission in &out.emissions {
             push(tick, Wide::Event(from_world::sound_event(emission, None)));
@@ -365,8 +400,9 @@ impl Tracker {
 
     /// The events that describe the mission as it stands, for a player just
     /// seated: every crater and crash-site fire and every effect still
-    /// showing, and every surface unit not as the mission built it (protocol
-    /// 22), at `tick`. Destroyed ground objects travel in the Seated
+    /// showing, every surface unit not as the mission built it (protocol
+    /// 22), and every city fill building knocked flat (protocol 25), at
+    /// `tick`. Destroyed ground objects travel in the Seated
     /// message; smoke and contrails already in the sky are not sent (the
     /// protocol's "first snapshot").
     pub fn standing(world: &World, tick: u64) -> Vec<Timed> {
@@ -392,12 +428,31 @@ impl Tracker {
                 *view != built
             })
             .map(|view| Wide::Event(WireEvent::SurfaceUnit(view)));
+        let flattened = world
+            .terrain
+            .city_fill
+            .as_ref()
+            .map(|fill| flattened_events(&fill.flattened()))
+            .unwrap_or_default();
         marks
             .chain(effects)
             .chain(surface)
+            .chain(flattened)
             .map(|event| Timed { tick, event })
             .collect()
     }
+}
+
+/// City flattened events for `ids` (ascending), as many as the event's limit
+/// needs.
+fn flattened_events(ids: &[u32]) -> Vec<Wide> {
+    ids.chunks(crate::wire::limits::FLATTENED)
+        .map(|chunk| {
+            Wide::Event(WireEvent::CityFlattened {
+                buildings: chunk.to_vec(),
+            })
+        })
+        .collect()
 }
 
 fn effect_pose(effect: &live::Effect) -> EffectPose {

@@ -46,6 +46,8 @@ pub mod candidate;
 pub mod capture;
 #[cfg(test)]
 mod chat_tests;
+#[cfg(test)]
+mod city_fill_tests;
 pub mod clock;
 pub mod content;
 pub mod convert;
@@ -2508,6 +2510,15 @@ impl Client {
         self.marks.clear();
         self.destroyed.clear();
         self.surface_units.clear();
+        // A new flight's city stands whole until the host says otherwise
+        // (its seat sends every building already flat).
+        if let Some(fill) = self
+            .mission
+            .as_ref()
+            .and_then(|m| m.world.terrain.city_fill.as_ref())
+        {
+            fill.reset();
+        }
         self.snapshot_tick = None;
         self.pending_own.clear();
         self.holding_since = None;
@@ -2807,6 +2818,19 @@ impl Client {
                 }
                 while states.len() > MAX_SURFACE_STATES {
                     states.pop_front();
+                }
+            }
+            // City fill buildings the host's ground bursts knocked flat
+            // (protocol 25) fall in the client's copy of the mission at
+            // once: the prediction flies past them from now on, and the
+            // game's picture follows the copy (`mission_fill`).
+            WireEvent::CityFlattened { buildings } => {
+                if let Some(fill) = self
+                    .mission
+                    .as_ref()
+                    .and_then(|m| m.world.terrain.city_fill.as_ref())
+                {
+                    fill.knock_down(buildings.iter().copied());
                 }
             }
             WireEvent::Launch { .. }

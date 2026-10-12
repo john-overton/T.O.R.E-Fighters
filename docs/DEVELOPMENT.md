@@ -1131,7 +1131,8 @@ The [city fill](features.md) is on by default everywhere since protocol 25.
 player launches and the offline tools build no fill; online sessions, the
 server and the bot never read it, and a replay builds the fill its
 recording's `world.city_fill_scene` names. `TORE_CITY_FILL_CAP` changes the
-number of buildings (never for a networked game) and
+number of buildings in single player and the offline tools (online games
+ignore it) and
 `TORE_CITY_FILL_SHADOW_NM` the shadow distance. The offscreen aid
 `--city-fill-dump OUT [THEATER]` (no window, nothing simulated; options in
 `crates/tore-app/src/city_fill_dump.rs`) writes mask and fill images and

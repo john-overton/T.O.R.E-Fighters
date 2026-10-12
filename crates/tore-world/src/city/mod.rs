@@ -14,7 +14,10 @@
 //! The fill is a function of the theater layout alone (its texture tiles, its
 //! objects and the kit shapes), in integer feet and whole degrees, so every
 //! client builds the same one. It is not on the wire: a mission text always
-//! means the fill, so every machine of a networked game builds it.
+//! means the fill, so every machine of a networked game builds it. Only the
+//! buildings a ground burst knocks flat are: the host tells them by index
+//! ([`CityFill::knock_down`] on each player's copy), and the world
+//! checkpoint carries them ([`CityFill::flattened`], protocol 25).
 
 pub mod fill;
 pub mod kit;
@@ -28,21 +31,6 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
 };
-
-static CAP: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(fill::MAX_INSTANCES);
-
-/// Sets the per-theater building budget for fills built from now on (the
-/// app's `TORE_CITY_FILL_CAP`, a measuring aid; default
-/// [`fill::MAX_INSTANCES`]).
-pub fn set_cap(cap: usize) {
-    CAP.store(cap, Ordering::Relaxed);
-}
-
-/// The per-theater building budget.
-pub fn cap() -> usize {
-    CAP.load(Ordering::Relaxed)
-}
 
 /// A building falls where a ground burst still passes on at least this
 /// percent of its record's damage (fitted): a Mk 84's 70 percent at the
@@ -160,9 +148,16 @@ fn cell(v: i64) -> i64 {
 
 impl CityFill {
     /// The fill for a finished terrain: the layout's fill (built once per
-    /// process and layout), minus the buildings this mission's ground target
-    /// objects stand on. `None` when the theater has no city tiles.
-    pub fn for_terrain(resources: &dyn ResourceSource, terrain: &Terrain) -> Option<Self> {
+    /// process, layout and budget), minus the buildings this mission's ground
+    /// target objects stand on. `cap` is the per-theater building budget,
+    /// [`fill::MAX_INSTANCES`] but for the app's single-player measuring aid
+    /// ([`crate::terrain::Overrides::city_fill_cap`]). `None` when the
+    /// theater has no city tiles.
+    pub fn for_terrain(
+        resources: &dyn ResourceSource,
+        terrain: &Terrain,
+        cap: usize,
+    ) -> Option<Self> {
         let layout = {
             let mut cache = LAYOUTS.lock().unwrap_or_else(|e| e.into_inner());
             // The fill depends on the layout, the budget and what it keeps
@@ -179,7 +174,7 @@ impl CityFill {
             let key = format!(
                 "{}#{}#{:016x}",
                 terrain.layout,
-                cap(),
+                cap,
                 tore_codec::fnv1a64(&bytes)
             );
             match cache.get(&key) {
@@ -190,7 +185,7 @@ impl CityFill {
                     Arc::clone(layout)
                 }
                 None => {
-                    let layout = Arc::new(build_layout(resources, terrain));
+                    let layout = Arc::new(build_layout(resources, terrain, cap));
                     cache.insert(key, Arc::clone(&layout));
                     layout
                 }
@@ -270,6 +265,87 @@ impl CityFill {
     /// Whether building `n` stands: neither hidden nor flattened.
     pub fn standing(&self, n: usize) -> bool {
         !self.hidden[n] && !self.is_flattened(n)
+    }
+
+    /// The buildings knocked flat, in ascending order: what the world
+    /// checkpoint codes and the host tells its players.
+    pub fn flattened(&self) -> Vec<u32> {
+        let mut out = Vec::new();
+        for (w, word) in self.flattened.iter().enumerate() {
+            let mut bits = word.load(Ordering::Relaxed);
+            while bits != 0 {
+                out.push(w as u32 * 64 + bits.trailing_zeros());
+                bits &= bits - 1;
+            }
+        }
+        out
+    }
+
+    /// The number of buildings in the fill.
+    pub fn len(&self) -> usize {
+        self.hidden.len()
+    }
+
+    /// Whether the fill holds no building (never true of a built fill).
+    pub fn is_empty(&self) -> bool {
+        self.hidden.is_empty()
+    }
+
+    /// Knocks the buildings `ids` flat, as a host's ground burst did: a
+    /// player's game applies what the host tells it. A hidden building or
+    /// one already flat stays as it is; an id past the fill is ignored.
+    /// Returns how many fell.
+    pub fn knock_down(&self, ids: impl IntoIterator<Item = u32>) -> usize {
+        let mut fell = 0;
+        for id in ids {
+            let n = id as usize;
+            if n < self.len() && self.standing(n) {
+                self.flattened[n / 64].fetch_or(1 << (n % 64), Ordering::Relaxed);
+                fell += 1;
+            }
+        }
+        if fell > 0 {
+            self.version.fetch_add(1, Ordering::Relaxed);
+        }
+        fell
+    }
+
+    /// Makes exactly the buildings `ids` the flattened ones (a checkpoint's
+    /// restore). An id past the fill is ignored. Bumps the version only when
+    /// that changes anything.
+    pub fn set_flattened(&self, ids: &[u32]) {
+        let mut words = vec![0u64; self.flattened.len()];
+        for &id in ids {
+            let n = id as usize;
+            if n < self.len() {
+                words[n / 64] |= 1 << (n % 64);
+            }
+        }
+        let mut any = false;
+        for (word, new) in self.flattened.iter().zip(words) {
+            any |= word.swap(new, Ordering::Relaxed) != new;
+        }
+        if any {
+            self.version.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Copies `other`'s knocked-down buildings, a fill of the same layout
+    /// (the app's game follows its session client's copy of the mission
+    /// every frame): a read of each word, and a write only where they
+    /// differ.
+    pub fn copy_flattened(&self, other: &CityFill) {
+        let mut any = false;
+        for (word, theirs) in self.flattened.iter().zip(&other.flattened) {
+            let new = theirs.load(Ordering::Relaxed);
+            if word.load(Ordering::Relaxed) != new {
+                word.store(new, Ordering::Relaxed);
+                any = true;
+            }
+        }
+        if any {
+            self.version.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     /// Bumped by every [`CityFill::flatten`] that knocks a building down, so
@@ -412,17 +488,21 @@ fn layout_keepouts(terrain: &Terrain) -> Vec<fill::Keepout> {
     keepouts
 }
 
-pub(crate) fn build_layout(resources: &dyn ResourceSource, terrain: &Terrain) -> Layout {
+pub(crate) fn build_layout(
+    resources: &dyn ResourceSource,
+    terrain: &Terrain,
+    cap: usize,
+) -> Layout {
     let noting = Noting {
         inner: resources,
         names: Default::default(),
     };
-    let mut layout = build_layout_from(&noting, terrain);
+    let mut layout = build_layout_from(&noting, terrain, cap);
     layout.inputs = noting.names.into_inner().into_iter().collect();
     layout
 }
 
-fn build_layout_from(resources: &dyn ResourceSource, terrain: &Terrain) -> Layout {
+fn build_layout_from(resources: &dyn ResourceSource, terrain: &Terrain, cap: usize) -> Layout {
     let base = tore_formats::theater::base_theater(&terrain.layout).unwrap_or("");
     // A theater with no city pictures fills its retail clusters' footprints
     // at the retail shape scale, three times their drawn size.
@@ -467,7 +547,7 @@ fn build_layout_from(resources: &dyn ResourceSource, terrain: &Terrain) -> Layou
         })
         .unwrap_or_default();
     let (cities, instances, candidates) =
-        fill::place(&map, &kit, &terrain.layout, &keepouts, &names, cap());
+        fill::place(&map, &kit, &terrain.layout, &keepouts, &names, cap);
     Layout {
         layout: terrain.layout.clone(),
         map,
@@ -577,6 +657,32 @@ mod tests {
             f.contact([9_900., 250., 20_000.], [10_100., 250., 20_000.])
                 .is_some()
         );
+    }
+
+    /// What a player's game and a restore apply: the host's list of
+    /// knocked-down buildings, exactly, and nothing for a building past the
+    /// fill or one already flat.
+    #[test]
+    fn the_flattened_list_round_trips_and_is_applied_exactly() {
+        let f = fill(0);
+        assert!(f.flattened().is_empty());
+        assert_eq!(f.flatten([10_300., 0., 20_000.], 500.), 1);
+        assert_eq!(f.flattened(), [0]);
+        let g = fill(0);
+        assert_eq!(g.knock_down([0, 99]), 1);
+        assert_eq!(g.knock_down([0]), 0);
+        assert_eq!(g.flattened(), f.flattened());
+        assert!(
+            g.contact([9_900., 250., 20_000.], [10_100., 250., 20_000.])
+                .is_none()
+        );
+        let version = g.version();
+        g.set_flattened(&[0]);
+        assert_eq!(g.version(), version, "no change, no new version");
+        g.set_flattened(&[]);
+        assert!(!g.is_flattened(0));
+        g.copy_flattened(&f);
+        assert!(g.is_flattened(0));
     }
 
     #[test]

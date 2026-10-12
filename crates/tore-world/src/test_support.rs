@@ -152,6 +152,51 @@ pub fn profile() -> Aircraft {
     a
 }
 
+/// A city fill of 200 ft towers (40 by 100 ft, heading north) with their
+/// bases at `ground` ft, one at each `[x, z]` in feet: for the tests of the
+/// knocked-down buildings online and in checkpoints. Put it in a world with
+/// `world.terrain.city_fill = Some(Arc::new(..))` before its first step.
+pub fn city_fill(at: &[[i32; 2]], ground: f32) -> crate::city::CityFill {
+    use crate::city::{Instance, Layout, kit, mask};
+    let tower = kit::Piece {
+        source: "T.OT".into(),
+        shape: "T.SH".into(),
+        faces: Vec::new(),
+        origin: [0.; 3],
+        scale: 1.,
+        half: [20, 50],
+        height: 200,
+        class: kit::Class::Tower,
+        cut: false,
+    };
+    let layout = Layout {
+        layout: "TEST.MM".into(),
+        map: mask::LightMap::default(),
+        kit: kit::Kit {
+            pieces: vec![tower],
+        },
+        cities: Vec::new(),
+        instances: at
+            .iter()
+            .map(|&[x, z]| Instance {
+                piece: 0,
+                x,
+                z,
+                heading: 0,
+                core: true,
+                city: 0,
+            })
+            .collect(),
+        candidates: at.len(),
+        inputs: Vec::new(),
+    };
+    crate::city::CityFill::assemble(
+        std::sync::Arc::new(layout),
+        vec![ground; at.len()],
+        vec![false; at.len()],
+    )
+}
+
 pub fn terrain() -> Terrain {
     use tore_formats::theater::TerrainCell;
     let cells = [0, 4, 8, 12]

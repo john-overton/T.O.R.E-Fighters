@@ -57,6 +57,7 @@ fn overrides(on: bool) -> AppResult<crate::terrain::Overrides> {
         cloud_altitude: Some(0),
         redrawn_airports: crate::scenery::redrawn_airports()?,
         city_fill: on,
+        city_fill_cap: crate::scenery::city_fill_cap()?,
     })
 }
 

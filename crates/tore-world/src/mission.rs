@@ -2159,6 +2159,9 @@ impl Parser {
             // airports over the city fill.
             redrawn_airports: true,
             city_fill: true,
+            // Nor a building budget: the whole fill, whatever
+            // `TORE_CITY_FILL_CAP` says.
+            city_fill_cap: None,
         };
         if let Some(start) = self.start {
             spec.start = start;
@@ -2333,6 +2336,7 @@ mod tests {
             cloud_altitude: Some(12_000),
             redrawn_airports: true,
             city_fill: true,
+            city_fill_cap: None,
         };
         spec.start = Start::Ground {
             runway: RUNWAY_OBJECT_BASE + 3,

@@ -117,7 +117,24 @@ pub fn launch_overrides() -> AppResult<Overrides> {
         cloud_altitude,
         redrawn_airports: redrawn_airports()?,
         city_fill: city_fill()?,
+        city_fill_cap: city_fill_cap()?,
     })
+}
+
+/// `TORE_CITY_FILL_CAP`, the city fill's per-theater building budget: a
+/// measuring aid for single-player launches and the offline tools. A
+/// session's mission comes from its text, which never carries it, so online
+/// games, the server and the bot always build the whole fill.
+pub fn city_fill_cap() -> AppResult<Option<usize>> {
+    match std::env::var("TORE_CITY_FILL_CAP") {
+        Ok(value) => {
+            Ok(Some(value.parse().map_err(
+                |_| "TORE_CITY_FILL_CAP must be a whole number",
+            )?))
+        }
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// The city fill (`tore_world::city`) is the default (John, 2026-10-11).

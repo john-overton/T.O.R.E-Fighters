@@ -260,3 +260,56 @@ fn damaged_checkpoints_are_refused_without_a_panic() {
         let _ = fresh.restore_sections(&with_crc(random));
     }
 }
+
+/// The city fill's knocked-down buildings are world state (review net
+/// finding 1): a checkpoint carries them, a world restored from it has the
+/// same ones flat and flies through them, and a world whose fill differs
+/// (one has none) is refused.
+#[test]
+fn a_checkpoint_carries_the_knocked_down_city_fill_buildings() {
+    use std::sync::Arc;
+    let scenario = checkpoint_scenarios::single_player();
+    let at = [[10_000, 20_000], [10_400, 20_000], [30_000, 30_000]];
+    let with_fill = || {
+        let mut world = (scenario.build)();
+        world.terrain.city_fill = Some(Arc::new(crate::test_support::city_fill(&at, 0.)));
+        world
+    };
+    let world = with_fill();
+    let fill = world.terrain.city_fill.as_ref().unwrap();
+    // A burst between the first two towers knocks both flat.
+    assert_eq!(fill.flatten([10_200., 0., 20_000.], 300.), 2);
+    let through = ([9_900., 100., 20_000.], [10_100., 100., 20_000.]);
+    assert!(!world.terrain.fill_contact(through.0, through.1));
+
+    let bytes = world.checkpoint().unwrap();
+    let mut restored = with_fill();
+    assert!(
+        restored.terrain.fill_contact(through.0, through.1),
+        "a fresh build stands"
+    );
+    restored.restore(&bytes).unwrap();
+    let restored_fill = restored.terrain.city_fill.as_ref().unwrap();
+    assert_eq!(restored_fill.flattened(), [0, 1]);
+    assert!(!restored.terrain.fill_contact(through.0, through.1));
+    assert!(restored.checkpoint().unwrap() == bytes);
+    // The third tower still stands.
+    assert!(
+        restored
+            .terrain
+            .fill_contact([29_900., 100., 30_000.], [30_100., 100., 30_000.])
+    );
+
+    // A restore makes the set exact: a building flat only in the restored
+    // world stands again.
+    restored_fill.knock_down([2]);
+    restored.restore(&bytes).unwrap();
+    assert_eq!(
+        restored.terrain.city_fill.as_ref().unwrap().flattened(),
+        [0, 1]
+    );
+
+    // A world without the fill refuses the section.
+    let mut bare = (scenario.build)();
+    assert!(bare.restore(&bytes).is_err());
+}

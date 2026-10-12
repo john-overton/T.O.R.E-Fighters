@@ -9168,15 +9168,6 @@ fn main() -> std::process::ExitCode {
         tore_import::Level::Warn => log::warn!("{text}"),
     });
     let interactive = startup::interactive();
-    // A measuring aid: the city fill's per-theater building budget. Single
-    // player and the tools only: every machine of a networked game must
-    // build the same city, so never set it for one.
-    if let Some(cap) = std::env::var("TORE_CITY_FILL_CAP")
-        .ok()
-        .and_then(|v| v.parse().ok())
-    {
-        tore_world::city::set_cap(cap);
-    }
     let result = std::panic::catch_unwind(|| {
         if let Some(result) = startup::self_test() {
             return result;
