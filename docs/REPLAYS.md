@@ -733,14 +733,22 @@ beyond them.
     sets the starts. A tenth value `1` marks the [Quick Mission front
     line](spec/surface-defenses.md#the-front-line) (Blue and Red ground units
     in contact); it is left out when there is none, which is how every
-    recording made before the front line reads. The viewer rebuilds the terrain with it, so the
+    recording made before the front line reads. A build from before the
+    front line (slice CL-FL) reads only nine values and refuses a recording
+    with the tenth as damaged ("world.ground_target is not a ground target")
+    rather than as a newer build's; the format number stays 3, so nothing
+    earlier can tell it apart, and such a build cannot open a Quick Mission
+    recording with a ground target made since, since the front line is on by
+    default. The viewer rebuilds the terrain with it, so the
     template, its defenses, the added trucks and radars, the parked aircraft
     and the starts are the flight's.
   - **The airfield scene**, `world.airfield_scene=N`, written only when N is
     not 0. 0 is the retail airfields, which every recording before the field
-    has; 1 is the [redrawn airports](formats/redrawn-airports.md), which every
-    flight has had since they became the default (2026-10-11, protocol 24),
-    so every recording since then is a format 3 file. The viewer rebuilds the
+    has; 1 is the [redrawn airports](formats/redrawn-airports.md), the
+    default since 2026-10-11 (protocol 24), so a recording of a flight over
+    the redrawn airports is a format 3 file. A flight with
+    `TORE_REDRAWN_AIRPORTS=0` writes scene 0 and, with no other format 3
+    content, stays format 2. The viewer rebuilds the
     scene the header names, whatever `TORE_REDRAWN_AIRPORTS` says: an old
     recording replays on the retail airfields, a new one on the redraw. A
     scene this build does not know (a later build's) opens with the retail
@@ -748,9 +756,13 @@ beyond them.
     moves anything an aircraft touches takes a new number.
   - **The city fill scene**, `world.city_fill_scene=N`, written only when
     N is not 0. 0 is no city fill, which every recording before the field
-    has; 1 is the [city fill](features.md) of `tore_world::city`, which
-    every flight has had since it became the default (2026-10-11, protocol
-    25), so every recording since then is a format 3 file. The viewer
+    has; 1 is the [city fill](features.md) of `tore_world::city`, the
+    default since 2026-10-11 (protocol 25), so a recording of a world with a
+    city fill is a format 3 file. A world without one writes scene 0: a
+    flight with `TORE_CITY_FILL=0`, or a theater whose fill has no
+    buildings. A build from before the field (slice
+    CL-CF) keeps the unknown entry aside and replays without the fill,
+    with no warning. The viewer
     rebuilds what the header names, whatever `TORE_CITY_FILL` says: an old
     recording replays without the fill, a new one with it. A scene this
     build does not know opens without the fill and a warning in the session

@@ -620,7 +620,6 @@ impl ScriptedPilot {
     }
 }
 
-/// The planes the roster puts on the other side from the client's own.
 /// Where a seated plane starts, as `tore-bot`'s start line says it: on the
 /// ground at the nearest airport (within 3 nautical miles) with that field's
 /// side, or in the air at its altitude (slice CL-R, for the Redfor ground
@@ -656,6 +655,7 @@ pub fn start_words(world: &tore_world::world::World, flight: &flight::State) -> 
     }
 }
 
+/// The planes the roster puts on the other side from the client's own.
 pub fn enemies(client: &Client) -> BTreeSet<u32> {
     let (Some(roster), Some((_, own))) = (client.roster(), client.seat()) else {
         return BTreeSet::new();
