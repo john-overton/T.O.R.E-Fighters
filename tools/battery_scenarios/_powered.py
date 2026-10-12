@@ -368,6 +368,59 @@ def easy_physics_scenarios() -> list[Scenario]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Off-airfield touchdown (bug B21, docs/spec/touchdown.md)
+# ---------------------------------------------------------------------------
+
+# (aircraft, sink ft/s held to the ground, outcome): "down" sits on the ground undamaged, "damaged" sits with the
+# gear jammed, "lands" sits (damaged or not), "crash" crashes. Flown from 60 ft over flat open ground with
+# `--maneuver settle:SINK`, which holds the sink on the collective (the throttle on the jet). A fixed-wing
+# aircraft off the airfield is covered by the unit tests and the `land-off-runway` landing probes.
+TOUCHDOWNS = [
+    ("ah64", 5, "down"),
+    ("ah64", 15, "damaged"),
+    ("ah64", 25, "crash"),
+    ("mi24", 5, "down"),
+    ("v22", 5, "down"),
+    ("v22", 15, "damaged"),
+    ("av8", 5, "lands"),
+    ("av8", 15, "crash"),
+]
+
+
+def _touchdown_step(aircraft: str, sink: int) -> Step:
+    args = ["--headless-flight", "2400", "--maneuver", f"settle:{sink}", "--aircraft", aircraft, "--researched-flight", "--no-audio"]
+    return Step(args + EXTRA.get(aircraft, []), timeout=120)
+
+
+def check_touchdowns(output: str) -> list[str]:
+    parts = sections(output)
+    problems = []
+    for step, (aircraft, sink, outcome) in enumerate(TOUCHDOWNS, start=1):
+        found = re.search(r"touchdown: on_ground=(\w+) gear_damaged=(\w+) crashed=(\w+)", parts.get(step, ""))
+        label = f"{aircraft} at {sink} ft/s"
+        if not found:
+            problems.append(f"{label}: no touchdown line")
+            continue
+        on_ground, damaged, crashed = (v == "true" for v in found.groups())
+        if outcome == "crash" and not crashed:
+            problems.append(f"{label} should crash and did not")
+        elif outcome in ("down", "damaged", "lands"):
+            if crashed or not on_ground:
+                problems.append(f"{label} should sit on the ground (crashed={crashed}, on_ground={on_ground})")
+            if outcome != "lands" and (outcome == "damaged") != damaged:
+                problems.append(f"{label}: gear damaged is {damaged}, expected {outcome == 'damaged'}")
+    return problems
+
+
+def touchdown_scenarios() -> list[Scenario]:
+    return [Scenario(
+        name="flight-powered-touchdown-offfield", lane="flight", args=["--version"],
+        then=[_touchdown_step(ac, sink) for ac, sink, _ in TOUCHDOWNS],
+        check=check_touchdowns, timeout=900,
+    )]
+
+
 def powered_scenarios() -> list[Scenario]:
     return (
         hover_scenarios()
@@ -377,4 +430,5 @@ def powered_scenarios() -> list[Scenario]:
         + autorotation_scenarios()
         + vrs_scenarios()
         + easy_physics_scenarios()
+        + touchdown_scenarios()
     )

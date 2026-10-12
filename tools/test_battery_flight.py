@@ -290,6 +290,17 @@ class PoweredTapeTests(unittest.TestCase):
         for ac in _powered.ROTORCRAFT:
             self.assertEqual(_powered.spec("hold", ac)[2][420], ["toggle:hover-hold"])
 
+    def test_the_touchdown_check_reads_each_outcome(self):
+        def line(on_ground, damaged, crashed):
+            return f"touchdown: on_ground={on_ground} gear_damaged={damaged} crashed={crashed}\n"
+
+        outcomes = {"down": line("true", "false", "false"), "lands": line("true", "true", "false"), "damaged": line("true", "true", "false"), "crash": line("false", "false", "true")}
+        good = "".join(f"\n$ then {i}: x\n" + outcomes[row[2]] for i, row in enumerate(_powered.TOUCHDOWNS, start=1))
+        self.assertEqual(_powered.check_touchdowns(good), [])
+        bad = good.replace(outcomes["crash"], outcomes["down"], 1)
+        self.assertTrue(any("should crash" in p for p in _powered.check_touchdowns(bad)))
+        self.assertTrue(any("no touchdown line" in p for p in _powered.check_touchdowns("")))
+
     def test_the_result_line_is_read_and_the_checks_name_each_problem(self):
         flight_line = "ticks=1800 speed_kt=0.4 altitude_ft=5000.1 fuel_lb=1900.0 crashed=false\n"
         extremes = "extremes: samples=1800 non_finite=0 max_speed_kt=1.0\n"
