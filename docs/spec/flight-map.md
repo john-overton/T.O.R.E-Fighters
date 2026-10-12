@@ -84,6 +84,23 @@ contacts stay the yellow unknown placeholders and expose no allegiance. The
 symbol and side come from the mission's surface units by id; nothing the player
 has not seen is shown.
 
+Airfields show their side (opinionated, John 2026-10-12: "if there are known
+allegiances for airports (set by the mission) those should be visible in the
+map"). Each airfield symbol sits on the tile of its airport's side against the
+viewer's own: the blue row for a friendly field, the red row for a hostile one
+and the grey tile for a neutral field, the same look as a surface unit. The
+side is the one the world flies with, the
+[airport allegiance](airports.md#allegiance) the layout gives every airport. A
+mission does not change it: Quick Mission and networked missions only choose
+which fields a ground start may use, so no field is ever unknown to the pilot
+and the map reads it without any detection. The scene records it from Blue's
+point of view; a Redfor pilot (a networked game's Redfor seat) sees friendly
+and hostile swapped, as the tower and the wing's landing orders already do.
+The airfields a start names (BLUE START, RED START) are drawn as the start
+symbols described under [Mission markup](#mission-markup), in each side's own
+colour whichever side the viewer flies; the creator's mission map draws its
+airfields on blue, red or grey tiles by the Blue pilot's view.
+
 ## Category controls
 
 The right rail has six buttons: Aircraft, Airfields, Buildings, Surface,

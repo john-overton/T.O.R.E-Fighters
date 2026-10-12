@@ -9,6 +9,7 @@ use crate::{
 use tore_formats::surface_unit::class;
 use tore_formats::text::GlyphCodes;
 use tore_formats::{font::Font, theater::CELL_FEET};
+use tore_sim::airport::Allegiance;
 use tore_sim::combat::live::{DEFAULT_OWNSHIP_SIDE, NO_SIDE, Side};
 use tore_sim::sensors::FEET_PER_NAUTICAL_MILE as NMI;
 use tore_world::readout::CockpitReadout;
@@ -245,6 +246,17 @@ fn unit_look(unit: &Unit, own: Side) -> (usize, Tile) {
     (symbol, tile)
 }
 
+/// The tile of an airfield for a viewer on side `own`. The scene records an
+/// airport from Blue's point of view, so a Redfor viewer sees the two swapped;
+/// a neutral field, or one whose side is unknown, claims neither.
+fn airfield_tile(allegiance: Allegiance, own: Side) -> Tile {
+    match allegiance.seen_by(own != DEFAULT_OWNSHIP_SIDE) {
+        Allegiance::Friendly => Tile::Friendly,
+        Allegiance::Hostile => Tile::Hostile,
+        Allegiance::Neutral | Allegiance::Unknown => Tile::Neutral,
+    }
+}
+
 /// The in-flight map. Its view is the planning map's ([`PlanView`]): the
 /// same zoom steps, scroll bars and rocker, and the same rule that no black
 /// ever shows, but it follows the player until the player scrolls away.
@@ -450,13 +462,14 @@ impl Map {
         {
             if let Some((point, _)) = projection.locate(runway.surface.center) {
                 let (x, y) = place_marker(pixels, point, &mut markers, &mut labels);
-                symbol(pixels, icons, x, y, Some(15), Tile::Neutral);
-                let name = world
+                let airport = world
                     .airport_scene
                     .airports
                     .iter()
-                    .find(|a| a.id == runway.airport)
-                    .map_or(runway.name.as_str(), |a| a.name.as_str());
+                    .find(|a| a.id == runway.airport);
+                let tile = airport.map_or(Tile::Neutral, |a| airfield_tile(a.allegiance, own));
+                symbol(pixels, icons, x, y, Some(15), tile);
+                let name = airport.map_or(runway.name.as_str(), |a| a.name.as_str());
                 label(pixels, font, name, (x, y + 12), INK, &mut labels);
             }
         }
@@ -1348,6 +1361,22 @@ mod tests {
             unit_look(&unit(class::SAM, blue, false), red).1,
             Tile::Hostile
         );
+    }
+    #[test]
+    fn an_airfield_is_on_the_tile_of_its_side_against_the_viewers() {
+        let (blue, red) = (DEFAULT_OWNSHIP_SIDE, Side(2));
+        // The scene records Blue's point of view: a Blue pilot sees a Blue
+        // field as a friend and a Redfor one as a foe.
+        assert_eq!(airfield_tile(Allegiance::Friendly, blue), Tile::Friendly);
+        assert_eq!(airfield_tile(Allegiance::Hostile, blue), Tile::Hostile);
+        // A Redfor pilot sees the two swapped.
+        assert_eq!(airfield_tile(Allegiance::Friendly, red), Tile::Hostile);
+        assert_eq!(airfield_tile(Allegiance::Hostile, red), Tile::Friendly);
+        // A neutral field, or an unknown one, claims neither side for either.
+        for own in [blue, red] {
+            assert_eq!(airfield_tile(Allegiance::Neutral, own), Tile::Neutral);
+            assert_eq!(airfield_tile(Allegiance::Unknown, own), Tile::Neutral);
+        }
     }
     #[test]
     fn symbols_take_the_blue_row_for_friends_the_red_row_for_foes_and_grey_for_neither() {

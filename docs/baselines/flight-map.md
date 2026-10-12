@@ -72,3 +72,21 @@ OFF MAP pinning for anything beyond the theater. No retail comparison was run.
 - Not run: windowed scenarios, the full battery, interactive piloting with the
   mouse (thumb drags and rocker presses are covered by the shared view's tests,
   which the creator's map already used), Windows and macOS.
+
+## Airfield sides (2026-10-12)
+
+Implementation mode, slice CL-MS. [Behavior specification](../spec/flight-map.md#knowledge-and-detection).
+The in-flight map draws each airfield on the tile of its airport's side
+against the viewer's own (blue friendly, red hostile, grey neutral), swapped
+for a Redfor viewer. The side is the airport allegiance the layout gives; no
+mission changes it, so it is always known. No retail comparison was run.
+
+- Unit test: a Blue viewer sees a Redfor field as hostile and a Blue field as
+  friendly, a Redfor viewer sees both swapped, and a neutral or unknown field
+  stays grey for both.
+- The preview set is unchanged (eight views of one Ukraine mission); the
+  airfields now carry their side. Before and after renders are kept under
+  `.local/surface-close/renders/cl-ms/`.
+- The creator's map already drew airfields by side; it is unchanged.
+- Not run: windowed scenarios, the full battery, a networked Redfor seat,
+  Windows and macOS.

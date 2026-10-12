@@ -470,7 +470,9 @@ positions)". An addition: retail's creator has no map.
   read-only view. Esc, Enter, Space or Close return to the creator
   unchanged; the in-game map's +/- zoom, arrows pan and Home resets.
 - The screen is the in-game map's ground, frame and scale bar. Airfields are
-  drawn one per airport on blue, red or grey tiles by side.
+  drawn one per airport on blue, red or grey tiles by side, as the Blue
+  pilot sees it; the in-flight map uses the same tiles, swapped for a Redfor
+  viewer ([airfield sides](flight-map.md#knowledge-and-detection)).
 - **It builds in the background** (slice CL-R2, John 2026-10-11: opening the
   map took about 4 s on the menu's own thread). Clicking Map starts the
   build on a thread of its own and the creator carries on, saying "Building
