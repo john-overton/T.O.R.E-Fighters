@@ -16,6 +16,7 @@
 //!
 //! This module resolves and identifies; [`movement`] moves the units that
 //! follow a route. Nothing here fires.
+pub mod aim;
 pub mod catalog;
 mod checkpoint;
 pub mod emitters;
