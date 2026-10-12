@@ -1010,7 +1010,9 @@ def scenarios() -> list[Scenario]:
     # off-pavement tick is an `off the pavement` anomaly in every ground probe.
     def on_pavement(landers: int):
         def check(output: str) -> list[str]:
-            problems = checker(ground=True, need_takeoff=True, need_landing=True, player_flies=True)(output)
+            # The scripted player flies on alone for up to 30 minutes and is
+            # not what these check, so it may come down.
+            problems = checker(ground=True, need_takeoff=True, need_landing=True)(output)
             m = re.search(r"^AI probe pavement: ground_samples=(\d+) off_pavement=(\d+)$", output, re.M)
             if not m:
                 problems.append("no 'AI probe pavement' line")
