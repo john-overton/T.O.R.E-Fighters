@@ -166,9 +166,10 @@ pub(super) struct Ring {
     frames: VecDeque<Arc<Frame>>,
     events: VecDeque<RingEvent>,
     next_seq: u64,
-    /// The ground objects destroyed and the craters and crash-site fires as
-    /// of the newest tick folded out of the ring: what an observer who
-    /// starts now is told stands, besides the events still in the ring.
+    /// The ground objects destroyed, and the craters, crash-site fires and
+    /// knocked-down city fill buildings, as of the newest tick folded out of
+    /// the ring: what an observer who starts now is told stands, besides the
+    /// events still in the ring.
     destroyed: BTreeSet<u32>,
     marks: Vec<Timed>,
 }
@@ -191,7 +192,11 @@ impl Ring {
                 Wide::Event(WireEvent::GroundDestroyed { object }) => {
                     self.destroyed.insert(*object);
                 }
-                Wide::Event(WireEvent::Mark { .. }) => self.marks.push(event.timed),
+                // The city fill's knocked-down buildings stand in the mission
+                // as marks do (protocol 25): a later observer is told them.
+                Wide::Event(WireEvent::Mark { .. } | WireEvent::CityFlattened { .. }) => {
+                    self.marks.push(event.timed)
+                }
                 _ => {}
             }
         }
@@ -535,8 +540,12 @@ impl Host {
             let marks = Tracker::standing(&self.world, tick)
                 .into_iter()
                 .filter(|t| {
-                    matches!(t.event, Wide::Event(WireEvent::Mark { .. }))
-                        && !new_marks.contains(&&t.event)
+                    // A building this tick knocked flat is told twice, which
+                    // knocks nothing more down.
+                    matches!(
+                        t.event,
+                        Wide::Event(WireEvent::Mark { .. } | WireEvent::CityFlattened { .. })
+                    ) && !new_marks.contains(&&t.event)
                 })
                 .collect();
             self.stream.ring = Some(Ring {

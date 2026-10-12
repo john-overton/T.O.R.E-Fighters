@@ -899,6 +899,7 @@ snapshot's tick.
 | Surface burst | everyone | A surface unit's gun burst (protocol 22): unit, hardpoint, target, the first round's direction, the burst's rounds and ticks ([the surface world](#the-surface-world-protocol-22)) |
 | Surface burst end | everyone | That burst stopped after this many rounds, short of its schedule (protocol 22) |
 | Surface unit | everyone | A surface unit's hit points, radar, launcher rails and spare magazines, when they change and at a seat (protocol 22) |
+| City flattened | everyone | City fill buildings a ground burst knocked flat, by index, when they fall and at a seat (protocol 25, [the city fill](#the-city-fill-protocol-25)) |
 
 Recording stems, weapon and sound names are sent by their index in the
 connection's name table (the Names message), which the host fills before the
@@ -2582,14 +2583,35 @@ stands.
   the fill (`MissionSpec::from_text`), so the King's game, every player's,
   the dedicated server and the bot build the same city. `TORE_CITY_FILL=0`
   applies only to single-player launches and the offline tools; nothing
-  online reads it. The development aid `TORE_CITY_FILL_CAP` changes the
-  number of buildings and must never be set for a networked game.
+  online reads it. The development aid `TORE_CITY_FILL_CAP`, the building
+  budget, is ignored online the same way: the app passes it in the launch
+  overrides (`Overrides::city_fill_cap`), which a mission text never sets,
+  so a session's mission always builds the whole fill.
 - **Why a bump.** The buildings are scenery but not harmless: an aircraft
   below a roof crashes and a strong enough ground burst knocks buildings
   flat, so a 24 game, which builds no fill, would fly a different world. The
-  version check keeps such games apart. The fill changes no message's bytes;
-  the wire golden changes in the version line and the transport packets
-  sealed with it.
+  version check keeps such games apart. The wire golden changes in the
+  version line, the transport packets sealed with it and the City flattened
+  event below.
+- **Knocked-down buildings.** Only the host's world steps combat, so only
+  its fill sees a ground burst. **City flattened** (event 21, everyone)
+  carries the buildings that fell: a count (at most 256; more go in several
+  events), the first building's index in the fill and each later one as its
+  gap from the one before less one, ascending. The host sends the buildings
+  that fell at the tick they fell (its tracker compares the fill's version
+  after each step), and at every seat, resume and observer start one or
+  more events with every building already flat. A client knocks them down
+  in its copy of the mission as the event arrives, so its prediction, which
+  flies through that copy's terrain, passes where the host's aircraft do;
+  the game copies the flat set into its own world each frame, so the
+  scenery draws them flat. A new flight (a restart) stands every building
+  up again before its seat's events. *Agent decision:* building indices
+  rather than the burst's centre and radius, since the indices need no
+  float rule on the client, and the seat's list is the same event. The
+  buildings are also in the world checkpoint, section 12
+  ([checkpoint](checkpoint.md#sections)), so the Check hash covers them and
+  a standby, a rejoin's restore and a new host after a migration or a
+  takeover start with them flat.
 - **Folded under 25.** The mission text's `enemy-start ground RUNWAY|auto`
   line (slice CL-R, [dedicated server](../DEDICATED-SERVER.md)), written only
   when Enemy Wing 1 starts on the ground: a 24 game refuses a mission that
@@ -2601,8 +2623,11 @@ stands.
   [front line](../spec/surface-defenses.md#the-front-line) (slice CL-FL) is
   part of the surface every game builds from the mission and its seed: the
   surface digest covers it, so a game that builds no front disagrees with
-  one that does and is refused. The close-out's other slices changed no wire
-  bytes.
+  one that does and is refused. The knocked-down buildings (review fixes,
+  above): the City flattened event (code 21) and the world checkpoint's
+  city fill section (section 12), which a 24 build lacks and would refuse.
+  `TORE_CITY_FILL_CAP` no longer reaches a session's mission. The
+  close-out's other slices changed no wire bytes.
 - **Checks that still apply.** The theater content item lists the files the
   fill is built from (the reference weather layer, every ground placement's
   picture, the kit's definitions and shapes), read without building the
@@ -2758,7 +2783,10 @@ again with an observer; the capture format did not change for it.
   [the city fill](#the-city-fill-protocol-25)): every game builds the city
   fill, whose buildings aircraft crash into and ground bursts knock flat;
   folded under 25, the mission text's `enemy-start` line (CL-R), which a 24
-  game refuses. No message layout changed.
+  game refuses; `ground_trim` in the AI airfield sequence's checkpoint
+  (CL-AP); the front line in the surface digest (CL-FL); and the City
+  flattened event (code 21) with the world checkpoint's city fill section
+  (section 12), which carry the buildings ground bursts knocked flat.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

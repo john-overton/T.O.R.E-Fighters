@@ -37,12 +37,14 @@ pub fn run() -> AppResult<()> {
     std::fs::create_dir_all(out)?;
     let resources = crate::reel::load_assets()?.theater_resources;
     let city_fill = crate::scenery::city_fill()?;
+    let city_fill_cap = crate::scenery::city_fill_cap()?;
     let overrides = |redrawn_airports: bool| Overrides {
         time: Some([12, 0]),
         wind: None,
         cloud_altitude: Some(0),
         redrawn_airports,
         city_fill,
+        city_fill_cap,
     };
     let drawn = crate::scenery::redrawn_airports()?;
     let mut seen = std::collections::BTreeSet::new();

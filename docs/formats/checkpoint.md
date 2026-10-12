@@ -203,11 +203,12 @@ compile without a section (see [keeping it complete](#keeping-it-complete)):
 | 9 | Data link | The flight data link's picture: members, each flight's published tracks and member status with their publish ticks, locks, engagements, assignments, the two warning tables, the planes already announced | New value |
 | 10 | Score | Whether the host has scoring on and, if so, the targets whose end is recorded and the score facts waiting for the host, with their tick | New value |
 | 11 | Revival | Stage F phase 2's revival book (`revive::Book`): each abandoned plane with the tick it was abandoned and the tick its wreck came to rest, in the order they were abandoned; the retired planes' roster entries; the planes revivals added, in order; each added plane's lineage root, a map from the added plane to the plane the mission started with that it continues (*lobby pass R1*). The abandoned list also holds the AI wrecks a respawn replaced, waiting to retire (*R1*). Then the lead hold (*lobby pass R2*): whether it is on, and each owned wing (its side and index, the owner as a seat or as the away player's plane, the owner's newest plane in the wing, whether it has led). Refused: a plane twice in one list, a plane both abandoned and retired, a retired plane with a pilot, a root for a plane never added or an added plane as a root, a hold that is off with owners, one wing owned twice. *Built (F2-V, roots R1, lead hold R2)* | New value |
+| 12 | City fill | The city fill's knocked-down buildings: whether the terrain has a fill (a restore refuses a world that differs), then the count of flattened buildings and their indices in the fill, ascending, the first as it is and each later one as its gap from the one before less one. The fill itself is mission setup. Refused: more buildings than the fill holds, an index past it. *Built (surface close-out review fixes, protocol 25)* | Exactly that set |
 
 Not coded at `World` level: `setup`, `phrases` and every terrain field but
-the weather (mission setup). Stage G added the data link's picture (section 9)
+the weather and the city fill's knocked-down buildings (mission setup). Stage G added the data link's picture (section 9)
 and stage F phase 2 the score recorder (section 10) and the revival book
-(section 11); each new `World` field gets
+(section 11), and the surface close-out the city fill (section 12); each new `World` field gets
 the next free id, and state added inside an existing holder joins that
 holder's section. A G slice that adds state to `DataLink` codes it in
 `datalink_checkpoint.rs`, whose field list will not compile until it does. The

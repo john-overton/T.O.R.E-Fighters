@@ -83,6 +83,13 @@ pub struct Overrides {
     /// bursts knock them flat, so a mission text never turns it off: every
     /// machine of a session and the server build the same city.
     pub city_fill: bool,
+    /// The city fill's per-theater building budget, `None` for the default
+    /// ([`crate::city::fill::MAX_INSTANCES`]). A measuring aid the app sets
+    /// from `TORE_CITY_FILL_CAP` for single player and the offline tools
+    /// only: a mission text never sets it, so a session, the server and the
+    /// bot always build the whole fill whatever the variable says, and a
+    /// replay builds the default budget.
+    pub city_fill_cap: Option<usize>,
 }
 
 impl Default for Overrides {
@@ -94,6 +101,7 @@ impl Default for Overrides {
             cloud_altitude: None,
             redrawn_airports: true,
             city_fill: true,
+            city_fill_cap: None,
         }
     }
 }
@@ -1071,8 +1079,16 @@ impl Terrain {
         let plans = redrawn::Plans::new(out.redrawn_airports)?;
         out.build_airport_scene(resources, code.trim_end_matches(".MM"), target, &plans)?;
         if recorded.map_or(overrides.city_fill, |r| r.city_fill) {
-            out.city_fill =
-                crate::city::CityFill::for_terrain(resources, &out).map(std::sync::Arc::new);
+            let cap = match recorded {
+                Some(_) => None,
+                None => overrides.city_fill_cap,
+            };
+            out.city_fill = crate::city::CityFill::for_terrain(
+                resources,
+                &out,
+                cap.unwrap_or(crate::city::fill::MAX_INSTANCES),
+            )
+            .map(std::sync::Arc::new);
         }
         Ok(out)
     }

@@ -717,6 +717,18 @@ impl App {
             surface_units_to_world(&mut self.world, &frame.surface_units);
             flight.surface_units.clone_from(&frame.surface_units);
         }
+        // The city fill buildings the host's ground bursts knocked flat
+        // (protocol 25), as the session's copy of the mission has them: the
+        // scenery draws them flat.
+        if let (Some(ours), Some(told)) = (
+            &self.world.terrain.city_fill,
+            session
+                .client
+                .mission()
+                .and_then(|world| world.terrain.city_fill.as_ref()),
+        ) {
+            ours.copy_flattened(told);
+        }
         self.combat_view.show_picture(frame.picture.clone());
 
         // The weather clock follows the host's tick.
@@ -1117,7 +1129,8 @@ impl TickPresenter<'_> {
                 | WireEvent::GunBurst { .. }
                 | WireEvent::SurfaceBurst { .. }
                 | WireEvent::SurfaceBurstEnd { .. }
-                | WireEvent::SurfaceUnit(_) => {}
+                | WireEvent::SurfaceUnit(_)
+                | WireEvent::CityFlattened { .. } => {}
             }
         }
         if weapon_cycled {

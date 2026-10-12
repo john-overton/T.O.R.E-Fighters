@@ -616,6 +616,10 @@ pub fn events() -> EventsSection {
             ticks: 120,
             blast: Some(28),
         },
+        // Protocol 25: city fill buildings a ground burst knocked flat.
+        WireEvent::CityFlattened {
+            buildings: vec![7, 8, 9, 130, 499_999],
+        },
     ];
     EventsSection {
         events: list

@@ -199,6 +199,12 @@ pub enum WireEvent {
     /// event's tick (protocol 22): sent when it changes, and at seating for
     /// every unit not as the mission built it.
     SurfaceUnit(SurfaceUnitView),
+    /// City fill buildings a ground burst knocked flat (protocol 25): their
+    /// indices in the fill every game builds, ascending, at most
+    /// [`limits::FLATTENED`]. Sent at the tick they fell, and at seating for
+    /// every building already flat; a game knocks the same ones down in its
+    /// copy of the mission, so its prediction and its picture fly past them.
+    CityFlattened { buildings: Vec<u32> },
 }
 
 /// The part of a surface unit's state a client draws or shows (protocol
@@ -576,6 +582,7 @@ impl WireEvent {
             Self::SurfaceBurst { .. } => 18,
             Self::SurfaceBurstEnd { .. } => 19,
             Self::SurfaceUnit(_) => 20,
+            Self::CityFlattened { .. } => 21,
         }
     }
 
@@ -747,6 +754,7 @@ impl WireEvent {
                 w.write_varint(u64::from(*fired));
             }
             Self::SurfaceUnit(view) => view.write(w)?,
+            Self::CityFlattened { buildings } => write_flattened(w, buildings)?,
         }
         Ok(())
     }
@@ -892,9 +900,46 @@ impl WireEvent {
                 fired: read_u16(r)?,
             },
             20 => Self::SurfaceUnit(SurfaceUnitView::read(r)?),
+            21 => Self::CityFlattened {
+                buildings: read_flattened(r)?,
+            },
             _ => return Err(WireError::Invalid("event kind")),
         })
     }
+}
+
+/// A City flattened event's buildings: the count, the first index, then
+/// each later one as its gap from the one before less one (ascending).
+fn write_flattened(w: &mut BitWriter, buildings: &[u32]) -> WireResult<()> {
+    if buildings.len() > limits::FLATTENED {
+        return Err(WireError::TooMany {
+            what: "flattened buildings",
+            limit: limits::FLATTENED,
+        });
+    }
+    if buildings.windows(2).any(|pair| pair[1] <= pair[0]) {
+        return Err(WireError::Invalid("flattened buildings out of order"));
+    }
+    bits::write_count(w, buildings.len());
+    let mut last: Option<u32> = None;
+    for &id in buildings {
+        w.write_varint(u64::from(last.map_or(id, |last| id - last - 1)));
+        last = Some(id);
+    }
+    Ok(())
+}
+
+fn read_flattened(r: &mut BitReader<'_>) -> WireResult<Vec<u32>> {
+    let count = bits::read_count(r, limits::FLATTENED, "flattened buildings")?;
+    let mut buildings = Vec::with_capacity(count);
+    let mut next = 0u64;
+    for _ in 0..count {
+        let id = next + r.read_varint()?;
+        let id = u32::try_from(id).map_err(|_| tore_codec::CodecError::ValueOutOfRange)?;
+        buildings.push(id);
+        next = u64::from(id) + 1;
+    }
+    Ok(buildings)
 }
 
 /// Reads a varint that must fit 16 bits.

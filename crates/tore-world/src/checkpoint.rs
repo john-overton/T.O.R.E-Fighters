@@ -44,11 +44,12 @@ pub enum Section {
     DataLink,
     Score,
     Revival,
+    CityFill,
 }
 
 impl Section {
     /// Every section, in id order.
-    pub const ALL: [Section; 11] = [
+    pub const ALL: [Section; 12] = [
         Section::Roster,
         Section::Combat,
         Section::AiWings,
@@ -60,6 +61,7 @@ impl Section {
         Section::DataLink,
         Section::Score,
         Section::Revival,
+        Section::CityFill,
     ];
 
     pub fn id(self) -> u8 {
@@ -75,6 +77,7 @@ impl Section {
             Section::DataLink => 9,
             Section::Score => 10,
             Section::Revival => 11,
+            Section::CityFill => 12,
         }
     }
 
@@ -95,6 +98,7 @@ impl Section {
             Section::DataLink => "data link",
             Section::Score => "score",
             Section::Revival => "revival",
+            Section::CityFill => "city fill",
         }
     }
 }
@@ -461,6 +465,27 @@ impl World {
                 }
             }
             Section::Revival => revival.save(s, None),
+            // The city fill's knocked-down buildings (the rest of the fill
+            // is mission setup): whether there is a fill, then the
+            // flattened buildings' count and ascending indices, each after
+            // the first as its gap less one.
+            Section::CityFill => {
+                let w = s.writer();
+                w.write_bool(terrain.city_fill.is_some());
+                if let Some(fill) = &terrain.city_fill {
+                    let ids = fill.flattened();
+                    w.write_varint(ids.len() as u64);
+                    let mut last: Option<u32> = None;
+                    for id in ids {
+                        w.write_varint(u64::from(match last {
+                            Some(last) => id - last - 1,
+                            None => id,
+                        }));
+                        last = Some(id);
+                    }
+                }
+                Ok(())
+            }
         }
     }
 
@@ -494,6 +519,37 @@ impl World {
                 }
             }
             Section::Revival => self.revival = Checkpoint::load(l, None)?,
+            Section::CityFill => {
+                let r = l.reader();
+                let present = r.read_bool()?;
+                match (present, &self.terrain.city_fill) {
+                    (true, Some(fill)) => {
+                        let count = r.read_varint()?;
+                        if count > fill.len() as u64 {
+                            return invalid(format!(
+                                "{count} flattened buildings in a fill of {}",
+                                fill.len()
+                            ));
+                        }
+                        let mut ids = Vec::with_capacity(count as usize);
+                        let mut next = 0u64;
+                        for _ in 0..count {
+                            let id = next + r.read_varint()?;
+                            if id >= fill.len() as u64 {
+                                return invalid(format!(
+                                    "flattened building {id} past a fill of {}",
+                                    fill.len()
+                                ));
+                            }
+                            ids.push(id as u32);
+                            next = id + 1;
+                        }
+                        fill.set_flattened(&ids);
+                    }
+                    (false, None) => {}
+                    _ => return invalid("the city fill exists in only one of the two worlds"),
+                }
+            }
         }
         Ok(())
     }
