@@ -1244,6 +1244,45 @@ fn a_laser_store_is_chosen_only_with_a_spot_assured() {
     assert_eq!(strike.kind, Some(StoreKind::Bomb));
 }
 
+/// Found at the integration (ST-L x ST-T2): a fighter's gun is no store to
+/// strike with, so a fighter with a laser bomb and a gun and no designator
+/// is a laser-only carrier: it waits for a spot instead of going home, and
+/// drops on one. An attack jet's gun strafes, so it takes the gun.
+#[test]
+fn a_fighters_gun_does_not_stop_it_waiting_for_a_spot() {
+    let gun = Store {
+        station: StationId(0),
+        kind: StoreKind::Gun,
+        rounds: 500,
+        cadence_ticks: 4,
+        maximum_range_ft: 7_000.,
+        ..bomb(500)
+    };
+    let fighter = |spots: Vec<u32>| {
+        let mut world = lasing_world(None);
+        world.inputs.class = StrikeClass::Fighter;
+        world.inputs.stores = vec![laser_store(), gun];
+        world.inputs.lase.spot_targets = spots;
+        world.own = own([0., 8_000., 0.], 600.);
+        world
+    };
+    let world = fighter(Vec::new());
+    let mut strike = Strike::new(1);
+    strike.step(&world.context(0));
+    assert_eq!(strike.phase(), Phase::Wait);
+    let world = fighter(vec![TARGET]);
+    let mut strike = Strike::new(1);
+    strike.step(&world.context(0));
+    assert_eq!(strike.phase(), Phase::Attack);
+    assert_eq!(strike.kind, Some(StoreKind::Laser));
+    let mut world = fighter(Vec::new());
+    world.inputs.class = StrikeClass::Attack;
+    let mut strike = Strike::new(1);
+    strike.step(&world.context(0));
+    assert_eq!(strike.phase(), Phase::Attack);
+    assert_eq!(strike.kind, Some(StoreKind::Gun));
+}
+
 #[test]
 fn a_glide_bomb_that_cannot_reach_is_approached_in_a_descent_to_its_floor() {
     let mut world = lasing_world(Some(pod()));

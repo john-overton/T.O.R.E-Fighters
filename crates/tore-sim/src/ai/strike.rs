@@ -1196,15 +1196,18 @@ impl Strike {
     }
 
     /// The striker has a laser store with rounds and no other store it could
-    /// drop on a target (an anti-radiation or other missile counts as one).
+    /// drop on a target (an anti-radiation or other missile counts as one; a
+    /// gun only where [`has_usable_store`] lets it strafe, so a fighter's gun
+    /// does not, found at the integration).
     fn carries_only_laser(&self, cx: &Context<'_>) -> bool {
         let stores = &cx.inputs.stores;
         stores
             .iter()
             .any(|s| s.kind == StoreKind::Laser && s.rounds > 0)
-            && !stores
-                .iter()
-                .any(|s| s.rounds > 0 && !matches!(s.kind, StoreKind::Laser | StoreKind::Command))
+            && !stores.iter().any(|s| {
+                s.kind != StoreKind::Laser
+                    && has_usable_store(std::slice::from_ref(s), false, cx.inputs.class)
+            })
     }
 
     /// The laser store's fire range, feet (zero with none).
