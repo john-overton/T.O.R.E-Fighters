@@ -268,3 +268,46 @@ fn carriers_islands_and_deck_crew_draw_their_full_models() {
     let outside = BTreeMap::from([(SPRITE_FRAME_WORD, 11 << 16)]);
     assert!(Shape::with_state(&crew, &outside).is_err());
 }
+
+/// The shapes that turn parts (docs/formats/objects-and-shapes.md,
+/// "Turrets and rotating antennas"): every retail shape in the scanned
+/// archives with a `@HardpointAngle@4` turret or a `_currentTicks` antenna,
+/// and what turns. Skips without the install.
+#[test]
+fn only_the_reviewed_shapes_turn_turrets_or_antennas() {
+    use tore_formats::shape::articulation;
+    let root = game_dir();
+    let mut found = Vec::new();
+    for name in ARCHIVES {
+        let Ok(archive) = Archive::open(root.join(name)) else {
+            eprintln!("skipped: no retail {name}");
+            return;
+        };
+        for entry in archive.entries.keys().filter(|n| n.ends_with(".SH")) {
+            let data = archive.read(entry).unwrap();
+            if let Ok(parts) = articulation(&data)
+                && !parts.is_empty()
+            {
+                found.push(format!(
+                    "{name}/{entry} turrets {:?} antennas {:?}",
+                    parts.turrets, parts.antennas
+                ));
+            }
+        }
+    }
+    assert_eq!(
+        found,
+        [
+            "FA_2.LIB/CTWR1.SH turrets [] antennas [7]",
+            "FA_2.LIB/CTWR2.SH turrets [] antennas [7]",
+            "FA_2.LIB/HAWKS.SH turrets [] antennas [7, 7]",
+            "FA_2.LIB/KRIV.SH turrets [(1, 32760), (0, 32760)] antennas [6]",
+            "FA_2.LIB/KRIVAK.SH turrets [(1, 32760), (0, 32760)] antennas [6]",
+            "FA_2.LIB/REDCR.SH turrets [] antennas [5]",
+            "FA_2.LIB/RLD.SH turrets [] antennas [7]",
+            "FA_2.LIB/SOVR.SH turrets [(1, 32760), (0, 0)] antennas [6]",
+            "FA_2.LIB/TOWER.SH turrets [] antennas [7]",
+        ],
+        "{found:#?}"
+    );
+}
