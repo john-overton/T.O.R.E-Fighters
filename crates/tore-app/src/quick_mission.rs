@@ -24,6 +24,7 @@ use tore_world::mission::{
 pub mod allegiance;
 pub mod map;
 pub mod matrix;
+pub mod remember;
 /// The aircraft fields of the five wings the AI flies. Field 6 is friendly
 /// wing 1's, which is also the player's own aircraft.
 const AI_AIRCRAFT_FIELDS: [usize; 5] = [9, 12, 23, 26, 29];
@@ -166,7 +167,7 @@ impl ViewKind {
         }
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Draft {
     pub values: [usize; FIELDS],
 }
@@ -1884,7 +1885,7 @@ impl QuickMission {
             | "lobby-creator-view-flying"
             | "lobby-creator-view-locked" => self.preview_view(name)?,
             "lobby-ordnance" | "lobby-ordnance-refused" | "lobby-ordnance-cheat" => {}
-            "lobby-ordnance-gaps" => {
+            "lobby-ordnance-gaps" | "lobby-ordnance-laser" => {
                 if let Some(ordnance) = &mut self.ordnance {
                     ordnance.preview(name);
                 }
@@ -1893,7 +1894,8 @@ impl QuickMission {
             | "ordnance-empty"
             | "ordnance-drag"
             | "ordnance-message"
-            | "ordnance-message-long" => {
+            | "ordnance-message-long"
+            | "ordnance-laser" => {
                 if let Some(ordnance) = &mut self.ordnance {
                     ordnance.preview(name);
                 }
@@ -3014,7 +3016,7 @@ mod tests {
         q.choose_theater_code("UKR", &BTreeMap::new());
         assert_eq!(q.theater_codes[q.draft.values[13]], "UKR");
     }
-    fn setup() -> QuickMission {
+    pub(super) fn setup() -> QuickMission {
         // The retail list sizes: a target list per theater (the templates'),
         // and the four strengths of the AAA and SAM fields.
         let mut options = Options {
@@ -3058,7 +3060,7 @@ mod tests {
         q
     }
     /// A creator offering every selectable aircraft.
-    fn full_catalog() -> QuickMission {
+    pub(super) fn full_catalog() -> QuickMission {
         let mut q = setup();
         q.aircraft_files = AircraftId::SELECTABLE
             .map(|id| id.selection_key().to_string())

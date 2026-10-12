@@ -337,6 +337,10 @@ struct App {
     theater_resources: Arc<std::collections::BTreeMap<String, Vec<u8>>>,
     camera: camera::Camera,
     quick: quick_mission::QuickMission,
+    /// The creator's draft kept in the profile between sessions (slice BQ,
+    /// B22); `None` for diagnostic runs, scripted runs and a file this build
+    /// cannot read.
+    quick_memory: Option<quick_mission::remember::Memory>,
     launch_creator: bool,
     /// `--loadout none|guns`: the stores the Load Ordnance page would leave, applied
     /// to the Quick Mission's loadout before launch.
@@ -980,6 +984,9 @@ impl App {
     }
 
     fn save_preferences(&mut self) {
+        if let Some(memory) = &mut self.quick_memory {
+            memory.save(&self.quick);
+        }
         let Some(path) = &self.preference_path else {
             return;
         };
@@ -12054,6 +12061,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     | "lobby-ordnance-refused"
                     | "lobby-ordnance-cheat"
                     | "lobby-ordnance-gaps"
+                    | "ordnance-laser"
+                    | "lobby-ordnance-laser"
             ) {
                 quick.ordnance = Some(ordnance::Ordnance::new(
                     tore_sim::combat::loadout::Loadout::new(&hornet.profile, |n| {
@@ -12090,6 +12099,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 }
                 if snapshot_state == "lobby-ordnance-cheat" {
                     page.message = Some(ordnance::LOBBY_CHEAT_NOTICE.into());
+                }
+                if snapshot_state == "lobby-ordnance-laser" {
+                    // The warning shows when no message is up.
+                    page.message = None;
                 }
             }
             if let Some(page) = snapshot_state.strip_prefix("debrief") {
@@ -13188,6 +13201,40 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         radio: Default::default(),
     };
     let presented_plane = world.picture_plane().0;
+    // The creator opens as the profile left it, or on random aircraft the
+    // first time (slice BQ, B22). Only an ordinary interactive start: the
+    // diagnostic, scripted and flag-driven runs keep the creator they asked
+    // for, so their missions stay the same every time.
+    let quick_memory = if preferences_enabled
+        && input_script_steps.is_none()
+        && !launch_creator
+        && matches!(initial_screen, Screen::Main | Screen::Quick)
+        && ground_start.is_none()
+        && ground_target.is_none()
+        && enemy_ground_start_airport.is_none()
+        && separation_nm.is_none()
+        && probe_script.wing_size.is_none()
+        && !probe_script.wing_only
+        && !probe_script.redfor
+    {
+        let memory = quick_mission::remember::Memory::open(
+            &mut quick,
+            assets::data_directory()?.join("quick-mission-v1.conf"),
+            aircraft_requested,
+        );
+        if memory.as_ref().is_some_and(|memory| memory.recalled) {
+            // The command line still wins over the saved draft.
+            if std::env::args().any(|a| a == "--theater") {
+                quick.choose_theater_code(&theater_code, &theater_resources);
+            }
+            if aircraft_requested {
+                quick.choose_player_aircraft(aircraft_id);
+            }
+        }
+        memory
+    } else {
+        None
+    };
     let mut app = App {
         net: None,
         net_built: None,
@@ -13280,6 +13327,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         cheats_sent: None,
         camera,
         quick,
+        quick_memory,
         screen: initial_screen,
         frame_time: Instant::now(),
         instrument_time: Instant::now(),
