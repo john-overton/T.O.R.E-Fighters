@@ -621,8 +621,10 @@ fn a_game_restarted_before_the_host_noticed_replaces_its_old_connection() {
         c.callsign = "Viper".into();
         c.token = Some(token);
     });
+    // The reservation ends at the host tick after the seat (the city fill's
+    // build moves the seat a tick later than it was), so wait for both.
     assert!(rig.run_until(Duration::from_secs(4), |r| {
-        r.closed(viper) && r.seated(back)
+        r.closed(viper) && r.seated(back) && r.host.rejoin.reserved.is_empty()
     }));
     assert_eq!(rig.clients[back].seated.as_ref().unwrap().plane, 0);
     assert_eq!(peer(&rig, "Viper").lobby.order, order);
@@ -634,7 +636,6 @@ fn a_game_restarted_before_the_host_noticed_replaces_its_old_connection() {
             .count(),
         1
     );
-    assert!(rig.host.rejoin.reserved.is_empty());
     no_errors_except_closed(&rig, viper);
 }
 
