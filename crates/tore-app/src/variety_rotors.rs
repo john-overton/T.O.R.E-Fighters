@@ -127,6 +127,68 @@ const V22_NACELLES: [[usize; 24]; 2] = [
     ],
 ];
 
+/// Fitted radar dome turn rate, revolutions per minute: the E-3's rotodome
+/// turns at 6 rpm in operation (John, 2026-10-12, opinionated; the rate is
+/// fitted, one turn in 10 s). Retail has no spin for these shapes.
+pub const DOME_REVOLUTIONS_PER_MINUTE: f64 = 6.;
+
+/// One airborne-radar dome made of its own faces: the lens-shaped disc turns
+/// about the vertical line through `pivot`; the mast struts stay fixed.
+pub struct Dome {
+    pub faces: &'static [usize],
+    pub pivot: [f32; 3],
+}
+
+/// AWACS.SH (E-3): 16 triangles, an 8-sided lens 45 units across, pole
+/// (0,-45) between z 29 and 36. Faces found by shape inspection, 2026-10-12.
+pub const E3_DOME: Dome = Dome {
+    faces: &[
+        0x3e6a, 0x3e8b, 0x3eac, 0x3ecd, 0x3eee, 0x3f0f, 0x3f30, 0x3f51, 0x3f72, 0x3f93, 0x3fb4,
+        0x3fd5, 0x3ff6, 0x4017, 0x4039, 0x4092,
+    ],
+    pivot: [0., -45., 32.],
+};
+/// IL76.SH (the Redfor Mainstay): 20 triangles, a 10-sided lens 38 units
+/// across, pole (0,-23) between z 28 and 36.
+pub const IL76_DOME: Dome = Dome {
+    faces: &[
+        0x4ba2, 0x4bb7, 0x4bcc, 0x4be1, 0x4bf6, 0x4c0b, 0x4c20, 0x4c35, 0x4c4a, 0x4c5f, 0x4c74,
+        0x4c89, 0x4c9e, 0x4cb3, 0x4cc8, 0x4cdd, 0x4cf2, 0x4d07, 0x4d1c, 0x4d31,
+    ],
+    pivot: [0., -23., 32.],
+};
+/// E2C.SH (the Hawkeye): 16 triangles, a lens 38 units across, pole (0,-11)
+/// between z 16 and 21. Agent addition: John asked for the E-3 and the A-50.
+pub const E2_DOME: Dome = Dome {
+    faces: &[
+        0x2192, 0x217a, 0x2132, 0x211a, 0x20ea, 0x20d2, 0x20ba, 0x208a, 0x21c3, 0x21aa, 0x2162,
+        0x214a, 0x2102, 0x20a2, 0x2072, 0x205a,
+    ],
+    pivot: [0., -11., 18.],
+};
+
+fn dome(id: AircraftId) -> Option<&'static Dome> {
+    match id {
+        AircraftId::E3 => Some(&E3_DOME),
+        AircraftId::Il76 => Some(&IL76_DOME),
+        AircraftId::E2 => Some(&E2_DOME),
+        _ => None,
+    }
+}
+
+/// The dome's angle about the vertical, radians, clockwise seen from above:
+/// a plain function of the picture's tick, so every client and every replay
+/// agree. It turns while an engine is lit and the aircraft is not wrecked
+/// (agent decision, 2026-10-12: the radar is on when the aircraft is
+/// running), and rests at zero otherwise.
+pub fn dome_angle(state: &flight::State) -> f64 {
+    if state.engine && !state.crashed {
+        -(state.ticks as f64 * flight::DT * TAU * DOME_REVOLUTIONS_PER_MINUTE / 60.)
+    } else {
+        0.
+    }
+}
+
 /// Positions use source X/right, Y/forward, Z/up coordinates before render scale.
 pub fn animate(id: AircraftId, face: &mut Face, state: &flight::State) {
     let phase = if state.engine && state.fuel > 0. {
@@ -134,6 +196,12 @@ pub fn animate(id: AircraftId, face: &mut Face, state: &flight::State) {
     } else {
         0.
     };
+    if let Some(dome) = dome(id)
+        && dome.faces.contains(&face.address)
+    {
+        turn(face, dome.pivot, [0., 0., 1.], dome_angle(state));
+        return;
+    }
     let tilt = |rotor: usize| state.lift_controls.rotors[rotor].tilt;
     match id {
         AircraftId::C130 => {
@@ -358,6 +426,54 @@ mod tests {
     }
     fn state() -> flight::State {
         flight::State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap()
+    }
+    #[test]
+    fn radar_domes_turn_clockwise_once_in_ten_seconds_about_their_pole() {
+        let source = face(0x3e6a, vec![[10., -45., 32.], [0., -45., 36.]]);
+        let mut s = state();
+        s.engine = true;
+        // A quarter turn after 2.5 s (300 ticks): east of the pole goes south.
+        s.ticks = 300;
+        let mut moved = source.clone();
+        animate(AircraftId::E3, &mut moved, &s);
+        let [x, y, z] = moved.positions[0];
+        assert!(x.abs() < 1e-4 && (y + 55.).abs() < 1e-4 && (z - 32.).abs() < 1e-4);
+        // The pole, on the axis, stays put.
+        assert!((moved.positions[1][1] + 45.).abs() < 1e-4);
+        // A whole turn in 1,200 ticks, and any tick is the same on every client.
+        s.ticks = 1200;
+        let mut turned = source.clone();
+        animate(AircraftId::E3, &mut turned, &s);
+        for i in 0..3 {
+            assert!((turned.positions[0][i] - source.positions[0][i]).abs() < 1e-3);
+        }
+        // Resting engine, wreck and other faces do not turn.
+        s.ticks = 300;
+        s.engine = false;
+        let mut rest = source.clone();
+        animate(AircraftId::E3, &mut rest, &s);
+        assert_eq!(rest.positions, source.positions);
+        s.engine = true;
+        let mut other = source.clone();
+        other.address = 0x100;
+        animate(AircraftId::E3, &mut other, &s);
+        assert_eq!(other.positions, source.positions);
+        let mut wrong = source.clone();
+        animate(AircraftId::F18, &mut wrong, &s);
+        assert_eq!(wrong.positions, source.positions);
+        s.crashed = true;
+        let mut wreck = source.clone();
+        animate(AircraftId::E3, &mut wreck, &s);
+        assert_eq!(wreck.positions, source.positions);
+    }
+    #[test]
+    fn each_dome_names_a_closed_lens_of_distinct_faces() {
+        for (dome, count) in [(&E3_DOME, 16), (&IL76_DOME, 20), (&E2_DOME, 16)] {
+            let mut ids = dome.faces.to_vec();
+            ids.sort_unstable();
+            ids.dedup();
+            assert_eq!(ids.len(), count);
+        }
     }
     #[test]
     fn phase_selection_preserves_one_original_image_per_rotor_panel() {
