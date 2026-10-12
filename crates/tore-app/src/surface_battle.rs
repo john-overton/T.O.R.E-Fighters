@@ -346,7 +346,7 @@ fn pairs(world: &World) -> Vec<Pair> {
 /// the resolved unit, the scene's side table, its arms and its combat row.
 /// A test aid (the surface digest no longer matches the mission text, which
 /// only a networked game checks).
-fn hand_to_blue(world: &mut World, id: UnitId) -> AppResult<()> {
+pub(crate) fn hand_to_blue(world: &mut World, id: UnitId) -> AppResult<()> {
     let surface = &mut world.terrain.surface;
     let unit = surface
         .units
