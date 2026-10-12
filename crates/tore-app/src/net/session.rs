@@ -1833,6 +1833,15 @@ impl NetSession {
         frame.picture = picture;
     }
 
+    /// What the surface units' weapons hold at host tick `tick`, as far as
+    /// a client knows: the targets of their recent gun bursts. The host
+    /// sends no lock or missile target of a surface unit, so a launcher's
+    /// picture does not aim on a client (docs/spec/surface-defenses.md,
+    /// "Aiming").
+    pub fn surface_aim_tracks(&self, tick: u64) -> Vec<tore_world::surface::aim::Track> {
+        tore_world::surface::aim::burst_tracks(tick, self.guns.surface_sights())
+    }
+
     /// Steps the regenerated effects to client tick `to`, one step per tick
     /// since the last call (at most [`MAX_EFFECT_TICKS`]), each over
     /// `picture`, the newest the screen has; the releases the frames brought

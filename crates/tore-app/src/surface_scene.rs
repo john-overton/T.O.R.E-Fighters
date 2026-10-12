@@ -1,7 +1,8 @@
 //! `--surface-scene OUT_DIR THEATER STEM [--surface-seed N] [--seconds S]
 //! [--surface-only] [--kill all|LIST] [--burn S] [--rails N] [--focus LIST]
 //! [--views LIST] [--look YAW,PITCH] [--tag NAME] [--distance FT]
-//! [--defenses AAA SAM]`: renders a
+//! [--defenses AAA SAM] [--intruder EAST,UP,NORTH] [--blue LIST] [--no-aim]`:
+//! renders a
 //! Quick Mission ground target as the game draws it, offscreen at 1080p, for
 //! review (docs/spec/surface-defenses.md, "Destroyed looks and drawing").
 //!
@@ -18,6 +19,14 @@
 //! the radius held in view, `--look` a view of its own) and is written as
 //! `TAG-VIEW.png` with the static scene, the moving surface units, the men
 //! and deck crew, explosions, fires and smoke.
+//!
+//! The units aim as the game draws them (docs/spec/surface-defenses.md,
+//! "Aiming"), stepped every tick; `--no-aim` draws them unturned, as before
+//! aiming was drawn. `--intruder` holds the player's aircraft (invulnerable)
+//! circling 3,000 ft round the point that many feet east, up and north of
+//! the focus at 300 knots, so the defenses lock on and fire at it;
+//! `--blue` hands template objects (ordinals) to Blue, as `--surface-battle`
+//! does, so units fight each other.
 use crate::{AppResult, camera::Camera, reel::Gpu, scenery::Scenery, surface_dump};
 use std::path::Path;
 use tore_formats::aircraft::AircraftId;
@@ -45,6 +54,10 @@ struct Options {
     defenses: (Defense, Defense),
     /// A view of its own: yaw and pitch in degrees.
     look: Option<(f64, f64)>,
+    /// Feet east, up and north of the focus the player's aircraft circles.
+    intruder: Option<[f64; 3]>,
+    blue: Vec<u32>,
+    no_aim: bool,
 }
 
 fn options() -> AppResult<Options> {
@@ -66,6 +79,9 @@ fn options() -> AppResult<Options> {
         distance: None,
         defenses: (Defense::Heavy, Defense::Heavy),
         look: None,
+        intruder: None,
+        blue: Vec::new(),
+        no_aim: false,
     };
     let list = |text: String| -> Vec<String> {
         text.split(',')
@@ -93,6 +109,20 @@ fn options() -> AppResult<Options> {
                 o.look = Some((yaw.parse()?, pitch.parse()?));
                 o.views = vec!["look".into()];
             }
+            "--intruder" => {
+                let text = next()?;
+                let parts: Vec<f64> = text.split(',').map(str::parse).collect::<Result<_, _>>()?;
+                let [east, up, north] = parts.as_slice() else {
+                    return Err("--intruder EAST,UP,NORTH".into());
+                };
+                o.intruder = Some([*east, *up, *north]);
+            }
+            "--blue" => {
+                for ordinal in list(next()?) {
+                    o.blue.push(ordinal.parse()?);
+                }
+            }
+            "--no-aim" => o.no_aim = true,
             "--defenses" => {
                 let level = |text: String| {
                     Defense::parse(&text).ok_or_else(|| format!("unknown defense level {text}"))
@@ -104,7 +134,7 @@ fn options() -> AppResult<Options> {
         }
     }
     let [out, theater, stem] = positional.as_slice() else {
-        return Err("--surface-scene OUT_DIR THEATER STEM [--surface-seed N] [--seconds S] [--surface-only] [--kill all|LIST] [--burn S] [--rails N] [--focus LIST] [--views LIST] [--look YAW,PITCH] [--tag NAME] [--distance FT] [--defenses AAA SAM]".into());
+        return Err("--surface-scene OUT_DIR THEATER STEM [--surface-seed N] [--seconds S] [--surface-only] [--kill all|LIST] [--burn S] [--rails N] [--focus LIST] [--views LIST] [--look YAW,PITCH] [--tag NAME] [--distance FT] [--defenses AAA SAM] [--intruder EAST,UP,NORTH] [--blue LIST] [--no-aim]".into());
     };
     o.out = out.clone();
     o.theater = theater.to_ascii_uppercase();
@@ -155,6 +185,30 @@ fn places(world: &World) -> Vec<(u32, String, [f64; 3], bool)> {
     out
 }
 
+/// The places `o.focus` names (every template unit when it names none).
+fn focused(
+    o: &Options,
+    all: Vec<(u32, String, [f64; 3], bool)>,
+) -> Vec<(u32, String, [f64; 3], bool)> {
+    all.into_iter()
+        .filter(|(id, resource, _, routed)| {
+            o.focus.is_empty()
+                || o.focus.iter().any(|item| match item.as_str() {
+                    "routed" => *routed,
+                    "parked" => resource.starts_with("parked "),
+                    _ => named(std::slice::from_ref(item), *id, resource),
+                })
+        })
+        .collect()
+}
+
+/// The middle of `places`.
+fn centre(places: &[(u32, String, [f64; 3], bool)]) -> [f64; 3] {
+    std::array::from_fn(|i| {
+        places.iter().map(|(_, _, p, _)| p[i]).sum::<f64>() / places.len().max(1) as f64
+    })
+}
+
 /// A camera looking along `yaw` (radians, 0 north) down `pitch` at
 /// `center`, back far enough to hold `radius` feet around it.
 fn framed(center: [f64; 3], radius: f64, yaw: f64, pitch: f64) -> Camera {
@@ -181,13 +235,50 @@ pub fn run() -> AppResult<()> {
     spec.ground_target = Some(o.stem.clone());
     spec.surface_seed = o.seed;
     (spec.aaa, spec.sam) = o.defenses;
+    if o.intruder.is_some() {
+        spec.cheats.damage = tore_sim::cheats::Damage::Invulnerable;
+    }
     let mut world = World::new(&spec, &resources, Seating::SinglePlayer)?;
     if let Some(why) = &world.terrain.surface.unresolved {
         return Err(format!("the ground target stands nowhere: {why}").into());
     }
+    for ordinal in &o.blue {
+        let id = UnitId::template(*ordinal).ok_or("--blue: not a template ordinal")?;
+        crate::surface_battle::hand_to_blue(&mut world, id)?;
+    }
+    let mut scenery = Scenery::build(&resources, &world.terrain)?;
+    // The point the intruder circles, from where the focus stands at the
+    // start.
+    let anchor = o.intruder.map(|[east, up, north]| {
+        let start = focused(&o, places(&world));
+        let center = centre(&start);
+        [center[0] + east, center[1] + up, center[2] + north]
+    });
+    let aim = !o.no_aim;
     let mut output = TickOutput::default();
-    let mut step = |world: &mut World, ticks: u64, surface_only: bool| -> AppResult<()> {
+    let mut step = |world: &mut World,
+                    scenery: &mut Scenery,
+                    ticks: u64,
+                    surface_only: bool|
+     -> AppResult<()> {
         for _ in 0..ticks {
+            if let Some(anchor) = anchor {
+                // 300 knots round a 3,000 ft circle, level.
+                let (speed, radius) = (300. * 1.687_81, 3_000.);
+                let turn = world.tick() as f64 / 120. * speed / radius;
+                let flight = &mut world.cockpits[0].flight;
+                flight.position = [
+                    anchor[0] + radius * turn.cos(),
+                    anchor[1],
+                    anchor[2] + radius * turn.sin(),
+                ];
+                flight.velocity = [-speed * turn.sin(), 0., speed * turn.cos()];
+                flight.speed = speed;
+                flight.yaw = flight.velocity[0].atan2(flight.velocity[2]);
+                flight.pitch = 0.;
+                flight.bank = 0.;
+                flight.vertical_speed = 0.;
+            }
             if surface_only {
                 world.combat.step_surface(&world.terrain);
             } else {
@@ -197,34 +288,32 @@ pub fn run() -> AppResult<()> {
                 };
                 world.step(&[input], &mut output)?;
             }
+            if aim {
+                let surface = &world.terrain.surface;
+                let tracks = tore_world::surface::aim::tracks(surface, &world.combat.surface);
+                scenery.surface.step_aim(
+                    world.combat.render_snapshot(),
+                    surface,
+                    &tracks,
+                    Some(&world.combat.surface),
+                );
+            }
         }
         Ok(())
     };
     step(
         &mut world,
+        &mut scenery,
         (o.seconds * 120.).round() as u64,
         o.surface_only,
     )?;
     // One whole-world tick takes the picture the views draw.
-    step(&mut world, 1, false)?;
-    let all = places(&world);
-    let focus: Vec<(u32, String, [f64; 3], bool)> = all
-        .into_iter()
-        .filter(|(id, resource, _, routed)| {
-            o.focus.is_empty()
-                || o.focus.iter().any(|item| match item.as_str() {
-                    "routed" => *routed,
-                    "parked" => resource.starts_with("parked "),
-                    _ => named(std::slice::from_ref(item), *id, resource),
-                })
-        })
-        .collect();
+    step(&mut world, &mut scenery, 1, false)?;
+    let focus = focused(&o, places(&world));
     if focus.is_empty() {
         return Err("nothing to frame".into());
     }
-    let center: [f64; 3] = std::array::from_fn(|i| {
-        focus.iter().map(|(_, _, p, _)| p[i]).sum::<f64>() / focus.len() as f64
-    });
+    let center = centre(&focus);
     let radius = o.distance.unwrap_or_else(|| {
         focus
             .iter()
@@ -257,7 +346,12 @@ pub fn run() -> AppResult<()> {
             target.hp = 0;
         }
         println!("surface-scene: destroyed {} objects", doomed.len());
-        step(&mut world, (o.burn * 120.).round() as u64, false)?;
+        step(
+            &mut world,
+            &mut scenery,
+            (o.burn * 120.).round() as u64,
+            false,
+        )?;
     }
     if let Some(rails) = o.rails {
         let launchers: Vec<UnitId> = world
@@ -276,9 +370,9 @@ pub fn run() -> AppResult<()> {
             }
         }
     }
-    let mut scenery = Scenery::build(&resources, &world.terrain)?;
     let art = crate::render_snapshot::CombatArt::load(&resources)?;
     let mut gpu = pollster::block_on(Gpu::new(&scenery))?;
+    let tracks = tore_world::surface::aim::tracks(&world.terrain.surface, &world.combat.surface);
     for (id, resource, at, routed) in &focus {
         println!(
             "surface-scene: {id:#010x} {resource} at {:.0} {:.0} {:.0}{}",
@@ -287,6 +381,30 @@ pub fn run() -> AppResult<()> {
             at[2],
             if *routed { " routed" } else { "" }
         );
+        if let Some(aim) = scenery.surface.aim_of(*id) {
+            let held: Vec<u32> = tracks
+                .iter()
+                .filter(|t| t.unit.0 == *id)
+                .map(|t| t.target)
+                .collect();
+            let turrets: Vec<String> = aim
+                .turrets
+                .iter()
+                .map(|(hp, a)| format!("{hp}:{:.1}", a.to_degrees()))
+                .collect();
+            let hp = world
+                .combat
+                .state
+                .targets
+                .iter()
+                .find(|t| t.id == *id)
+                .map_or(0, |t| t.hp);
+            println!(
+                "surface-scene: aim {id:#010x} hp {hp} body {:.1} turrets [{}] holds {held:?}",
+                aim.body.to_degrees(),
+                turrets.join(" ")
+            );
+        }
     }
     let snapshot = world.combat.render_snapshot().clone();
     let standing = crate::render_snapshot::standing(&world.combat.state.targets);

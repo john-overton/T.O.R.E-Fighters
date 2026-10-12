@@ -279,6 +279,54 @@ pub const DAMAGED_WORD: usize = 0xfffe_0000;
 /// choice is not traced). Listed in `state_words` of a shape that reads it.
 pub const SPRITE_FRAME_WORD: usize = 0xfffd_0000;
 
+/// First synthetic state key of a turret's traverse (KRIV, SOVR): the
+/// value `@HardpointAngle@4` would return for a hardpoint, the mount's
+/// heading away from its rest in binary angle units (65,536 a turn,
+/// positive toward the right). The state path adds it to the rest heading
+/// the envelope carries; absent is 0, the mount at rest, the pose the
+/// scenery path always draws. Like the other synthetic keys it lies above
+/// any module address and is not listed in `state_words`;
+/// [`articulation`] lists the shape's turrets.
+pub const HARDPOINT_ANGLE_BASE: usize = 0xfffc_0000;
+
+/// State key for the traverse of `hardpoint`'s turret.
+pub const fn hardpoint_angle_word(hardpoint: u8) -> usize {
+    HARDPOINT_ANGLE_BASE + hardpoint as usize
+}
+
+/// Synthetic state key for `_currentTicks` (256 a second), which the
+/// rotating radar envelope (KRIV, SOVR, REDCR, RLD) shifts into the heading
+/// of its antenna. Absent is 0, the antenna unturned, as the scenery path
+/// always draws it. Not listed in `state_words`; [`articulation`] lists the
+/// shape's antennas.
+pub const CURRENT_TICKS_WORD: usize = 0xfffb_0000;
+
+/// A part of a shape that the reviewed envelopes turn about its up axis.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Articulation {
+    /// Turrets, in drawing order: the hardpoint whose `@HardpointAngle@4`
+    /// turns it, and the rest heading the envelope adds (binary angle units).
+    pub turrets: Vec<(u8, i16)>,
+    /// Rotating antennas, in drawing order: the left shift applied to
+    /// `_currentTicks`, so the antenna turns `256 << shift` binary angle
+    /// units a second (5: 8 s a turn, 6: 4 s, 7: 2 s).
+    pub antennas: Vec<u8>,
+}
+
+impl Articulation {
+    pub fn is_empty(&self) -> bool {
+        self.turrets.is_empty() && self.antennas.is_empty()
+    }
+}
+
+/// The turrets and rotating antennas the state path of `data` would turn
+/// (see [`HARDPOINT_ANGLE_BASE`] and [`CURRENT_TICKS_WORD`]).
+pub fn articulation(data: &[u8]) -> Result<Articulation> {
+    let mut found = Articulation::default();
+    Shape::project(data, &BTreeMap::new(), true, false, &mut found)?;
+    Ok(found)
+}
+
 /// FNV-1a 64 of the 217-byte frame-table envelope in CATGUY.SH after its f0
 /// marker, with the five absolute address words (the object id it pushes,
 /// the two trampolines' return addresses and thunks) zeroed. Only a digest
@@ -452,16 +500,24 @@ fn loaded_count_branch(c: &[u8], base: usize, at: usize, count: i32) -> Result<u
 /// SH program. The write targets the heading word of the c4 transform the
 /// program resumes at, so the turret under it turns. The added constant is
 /// the hardpoint's mount heading (32760 in KRIVAK.NT and SOVR.NT for the aft
-/// mounts, absent for the forward one), and HardpointAngle is taken as zero,
-/// the mount's rest. Returns the resume offset and that rest heading in
-/// binary angle units, or `None` when the bytes are not this form.
-fn hardpoint_angle_envelope(c: &[u8], base: usize, start: usize) -> Result<Option<(usize, i16)>> {
+/// mounts, absent for the forward one); HardpointAngle itself is the host's
+/// [`hardpoint_angle_word`], zero (the mount's rest) unless the state path
+/// gives one. Returns the resume offset, that rest heading in binary angle
+/// units and the hardpoint, or `None` when the bytes are not this form.
+fn hardpoint_angle_envelope(
+    c: &[u8],
+    base: usize,
+    start: usize,
+) -> Result<Option<(usize, i16, u8)>> {
     let Some(b) = c.get(start..start + 17) else {
         return Ok(None);
     };
     if b[..6] != [0xe8, 0, 0, 0, 0, 0x5b] || b[6..8] != [0x81, 0xc3] || b[12] != 0xb9 {
         return Ok(None);
     }
+    let Ok(hardpoint) = u8::try_from(u32::from_le_bytes(b[13..17].try_into().unwrap())) else {
+        return Ok(None);
+    };
     let call = start + 17;
     if trampoline(c, base, call).ok() != Some(call + 11) {
         return Ok(None);
@@ -483,7 +539,36 @@ fn hardpoint_angle_envelope(c: &[u8], base: usize, start: usize) -> Result<Optio
             "hardpoint angle does not write the resumed c4 rotation",
         ));
     }
-    Ok(Some((resume, rest)))
+    Ok(Some((resume, rest, hardpoint)))
+}
+
+/// Reviewed rotating antenna envelope (KRIV, SOVR, REDCR, RLD), after the
+/// f0 marker: `call $+5; pop ebx; add ebx,N; mov eax,[_currentTicks];
+/// shl ax,S; mov [ebx+6],ax`, then the trampoline that resumes SH at the c4
+/// whose heading word that write lands on. The antenna under it turns
+/// `_currentTicks << S` (16 bits), with `_currentTicks` at 256 a second.
+/// Returns the resume offset and `S`, or `None` when the bytes are not this
+/// form.
+fn rotating_antenna_envelope(c: &[u8], base: usize, start: usize) -> Result<Option<(usize, u8)>> {
+    let Some(b) = c.get(start..start + 25) else {
+        return Ok(None);
+    };
+    if b[..8] != [0xe8, 0, 0, 0, 0, 0x5b, 0x81, 0xc3]
+        || b[12] != 0xa1
+        || b[17..20] != [0x66, 0xc1, 0xe0]
+        || !(1..=15).contains(&b[20])
+        || b[21..25] != [0x66, 0x89, 0x43, 0x06]
+    {
+        return Ok(None);
+    }
+    let resume = trampoline(c, base, start + 25)?;
+    let written = start + 5 + u32_at(c, start + 8)? + 6;
+    if slice(c, resume, 1)? != [0xc4] || written != resume + 8 {
+        return Err(invalid(
+            "rotating antenna does not write the resumed c4 rotation",
+        ));
+    }
+    Ok(Some((resume, b[20])))
 }
 
 /// Reviewed low-memory envelope (the carriers NIMZ, KITT, CLEM, WASP, their
@@ -555,25 +640,32 @@ impl Shape {
         Self::with_state(data, &BTreeMap::new())
     }
     pub fn with_state(data: &[u8], state: &BTreeMap<usize, i32>) -> Result<Self> {
-        Self::project(data, state, false, false)
+        Self::project(data, state, false, false, &mut Articulation::default())
     }
     /// Export validation follows explicit SH jumps; the gameplay projection stays unchanged.
     /// This interprets only bounded data records and reviewed state guard patterns, never x86.
     pub fn with_export_state(data: &[u8], state: &BTreeMap<usize, i32>) -> Result<Self> {
-        Self::project(data, state, true, false)
+        Self::project(data, state, true, false, &mut Articulation::default())
     }
     /// Static scenery pose with loaded launchers and turrets at their mount
     /// rest. Interprets bounded drawing records and the reviewed loaded-count
     /// (CHAP, SA2, SA3, SCD) and hardpoint-angle (KRIV, SOVR) envelopes only.
     /// No imported callback runs and no autonomous behavior is implied.
     pub fn scenery(data: &[u8]) -> Result<Self> {
-        Self::project(data, &BTreeMap::new(), true, true)
+        Self::project(
+            data,
+            &BTreeMap::new(),
+            true,
+            true,
+            &mut Articulation::default(),
+        )
     }
     fn project(
         data: &[u8],
         state: &BTreeMap<usize, i32>,
         export: bool,
         scenery: bool,
+        articulation: &mut Articulation,
     ) -> Result<Self> {
         let (c, base) = module::code(data)?;
         let mut slots = BTreeMap::<usize, [f32; 3]>::new();
@@ -681,8 +773,34 @@ impl Shape {
                         p = resume;
                         continue;
                     }
-                    if let Some((resume, rest)) = hardpoint_angle_envelope(c, base, p + 2)? {
-                        pending_heading = Some((resume, heading_radians(rest)));
+                    if let Some((resume, rest, hardpoint)) =
+                        hardpoint_angle_envelope(c, base, p + 2)?
+                    {
+                        let angle = if scenery {
+                            0
+                        } else {
+                            state
+                                .get(&hardpoint_angle_word(hardpoint))
+                                .copied()
+                                .unwrap_or(0)
+                        };
+                        if !articulation.turrets.contains(&(hardpoint, rest)) {
+                            articulation.turrets.push((hardpoint, rest));
+                        }
+                        let turn = rest.wrapping_add(angle as u16 as i16);
+                        pending_heading = Some((resume, heading_radians(turn)));
+                        p = resume;
+                        continue;
+                    }
+                    if let Some((resume, shift)) = rotating_antenna_envelope(c, base, p + 2)? {
+                        let ticks = if scenery {
+                            0
+                        } else {
+                            state.get(&CURRENT_TICKS_WORD).copied().unwrap_or(0)
+                        };
+                        articulation.antennas.push(shift);
+                        let turn = ((ticks as u32) << shift) as u16 as i16;
+                        pending_heading = Some((resume, heading_radians(turn)));
                         p = resume;
                         continue;
                     }
@@ -1322,6 +1440,96 @@ mod tests {
         assert!(Shape::parse(&module::fixture(&turret(Some(0x7ff8), 2))).is_err());
         let mut c = turret(None, 0);
         c[31] = 0x88; // an unreviewed write
+        assert!(Shape::parse(&module::fixture(&c)).is_err());
+    }
+
+    fn close(a: &[[f32; 3]], b: &[[f32; 3]]) -> bool {
+        a.len() == b.len()
+            && a.iter()
+                .zip(b)
+                .all(|(p, q)| p.iter().zip(q).all(|(x, y)| (x - y).abs() < 0.02))
+    }
+
+    #[test]
+    fn a_turret_traverses_by_its_hardpoint_angle_on_the_state_path() {
+        let bytes = module::fixture(&turret(None, 0));
+        // A quarter turn right: the turret's forward points right.
+        let state = BTreeMap::from([(hardpoint_angle_word(1), 16384)]);
+        let turned = Shape::with_export_state(&bytes, &state).unwrap();
+        assert!(close(
+            &turned.faces[0].positions,
+            &[[16., 0., 0.], [16., -10., 0.], [26., 0., 0.]]
+        ));
+        // Another hardpoint's angle, and the scenery pose, leave it at rest.
+        let other = BTreeMap::from([(hardpoint_angle_word(0), 16384)]);
+        for shape in [
+            Shape::with_export_state(&bytes, &other).unwrap(),
+            Shape::scenery(&bytes).unwrap(),
+        ] {
+            assert_eq!(
+                shape.faces[0].positions,
+                vec![[16., 0., 0.], [26., 0., 0.], [16., 10., 0.]]
+            );
+        }
+        // The angle adds to the mount's rest: an aft mount turned a quarter
+        // turn right from astern faces left.
+        let aft = module::fixture(&turret(Some(0x7ff8), 0));
+        let turned = Shape::with_export_state(&aft, &state).unwrap();
+        assert!(close(
+            &turned.faces[0].positions,
+            &[[16., 0., 0.], [16., 10., 0.], [6., 0., 0.]]
+        ));
+        assert!(turned.state_words.is_empty());
+        assert_eq!(
+            articulation(&aft).unwrap(),
+            Articulation {
+                turrets: vec![(1, 0x7ff8)],
+                antennas: vec![],
+            }
+        );
+    }
+
+    /// A rotating antenna: `_currentTicks << shift` written to the heading of
+    /// a c4 16 units right, with the antenna geometry under it.
+    fn antenna(shift: u8) -> Vec<u8> {
+        let mut c = vec![0xf0, 0, 0xe8, 0, 0, 0, 0, 0x5b, 0x81, 0xc3, 33, 0, 0, 0];
+        c.extend([0xa1, 0x40, 0x20, 0, 0, 0x66, 0xc1, 0xe0, shift]);
+        c.extend([0x66, 0x89, 0x43, 0x06]);
+        push_trampoline(&mut c, 38);
+        assert_eq!(c.len(), 38);
+        c.extend([0xc4, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0]);
+        c.extend(program());
+        c
+    }
+
+    #[test]
+    fn a_rotating_antenna_turns_with_the_tick_count() {
+        let bytes = module::fixture(&antenna(6));
+        let rest = vec![[16., 0., 0.], [26., 0., 0.], [16., 10., 0.]];
+        // Unturned on the scenery path and with no tick count, as before.
+        assert_eq!(Shape::scenery(&bytes).unwrap().faces[0].positions, rest);
+        assert_eq!(Shape::parse(&bytes).unwrap().faces[0].positions, rest);
+        // 256 ticks (one second) shifted by 6 is a quarter turn.
+        let state = BTreeMap::from([(CURRENT_TICKS_WORD, 256)]);
+        let turned = Shape::with_export_state(&bytes, &state).unwrap();
+        assert!(close(
+            &turned.faces[0].positions,
+            &[[16., 0., 0.], [16., -10., 0.], [26., 0., 0.]]
+        ));
+        // Four seconds is a whole turn: the 16-bit heading wraps.
+        let state = BTreeMap::from([(CURRENT_TICKS_WORD, 1024)]);
+        let whole = Shape::with_export_state(&bytes, &state).unwrap();
+        assert!(close(&whole.faces[0].positions, &rest));
+        assert_eq!(
+            articulation(&bytes).unwrap(),
+            Articulation {
+                turrets: vec![],
+                antennas: vec![6],
+            }
+        );
+        // The write must land on the resumed c4.
+        let mut c = antenna(6);
+        c[10] = 35;
         assert!(Shape::parse(&module::fixture(&c)).is_err());
     }
 

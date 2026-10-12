@@ -4146,6 +4146,25 @@ impl ApplicationHandler for App {
                         // Everything combat draws this frame, shared by every camera.
                         let picture = self.combat_view.presented(&self.world.combat);
                         let standing = render_snapshot::standing(&self.world.combat.state.targets);
+                        // Surface units turn toward what their weapons hold
+                        // (docs/spec/surface-defenses.md, "Aiming"); a client
+                        // knows only the bursts.
+                        {
+                            let surface = &self.world.terrain.surface;
+                            let mut tracks = tore_world::surface::aim::tracks(
+                                surface,
+                                &self.world.combat.surface,
+                            );
+                            if let Some(net) = &self.net {
+                                tracks.extend(net.surface_aim_tracks(picture.tick));
+                            }
+                            self.scenery.surface.step_aim(
+                                &picture,
+                                surface,
+                                &tracks,
+                                Some(&self.world.combat.surface),
+                            );
+                        }
                         // The flight frame every screen below draws: the seat's
                         // plane at this frame's instant, the picture, the smoke
                         // and the devices. A networked flight's comes from the

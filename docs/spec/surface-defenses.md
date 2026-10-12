@@ -1481,8 +1481,9 @@ size on land, rather than one fitted value for all ground objects.
   Stationary units draw as scenery with ids.
 - **Launcher rails** (CHAP, SA-2, SA-3, SCUD) show the rounds each hardpoint
   still carries: a rail empties as its missile leaves and fills again when a
-  truck rearms it. Launchers do not slew or elevate (no articulation data
-  beyond the loaded count).
+  truck rearms it. A launcher on a vehicle turns with its body toward its
+  target ([Aiming](#aiming)); no launcher elevates (no shape has a pitch
+  part).
 - **Men** (SOLDIER) are viewer-facing sprites, 4 ft tall, upright on the
   screen; they vanish with their unit.
 - **Carriers** carry their island and deck parts from the FA.EXE carrier table
@@ -1503,9 +1504,66 @@ size on land, rather than one fitted value for all ground objects.
   TRUCK); the HAWK element draws SRDR2 (John, 2026-10-10).
 
 `--surface-scene` renders a ground target in game offscreen after a chosen
-time, with units destroyed and rails emptied on request, and `--surface-preview
-OUT destroyed` draws each class beside its destroyed look (see
+time, with units destroyed and rails emptied on request (and, since CL-AIM,
+an intruding aircraft to aim at, units handed to Blue, or the old unturned
+look with `--no-aim`), and `--surface-preview OUT destroyed` draws each
+class beside its destroyed look (see
 [development](../DEVELOPMENT.md#surface-unit-inspection)).
+
+### Aiming
+
+Surface units visibly point their weapons at what they engage (John,
+2026-10-12: "AAA and SAM units rotate, tank turrets rotate or the whole body
+rotates, barrels point at enemies"). Slice CL-AIM. It is presentation only:
+the fight still aims every round itself, at once, inside the mount's arc
+(see [Unknowns](#unknowns), "Slew rates"), so nothing a unit hits or misses
+changes.
+
+What can turn comes from the retail shapes
+([turrets and rotating antennas](../formats/objects-and-shapes.md#turrets-and-rotating-antennas-2026-10-12)):
+
+| Shape kind | Units | What turns | Basis |
+| --- | --- | --- | --- |
+| Turrets (`@HardpointAngle@4`) | Krivak (KRIV, KRIVAK), Sovremennyy (SOVR): the two AAA30BAD or AAA30 gun mounts | Each gun turret traverses on the hull, inside its mount's arc (`slewLimitH`, 150 degrees either side of its rest), at 45 degrees a second, and returns to its rest when nothing is held; the hull keeps its heading | Which parts turn and their rest: retail. The rate and the return to rest: fitted |
+| Rotating antennas (`_currentTicks`) | Krivak and Sovremennyy (one turn in 4 s), Butler's Red Crown radar REDCR (8 s), Roland RLD (2 s) | Spins all the time, clockwise seen from above, every unit in step with the mission clock | Retail (`_currentTicks << 6`, `<< 5`, `<< 7`, at 256 ticks a second) |
+| No part | Every other armed land unit: ZSU-23, ZSU-57, ZIF-31, M163, M1939, KS-12, KS-19, 2S6, Crotale, Chaparral, HAWK, Roland, SA-3, SA-6, SA-9, SA-13, SA-15, SCUD, the four tanks, BMP-2, BTR-80, M113, M2, the infantry SAM teams and TROOPS | The whole unit turns about its up axis, standing on the ground as before, at its type's turn rate (`_turnRate`: tanks and the ZSU-57 15 degrees a second, ZSU-23 30, 2S6 and the IFVs 45, SA-3 and SA-6 5); it keeps the heading it last aimed at, and lines up with its route again while it drives | Turn rate: retail word, read as degrees a second as for movement (fitted). Whole-body turning: John's rule |
+| No part, fixed | The SA-2 site (turn rate 0, six fixed rails); the barrage zone (no shape) | Nothing | Retail data |
+| No part, ship | Every other ship (Kirov, Kiev, frigates, carriers and the rest) | Nothing: the hull keeps its heading | John's rule |
+
+No retail shape has a part that pitches: no barrel or rail elevates (the
+envelopes write only the heading word of a part's transform). A tank's gun
+points at its target because its body does.
+
+When a unit aims, from what it knows:
+
+- A weapon aims from the moment its controller chooses a target (Prepare)
+  while it holds it (Track, Fire, Pause), so a slow mount turns during its
+  preparation and is on target when its first round leaves (defined, agent).
+  A battery's launchers aim while the battery's controller does.
+- A unit whose picture turns as a whole aims with its first weapon that
+  holds a target (a 2S6's gun before its missiles). A turret aims with the
+  weapon that fires from its hardpoint.
+- Nothing aims at a destroyed unit or a crashed aircraft, and a destroyed
+  unit stops turning (it shows its wreck).
+- A part turns at its rate by mission time, so it moves the same whatever
+  the frame rate (its goal is taken once a frame, so two viewers at very
+  different frame rates may differ by a fraction of a degree while a target
+  crosses fast). A jump of more than a second (a replay seek, a restart)
+  puts every part straight on its goal.
+
+Who sees what (the aim is worked out on each machine from what it already
+has; no wire field or recording changed):
+
+| Viewer | What the aim follows |
+| --- | --- |
+| Single player | The controllers' phases and targets, the battery controllers included |
+| Replay | The recorded `surface.phase` events (the same phases and targets) and, for battery launchers (whose battery controller is not recorded), each salvo's target for 5 s after it |
+| Online client, the hosting player included | Each gun burst's target for 5 s after it began. The host sends no controller phase or missile target of a surface unit, so a launcher does not turn on a client, and a gun turns only once it fires. Matching single player needs the host to send each controller's target as it changes (the replay's `surface.phase`: unit id, weapon index, target id or none); not built (protocol 25 is the city fill's) |
+
+Drawing: a unit that has turned, or has a spinning antenna, is drawn every
+frame like a moving unit (its static copy hidden) and so casts a shadow as
+moving units do; one at rest stays in the static scenery. A shape's line
+art is not drawn on the every-frame path (as for moving units).
 
 ### Flak bursts, gunfire, launches and light
 
@@ -1781,7 +1839,7 @@ so). Each row has a fitted stand-in above.
 | `quickpos` consumption | Templates with only `quickpos` ("nothing") set an accumulator; every `pos` adds to it | Not used; starts come from the target | Trace the accumulator's consumer |
 | Barrage zone rule | `A_M1939` has `zoneDist` 195, random fire 33 percent, no shape | Rule above | Trace `zoneDist` |
 | Salvo doctrine | Burst counts only; manual history says SA-2s fire in pairs | Use the burst fields as given | None planned |
-| Slew rates | Only slew limits are in the data | Instant within arcs | None planned |
+| Slew rates | Only slew limits are in the data | Instant within arcs for the fight; the picture turns at a turret's fitted 45 degrees a second or the type's turn rate ([Aiming](#aiming)) | None planned |
 | Formation geometry for surface groups | Routes carry `w_wng 1 0 2048 0` (the aircraft wing format) | Each unit follows its own route | Trace the wing format's surface use |
 | Route flag bit 0x04 | Routed objects have it set (inference) | Not used | Trace the mission flag reader |
 | `damage[0..4]` = 255 on every NT | Mapping unresolved | Hit points only | Trace the damage-class table |

@@ -1658,7 +1658,13 @@ launcher's rails to at most `--rails N` rounds, then writes one PNG per view
 (`--views oblique,close,low,top,deck`, or `--look YAW,PITCH` in degrees)
 framing `--focus` (`routed`, `parked`, ordinals or types) within
 `--distance FT`. It draws the static scene with its wrecks and rails, the
-moving units, men and deck crew, explosions, fires and smoke. `--surface-preview
+moving units, men and deck crew, explosions, fires and smoke. Units aim as
+in the game, stepped every tick; `--no-aim` draws them unturned.
+`--intruder EAST,UP,NORTH` holds the player's aircraft (invulnerable)
+circling that far from the focus so the defenses lock on and fire, `--blue
+ORDINALS` hands template objects to Blue so units fight each other, and each
+focused unit prints its aim (`aim ... body ... turrets ... holds ...`).
+`--surface-preview
 OUT_DIR destroyed` draws one unit of each class beside its destroyed look,
 read from the records, and the four carriers with their damaged islands.
 
@@ -1666,6 +1672,7 @@ read from the records, and the four carriers with their damaged islands.
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes UKR QUCOL --seconds 1300 --surface-only --focus routed --distance 110 --look 300,-35
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes PGU QPGSAM --focus 8 --distance 14 --look 30,-25 --rails 1
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes FRA QFFLT --focus CLEM.NT --distance 420 --kill CLEM.NT --burn 30
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes UKR QUCOL --seconds 30 --focus 10 --views close --distance 40 --intruder 5000,3000,2000
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-preview .local/destroyed destroyed
 ```
 
