@@ -848,7 +848,10 @@ and `debrief-1` through `debrief-5` (the retail reference result on DEBSCV);
 they use the original 640×480 menu canvas. The empty/drag ordnance fixtures
 support CPU snapshots for inspecting card outlines and the carried thumbnail.
 `ordnance-message` previews the Cheat notice; `ordnance-message-long` previews
-the single-line notice's ellipsis and fitted background width.
+the single-line notice's ellipsis and fitted background width. `ordnance-laser` (and
+`lobby-ordnance-laser`) load a laser missile or bomb to show the laser warning and the
+sensor helper line; `first-load` shows the creator as a first load draws it, every
+aircraft slot random from a fixed seed ([first load](spec/quick-mission-menu.md#first-load-and-the-saved-draft)).
 Old caches re-import when local media is present. Aircraft switching refreshes
 GPU atlas/cockpit resources, camera previews and instruments before launch.
 See [validation and remaining parity](baselines/rafale-quick-mission.md).
