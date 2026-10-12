@@ -83,7 +83,7 @@ fn spec() -> AppResult<MissionSpec> {
 
 pub fn run() -> AppResult<()> {
     let args: Vec<String> = std::env::args().skip(2).collect();
-    let [out] = args.as_slice() else {
+    let Some(out) = args.first() else {
         return Err("--flight-map-preview OUTPUT_DIRECTORY".into());
     };
     let out = Path::new(out);
