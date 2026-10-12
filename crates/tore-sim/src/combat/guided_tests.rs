@@ -297,8 +297,8 @@ fn guiding_cost(
 fn guiding_time_to_impact_cost() {
     let hills = |x: f64, z: f64| 600. + 500. * (x / 2500.).sin() * (z / 3100.).sin();
     let ridge = |_: f64, z: f64| (1. - ((z - 20_000.) / 3000.).abs()).max(0.) * 2200.;
-    let cases: [(&str, &dyn Fn(f64, f64) -> f64); 3] =
-        [("flat", &|_, _| 0.), ("ridge", &ridge), ("hills", &hills)];
+    type Ground<'a> = &'a dyn Fn(f64, f64) -> f64;
+    let cases: [(&str, Ground); 3] = [("flat", &|_, _| 0.), ("ridge", &ridge), ("hills", &hills)];
     for (name, ground) in cases {
         for every in [true, false] {
             let (spent, ticks, seconds) = guiding_cost(ground, every);
