@@ -54,6 +54,7 @@ mod fill_renderer;
 mod flight;
 mod flight_canvas;
 mod flight_map;
+mod flight_map_preview;
 mod flight_music;
 mod flight_probe;
 mod flight_ui;
@@ -407,6 +408,10 @@ struct App {
     net: Option<net::session::NetSession>,
     /// The mission the game built for the session, until the flight starts.
     net_built: Option<net::session::Built>,
+    /// The mission's markup for the in-flight map (slice CL-MAP): the starts
+    /// and the approximate objective area, read from the mission as built.
+    /// `None` for a free flight.
+    mission_markup: Option<flight_map::Plan>,
     /// A networked flight on screen, with the single-player state it set
     /// aside.
     net_flight: Option<net::play::NetFlight>,
@@ -2379,6 +2384,8 @@ impl App {
             // The Quick Mission was built whole, and started once, by
             // `World::build`. The renderer draws the new world's terrain.
             Some((built, view)) => {
+                self.mission_markup =
+                    Some(quick_mission::map::mission_plan(&built.world, false, None));
                 self.world = built.world;
                 self.combat_view = view;
                 match scenery::Scenery::build(&self.theater_resources, &self.world.terrain) {
@@ -3534,6 +3541,10 @@ impl ApplicationHandler for App {
                         Action::None
                     }
                     Screen::Flight => {
+                        if self.flight_ui.map.open {
+                            // A held scroll bar thumb follows the pointer.
+                            self.flight_ui.map.moved(point);
+                        }
                         if self.flight_ui.frozen() {
                             self.mouse_look = None;
                         }
@@ -5077,6 +5088,7 @@ impl ApplicationHandler for App {
                                     }),
                                 &self.hornet.font,
                                 &self.menu.quick_sprites,
+                                self.mission_markup.as_ref(),
                             );
                             // Opaque letterbox prevents the cockpit leaking around the map.
                             for pixel in self.flight_canvas.pixels.chunks_exact_mut(4) {
@@ -9238,6 +9250,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
         surface_preview::run()?;
         return Ok(Outcome::Done);
     }
+    if std::env::args().nth(1).as_deref() == Some("--flight-map-preview") {
+        flight_map_preview::run()?;
+        return Ok(Outcome::Done);
+    }
     if std::env::args().nth(1).as_deref() == Some("--surface-fx-preview") {
         surface_fx_preview::run()?;
         return Ok(Outcome::Done);
@@ -13139,6 +13155,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     let mut app = App {
         net: None,
         net_built: None,
+        mission_markup: None,
         net_flight: None,
         net_ending: None,
         observing: None,

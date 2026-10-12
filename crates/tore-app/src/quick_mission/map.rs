@@ -349,8 +349,25 @@ fn build(
     })
 }
 
-/// What the map shows of a built mission.
+/// What the map shows of a built mission (the creator's map: the starts, the
+/// approximate objective and the line below the plot).
 fn plan_of(world: &World, spec: &tore_world::mission::MissionSpec, lobby: bool) -> Plan {
+    mission_plan(world, lobby, Some(spec.start.altitude_ft()))
+}
+
+/// The mission's markup, read from a world just built and not yet flown: the
+/// Blue and Red starts (an airfield or an airborne point), the other wings'
+/// starts where they differ, and the approximate objective area. The creator's
+/// map draws it, and so does the in-flight map (slice CL-MAP, John
+/// 2026-10-12: "map mark up specific to the mission"), so the two always show
+/// the same mission the same way. Everything comes from the world's mission
+/// data, which every machine of a networked game builds the same, so the
+/// markup is the same on all of them, and in a replay.
+///
+/// `lobby` says the host draws the target's layout when the flight starts, so
+/// the markup carries the lobby's note. `altitude_ft` is the creator's start
+/// altitude, for the line under the plot; the flight has no such line.
+pub fn mission_plan(world: &World, lobby: bool, altitude_ft: Option<u32>) -> Plan {
     let mut plan = Plan::default();
     let terrain = &world.terrain;
     let ground_label = |side: &str, position: [f64; 3], plan: &mut Plan| -> String {
@@ -362,24 +379,6 @@ fn plan_of(world: &World, spec: &tore_world::mission::MissionSpec, lobby: bool) 
             None => format!("{side} START"),
         }
     };
-    // Blue: the player's own start, which leads friendly wing 1.
-    let mut blue_words = String::from("BLUE: AIRBORNE");
-    if let Some(cockpit) = world.cockpits.first() {
-        let flight = &cockpit.flight;
-        let label = if spec.start.on_ground() {
-            blue_words = "BLUE: ON THE GROUND".into();
-            ground_label("BLUE", flight.position, &mut plan)
-        } else {
-            blue_words = format!("BLUE: AIRBORNE AT {} FT", spec.start.altitude_ft());
-            "BLUE START".into()
-        };
-        plan.markers.push(PlanMarker {
-            position: flight.position,
-            heading: flight.yaw,
-            side: PlanSide::Blue,
-            label,
-        });
-    }
     // The AI wings' leads, by side and wing.
     let mut leads: Vec<(Side, u8, [f64; 3], f64)> = Vec::new();
     if let Some(ai) = &world.ai_wings {
@@ -397,6 +396,36 @@ fn plan_of(world: &World, spec: &tore_world::mission::MissionSpec, lobby: bool) 
         }
     }
     leads.sort_by_key(|(side, wing, ..)| (*side == Side::Enemy, *wing));
+    // Blue: the player's own start, which leads friendly wing 1 (an open
+    // mission has no cockpit until a human takes a plane: the wing's lead).
+    let mut blue_words = String::from("BLUE: AIRBORNE");
+    let blue = world
+        .cockpits
+        .first()
+        .map(|cockpit| (cockpit.flight.position, cockpit.flight.yaw))
+        .or_else(|| {
+            leads
+                .iter()
+                .find(|(side, wing, ..)| *side == Side::Friendly && *wing == 1)
+                .map(|(_, _, position, heading)| (*position, *heading))
+        });
+    if let Some((position, heading)) = blue {
+        let label = if world.setup.ground_start.is_some() {
+            blue_words = "BLUE: ON THE GROUND".into();
+            ground_label("BLUE", position, &mut plan)
+        } else {
+            if let Some(feet) = altitude_ft {
+                blue_words = format!("BLUE: AIRBORNE AT {feet} FT");
+            }
+            "BLUE START".into()
+        };
+        plan.markers.push(PlanMarker {
+            position,
+            heading,
+            side: PlanSide::Blue,
+            label,
+        });
+    }
     let blue_start = plan.markers.first().map(|m| m.position);
     for (_, wing, position, heading) in leads.iter().filter(|(side, ..)| *side == Side::Friendly) {
         if *wing == 1 || blue_start.is_some_and(|at| distance_nm(at, *position) < SAME_PLACE_NM) {
@@ -417,7 +446,7 @@ fn plan_of(world: &World, spec: &tore_world::mission::MissionSpec, lobby: bool) 
         let label = match red_start {
             None => {
                 red_start = Some(*position);
-                if *wing == 1 && spec.enemy_start.on_ground() {
+                if *wing == 1 && world.setup.enemy_ground_start.is_some() {
                     red_words = "RED: ON THE GROUND".into();
                     ground_label("RED", *position, &mut plan)
                 } else {
@@ -437,7 +466,8 @@ fn plan_of(world: &World, spec: &tore_world::mission::MissionSpec, lobby: bool) 
     }
     // The objective as an area around the targets, never the targets.
     let surface = &terrain.surface;
-    if let Some(stem) = &spec.ground_target {
+    let has_target = surface.template.is_some() || surface.unresolved.is_some();
+    if let Some(site) = &surface.template {
         let centroid = surface
             .starts
             .as_ref()
@@ -465,24 +495,24 @@ fn plan_of(world: &World, spec: &tore_world::mission::MissionSpec, lobby: bool) 
                     ]
                 })
             });
-        match (&surface.unresolved, centroid) {
-            (None, Some(centroid)) => {
-                plan.objective = Some(objective_area(
-                    centroid,
-                    &spec.theater,
-                    stem,
-                    spec.surface_seed,
-                ));
-            }
-            _ => {
-                plan.note = Some(
-                    "The ground target is not in this import, so the map has no objective area."
-                        .into(),
-                );
-            }
+        // The draw hashes the theater's code, the template's stem and the
+        // surface seed, all of which the mission itself carries.
+        let theater = terrain.layout.trim_end_matches(".MM");
+        if let (None, Some(centroid)) = (&surface.unresolved, centroid) {
+            plan.objective = Some(objective_area(
+                centroid,
+                theater,
+                &site.stem,
+                site.settings.seed,
+            ));
         }
     }
-    if lobby && spec.ground_target.is_some() && plan.note.is_none() {
+    if has_target && plan.objective.is_none() {
+        plan.note = Some(
+            "The ground target is not in this import, so the map has no objective area.".into(),
+        );
+    }
+    if lobby && has_target && plan.note.is_none() {
         plan.note = Some(LOBBY_MAP_NOTE.into());
     }
     plan.summary = format!("{blue_words}   {red_words}");
@@ -515,5 +545,82 @@ mod tests {
         let b = objective_area([0.; 2], "UKR", "QUSFLT", 2).0;
         let c = objective_area([0.; 2], "UKR", "QULFLT", 1).0;
         assert!(a != b && a != c);
+    }
+
+    /// The synthetic mission the markup tests build: a ground target with
+    /// the starts that come with it, and an enemy wing.
+    fn mission(seating: Seating) -> World {
+        use tore_world::test_support::surface::{spec_with_target, surface_resources, target};
+        let mut spec = spec_with_target(&target("QUCITY", 3, 3, 9));
+        spec.wings[3].count = 2;
+        World::new(&spec, &surface_resources(), seating).unwrap()
+    }
+
+    #[test]
+    fn the_flights_markup_is_the_creators_map_of_the_same_mission() {
+        // Single player and a networked game build the same mission; both
+        // show the same circle, on the same stem, theater and seed, and the
+        // same starts.
+        let single = mission(Seating::SinglePlayer);
+        let open = mission(Seating::Open);
+        let creator = plan_of(
+            &single,
+            &MissionSpec::new("UKR", tore_formats::aircraft::AircraftId::F18),
+            false,
+        );
+        let flight = mission_plan(&single, false, None);
+        let networked = mission_plan(&open, false, None);
+        let (center, radius) = flight.objective.expect("a ground target has an area");
+        assert_eq!(radius, OBJECTIVE_RADIUS_NM * NMI);
+        assert_eq!(creator.objective, flight.objective);
+        assert_eq!(networked.objective, flight.objective);
+        assert_eq!(creator.markers, flight.markers);
+        assert_eq!(networked.markers.len(), flight.markers.len());
+        // The circle is the hashed one: the same draw for the same mission,
+        // holding the targets' centroid off its centre.
+        let site = single.terrain.surface.template.as_ref().unwrap();
+        let theater = single.terrain.layout.trim_end_matches(".MM");
+        let starts = single.terrain.surface.starts.as_ref().unwrap();
+        let centroid = [f64::from(starts.target[0]), f64::from(starts.target[1])];
+        assert_eq!(
+            (center, radius),
+            objective_area(centroid, theater, &site.stem, site.settings.seed)
+        );
+        let off = (center[0] - centroid[0]).hypot(center[1] - centroid[1]) / NMI;
+        assert!((0.5..=2.5).contains(&off), "{off}");
+        // The markup holds the area, never a target's own position.
+        assert!(
+            flight
+                .markers
+                .iter()
+                .all(|m| m.label.contains("START") || m.label.contains("WING"))
+        );
+        // The same mission built again gives the same markup.
+        assert_eq!(
+            mission_plan(&mission(Seating::SinglePlayer), false, None),
+            flight
+        );
+    }
+
+    #[test]
+    fn both_starts_are_marked_and_an_open_mission_starts_blue_at_its_lead() {
+        for seating in [Seating::SinglePlayer, Seating::Open] {
+            let plan = mission_plan(&mission(seating), false, None);
+            let labels: Vec<&str> = plan.markers.iter().map(|m| m.label.as_str()).collect();
+            assert_eq!(labels.first(), Some(&"BLUE START"), "{seating:?}");
+            assert!(labels.contains(&"RED START"), "{labels:?}");
+            assert_eq!(plan.markers[0].side, PlanSide::Blue);
+        }
+        // The lobby's note is the creator's, only for the lobby.
+        assert_eq!(
+            mission_plan(&mission(Seating::SinglePlayer), true, None)
+                .note
+                .as_deref(),
+            Some(LOBBY_MAP_NOTE)
+        );
+        assert_eq!(
+            mission_plan(&mission(Seating::SinglePlayer), false, None).note,
+            None
+        );
     }
 }
