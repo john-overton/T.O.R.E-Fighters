@@ -70,6 +70,7 @@ fn carrying_as(weapon: Weapon, count: u16, class: StrikeClass) -> State {
             mount: [0.; 3],
             count,
             internal: false,
+            rack: Default::default(),
         },
     ];
     let mut s = State::new(config, true).unwrap();

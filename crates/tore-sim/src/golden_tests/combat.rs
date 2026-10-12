@@ -624,6 +624,7 @@ fn configuration(stations: Vec<(Weapon, u16, bool)>) -> Configuration {
                 mount: [0.; 3],
                 count,
                 internal,
+                rack: Default::default(),
             })
             .collect(),
         hit_points: 20,

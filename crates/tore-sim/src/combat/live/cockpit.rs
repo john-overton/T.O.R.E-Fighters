@@ -304,6 +304,10 @@ pub(super) struct Round<'a> {
     /// A gun round's place in its burst and whether it is a tracer.
     pub gun_round: Option<u8>,
     pub tracer: bool,
+    /// The whole releases the station holds once this one has gone, which
+    /// picks the side of a paired station it leaves from
+    /// ([`crate::combat::hardpoints::Rack::release_mount`]).
+    pub units_after: u32,
 }
 
 /// The stores the AI releases through the shared release ([`State::release_strike`]):
@@ -329,6 +333,9 @@ pub struct StrikeRelease<'a> {
     pub launcher: Launcher,
     /// The aircraft the rounds warn (a round aimed at a human).
     pub incoming: Option<u32>,
+    /// The rounds the station holds after the debit, which picks the side
+    /// of a paired station the release leaves from.
+    pub rounds_after: u32,
 }
 
 /// Where and how tightly the AI aims one pass: the skill hook of
@@ -703,8 +710,13 @@ impl State {
             station: index,
             launcher,
             incoming,
+            rounds_after,
         } = release;
         let station = config.stations.get(index).ok_or(Readiness::Safe)?;
+        let units_after = crate::combat::hardpoints::units(
+            rounds_after,
+            u32::from(station.weapon.burst.actual_rounds_per_game),
+        );
         if self.ownship(aircraft).is_some() {
             return Err(Readiness::Safe);
         }
@@ -749,6 +761,7 @@ impl State {
                     seeker_target: None,
                     gun_round: None,
                     tracer: false,
+                    units_after,
                 },
                 &spots,
                 ground,
@@ -820,14 +833,21 @@ impl State {
         let Ok(speed) = launch_speed(&w.movement, (launcher.speed_fps * 256.) as i32) else {
             return false;
         };
+        // A store leaves its own side of a paired station; a gun keeps its
+        // muzzle (B3).
+        let mount = if super::is_gun(w) {
+            station.mount
+        } else {
+            station.rack.release_mount(station.mount, r.units_after)
+        };
         let position = if let Some((slot, heading, elevation)) = r.gun_pose {
             crate::combat::gunship::muzzle(slot, launcher, heading, elevation)
         } else {
             std::array::from_fn(|i| {
                 launcher.position[i]
-                    + launcher.basis.right[i] * station.mount[0]
-                    + launcher.basis.up[i] * station.mount[1]
-                    + launcher.basis.forward[i] * station.mount[2]
+                    + launcher.basis.right[i] * mount[0]
+                    + launcher.basis.up[i] * mount[1]
+                    + launcher.basis.forward[i] * mount[2]
             })
         };
         let mut direction = r
@@ -840,7 +860,7 @@ impl State {
         let bomb = ballistics::is_bomb(w).then(|| {
             let (heading, pitch) =
                 ballistics::scatter(ballistics::scatter_stream(self.rng, self.tick, r.id));
-            ballistics::ReleaseState::from_station(&launcher, station, r.round)
+            ballistics::ReleaseState::from_mount(&launcher, station, mount, r.round)
                 .turned(heading, pitch)
         });
         let position = bomb.map_or(position, |release| release.position);

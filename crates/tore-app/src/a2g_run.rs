@@ -561,6 +561,7 @@ fn fit_store(
             mount: [0., -4., 0.],
             count: o.count.unwrap_or(1),
             internal: true,
+            rack: Default::default(),
         });
         println!("a2g-run: added station {station} (an internal bay)");
     }

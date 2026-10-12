@@ -252,6 +252,7 @@ impl State {
                     (round.ordinal % u64::from(w.burst.actual_rounds_per_game.max(1))) as u8,
                 ),
                 tracer: crate::combat::gun_round::tracer(w, round.ordinal),
+                units_after: 0,
             },
             &[],
             ground,
