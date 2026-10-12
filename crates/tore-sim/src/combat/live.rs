@@ -45,7 +45,7 @@ pub use ground_sensing::GroundListing;
 mod guided;
 #[cfg(test)]
 pub(crate) mod guided_tests;
-pub use guided::{GuidedFlight, Mode as GuidedMode};
+pub use guided::{GuidedFlight, Mode as GuidedMode, SECONDS_REFRESH_TICKS};
 #[cfg(test)]
 mod gun_key_tests;
 #[cfg(test)]
@@ -2190,6 +2190,7 @@ impl<'a> OwnshipView<'a> {
             ground: None,
             observation: Default::default(),
             solution: Default::default(),
+            terrain_solution: Default::default(),
             readiness: Default::default(),
             solution_readiness: Default::default(),
         }
@@ -2245,6 +2246,7 @@ pub struct LauncherView<'a> {
     ground: Option<&'a dyn Fn(f64, f64) -> f64>,
     observation: std::cell::OnceCell<Option<seeker::Observation>>,
     solution: std::cell::OnceCell<Option<missiles::Solution>>,
+    terrain_solution: std::cell::OnceCell<Option<missiles::Solution>>,
     readiness: std::cell::OnceCell<Readiness>,
     solution_readiness: std::cell::OnceCell<Readiness>,
 }
@@ -2253,6 +2255,7 @@ impl<'a> LauncherView<'a> {
     /// sensor updates. No terrain enters the energy-only range envelope.
     pub fn with_terrain(mut self, ground: &'a dyn Fn(f64, f64) -> f64) -> Self {
         self.ground = Some(ground);
+        self.terrain_solution = Default::default();
         self.readiness = Default::default();
         self.solution_readiness = Default::default();
         self
@@ -2264,9 +2267,36 @@ impl<'a> LauncherView<'a> {
         })
     }
 
+    /// Whether [`Self::terrain_solution`] flies the terrain-aware fly-out
+    /// (a cruise profile under the specified rules, with terrain to read)
+    /// rather than answering with [`Self::mounted_solution`]. That fly-out
+    /// samples the terrain on every step, so a caller that asks every frame
+    /// keeps its answer for a few ticks (review M1).
+    pub fn flies_terrain_solution(&self) -> bool {
+        self.ground.is_some()
+            && self.view.state.weapon_rules == Rules::Spec
+            && self
+                .view
+                .own
+                .config
+                .stations
+                .get(self.view.own.selected)
+                .is_some_and(|s| missiles::Cruise::for_weapon(&s.weapon).is_some())
+    }
+
     /// HUD fly-out time follows the same cruise clearance as live guidance.
     /// Launch authority and IN RNG continue to use the energy-only solution.
+    /// Worked out once per view, like the other solutions.
     pub fn terrain_solution(&self) -> Option<missiles::Solution> {
+        *self
+            .terrain_solution
+            .get_or_init(|| self.compute_terrain_solution())
+    }
+
+    fn compute_terrain_solution(&self) -> Option<missiles::Solution> {
+        if !self.flies_terrain_solution() {
+            return self.mounted_solution();
+        }
         let w = &self
             .view
             .own
@@ -2274,12 +2304,6 @@ impl<'a> LauncherView<'a> {
             .stations
             .get(self.view.own.selected)?
             .weapon;
-        if self.view.state.weapon_rules != Rules::Spec
-            || missiles::Cruise::for_weapon(w).is_none()
-            || self.ground.is_none()
-        {
-            return self.mounted_solution();
-        }
         let profile = missiles::Profile::for_weapon(w)?;
         let observed = self.weapon_observation()?;
         missiles::intercept_with_terrain(

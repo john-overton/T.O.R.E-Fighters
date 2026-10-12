@@ -256,6 +256,11 @@ pub(super) fn release<G: Fn(f64, f64) -> f64>(
     flight
 }
 
+/// How often a guiding cruise-profile weapon works out its time to impact
+/// again, ticks (8 a second); it counts down in between. Agent design: the
+/// HUD shows it to a tenth of a second.
+pub const SECONDS_REFRESH_TICKS: u64 = 15;
+
 /// What one guided step reads besides the projectile.
 pub(super) struct Context<'a, G> {
     pub ships: &'a [Ownship],
@@ -278,6 +283,7 @@ pub(super) fn steer<G: Fn(f64, f64) -> f64>(
     cx: &Context<'_, G>,
 ) -> Option<(BombMotion, u64)> {
     let glide = guided::is_glide_bomb(w);
+    let was_guiding = flight.mode == Mode::Guiding;
     let owner = cx.ships.iter().find(|own| own.aircraft == flight.owner);
     // Which way the weapon points now: a falling bomb along its fall.
     let heading = match flight.fall {
@@ -348,15 +354,27 @@ pub(super) fn steer<G: Fn(f64, f64) -> f64>(
         let next = missiles::steer(&w.movement, p.age, p.direction, desired);
         motion.turn(p.direction, next);
         p.direction = next;
-        flight.seconds = guided::time_to_with_terrain(
-            w,
-            *motion,
-            p.position,
-            p.direction,
-            point,
-            p.age,
-            Some(cx.ground),
-        );
+        // A cruise profile's fly-out samples the terrain on every step to
+        // impact, so it is worked out on the first guiding tick and then
+        // every SECONDS_REFRESH_TICKS (staggered by projectile id); between
+        // those it counts down. Other weapons fly it every tick, as before
+        // (review H1: every tick cost the square of the flight time).
+        let refresh = !was_guiding
+            || motion.cruise.is_none()
+            || (p.age + u64::from(p.id)).is_multiple_of(SECONDS_REFRESH_TICKS);
+        flight.seconds = if refresh {
+            guided::time_to_with_terrain(
+                w,
+                *motion,
+                p.position,
+                p.direction,
+                point,
+                p.age,
+                Some(cx.ground),
+            )
+        } else {
+            flight.seconds.map(|s| (s - missiles::DT).max(0.))
+        };
     } else if let Some((fall, start)) = flight.fall {
         let elapsed = (p.age - start) as f64 / 120.;
         let here = fall.position(elapsed);

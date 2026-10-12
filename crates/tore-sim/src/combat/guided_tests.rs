@@ -238,3 +238,81 @@ fn the_steering_is_the_turn_from_the_track_to_the_aim() {
     assert!((to(-10_000., 10_000.) + std::f64::consts::FRAC_PI_4).abs() < 1e-9);
     assert!((to(0., -10_000.).abs() - std::f64::consts::PI).abs() < 1e-9);
 }
+
+/// One guiding command missile flown as live flight flies it, with the
+/// terrain-aware time to impact worked out every tick (`every`) or as live
+/// flight now does, every `SECONDS_REFRESH_TICKS` with a count-down between
+/// (review H1). Returns the time spent on those times, the ticks flown and
+/// every time.
+fn guiding_cost(
+    ground: &dyn Fn(f64, f64) -> f64,
+    every: bool,
+) -> (std::time::Duration, u64, Vec<Option<f64>>) {
+    use crate::combat::live::SECONDS_REFRESH_TICKS;
+    let mut w = at2();
+    w.movement.remove_t = 240;
+    let m = w.movement;
+    let mut motion = Motion::launch(&w, [0., 0., 1000.], 1500.);
+    let mut position = [0., 1500., 0.];
+    let mut direction = [0., 0., 1.];
+    let point = [0., ground(0., 40_000.), 40_000.];
+    let mut spent = std::time::Duration::ZERO;
+    let mut seconds: Vec<Option<f64>> = Vec::new();
+    for age in 0..u64::from(m.remove_t) * 30 {
+        let aim = motion.aim_over_terrain(position, point, ground);
+        let desired = missiles::commanded_heading(
+            direction,
+            motion.path(),
+            unit(missiles::sub(aim, position)),
+        );
+        let next = missiles::steer(&m, age, direction, desired);
+        motion.turn(direction, next);
+        direction = next;
+        let start = std::time::Instant::now();
+        let refresh = every || age == 0 || age.is_multiple_of(SECONDS_REFRESH_TICKS);
+        let time = if refresh {
+            time_to_with_terrain(&w, motion, position, direction, point, age, Some(ground))
+        } else {
+            seconds.last().copied().flatten().map(|s| (s - DT).max(0.))
+        };
+        spent += start.elapsed();
+        seconds.push(time);
+        let delta = motion.step(&m, age, direction);
+        for (p, d) in position.iter_mut().zip(delta) {
+            *p += d;
+        }
+        if missiles::length(missiles::sub(point, position)) <= 25.
+            || position[1] <= ground(position[0], position[2])
+        {
+            return (spent, age + 1, seconds);
+        }
+    }
+    (spent, u64::from(m.remove_t) * 30, seconds)
+}
+
+/// Review H1 timing probe: `cargo test --release -p tore-sim
+/// guiding_time_to_impact_cost -- --ignored --nocapture`.
+#[test]
+#[ignore = "timing probe"]
+fn guiding_time_to_impact_cost() {
+    let hills = |x: f64, z: f64| 600. + 500. * (x / 2500.).sin() * (z / 3100.).sin();
+    let ridge = |_: f64, z: f64| (1. - ((z - 20_000.) / 3000.).abs()).max(0.) * 2200.;
+    let cases: [(&str, &dyn Fn(f64, f64) -> f64); 3] =
+        [("flat", &|_, _| 0.), ("ridge", &ridge), ("hills", &hills)];
+    for (name, ground) in cases {
+        for every in [true, false] {
+            let (spent, ticks, seconds) = guiding_cost(ground, every);
+            let flown = ticks as f64 * DT;
+            let worst = seconds
+                .iter()
+                .enumerate()
+                .filter_map(|(i, s)| s.map(|s| (s - (flown - i as f64 * DT)).abs()))
+                .fold(0., f64::max);
+            println!(
+                "h1 {name} {}: {ticks} ticks, {:.1} us per tick, worst error {worst:.4} s",
+                if every { "every tick" } else { "refreshed" },
+                spent.as_secs_f64() * 1e6 / ticks as f64,
+            );
+        }
+    }
+}
