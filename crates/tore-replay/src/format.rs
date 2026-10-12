@@ -257,6 +257,12 @@ pub(crate) fn encode_header(header: &Header) -> Result<Vec<u8>> {
     if w.airfield_scene != 0 {
         lines.push(("world.airfield_scene".into(), w.airfield_scene.to_string()));
     }
+    if w.city_fill_scene != 0 {
+        lines.push((
+            "world.city_fill_scene".into(),
+            w.city_fill_scene.to_string(),
+        ));
+    }
     if w.surface {
         lines.push(("world.surface".into(), "1".into()));
     }
@@ -427,6 +433,11 @@ pub(crate) fn decode_header(bytes: &[u8], version: u16) -> Result<Header> {
                     .parse()
                     .map_err(|_| corrupt("header entry world.airfield_scene is not a number"))?
             }
+            "world.city_fill_scene" => {
+                w.city_fill_scene = value
+                    .parse()
+                    .map_err(|_| corrupt("header entry world.city_fill_scene is not a number"))?
+            }
             "world.surface" => w.surface = value == "1",
             other => {
                 if header.extra.len() >= MAX_KEY_VALUES {
@@ -592,6 +603,7 @@ mod tests {
                     separation_nm: 60,
                 }),
                 airfield_scene: 2,
+                city_fill_scene: 3,
                 surface: true,
             },
             extra: vec![

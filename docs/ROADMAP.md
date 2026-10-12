@@ -1239,7 +1239,8 @@ In John's order where he gave one; each is its own planned round.
    `TORE_REDRAWN_AIRPORTS=0` keeps the retail airfields in single player for
    developers. What remains: [redrawn airports, limits](formats/redrawn-airports.md#limits).
 4. **City fill.** Real-size scenery buildings filling the light areas of the
-   city textures (branch `ac-cf0`, off by default behind `TORE_CITY_FILL=1`):
+   city textures, on by default everywhere since the surface close-out
+   (protocol 25; `TORE_CITY_FILL=0` turns it off in single player):
    up to 500,000 buildings drawn to 30 nm with separate graphics settings for
    building distance and detail; scenery, not targets.
 

@@ -45,6 +45,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [The surface world (protocol 22)](#the-surface-world-protocol-22) (built under protocol 22)
 - [The air-to-ground round (protocol 23)](#the-air-to-ground-round-protocol-23) (built under protocol 23)
 - [The redrawn airports (protocol 24)](#the-redrawn-airports-protocol-24) (built under protocol 24)
+- [The city fill (protocol 25)](#the-city-fill-protocol-25) (built under protocol 25)
 - [Limits](#limits)
 - [Captures](#captures)
 - [Versions](#versions)
@@ -2568,6 +2569,42 @@ and the server rebuild it from their own import and build.
   the terrain reads, now including the building and vehicle types the plans
   add.
 
+## The city fill (protocol 25)
+
+*Built (slice CL-CF of the surface close-out, 2026-10-11); agent decisions
+unless credited.* John asked for the [city fill](theater.md#city-texture-light-areas-cf0-prototype)
+on by default everywhere, online too (2026-10-11). Like the airport scene,
+the fill is not on the wire: every game of a session and the server build it
+from their own import, the theater layout alone deciding where each building
+stands.
+
+- **Fixed on online.** The mission text has no city line and always means
+  the fill (`MissionSpec::from_text`), so the King's game, every player's,
+  the dedicated server and the bot build the same city. `TORE_CITY_FILL=0`
+  applies only to single-player launches and the offline tools; nothing
+  online reads it. The development aid `TORE_CITY_FILL_CAP` changes the
+  number of buildings and must never be set for a networked game.
+- **Why a bump.** The buildings are scenery but not harmless: an aircraft
+  below a roof crashes and a strong enough ground burst knocks buildings
+  flat, so a 24 game, which builds no fill, would fly a different world. The
+  version check keeps such games apart. The fill changes no message's bytes;
+  the wire golden changes in the version line and the transport packets
+  sealed with it.
+- **Folded under 25.** The mission text's `enemy-start ground RUNWAY|auto`
+  line (slice CL-R, [dedicated server](../DEDICATED-SERVER.md)), written only
+  when Enemy Wing 1 starts on the ground: a 24 game refuses a mission that
+  carries it, and the mission hash covers it. The AI airfield sequence's
+  checkpoint gains one field, `ground_trim` (the rudder trim an AI aircraft
+  learns on the ground, slice CL-AP): the world checkpoint and so the
+  Check hash and a standby's restored state carry it, and a 24 build, which
+  lacks it, would read a 25 checkpoint wrongly. The close-out's other slices
+  changed no wire bytes.
+- **Checks that still apply.** The theater content item lists the files the
+  fill is built from (the reference weather layer, every ground placement's
+  picture, the kit's definitions and shapes), read without building the
+  fill, so a game whose city art or kit differed is told which theater
+  differs.
+
 ## Limits
 
 Decoders check every count and length against these before reading on.
@@ -2713,7 +2750,11 @@ again with an observer; the capture format did not change for it.
   The combat checkpoint, which the standby stream and a takeover carry,
   also changes under 24 with no message layout change: a missile's
   `Motion.holds_path` (FX-M) and the `kept` map after `guided_impacts`
-  (FX-J, rejoin).
+  (FX-J, rejoin). 25 since the surface close-out (slice CL-CF,
+  [the city fill](#the-city-fill-protocol-25)): every game builds the city
+  fill, whose buildings aircraft crash into and ground bursts knock flat;
+  folded under 25, the mission text's `enemy-start` line (CL-R), which a 24
+  game refuses. No message layout changed.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

@@ -116,7 +116,22 @@ pub fn launch_overrides() -> AppResult<Overrides> {
         wind,
         cloud_altitude,
         redrawn_airports: redrawn_airports()?,
+        city_fill: city_fill()?,
     })
+}
+
+/// The city fill (`tore_world::city`) is the default (John, 2026-10-11).
+/// `TORE_CITY_FILL=0` is a developer escape hatch that builds no fill for
+/// single-player launches and the offline tools; unset or `1` builds it.
+/// Online sessions, the server and replays never read it: a session always
+/// flies over the fill (the mission text has no city line) and a replay
+/// builds the city its recording names.
+pub fn city_fill() -> AppResult<bool> {
+    match std::env::var("TORE_CITY_FILL").as_deref() {
+        Err(std::env::VarError::NotPresent) | Ok("1") => Ok(true),
+        Ok("0") => Ok(false),
+        _ => Err("TORE_CITY_FILL must be 0 or 1".into()),
+    }
 }
 
 /// The redrawn airports (docs/formats/redrawn-airports.md) are the default

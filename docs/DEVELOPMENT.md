@@ -1126,6 +1126,23 @@ closing count; `--svg` draws each airfield overhead with its routes and
 Mission templates' parked aircraft against the pavement instead
 ([audit](formats/redrawn-airports.md#audit)).
 
+The [city fill](features.md) is on by default everywhere since protocol 25.
+`TORE_CITY_FILL=0` is a developer escape hatch like the airports' one: single
+player launches and the offline tools build no fill; online sessions, the
+server and the bot never read it, and a replay builds the fill its
+recording's `world.city_fill_scene` names. `TORE_CITY_FILL_CAP` changes the
+number of buildings (never for a networked game) and
+`TORE_CITY_FILL_SHADOW_NM` the shadow distance. The offscreen aid
+`--city-fill-dump OUT [THEATER]` (no window, nothing simulated; options in
+`crates/tore-app/src/city_fill_dump.rs`) writes mask and fill images and
+takes `--render` (a still, fill off and on), `--target` (the target
+display's view), `--sequence` (every frame along a path, for watching
+transitions), `--sweep` (a still camera with one tier moving: building
+detail, building distance or smallest size, printing the pixels that pop per
+step) and `--bench` / `--target-bench` (frame times fill off then on, 4K by
+default). The fade work was measured with `--sweep` and `--bench` over Kiev
+(UKR, `--bench 671744,1330000,500,0,100,600`).
+
 `TORE_WEATHER_SMOOTH=0|1` selects stepped or smooth weather presentation (default
 1). Smooth mode blends source time/altitude colors and neighboring horizon/fog
 shades. It uses fractional mission time, freezes on pause and does not change

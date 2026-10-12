@@ -115,6 +115,7 @@ fn overrides() -> AppResult<Overrides> {
         wind: None,
         cloud_altitude: Some(0),
         redrawn_airports: crate::scenery::redrawn_airports()?,
+        city_fill: crate::scenery::city_fill()?,
     })
 }
 

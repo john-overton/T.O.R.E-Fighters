@@ -190,6 +190,53 @@ fn an_items_names_are_what_its_loader_reads_and_its_digest_covers_their_bytes() 
     assert_eq!(content, Content::of(&map));
 }
 
+/// The theater item lists what the city fill is built from without building
+/// it (the fill is cached per process, so a build lists its files only the
+/// first time): the inputs it reads are exactly what a build reads.
+#[test]
+fn the_theater_item_reads_the_city_fills_inputs_exactly() {
+    use crate::terrain::{Overrides, Terrain};
+    let map = resources();
+    let overrides = Overrides {
+        city_fill: false,
+        ..Overrides::default()
+    };
+    let terrain = Terrain::for_mission(&map, THEATER, Some(0), &overrides).unwrap();
+    let built = ResourceReads::new(&map);
+    crate::city::build_layout(&built, &terrain);
+    let listed = ResourceReads::new(&map);
+    crate::city::read_inputs(&listed, &terrain);
+    assert!(!listed.names().is_empty());
+    assert_eq!(built.names(), listed.names());
+    let theater = Content::of(&map);
+    let theater = theater.get(Kind::Theater, THEATER).unwrap();
+    for name in listed.names() {
+        assert!(theater.reads(&name), "{name} is in the theater item");
+    }
+}
+
+/// A mission build reads the city fill's inputs whether this process built
+/// that layout's fill before (the cache) or not, so the host's and a
+/// player's manifests agree.
+#[test]
+fn a_build_reads_the_city_fills_inputs_on_every_build() {
+    use crate::terrain::{Overrides, Terrain};
+    let map = resources();
+    let names = || {
+        let reads = ResourceReads::new(&map);
+        Terrain::for_mission(&reads, THEATER, Some(0), &Overrides::default()).unwrap();
+        reads.names()
+    };
+    let first = names();
+    assert_eq!(first, names());
+    let listed = ResourceReads::new(&map);
+    let terrain = Terrain::for_mission(&map, THEATER, Some(0), &Overrides::default()).unwrap();
+    crate::city::read_inputs(&listed, &terrain);
+    for name in listed.names() {
+        assert!(first.contains(&name), "{name} is read by a build");
+    }
+}
+
 #[test]
 fn items_are_found_by_a_resource_they_read() {
     let content = Content::of(&resources());

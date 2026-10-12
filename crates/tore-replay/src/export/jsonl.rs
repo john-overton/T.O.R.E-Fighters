@@ -134,6 +134,9 @@ fn header_line(recording: &Recording) -> String {
     if w.airfield_scene != 0 {
         world = world.int("airfield_scene", w.airfield_scene);
     }
+    if w.city_fill_scene != 0 {
+        world = world.int("city_fill_scene", w.city_fill_scene);
+    }
     let world = world.finish();
     let mut extra = Object::new();
     for (k, v) in &h.extra {

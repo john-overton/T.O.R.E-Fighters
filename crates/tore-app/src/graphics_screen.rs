@@ -39,11 +39,10 @@ const CITY_ROWS: [Row; 6] = [
     Row::BuildingDistance,
     Row::BuildingDetail,
 ];
-/// The rows shown: the two city building rows only while the CF0 city fill
-/// prototype is switched on (`TORE_CITY_FILL=1`), so the screen is unchanged
-/// otherwise.
+/// The rows shown: the two city building rows unless the city fill is
+/// switched off (`TORE_CITY_FILL=0`, a developer escape hatch).
 fn rows() -> &'static [Row] {
-    if tore_world::city::enabled() {
+    if crate::scenery::city_fill().unwrap_or(true) {
         &CITY_ROWS
     } else {
         &BASE_ROWS
@@ -586,10 +585,12 @@ mod tests {
         assert_eq!(e.focus, Focus::Row(0));
         press(&mut e, "ArrowUp");
         assert_eq!(e.focus, Focus::Row(0), "the top row stops the focus");
-        for _ in 0..3 {
+        // Six rows with the city fill's two (the default), four without.
+        let last = rows().len() - 1;
+        for _ in 0..last {
             press(&mut e, "ArrowDown");
         }
-        assert_eq!(e.focus, Focus::Row(3));
+        assert_eq!(e.focus, Focus::Row(last));
         press(&mut e, "ArrowDown");
         assert_eq!(e.focus, Focus::Footer(0));
         press(&mut e, "ArrowRight");
@@ -597,8 +598,8 @@ mod tests {
         press(&mut e, "ArrowRight");
         assert_eq!(e.focus, Focus::Footer(2));
         press(&mut e, "ArrowUp");
-        assert_eq!(e.focus, Focus::Row(3));
-        // Tab walks every control and wraps; Shift-Tab goes back.
+        assert_eq!(e.focus, Focus::Row(last));
+        // Tab walks the three footer buttons and wraps; Shift-Tab goes back.
         for _ in 0..4 {
             press(&mut e, "Tab");
         }

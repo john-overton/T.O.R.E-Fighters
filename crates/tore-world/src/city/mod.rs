@@ -1,7 +1,8 @@
-//! City fill, CF0 prototype: real-size buildings over the light areas of a
-//! theater's city texture tiles. Opt-in only: the app turns it on with
-//! `TORE_CITY_FILL=1` ([`set_enabled`]); off, no terrain carries a fill and
-//! nothing else changes.
+//! City fill: real-size buildings over the light areas of a theater's city
+//! texture tiles. On by default (John, 2026-10-11, protocol 25): a terrain
+//! carries a fill when its [`crate::terrain::Overrides::city_fill`] (or a
+//! recording's city fill scene) says so. The app's `TORE_CITY_FILL=0` turns
+//! it off for single player and the offline tools, a developer escape hatch.
 //!
 //! Fill buildings are scenery. They are drawn, an aircraft that flies into
 //! one below its roof crashes ([`CityFill::contact`]), and a ground burst can
@@ -12,8 +13,8 @@
 //!
 //! The fill is a function of the theater layout alone (its texture tiles, its
 //! objects and the kit shapes), in integer feet and whole degrees, so every
-//! client builds the same one. It is not on the wire: in a networked game
-//! every machine must set the switch alike.
+//! client builds the same one. It is not on the wire: a mission text always
+//! means the fill, so every machine of a networked game builds it.
 
 pub mod fill;
 pub mod kit;
@@ -24,21 +25,9 @@ use std::{
     collections::BTreeMap,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
     },
 };
-
-static ENABLED: AtomicBool = AtomicBool::new(false);
-
-/// Turns the fill on or off for terrains built from now on.
-pub fn set_enabled(on: bool) {
-    ENABLED.store(on, Ordering::Relaxed);
-}
-
-/// Whether terrains built now carry a fill.
-pub fn enabled() -> bool {
-    ENABLED.load(Ordering::Relaxed)
-}
 
 static CAP: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(fill::MAX_INSTANCES);
@@ -97,6 +86,30 @@ pub struct Layout {
     pub instances: Vec<Instance>,
     /// Lots that passed before the budget.
     pub candidates: usize,
+    /// Every resource name the build read, sorted. A terrain that takes
+    /// the cached layout reads them again, so what a mission build reads
+    /// (its content manifest) is the same whether or not this process built
+    /// the fill before.
+    pub inputs: Vec<String>,
+}
+
+/// A resource source that notes every name asked for.
+struct Noting<'a> {
+    inner: &'a dyn ResourceSource,
+    names: std::cell::RefCell<std::collections::BTreeSet<String>>,
+}
+
+impl ResourceSource for Noting<'_> {
+    fn get(&self, name: &str) -> Option<&Vec<u8>> {
+        self.names.borrow_mut().insert(name.to_owned());
+        self.inner.get(name)
+    }
+    fn theater_catalog(&self) -> tore_formats::Result<Vec<(String, String)>> {
+        self.inner.theater_catalog()
+    }
+    fn theater_label(&self, code: &str) -> tore_formats::Result<Option<String>> {
+        self.inner.theater_label(code)
+    }
 }
 
 impl Layout {
@@ -170,7 +183,12 @@ impl CityFill {
                 tore_codec::fnv1a64(&bytes)
             );
             match cache.get(&key) {
-                Some(layout) => Arc::clone(layout),
+                Some(layout) => {
+                    for name in &layout.inputs {
+                        resources.get(name);
+                    }
+                    Arc::clone(layout)
+                }
                 None => {
                     let layout = Arc::new(build_layout(resources, terrain));
                     cache.insert(key, Arc::clone(&layout));
@@ -362,6 +380,18 @@ impl CityFill {
     }
 }
 
+/// Reads every resource the fill of `terrain` is built from, without
+/// building it: the reference palette's weather layer, every ground
+/// placement's picture, the kit's definitions and shapes, and the layout.
+/// A game's content lists these for the theater whether or not this process
+/// has built (and cached) that layout's fill already.
+pub fn read_inputs(resources: &dyn ResourceSource, terrain: &Terrain) {
+    let base = tore_formats::theater::base_theater(&terrain.layout).unwrap_or("");
+    mask::read_inputs(resources, &terrain.environment, base);
+    kit::Kit::load(resources);
+    resources.get(&terrain.layout);
+}
+
 /// What the fill keeps out of: every layout object's box (runways with the
 /// wider clearance) and, with the redrawn airports on, each redrawn
 /// airfield's whole box with the runway clearance.
@@ -382,7 +412,17 @@ fn layout_keepouts(terrain: &Terrain) -> Vec<fill::Keepout> {
     keepouts
 }
 
-fn build_layout(resources: &dyn ResourceSource, terrain: &Terrain) -> Layout {
+pub(crate) fn build_layout(resources: &dyn ResourceSource, terrain: &Terrain) -> Layout {
+    let noting = Noting {
+        inner: resources,
+        names: Default::default(),
+    };
+    let mut layout = build_layout_from(&noting, terrain);
+    layout.inputs = noting.names.into_inner().into_iter().collect();
+    layout
+}
+
+fn build_layout_from(resources: &dyn ResourceSource, terrain: &Terrain) -> Layout {
     let base = tore_formats::theater::base_theater(&terrain.layout).unwrap_or("");
     // A theater with no city pictures fills its retail clusters' footprints
     // at the retail shape scale, three times their drawn size.
@@ -435,6 +475,7 @@ fn build_layout(resources: &dyn ResourceSource, terrain: &Terrain) -> Layout {
         cities,
         instances,
         candidates,
+        inputs: Vec::new(),
     }
 }
 
@@ -473,6 +514,7 @@ mod tests {
                 city: 0,
             }],
             candidates: 1,
+            inputs: Vec::new(),
         };
         CityFill::assemble(Arc::new(layout), vec![100.], vec![false])
     }

@@ -717,12 +717,12 @@ beyond them.
 
 - **A recording is written in the oldest format that holds it** (agent
   decision, 2026-10-10). A world with a ground target, a redrawn airfield
-  scene or active surface units is a **format 3** file; every other
+  scene, the city fill or active surface units is a **format 3** file; every other
   recording is the format 2 file it always was, byte for byte, so a build
   from before format 3 still opens it. A reader opens both. The header says
   which: `world.surface=1` marks a world with surface units, and
-  `world.ground_target` or `world.airfield_scene` (below) a ground target or
-  a redrawn scene.
+  `world.ground_target`, `world.airfield_scene` or `world.city_fill_scene`
+  (below) a ground target, a redrawn scene or the city fill.
 - Format 3 adds, for the surface-defenses round (slice RP1):
   - **The ground target** in the header, `world.ground_target=` followed by
     `stem,aaa,sam,seed,nationality,night_stealth,jitter,relocate,separation_nm`
@@ -743,6 +743,16 @@ beyond them.
     scene this build does not know (a later build's) opens with the retail
     airfields and a warning in the session log. A change to the plans that
     moves anything an aircraft touches takes a new number.
+  - **The city fill scene**, `world.city_fill_scene=N`, written only when
+    N is not 0. 0 is no city fill, which every recording before the field
+    has; 1 is the [city fill](features.md) of `tore_world::city`, which
+    every flight has had since it became the default (2026-10-11, protocol
+    25), so every recording since then is a format 3 file. The viewer
+    rebuilds what the header names, whatever `TORE_CITY_FILL` says: an old
+    recording replays without the fill, a new one with it. A scene this
+    build does not know opens without the fill and a warning in the session
+    log. A change to the fill that moves anything an aircraft can hit takes
+    a new number.
   - **Surface poses**: every unit that follows a route (columns, convoys,
     ships under way) as a list in each frame, keyed by its fixed id, with
     position and attitude predicted like an aircraft's, so a unit driving
@@ -2123,10 +2133,12 @@ headless workflow.
   launchers (rails) and a parked aircraft's debris piece (format 3).
 - `replay::identity::terrain` rebuilds the recorded world from the header's
   resolved settings (layout, weather choice and layer, start time, wind,
-  cloud deck and, in format 3, the ground target and the airfield scene) without reading `TORE_WEATHER_TIME`, `TORE_WIND`,
-  `TORE_CLOUD_ALTITUDE` or `TORE_REDRAWN_AIRPORTS`; `replay::identity::of`
-  captures them from a live terrain (`RETAIL_AIRFIELD_SCENE` 0,
-  `REDRAWN_AIRFIELD_SCENE` 1). The viewer then builds its `Scenery` from that terrain.
+  cloud deck and, in format 3, the ground target, the airfield scene and the
+  city fill scene) without reading `TORE_WEATHER_TIME`, `TORE_WIND`,
+  `TORE_CLOUD_ALTITUDE`, `TORE_REDRAWN_AIRPORTS` or `TORE_CITY_FILL`;
+  `replay::identity::of` captures them from a live terrain
+  (`RETAIL_AIRFIELD_SCENE` 0, `REDRAWN_AIRFIELD_SCENE` 1,
+  `NO_CITY_FILL_SCENE` 0, `CITY_FILL_SCENE` 1). The viewer then builds its `Scenery` from that terrain.
 - The viewer lives in `tore-app/src/replay/`: `viewer.rs` (the screen:
   loading, cameras, keys, drawing), `host.rs` (the `Screen::Replay`
   plumbing in the app), `panels.rs` (the debug panels and the chunk cache
