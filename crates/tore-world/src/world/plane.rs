@@ -95,7 +95,9 @@ impl OwnshipTerms {
 /// The plane flies one tick: `previous` keeps where the tick started it, the
 /// flight steps over the terrain's surface, and it crashes into, or with no
 /// crashes rebounds from, any of the `standing` ground objects it passed
-/// through. The native research adapter has no building contact.
+/// through. The native research adapter has no building contact. A helicopter,
+/// or an aircraft hovering or in helicopter mode, may instead come down on
+/// the flat top of any of them (`fly_rotor`, docs/spec/touchdown.md).
 ///
 /// Not generic and never inlined, so the flight step is compiled once, here,
 /// for the host's world step and the client's prediction alike. Generic, it
@@ -114,6 +116,13 @@ pub fn fly(
     standing: &mut dyn Iterator<Item = u32>,
 ) {
     previous.clone_from(flight);
+    if flight.native.is_none()
+        && flight.research.is_some()
+        && tore_sim::touchdown::Class::of(flight).can_land_off_airfield()
+    {
+        fly_rotor(previous, flight, pilot, terrain, standing);
+        return;
+    }
     flight.step_surface(pilot, |x, z| terrain.surface(x, z));
     if flight.native.is_none()
         && (terrain
@@ -121,11 +130,42 @@ pub fn fly(
             .is_some()
             || terrain.fill_contact(previous.position, flight.position))
     {
-        if flight.cheats.no_crashes {
-            flight.rebound(previous.position);
-        } else {
-            flight.crashed = true;
-        }
+        crash_into_object(flight, previous);
+    }
+}
+
+fn crash_into_object(flight: &mut flight::State, previous: &flight::State) {
+    if flight.cheats.no_crashes {
+        flight.rebound(previous.position);
+    } else {
+        flight.crashed = true;
+    }
+}
+
+/// One tick of an aircraft that may touch down away from an airfield (a
+/// helicopter, the V-22 in helicopter mode, a vectoring jet in a hover): the
+/// flat top of any standing object, or of a city fill building, below it is
+/// ground it can come down on, so the contact rule
+/// ([`tore_sim::touchdown`]) decides instead of a crash into the object. Any
+/// other contact with an object, from the side or from under its roof,
+/// crashes as for every aircraft. docs/spec/touchdown.md.
+fn fly_rotor(
+    previous: &mut flight::State,
+    flight: &mut flight::State,
+    pilot: &tore_input::PilotInput,
+    terrain: &Terrain,
+    standing: &mut dyn Iterator<Item = u32>,
+) {
+    let alive: std::collections::BTreeSet<u32> = standing.collect();
+    let clearance = flight.model().configuration().equipment.ground_clearance_ft;
+    let bottom = flight.position[1] - clearance;
+    flight.step_surface(pilot, |x, z| terrain.surface_over(x, z, bottom, &alive));
+    if terrain
+        .solid_contact(previous.position, flight.position, alive.iter().copied())
+        .is_some()
+        || terrain.fill_contact(previous.position, flight.position)
+    {
+        crash_into_object(flight, previous);
     }
 }
 

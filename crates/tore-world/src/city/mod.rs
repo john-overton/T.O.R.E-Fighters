@@ -413,6 +413,45 @@ impl CityFill {
         best
     }
 
+    /// The highest roof of a standing building over `(x, z)` that lies no
+    /// higher than `bottom` plus [`tore_sim::touchdown::TOP_REACH_FT`]: what
+    /// a helicopter above that point can come down on. The roof is the
+    /// collision box's flat top, as [`Self::contact`] sees it.
+    pub fn roof_below(&self, x: f64, z: f64, bottom: f64) -> Option<f64> {
+        let mut best: Option<f64> = None;
+        let one = trig::ONE as f64;
+        for &n in self
+            .grid
+            .get(&(cell(x.floor() as i64), cell(z.floor() as i64)))?
+        {
+            let n = n as usize;
+            if !self.standing(n) {
+                continue;
+            }
+            let i = &self.layout.instances[n];
+            let piece = &self.layout.kit.pieces[usize::from(i.piece)];
+            let (s, c) = (
+                trig::sin(i32::from(i.heading)) as f64 / one,
+                trig::cos(i32::from(i.heading)) as f64 / one,
+            );
+            let (dx, dz) = (x - f64::from(i.x), z - f64::from(i.z));
+            let (lx, lz) = (dx * c - dz * s, dx * s + dz * c);
+            let (hx, hz) = (piece.half[0] as f64, piece.half[1] as f64);
+            if hx < tore_sim::touchdown::MIN_TOP_HALF_FT
+                || hz < tore_sim::touchdown::MIN_TOP_HALF_FT
+                || lx.abs() > hx
+                || lz.abs() > hz
+            {
+                continue;
+            }
+            let top = f64::from(self.base[n]) + piece.height as f64;
+            if top <= bottom + tore_sim::touchdown::TOP_REACH_FT && best.is_none_or(|b| top > b) {
+                best = Some(top);
+            }
+        }
+        best
+    }
+
     fn segment(&self, n: usize, from: [f64; 3], to: [f64; 3]) -> Option<f64> {
         let i = &self.layout.instances[n];
         let piece = &self.layout.kit.pieces[usize::from(i.piece)];
@@ -633,6 +672,24 @@ mod tests {
             f.contact([10_045., 250., 19_000.], [10_045., 250., 21_000.])
                 .is_some()
         );
+    }
+
+    #[test]
+    fn a_roof_is_ground_for_an_aircraft_above_it_only() {
+        let f = fill(0);
+        // The tower's roof is its 100 ft base plus 200 ft.
+        assert_eq!(f.roof_below(10_000., 20_000., 300.), Some(300.));
+        assert_eq!(f.roof_below(10_015., 20_040., 320.), Some(300.));
+        // Beside the footprint, or below the roof: no roof.
+        assert_eq!(f.roof_below(10_030., 20_000., 320.), None);
+        assert_eq!(f.roof_below(10_000., 20_000., 250.), None);
+        // Turned a quarter, the 100 ft side lies east-west.
+        let f = fill(90);
+        assert_eq!(f.roof_below(10_045., 20_000., 310.), Some(300.));
+        assert_eq!(f.roof_below(10_000., 20_045., 310.), None);
+        // A flattened building has no roof.
+        f.flatten([10_000., 0., 20_000.], 500.);
+        assert_eq!(f.roof_below(10_045., 20_000., 310.), None);
     }
 
     #[test]

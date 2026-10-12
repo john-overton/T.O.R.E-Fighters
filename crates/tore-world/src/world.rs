@@ -101,6 +101,8 @@ mod score_tests;
 mod succession_tests;
 #[cfg(test)]
 mod tick_tests;
+#[cfg(test)]
+mod touchdown_tests;
 
 /// The whole mission. The app drives it and presents it.
 pub struct World {
