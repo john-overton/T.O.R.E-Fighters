@@ -40,7 +40,7 @@ NORMAL_STATES = [
 # Quick Mission mode states, the loadout page states and the debrief pages.
 QUICK_STATES = [
     "normal", "aircraft", "theaters", "help", "ordnance", "ordnance-tanks", "ordnance-empty", "ordnance-drag",
-    "ordnance-message", "ordnance-message-long", "debrief", "debrief-2", "debrief-3", "debrief-4",
+    "ordnance-message", "ordnance-message-long", "ordnance-laser", "lobby-ordnance-laser", "debrief", "debrief-2", "debrief-3", "debrief-4",
     "debrief-5", "debrief-success", "objectives", "ground-start", "airports",
     "ground-start-auto", "ground-target", "ground-target-last",
     "objective-1", "objective-2", "objective-3", "objective-4", "objective-5", "objective-6",
@@ -208,6 +208,45 @@ def map_plot_filled():
                     void += 1
         if void > 50:
             problems.append(f"{void} void pixels show in the map's plot")
+        return problems
+
+    return check
+
+
+def ordnance_notes(warning: bool, helper: bool, lobby: bool = False):
+    """The Load Ordnance page's laser warning (dim amber, in the message band) and sensor helper line
+    (blue-grey, under the title bar), found by their exact ink: the tint times the font's own colour
+    (slice BQ, B24; wording and colours the lead's defaults)."""
+    base = menu_picture()
+    amber, grey = (178, 126, 47), (137, 155, 162)
+
+    def count(pixels: bytes, width: int, rows: range, ink) -> int:
+        found = 0
+        for y in rows:
+            row = y * width * 3
+            for x in range(width):
+                j = row + x * 3
+                if (pixels[j], pixels[j + 1], pixels[j + 2]) == ink:
+                    found += 1
+        return found
+
+    def check(output: str) -> list[str]:
+        problems = base(output)
+        m = re.search(r"Menu preview:\s*(\S+)", output)
+        if not m or not Path(m.group(1)).exists():
+            return problems + ["no ordnance picture written"]
+        data = Path(m.group(1)).read_bytes()
+        header = re.match(rb"P6\s+(\d+)\s+(\d+)\s+255\s", data)
+        if not header:
+            return problems + ["the ordnance picture is not a binary PPM"]
+        width, pixels = int(header.group(1)), data[header.end():]
+        low = range(64, 86) if lobby else range(335, 355)
+        got_warning = count(pixels, width, low, amber) > 30
+        got_helper = count(pixels, width, range(64, 86), grey) > 30
+        if got_warning != warning:
+            problems.append(f"laser warning shown={got_warning}, expected {warning}")
+        if got_helper != helper:
+            problems.append(f"sensor helper shown={got_helper}, expected {helper}")
         return problems
 
     return check
@@ -505,6 +544,26 @@ def scenarios() -> list[Scenario]:
                     check=menu_picture(),
                 )
             )
+    # The ordnance page's laser warning and sensor helper (slice BQ, B24): a laser missile loaded on
+    # the F/A-18 (pod stations, no sensor), the Su-25 (built-in laser) and the F-16C (fixed Pave Spike).
+    for a, state, warning, helper, lobby in (
+        ("f18", "ordnance", False, True, False),
+        ("f18", "ordnance-laser", True, True, False),
+        ("f18", "lobby-ordnance-laser", True, False, True),
+        ("su25", "ordnance-laser", False, True, False),
+        ("f16c", "ordnance-laser", False, True, False),
+        ("mig29", "ordnance", False, True, False),
+    ):
+        out.append(
+            Scenario(
+                name=f"menus-snap-quick-{state}-notes-{a}",
+                lane="menus",
+                args=["--aircraft", a, "--quick-mission", "--snapshot", "{work}/shot.ppm", "--snapshot-state", state, "--no-audio"],
+                timeout=120,
+                expect=[r"Menu preview:"],
+                check=ordnance_notes(warning, helper, lobby),
+            )
+        )
     # The creator on every base theater, with its theater popup open. The
     # imported `~` layout variants are not offered to players; `--theater ~CODE`
     # still opens the creator on one as a developer option, so each is checked

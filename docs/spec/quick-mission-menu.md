@@ -159,6 +159,40 @@ creator with every setting of the mission just flown, including a custom load,
 and the ordnance screen closed. Requested by John on 2026-09-23. Starting the
 next mission reopens the ordnance screen for a custom load as before.
 
+## First load and the saved draft
+
+Slice BQ, B22 (John asked on 2026-10-12 that each slot's aircraft be random on
+first load and that the mission state survive the end of a game and a trip to
+the ordnance screen; the two rules below are agent decisions, recorded as such).
+Opinionated, not retail: the original opens on the same list head every time.
+
+- **First load** is the first time the creator opens in a profile that holds no
+  saved draft. Each aircraft slot then takes a random aircraft from its own list:
+  friendly wing 1 (the player's own aircraft) from every aircraft the game has,
+  and the five other wings from the aircraft the AI can fly. `--aircraft` still
+  names the player's aircraft and keeps that slot; the wings are random. The pick
+  is a menu choice from the clock: nothing in a mission reads it, and once a
+  mission is built it is a fixed mission, so it stays the same on every machine
+  online and on every replay.
+- **The draft is kept** in the profile as `quick-mission-v1.conf` and written
+  after every menu action, so it survives the end of a flight (the debrief's OK
+  returns to the creator as it was), a visit to the ordnance screen and a
+  restart. The random pick is made once: the next launch opens on the saved
+  draft and draws nothing. It holds the theater (by code), every aircraft (by
+  selection key, so a changed import cannot turn one aircraft into another) and
+  every other choice by its place in its list, with the group objectives and
+  survival flags. A choice the lists no longer have keeps the creator's own value.
+- **Not kept:** the ground target's seed (each flight draws its own), the custom
+  load on the ordnance page (rebuilt for the aircraft; kept for the rest of the
+  session as before), the AI mission preset (a command-line choice), the lobby's
+  creator and the read-only lobby view. A file this build cannot read, or one
+  with a newer version, is left as it is and the creator opens on its defaults.
+- **Command-line and diagnostic runs** (`--snapshot`, probes, scripted runs,
+  `--smoke-test`, `--launch-quick-mission`, `--ground-start`, `--ground-target`,
+  `--separation`) neither read nor write the file and never randomize, so every
+  battery scenario still builds the same creator. `--theater` wins over a saved
+  theater.
+
 ## Mission wings
 
 Guns only applies to the player and every member of all six wings, on both
