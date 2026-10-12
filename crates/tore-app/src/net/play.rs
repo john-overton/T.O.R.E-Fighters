@@ -1206,7 +1206,12 @@ impl TickPresenter<'_> {
                 .collect();
             let loops = crate::audio::loop_sources(frame.picture, &models);
             let sources = crate::audio::snapshot_sources(frame.picture);
-            let own_releases: Vec<&str> = releases.iter().map(String::as_str).collect();
+            // The wire names the recording only: the launch fades over the
+            // default distance.
+            let own_releases: Vec<crate::audio::Launch> = releases
+                .iter()
+                .map(|sound| crate::audio::Launch::named(sound))
+                .collect();
             for step in 0..ticks.max(1) {
                 let first = step == 0;
                 audio.spatial_tick(

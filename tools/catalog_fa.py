@@ -267,6 +267,8 @@ def weapon_row(source, archive, data, layout):
         'surface_type_references': 0,
         'shape': ';'.join(strings(blocks, obj['shape'])),
         'fire_sound': ';'.join(strings(blocks, projectile['fireSound'])),
+        'max_sound_distance_ft': projectile['maxSndDist'].number(),
+        'frequency_adjust': projectile['freqAdj'].number(),
         'archive': archive,
     }
 

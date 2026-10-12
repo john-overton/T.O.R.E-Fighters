@@ -133,6 +133,45 @@ pub struct Audio {
     clips: BTreeMap<String, Arc<Clip>>,
     radio_phrases: BTreeMap<String, String>,
 }
+/// One weapon launch or bomb release sound a tick asks for: the record's
+/// recording and how far away it is heard.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Launch<'a> {
+    /// The recording, the weapon record's `fireSound`.
+    pub name: &'a str,
+    /// The record's `maxSndDist` in feet; 0 when it is not known, as in a
+    /// replay, which does not record it (fitted default 6,000 ft).
+    pub max_distance_ft: i16,
+}
+impl<'a> Launch<'a> {
+    pub fn new(name: &'a str, max_distance_ft: i16) -> Self {
+        Self {
+            name,
+            max_distance_ft,
+        }
+    }
+    /// A launch whose record is not at hand.
+    pub fn named(name: &'a str) -> Self {
+        Self::new(name, 0)
+    }
+}
+/// The launches that actually sound out of one tick's releases. The original
+/// asks for a weapon's sound once per fire call, after the call has made all
+/// its projectiles, so a 3-, 6- or 7-bomb pack is one sound however many
+/// bombs leave. The simulation reports every projectile, so the same
+/// recording asked for twice in a tick is the same call's sound and plays
+/// once (docs/spec/sound.md#weapon-launch-and-bomb-release).
+pub fn one_sound_per_release<'a>(releases: &[Launch<'a>]) -> Vec<Launch<'a>> {
+    let mut sounds: Vec<Launch<'a>> = Vec::with_capacity(releases.len());
+    for launch in releases {
+        match sounds.iter_mut().find(|l| l.name == launch.name) {
+            // The farther-reaching record's distance stands.
+            Some(seen) => seen.max_distance_ft = seen.max_distance_ft.max(launch.max_distance_ft),
+            None => sounds.push(*launch),
+        }
+    }
+    sounds
+}
 /// A looping sound heard from where it is: a burning crash site or another
 /// aircraft's engine. Presentation only (docs/audio.md).
 #[derive(Clone, Debug, PartialEq)]
@@ -800,7 +839,7 @@ impl Audio {
         listener: tore_sim::acoustics::Listener,
         sources: &[tore_sim::acoustics::Source],
         emissions: &[tore_sim::acoustics::Emission],
-        releases: &[&str],
+        releases: &[Launch],
         player_position: [f64; 3],
         engine: Option<([f64; 3], [f64; 3])>,
         loops: &[LoopSource],
@@ -1299,7 +1338,7 @@ impl Mixer {
         listener: tore_sim::acoustics::Listener,
         sources: &[tore_sim::acoustics::Source],
         emissions: &[tore_sim::acoustics::Emission],
-        releases: &[&str],
+        releases: &[Launch],
         player_position: [f64; 3],
         engine: Option<([f64; 3], [f64; 3])>,
         loops: &[LoopSource],
@@ -1351,10 +1390,15 @@ impl Mixer {
         self.spatial
             .loops(clips, listener, velocity, &loops, enabled);
         if enabled {
-            for name in releases {
-                if let Some(clip) = clips.get(*name) {
+            for launch in one_sound_per_release(releases) {
+                if let Some(clip) = clips.get(launch.name) {
                     if listener.external {
-                        self.spatial.weapon(clip.clone(), player_position, listener);
+                        self.spatial.weapon(
+                            clip.clone(),
+                            launch.max_distance_ft,
+                            player_position,
+                            listener,
+                        );
                     } else if self.voices.len() < 8 {
                         self.voices.push(Voice {
                             clip: clip.clone(),
@@ -1666,6 +1710,101 @@ mod tests {
     }
 
     #[test]
+    fn a_pack_release_is_one_sound_and_other_weapons_keep_their_own() {
+        let bomb2 = Launch::new("&BOMB2.11K", 6000);
+        let bomb = Launch::new("&BOMB.11K", 7000);
+        // A seven-bomb pack reports seven projectiles in one tick: one sound.
+        assert_eq!(one_sound_per_release(&[bomb2; 7]), [bomb2]);
+        // Different recordings in the same tick each sound, in order.
+        assert_eq!(
+            one_sound_per_release(&[bomb2, bomb, bomb2, bomb]),
+            [bomb2, bomb]
+        );
+        // The same recording from records with different reach plays once
+        // at the longer reach.
+        let far = Launch::new("&BOMB2.11K", 7000);
+        assert_eq!(one_sound_per_release(&[bomb2, far]), [far]);
+        assert!(one_sound_per_release(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_seven_bomb_pack_takes_one_voice_not_the_cockpit_cap() {
+        use tore_sim::acoustics::Listener;
+        let clips: BTreeMap<String, Arc<Clip>> = [
+            ("&BOMB2.11K".to_string(), flat_clip(192)),
+            ("&ASHVMIS.11K".to_string(), flat_clip(192)),
+        ]
+        .into();
+        let play = |releases: &[Launch], external: bool| {
+            let mut m = test_mixer();
+            m.stall = None;
+            m.spatial_tick(
+                &clips,
+                Listener {
+                    position: [0.; 3],
+                    right: [1., 0., 0.],
+                    view: 0,
+                    external,
+                    own: None,
+                },
+                &[],
+                &[],
+                releases,
+                [0., 0., 150.],
+                None,
+                &[],
+            );
+            m
+        };
+        let pack = [Launch::new("&BOMB2.11K", 6000); 7];
+        let m = play(&pack, false);
+        assert_eq!(m.voices.len(), 1, "one release, one voice");
+        // A held-down Maverick press after the pack still has room.
+        let mut both = pack.to_vec();
+        both.push(Launch::new("&ASHVMIS.11K", 7000));
+        assert_eq!(play(&both, false).voices.len(), 2);
+        // Heard from outside it is one voice too, placed 150 ft away and
+        // started at once.
+        let outside = play(&pack, true);
+        assert!(outside.voices.is_empty());
+        assert_eq!(outside.spatial.voice_count(), 1);
+    }
+
+    #[test]
+    fn the_cockpit_hears_the_launch_at_full_level_centered() {
+        use tore_sim::acoustics::Listener;
+        let clips: BTreeMap<String, Arc<Clip>> =
+            [("&ASHVMIS.11K".to_string(), flat_clip(255))].into();
+        let mut m = test_mixer();
+        m.stall = None;
+        m.spatial_tick(
+            &clips,
+            Listener {
+                position: [0.; 3],
+                right: [1., 0., 0.],
+                view: 0,
+                external: false,
+                own: None,
+            },
+            &[],
+            &[],
+            &[Launch::new("&ASHVMIS.11K", 7000)],
+            [0., 0., 3000.],
+            None,
+            &[],
+        );
+        let mut out = [0.; 2];
+        for _ in 0..200 {
+            out = m.frame(8000.);
+        }
+        // Level 255 of the original's mixer is 0.4 of a full-scale sample;
+        // the clip is a full-scale constant, so the sound is that level at
+        // both ears however far away the aircraft is.
+        assert!((out[0] - 0.4 * 0.99).abs() < 0.02, "{out:?}");
+        assert_eq!(out[0], out[1]);
+    }
+
+    #[test]
     fn ir_recording_keeps_playhead_on_lock_and_volume_tracks_hud_percent() {
         use tore_sim::combat::live::SeekerTone;
         let clips = ["&IR1.11K", "&RDRTRY.5K", "&RDRLOCK.5K"]
@@ -1819,6 +1958,12 @@ mod tests {
             "swap"
         );
         assert_eq!(pan(100, true, 0.), 0.);
+    }
+    fn flat_clip(value: u8) -> Arc<Clip> {
+        Arc::new(Clip {
+            samples: vec![value; 8000],
+            rate: 8000.,
+        })
     }
     fn test_mixer() -> Mixer {
         Mixer {

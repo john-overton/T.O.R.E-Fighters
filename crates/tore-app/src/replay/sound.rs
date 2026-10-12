@@ -139,7 +139,11 @@ impl Cue {
                 tick.listener,
                 &tick.sources,
                 &tick.emissions,
-                &tick.releases.iter().map(String::as_str).collect::<Vec<_>>(),
+                &tick
+                    .releases
+                    .iter()
+                    .map(|name| audio::Launch::named(name))
+                    .collect::<Vec<_>>(),
                 tick.player,
                 tick.engine,
                 &tick.loops,
