@@ -96,6 +96,72 @@ fn sights(frame: &Frame) -> impl Iterator<Item = (u64, Sight)> + '_ {
     })
 }
 
+/// A controller station's phase changes in tick order: the tick, and the
+/// target it holds from then on (`None`: nothing).
+type PhaseChanges = Vec<(u64, Option<u32>)>;
+
+/// The sights, indexed so that the weapons' aim at a tick costs a lookup per
+/// controller station and a short slice of bursts, however long the recording
+/// is. Built a chunk at a time as the pass merges them (chunks arrive in tick
+/// order, so every list stays sorted by tick).
+#[derive(Clone, Debug, Default, PartialEq)]
+struct AimIndex {
+    /// Each controller station's phase changes, by unit and station.
+    phases: BTreeMap<(u32, usize), PhaseChanges>,
+    /// Every burst, in tick order: tick, unit, mount, target.
+    bursts: Vec<(u64, u32, usize, u32)>,
+}
+
+impl AimIndex {
+    fn push(&mut self, when: u64, sight: Sight) {
+        match sight {
+            Sight::Phase {
+                unit,
+                station,
+                target,
+            } => self
+                .phases
+                .entry((unit, station))
+                .or_default()
+                .push((when, target)),
+            Sight::Burst {
+                unit,
+                mount,
+                target,
+            } => self.bursts.push((when, unit, mount, target)),
+        }
+    }
+
+    /// What the weapons hold at `tick`.
+    fn tracks(&self, tick: u64) -> Vec<tore_world::surface::aim::Track> {
+        use tore_world::surface::{
+            UnitId,
+            aim::{BURST_HOLD_TICKS, Track, Weapon, burst_tracks},
+        };
+        // Each station's last phase change at or before `tick`.
+        let mut out: Vec<Track> = self
+            .phases
+            .iter()
+            .filter_map(|(&(unit, station), changes)| {
+                let at = changes.partition_point(|&(when, _)| when <= tick);
+                Some(Track {
+                    unit: UnitId(unit),
+                    weapon: Weapon::Station(station),
+                    target: changes.get(at.checked_sub(1)?)?.1?,
+                })
+            })
+            .collect();
+        // Only the bursts the hold still covers: began at or before `tick`,
+        // and no more than `BURST_HOLD_TICKS` before it.
+        let from = self
+            .bursts
+            .partition_point(|&(when, ..)| when < tick.saturating_sub(BURST_HOLD_TICKS));
+        let to = self.bursts.partition_point(|&(when, ..)| when <= tick);
+        out.extend(burst_tracks(tick, &self.bursts[from..to.max(from)]));
+        out
+    }
+}
+
 /// Everything the pass has found so far.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Tracks {
@@ -111,6 +177,9 @@ pub struct Tracks {
     pub stock: Vec<(u64, SurfaceStock)>,
     /// What surface weapons held, in tick order (format 3).
     pub sights: Vec<(u64, Sight)>,
+    /// The sights again, indexed for `aim_tracks`: a frame asks about one
+    /// tick, and must not walk the recording from its start to answer.
+    aims: AimIndex,
     /// The player's view on every tick from `first`; a tick with no frame
     /// (a gap, or no player) repeats the one before it.
     player: Vec<View>,
@@ -202,6 +271,9 @@ impl Tracks {
         }
         self.surface.extend(batch.surface);
         self.stock.extend(batch.stock);
+        for &(when, sight) in &batch.sights {
+            self.aims.push(when, sight);
+        }
         self.sights.extend(batch.sights);
         for (tick, view) in batch.player {
             let index = tick.saturating_sub(self.first) as usize;
@@ -303,6 +375,14 @@ impl Tracks {
     /// (a battery's launchers, whose controller the recording does not
     /// tell).
     pub fn aim_tracks(&self, tick: u64) -> Vec<tore_world::surface::aim::Track> {
+        self.aims.tracks(tick)
+    }
+
+    /// `aim_tracks` as it was first written: every sight from the start of
+    /// the recording, walked each time. Kept to prove the index finds the
+    /// same.
+    #[cfg(test)]
+    fn aim_tracks_by_scan(&self, tick: u64) -> Vec<tore_world::surface::aim::Track> {
         use tore_world::surface::{
             UnitId,
             aim::{Track, Weapon, burst_tracks},
@@ -620,6 +700,66 @@ pub(crate) mod tests {
         // Searching again holds nothing; the salvo is held 600 ticks.
         assert_eq!(tracks.aim_tracks(620), [held(9, Weapon::Mount(2))]);
         assert!(tracks.aim_tracks(621).is_empty());
+    }
+
+    /// The indexed aim finds what the walk from the start of the recording
+    /// found, at every tick (so a seek, which asks about any tick at all,
+    /// reads the same), over a long recording merged a chunk at a time, with
+    /// several events on one tick and bursts older than their hold.
+    #[test]
+    fn the_indexed_aim_matches_a_walk_over_every_sight() {
+        use tore_replay::{
+            Event,
+            vocab::{field, kind},
+        };
+        let mut seed = 0x2545_f491_u64;
+        let mut next = move |bound: u64| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (seed >> 33) % bound
+        };
+        const PHASES: [&str; 5] = ["search", "prepare", "track", "fire", "pause"];
+        let mut frames = Vec::new();
+        for tick in (100..7_000_u64).step_by(7) {
+            let mut events = Vec::new();
+            for _ in 0..next(4) {
+                let unit = 0x5000_0000 + next(6) as u32;
+                if next(3) == 0 {
+                    events.push(
+                        Event::new(kind::SURFACE_BURST)
+                            .with_subject(unit)
+                            .with_object(next(9) as u32)
+                            .with(field::MOUNT, next(3) as i64),
+                    );
+                } else {
+                    events.push(
+                        Event::new(kind::SURFACE_PHASE)
+                            .with_subject(unit)
+                            .with_object(next(9) as u32)
+                            .with(field::STATION, next(2) as i64)
+                            .with(field::TO, PHASES[next(5) as usize]),
+                    );
+                }
+            }
+            frames.push(Frame {
+                tick,
+                events,
+                ..Default::default()
+            });
+        }
+        let mut tracks = Tracks::new(100);
+        for chunk in frames.chunks(40) {
+            tracks.merge(batch(chunk, &BTreeSet::new(), 0, &mut BTreeSet::new()));
+        }
+        assert!(tracks.sights.len() > 1_000, "the recording is long enough");
+        let mut held = 0;
+        for tick in 0..7_700 {
+            let indexed = tracks.aim_tracks(tick);
+            assert_eq!(indexed, tracks.aim_tracks_by_scan(tick), "tick {tick}");
+            held += indexed.len();
+        }
+        assert!(held > 10_000, "the comparison saw weapons aiming: {held}");
     }
 
     /// A pass over a growing recording reads each new chunk once and ends
