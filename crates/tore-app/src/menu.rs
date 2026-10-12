@@ -689,9 +689,22 @@ pub(crate) fn text_width(font: &Sprite, text: &str) -> i32 {
 pub(crate) struct Canvas<'a>(pub &'a mut [u8]);
 impl Canvas<'_> {
     pub(crate) fn centered_text(&mut self, font: &Sprite, text: &str, rect: (i32, i32, i32, i32)) {
+        self.centered_text_by(font, text, text, rect);
+    }
+    /// `text` centred in `rect` across, and down by the visible glyph bounds
+    /// of `bounds_of`: a top-bar label sits on its neighbours' baseline
+    /// when it is centred by their text, not by its own (a label with a
+    /// descender, "Map", would otherwise ride a pixel or two high).
+    pub(crate) fn centered_text_by(
+        &mut self,
+        font: &Sprite,
+        text: &str,
+        bounds_of: &str,
+        rect: (i32, i32, i32, i32),
+    ) {
         let mut top = font.height;
         let mut bottom = 0;
-        for ch in text.glyph_codes() {
+        for ch in bounds_of.glyph_codes() {
             let [sx, w, h] = font.glyphs[ch as usize];
             for y in 0..h {
                 if (sx..sx + w).any(|x| font.rgba[(y * font.width + x) * 4 + 3] > 0) {

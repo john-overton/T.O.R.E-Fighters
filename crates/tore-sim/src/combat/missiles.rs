@@ -89,7 +89,8 @@ pub enum TargetRole {
 /// records (seeker 3) with the support flag 0x200, as the missile inventory
 /// proposes, plus SA-19 and SA-N-11, which lack the flag but arm the HAWK,
 /// Roland, 2S6 and Kirov (default, pending John). Target role aircraft.
-/// ASROC stays held and the SS-N-9 is anti-ship: neither has a profile.
+/// ASROC stays held (no submarine is ever a target); the SS-N-9 is
+/// [`SURFACE_TO_SURFACE`].
 pub const SURFACE_SUPPORTED: [&str; 13] = [
     "SA2A.JT",
     "SA3.JT",
@@ -110,6 +111,18 @@ pub const SURFACE_SUPPORTED: [&str; 13] = [
 pub const SURFACE_INFRARED: [&str; 6] = [
     "FIM92.JT", "SA7.JT", "SA9.JT", "SA13.JT", "SA14.JT", "SA16.JT",
 ];
+/// The surface-to-surface missiles surface units fire: the Sarancha's SS-N-9,
+/// the only missile record a surface unit carries whose target flag is the
+/// surface one (0x20000) and not the air one (0x10000). Target role
+/// surface; supported radar by the record's support flag 0x200, as the AS-7
+/// and AS-15 (retail data). Its launcher aims it at ships only
+/// ([`ANTI_SHIP`]). Surface units fight each other since John's request of
+/// 2026-10-11; docs/spec/surface-defenses.md, "Surface against surface".
+pub const SURFACE_TO_SURFACE: [&str; 1] = ["SSN9.JT"];
+/// The surface-to-surface missiles a surface unit aims at ships only: the
+/// SS-N-9 is an anti-ship missile (its name in the spec's SAM table; agent
+/// decision, 2026-10-11).
+pub const ANTI_SHIP: [&str; 1] = ["SSN9.JT"];
 /// The reviewed air-to-ground missiles: target role surface. Infrared
 /// (AGM-65G, AGM-65A, the AGM-84E SLAM by its data signature 2),
 /// anti-radiation (AGM-45, AGM-88), active radar (AGM-84A, AM-39, AS-16) and
@@ -156,7 +169,7 @@ impl Profile {
     /// Guidance and active-seeker range, in nautical miles, of each reviewed
     /// identity, by weapon record name.
     fn reviewed_guidance(source: &str) -> Option<(Guidance, Option<f64>)> {
-        if SURFACE_SUPPORTED.contains(&source) {
+        if SURFACE_SUPPORTED.contains(&source) || SURFACE_TO_SURFACE.contains(&source) {
             return Some((Guidance::Supported, None));
         }
         if SURFACE_INFRARED.contains(&source) {
@@ -188,7 +201,9 @@ impl Profile {
     /// Explicit reviewed identities only. This does not expand store allowlists.
     pub fn for_weapon(w: &Weapon) -> Option<Self> {
         let (guidance, active) = Self::reviewed_guidance(&w.source)?;
-        let role = if SURFACE_ROLE.contains(&w.source.as_str()) {
+        let role = if SURFACE_ROLE.contains(&w.source.as_str())
+            || SURFACE_TO_SURFACE.contains(&w.source.as_str())
+        {
             TargetRole::Surface
         } else {
             TargetRole::Aircraft

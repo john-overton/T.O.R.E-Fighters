@@ -535,7 +535,7 @@ Everything below is **spec-derived** unless the fitted table says otherwise.
   friendly flights, enemies and ground objects are silent. Unheard calls
   still make their roll and start their global cooldowns, because those
   cooldowns are shared by every speaker.
-- **Labels.** Flight colour plus position word, such as `Red two`. The player
+- **Labels.** Flight colour plus position word, such as `Red two`. The colour counts the flights of the speaker's own side (CL-R2: Redfor's first flight is Red, as Bluefor's). The player
   is `YOU`; a whole-flight call from a player with no living wingman uses
   `RIO` or `CO-PILOT` in a multi-crew aircraft (the F/A-18D speaks as the RIO,
   the Rafale C as `YOU`).
@@ -589,7 +589,7 @@ Every other seat hears the speaker by flight colour and position. Design:
 
 | Component | Rule | Known difference |
 | --- | --- | --- |
-| Flight numbering | The player's flight is the first (Red), then the other populated friendly Quick Mission wings, then the enemy wings, each in setup order. Positions are the wing slots, the player being Red one. | The original numbers flights in mission order; a Quick Mission has no such file. A ninth flight, unreachable with six wings, is labelled `Flight 9`. |
+| Flight numbering | The player's flight is the first, then the other populated friendly Quick Mission wings, then the enemy wings, each in setup order; this number identifies a flight. The colour a flight is **called** by counts within its own side (CL-R2, John 2026-10-11: the tower called the Redfor wingman "Blue two"): each side's first populated flight is Red, its next Blue, and so on, so Redfor Enemy Wing 1 is "Red one" and "Red two" whoever flies it, in tower calls, wing replies, chatter, the battle net, attack calls, the HUD, replays and the debrief. Both sides therefore have a Red flight; a side hears only its own flights, so no listener hears two. Positions are the wing slots, the player being Red one. | The original numbers flights in mission order; a Quick Mission has no such file. A ninth flight, unreachable with six wings, is labelled `Flight 9`. |
 | AI releases announced | Every AI weapon release is announced. | The original announces on one of two AI release paths; which releases that covers is unknown. |
 | Gun launch cooldown | The 4 second gun cooldown silences the whole unguided launch call, so a burst makes one call. | The original may say the generic line for every round. |
 | "I'm using my gun" | Followed by ". " before the generic line. | The original joins the two texts directly. |

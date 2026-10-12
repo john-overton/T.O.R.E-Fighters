@@ -13,7 +13,8 @@
 //!
 //! - **Mission...** opens the creator on **the lobby's current mission** (never
 //!   on the player's own last draft), for everyone. The King in the lobby gets
-//!   it editable, with `OK` reading **Accept** and Start locked to Airborne.
+//!   it editable, with `OK` reading **Accept**; Start and Enemy start offer
+//!   Ground as in single player (agent decision, slice CL-R, 2026-10-11).
 //!   Accept checks the draft against what a host takes
 //!   ([`crate::quick_mission::QuickMission::lobby_spec`]), lays it over the
 //!   lobby's mission (so the cheats and what the creator does not carry stay),

@@ -86,7 +86,7 @@ impl World {
         let sender = crate::radio_calls::members(&self.roster, self.ai_wings.as_ref(), |_| true)
             .into_iter()
             .find(|member| member.id == plane.0);
-        let flight = sender.as_ref().map(|member| member.flight);
+        let flight = sender.as_ref().map(|member| member.colour);
         let label = sender
             .as_ref()
             .map_or_else(|| "YOU".to_owned(), crate::radio_calls::label);

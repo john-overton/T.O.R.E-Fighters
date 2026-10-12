@@ -49,6 +49,10 @@ QUICK_STATES = [
     # Lobby pass (slice L4): the mission page read-only, for a player who is not the King.
     "lobby-creator-view", "lobby-creator-view-gaps", "lobby-creator-view-click", "lobby-creator-view-changed",
     "lobby-creator-view-flying", "lobby-creator-view-locked", "lobby-creator-view-target",
+    # Slice CL-R: the enemy's ground start rows and list, and the creator's Map (airborne, no target).
+    "enemy-ground-start", "enemy-ground-start-auto", "enemy-airports", "map", "map-lobby",
+    # Slice CL-R2: the map while it is still being built, at its widest zoom (the theater just fills the plot) and its narrowest.
+    "map-building", "map-wide", "map-close",
 ]
 THEATERS = ["BAL", "CUB", "EGY", "LFA", "FRA", "GRE", "IRA", "KURILE", "TVIET", "SPA", "APA", "PGU", "NSK", "WTA", "UKR", "VLA"]
 VARIANT_THEATERS = [f"~{code}{n}" for code in ("UKR", "VLA") for n in range(1, 9)] + ["~UKRF", "~VLAF", "~WTAF"]
@@ -175,6 +179,38 @@ def scene_problems(condition: int, path_marker=r"Scene capture:"):
 def menu_picture(size=(640, 480)):
     # The dark input, graphics, replay and locate screens use few colours.
     return lambda output: picture_problems(output, r"(?:Menu|Locate) preview:", size, min_colors=8)
+
+
+def map_plot_filled():
+    """The creator's Map snapshot is a menu picture whose plot (x 12 to 470,
+    y 30 to 420) has no void: the planning map's cell for "off the theater" is
+    (18, 18, 18), and the map never zooms or pans far enough to show it
+    (slice CL-R2, John 2026-10-11: "we don't see black space around it")."""
+    base = menu_picture()
+
+    def check(output: str) -> list[str]:
+        problems = base(output)
+        m = re.search(r"Menu preview:\s*(\S+)", output)
+        if not m or not Path(m.group(1)).exists():
+            return problems + ["no map picture written"]
+        data = Path(m.group(1)).read_bytes()
+        header = re.match(rb"P6\s+(\d+)\s+(\d+)\s+255\s", data)
+        if not header:
+            return problems + ["the map picture is not a binary PPM"]
+        width, height = int(header.group(1)), int(header.group(2))
+        pixels = data[header.end():]
+        void = 0
+        for y in range(30, 420):
+            row = (y * width + 12) * 3
+            for x in range(458):
+                j = row + x * 3
+                if pixels[j] == 18 and pixels[j + 1] == 18 and pixels[j + 2] == 18:
+                    void += 1
+        if void > 50:
+            problems.append(f"{void} void pixels show in the map's plot")
+        return problems
+
+    return check
 
 
 def flight_picture(size):
@@ -393,21 +429,43 @@ def scenarios() -> list[Scenario]:
                 args=["--quick-mission", "--snapshot", "{work}/shot.ppm", "--snapshot-state", state, "--no-audio"],
                 timeout=120,
                 expect=[r"(Menu|Locate) preview:"],
-                check=menu_picture(),
+                check=map_plot_filled() if state.startswith("map") else menu_picture(),
             )
         )
-    # Every creator popup (fields 3 to 34), with a ground start chosen so the
+    # Every creator popup (fields 3 to 36), with a ground start chosen so the
     # airport row exists (Simferopol: airport 1, Zaporizhzhya, is a Redfor
-    # field since slice AL1 and no Blue ground start).
-    for field in range(3, 35):
+    # field since slice AL1 and no Blue ground start). The enemy's Start and
+    # Airport (35 and 36, slice CL-R) are opened with Enemy Wing 1 parked at
+    # Donets'k (airport 5), so the Enemy airport row exists too.
+    for field in range(3, 37):
+        enemy = ["--enemy-ground-start", "5"] if field >= 35 else []
         out.append(
             Scenario(
                 name=f"menus-snap-quick-field-{field}",
                 lane="menus",
-                args=["--quick-mission", "--ground-start", "2", "--snapshot", "{work}/shot.ppm", "--snapshot-state", f"field-{field}", "--no-audio"],
+                args=["--quick-mission", "--ground-start", "2", *enemy, "--snapshot", "{work}/shot.ppm", "--snapshot-state", f"field-{field}", "--no-audio"],
                 timeout=120,
                 expect=[r"Menu preview:"],
                 check=menu_picture(),
+            )
+        )
+    # The creator's Map (slice CL-R) on the Ukraine with a ground target, a
+    # Blue ground start at L'viv (airport 9) and Enemy Wing 1 parked at
+    # Donets'k (airport 5): both starts are named and the objective is an
+    # area, built from the mission the creator would fly.
+    for state in ("map", "map-lobby", "map-wide", "map-close"):
+        out.append(
+            Scenario(
+                name=f"menus-snap-quick-{state}-ukr-target-ground",
+                lane="menus",
+                args=["--theater", "UKR", "--quick-mission", "--ground-start", "9", "--enemy-ground-start", "5",
+                      "--ground-target", "QUCITY", "--defenses", "2", "2", "--surface-seed", "12345",
+                      "--snapshot", "{work}/shot.ppm", "--snapshot-state", state, "--no-audio"],
+                timeout=180,
+                expect=[r"creator map: BLUE START: L'VIV at", r"creator map: RED START: DONETS'K at",
+                        r"creator map: objective area x=\d+ z=\d+ radius=30380", r"Menu preview:"],
+                forbid=[r"the map did not open"],
+                check=map_plot_filled(),
             )
         )
     out.append(

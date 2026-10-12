@@ -280,6 +280,7 @@ impl Map {
         Projection {
             center: [anchor[0] + self.offset[0], anchor[1] + self.offset[1]],
             feet_per_pixel: self.width_nmi() * NMI / f64::from(AREA.2),
+            area: AREA,
         }
     }
     fn draw_filters(
@@ -359,41 +360,13 @@ impl Map {
         self.last_player = [state.position[0], state.position[2]];
         let projection = self.projection(state);
         let icons = sprites.get("MCICONS.PIC");
-        let background = sprites.get(&world.theater.map);
-        for y in AREA.1..AREA.1 + AREA.3 {
-            for x in AREA.0..AREA.0 + AREA.2 {
-                let [east, north] = projection.world(x, y);
-                let col = (east / f64::from(CELL_FEET)).floor() as i32;
-                let row = (north / f64::from(CELL_FEET)).floor() as i32;
-                let rgb = match world.theater.lookup(col, row, 1) {
-                    Some(cell) => background.map_or_else(
-                        || {
-                            if cell.color == 255 {
-                                [65, 119, 137]
-                            } else {
-                                scenery.palette[usize::from(cell.color)]
-                            }
-                        },
-                        |map| {
-                            let u = (east / (world.theater.cols as f64 * f64::from(CELL_FEET))
-                                * map.width as f64)
-                                .clamp(0., (map.width - 1) as f64)
-                                as usize;
-                            let v = ((1.
-                                - north / (world.theater.rows as f64 * f64::from(CELL_FEET)))
-                                * map.height as f64)
-                                .clamp(0., (map.height - 1) as f64)
-                                as usize;
-                            let at = (v * map.width + u) * 4;
-                            map.rgba[at..at + 3].try_into().unwrap()
-                        },
-                    ),
-                    None => [18; 3],
-                };
-                let at = (y as usize * 640 + x as usize) * 4;
-                pixels[at..at + 4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
-            }
-        }
+        draw_ground(
+            pixels,
+            world,
+            &projection,
+            sprites.get(&world.theater.map),
+            |color| scenery.palette[usize::from(color)],
+        );
         let mut labels = Vec::new();
         let mut markers = Vec::new();
         if let Some((x, y)) = projection.point(state.position) {
@@ -607,29 +580,197 @@ impl Map {
         );
     }
 }
+/// The theater under the plot: the imported map picture when there is one,
+/// else each terrain cell's colour (`palette` for the land, the sea blue).
+fn draw_ground(
+    pixels: &mut [u8],
+    world: &Terrain,
+    projection: &Projection,
+    background: Option<&Sprite>,
+    palette: impl Fn(u8) -> [u8; 3],
+) {
+    let area = projection.area;
+    for y in area.1..area.1 + area.3 {
+        for x in area.0..area.0 + area.2 {
+            let [mut east, mut north] = projection.world(x, y);
+            // A pixel row or column that starts exactly on the theater's far
+            // edge is still the theater's last cell, not the void beyond it
+            // (a view held against the north edge starts there).
+            let (width, height) = (
+                world.theater.cols as f64 * f64::from(CELL_FEET),
+                world.theater.rows as f64 * f64::from(CELL_FEET),
+            );
+            if (width..width + projection.feet_per_pixel).contains(&east) {
+                east = width - 1e-3;
+            }
+            if (height..height + projection.feet_per_pixel).contains(&north) {
+                north = height - 1e-3;
+            }
+            let col = (east / f64::from(CELL_FEET)).floor() as i32;
+            let row = (north / f64::from(CELL_FEET)).floor() as i32;
+            let rgb = match world.theater.lookup(col, row, 1) {
+                Some(cell) => background.map_or_else(
+                    || {
+                        if cell.color == 255 {
+                            [65, 119, 137]
+                        } else {
+                            palette(cell.color)
+                        }
+                    },
+                    |map| {
+                        let u = (east / (world.theater.cols as f64 * f64::from(CELL_FEET))
+                            * map.width as f64)
+                            .clamp(0., (map.width - 1) as f64)
+                            as usize;
+                        let v = ((1. - north / (world.theater.rows as f64 * f64::from(CELL_FEET)))
+                            * map.height as f64)
+                            .clamp(0., (map.height - 1) as f64)
+                            as usize;
+                        let at = (v * map.width + u) * 4;
+                        map.rgba[at..at + 3].try_into().unwrap()
+                    },
+                ),
+                None => [18; 3],
+            };
+            let at = (y as usize * 640 + x as usize) * 4;
+            pixels[at..at + 4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+        }
+    }
+}
+
+/// Which side a planning map marker belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlanSide {
+    Blue,
+    Red,
+}
+
+/// One start on the planning map: where a wing begins and which way it
+/// points, with the words beside it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlanMarker {
+    pub position: [f64; 3],
+    /// Radians clockwise from north.
+    pub heading: f64,
+    pub side: PlanSide,
+    pub label: String,
+}
+
+/// What the Quick Mission creator's map shows before a flight (slice CL-R,
+/// John 2026-10-11: "a map button that shows a screen like the in-game map
+/// and shows the bluefor and redfor starting locations"): the starts, the
+/// approximate objective and a note.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Plan {
+    pub markers: Vec<PlanMarker>,
+    /// The objective area: its centre (east, north feet) and radius in feet.
+    pub objective: Option<([f64; 2], f64)>,
+    /// Runway objects whose airfield a start's label names already, so the
+    /// field is not drawn again beneath it.
+    pub start_fields: Vec<u32>,
+    /// The line below the plot.
+    pub summary: String,
+    /// Words in the side panel under the legend, when the map has to say
+    /// something about what it shows.
+    pub note: Option<String>,
+}
+
+/// Colour of the objective area's ring and its words.
+const OBJECTIVE: [u8; 4] = [255, 223, 92, 255];
+/// The dark edge that keeps the objective area visible on light ground.
+const OBJECTIVE_EDGE: [u8; 4] = [24, 26, 28, 255];
+
+mod plan_view;
+pub use plan_view::PlanView;
+
+/// The objective area's look: yellow hatching edged in dark inside a yellow
+/// ring between two dark ones, so it shows on sea, forest and desert alike.
+fn objective_mark(pixels: &mut [u8], at: (f64, f64), r: f64, clip: (i32, i32, i32, i32)) {
+    let (x0, y0) = ((at.0 - r).floor() as i32, (at.1 - r).floor() as i32);
+    for y in y0.max(clip.1)..((at.1 + r).ceil() as i32).min(clip.1 + clip.3) {
+        for x in x0.max(clip.0)..((at.0 + r).ceil() as i32).min(clip.0 + clip.2) {
+            if (f64::from(x) - at.0).hypot(f64::from(y) - at.1) > r {
+                continue;
+            }
+            let color = match (x - y).rem_euclid(6) {
+                0 => OBJECTIVE,
+                1 => OBJECTIVE_EDGE,
+                _ => continue,
+            };
+            let i = (y as usize * 640 + x as usize) * 4;
+            pixels[i..i + 4].copy_from_slice(&color);
+        }
+    }
+    let steps = (r * 8.).ceil().max(64.) as u32;
+    for (ring, color) in [
+        (r + 1., OBJECTIVE_EDGE),
+        (r - 1., OBJECTIVE_EDGE),
+        (r, OBJECTIVE),
+    ] {
+        let mut p = Paint {
+            pixels: &mut *pixels,
+            clip,
+            color,
+        };
+        for i in 0..steps {
+            let a = std::f64::consts::TAU * f64::from(i) / f64::from(steps);
+            let b = std::f64::consts::TAU * f64::from(i + 1) / f64::from(steps);
+            p.line(
+                (at.0 + ring * a.sin(), at.1 - ring * a.cos()),
+                (at.0 + ring * b.sin(), at.1 - ring * b.cos()),
+            );
+        }
+    }
+}
+
+/// The width of `text` in `font`.
+fn advance(font: &Font, text: &str) -> i32 {
+    text.glyph_codes()
+        .map(|c| font.glyphs[c as usize].advance as i32)
+        .sum()
+}
+
 struct Projection {
     center: [f64; 2],
     feet_per_pixel: f64,
+    /// The plot the projection draws into (the in-game map's, or the
+    /// planning map's smaller one).
+    area: (i32, i32, i32, i32),
 }
 impl Projection {
     fn inside(&self, x: i32, y: i32) -> bool {
-        (AREA.0 + 12..AREA.0 + AREA.2 - 12).contains(&x)
-            && (AREA.1 + 12..AREA.1 + AREA.3 - 12).contains(&y)
+        let area = self.area;
+        (area.0 + 12..area.0 + area.2 - 12).contains(&x)
+            && (area.1 + 12..area.1 + area.3 - 12).contains(&y)
     }
     fn point(&self, position: [f64; 3]) -> Option<(i32, i32)> {
         if !position.iter().all(|p| p.is_finite()) {
             return None;
         }
-        let x =
-            f64::from(AREA.0 + AREA.2 / 2) + (position[0] - self.center[0]) / self.feet_per_pixel;
-        let y = 234. - (position[2] - self.center[1]) / self.feet_per_pixel;
+        let x = f64::from(self.area.0 + self.area.2 / 2)
+            + (position[0] - self.center[0]) / self.feet_per_pixel;
+        let y = f64::from(self.area.1 + self.area.3 / 2)
+            - (position[2] - self.center[1]) / self.feet_per_pixel;
         self.inside(x as i32, y as i32)
             .then_some((x as i32, y as i32))
     }
+    /// Where a position falls on the screen, inside the plot or not.
+    fn unclipped(&self, position: [f64; 3]) -> Option<(f64, f64)> {
+        position.iter().all(|p| p.is_finite()).then(|| {
+            (
+                f64::from(self.area.0 + self.area.2 / 2)
+                    + (position[0] - self.center[0]) / self.feet_per_pixel,
+                f64::from(self.area.1 + self.area.3 / 2)
+                    - (position[2] - self.center[1]) / self.feet_per_pixel,
+            )
+        })
+    }
     fn world(&self, x: i32, y: i32) -> [f64; 2] {
         [
-            self.center[0] + (x as f64 - f64::from(AREA.0 + AREA.2 / 2)) * self.feet_per_pixel,
-            self.center[1] - (y as f64 - 234.) * self.feet_per_pixel,
+            self.center[0]
+                + (x as f64 - f64::from(self.area.0 + self.area.2 / 2)) * self.feet_per_pixel,
+            self.center[1]
+                - (y as f64 - f64::from(self.area.1 + self.area.3 / 2)) * self.feet_per_pixel,
         ]
     }
 }
@@ -640,11 +781,20 @@ fn place_marker(
     occupied: &mut Vec<(i32, i32)>,
     labels: &mut Vec<(i32, i32, i32, i32)>,
 ) -> (i32, i32) {
+    place_marker_in(AREA, pixels, point, occupied, labels)
+}
+fn place_marker_in(
+    area: (i32, i32, i32, i32),
+    pixels: &mut [u8],
+    point: (i32, i32),
+    occupied: &mut Vec<(i32, i32)>,
+    labels: &mut Vec<(i32, i32, i32, i32)>,
+) -> (i32, i32) {
     let free = |(x, y): (i32, i32)| {
-        x >= AREA.0 + 12
-            && x < AREA.0 + AREA.2 - 12
-            && y >= AREA.1 + 12
-            && y < AREA.1 + AREA.3 - 24
+        x >= area.0 + 12
+            && x < area.0 + area.2 - 12
+            && y >= area.1 + 12
+            && y < area.1 + area.3 - 24
             && !labels
                 .iter()
                 .any(|&(a, b, c, d)| x - 12 < c && x + 12 > a && y - 10 < d && y + 10 > b)
@@ -674,7 +824,7 @@ fn place_marker(
     if placed != point {
         let mut p = Paint {
             pixels,
-            clip: AREA,
+            clip: area,
             color: INK,
         };
         p.line(
@@ -749,6 +899,17 @@ fn label(
     pixels: &mut [u8],
     font: &Font,
     text: &str,
+    at: (i32, i32),
+    color: [u8; 4],
+    occupied: &mut Vec<(i32, i32, i32, i32)>,
+) {
+    label_in(AREA, pixels, font, text, at, color, occupied);
+}
+fn label_in(
+    area: (i32, i32, i32, i32),
+    pixels: &mut [u8],
+    font: &Font,
+    text: &str,
     (x, y): (i32, i32),
     color: [u8; 4],
     occupied: &mut Vec<(i32, i32, i32, i32)>,
@@ -759,10 +920,10 @@ fn label(
         .map(|c| font.glyphs[c as usize].advance as i32)
         .sum::<i32>();
     let h = font.height as i32;
-    let x = (x - w / 2).clamp(AREA.0 + 2, (AREA.0 + AREA.2 - w - 2).max(AREA.0 + 2));
+    let x = (x - w / 2).clamp(area.0 + 2, (area.0 + area.2 - w - 2).max(area.0 + 2));
     let fits = |y: i32| {
-        y > AREA.1
-            && y + h < AREA.1 + AREA.3
+        y > area.1
+            && y + h < area.1 + area.3
             && !occupied
                 .iter()
                 .any(|&(a, b, c, d)| x - 2 < c && x + w + 2 > a && y - 1 < d && y + h + 1 > b)
@@ -774,7 +935,7 @@ fn label(
     Canvas(pixels).rect((x - 2, y - 1, w + 4, h + 2), [30, 36, 40, 255]);
     Paint {
         pixels,
-        clip: AREA,
+        clip: area,
         color,
     }
     .text(font, &text, x, y);
@@ -946,6 +1107,7 @@ mod tests {
         let p = Projection {
             center: [1000., 2000.],
             feet_per_pixel: 100. * NMI / 476.,
+            area: AREA,
         };
         assert_eq!(p.point([1000., 0., 2000.]), Some((250, 234)));
         assert_eq!(p.point([1000. + 25. * NMI, 0., 2000.]), Some((369, 234)));

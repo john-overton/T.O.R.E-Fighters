@@ -75,7 +75,16 @@ Exact original font choice, popup texture placement and field bevel composition 
 unknown. Further research would inspect the original dialog drawing data.
 
 The Aircraft menu label is vertically centered by visible glyph bounds within
-y=38..58, matching the [ordnance menu bar](ordnance-presentation.md).
+y=38..58, matching the [ordnance menu bar](ordnance-presentation.md). The
+**Map** entry (slice CL-R2, John 2026-10-11: "the map positioning in the menu
+bar is off quite a bit") follows the same rule as the other bars' entries:
+its label starts one label's gap, 14 pixels, after the word before it
+(103 for Aircraft, then about 175 for Map; the ordnance bar's Weapons entry is 75
+wide and Airbase starts 13 to 14 pixels after the word), and the hit boxes
+abut, each running from its label to the next. Its label sits on Aircraft's
+baseline, because the three letters of "Map" have a descender that would
+otherwise lift a label centred by its own visible bounds a pixel or two.
+Single player, the lobby's creator and the read-only view draw the one bar.
 
 ## Ground target and defenses
 
@@ -312,7 +321,7 @@ The picker lists the player's side's airports and the neutral ones, in layout
 order, and its default is the first of them, so a Blue player no longer starts
 at Polotsk in the Baltics (an enemy field ringed by ZSU-23s) but at Siauliai,
 and in South Korea at Kimpo instead of Koksan. A Redfor pilot's picker would
-list the Red fields; the multiplayer creator stays airborne. In a theater with
+list the Red fields. In a theater with
 no field for the player's side (for Blue, the Falklands and North Vietnam)
 Ground is not offered: the Start field is greyed with the note "(no friendly
 airfield)", the Ground row of its list is dimmed, and choosing it, or changing
@@ -322,6 +331,38 @@ needs a friendly or neutral airfield." The `--ground-start N` option refuses an
 enemy field with "is an enemy airfield: no ground start there. Choose one of
 your side's airfields or Airborne." A dedicated server refuses a mission whose
 `start ground N` names an enemy field, before it opens its port.
+
+**Enemy ground start (John, 2026-10-11, slice CL-R).** "Add redfor ground
+starts. Match the quick mission creator styles." The creator's right column
+gains two rows under the ground target sentence, the mirror of Start and
+Airport: **Enemy start: Airborne/Ground** and, with Ground, **Enemy airport:**.
+They park Enemy Wing 1 (the flight Redfor players take online; the AI flies it
+in single player) at a Redfor or neutral field, never a Blue one (a STOL strip is
+allowed, labelled, as for Blue); Enemy Wings 2 and 3 stay airborne.
+
+| Blue (Start, Airport) | Redfor (Enemy start, Enemy airport) |
+| --- | --- |
+| Airborne (default) or Ground | The same two choices |
+| The player's side's and neutral fields, layout order | The Red and neutral fields, layout order, STOL fields last and labelled |
+| With a ground target, "Automatic (near the target)" first: the Blue-side field nearest the target at least 15 nm from it | The same first row: the Red-side field nearest the target at least 15 nm from it |
+| No field: Start greyed, "(no friendly airfield)" | No field: Enemy start greyed, "(no Redfor airfield)", and "No Redfor airfield in this theater, so the enemy starts airborne. An enemy ground start needs a Redfor or neutral airfield." |
+| A changed theater resets the airport | The same |
+| `--ground-start N` refuses an enemy field | `--enemy-ground-start N` refuses a Blue field: "is a Blue airfield: no enemy ground start there. Choose a Redfor airfield or start the enemy Airborne." |
+| Mission text `start ground N/auto` | Mission text `enemy-start ground N/auto` |
+
+Enemy start Ground with Enemy Wing 1 empty is refused at OK ("Enemy wing 1 has
+no aircraft to park. Give it aircraft or start the enemy Airborne."), and both
+sides on one airfield are refused ("You and the enemy cannot start on the same
+airfield."). The enemy ground start overrides the enemy's start distance
+([start placement](surface-defenses.md#start-placement)).
+
+**The multiplayer creator offers ground starts (agent decision, slice CL-R,
+2026-10-11).** It locked Start to Airborne from EF8 (John's 2026-09-28 rule,
+"everyone starts airborne"); John's 2026-10-11 request for Redfor ground
+starts in the creator's style supersedes that, so the King's creator offers
+both sides' rows as single player does, Accept carries them in the mission
+text, and the read-only creator shows them. The notice on opening reads
+"Multiplayer: Accept sends this mission to the lobby."
 
 **STOL strips (opinionated, John 2026-10-11; replaces his 2026-09-30 rule).**
 The 22 airstrips with a runway under 3,000 ft (about 1,074 ft, in Cuba, the
@@ -411,6 +452,68 @@ wingmen so the parked-wing path is exercised.
 restart, real runway support, takeoff probes and rendering checks.
 
 [Reverse-cycling validation](../baselines/horizon-creator.md).
+
+## Mission map
+
+John, 2026-10-11: "Add a map button that shows a screen like the in-game map
+and shows the bluefor and redfor starting locations", and "show the objective
+as an APPROXIMATE location (an area/circle around it, not the exact target
+positions)". An addition: retail's creator has no map.
+
+- **Map** sits in the creator's top bar after "? Aircraft" (see above). It
+  works in single player, in the lobby's editable creator and in the
+  read-only view. Esc, Enter, Space or Close return to the creator
+  unchanged; the in-game map's +/- zoom, arrows pan and Home resets.
+- The screen is the in-game map's ground, frame and scale bar. Airfields are
+  drawn one per airport on blue, red or grey tiles by side.
+- **It builds in the background** (slice CL-R2, John 2026-10-11: opening the
+  map took about 4 s on the menu's own thread). Clicking Map starts the
+  build on a thread of its own and the creator carries on, saying "Building
+  mission map..." in the notice box (the creator's retail notice style) until
+  the map is ready, when it opens by itself. Esc, Cancel and OK give the build
+  up (Esc gives up the build before it leaves the creator). If any setting
+  changes while the map builds, that result is stale: it is dropped and the
+  map is built again for the settings now in force, so the map that opens is
+  always the draft's. The result is the same as before for the same
+  settings and seed, and single player still draws the flight's seed when
+  Map is clicked and keeps it on OK.
+- **Zoom, scroll and rocker** (opinionated, John 2026-10-11: "it should start
+  zoomed in and have the scroll bars for the map, there should also be a rocker
+  switch to zoom in and out"). The map opens zoomed in on the objective area
+  and the starts: the closest view, no narrower than 50 nm across, that holds
+  both starts and the whole objective circle with a fifth of the plot to
+  spare; if no view holds them all, the first start (the player's) and the
+  objective; with neither, one step in. Home returns to that view. A
+  horizontal bar under the plot and a vertical bar beside it scroll the map:
+  each has an arrow button at either end (a click moves the view an eighth
+  of its width or height), a thumb that drags, and a track that pages by
+  seven eighths on a click; the arrow keys still pan by a quarter. A retail
+  vertical rocker (the debrief's, five frames, tilting on press) in the side
+  panel zooms: its top half in, its bottom half out, with ZOOM IN and ZOOM
+  OUT beside it; + and - do the same and tap the rocker. The bars are drawn
+  flat in the menus' greys with arrow ends (retail has no horizontal bar or
+  arrow-ended bar decoded); the rocker is retail's own art.
+- **No black border at any zoom.** The widest zoom is the one at which the
+  theater just fills the plot (as wide as the theater, or as tall, whichever
+  is the tighter), then the in-game map's 800, 400, 200, 100, 50 and 25 nm
+  steps that are narrower. The view is held inside the theater at every zoom
+  and pan, so the picture always fills the plot.
+- **BLUE START** and **RED START** mark where the player and Enemy Wing 1
+  start: the airborne point with its heading, or the airfield's name for a
+  ground start. Another wing that starts more than 3 nm from its side's start
+  is marked **BLUE WING n** or **RED WING n**. A line under the map says
+  whether each side starts in the air or on the ground.
+- The positions are the flight's: opening the map builds the mission the
+  creator would fly. In single player that draws the ground target's seed
+  then, and OK keeps it once, so the flight flies the layout the map showed.
+  In the lobby the host draws the seed when the flight starts, so the map
+  shows the target's retail spot and says the target and starts may move.
+- **The objective area** (opinionated, John 2026-10-11; numbers fitted): a
+  circle of 5 nm radius around a centre moved 0.5 to 2.5 nm off the targets'
+  centroid, in a direction and by a distance hashed from the theater, the
+  target and the seed, so the same mission shows the same circle, the targets
+  are always inside it and never at its centre. It is drawn at least 7 pixels
+  in radius. No ground target, no area.
 
 ## Group objectives
 

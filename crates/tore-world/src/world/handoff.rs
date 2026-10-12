@@ -134,24 +134,36 @@ impl World {
         let service = tore_sim::airport::Service::new(&self.terrain.airport_scene)
             .map_err(std::io::Error::other)?;
         let turbulence_rng = tore_formats::flight_model::clock_rng::NativeRng::seeded(1)?;
-        // The mission's home base: the one every cockpit checks, or with no
-        // cockpit the ground start's airport.
-        let home = match self.cockpits.first() {
-            Some(cockpit) => cockpit.result.home_base(),
-            None => ai_wings::outcome::home_base(
-                &self.terrain,
-                self.combat
-                    .mission_layout
-                    .as_ref()
-                    .and_then(|layout| layout.ground.as_ref())
-                    .map(|ground| ground.airport),
-            ),
+        // The mission's home base for the plane's side: its side's ground
+        // start airport (Blue's, or Redfor's for an enemy ground start,
+        // slice CL-R), none for a side that starts in the air.
+        let layout = self.combat.mission_layout.as_ref();
+        let parked = if self.roster.redfor(plane) {
+            layout.and_then(|layout| layout.enemy_ground.as_ref())
+        } else {
+            layout.and_then(|layout| layout.ground.as_ref())
         };
+        let home = ai_wings::outcome::home_base(&self.terrain, parked.map(|ground| ground.airport));
         let wings = self.ai_wings.as_mut().ok_or("no AI flies this mission")?;
         let target = wings
             .mission()
             .actor(id)
             .and_then(tore_sim::ai::mission::AiActor::current_target);
+        // Still parked where its side's ground start put it: the cockpit
+        // starts as a single-player ground start does, on NAV with the
+        // departure airport selected (slice CL-R, for either side).
+        let parked_at = wings.mission().actor(id).and_then(|actor| {
+            actor
+                .ground_start()
+                .filter(|_| {
+                    actor
+                        .flight()
+                        .research
+                        .as_ref()
+                        .is_some_and(|research| research.on_ground)
+                })
+                .map(|start| start.runway.airport)
+        });
         let removed = wings
             .remove_actor(id)
             .ok_or_else(|| format!("the AI does not fly plane {id}"))?;
@@ -198,6 +210,9 @@ impl World {
                 cheats.unlimited_ammo,
             ),
         }
+        if parked_at.is_some() && kept.is_none() {
+            ownship.armed = false;
+        }
         let airport_nav_mode = !ownship.armed;
         let row = self.combat.state.targets.remove(index);
         if let Err(error) = self
@@ -219,6 +234,18 @@ impl World {
             if let Some(airport) = kept.airport {
                 airport_service.reselect(&self.terrain.airport_scene, airport);
             }
+        }
+        if let Some(airport) = parked_at.filter(|_| kept.is_none()) {
+            airport_service.command(
+                &self.terrain.airport_scene,
+                super::airport_aircraft(
+                    &self.terrain,
+                    &flight,
+                    airport_nav_mode,
+                    self.roster.redfor(plane),
+                ),
+                tore_sim::airport::Command::SelectAirport(airport),
+            );
         }
         let crew = comms::crew(&kind.profile);
         self.roster

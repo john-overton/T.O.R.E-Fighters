@@ -994,13 +994,20 @@ def scenarios() -> list[Scenario]:
                 problems.append(f"{label} flew the gates for {times['Final'] - times['Approach']:.0f} s")
         return problems
 
-    # Amiens (FRA 9), Burevestnik (KURILE 3), Hyon Ni (NSK 6), Donets'k and
-    # Kharkiv (UKR 5 and 6) are Redfor fields since slice AL1: the Blue wing
-    # neither starts nor is ordered to land there, so only the Blue ones stay.
-    for theater, airport in (("UKR", "8"), ("UKR", "12")):
+    # L'viv and Ivano Frankivs'k (UKR 8 and 12) are Blue fields. Amiens (FRA
+    # 9), Burevestnik (KURILE 3), Hyon Ni (NSK 6), Donets'k and Kharkiv (UKR 5
+    # and 6) are Redfor fields since slice AL1: the Blue wing neither starts
+    # nor is ordered to land there, so the Redfor seat flies them
+    # (`--probe-redfor`, slice CL-R): the scripted leader and its wingman are
+    # Enemy Wing 1 of an open mission, parked there by an enemy ground start.
+    for theater, airport, redfor in (
+        ("UKR", "8", False), ("UKR", "12", False),
+        ("FRA", "9", True), ("KURILE", "3", True), ("NSK", "6", True), ("UKR", "5", True), ("UKR", "6", True),
+    ):
         out.append(probe(f"ils-terrain-{theater.lower()}-a{airport}", [
             "--theater", theater, "--ground-start", airport, "--probe-wing-size", "2", "--maneuver", "takeoff",
-            "--probe-wing-order", "18000:land-selected", "--separation", "200", "--probe-wing-only"],
+            "--probe-wing-order", "18000:land-selected", "--separation", "200", "--probe-wing-only",
+            *(["--probe-redfor"] if redfor else [])],
             ticks=120000, timeout=2400, check=land_order_checker(lands_without_hanging)))
     # Redrawn airports (slice CL-AP, John 2026-10-11: "ensure AI actually taxi
     # on taxiways instead of grass"): a ground start, takeoff, land order and
@@ -1036,6 +1043,26 @@ def scenarios() -> list[Scenario]:
             "--theater", theater, "--ground-start", airport, *extra, "--probe-wing-size", size, "--maneuver", "takeoff",
             "--probe-wing-order", f"{order}:land-selected", "--separation", "200", "--probe-wing-only", "--probe-pavement"],
             ticks=216000 if size == "4" else 108000, timeout=2400, check=on_pavement(landers)))
+    # An enemy ground start in single player (slice CL-R): Enemy Wing 1 parks
+    # at Kharkiv (UKR 6, a Redfor field) while the player's wing leaves Odesa;
+    # the AI pair must start on the ground and be flying at the end.
+    def enemy_wing_took_off(output: str) -> list[str]:
+        problems = checker(ground=True)(output)
+        starts = re.findall(r"^t=0 \(0\.0s\) (Enemy 1-\d) \S+: alive=true agl=(-?\d+) ", output, re.M)
+        if len(starts) != 2 or any(int(agl) > 50 for _, agl in starts):
+            problems.append(f"Enemy Wing 1 did not start parked: {starts}")
+        for raw in output.splitlines():
+            m = ACTOR.match(raw)
+            if m and m.group(2).startswith("Enemy 1-"):
+                y = re.search(r" y=(-?[\d.]+) ", raw)
+                if m.group(5) != "true" or not y or float(y.group(1)) < 1500:
+                    problems.append(f"{m.group(2)} is not flying at the end: {raw[:160]}")
+        return problems
+
+    out.append(probe("enemy-ground-start-ukr-a6", [
+        "--theater", "UKR", "--ground-start", "9", "--enemy-ground-start", "6", "--probe-wing-size", "2",
+        "--maneuver", "takeoff", "--separation", "50"],
+        ticks=24000, timeout=1800, check=enemy_wing_took_off))
     # The new lead after a lost human (John, 2026-09-30). The scripted pilot
     # survives, so these probes lose the player on purpose with
     # `--probe-lose-player`, 60 s after takeoff at Kharkiv and 20 s after

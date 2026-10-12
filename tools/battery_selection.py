@@ -119,7 +119,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "AI takeoff, landing, return to base, ILS approaches on every theater",
         (
             "ai-takeoff-*", "ai-theater-*", "ai-ground-*", "ai-rtb-*", "ai-ils-*",
-            "ai-long-ground-land", "ai-lost-lead-*", "ai-airfield-taxi-*",
+            "ai-long-ground-land", "ai-lost-lead-*", "ai-airfield-taxi-*", "ai-enemy-ground-start-*",
         ),
     ),
     "ai-lead": (
@@ -251,8 +251,8 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ("net-window-*",),
     ),
     "net-surface": (
-        "a ground target online (protocol 22): a server and bots over the defended moving column, co-op and PvP",
-        ("net-surface-*",),
+        "a ground target online (protocol 22): a server and bots over the defended moving column, co-op and PvP, and a Redfor ground start",
+        ("net-surface-*", "net-redfor-*"),
     ),
     "net-a2g": (
         "the air-to-ground round online (protocol 23): a lasing bot and a buddy bomber with a HARM over a radar site",
@@ -682,6 +682,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/surface_dump.rs", ("surface",), "the surface dump and template sheets"),
     _r("crates/tore-app/src/surface_trace.rs", ("surface",), "the surface trace"),
     _r("crates/tore-app/src/surface_drive.rs", ("surface",), "the surface movement drive"),
+    _r("crates/tore-app/src/surface_battle.rs", ("surface",), "the surface battle drive and survey"),
     _r("crates/tore-app/src/surface_parked.rs", ("surface",), "the parked aircraft drive"),
     _r("crates/tore-app/src/blast_preview.rs", ("replay-cli",), "the explosion and cluster burst preview (offscreen renders)"),
     _r("crates/tore-app/src/a2g_radar.rs", ("a2g",), "the ground pages drive"),
@@ -747,6 +748,7 @@ RULES: tuple[Rule, ...] = (
     _r("tools/battery_scenarios/ai.py", LANE_SMOKE["ai"], "AI scenarios", unit_tests=("test_battery_ai",)),
     _r("tools/battery_scenarios/surface.py", ("surface",), "surface unit scenarios", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/surface_move.py", ("surface",), "surface movement scenarios", unit_tests=("test_battery",)),
+    _r("tools/battery_scenarios/surface_battle.py", ("surface",), "surface units fighting each other", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/surface_parked.py", ("surface",), "parked aircraft scenarios", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/a2g_radar.py", ("a2g",), "ground page scenarios", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/a2g_bombs.py", ("a2g",), "bomb and rocket motion scenarios", unit_tests=("test_battery",)),

@@ -27,9 +27,12 @@
 //! In flight a surface round differs from an aircraft's in a few fitted ways
 //! (`State::step` applies them; the spec has the rules):
 //!
-//! - It hits aircraft and the terrain only, never a ground object or ship:
-//!   surface units do not fight each other this round, and a launcher is never
-//!   hit by its own missile on the rail.
+//! - It hits aircraft, the terrain and the ground objects and ships of the
+//!   other side (surface units fight each other: John, 2026-10-11). It passes
+//!   through its own side's ground objects and ships, neutral scenery and its
+//!   own launcher, whatever the friendly fire setting, so a gun crew never
+//!   shoots up its own site and a launcher is never hit by its own missile
+//!   on the rail.
 //! - A surface gun round does the record's damage, never the aircraft guns'
 //!   one-third rule, and never a critical (pilot or central) kill: the
 //!   tuning table already matches retail damage per second. A jammer does
@@ -39,7 +42,12 @@
 //!   in flight. The burst is an [`EffectKind::Flak`] effect with the record's
 //!   own explosion type.
 //! - A surface round's collateral damage (`collateral.rs`, the rule every
-//!   weapon follows) reaches aircraft only.
+//!   weapon follows) reaches aircraft and the other side's ground objects
+//!   and ships, never its own side's or neutral scenery.
+//!
+//! What a surface weapon may be aimed at is its record's: flag
+//! [`AIR_TARGET_FLAG`] for aircraft and [`SURFACE_TARGET_FLAG`] for
+//! everything else ([`engages_aircraft`], [`engages_surface`]).
 //!
 //! The explosion a destroyed ground object shows comes from its unit's record
 //! when the host gives one ([`State::set_ground_look`]).
@@ -59,6 +67,37 @@ const SURFACE_PROJECTILE_ID_LAST: u32 = 0x3FFF_FFFF;
 /// Projectile slots a surface shot always leaves free for the aircraft's own
 /// weapons (fitted): surface rounds fill at most 4,000 of the 5,000.
 pub const SURFACE_PROJECTILE_RESERVE: usize = 1_000;
+
+/// A weapon record flag: the weapon may be aimed at aircraft (the fighter
+/// and bomber classes, `0xC000`). Retail: the store choice matches a target's
+/// class against it (docs/formats/ai.md, B45; docs/formats/radar.md,
+/// `PROJLock`). Every surface-to-air missile, AAA gun and flak record, and
+/// every aircraft gun, carries it.
+pub const AIR_TARGET_FLAG: u32 = 0x1_0000;
+/// A weapon record flag: the weapon may be aimed at every other class
+/// (ships, SAM and AAA sites, tanks, vehicles, structures, men). Retail, as
+/// [`AIR_TARGET_FLAG`]. The tank, armoured car and small-arms guns carry
+/// both; the SS-N-9 and the air-to-ground weapons only this one.
+pub const SURFACE_TARGET_FLAG: u32 = 0x2_0000;
+
+/// Whether a surface unit may aim `w` at an aircraft: its record carries
+/// [`AIR_TARGET_FLAG`], or neither target flag (a record that names no
+/// target class keeps the anti-aircraft use every surface weapon had before
+/// surface units fought each other).
+pub fn engages_aircraft(w: &Weapon) -> bool {
+    w.flags & AIR_TARGET_FLAG != 0 || w.flags & SURFACE_TARGET_FLAG == 0
+}
+
+/// Whether a surface unit may aim `w` at a ground object or ship: its record
+/// carries [`SURFACE_TARGET_FLAG`].
+pub fn engages_surface(w: &Weapon) -> bool {
+    w.flags & SURFACE_TARGET_FLAG != 0
+}
+
+/// Whether sides `a` and `b` fight each other: both sided and different.
+pub fn opposed(a: super::Side, b: super::Side) -> bool {
+    a != super::NO_SIDE && b != super::NO_SIDE && a != b
+}
 
 /// What a surface round carries beyond an aircraft's, by projectile id.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

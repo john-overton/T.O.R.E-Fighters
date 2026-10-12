@@ -163,7 +163,7 @@ fn burst(w: &Weapon, detonation: Detonation) -> Burst {
         w,
         Shooter {
             side: NO_SIDE,
-            surface: false,
+            surface: None,
             ownship: false,
         },
         [0.; 3],
@@ -374,11 +374,14 @@ fn a_bomb_on_the_ground_hurts_ground_objects_and_parked_aircraft() {
 }
 
 #[test]
-fn a_surface_units_splash_still_reaches_aircraft_only() {
+fn a_surface_units_splash_reaches_aircraft_and_the_other_sides_ground_units_only() {
     let mut s = scene();
     ground_object(&mut s, 0x5000_0009, [0., 8., -5000.], 1000, RED);
+    // A parked aircraft with no side, a Blue vehicle and a Red one beside
+    // the burst.
     s.targets.push(parked(0x5000_0001, [0., 0., 300.]));
     ground_object(&mut s, 0x4000_0001, [200., 8., 0.], 1000, BLUE);
+    ground_object(&mut s, 0x4000_0002, [-200., 8., 0.], 1000, RED);
     s.targets.push(aircraft(1, [0., 200., 300.], BLUE));
     let mut sam = sparrow();
     sam.source = "SA6.JT".into();
@@ -392,11 +395,21 @@ fn a_surface_units_splash_still_reaches_aircraft_only() {
         },
     );
     run_from(&mut s, 60, far());
+    // Neutral scenery and the shooter's own side are spared, whatever the
+    // friendly fire setting (it is on here).
     assert_eq!(hp(&s, 0x5000_0001), 1000);
-    assert_eq!(hp(&s, 0x4000_0001), 1000);
+    assert_eq!(hp(&s, 0x4000_0002), 1000);
+    // The Blue vehicle's near side is 185 ft from the ground burst: half of
+    // (35 - 8) percent, 13 percent of the record's 170.
+    assert_eq!(hp(&s, 0x4000_0001), 1000 - 170 * 13 / 100);
     // The aircraft overhead: its surface is sqrt(200^2 + 300^2) - 20 = 340
     // ft from the ground burst, so half of (35 - 15) percent.
     assert_eq!(hp(&s, 1), 1000 - 170 * 10 / 100);
+    // The unit that fired is the Blue vehicle's last attacker.
+    assert_eq!(
+        s.ledger.credit(0x4000_0001).map(|kill| kill.owner),
+        Some(0x5000_0009)
+    );
 }
 
 #[test]

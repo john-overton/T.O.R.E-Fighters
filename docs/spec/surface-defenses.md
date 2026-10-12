@@ -40,13 +40,17 @@ simulated aircraft on the ground (engines off, aircraft damage, they burn when
 killed), not scenery. The 321 air-defense units already standing in 12 theater
 layouts wake up too, on both sides. Destroying the target is a mission
 objective; the debrief counts SAM and AAA fire. Everything runs on the host in
-multiplayer; in PvP the Redfor players defend the target.
+multiplayer; in PvP the Redfor players defend the target. Since 2026-10-11
+surface units of opposing sides in range shoot at each other too (John): tanks,
+armoured cars, troops and the Sarancha's anti-ship missile, by what their
+weapon records may aim at ([surface against surface](#surface-against-surface)).
 
 - [Provenance and how to read this](#provenance-and-how-to-read-this)
 - [Data model](#data-model): unit records, templates and rolls, ownership, ids,
   jitter, relocation, starts, the units of the movement words, mission settings.
 - [Surface AI](#surface-ai): engagement, SAM missiles, AAA and flak, ships,
-  movement, experience, RWR emitters, countermeasures.
+  movement, experience, RWR emitters, countermeasures, and [surface against
+  surface](#surface-against-surface).
 - [SAM batteries](#sam-batteries), [Resupply](#resupply) and
   [AAA tuning](#aaa-tuning).
 - [Parked aircraft](#parked-aircraft) and [Destroyed looks and
@@ -287,8 +291,19 @@ Further rules, all retail data unless noted:
   ([airport allegiance](airports.md#allegiance)), so a ground start is always
   under friendly guns.
 - **In PvP the Redfor players defend the target** (defined, John). Template
-  units are Redfor: they engage Blue aircraft only. Base-layout units take their
+  units are Redfor: they engage Blue aircraft (and Blue ground units in reach,
+  [surface against surface](#surface-against-surface)). Base-layout units take their
   layout side, so a Redfor player raiding a friendly airfield meets its SAMs.
+- **Redfor may start on the ground at its own airfield** (John, 2026-10-11:
+  "add redfor ground starts, match the quick mission creator styles"). The
+  creator's **Enemy start** (Airborne or Ground) and **Enemy airport** mirror
+  Blue's Start and Airport ([start placement](#start-placement)); they park
+  Enemy Wing 1, the flight Redfor humans take online, whether a human or the
+  AI flies it, and the other enemy wings start in the air as before. The
+  field is a Redfor or neutral one, never Blue's, so its guns and SAMs are
+  Red's own: they hold their fire at the Redfor wing, and with friendly fire
+  off no Red round touches it. A unit engages only an airborne aircraft of
+  the other side, so nothing shoots a parked aircraft of either side.
 
 ### Identifiers
 
@@ -439,12 +454,24 @@ from the seed and is inside the digest.
   a time. Friendly wings 2 and 3 keep their offsets from the player.
 - **Ground starts.** An explicit runway choice is kept. With none picked, the
   default runway becomes the Blue-side airfield nearest the target that is at
-  least 15 nm from it; a Redfor human ground start in PvP uses the Red-side
-  airfield nearest the target under the same rule (default, pending John). An
-  airfield's side is its owner's; an unowned one takes its side of the front.
-  The airfield must hold the wing (no short strip or vertical pad); with none,
-  the earlier rule stands (the first friendly airport's runway that holds the
-  wing). Red still starts by the target.
+  least 15 nm from it (default, pending John). An airfield's side is its
+  owner's; an unowned one takes its side of the front. The airfield must hold
+  the wing (no short strip or vertical pad); with none, the earlier rule
+  stands (the first friendly airport's runway that holds the wing).
+- **Enemy ground starts** (slice CL-R, John 2026-10-11). The same rule for
+  Red: an explicit Redfor or neutral runway is kept (a Blue field, a short
+  strip or a vertical pad is refused); with none picked, Enemy Wing 1 parks at
+  the Red-side airfield nearest the target at least 15 nm from it, else the
+  first Red-side runway that holds the wing. **The ground start overrides the
+  distance** (John, 2026-10-11: "for the redfor ground starts have that
+  override the distance"): Enemy Wing 1 starts at its field wherever that is,
+  not within 5 nm of the target and not at the enemy distance from Blue.
+  Everything else keeps its rule: Enemy Wings 2 and 3 start in the air within
+  5 nm of the target (or at the enemy distance from Blue with no target), and
+  Blue is still placed the enemy distance from that Red point, heading at the
+  target, so the enemy distance setting measures Blue's run to the defended
+  target, not to Red's airfield. Enemy Wing 1 must have aircraft, and it never
+  shares the player's runway.
 - The target point is the targets' placed centroid. A theater with no front
   (no owned placements on one side) starts Blue toward the middle of the map
   (fitted).
@@ -455,6 +482,7 @@ flowchart LR
     T[Target centroid] -->|seeded spot within 5 nm| R[Red start, defending]
     R -->|enemy distance setting, bearing toward Blue side, plus or minus 30 degrees| B[Blue start, heading at the target]
     B -.->|heads at| T
+    T -->|nearest Red-side field at least 15 nm away| F[Enemy Wing 1 on the ground, when Red ground-starts]
 ```
 
 ### The units of the movement and range words
@@ -554,7 +582,7 @@ stateDiagram-v2
 | --- | --- | --- |
 | Detection range | The weapon's seeker `zone0` range and altitude band (SA-2 150,000 ft with an altitude floor of 3,000 ft; SA-6 80,000 ft, floor 500 ft); a sensor's range for GCI and BUTLER (303,800 ft, 50 nm). A battery detects from its radar's position with the battery missile's `zone0`; a GCI element also gives its 50 nm sensor for search, never for launch | retail; battery use defined (John) |
 | Search period | Quarter seconds in the NPC block: 5 s for small SAMs, ZSU-23 and vehicles, 10 s for big SAMs, guns and ships, 48 s for the SCUD | retail, B42 |
-| Eligibility | Hostile side, airborne, class matches the object's `react` attack mask (templates use `$c000`: fighters and bombers), inside detection range and band, terrain line of sight clear, inside `searchDist` when non-zero (unit unknown: 25 is read as 25 x 256 ft) | retail; the `searchDist` reading fitted |
+| Eligibility | Hostile side, airborne, class matches the object's `react` attack mask (templates use `$c000`: fighters and bombers), inside detection range and band, terrain line of sight clear, inside `searchDist` when non-zero (unit unknown: 25 is read as 25 x 256 ft). Ground units and ships of the other side too, for a weapon whose record may aim at them ([surface against surface](#surface-against-surface)) | retail; the `searchDist` reading fitted |
 | Choice | Nearest eligible; keep the current target while valid; KS-12 and KS-19 re-evaluate every 10 s (`retargetT` 40) | fitted (the retail ranking terms for surface actors are untraced) |
 | Preparation | `unreadyAttackT` for a unit's first engagement (SA-2, SA-3 and SA-6 36 s; SA-15 5 s), `attackT` afterwards (5 to 20 s) | retail times; which engagement counts as first is fitted (B42 says the producer of the unready flag is unknown) |
 | Lock to fire | `trackT`: guns 1 s, missiles 5 s, Sea Sparrow and SS-N-9 3 s | retail, B42 |
@@ -629,7 +657,11 @@ TORE rules (defined and fitted):
   (Ticonderoga keeps its Phalanx). Default, pending John. The Tunguska and
   Kashtan carry their own radars; only the battery systems need component
   radars (answered for John's question).
-- **SS-N-9** never fires: there are no surface targets this round.
+- **SS-N-9** fires at ships of the other side (since 2026-10-11): it is the
+  only missile record a surface unit carries with the surface target flag
+  0x20000 and not the air one, supported radar by its support flag 0x200
+  (retail data), aimed at ships only (agent decision: an anti-ship missile).
+  See [surface against surface](#surface-against-surface).
 - **Collateral damage** follows the rule every weapon follows, in
   [splash damage](missiles.md#splash-damage): a share of the record's damage
   falling from the collateral percent at the burst to nothing at the radius,
@@ -637,13 +669,20 @@ TORE rules (defined and fitted):
   ground. The aircraft a missile strikes takes its direct hit only; friendly
   fire off spares the shooter's side. A burst is a missile striking an
   aircraft or the ground, or a flak shell bursting. A surface unit's splash
-  reaches aircraft only (see the next point), so a SAM falling back near its
-  own battery never wrecks it. John decided on 2026-10-10 that splash applies
-  to every weapon, aircraft missiles, rockets and bombs included.
-- **What a surface round can hit.** Aircraft and the terrain only: surface
-  units do not fight each other this round, so a round or missile passes
-  through ground objects and ships, and a launcher is never hit by its own
-  missile leaving the rail. Defined (agent).
+  reaches aircraft and the other side's ground objects and ships, never its
+  own side's or neutral scenery (see the next point), so a SAM falling back
+  near its own battery never wrecks it. John decided on 2026-10-10 that
+  splash applies to every weapon, aircraft missiles, rockets and bombs
+  included.
+- **What a surface round can hit** (changed 2026-10-11, when surface units
+  began to fight each other). Aircraft, the terrain, and the ground objects
+  and ships of the other side. A round or missile passes through its own
+  side's ground objects and ships, neutral scenery (an object with no side)
+  and its own launcher, whatever the friendly fire setting, so a gun crew
+  never shoots up its own site or the runway beside it, and a launcher is
+  never hit by its own missile leaving the rail. Defined (agent): friendly
+  fire is on by default, and AAA firing low past its own units and airfield
+  would otherwise wreck them in every mission.
 
 ### AAA and flak
 
@@ -813,7 +852,9 @@ The follower (fitted: the retail waypoint consumer is untraced):
   stands).
 - **Fire.** Guns fire while moving (fitted; retail behaviour unknown). The unit
   fires from where it is: its combat target (aim point, velocity, orientation),
-  its hit box and its mounts follow the pose every tick.
+  its hit box and its mounts follow the pose every tick. A land unit halts while
+  it engages a ground unit or ship and drives on afterwards ([surface against
+  surface](#surface-against-surface)).
 
 The state of a moving unit is a position, heading, speed, leg and halt reason in
 whole units (1/65536 ft, 2^32 binary angles), so a checkpoint resumes the march
@@ -931,6 +972,108 @@ No new countermeasure code is needed beyond wiring:
 Manual guidance matches: radar SAMs have trouble at low altitude, fly above
 15,000 ft against AAA, ground radars cannot see through hills, and air defenses
 need time to turn and engage (pp. 157 to 158, 192 to 193).
+
+### Surface against surface
+
+John, 2026-10-11: "If units are in range of opposing sides they should shoot
+at each other." Slice CL-SV built it on the engagement controller above; the
+controller does not care whether its target is an aircraft or a ground unit,
+so search, preparation, lock, bursts, salvos, magazines and resupply are
+unchanged. Only what a unit may aim at, which it prefers, what its rounds
+strike and how a column behaves are new.
+
+**What a weapon may aim at** comes from its record (retail). Every JT record
+carries a target flag: 0x10000 lets it be aimed at aircraft (the fighter and
+bomber classes, `0xC000`), 0x20000 at every other class (ships, SAM and AAA
+sites, tanks, vehicles, structures, men). Retail's store choice matches a
+target's class against these flags ([AI formats](../formats/ai.md), B45; the
+`PROJLock` row of [radar](../formats/radar.md)). Over the 135 JT records the
+split is clean: every air-to-air missile, SAM, AAA and flak record carries
+only the air flag, every bomb, rocket and air-to-ground missile only the
+surface flag, and the aircraft guns and the ground units' own guns both.
+
+| Surface weapon | Target flags | Aims at |
+| --- | --- | --- |
+| Tank guns: M1 (M256), T-72 record for the T-72, T-80, T-90 | air and surface (`0x300c0`) | aircraft and ground units, ships |
+| Armoured car and APC guns: BMP-2, BTR-80, M113, M2 | air and surface | aircraft and ground units, ships |
+| Small arms (TROOPS) | air and surface | aircraft and ground units, ships |
+| SS-N-9 (Sarancha) | surface only (`0x22365`) | ships only (agent decision: an anti-ship missile) |
+| ZSU-23, ZSU-57, 2S6 gun, Phalanx, AAA30, AAA30BAD, M1939, barrage zone | air only (`0x140c0`, `0x100c0`, `0x5140c0`) | aircraft only |
+| KS-12, KS-19 flak | air only (`0x2940c0`) | aircraft only |
+| Every SAM, ship SAM, Sea Sparrow and ASROC | air only (`0x12041` to `0x12345`) | aircraft only; ASROC stays held |
+
+So AAA does not fire at the ground even though John's request named it as an
+example: its records do not allow it. The M1975 is a tank-class unit with no
+weapon, so no artillery fights. A record with neither flag would keep the
+anti-aircraft use every surface weapon had (none does).
+
+**What it may aim at is a unit**, of the other side, that stands and that the
+scene holds: a ground vehicle, a SAM or AAA site, a truck, a radar, a ship.
+Never a building or other structure, a parked aircraft, a unit with no side,
+or the invisible barrage zone (defined, agent: a crew fights vehicles, sites
+and ships). The target point is the unit's combat row, the upper half of its
+box, and a moving unit is aimed at where it is.
+
+**The `react` masks.** Retail mission objects carry three class masks; the
+manual's Pro Mission Creator calls them ATTACK, DEFEND and EVADE ("Defend if
+under attack from this class of enemy", p. 207), and a class in none is
+IGNORE. The shipped templates give tanks and armoured cars `$c000 $3fff $0`
+(attack fighters and bombers, defend against every other class) and SAM,
+AAA, ships and trucks `$c000 $0 $0` (ignore surface classes); troops carry
+`$0 $0 $0`. John's rule decides instead: units in range shoot, whatever their
+masks say (opinionated, John). The masks keep their air meaning (an aircraft
+is eligible only if `react` names its class).
+
+| Rule | As built | Basis |
+| --- | --- | --- |
+| Detection and range | The weapon's `zone0` (range and relative altitude band) to see it and `zone1` to fire, a gun's capped by its shells' reach, a missile's by experience; `searchDist`; terrain line of sight from 10 ft above the unit to the target's aim point, sampled every 500 ft | retail records, the existing rules |
+| Gates | As for an aircraft: launch zone, mount arcs relative to the hull, line of sight | retail, unchanged |
+| Preference | An air-defence unit (class SAM or AAA) takes aircraft first, every other unit (tanks, vehicles, men, ships) ground units and ships first. A controller sees only the eligible contacts of the preferred kind while there is one, so a tank fighting an aircraft turns to a ground unit that comes into view, and to the aircraft again once no ground unit is left | defined (agent) |
+| Choice | Nearest eligible of the preferred kind, ties by lower id; kept while it stays eligible; flak retargets as before | fitted, deterministic: no random choice |
+| Aim | A gun's aim error at a ground unit or ship is a quarter of its air error (visual 0.375, 0.25, 0.175, 0.125 degrees by skill; radar a quarter of 0.6 to 0.2), drawn from the surface's seeded random stream once per burst, plus the 0.25 degree round dispersion. A T-72 at 3,000 ft hits another about once in five rounds | fitted (the retail hit-chance rule is untraced; with the air error a tank needs about fifteen minutes to hit another) |
+| Damage | The record's damage for the target's class (`damage[0..4]`: the T-72 and M1 guns 200 against everything, so one 125 mm round kills a 200 point tank) | retail |
+| Locks and painting | Fed for aircraft only: a ground unit has no RWR, and a ship's lock tone would be meaningless | defined (agent) |
+| The SS-N-9's support | The Sarancha's radar comes on while a ship of the other side is inside the SS-N-9's 250,000 ft detection range (its air search keeps the SA-N-4's 100,000 ft), and it supports its missiles from its own radar like any self-contained launcher | defined (agent) |
+| Columns | A land unit on a route halts while one of its weapons engages a ground unit or ship (from preparing to the pause between bursts and a magazine swap): it brakes at its usual 5 ft/s squared where it is and drives on, from rest, when none does. Fighting aircraft does not stop it, and ships fight under way. Nothing about the halt is kept: it follows from the controllers' state, which the checkpoint already holds | fitted (agent): a column stops to fight; the retail waypoint consumer is untraced |
+| Supply | Unchanged: trucks rearm and refill whatever a unit fired at | defined (John) |
+| Stock | Unchanged; a ship's missile mounts hold the record's `maxItems` 32,767 (unlimited), so a Sarancha fires an SS-N-9 every 8 s (`reloadT` 32) while a ship is in reach | retail |
+
+**What strikes what.** See [what a surface round can
+hit](#sam-missiles): aircraft, the terrain and the other side's ground objects
+and ships, never its own side's or neutral scenery, whatever the friendly fire
+setting (defined, agent). Its splash follows the same sides. Damage, wrecks,
+fires and craters are those of any hit. The kill is credited to the unit
+(its id is the round's owner), so the wreck's replay event names it and an
+objective counts the target destroyed whoever destroyed it. No pilot's
+debrief row and no multiplayer score counts it: retail multiplayer scores no
+ground kills, and a surface unit is no player.
+
+**Where it happens.** Retail never stands opposing units in reach of each
+other in a Quick Mission. The `--surface-battle --survey` run built every
+theater's base layout and every offered ground target at heavy defenses with
+seeds 1 to 20 (2,480 missions) and found no pair of opposing units within a
+weapon's reach: the nearest, in Iraq's "troops withdrawing from Kuwait"
+(`~QIRRETR`, whose 40 American objects stay friendly), stand 22,000 to 27,000
+ft apart, beyond a tank gun's 5,000 ft. So the ground war never wakes in an
+ordinary Quick Mission and changes nothing there; it is checked on test
+missions that hand template units to Blue (`--surface-battle ... --blue`,
+the `surface-battle-*` [battery scenarios](../testing/lane-ai.md)): four of the
+Ukraine column's tanks against the other five and the template's SAM and AAA
+sites (both sides halt, fight and kill; only the tanks fire), and the Baltic
+fleet's Kiev and a Krivak against its Saranchas (the SS-N-9s sink both).
+
+```mermaid
+flowchart TD
+    C[Contact] --> A{Aircraft?}
+    A -->|yes| R{Weapon has the air flag and react names its class?}
+    A -->|no: a unit| S{Other side, standing, in the scene, not a building?}
+    S -->|yes| F{Weapon has the surface flag; an anti-ship missile and a ship?}
+    R -->|yes| E[Eligible if in zone, search distance and sight]
+    F -->|yes| E
+    E --> P{Preferred kind present?}
+    P -->|yes| N[Nearest of the preferred kind, ties by id]
+    P -->|no| M[Nearest of the other kind]
+```
 
 ## SAM batteries
 
@@ -1196,8 +1339,10 @@ not static scenery), engines off, and they never take off. The templates'
 
 - **For weapons a parked aircraft is a surface target.** It takes the surface
   role, so Mavericks, bombs and other surface weapons take it and air-to-air
-  missiles do not. It is on the ground, so radar cannot see it. Surface units'
-  rounds and flak pass it by, as they pass every ground object.
+  missiles do not. It is on the ground, so radar cannot see it. No surface
+  unit aims at it; a surface unit's round or splash strikes it only when it
+  belongs to the other side and stands in the way, as for any ground object
+  ([surface against surface](#surface-against-surface)).
 - **For damage it is an aircraft.** Gun rounds meet the aircraft volume (the
   six damage-section boxes inside a 28 ft sphere); bombs and missiles meet the
   28 ft sphere without their fuze radius (fitted: a Mk 82's 100 ft fuze would
@@ -1500,8 +1645,22 @@ and the player's view in [the multiplayer guide](../MULTIPLAYER.md#ground-target
   radar state and timers, route progress) is part of the mission checkpoint, so
   host migration carries it.
 - **Sides.** Friendly fire off spares same-side aircraft from surface rounds too.
-  In PvP Redfor humans start by the target (airborne) and defend it; a Redfor
-  ground start on Red's own airfield is not built online.
+- **Surface against surface** (2026-10-11). The host runs it like the rest:
+  the wrecks, hit points and stock travel as today's Surface unit events and
+  the destroyed list, a missile as a projectile entity, a gun burst at a
+  ground unit as today's Surface burst event (its target is the unit's id).
+  A client remakes those rounds along the first round's direction without
+  turning them, as it cannot lead a target it does not draw as an aircraft;
+  they are cosmetic. No wire field changed, and the controllers' targets
+  (aircraft or unit ids) and the halts' cause are already in the mission
+  checkpoint.
+  In PvP Redfor humans start by the target (airborne) and defend it, or, with
+  the mission's enemy ground start (`enemy-start ground`, slice CL-R), on the
+  ground at the Redfor field Enemy Wing 1 parks on: the host builds that
+  parking from the mission text and its seed like every other start, so every
+  game agrees. A player who takes a parked plane starts as a single-player
+  ground start does, on NAV with the departure field selected, and that
+  field is the home base its result calls check.
 - **Debrief.** The networked debrief carries "Shot down by".
 
 ## Replays
@@ -1518,6 +1677,7 @@ surface the flight had.
 | Units that drive or sail | A pose each tick (position and attitude to the recording's precision of 1/32 ft, the wrecked flag), keyed by the unit's fixed id. Standing units are the rebuilt scenery |
 | Wrecks | The unit's hit points (as for any ground object), so the wreck look, the crater, the fire mark and the smoke column come back; the registry's hit points size the fire. The smoke starts on the tick the unit died, however the playhead got there |
 | Launchers and guns | A launcher's rails, every rail of the unit when one changes, and a gun's spare magazines when they change; a unit not listed holds its full load. Gun rounds and missiles are the usual projectiles owned by the unit's id |
+| Fire at ground units and ships | `surface.burst` and `surface.phase` with the unit fired at as the object and `surface` true (since 2026-10-11); that unit joins the registry, so the log names it, and its `surface.wreck` names the unit that destroyed it |
 | Radars | `surface.radar` events when a radar comes on, goes off or is shut down |
 | Parked aircraft | Their hit points like any ground object, and the piece a destroyed one throws |
 | Flak | Its own effect code with the explosion type (the KS-12's 27, the KS-19's 28), so the replay lights and puffs each burst |
@@ -1626,6 +1786,7 @@ so). Each row has a fitted stand-in above.
 | Route flag bit 0x04 | Routed objects have it set (inference) | Not used | Trace the mission flag reader |
 | `damage[0..4]` = 255 on every NT | Mapping unresolved | Hit points only | Trace the damage-class table |
 | SA-19, SA-N-11 and ASROC roles | No support flag, or an unclear role | SA-19 and SA-N-11 supported radar, ASROC held | Trace the seeker role |
+| Whether retail surface units fight each other | The `react` DEFEND mask on tanks and armoured cars (`$3fff`) says they answer fire from surface classes; no shipped template stands opposing units in reach | John's rule: units in range shoot; target flags decide the weapons | Trace `Reaction` (0x464040) for the DEFEND word and the surface actors' ranking terms |
 | Flak time fuze | Not in the data; the 250 ft proximity radius is | Time fuze at predicted flight time | None planned |
 | Hardpoint `flags`, NPC `flags` | NT flags seen: 0x4000000 (SA2A), 0x2000000 (M1939, KS-12, KS-19), 0x801 (Mule), carrier values 0xc8331, 0x108331, 0x1c8131 | Not used | Trace the flag consumers |
 
@@ -1639,7 +1800,7 @@ ones follow in their own table.
 | --- | --- | --- |
 | Relocation and start numbers | John found the target variance fine (2026-10-10); the numbers stay fitted: unanchored templates move 3 to 30 nm from their retail spot, keep within 15 nm of their retail depth along the front and may rotate freely; Blue starts plus or minus 30 degrees off the line from Red toward its own side (the distances are John's: Red within 5 nm of the target, Blue the enemy distance setting from Red) | Far enough that a template is not where you remember it, near enough to stay on the side of the map retail's designers put it |
 | SA-19 and SA-N-11 as supported radar; ASROC held | As in [SAM missiles](#sam-missiles) | HAWK, Roland and the 2S6 carry SA-19 and would otherwise be unarmed |
-| Ground-start runway with a target | With no runway picked, the nearest friendly airfield at least 15 nm from the target, for Blue and a Redfor human | A ground start across the map from a relocated target would mean a long flight |
+| Ground-start runway with a target | With no runway picked, the nearest friendly airfield at least 15 nm from the target, for Blue and for Enemy Wing 1's ground start (slice CL-R) | A ground start across the map from a relocated target would mean a long flight |
 | Battery size and clustering | Up to 1 SA-2 site, 4 SA-3, 4 SA-6 and 6 HAWK launchers, clustered within 1 nm; existing radars adopted within 3.5 nm (confirmed by John, 2026-10-10; the lead's change from 2 nm, 2026-10-10, so North Vietnam's GCIs pair with their SA-2 sites); Crotale self-contained; base layouts get added radars where none can be adopted | Matches real battery sizes and retail's spacing |
 | Radar kills in the debrief | Keep the radars' retail class: GCI is a Structure, Straight Flush and the HAWK radar Vehicles | That is how retail's kill table sorts those objects |
 | Building and unit hit boxes | Real size, a third of retail's in every axis, with the drawn size | Matches John's realistic scale; retail's targets were three times larger and easier to hit |
@@ -1654,6 +1815,8 @@ Settled during the round:
 | Runway pavement width | Deferred by John (2026-10-10): keep the retail width, about twice a real runway's (368 ft pavement band on RUNWAY.SH); runways are not shrunk with buildings | The STRIP anchors are uniform feet, so a narrower runway would need an uneven stretch |
 | Jammers against radar-directed AAA | Factor 2 on the aim error, "fine for now" (John, 2026-10-10) | Visual guns are unaffected |
 | Lock tone between salvos, one controller per ship gun mount | Yes (John, 2026-10-10) | See [implementation so far](#implementation-so-far) |
+| Surface units fighting each other | Built (John, 2026-10-11: "If units are in range of opposing sides they should shoot at each other"): by the weapon records' target flags; the agent's choices (preference, sides struck, the SS-N-9 at ships only, the column's halt, the surface aim error) are listed in [surface against surface](#surface-against-surface) | |
+| Redfor ground start | Built (John, 2026-10-11: "add redfor ground starts, match the quick mission creator styles"; "have that override the distance"): Enemy Wing 1 may start at a Redfor field in single player and online, chosen as Blue's start is | See [start placement](#start-placement) |
 
 ## Provenance summary
 
@@ -1662,5 +1825,8 @@ Settled during the round:
 | Unit records, weapon records, template contents, rolls, equipment lists, night rule, `nationality3` pass-through, flak floors and fuze radius, burst, salvo, reload, startup shots, search and preparation times, tracking delay, target flags | retail |
 | B42 phases, missile guidance classes, decoy rules, RWR states | spec-derived |
 | Having a gun rate, magazine and reload (values fitted); splash damage for every weapon; the 60 and 120 s gun swaps; the 300 to 600 s SAM rearm range; base-layout defenses active; Redfor defends in PvP; jitter; relocation and starts; batteries; supply trucks; simulated parked aircraft; one combined objective; friendly-fire failure; a fifth network entity kind | defined (John, 2026-10-10) |
-| Relocation site rules and counts, battery caps and radar placement, truck counts and placement, the per-system SAM rearm timers within John's range, gun reserve, jitter numbers, emitter rule, radar on and off, HARM shutdown, experience effects, target choice, time fuze, surface splash reaching aircraft only, barrage rule, movement rates, launch pitch, flak and gun-light looks | fitted or defined (agent) |
+| Surface units of opposing sides in range shoot at each other, whatever their `react` masks | opinionated (John, 2026-10-11) |
+| Weapon target flags (0x10000 air, 0x20000 surface) deciding what a surface weapon aims at; surface damage by class | retail |
+| Preference by unit class, nearest-first choice, units only (no buildings or parked aircraft), the SS-N-9 at ships only and its surface radar search, sides a surface round strikes, the quarter surface aim error, the column's halt | fitted or defined (agent, 2026-10-11) |
+| Relocation site rules and counts, battery caps and radar placement, truck counts and placement, the per-system SAM rearm timers within John's range, gun reserve, jitter numbers, emitter rule, radar on and off, HARM shutdown, experience effects, target choice, time fuze, surface splash reaching aircraft and the other side's ground objects only, barrage rule, movement rates, launch pitch, flak and gun-light looks | fitted or defined (agent) |
 | Unready flag producer, hit-chance rule, surface ranking terms, `zoneDist` and `maxVisDist` units, movement word units other than `w_speed`, whether retail Quick Missions activate base defenses | unknown, see [Unknowns](#unknowns) |

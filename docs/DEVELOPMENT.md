@@ -1603,6 +1603,23 @@ so both commands read what the pack lacks from the retail media at runtime:
 `TORE_GAME_DIR`, else the source the data directory remembers, else the
 checkout's `gameassets/fighters-anthology` link.
 
+`--surface-battle --survey [THEATER ...] [--seeds N]` builds every base layout
+and offered ground target at heavy defenses (seed 1, or seeds 1 to N) and lists
+every pair of opposing units within a weapon's reach of each other, with the
+nearest pair out of reach; `--surface-battle THEATER [STEM] [--blue
+ORDINAL,...] [--seconds S] [--twice]` runs the mission with the player parked
+and prints what surface units do to each other: engagements of ground units and
+ships, shots, hits with the unit credited, kills, columns halting and driving
+on, a summary and an end-state digest. `--blue` hands template objects to Blue
+first (a test mission: retail never stands opposing units in reach), and
+`--twice` reruns it and compares the digests
+([surface against surface](spec/surface-defenses.md#surface-against-surface)).
+
+```sh
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-battle --survey --seeds 20
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-battle UKR QUCOL --blue 0,1,2,3 --seconds 120 --twice
+```
+
 `--surface-trace THEATER [STEM]` flies the player on a scripted straight line
 past one armed unit (`--over TYPE [--index N]` or `--unit ID`) at
 `--altitude` feet above it, `--speed` knots, `--pass` feet to its side,

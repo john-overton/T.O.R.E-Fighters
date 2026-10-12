@@ -792,8 +792,10 @@ pub struct HomeRunway {
     pub enemy: bool,
 }
 
-/// The friendly wing's parked start: the departure runway and one surface
-/// point and heading per aircraft, leader (the player) first.
+/// A wing's parked start: the departure runway and one surface point and
+/// heading per aircraft, leader first. Friendly Wing 1's leader is the
+/// player in single player; Enemy Wing 1 parks on one for an enemy ground
+/// start ([`Airfields::enemy_departure`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Departure {
     pub runway: RunwayView,
@@ -807,6 +809,9 @@ pub struct Airfields {
     pub runways: Vec<HomeRunway>,
     /// Present when the player's wing starts on the ground.
     pub departure: Option<Departure>,
+    /// Present when Enemy Wing 1 starts on the ground (slice CL-R, the
+    /// Redfor mirror of [`Self::departure`]).
+    pub enemy_departure: Option<Departure>,
 }
 
 impl Airfields {
@@ -843,7 +848,11 @@ impl Airfields {
                 });
             }
         }
-        Self { runways, departure }
+        Self {
+            runways,
+            departure,
+            enemy_departure: None,
+        }
     }
 
     /// [`from_scene`](Self::from_scene) with each runway's airfield points.
@@ -853,6 +862,21 @@ impl Airfields {
             runway.view.anchors = world.airfield_anchors.get(&runway.view.object).copied();
         }
         fields
+    }
+
+    /// These airfields with Enemy Wing 1 parked by `departure`.
+    pub fn with_enemy_departure(mut self, departure: Option<Departure>) -> Self {
+        self.enemy_departure = departure;
+        self
+    }
+
+    /// The parked start of `side`'s first wing, if it starts on the ground.
+    pub fn departure_of(&self, side: launch::Side) -> Option<&Departure> {
+        if side.is_enemy() {
+            self.enemy_departure.as_ref()
+        } else {
+            self.departure.as_ref()
+        }
     }
 
     /// `fitted`, agent decision 2026-09-23: an aircraft's home is the nearest
@@ -1130,10 +1154,14 @@ impl AiWings {
                 // A ground start parks Friendly Wing 1, the wing the
                 // departure is laid out for, on the departure runway instead
                 // of dropping it from altitude, whether or not a human flies
-                // in it: in an open mission the AI parks its lead too. Only
-                // the researched flight model can stand on a runway.
-                let departing = wing.wing.side == launch::Side::Friendly && wing.wing.index == 0;
-                let ground_start = match airfields.departure.as_ref().filter(|_| departing) {
+                // in it: in an open mission the AI parks its lead too. An
+                // enemy ground start parks Enemy Wing 1 the same way on its
+                // own (slice CL-R). Only the researched flight model can
+                // stand on a runway.
+                let departure = airfields
+                    .departure_of(wing.wing.side)
+                    .filter(|_| wing.wing.index == 0);
+                let ground_start = match departure {
                     Some(departure) => {
                         let order = usize::from(member_index);
                         let (Some(slot), Some(heading)) =
@@ -3517,6 +3545,7 @@ mod tests {
                 headings: vec![0.; 3],
                 slots: vec![[0., 30., 1100.], [40., 30., 850.], [-40., 30., 600.]],
             }),
+            enemy_departure: None,
         };
         let targets = vec![
             target(1, [40., 9000., 850.], 0.),
@@ -3578,6 +3607,7 @@ mod tests {
                 headings: vec![0.; 3],
                 slots: slots.clone(),
             }),
+            enemy_departure: None,
         };
         let targets = vec![
             target(0, [0., 9000., 1100.], 0.),
@@ -3605,6 +3635,59 @@ mod tests {
     }
 
     #[test]
+    fn an_enemy_ground_start_parks_enemy_wing_one_on_its_own_runway() {
+        let wings = ground_wings();
+        let red_runway = runway_view(8, [0., 10., 90_000.]);
+        let slots = vec![[0., 10., 88_000.], [40., 10., 87_750.]];
+        let airfields = Airfields {
+            runways: vec![
+                HomeRunway {
+                    view: runway_view(7, [0., 30., 3000.]),
+                    friendly: true,
+                    enemy: false,
+                },
+                HomeRunway {
+                    view: red_runway,
+                    friendly: false,
+                    enemy: true,
+                },
+            ],
+            departure: None,
+            enemy_departure: None,
+        }
+        .with_enemy_departure(Some(Departure {
+            runway: red_runway,
+            headings: vec![std::f64::consts::PI; 2],
+            slots: slots.clone(),
+        }));
+        let targets = vec![
+            target(1, [40., 9000., 850.], 0.),
+            target(2, [-40., 9000., 600.], 0.),
+            target(3, [-4096., 9000., -3000.], 0.),
+            target(4, [0., 9000., 80_000.], std::f64::consts::PI),
+            target(5, [-512., 9000., 80_512.], std::f64::consts::PI),
+        ];
+        let bridge =
+            AiWings::build_at(&wings, &targets, &airfields, |_| Ok((aircraft(), None))).unwrap();
+        for (id, order) in [(4u32, 0u8), (5, 1)] {
+            let actor = bridge.mission.actor(id).unwrap();
+            let flight = actor.flight();
+            assert!(flight.research.as_ref().is_some_and(|r| r.on_ground));
+            let slot = slots[usize::from(order)];
+            assert_eq!([flight.position[0], flight.position[2]], [slot[0], slot[2]]);
+            let start = actor.ground_start().unwrap();
+            assert_eq!((start.order, start.runway), (order, red_runway));
+            assert_eq!(actor.home_runway(), Some(&red_runway));
+        }
+        // The friendly side stays in the air, with its own field as home.
+        for id in 1u32..=3 {
+            let actor = bridge.mission.actor(id).unwrap();
+            assert!(actor.ground_start().is_none());
+            assert_eq!(actor.home_runway().map(|r| r.object), Some(7));
+        }
+    }
+
+    #[test]
     fn a_ground_start_parks_wingmen_on_the_runway_hidden_from_radar() {
         let wings = ground_wings();
         let departure_runway = runway_view(7, [0., 30., 3000.]);
@@ -3627,6 +3710,7 @@ mod tests {
                 headings: vec![0., std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2],
                 slots: slots.clone(),
             }),
+            enemy_departure: None,
         };
         // Combat::reset placed everyone in the air around the player.
         let mut targets = vec![

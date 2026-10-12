@@ -442,6 +442,51 @@ pub fn auto_runway_for(world: &Terrain, count: usize, red: bool) -> crate::World
     })
 }
 
+/// The runway Enemy Wing 1 parks on for an enemy ground start (slice CL-R,
+/// the Redfor mirror of the player's start): `None` when it starts in the
+/// air. `enemy-start ground auto` ranks the Red-side airfields as
+/// [`auto_runway_for`] does for Blue (with a ground target the Red-side field
+/// nearest the target at least 15 nm from it; else the first Red-side
+/// runway, by object id, that holds the wing). A chosen runway must be a
+/// Redfor or neutral field's (slice AL1: a Blue field is the other side's,
+/// under its guns) and no vertical pad; a STOL strip is allowed, as it is
+/// for the player (John, 2026-10-11). Whether the wing fits is [`ground_layout`]'s check.
+pub fn enemy_runway(
+    world: &Terrain,
+    start: crate::mission::EnemyStart,
+    count: usize,
+) -> crate::WorldResult<Option<u32>> {
+    use crate::mission::EnemyStart;
+    let scene = &world.airport_scene;
+    match start {
+        EnemyStart::Airborne => Ok(None),
+        EnemyStart::GroundAuto => auto_runway_for(world, count, true).map(Some).map_err(|_| {
+            "No Redfor runway in this theater holds enemy wing 1 for a ground start. Start the enemy Airborne."
+                .into()
+        }),
+        EnemyStart::Ground { runway } => {
+            let airport = scene
+                .runway(runway)
+                .and_then(|r| scene.airports.iter().find(|a| a.id == r.airport))
+                .ok_or("The enemy's runway is unavailable; choose another airport.")?;
+            let name = &airport.name;
+            if !airport.serves(true) {
+                return Err(format!(
+                    "{name} is a Blue airfield: no enemy ground start there. Choose a Redfor airfield or start the enemy Airborne."
+                )
+                .into());
+            }
+            if scene.vertical_pad(runway) {
+                return Err(format!(
+                    "{name} is a vertical pad: no enemy ground start there. Choose a runway or start the enemy Airborne."
+                )
+                .into());
+            }
+            Ok(Some(runway))
+        }
+    }
+}
+
 pub fn ground_layout(
     world: &Terrain,
     object: u32,
@@ -566,6 +611,10 @@ pub fn apply_ground_start(
 pub struct MissionLayout {
     /// The player's wing parked on this runway, for a ground start.
     pub ground: Option<GroundLayout>,
+    /// Enemy Wing 1 parked on this runway, for an enemy ground start
+    /// ([`crate::mission::EnemyStart`]). The rest of the enemy group starts
+    /// where [`Self::enemy`] aims it.
+    pub enemy_ground: Option<GroundLayout>,
     /// Airborne start only: the turn added to the player's starting heading,
     /// radians clockwise, so that the enemy ahead stays on the map. The whole
     /// airborne scene turns with the player.
@@ -618,9 +667,16 @@ impl MissionLayout {
                 enemy.turn
             },
             ground,
+            enemy_ground: None,
             enemy,
             held_heading,
         }
+    }
+
+    /// The layout with Enemy Wing 1 parked by `enemy_ground`.
+    pub fn with_enemy_ground(mut self, enemy_ground: Option<GroundLayout>) -> Self {
+        self.enemy_ground = enemy_ground;
+        self
     }
 
     pub fn spawn_plan(&self) -> crate::ai_wings::SpawnPlan {
@@ -877,6 +933,34 @@ mod placement_tests {
     }
 
     #[test]
+    fn an_enemy_ground_start_takes_a_redfor_or_neutral_field_and_never_a_blue_one() {
+        use crate::mission::EnemyStart;
+        use tore_sim::airport::Allegiance;
+        let mut world = airfield(6000.);
+        let ground = EnemyStart::Ground { runway: RUNWAY };
+        assert_eq!(enemy_runway(&world, EnemyStart::Airborne, 2).unwrap(), None);
+        // Neutral serves both sides.
+        assert_eq!(enemy_runway(&world, ground, 2).unwrap(), Some(RUNWAY));
+        world.airport_scene.airports[0].allegiance = Allegiance::Hostile;
+        assert_eq!(enemy_runway(&world, ground, 2).unwrap(), Some(RUNWAY));
+        assert_eq!(
+            enemy_runway(&world, EnemyStart::GroundAuto, 2).unwrap(),
+            Some(RUNWAY)
+        );
+        world.airport_scene.airports[0].allegiance = Allegiance::Friendly;
+        let error = enemy_runway(&world, ground, 2).unwrap_err().to_string();
+        assert!(error.contains("Strip is a Blue airfield"), "{error}");
+        let error = enemy_runway(&world, EnemyStart::GroundAuto, 2)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("No Redfor runway"), "{error}");
+        let error = enemy_runway(&world, EnemyStart::Ground { runway: RUNWAY + 9 }, 2)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("unavailable"), "{error}");
+    }
+
+    #[test]
     fn the_layout_turns_the_scene_in_the_air_and_only_the_enemy_on_the_ground() {
         let world = airfield(6000.);
         let ground = ground_layout(&world, RUNWAY, 3).unwrap();
@@ -887,6 +971,7 @@ mod placement_tests {
         };
         let airborne = MissionLayout {
             ground: None,
+            enemy_ground: None,
             player_turn: aim.turn,
             enemy: aim,
             held_heading: false,
@@ -901,6 +986,7 @@ mod placement_tests {
         );
         let parked = MissionLayout {
             ground: Some(ground.clone()),
+            enemy_ground: None,
             player_turn: 0.,
             enemy: EnemyAim::straight(5. * FEET_PER_NM),
             held_heading: false,

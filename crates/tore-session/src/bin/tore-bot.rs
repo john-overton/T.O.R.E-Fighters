@@ -876,6 +876,8 @@ struct Running {
     /// Seatings, the plane of the last, and the ejection printed
     /// (`--revive`).
     seatings: u32,
+    /// The seatings whose start line is printed (slice CL-R).
+    starts_told: u32,
     last_plane: Option<u32>,
     ejection_told: bool,
     /// The plane the AI flew while it was away, and Back told (`--away`).
@@ -1362,6 +1364,7 @@ fn main() -> ExitCode {
             host_left: false,
             observed: false,
             seatings: 0,
+            starts_told: 0,
             last_plane: None,
             ejection_told: false,
             away_plane: None,
@@ -1567,7 +1570,19 @@ fn main() -> ExitCode {
             {
                 bot.client.disconnect(now);
             }
-            bot.update(now);
+            let frame = bot.update(now);
+            // Where the plane starts, once a seating: on the ground at a
+            // field and its side, or in the air (slice CL-R).
+            if r.starts_told < r.seatings
+                && let (Some(frame), Some(world)) = (frame, bot.client.mission())
+            {
+                r.starts_told = r.seatings;
+                println!(
+                    "{}: start: {}",
+                    r.name,
+                    tore_session::bot::start_words(world, &frame.flight)
+                );
+            }
             // A lost host: when the snapshots come again (slice K9's lines).
             match bot.client.migration() {
                 MigrationState::Steady => {

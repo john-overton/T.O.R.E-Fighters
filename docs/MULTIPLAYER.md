@@ -167,8 +167,9 @@ the callsigns with the King's crown, the house of the player whose machine runs
 the game, a tick for ready and a red cross with the reason (shown under the
 lists) for a player whose game cannot play the mission. **Messages** is the
 chat box and its line (Enter sends to all). The buttons: **Mission...** opens
-the Quick Mission creator, for the King with its OK reading **Accept**, Start
-locked to Airborne ("Multiplayer: everyone starts airborne") and what a host
+the Quick Mission creator, for the King with its OK reading **Accept** (Start
+was locked to Airborne until slice CL-R; both sides' start choices are offered
+since, see **Start** below) and what a host
 cannot take refused before anything is sent, and for everyone else read only
 (since the lobby pass); **Loadout** opens Load Ordnance
 for the player's own aircraft, with Accept and Cancel, the mission's Guns only
@@ -224,8 +225,17 @@ mission flies the Loadout button reads **Watch**. The lobby's head sums the
 settings up in a line. How it works and each agent decision:
 [architecture](ARCHITECTURE.md#the-lobby-panels-as-built-f2-l).
 
-**Start.** Everyone starts airborne, as in retail multiplayer. Late joiners take
-over aircraft already flying. *Retail gap-fill (agent):* until multiplayer
+**Start.** Retail multiplayer starts everyone airborne, and so did this game
+until the surface close-out. *Since slice CL-R (2026-10-11):* the King's
+creator offers the single-player start choices for both sides (John: "add
+redfor ground starts, match the quick mission creator styles"): Start and
+Airport park Friendly Wing 1 at a Blue field, and Enemy start and Enemy
+airport park Enemy Wing 1, the Redfor flight, at a Redfor field, with the
+same automatic pick near a ground target
+([start placement](spec/surface-defenses.md#start-placement)). A player who
+takes a parked plane starts on the ground there, on NAV with that field
+selected; that it unlocks Blue's ground start in the lobby too is an agent
+decision of the slice. Late joiners take over aircraft already flying. *Retail gap-fill (agent):* until multiplayer
 ground starts exist, "back at a base" starts the player airborne near their
 side's base. *Designed (phase 2):* this is retail's revival: a new aircraft of
 the player's type, airborne, at the revival distance from the battle on the
@@ -823,10 +833,11 @@ defenses](spec/surface-defenses.md)). What a player sees:
 - **PvP.** The target's units are Redfor: Redfor players defend it (a Protect
   line) and its radars never paint them; Bluefor attacks it (a Destroy line).
   Redfor players start with the enemy group the layout places within 5 nm of
-  the target; a revived Redfor player comes back on its side's bearing as
-  before. *Not built:* a Redfor ground start on Red's airfield
-  (`auto_runway_for(.., true)`); a ground-start mission parks Bluefor's first
-  flight only, and Redfor starts in the air by the target.
+  the target, or, with the mission's enemy ground start, on the ground at the
+  Redfor field Enemy Wing 1 parks on (the nearest Red-side field at least 15
+  nm from the target when none is picked; slice CL-R). That field's guns and
+  SAMs are Red's own and never engage them. A revived Redfor player comes back
+  in the air on its side's bearing as before.
 - **Host migration and rejoin.** A new host takes the surface from the old
   host's checkpoint (the units' places, routes, hit points, rails, magazines,
   timers and radars), checks every resuming player's surface digest, and
@@ -1499,7 +1510,7 @@ these places:
 | Aircraft choice | Each player picks their own type | Each human takes a slot in a King-built wing | Opinionated, John 2026-09-28 |
 | AI | AI wings from the creator | AI flies every open slot and takes over dropped players | Opinionated, John 2026-09-28 |
 | Sides | Each player picks Friendly or Enemy | Co-op: humans on blue. PvP: any side | Opinionated, John 2026-09-28 |
-| Start | Everyone starts airborne | Everyone starts airborne | Matches retail, John 2026-09-28 |
+| Start | Everyone starts airborne | Airborne, or on the ground at a side's own field when the King's mission parks that side's first wing | Airborne matched retail (John 2026-09-28); ground starts for both sides since John's Redfor ground start request, 2026-10-11 (Blue's in the lobby: agent decision) |
 | Death | Revive with Enter; host sets lives, delay, distance and weapons | The spec's respawn rules, with retail's revival settings | Both, John 2026-09-28 |
 | Scoring | Kill tally, time and kill limits, kill owner | Retail's scoring settings in PvP | Matches retail, John 2026-09-28 |
 | Chat | `~` with five receivers and `CHAT.TXT` | Retail keys and receivers; quick messages | Matches retail, John 2026-09-28; quick messages are a retail gap-fill (agent) |

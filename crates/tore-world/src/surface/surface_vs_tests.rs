@@ -1,0 +1,336 @@
+//! Surface against surface (John, 2026-10-11: "If units are in range of
+//! opposing sides they should shoot at each other"): what a weapon aims at by
+//! its record's target flags, which kind a unit prefers, line of sight, the
+//! anti-ship missile, the column's halt and determinism. On synthetic units
+//! with the retail records' numbers; no retail data.
+use super::*;
+use crate::surface::movement;
+
+const RED_TANK: u32 = 0x5000_0001;
+const BLUE_TANK: u32 = 0x4000_0011;
+const BLUE_TRUCK: u32 = 0x4000_0012;
+const RED_SHIP: u32 = 0x5000_0002;
+const BLUE_SHIP: u32 = 0x4000_0013;
+
+/// The retail T-72 record (the T-72, T-80 and T-90 gun): the air and the
+/// surface target flags, fire zone 50 to 5,000 ft below 3,000 ft.
+fn t72() -> Weapon {
+    let mut w = gun(
+        "T72.JT",
+        0x300c0,
+        0,
+        [
+            zone(32767, 0, 20_000, i32::MIN, i32::MAX),
+            zone(8190, 50, 5_000, i32::MIN, 3_000),
+        ],
+        5866,
+    );
+    w.burst.game_rounds_in_burst = 1;
+    w.burst.game_burst_t = 1;
+    w.burst.reload_t = 16;
+    w.damage.by_class = [200; 5];
+    w
+}
+
+/// The retail SS-N-9 record: the surface target flag only, supported radar.
+fn ssn9() -> Weapon {
+    let mut w = missile(
+        "SSN9.JT",
+        3,
+        [
+            zone(32767, 0, 250_000, i32::MIN, i32::MAX),
+            zone(8190, 3_000, 120_000, i32::MIN, i32::MAX),
+        ],
+        32,
+        1440,
+    );
+    w.flags = 0x22365;
+    w.guidance.track_t = 12;
+    w.damage.by_class = [170; 5];
+    w
+}
+
+impl Placed {
+    fn on(mut self, side: Side) -> Self {
+        self.unit.side = side;
+        self.arms.side = side;
+        self
+    }
+}
+
+fn tank(id: u32, x: f64, z: f64, side: Side) -> Placed {
+    placed(id, "T72.NT", 0x0400, x, z, 1)
+        .with_gun(t72(), "T72", arc(0, FREE, FREE), 0)
+        .on(side)
+}
+
+fn passive(id: u32, resource: &str, class: u16, x: f64, z: f64, side: Side) -> Placed {
+    let mut p = placed(id, resource, class, x, z, 1).on(side);
+    p.unit.kind = UnitKind::Passive;
+    p
+}
+
+/// The rounds `unit` fired at `target`.
+fn rounds_at(f: &Fixture, unit: u32, target: u32) -> u32 {
+    f.fired
+        .iter()
+        .map(|(_, t)| match t {
+            Trace::Shot {
+                unit: u,
+                target: aimed,
+                rounds,
+                ..
+            } if u.0 == unit && *aimed == target => *rounds,
+            _ => 0,
+        })
+        .sum()
+}
+
+/// The targets `unit`'s first controller took, in order.
+fn targets_of(f: &Fixture, unit: u32) -> Vec<u32> {
+    let mut out: Vec<u32> = f
+        .traces
+        .iter()
+        .filter_map(|(_, t)| match t {
+            Trace::Phase {
+                unit: u,
+                weapon: 0,
+                target: Some(target),
+                ..
+            } if u.0 == unit => Some(*target),
+            _ => None,
+        })
+        .collect();
+    out.dedup();
+    out
+}
+
+#[test]
+fn opposing_tanks_in_range_engage_each_other_before_an_aircraft() {
+    // A Blue jet low over the Red tank, inside its gun's air zone: the tank
+    // still takes the Blue tank 3,000 ft off first.
+    let mut f = Fixture::new(
+        vec![
+            tank(RED_TANK, 0., 0., RED),
+            tank(BLUE_TANK, 0., 3_000., BLUE),
+        ],
+        Vec::new(),
+    );
+    f.jet.position = [0., 1_500., 1_000.];
+    // Search at once, 20 s unready preparation, 1 s lock.
+    f.run(25 * TPS);
+    assert_eq!(targets_of(&f, RED_TANK), vec![BLUE_TANK]);
+    assert_eq!(targets_of(&f, BLUE_TANK), vec![RED_TANK]);
+    assert!(rounds_at(&f, RED_TANK, BLUE_TANK) >= 1);
+    assert!(rounds_at(&f, BLUE_TANK, RED_TANK) >= 1);
+    assert_eq!(rounds_at(&f, RED_TANK, JET), 0);
+    // A ground target makes no RWR lock or painting.
+    assert!(f.state.locks.is_empty() && f.state.painting.is_empty());
+    // The Blue tank gone, the Red one turns to the jet.
+    f.kill(BLUE_TANK);
+    f.run(60 * TPS);
+    assert_eq!(targets_of(&f, RED_TANK), vec![BLUE_TANK, JET]);
+    assert!(rounds_at(&f, RED_TANK, JET) >= 1);
+}
+
+#[test]
+fn air_defence_keeps_aircraft_first_and_aaa_never_aims_at_the_ground() {
+    // A Red ZSU-23 (an AAA gun, air target flag only) beside a Blue tank.
+    let zsu = placed(ZSU_ID, "ZSU23.NT", 0x0800, 0., 0., 1)
+        .with_gun(zsu23(), "ZSU23", arc(0, FREE, [0., 90.]), 0)
+        .radar(false, None);
+    let mut f = Fixture::new(vec![zsu, tank(BLUE_TANK, 0., 2_000., BLUE)], Vec::new());
+    // No hostile aircraft: the gun stays idle and its radar off, while the
+    // tank engages it.
+    f.jet.side = RED;
+    f.run(30 * TPS);
+    assert_eq!(f.phase(ZSU_ID), Phase::Idle);
+    assert!(!f.emitting(ZSU_ID));
+    assert_eq!(rounds_at(&f, ZSU_ID, BLUE_TANK), 0);
+    assert!(rounds_at(&f, BLUE_TANK, ZSU_ID) >= 1);
+    // A Blue jet arrives: the gun fights it.
+    f.jet.side = BLUE;
+    f.jet.position = [0., 2_000., 3_000.];
+    f.run(30 * TPS);
+    assert!(rounds_at(&f, ZSU_ID, JET) > 0);
+    assert_eq!(rounds_at(&f, ZSU_ID, BLUE_TANK), 0);
+}
+
+#[test]
+fn ground_units_aim_only_at_sided_units_they_can_see_and_reach() {
+    // Beyond reach: 6,000 ft is past the gun's 5,000 ft zone.
+    let mut f = Fixture::new(
+        vec![
+            tank(RED_TANK, 0., 0., RED),
+            tank(BLUE_TANK, 0., 6_000., BLUE),
+        ],
+        Vec::new(),
+    );
+    f.jet.side = RED;
+    f.run(40 * TPS);
+    assert_eq!(f.rounds(), 0);
+
+    // Behind a ridge.
+    let mut f = Fixture::new(
+        vec![
+            tank(RED_TANK, 0., 0., RED),
+            tank(BLUE_TANK, 0., 3_000., BLUE),
+        ],
+        Vec::new(),
+    );
+    f.jet.side = RED;
+    f.ridge = Some(Ridge {
+        x: (-1e9, 1e9),
+        z: (1_200., 1_800.),
+        height: 60.,
+    });
+    f.run(40 * TPS);
+    assert_eq!(f.rounds(), 0, "a ridge between hides them");
+    f.ridge = None;
+    f.run(30 * TPS);
+    assert!(rounds_at(&f, RED_TANK, BLUE_TANK) >= 1);
+
+    // A truck with no side, a building of the other side and a unit the
+    // scene cannot draw are never aimed at; a Blue truck is.
+    let neutral = passive(0x4000_0020, "TRUCK.NT", 0x0200, 0., 1_000., NO_SIDE);
+    let mut building = passive(0x4000_0021, "BNK6.OT", 0x0100, 0., 1_200., BLUE);
+    building.unit.kind = UnitKind::Structure;
+    let mut unseen = passive(0x4000_0022, "TRUCK.NT", 0x0200, 0., 1_400., BLUE);
+    unseen.unit.in_scene = false;
+    let mut f = Fixture::new(
+        vec![tank(RED_TANK, 0., 0., RED), neutral, building, unseen],
+        Vec::new(),
+    );
+    f.jet.side = RED;
+    f.run(40 * TPS);
+    assert_eq!(f.rounds(), 0);
+    let blue_truck = passive(BLUE_TRUCK, "TRUCK.NT", 0x0200, 0., 2_000., BLUE);
+    let mut f = Fixture::new(vec![tank(RED_TANK, 0., 0., RED), blue_truck], Vec::new());
+    f.jet.side = RED;
+    f.run(25 * TPS);
+    assert!(rounds_at(&f, RED_TANK, BLUE_TRUCK) >= 1);
+}
+
+#[test]
+fn the_ss_n9_aims_at_ships_only_and_its_radar_supports_it() {
+    let sarancha = placed(RED_SHIP, "SARAN.NT", 0x2000, 0., 0., 1)
+        .with_missile(ssn9(), &[(arc(2, FREE, [0., 45.]), 2)])
+        .radar(false, None);
+    assert_eq!(
+        sarancha.arms.radar,
+        Some(emitters::RadarRule::Detection {
+            range: 0.,
+            surface: 250_000.
+        }),
+        "an air-blind radar that searches for ships"
+    );
+    let ship = passive(BLUE_SHIP, "CARGO.NT", 0x2000, 0., 60_000., BLUE);
+    let land = passive(BLUE_TRUCK, "TRUCK.NT", 0x0200, 0., 30_000., BLUE);
+    let mut f = Fixture::new(vec![sarancha, land, ship], Vec::new());
+    f.jet.side = RED;
+    f.run(TPS);
+    assert!(
+        f.emitting(RED_SHIP),
+        "a Blue ship in range turns the radar on"
+    );
+    // Search at once, 36 s unready preparation, 3 s lock.
+    f.run(40 * TPS);
+    assert_eq!(rounds_at(&f, RED_SHIP, BLUE_SHIP), 1);
+    assert_eq!(rounds_at(&f, RED_SHIP, BLUE_TRUCK), 0);
+    let support = f.supports.iter().find(|s| s.owner == RED_SHIP).unwrap();
+    assert!(support.supported && support.radar_emitting);
+    assert_eq!(support.observation.unwrap().id, BLUE_SHIP);
+    // No ship in range: the land target alone never draws a missile.
+    let sarancha = placed(RED_SHIP, "SARAN.NT", 0x2000, 0., 0., 1)
+        .with_missile(ssn9(), &[(arc(2, FREE, [0., 45.]), 1)])
+        .radar(false, None);
+    let land = passive(BLUE_TRUCK, "TRUCK.NT", 0x0200, 0., 30_000., BLUE);
+    let mut f = Fixture::new(vec![sarancha, land], Vec::new());
+    f.jet.side = RED;
+    f.run(60 * TPS);
+    assert_eq!(f.rounds(), 0);
+    assert!(!f.emitting(RED_SHIP));
+}
+
+#[test]
+fn a_unit_engaging_a_surface_target_holds_and_one_engaging_aircraft_does_not() {
+    let mut f = Fixture::new(
+        vec![
+            tank(RED_TANK, 0., 0., RED),
+            tank(BLUE_TANK, 0., 3_000., BLUE),
+        ],
+        Vec::new(),
+    );
+    f.jet.side = RED;
+    assert!(!movement::engaging_surface(f.unit_state(RED_TANK)));
+    f.run(TPS);
+    // Preparing on the Blue tank already counts.
+    assert_eq!(f.phase(RED_TANK), Phase::Prepare);
+    assert!(movement::engaging_surface(f.unit_state(RED_TANK)));
+    f.kill(BLUE_TANK);
+    f.run(TPS);
+    assert!(!movement::engaging_surface(f.unit_state(RED_TANK)));
+    // Fighting the jet alone does not stop it.
+    f.jet.side = BLUE;
+    f.jet.position = [0., 1_500., 1_000.];
+    f.run(25 * TPS);
+    assert!(f.phase(RED_TANK).locked());
+    assert!(!movement::engaging_surface(f.unit_state(RED_TANK)));
+}
+
+#[test]
+fn a_surface_duel_runs_the_same_twice() {
+    let run = || {
+        let mut f = Fixture::new(
+            vec![
+                tank(RED_TANK, 0., 0., RED),
+                tank(RED_TANK + 1, 300., 0., RED),
+                tank(BLUE_TANK, 0., 3_000., BLUE),
+                passive(BLUE_TRUCK, "TRUCK.NT", 0x0200, 400., 2_600., BLUE),
+            ],
+            Vec::new(),
+        );
+        f.jet.position = [0., 1_500., 1_500.];
+        f.run(90 * TPS);
+        (f.traces, f.state)
+    };
+    let (a, state_a) = run();
+    let (b, state_b) = run();
+    assert!(a.iter().any(|(_, t)| matches!(t, Trace::Shot { .. })));
+    assert_eq!(a, b);
+    assert_eq!(state_a, state_b);
+}
+
+#[test]
+fn a_surface_duel_survives_a_checkpoint() {
+    let units = || {
+        vec![
+            tank(RED_TANK, 0., 0., RED),
+            tank(BLUE_TANK, 0., 3_000., BLUE),
+            passive(BLUE_TRUCK, "TRUCK.NT", 0x0200, 400., 2_600., BLUE),
+        ]
+    };
+    let mut f = Fixture::new(units(), Vec::new());
+    f.jet.position = [0., 1_500., 1_500.];
+    // Past the preparation and the first rounds: both tanks hold a ground
+    // target in the middle of their engagement.
+    f.run(25 * TPS);
+    assert!(movement::engaging_surface(f.unit_state(RED_TANK)));
+    let copy = round_trip(&f.state, &Models::default()).expect("it round-trips");
+    assert_eq!(copy, f.state);
+    let mut resumed = Fixture::new(units(), Vec::new());
+    resumed.jet = f.jet;
+    resumed.state = copy;
+    resumed.live = f.live.clone();
+    resumed.tick = f.tick;
+    let fired = f.traces.len();
+    f.run(40 * TPS);
+    resumed.run(40 * TPS);
+    assert!(
+        f.traces[fired..]
+            .iter()
+            .any(|(_, t)| matches!(t, Trace::Shot { .. }))
+    );
+    assert_eq!(resumed.traces, f.traces[fired..]);
+    assert_eq!(resumed.state, f.state);
+}

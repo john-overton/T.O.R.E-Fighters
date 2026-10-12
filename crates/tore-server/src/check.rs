@@ -5,7 +5,7 @@
 use crate::prepare::Prepared;
 use tore_session::host::content::{GameContent, report_lines};
 use tore_world::{
-    mission::{MissionSpec, RUNWAY_OBJECT_BASE, Start},
+    mission::{EnemyStart, MissionSpec, RUNWAY_OBJECT_BASE, Start},
     terrain::Terrain,
 };
 
@@ -29,13 +29,14 @@ pub fn ground_start_problem(spec: &MissionSpec, terrain: &Terrain) -> Option<Str
 }
 
 /// How the runway list names an airport's side, from the friendly wing's
-/// point of view, and whether a ground start may use it: a field that serves
-/// both sides is neutral, one that serves only Redfor the enemy's.
+/// point of view, and which ground start may use it: a field that serves
+/// both sides is neutral, one that serves only Redfor the enemy's, which
+/// `enemy-start ground` takes (slice CL-R) and `start ground` refuses.
 fn side_words(blue: bool, red: bool) -> &'static str {
     match (blue, red) {
         (true, true) => "neutral",
         (true, false) => "friendly",
-        (false, true) => "enemy: no ground start",
+        (false, true) => "enemy: enemy-start ground only",
         (false, false) => "no ground start",
     }
 }
@@ -49,6 +50,16 @@ pub fn mission_summary(spec: &MissionSpec, aircraft: usize) -> String {
             runway.saturating_sub(RUNWAY_OBJECT_BASE)
         ),
         Start::GroundAuto { .. } => "ground start on a runway the world picks".to_owned(),
+    };
+    let start = match spec.enemy_start {
+        EnemyStart::Airborne => start,
+        EnemyStart::Ground { runway } => format!(
+            "{start}, enemy wing 1 on runway {}",
+            runway.saturating_sub(RUNWAY_OBJECT_BASE)
+        ),
+        EnemyStart::GroundAuto => {
+            format!("{start}, enemy wing 1 on a Redfor runway the world picks")
+        }
     };
     let side = |range: std::ops::Range<usize>| -> String {
         let counts: Vec<String> = spec.wings[range]
@@ -100,7 +111,7 @@ pub fn report(prepared: &Prepared) -> Vec<String> {
     }
     lines.push(String::new());
     lines.push(format!(
-        "Runways of {} (the numbers start ground takes):",
+        "Runways of {} (the numbers start ground and enemy-start ground take):",
         spec.theater
     ));
     let scene = &prepared.world.terrain.airport_scene;
@@ -188,6 +199,31 @@ mod tests {
         );
         let neutral = ground_start_at("check-neutral-field", None).unwrap();
         assert!(report(&neutral).join("\n").contains("ft, neutral)"));
+    }
+
+    #[test]
+    fn an_enemy_ground_start_takes_a_redfor_field_and_the_report_says_so() {
+        let at = |name: &str, nationality2: Option<u8>| {
+            let dir = data_folder_with(name, true, owned_airport_resources(nationality2));
+            fs::write(
+                dir.join("mission.txt"),
+                format!("{MISSION}enemy-start ground 0\n"),
+            )
+            .unwrap();
+            let prepared = prepare(&Options::default(), &dir);
+            let _ = fs::remove_dir_all(dir);
+            prepared
+        };
+        let red = at("check-enemy-start-red", Some(137)).unwrap();
+        let text = report(&red).join("\n");
+        assert!(text.contains("enemy wing 1 on runway 0"), "{text}");
+        assert!(
+            text.contains("Synthetic Field (8000 ft, enemy: enemy-start ground only)"),
+            "{text}"
+        );
+        // A Blue field is the other side's.
+        let error = at("check-enemy-start-blue", Some(12)).err().unwrap();
+        assert!(error.contains("is a Blue airfield"), "{error}");
     }
 
     #[test]

@@ -20,8 +20,10 @@
 //!   the shooter included. With it on the shooter can be caught in its own
 //!   blast, as the manual warns (p. 126: a missile fired inside its minimum
 //!   range or a bomb dropped too low); that damage credits no one.
-//! - A surface unit's round reaches aircraft only (surface units do not
-//!   fight each other this round, plan W2).
+//! - A surface unit's round reaches aircraft and the other side's ground
+//!   objects and ships, never its own side's or neutral scenery, whatever
+//!   the friendly fire setting (surface units fight each other: John,
+//!   2026-10-11; the sparing is an agent decision).
 //!
 //! Kill credit, strikes, hit records and jolts follow the shooter exactly as
 //! a direct hit's do. Collateral never damages a projectile.
@@ -59,8 +61,9 @@ pub(super) struct Shooter {
     /// The shooter's side ([`NO_SIDE`] when friendly fire is on or the side
     /// is unknown): friendly fire off spares it.
     pub side: Side,
-    /// A surface unit's round: its collateral reaches aircraft only.
-    pub surface: bool,
+    /// A surface unit's round, with the unit's side: its collateral reaches
+    /// aircraft and the ground objects and ships of the other side only.
+    pub surface: Option<Side>,
     /// An ownship's round: a collateral kill moves its score.
     pub ownship: bool,
 }
@@ -244,7 +247,10 @@ impl State {
             } = self;
             for t in targets.iter_mut() {
                 let aircraft = t.role == TargetRole::Aircraft;
-                if (burst.shooter.surface && !aircraft)
+                if burst
+                    .shooter
+                    .surface
+                    .is_some_and(|side| !aircraft && !super::opposed(side, t.side))
                     || skipped(t.id, t.hp, t.body_present(), t.side)
                 {
                     continue;

@@ -650,3 +650,27 @@ fn a_column_on_one_route_ends_side_by_side_in_the_world() {
         assert_eq!(end[2], f64::from(z - 800) + spacing * (1. - n as f64));
     }
 }
+
+#[test]
+fn a_held_unit_brakes_to_a_stand_and_drives_on_when_released() {
+    let course = course(50., false);
+    let mut mover = Mover::start(&course, 256.);
+    run(&mut mover, &course, 120 * 20);
+    assert!(mover.speed_feet() > 45.);
+    // Held while it engages a ground unit: 50 ft/s at 5 ft/s squared stops
+    // in about 10 s, and it stays where it stopped.
+    for _ in 0..120 * 11 {
+        mover.step_held(&course, true, true, flat);
+    }
+    assert_eq!(mover.speed, 0);
+    assert_eq!(mover.halt, Halt::Moving);
+    let at = mover.position();
+    for _ in 0..120 * 30 {
+        mover.step_held(&course, true, true, flat);
+    }
+    assert_eq!(mover.position(), at);
+    // Released, it drives on along its route.
+    run(&mut mover, &course, 120 * 5);
+    assert!(mover.speed_feet() > 20.);
+    assert_ne!(mover.position(), at);
+}

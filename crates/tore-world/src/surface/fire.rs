@@ -1,8 +1,9 @@
 //! Surface units fighting: each tick every armed unit and SAM battery runs
 //! its engagement controller ([`tore_sim::ai::surface`]) against the hostile
-//! aircraft it can see, and the shots it asks for become projectiles through
-//! `live::State::fire_surface` (docs/spec/surface-defenses.md, "Surface AI",
-//! "SAM batteries", "AAA and flak").
+//! aircraft, and the hostile ground units and ships, it can see, and the
+//! shots it asks for become projectiles through `live::State::fire_surface`
+//! (docs/spec/surface-defenses.md, "Surface AI", "SAM batteries", "AAA and
+//! flak", "Surface against surface").
 //!
 //! [`Arsenal`] is what a unit fights with, read once from its NT and JT
 //! records when the terrain builds (the AAA tuning table applied to its
@@ -34,6 +35,29 @@
 //! - The barrage zone fires each burst with its record's random-fire chance,
 //!   at the nearest hostile's lead point clamped into its fire zone and
 //!   scattered by the record's offset-fire angles.
+//!
+//! Surface against surface (John, 2026-10-11: "If units are in range of
+//! opposing sides they should shoot at each other"):
+//!
+//! - A weapon aims at what its record's target flags allow (retail): the air
+//!   flag for aircraft, the surface flag for ground units and ships
+//!   ([`WeaponArms::aims_at_aircraft`], [`WeaponArms::aims_at_surface`]). So
+//!   tank, armoured car and small-arms guns fight both, AAA, flak and SAMs
+//!   stay anti-aircraft, and the SS-N-9 fights ships (agent decision: it is
+//!   anti-ship).
+//! - What it may aim at is a unit of the other side that the scene holds:
+//!   a ground vehicle, a site, a truck, a radar or a ship, never a building,
+//!   a parked aircraft or the invisible barrage zone ([`surface_contacts`]).
+//!   The template's `react` masks (ATTACK and DEFEND per class) do not gate
+//!   it: John's rule is that units in range shoot (opinionated, John).
+//! - Preference: an air-defence unit (a SAM or AAA class word) engages
+//!   aircraft first, every other unit ground units and ships first. A
+//!   controller sees only the eligible contacts of the preferred kind while
+//!   there is one, nearest first, ties by id, so the choice is a function of
+//!   the positions alone (agent decision).
+//! - A gun aims at a surface target with a quarter of its air aim error
+//!   ([`tore_sim::ai::surface::surface_aim_error_deg`], fitted). Missile
+//!   locks and painting feed aircraft only: a ground unit has no RWR.
 use super::{
     BatterySystem, Surface, SurfaceState, UnitId, UnitKind,
     catalog::Catalog,
@@ -54,7 +78,7 @@ use tore_sim::{
     attitude::{self, Basis, Vector},
     combat::{
         gunsight::{self, TargetObservation},
-        live::{self, ActorSupport, Side, SurfaceShot},
+        live::{self, ActorSupport, Side, SurfaceShot, opposed},
         missiles::{self, seeker},
         surface_guns::{self, GunTuning},
     },
@@ -540,6 +564,33 @@ fn launch_band(record: &Weapon, kind: Kind, skill: i32) -> Band {
 }
 
 impl WeaponArms {
+    /// Whether the weapon may be aimed at aircraft: its record's air target
+    /// flag ([`live::engages_aircraft`], retail).
+    pub fn aims_at_aircraft(&self) -> bool {
+        live::engages_aircraft(&self.record)
+    }
+    /// Whether the weapon may be aimed at some ground unit or ship: its
+    /// record's surface target flag ([`live::engages_surface`], retail), for
+    /// a gun whose rounds strike (not flak, not the barrage zone) or a
+    /// missile.
+    pub fn aims_at_any_surface(&self) -> bool {
+        live::engages_surface(&self.record)
+            && match self.kind {
+                Kind::Gun { flak, .. } => !flak,
+                Kind::Barrage { .. } => false,
+                Kind::Missile => true,
+            }
+    }
+    /// Whether the weapon may be aimed at a ground unit or ship of OBJECT
+    /// class `class_word`: [`Self::aims_at_any_surface`], and an anti-ship
+    /// missile ([`missiles::ANTI_SHIP`], the SS-N-9) at ships only.
+    pub fn aims_at_surface(&self, class_word: u16) -> bool {
+        self.aims_at_any_surface()
+            && (self.kind != Kind::Missile
+                || !missiles::ANTI_SHIP.contains(&self.record.source.as_str())
+                || class_word & class::SHIP != 0)
+    }
+
     /// A gun mount's weapon: `record` tuned by the AAA tuning table for
     /// `unit` (`ZSU23`), its controller timed by the NT's `npc` times
     /// (search, unready, attack, retarget; quarter seconds) at `skill`.
@@ -614,7 +665,7 @@ impl WeaponArms {
     /// A missile weapon fired from `arc` (more rails join with
     /// [`Self::mounts`]): salvo, spacing and zones from the record, the
     /// launch range scaled by `skill`. `None` for a record without a reviewed
-    /// guidance profile (the SS-N-9, ASROC), which never fires.
+    /// guidance profile (ASROC), which never fires.
     pub fn missile(
         record: Weapon,
         arc: MountArc,
@@ -663,8 +714,8 @@ pub fn mount_arc(index: usize, mount: &tore_formats::surface_unit::Mount) -> Mou
 }
 
 /// The controllers of one NT: a controller per gun mount and one per missile
-/// record, each with its record read and tuned. Unreviewed missiles (SS-N-9,
-/// ASROC) are left out: they never fire.
+/// record, each with its record read and tuned. Unreviewed missiles (ASROC)
+/// are left out: they never fire.
 #[allow(clippy::too_many_arguments)]
 fn weapons_of(
     nt: &SurfaceUnit,
@@ -737,6 +788,84 @@ pub struct Aircraft {
     pub airborne: bool,
     /// A radio-frequency jammer is on.
     pub jammer: bool,
+}
+
+/// What a surface controller may engage this tick: an aircraft, or a
+/// ground unit or ship of a side ([`surface_contacts`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Contact {
+    pub id: u32,
+    pub side: Side,
+    /// The aircraft, or the unit's aim point (the upper half of its box,
+    /// where its combat row stands), feet.
+    pub position: Vector,
+    pub velocity: Vector,
+    /// An aircraft's PT class word; a unit's OBJECT class word.
+    pub category: u16,
+    /// An aircraft in flight; never a surface unit.
+    pub airborne: bool,
+    /// A radio-frequency jammer is on (aircraft only).
+    pub jammer: bool,
+    /// A surface unit, not an aircraft.
+    pub surface: bool,
+}
+
+impl From<&Aircraft> for Contact {
+    fn from(a: &Aircraft) -> Self {
+        Self {
+            id: a.id,
+            side: a.side,
+            position: a.position,
+            velocity: a.velocity,
+            category: a.category,
+            airborne: a.airborne,
+            jammer: a.jammer,
+            surface: false,
+        }
+    }
+}
+
+/// The surface units a controller may engage this tick, ascending id: every
+/// unit of a side that stands (hit points above 0) and that the scene holds
+/// (`in_scene`, so never the invisible barrage zone), at its combat row
+/// (aim point and velocity), with its class word. Buildings and other
+/// structures, and parked aircraft, are never aimed at (agent decision:
+/// a crew fights vehicles, sites and ships); a round may still strike one
+/// of the other side that stands in its way.
+pub fn surface_contacts(surface: &Surface, live: &live::State) -> Vec<Contact> {
+    let mut out: Vec<Contact> = live
+        .targets
+        .iter()
+        .filter(|t| t.role == missiles::TargetRole::Surface && t.hp > 0 && t.side != live::NO_SIDE)
+        .filter_map(|t| {
+            let unit = surface.unit(UnitId(t.id))?;
+            (unit.kind != UnitKind::Structure && unit.in_scene).then_some(Contact {
+                id: t.id,
+                side: t.side,
+                position: t.position,
+                velocity: t.velocity,
+                category: unit.class,
+                airborne: false,
+                jammer: false,
+                surface: true,
+            })
+        })
+        .collect();
+    out.sort_by_key(|c| c.id);
+    out
+}
+
+/// A unit that engages ground units and ships before aircraft: anything but
+/// an air-defence unit (a SAM or AAA class word). Agent decision,
+/// 2026-10-11.
+pub fn prefers_surface(class_word: u16) -> bool {
+    class_word & (class::SAM | class::AAA) == 0
+}
+
+/// Whether `id` is a surface object's id (a layout or template unit, an
+/// added truck or radar), not an aircraft's.
+pub fn is_surface_id(id: u32) -> bool {
+    (super::LAYOUT_OBJECT_BASE..super::SURFACE_UNIT_END).contains(&id)
 }
 
 /// The world around the surface for one tick.
@@ -858,50 +987,81 @@ pub fn line_of_sight(from: Vector, to: Vector, ground: &dyn Fn(f64, f64) -> f64)
 
 /// Whether `aircraft` is a hostile the unit (or battery) may attack: an
 /// enemy of its side, airborne, of a class its react mask names.
-fn hostile(side: Side, react: u32, aircraft: &Aircraft) -> bool {
-    side != live::NO_SIDE
+fn hostile(side: Side, react: u32, aircraft: &Contact) -> bool {
+    !aircraft.surface
+        && side != live::NO_SIDE
         && aircraft.side != live::NO_SIDE
         && aircraft.side != side
         && aircraft.airborne
         && (react == 0 || aircraft.category == 0 || u32::from(aircraft.category) & react != 0)
 }
 
-/// What a controller sees from `from`: whether any hostile is inside
-/// `range`, and the eligible hostiles (inside the detection band, the search
-/// limit and line of sight) nearest first.
-#[allow(clippy::too_many_arguments)]
-fn look(
+/// Whether a controller of a unit of `side` with `weapon` may aim at
+/// `contact` at all: a hostile aircraft its react mask names, for a weapon
+/// that aims at aircraft, or a ground unit or ship of the other side of a
+/// class the weapon aims at.
+fn wanted(side: Side, react: u32, weapon: &WeaponArms, contact: &Contact) -> bool {
+    if contact.surface {
+        opposed(side, contact.side) && weapon.aims_at_surface(contact.category)
+    } else {
+        weapon.aims_at_aircraft() && hostile(side, react, contact)
+    }
+}
+
+/// What a unit's controller, or a battery's, sees.
+struct Look<'a> {
+    /// Where it looks from.
     from: Vector,
     side: Side,
     react: u32,
-    band: &Band,
+    weapon: &'a WeaponArms,
+    band: Band,
+    /// The detection range: a hostile inside it wakes the controller.
     range: f64,
     search_limit: Option<f64>,
-    scene: &Scene<'_>,
+    /// It engages ground units and ships before aircraft.
+    prefer_surface: bool,
     line_of_sight_needed: bool,
-) -> (bool, Vec<u32>) {
-    let mut in_range = false;
-    let mut eligible: Vec<(f64, u32)> = Vec::new();
-    for aircraft in scene.aircraft {
-        if !hostile(side, react, aircraft) {
-            continue;
+}
+
+impl Look<'_> {
+    /// Whether any hostile it may aim at is inside its range, and the
+    /// eligible ones (inside the detection band, the search limit and line of
+    /// sight) of the preferred kind while there is one, else of the other,
+    /// nearest first, ties by id.
+    fn sees(&self, contacts: &[Contact], scene: &Scene<'_>) -> (bool, Vec<u32>) {
+        let mut in_range = false;
+        let mut eligible: Vec<(bool, f64, u32)> = Vec::new();
+        let surface = self.weapon.aims_at_any_surface();
+        for contact in contacts {
+            if (contact.surface && !surface) || !wanted(self.side, self.react, self.weapon, contact)
+            {
+                continue;
+            }
+            let d = sub(contact.position, self.from);
+            let distance = length(d);
+            if distance > self.range {
+                continue;
+            }
+            in_range = true;
+            if !self.band.contains(distance, d[1])
+                || self.search_limit.is_some_and(|limit| distance > limit)
+                || (self.line_of_sight_needed
+                    && !line_of_sight(self.from, contact.position, scene.ground))
+            {
+                continue;
+            }
+            eligible.push((contact.surface != self.prefer_surface, distance, contact.id));
         }
-        let d = sub(aircraft.position, from);
-        let distance = length(d);
-        if distance > range {
-            continue;
+        eligible.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2)));
+        if let Some(&(other_kind, _, _)) = eligible.first() {
+            eligible.retain(|e| e.0 == other_kind);
         }
-        in_range = true;
-        if !band.contains(distance, d[1])
-            || search_limit.is_some_and(|limit| distance > limit)
-            || (line_of_sight_needed && !line_of_sight(from, aircraft.position, scene.ground))
-        {
-            continue;
-        }
-        eligible.push((distance, aircraft.id));
+        (
+            in_range,
+            eligible.into_iter().map(|(_, _, id)| id).collect(),
+        )
     }
-    eligible.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-    (in_range, eligible.into_iter().map(|(_, id)| id).collect())
 }
 
 /// The surface's random draws: SplitMix64 kept in the state.
@@ -988,8 +1148,17 @@ pub fn step(
         rows.get(&id.0)
             .is_some_and(|index| live.targets[*index].hp > 0)
     };
+    // What the controllers may aim at: the aircraft, then the ground units
+    // and ships of a side.
+    let ground = surface_contacts(surface, live);
+    let contacts: Vec<Contact> = scene
+        .aircraft
+        .iter()
+        .map(Contact::from)
+        .chain(ground.iter().copied())
+        .collect();
     // Radars first: who emits this tick, HARM shutdowns.
-    let radars = emitters::step(surface, state, live, scene, &rows);
+    let radars = emitters::step(surface, state, live, scene, &rows, &ground);
     let mut supports = Vec::new();
     // In-flight surface missiles by (owner, target).
     let mut in_flight: BTreeSet<(u32, u32)> = BTreeSet::new();
@@ -1001,8 +1170,7 @@ pub fn step(
             in_flight.insert((projectile.owner, target));
         }
     }
-    let aircraft_by_id: BTreeMap<u32, Aircraft> =
-        scene.aircraft.iter().map(|a| (a.id, *a)).collect();
+    let aircraft_by_id: BTreeMap<u32, Contact> = contacts.iter().map(|c| (c.id, *c)).collect();
     let observe = |from: Vector, id: u32| {
         aircraft_by_id.get(&id).map(|a| seeker::Observation {
             id,
@@ -1060,16 +1228,18 @@ pub fn step(
                 if optical {
                     band.max_range = launch.max_range;
                 }
-                look(
+                Look {
                     from,
-                    battery.side,
-                    battery.react,
-                    &band,
-                    if optical { band.max_range } else { range },
-                    None,
-                    scene,
-                    true,
-                )
+                    side: battery.side,
+                    react: battery.react,
+                    weapon,
+                    band,
+                    range: if optical { band.max_range } else { range },
+                    search_limit: None,
+                    prefer_surface: false,
+                    line_of_sight_needed: true,
+                }
+                .sees(&contacts, scene)
             }
             None => (false, Vec::new()),
         };
@@ -1192,6 +1362,7 @@ pub fn step(
         // painting, never the launchers'.
         if radar_on
             && let Some(target) = lock
+            && !is_surface_id(target)
             && state.batteries[battery.index].controller.phase().locked()
         {
             state.locks.push((target, weapon.record.seeker.signature));
@@ -1205,6 +1376,9 @@ pub fn step(
             continue;
         }
         let radar_on = radars.get(&arms.unit).copied().unwrap_or(false);
+        let prefer_surface = surface
+            .unit(arms.unit)
+            .is_some_and(|unit| prefers_surface(unit.class));
         for (index, weapon) in arms.weapons.iter().enumerate() {
             if weapon.battery {
                 continue;
@@ -1215,8 +1389,12 @@ pub fn step(
                 weapon,
                 state,
                 live,
-                scene,
-                &aircraft_by_id,
+                &View {
+                    scene,
+                    contacts: &contacts,
+                    by_id: &aircraft_by_id,
+                    prefer_surface,
+                },
                 radar_on,
                 &in_flight,
                 &mut supports,
@@ -1235,6 +1413,15 @@ fn slot_lock(controller: &Controller) -> Option<u32> {
         .flatten()
 }
 
+/// What a unit's controllers see this tick: the scene, every contact (by
+/// id too) and whether the unit engages ground units and ships first.
+struct View<'a> {
+    scene: &'a Scene<'a>,
+    contacts: &'a [Contact],
+    by_id: &'a BTreeMap<u32, Contact>,
+    prefer_surface: bool,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn step_weapon(
     arms: &Arms,
@@ -1242,12 +1429,13 @@ fn step_weapon(
     weapon: &WeaponArms,
     state: &mut SurfaceState,
     live: &mut live::State,
-    scene: &Scene<'_>,
-    aircraft_by_id: &BTreeMap<u32, Aircraft>,
+    seen: &View<'_>,
     radar_on: bool,
     in_flight: &BTreeSet<(u32, u32)>,
     supports: &mut Vec<ActorSupport>,
 ) {
+    let scene = seen.scene;
+    let aircraft_by_id = seen.by_id;
     let place = state.place(arms);
     let muzzle = place.eye;
     let barrage = match weapon.kind {
@@ -1257,27 +1445,35 @@ fn step_weapon(
     let (in_range, eligible) = match barrage {
         // The barrage needs no sight of its target: any hostile within the
         // activation radius.
-        Some(activation) => {
-            let band = Band {
+        Some(activation) => Look {
+            from: muzzle,
+            side: arms.side,
+            react: arms.react,
+            weapon,
+            band: Band {
                 min_range: 0.,
                 max_range: activation,
                 min_altitude: f64::MIN,
                 max_altitude: f64::MAX,
-            };
-            look(
-                muzzle, arms.side, arms.react, &band, activation, None, scene, false,
-            )
+            },
+            range: activation,
+            search_limit: None,
+            prefer_surface: false,
+            line_of_sight_needed: false,
         }
-        None => look(
-            muzzle,
-            arms.side,
-            arms.react,
-            &weapon.detection,
-            weapon.detection.max_range,
-            arms.search_limit,
-            scene,
-            true,
-        ),
+        .sees(seen.contacts, scene),
+        None => Look {
+            from: muzzle,
+            side: arms.side,
+            react: arms.react,
+            weapon,
+            band: weapon.detection,
+            range: weapon.detection.max_range,
+            search_limit: arms.search_limit,
+            prefer_surface: seen.prefer_surface,
+            line_of_sight_needed: true,
+        }
+        .sees(seen.contacts, scene),
     };
     let Some(unit) = state.unit(arms.unit) else {
         return;
@@ -1398,6 +1594,7 @@ fn step_weapon(
         let lock = slot_lock(controller);
         if controller.phase().locked()
             && let Some(target) = controller.target()
+            && !is_surface_id(target)
         {
             state.locks.push((target, weapon.record.seeker.signature));
             if radar_on {
@@ -1435,6 +1632,7 @@ fn step_weapon(
         && let Some(target) = state.unit(arms.unit).expect("armed").engagers[index]
             .controller
             .target()
+        && !is_surface_id(target)
         && state.unit(arms.unit).expect("armed").engagers[index]
             .controller
             .phase()
@@ -1564,7 +1762,8 @@ pub fn gun_aim_point(
     aim
 }
 
-/// Fires a gun's rounds of `fire` at `aircraft`: the lead point from the
+/// Fires a gun's rounds of `fire` at `aircraft` (an aircraft, or a ground
+/// unit or ship): the lead point from the
 /// shared gunsight solution, the burst's aim error, the round's end at the
 /// target's range (or a flak shell's time fuze).
 #[allow(clippy::too_many_arguments)]
@@ -1575,7 +1774,7 @@ fn fire_gun(
     index: usize,
     weapon: &WeaponArms,
     fire: FireRequest,
-    aircraft: &Aircraft,
+    aircraft: &Contact,
     scene: &Scene<'_>,
 ) {
     let place = state.place(arms);
@@ -1608,8 +1807,14 @@ fn fire_gun(
         }
     };
     if fire.burst_start {
-        // The burst's aim error, by skill; a jammer widens a radar gun's.
-        let mut error = control::aim_error_deg(arms.skill, radar).to_radians();
+        // The burst's aim error, by skill (a quarter of it at a ground unit
+        // or ship); a jammer widens a radar gun's.
+        let mut error = if aircraft.surface {
+            control::surface_aim_error_deg(arms.skill, radar)
+        } else {
+            control::aim_error_deg(arms.skill, radar)
+        }
+        .to_radians();
         if radar && aircraft.jammer {
             error *= control::JAMMED_RADAR_GUN_ERROR_FACTOR;
         }
