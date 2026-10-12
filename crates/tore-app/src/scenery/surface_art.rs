@@ -1129,6 +1129,34 @@ impl SurfaceArt {
         self.wrecks.insert(id, drawn);
         self
     }
+    /// A unit with spinning antennas whose aim has been stepped once: it
+    /// is drawn by the frame pass, never by the static batch.
+    pub(super) fn with_spinning_antenna(mut self, id: u32) -> Self {
+        self.aimers.insert(
+            id,
+            Aimer {
+                stand: Stand {
+                    scale: 1.,
+                    basis: Basis::new(0., 0., 0.),
+                    origin: [0.; 3],
+                },
+                bytes: Vec::new(),
+                intact: Shape {
+                    lines: Vec::new(),
+                    faces: Vec::new(),
+                    billboards: Vec::new(),
+                    state_words: BTreeSet::new(),
+                },
+                turrets: Vec::new(),
+                antennas: true,
+                rails: Vec::new(),
+                full: Vec::new(),
+                routed: false,
+            },
+        );
+        self.aims.tick = Some(0);
+        self
+    }
 }
 
 #[cfg(test)]
