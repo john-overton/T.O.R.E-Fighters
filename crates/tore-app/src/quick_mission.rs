@@ -678,10 +678,23 @@ impl QuickMission {
     pub fn ai_choice(&self, id: AircraftId) -> Option<usize> {
         self.wing_files.iter().position(|n| n == id.selection_key())
     }
-    /// Whether the player's aircraft is one the AI cannot fly, so no AI
-    /// wingman can share friendly wing 1 with the player.
-    fn player_without_ai_wingmen(&self) -> Option<AircraftId> {
-        self.player().filter(|id| !id.ai_flyable())
+    /// Why no AI wingman can share friendly wing 1 with the player: the
+    /// player's aircraft is one the AI cannot fly, or a helicopter on a
+    /// ground start (the AI starts and flies a helicopter in the air, but
+    /// cannot lift one off the ground yet, slice ST-H). The words end
+    /// "so friendly wing 1 ...".
+    fn wingmen_refusal(&self) -> Option<String> {
+        let player = self.player()?;
+        if !player.ai_flyable() {
+            return Some(format!("The AI cannot fly the {} yet", player.label()));
+        }
+        if player.is_helicopter() && self.ground_start() {
+            return Some(format!(
+                "The AI cannot take a {} off the ground yet",
+                player.label()
+            ));
+        }
+        None
     }
     pub fn guns_only(&self) -> bool {
         self.draft.values[19] == 0
@@ -1213,11 +1226,10 @@ impl QuickMission {
         }
         if !self.lobby
             && v[4] > 1
-            && let Some(player) = self.player_without_ai_wingmen()
+            && let Some(why) = self.wingmen_refusal()
         {
             return Some(format!(
-                "The AI cannot fly the {} yet, so friendly wing 1 can only hold you. Set friendly wing 1 to one aircraft.",
-                player.label()
+                "{why}, so friendly wing 1 can only hold you. Set friendly wing 1 to one aircraft."
             ));
         }
         if condition(v[15]).is_none() {
@@ -1697,13 +1709,10 @@ impl QuickMission {
         // just the player (a lobby's wing 1 is for humans, so it keeps its size).
         if !self.lobby
             && self.draft.values[4] > 1
-            && let Some(player) = self.player_without_ai_wingmen()
+            && let Some(why) = self.wingmen_refusal()
         {
             self.draft.values[4] = 1;
-            self.notice = Some(format!(
-                "The AI cannot fly the {} yet, so friendly wing 1 is just you.",
-                player.label()
-            ));
+            self.notice = Some(format!("{why}, so friendly wing 1 is just you."));
         }
     }
     /// An Airport field (34 or 36) whose Start is Airborne: it is not drawn,
@@ -3071,9 +3080,9 @@ mod tests {
             .into_iter()
             .filter(|id| !id.ai_flyable())
             .collect();
-        assert_eq!(kept.len(), 6);
+        assert_eq!(kept.len(), 4);
         for field in AI_AIRCRAFT_FIELDS {
-            assert_eq!(q.values(field).len(), AircraftId::SELECTABLE.len() - 6);
+            assert_eq!(q.values(field).len(), AircraftId::SELECTABLE.len() - 4);
             for id in &kept {
                 assert!(
                     !q.values(field).contains(&id.label().to_string()),
@@ -3081,7 +3090,10 @@ mod tests {
                 );
             }
         }
-        assert!(q.ai_choice(AircraftId::Ah64).is_none());
+        assert!(q.ai_choice(AircraftId::Ch47).is_none());
+        // The armed helicopters are offered since slice ST-H.
+        assert!(q.ai_choice(AircraftId::Ah64).is_some());
+        assert!(q.ai_choice(AircraftId::Mi24).is_some());
         assert!(q.ai_choice(AircraftId::Mig29).is_some());
         // The player's list is whole.
         assert_eq!(q.values(6).len(), AircraftId::SELECTABLE.len());
@@ -3110,8 +3122,6 @@ mod tests {
         let mut q = full_catalog();
         q.apply(4, 3);
         for id in [
-            AircraftId::Ah64,
-            AircraftId::Mi24,
             AircraftId::Ch47,
             AircraftId::V22,
             AircraftId::Av8,
@@ -3142,6 +3152,54 @@ mod tests {
         assert!(q.unsupported().is_none());
         q.apply(4, 3);
         assert_eq!(q.draft.values[4], 3);
+    }
+    #[test]
+    fn a_helicopter_leads_ai_wingmen_in_the_air_but_not_off_the_ground() {
+        let mut q = full_catalog();
+        q.airport_names[0] = vec!["First Field".into()];
+        q.airport_objects[0] = vec![0x4000_0000];
+        for id in [AircraftId::Ah64, AircraftId::Mi24] {
+            // Airborne, the AI flies the helicopter in friendly wing 1.
+            q.apply(33, 0);
+            q.apply(4, 0);
+            let index = q
+                .aircraft_files
+                .iter()
+                .position(|f| f == id.selection_key())
+                .unwrap();
+            q.apply(6, index);
+            assert_eq!(q.player(), Some(id));
+            q.apply(4, 3);
+            assert_eq!(q.draft.values[4], 3, "{id:?}");
+            assert!(q.unsupported().is_none());
+            // A ground start leaves the wing to the player alone, with the
+            // reason, and keeps it so.
+            q.apply(33, 1);
+            assert_eq!(q.draft.values[4], 1, "{id:?}");
+            assert!(
+                q.notice
+                    .as_deref()
+                    .is_some_and(|n| n.contains("off the ground") && n.contains("just you")),
+                "{:?}",
+                q.notice
+            );
+            q.apply(4, 2);
+            assert_eq!(q.draft.values[4], 1);
+            // A draft that slipped through is refused with the reason.
+            q.draft.values[4] = 2;
+            assert!(q.unsupported().unwrap().contains("off the ground"));
+            q.draft.values[4] = 1;
+            // The AI's other wings take the helicopter at either start.
+            for field in [9, 12] {
+                q.apply(field, q.ai_choice(id).unwrap());
+                assert_eq!(q.wing_aircraft(field), Some(id));
+            }
+        }
+        // A fighter takes its wingmen off the ground as ever.
+        q.apply(6, 0);
+        q.apply(4, 3);
+        assert_eq!(q.draft.values[4], 3);
+        assert!(q.unsupported().is_none());
     }
     fn right_click(q: &mut QuickMission, id: usize) -> Action {
         q.hover = Some(id);

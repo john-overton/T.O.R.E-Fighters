@@ -187,6 +187,47 @@ fn under_a_sam_it_attacks_from_low_at_the_weapons_range() {
 }
 
 #[test]
+fn under_threat_it_holds_course_at_speed_and_settles_to_the_masking_height() {
+    // The controller flies a defence (a missile), then it ends; for the ten
+    // quiet seconds after it the controller's own air logic would fly corner
+    // speed, which sinks a helicopter: the family flies the time (slice ST-H).
+    let mut world = heli_world(at2(4));
+    world.own.heading_deg = 20.;
+    world.own.agl_ft = 1_200.;
+    world.own.terrain_ahead_ft = 300.;
+    world.own.position = [0., 1_500., 0.];
+    let mut strike = Strike::new(3);
+    // While the controller flies the defence, the family stands aside for it.
+    let defending = Context {
+        defending: true,
+        warnings: crate::ai::awareness::ground::RecentWarnings {
+            air_to_air: false,
+            surface_to_air: true,
+        },
+        ..world.context(1)
+    };
+    let order = strike.step(&defending);
+    assert_eq!(strike.phase(), Phase::Defend);
+    assert!(order.steer.is_none());
+    // The defence is over but the ten quiet seconds are not: it holds course at
+    // full speed, down toward 200 ft over the highest ground ahead.
+    let order = strike.step(&world.context(2));
+    assert_eq!(strike.phase(), Phase::Defend);
+    let hold = steer(&order);
+    assert_eq!(hold.heading_deg, 20., "course held");
+    assert_eq!(hold.speed, SpeedRequest::Maximum);
+    assert!(
+        hold.pitch_deg < 0. && hold.pitch_deg >= -10.,
+        "{}",
+        hold.pitch_deg
+    );
+    assert_eq!(order.activity, Some(Activity::Defending));
+    // Already at that height it flies level.
+    world.own.position[1] = 500.;
+    assert_eq!(steer(&strike.step(&world.context(3))).pitch_deg, 0.);
+}
+
+#[test]
 fn rockets_leave_in_a_burst_while_the_cue_stays_in_the_circle() {
     let mut world = heli_world(rockets(38));
     let mut strike = Strike::new(3);

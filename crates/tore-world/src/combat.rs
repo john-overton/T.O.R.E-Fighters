@@ -255,6 +255,26 @@ pub fn weapon_contact(
 pub const SPAWN_MIN_MSL_FT: f64 = 5000.;
 /// Lowest airborne mission start above the ground under it, feet.
 pub const SPAWN_MIN_AGL_FT: f64 = 1000.;
+/// Where a helicopter of the AI's own wings starts above the ground under
+/// it, feet (opinionated, agent, slice ST-H): the AI cannot yet make a
+/// helicopter climb or descend by much, so it starts at the height it
+/// attacks from (the pop-up's 1,500 ft) and is not raised to
+/// [`SPAWN_MIN_MSL_FT`]. A helicopter in the player's wing starts with the
+/// player.
+pub const HELICOPTER_START_AGL_FT: f64 = 1500.;
+
+/// Where an airborne mission start at `y` feet settles over ground at
+/// `ground`: raised to [`SPAWN_MIN_MSL_FT`] above sea level and
+/// [`SPAWN_MIN_AGL_FT`] above the ground (John, 2026-09-29), except a
+/// helicopter of the AI's own wings, which starts [`HELICOPTER_START_AGL_FT`]
+/// above the ground, up or down (slice ST-H).
+pub fn settled_spawn_height(y: f64, ground: f64, helicopter: bool) -> f64 {
+    if helicopter {
+        ground + HELICOPTER_START_AGL_FT
+    } else {
+        y.max(SPAWN_MIN_MSL_FT.max(ground + SPAWN_MIN_AGL_FT))
+    }
+}
 
 pub fn launcher(s: &flight::State) -> Launcher {
     Launcher {
@@ -1444,8 +1464,10 @@ impl Combat {
     /// aircraft never starts inside the terrain. After [`Self::reset`] placed
     /// the wings, any airborne aircraft lower than [`SPAWN_MIN_MSL_FT`] above
     /// sea level or [`SPAWN_MIN_AGL_FT`] above the ground under it is raised
-    /// to the higher of the two. Runway starts are untouched. Returns how many
-    /// aircraft were raised.
+    /// to the higher of the two. Runway starts are untouched, and so is a
+    /// helicopter of the player's wing; a helicopter of the AI's other wings
+    /// starts [`HELICOPTER_START_AGL_FT`] above the ground (slice ST-H).
+    /// Returns how many aircraft were raised.
     pub fn raise_airborne_spawns(&mut self, world: &Terrain) -> usize {
         let Some(spawns) = self.mission_spawns.as_ref() else {
             return 0;
@@ -1459,11 +1481,13 @@ impl Combat {
                 continue;
             };
             let [x, y, z] = target.position;
-            let floor = SPAWN_MIN_MSL_FT
-                .max(f64::from(world.height(x as f32, z as f32)) + SPAWN_MIN_AGL_FT);
-            if y < floor {
-                target.position[1] = floor;
-                raised += 1;
+            let ground = f64::from(world.height(x as f32, z as f32));
+            let helicopter =
+                !spawn.with_player && target.aircraft.is_some_and(AircraftId::is_helicopter);
+            let settled = settled_spawn_height(y, ground, helicopter);
+            if (settled - y).abs() > f64::EPSILON {
+                target.position[1] = settled;
+                raised += usize::from(settled > y);
             }
         }
         raised
@@ -1750,6 +1774,20 @@ pub fn feedback(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_airborne_start_is_raised_clear_but_an_ai_helicopter_starts_at_its_own_height() {
+        // The 5,000 ft floor above sea level and the 1,000 ft above the
+        // ground (John, 2026-09-29): raised, never lowered.
+        assert_eq!(settled_spawn_height(3_000., 0., false), 5_000.);
+        assert_eq!(settled_spawn_height(3_000., 6_000., false), 7_000.);
+        assert_eq!(settled_spawn_height(9_000., 6_000., false), 9_000.);
+        // A helicopter of the AI's own wings: 1,500 ft above the ground,
+        // from above or below, and not raised to the sea-level floor.
+        assert_eq!(settled_spawn_height(9_000., 200., true), 1_700.);
+        assert_eq!(settled_spawn_height(100., 200., true), 1_700.);
+        assert_eq!(settled_spawn_height(5_000., 6_000., true), 7_500.);
+    }
 
     /// An AI's hit on a human-flown aircraft is credited to the AI (John,
     /// 2026-09-29), but not when the aircraft is then lost with no shooter:

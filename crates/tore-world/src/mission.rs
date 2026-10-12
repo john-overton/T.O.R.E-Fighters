@@ -972,8 +972,8 @@ impl MissionSpec {
             }
         }
         // Friendly wing 1 is flown by people; every other wing is the AI's,
-        // and the AI cannot fly the helicopters, the V-22, the AV-8 or the
-        // Yak-141 yet (`AircraftId::ai_flyable`).
+        // and the AI cannot fly the CH-47, the V-22, the AV-8 or the Yak-141
+        // yet (`AircraftId::ai_flyable`).
         for (index, wing) in self.wings.iter().enumerate().skip(1) {
             if wing.count > 0 && !wing.aircraft.ai_flyable() {
                 return refuse(format!(

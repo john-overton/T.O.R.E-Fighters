@@ -118,6 +118,9 @@ pub struct MissionSpawn {
     pub turn: f64,
     /// Departure order when this member starts on the runway.
     pub runway_order: Option<u8>,
+    /// The member flies in the player's own wing, so it starts where the
+    /// player does, whatever the aircraft.
+    pub with_player: bool,
 }
 
 impl MissionSpawn {
@@ -197,6 +200,7 @@ pub fn mission_spawns_for(
                         opposing,
                         turn: 0.0,
                         runway_order: Some(slot),
+                        with_player: true,
                     };
                 }
                 let offset = if slot == 0 {
@@ -223,6 +227,7 @@ pub fn mission_spawns_for(
                     opposing,
                     turn: if opposing { plan.enemy_turn } else { 0.0 },
                     runway_order: None,
+                    with_player: player_wing,
                 }
             })
         })
@@ -4919,6 +4924,156 @@ mod tests {
             assert!(joined.research.is_some());
             assert_ne!(joined.lift_controls, fresh, "{id:?} trimmed on joining");
             assert_eq!(joined.ticks, 0);
+        }
+    }
+
+    #[test]
+    fn a_helicopter_keeps_no_fuel_schedule_and_is_never_put_through_the_airfield_sequence() {
+        // Slice ST-H. The runway is 110 nm away: a jet told to land begins
+        // the approach; a helicopter, whose data gives
+        // it minutes of fuel against the hour a cruise of 80 knots takes,
+        // would be bingo in every Quick Mission, and an approach and rollout
+        // flown at 120 knots put it in the ground.
+        use tore_sim::ai::route::FuelState;
+        let runway = runway_view(9, [0., 10., 700_000.]);
+        let airfields = Airfields {
+            runways: vec![HomeRunway {
+                view: runway,
+                friendly: true,
+                enemy: true,
+            }],
+            departure: None,
+            enemy_departure: None,
+        };
+        let selections = [
+            (launch::Side::Friendly, 1u8, 1usize),
+            (launch::Side::Enemy, 0, 1),
+        ]
+        .map(|(side, index, count)| WingSelection {
+            wing: WingId::new(side, index).unwrap(),
+            aircraft: AircraftId::F18,
+            count,
+            skill_level: 1,
+        });
+        let payload = resolve_wings(&selections, None).unwrap();
+        for helicopter in [true, false] {
+            let targets: Vec<_> = vec![
+                target(1, [600., 3_000., 0.], 0.),
+                target(2, [0., 3_000., 900_000.], std::f64::consts::PI),
+            ];
+            let mut wings = AiWings::build_for(&payload, &targets, &airfields, &[], |_| {
+                Ok((
+                    if helicopter {
+                        crate::test_support::powered_profile(AircraftId::Mi24)
+                    } else {
+                        aircraft()
+                    },
+                    None,
+                ))
+            })
+            .unwrap();
+            wings.apply_mission_preset(Preset::Hold, [0., 3_000., 0.]);
+            wings.set_flight_model(AiFlightModel::AllHybrid).unwrap();
+            let mut targets = targets;
+            let order = tore_sim::ai::airfield::LandingOrder {
+                runway,
+                reason: tore_sim::ai::airfield::LandingReason::Ordered,
+            };
+            wings
+                .mission
+                .actor_mut(1)
+                .unwrap()
+                .order(tore_sim::ai::wing::WingRequest::Land(order), 0)
+                .unwrap();
+            let mut entered = false;
+            for _ in 0..1_800 {
+                fly_one_tick(&mut wings, &mut targets, vec![]);
+                entered |= wings.mission.actor(1).unwrap().airfield().is_some();
+            }
+            let actor = wings.mission.actor(1).unwrap();
+            assert!(!actor.flight().crashed);
+            assert_eq!(entered, !helicopter, "helicopter {helicopter}");
+            if helicopter {
+                assert_eq!(
+                    actor.controller().fuel_state(),
+                    Some(FuelState::NoManagement),
+                    "no schedule"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_helicopter_under_a_missile_warning_breaks_across_the_threat_and_keeps_flying() {
+        use tore_sim::combat::missiles::Guidance;
+        // Slice ST-H: a warned helicopter flies its own break, not the
+        // fighters' jink and dive at corner speed, which sank it.
+        for id in [AircraftId::Ah64, AircraftId::Mi24] {
+            let profile = || crate::test_support::powered_profile(id);
+            let (mut wings, mut targets) = led_wing_of(1, &[], 3_000., profile);
+            wings.set_flight_model(AiFlightModel::AllHybrid).unwrap();
+            assert!(wings.mission.actor(1).unwrap().is_rotorcraft(), "{id:?}");
+            let start = wings.mission.actor(1).unwrap().flight().clone();
+            let mut seen = None;
+            let (mut lowest, mut slowest) = (f64::MAX, f64::MAX);
+            for tick in 0..2_400 {
+                // A radar missile from the north-east, always about 5,000 ft
+                // out and closing (the fixture renews it each tick).
+                let at = wings.mission.actor(1).unwrap().flight().position;
+                wings
+                    .mission
+                    .set_missiles(vec![tore_sim::combat::threats::MissileSnapshot {
+                        id: 99,
+                        owner: 90,
+                        position: [at[0] + 3_500., at[1], at[2] + 3_500.],
+                        velocity: [-1_060., 0., -1_060.],
+                        guidance: Guidance::Supported,
+                        target: Some(1),
+                        radar_active: false,
+                        radar_acquired: false,
+                        supported: true,
+                        supporting_radar_position: Some([at[0] + 60_000., 10., at[2] + 60_000.]),
+                        alive: true,
+                    }]);
+                fly_one_tick(&mut wings, &mut targets, vec![]);
+                let actor = wings.mission.actor(1).unwrap();
+                assert!(!actor.flight().crashed, "{id:?} crashed at tick {tick}");
+                lowest = lowest.min(actor.flight().position[1]);
+                slowest = slowest.min(actor.flight().speed);
+                if seen.is_none() && actor.trace().rotor_break.is_some() {
+                    seen = actor.trace().rotor_break;
+                }
+            }
+            let (answer, bearing) = seen.unwrap_or_else(|| panic!("{id:?} never broke"));
+            // The bearing is the missile's, north-east; the break is 90
+            // degrees off it, on the side nearer the nose.
+            let bearing = bearing.expect("a radar warning has a bearing");
+            assert!((bearing - 45.).abs() < 10., "{id:?} bearing {bearing}");
+            let off = (answer.heading_deg - bearing + 540.) % 360. - 180.;
+            assert!(
+                (off.abs() - answer.offset_deg).abs() < 1e-6,
+                "{id:?} {answer:?}"
+            );
+            assert_eq!(answer.offset_deg, 90.);
+            let actor = wings.mission.actor(1).unwrap();
+            let flight = actor.flight();
+            // It neither dived nor stalled: it is where a break leaves it,
+            // turned toward the beam, high and fast enough.
+            assert!(
+                lowest > start.position[1] - 1_200.,
+                "{id:?} lowest {lowest}"
+            );
+            assert!(slowest > 0.7 * start.speed, "{id:?} slowest {slowest}");
+            assert!(flight.position[1] > 1_000., "{id:?} {}", flight.position[1]);
+            let turned = {
+                let heading = flight.yaw.to_degrees().rem_euclid(360.);
+                let beam = (bearing + 270.) % 360.;
+                (heading - beam + 540.) % 360. - 180.
+            };
+            assert!(
+                turned.abs() < 40.,
+                "{id:?} heading is {turned} off the beam"
+            );
         }
     }
 

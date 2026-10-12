@@ -7421,7 +7421,7 @@ fn ai_probe_run(
     }
     if let Some(enemy) = script.enemy_aircraft {
         let index = quick.ai_choice(enemy).ok_or(
-            "probe enemy aircraft is not imported, or the AI cannot fly it (no helicopter, V-22, AV-8 or Yak-141 wings)",
+            "probe enemy aircraft is not imported, or the AI cannot fly it (no CH-47, V-22, AV-8 or Yak-141 wings)",
         )?;
         for field in [23, 26, 29] {
             quick.draft.values[field] = index;
@@ -7429,7 +7429,7 @@ fn ai_probe_run(
     }
     if let Some(friend) = script.friendly_aircraft {
         let index = quick.ai_choice(friend).ok_or(
-            "probe friendly aircraft is not imported, or the AI cannot fly it (no helicopter, V-22, AV-8 or Yak-141 wings)",
+            "probe friendly aircraft is not imported, or the AI cannot fly it (no CH-47, V-22, AV-8 or Yak-141 wings)",
         )?;
         for field in [9, 12] {
             quick.draft.values[field] = index;

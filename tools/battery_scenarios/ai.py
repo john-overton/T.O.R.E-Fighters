@@ -807,6 +807,24 @@ def scenarios() -> list[Scenario]:
                          expect=[rf"data link: lock plane=0 target={locked}", rf"data link: lock plane=1 target={takes}"],
                          check=datalink_player_lock_check(wingman=1, locked=locked, takes=takes)))
 
+    # 9z. AI helicopters in a Quick Mission (slice ST-H): the AH-64 and Mi-24 fly as the AI's
+    # wings (friendly wings 2 and 3 and the enemy), and as the player's own AI wingmen on an airborne
+    # start. They start at 1,500 ft over the ground (wings 2 and 3, enemies), keep no fuel schedule and
+    # never enter an airfield sequence. The probes' own checks (no anomaly, no open hazard, no dead
+    # aircraft with a live activity) are the test: a helicopter that dived or landed on a runway at
+    # 120 knots shows as a ground hazard or a crash.
+    out.append(probe("fight-heli-wings-vs-jets", fight(2, 2, "--aircraft", "f18", "--probe-friendly-aircraft", "mi24",
+                                                  "--probe-enemy-aircraft", "su27", "--separation", "5", *attack),
+                     ticks=7200, notes="Mi-24 friendly wings 2 and 3 with the player's F/A-18Ds against two Su-27s."))
+    out.append(probe("fight-heli-vs-heli", fight(3, 3, "--aircraft", "f18", "--probe-friendly-aircraft", "ah64",
+                                            "--probe-enemy-aircraft", "mi24", "--separation", "5", *attack),
+                     ticks=9600, notes="AH-64 friendly wings against Mi-24 enemies."))
+    out.append(probe("fight-heli-player-wing", ["--aircraft", "ah64", "--probe-wing-size", "3", "--separation", "10"],
+                     ticks=9600, notes="A player in an AH-64 with two AI AH-64 wingmen on an airborne start."))
+    out.append(probe("rtb-heli-land-order", ["--aircraft", "mi24", "--probe-wing-size", "3", "--separation", "100",
+                                          "--probe-wing-order", "2000:land-selected"], ticks=14000,
+                     notes="Told to land, AI helicopters do not enter the airfield sequence."))
+
     # 10. Ground starts: takeoff, formation, landing orders.
     for size in [1, 2, 3, 4, 5]:
         out.append(probe(f"ground-takeoff-wing{size}", ["--ground-start", GROUND_AIRPORT, "--probe-wing-size", str(size), "--maneuver", "takeoff",

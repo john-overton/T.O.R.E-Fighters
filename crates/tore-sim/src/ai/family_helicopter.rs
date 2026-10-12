@@ -81,7 +81,7 @@ pub const GATE_FLOOR_FT: f64 = 40.;
 /// unmask's climb and its longest wait, and how far beyond the firing range
 /// the masked exit goes before turning back.
 pub const STANDOFF_SHARE: f64 = 0.6;
-pub const MASK_AGL_FT: f64 = 200.;
+pub const MASK_AGL_FT: f64 = crate::ai::helicopter_defense::MASK_AGL_FT;
 pub const UNMASK_CLIMB_FT: f64 = 500.;
 pub const UNMASK_TICKS: u64 = 10 * 120;
 pub const STANDOFF_EXIT_FT: f64 = 6_000.;
@@ -167,11 +167,11 @@ pub(super) fn step(s: &mut Strike, cx: &Context<'_>) -> Order {
             s.enter(Phase::Defend, cx.tick);
             s.released = 0;
         }
-        return order;
+        return mask_run(cx, order);
     }
     if s.phase == Phase::Defend {
         if !s.quiet(cx) {
-            return order;
+            return mask_run(cx, order);
         }
         if s.safe(cx) {
             s.enter(Phase::Ingress, cx.tick);
@@ -260,6 +260,35 @@ pub(super) fn step(s: &mut Strike, cx: &Context<'_>) -> Order {
                 }
             }
         },
+    }
+}
+
+/// While a threat is up and the controller is not flying a helicopter break
+/// (a warning not yet answered, or the ten quiet seconds after one): hold the
+/// course at maximum speed and settle to the masking height over the highest
+/// ground ahead, which `helicopter_defense` does for the break itself. The
+/// fighters' air logic would otherwise fly this time at corner speed, which
+/// sinks a helicopter (slice ST-H, docs/spec/ai-strike.md, "Helicopter
+/// defence").
+fn mask_run(cx: &Context<'_>, order: Order) -> Order {
+    if cx.defending {
+        // The controller's defence flies, and overrides a steer.
+        return order;
+    }
+    let own = cx.own;
+    let ground = (own.position[1] - own.agl_ft).max(own.terrain_ahead_ft);
+    let floor = ground + MASK_AGL_FT;
+    Order {
+        steer: Some(Steer {
+            heading_deg: own.heading_deg,
+            pitch_deg: hold_pitch_deg(own.position[1], floor),
+            speed: SpeedRequest::Maximum,
+            afterburner: false,
+            bank_deg: None,
+            handling: Handling::PLAIN,
+        }),
+        activity: Some(Activity::Defending),
+        ..order
     }
 }
 

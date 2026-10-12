@@ -177,6 +177,18 @@ own aircraft, experience, side and leader. Friendly Wing 1 follows the human;
 the other wings have their own AI leaders. No command-line option is required.
 `--ai-wings` remains a shortcut to open the creator.
 
+AI helicopters (slice ST-H, John's decision of 2026-10-11): the AH-64 and the
+Mi-24 are offered in the five AI wing fields, and in friendly wing 1 when the
+player flies one on an airborne start. The CH-47, the V-22, the AV-8 and the
+Yak-141 are not offered to the AI. A helicopter of the AI's own wings starts
+1,500 ft over the ground under it rather than at the chosen altitude, in forward
+flight (**opinionated**, agent: the AI cannot yet make a helicopter climb or
+descend by much). A player in a helicopter who chooses a ground start leads
+friendly wing 1 alone, with a notice, because the AI cannot take a helicopter off
+the ground; the other wings start airborne at any start. With a ground target set,
+a friendly wing 2 or 3 of helicopters strikes by the bomber-class default. See
+[AI strike](ai-strike.md#ai-helicopters-in-quick-mission).
+
 John requested separate delta formations on 2026-09-17. The host uses the B43
 alternating trailing slots with level stacking: slots 1 and 2 are 512 ft right
 and left, 512 ft behind; slots 3 and 4 are 1024 ft right and left, 1024 ft behind.
