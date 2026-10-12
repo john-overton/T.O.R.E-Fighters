@@ -222,8 +222,9 @@ pub fn assess(s: &State, ground: impl Fn(f64, f64) -> f64) -> Option<Assessment>
 pub struct AirfieldContext {
     /// Height above the surface below, feet.
     pub agl_ft: f64,
-    /// The surface below is a runway.
-    pub landable_below: bool,
+    /// The surface below: the touchdown rule ([`crate::touchdown::assess`])
+    /// decides whether contact with it would be a crash.
+    pub below: crate::research::Surface,
     /// Horizontal distance to the landing point, feet.
     pub landing_distance_ft: f64,
 }
@@ -240,17 +241,17 @@ pub const EXTREME_BANK_DEG: f64 = 90.0;
 /// Height below which [`EXTREME_BANK_DEG`] counts.
 pub const EXTREME_BANK_AGL_FT: f64 = 1_000.0;
 /// Ground contact this close is unavoidable; it is catastrophic only when
-/// the touchdown would be a crash.
+/// the touchdown would be a crash (the shared touchdown rule).
 pub const UNAVOIDABLE_IMPACT_S: f64 = 1.0;
 
 /// Whether an AI aircraft on an airfield sequence should still eject for
 /// `assessment`: destroyed or structurally failed, on fire, critically
 /// damaged, a dead engine that cannot glide to the landing point, spinning,
 /// inverted or beyond 90 degrees of bank low down, or ground contact within
-/// a second that would be a crash (off the runway, gear not down, or outside
+/// a second that would be a crash (the shared touchdown rule, gear not down, or outside
 /// the aircraft's landing limits). Anything else is a go-around.
 pub fn catastrophic(s: &State, assessment: Assessment, field: AirfieldContext) -> bool {
-    use tore_formats::flight_model::ground::{LandingSeverity, landing_severity};
+    use tore_formats::flight_model::ground::LandingSeverity;
     if assessment.hazard == Hazard::Destroyed
         || s.systems.structure.failed
         || s.systems.structure.burning()
@@ -271,18 +272,11 @@ pub fn catastrophic(s: &State, assessment: Assessment, field: AirfieldContext) -
     if assessment.impact_seconds > UNAVOIDABLE_IMPACT_S {
         return false;
     }
-    let basis = Basis::new(s.yaw, s.pitch, s.bank);
-    let forward = crate::attitude::dot(s.velocity, basis.forward);
-    let side = crate::attitude::dot(s.velocity, basis.right);
-    let severity = landing_severity(
-        s.model().configuration().native.landing,
-        (s.bank.to_degrees() * 256.) as i32,
-        (s.pitch.to_degrees() * 256.) as i32,
-        (forward * 256.) as i32,
-        (side * 256.) as i32,
-        s.velocity[1] as i16,
-    );
-    !field.landable_below || s.gear < 0.99 || severity != LandingSeverity::WithinLimits
+    let severity =
+        crate::touchdown::severity(s.model().configuration().native.landing, s, &field.below);
+    crate::touchdown::assess(s, &field.below).is_refused()
+        || s.gear < 0.99
+        || severity != LandingSeverity::WithinLimits
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
