@@ -151,7 +151,7 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="render-nosewheel-hud-inactive",
             lane="flight",
-            args=["--free-flight", "--aircraft", "f18", "--ground-start", "1", "--maneuver", "takeoff", "--flight-probe-ticks", "600", "--flight-view", "0", "--capture-flight", "{work}/nsw-inactive.ppm", "--no-audio"],
+            args=["--free-flight", "--aircraft", "f18", "--ground-start", "1", "--maneuver", "takeoff", "--flight-probe-ticks", "1200", "--flight-view", "0", "--capture-flight", "{work}/nsw-inactive.ppm", "--no-audio"],
             window=True,
             outputs=["nsw-inactive.ppm"],
             expect=["Scene capture:"],

@@ -21,7 +21,7 @@ Rudder now turns the air-relative flight path through sideslip force and roll
 coupling. The HUD shows available NSW percent below BRAKE while on the wheels and hides the readout when displayed authority reaches zero.
 Steering turns the nosewheel and steerable strut, leaving separate braces fixed.
 Nosewheel steering has 90-degree authority through 10 mph, fading
-linearly to zero at 25 mph ground speed. [Rules and fitted constants](spec/lateral-flight.md).
+linearly to zero at 50 mph ground speed (John widened the fade from 25 mph on 2026-10-12; opinionated). [Rules and fitted constants](spec/lateral-flight.md).
 
 ## AC-130 directed guns
 

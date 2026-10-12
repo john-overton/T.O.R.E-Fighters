@@ -14,6 +14,10 @@ Implementation mode. John requested working rudder side force and the following
 nosewheel schedule on 2026-10-01. These are opinionated requirements; the force,
 roll and wheelbase constants are fitted agent decisions, not retail measurements.
 
+On 2026-10-12 John widened the fade: full articulation still holds through
+10 mph, but the linear removal now ends at 50 mph instead of 25 mph, so authority
+is `(50 - mph) / 40` between 10 and 50 mph (opinionated; unchanged start point).
+
 In the legacy and researched adapters, yaw creates sideslip. A lateral force
 opposes air-relative motion across the fuselage, turning the velocity toward
 the nose. Bank then supplies its usual lift-driven turn. Existing rudder filtering,
@@ -31,7 +35,7 @@ existing tire friction handles lateral ground motion.
 
 The nosewheel takes rudder deflection while supported with gear down. Its maximum
 angle is 90 degrees through 10 mph ground speed, then decreases linearly to zero
-at 25 mph. At and above 25 mph only aerodynamic rudder yaw remains. Ground speed
+at 50 mph. At and above 50 mph only aerodynamic rudder yaw remains. Ground speed
 is horizontal world velocity, independent of wind. A stationary wheel can turn
 without rotating a stationary aircraft. The fitted effective wheelbase is 18 ft;
 yaw rate is signed forward ground speed divided by wheelbase times the sine of
@@ -42,7 +46,7 @@ The HUD shows `NSW 100%` directly below BRAKE while gear is fully down and
 the wheels carry the aircraft (John, 2026-10-02). This is available authority,
 not pedal deflection: centered pedals still show 100% at low speed. The display
 rounds to a whole percent and hides when that rounded value is zero, including
-at and above 25 mph. It also hides in flight and with gear retracted. John asked
+at and above 50 mph. It also hides in flight and with gear retracted. John asked
 for the inactive readout to disappear on 2026-10-02. Presentation choices are
 fitted; the sim supplies the fraction and its steering law is unchanged.
 
