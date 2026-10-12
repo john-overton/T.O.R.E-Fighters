@@ -12,8 +12,9 @@
 //!
 //! The site is the first of a seeded list of candidate centres that is level
 //! land, stands clear of every layout object and runway, keeps
-//! [`FRONT_CLEAR_NM`] from every template unit (so no front unit reaches the
-//! targets) and from both starts, and holds every unit. Everything comes from
+//! [`FRONT_CLEAR_NM`] from every template unit and every leg of a routed
+//! unit's path (so no front unit reaches the targets), from both airborne
+//! starts and from every runway a ground start may use, and holds every unit. Everything comes from
 //! the template's own stream and integer arithmetic, so every machine places
 //! the same front on the same foot.
 use super::{
@@ -81,11 +82,30 @@ pub(super) fn add(
     };
     let toward_blue = trig::bearing([blue_side[0] - target[0], blue_side[1] - target[1]]);
     // Everything the front keeps clear of: the template's units and aircraft
-    // as placed, and both starts.
+    // as placed, every leg of a routed unit's path (review M3: a column or a
+    // truck drives far from its start), both airborne starts, and the
+    // runways a ground start of either side may use (review L1).
     let clear_of: Vec<[i64; 2]> = surface
         .template_units()
         .map(|u| xz(u.position))
         .chain(surface.parked.iter().map(|p| xz(p.position)))
+        .collect();
+    let paths: Vec<Vec<[i64; 2]>> = surface
+        .template_units()
+        .filter_map(|u| {
+            let route = u.route.as_ref()?;
+            Some(
+                std::iter::once(xz(u.position))
+                    .chain(route.legs().map(|leg| xz(leg.position)))
+                    .collect(),
+            )
+        })
+        .collect();
+    let fields: Vec<&super::ground::Placed> = starts
+        .blue_airfields
+        .iter()
+        .chain(&starts.red_airfields)
+        .filter_map(|id| inputs.ground.runways.iter().find(|r| r.id == *id))
         .collect();
     let clear = FRONT_CLEAR_NM * NM_FT;
     let starts_at = [
@@ -106,6 +126,11 @@ pub(super) fn add(
                 .iter()
                 .chain(&starts_at)
                 .any(|p| distance2(*p, centre) < clear * clear)
+                || paths.iter().any(|path| {
+                    path.windows(2)
+                        .any(|leg| near_leg(centre, leg[0], leg[1], clear))
+                })
+                || fields.iter().any(|runway| runway.within(centre, clear))
             {
                 continue;
             }
@@ -137,6 +162,26 @@ pub(super) fn add(
         }
     }
     notes.push("no front line: no site holds the two lines".to_owned());
+}
+
+/// Whether `point` lies closer than `clear` feet to the leg from `a` to `b`
+/// (exact, in integers).
+pub(super) fn near_leg(point: [i64; 2], a: [i64; 2], b: [i64; 2], clear: i64) -> bool {
+    let wide = |v: i64| i128::from(v);
+    let leg = [wide(b[0] - a[0]), wide(b[1] - a[1])];
+    let to = [wide(point[0] - a[0]), wide(point[1] - a[1])];
+    let length2 = leg[0] * leg[0] + leg[1] * leg[1];
+    let along = to[0] * leg[0] + to[1] * leg[1];
+    let clear2 = wide(clear) * wide(clear);
+    if along <= 0 || length2 == 0 {
+        to[0] * to[0] + to[1] * to[1] < clear2
+    } else if along >= length2 {
+        let from_b = [wide(point[0] - b[0]), wide(point[1] - b[1])];
+        from_b[0] * from_b[0] + from_b[1] * from_b[1] < clear2
+    } else {
+        let cross = to[0] * leg[1] - to[1] * leg[0];
+        cross * cross < clear2 * length2
+    }
 }
 
 /// Both sides' units: Blue's, then Red's, each drawn from its equipment
@@ -227,4 +272,25 @@ fn poses(
         }
     }
     Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::near_leg;
+
+    #[test]
+    fn a_leg_is_near_along_its_length_and_at_its_ends_only() {
+        let (a, b) = ([0, 0], [10_000, 0]);
+        // Beside the middle of the leg.
+        assert!(near_leg([5_000, 999], a, b, 1_000));
+        assert!(!near_leg([5_000, 1_000], a, b, 1_000));
+        // Past either end the distance is to that end.
+        assert!(near_leg([10_600, 600], a, b, 1_000));
+        assert!(!near_leg([10_800, 800], a, b, 1_000));
+        assert!(near_leg([-700, 700], a, b, 1_000));
+        assert!(!near_leg([-800, 800], a, b, 1_000));
+        // A leg of no length is a point.
+        assert!(near_leg([300, 400], a, a, 501));
+        assert!(!near_leg([300, 400], a, a, 500));
+    }
 }

@@ -512,9 +512,12 @@ lists as the template's `<tank>`, `<afv>` and `<aaa>` slots
   centroid, on the bearing toward Blue's side of the theater's front (turned by
   up to 90 degrees); when no site in that band passes, 10 to 20 nm. Up to 24
   candidates per band, the first that passes wins. A candidate must keep 4 nm
-  from every template unit and parked aircraft (so no front unit's gun or
-  missile reaches the targets and the front can neither destroy nor protect
-  the objective) and from both starts (so nobody starts in the fighting), and
+  from every template unit and parked aircraft and from every leg of a routed
+  unit's path, start to last waypoint (so no front unit's gun or missile
+  reaches the targets, wherever a column or truck drives, and the front can
+  neither destroy nor protect the objective), and from both airborne starts
+  and every runway a ground start of either side may use (so nobody starts or
+  takes off in the fighting), and
   every unit must stand on land where a ground unit may (level, off the sea,
   clear of layout objects and runways: the same rule as the template's units)
   and see every unit of the other line over the terrain (the weapons' own line
@@ -525,7 +528,9 @@ lists as the template's `<tank>`, `<afv>` and `<aaa>` slots
   the targets, with 13 to 32 pairs in sight and reach and the nearest opposing
   pair 2,146 to 2,601 ft apart (the farthest pair in reach 4,056 ft, inside a
   tank gun's 5,000); the 25 without are naval targets (fleets, cargo ships, the
-  Taiwan sea scenarios) with no land within 20 nm of them.
+  Taiwan sea scenarios) with no land within 20 nm of them. The route and
+  runway rules (review fix, 2026-10-12) changed none of these builds: the
+  same survey after them stands the same 191 fronts in the same places.
 - **How.** The line's axis runs from the centre toward the targets, turned by
   up to 45 degrees. Blue's line stands 1,200 ft back from the centre on the
   Blue end of the axis, Red's 1,200 ft on the other: the lines are 2,400 ft

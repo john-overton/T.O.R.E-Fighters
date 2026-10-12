@@ -1223,6 +1223,118 @@ fn a_front_line_stands_in_contact_clear_of_the_targets_and_the_starts() {
     }
 }
 
+/// A route around the targets at `radius` feet: from the unit's spot, then
+/// sixteen legs round a ring.
+fn ring_route(from: [i32; 3], radius: f64) -> tore_formats::quick_template::Route {
+    use tore_formats::quick_template::{Route, WAYPOINT_LEG, WAYPOINT_START, Waypoint};
+    let point = |index: u32, flags: i32, position: [i32; 3]| Waypoint {
+        index,
+        flags,
+        goal: 0,
+        next: 0,
+        head: [0, 0],
+        position,
+        speed: 20,
+        wing: [0; 4],
+        react: [0; 3],
+        search_dist: 0,
+        preferred_target: 0,
+        name: String::new(),
+    };
+    let mut waypoints = vec![point(0, WAYPOINT_START, from)];
+    for n in 0..=16u32 {
+        let angle = f64::from(n) * std::f64::consts::TAU / 16.;
+        let at = [
+            MID + (radius * angle.sin()).round() as i32,
+            0,
+            MID + (radius * angle.cos()).round() as i32,
+        ];
+        waypoints.push(point(n + 1, WAYPOINT_LEG, at));
+    }
+    Route {
+        alias: 7,
+        waypoints,
+    }
+}
+
+/// Review M3 and L1: the front keeps clear of every leg of a routed unit's
+/// path, not only its start, and of every runway a ground start may use.
+/// A route round the targets at 7.5 nm rules out the first band (5 to 10
+/// nm), so the front stands 10 to 20 nm out, where the ground-start fields
+/// are; one is then put where the front stood.
+#[test]
+fn a_front_line_keeps_clear_of_routes_and_ground_start_runways() {
+    let grid = Grid::land(128);
+    let mut units = site_units();
+    units[7].route = Some(ring_route(units[7].position, 7.5 * NM_FT as f64));
+    let path: Vec<[i64; 2]> = std::iter::once(at(&units[7]))
+        .chain(
+            units[7]
+                .route
+                .as_ref()
+                .unwrap()
+                .legs()
+                .map(|leg| xz(leg.position)),
+        )
+        .collect();
+    // The lines spread about the centre the rule keeps clear.
+    let near = FRONT_CLEAR_NM * NM_FT - 3_000;
+    let build = |seed: u32, runways: Vec<Placed>| {
+        let ground = Ground::new(&grid, Vec::new(), runways, None);
+        let mut s = surface(units.clone(), Some(target(seed, Variation::ON)));
+        lay(&mut s, &ground, &[]);
+        s
+    };
+    let (mut fronts, mut fields) = (0, 0);
+    for seed in 1..=24 {
+        let s = build(seed, Vec::new());
+        let front = front_units(&s);
+        if front.is_empty() {
+            continue;
+        }
+        fronts += 1;
+        for u in &front {
+            assert!(
+                !path
+                    .windows(2)
+                    .any(|leg| front::near_leg(at(u), leg[0], leg[1], near)),
+                "seed {seed}: {:?} is near the route",
+                u.id
+            );
+        }
+        let middle = centroid(front.iter().map(|u| at(u))).unwrap();
+        let starts = s.starts.as_ref().unwrap();
+        let target = [i64::from(starts.target[0]), i64::from(starts.target[1])];
+        if distance2(middle, target) < (16 * NM_FT).pow(2) {
+            continue;
+        }
+        let runway = Placed {
+            id: l(9).0,
+            at: middle,
+            heading: 0,
+            footprint: types("STRIP.OT").footprint,
+        };
+        let again = build(seed, vec![runway]);
+        let starts = again.starts.as_ref().unwrap();
+        assert!(
+            starts.blue_airfields.contains(&runway.id) || starts.red_airfields.contains(&runway.id),
+            "seed {seed}: the field is a ground start's"
+        );
+        fields += 1;
+        for u in front_units(&again) {
+            assert!(
+                !runway.within(at(u), near),
+                "seed {seed}: {:?} is near the field",
+                u.id
+            );
+        }
+    }
+    assert!(
+        fronts >= 3 && fields >= 1,
+        "{fronts} fronts, {fields} fields"
+    );
+}
+
 #[test]
 fn the_front_line_is_seeded_and_turns_off() {
     let grid = Grid::land(128);
