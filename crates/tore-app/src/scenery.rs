@@ -498,6 +498,13 @@ impl Scenery {
             pages: &mut self.sky_indices,
         };
         for (id, object_type, shape, stand, lift) in drawn {
+            // A runway stays drawn when destroyed (B15).
+            if object_type
+                .and_then(|t| sources.definitions.get(t))
+                .is_some_and(|d| d.callbacks.iter().any(|c| c == "_STRIPProc"))
+            {
+                art.keep(id);
+            }
             // Experiment AP1: a redrawn airport draws its own pavement in
             // place of the retail airfield shape.
             if let Some(built) = crate::terrain::redrawn::Built::for_runway(&terrain.redrawn, id) {
@@ -669,6 +676,25 @@ impl Scenery {
             })
             .collect();
         self.static_geometry_with(looks)
+    }
+
+    /// How many vertex floats placement `id` draws now, its look given by
+    /// `targets` and `surface` as [`Self::static_geometry`] gives it: 0 for
+    /// a hidden placement.
+    pub fn drawn_vertex_floats(
+        &mut self,
+        id: u32,
+        targets: &[tore_sim::combat::live::Target],
+        surface: &tore_world::surface::SurfaceState,
+    ) -> usize {
+        let known = targets.iter().find(|t| t.id == id).map(|t| t.hp);
+        match self
+            .surface
+            .look(id, known.is_some_and(|hp| hp > 0), known.is_some(), Some(surface))
+        {
+            None => self.static_vertices.get(&id).map_or(0, Vec::len),
+            Some(look) => self.surface.drawn(id, &look).map_or(0, |d| d.vertices.len()),
+        }
     }
 
     /// Recorded destruction can move backwards when a replay seeks. Keep

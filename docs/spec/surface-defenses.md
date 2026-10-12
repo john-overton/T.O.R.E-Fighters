@@ -1535,9 +1535,11 @@ A land unit (an NT that is not a ship, a structure or a man) stands on the
 lowest point of its shape, standing or moving, and its contact and hit box
 stand with it (fitted: a vehicle's shape origin is at its turret or rails,
 and for every land unit the lowest point equals the F2 ground offset within a
-unit; a T-80 drawn on its origin hid its hull in the ground). Ships keep
-their waterline and buildings their authored depth: their F2 offsets lie well
-below their geometry (Krivak -100 against -26, the bunkers -176 against -88).
+unit; a T-80 drawn on its origin hid its hull in the ground). Since slice BG
+(B13, 2026-10-12) buildings do too, bunkers included: their lowest point also
+equals their F2 offset within 3 ft ([building
+grounding](../formats/objects-and-shapes.md#building-grounding-2026-10-12)).
+Ships keep their waterline (Krivak F2 -100 against its geometry's -26).
 
 ### Shapes the reader learned
 

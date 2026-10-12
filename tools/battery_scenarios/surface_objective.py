@@ -21,6 +21,14 @@ multiplayer mission (a Redfor player): the targets are a Protect objective, the
 column's guns and missiles fire at Blue only, and a Blue plane destroying the
 column's tanks takes the line from "Protected the 3 friendly objectives" to
 "Protected 0 of 3 friendly objectives".
+
+`surface-runway-stays` (B15, 2026-10-12) bombs `~QUSTRIP` (Ukraine, an
+airstrip): the Mk 82s on its hangars, shelters, tower and stores bring the
+template's own runway (`STRIP.OT`, 750 hit points) down with their splash.
+The runway must still be drawn (`--runway-art` counts its vertex floats), on
+the redrawn airport (B14: the template's strip is redrawn with the STRIP plan)
+and on the retail airfield shape (`--retail-airfields`), where it once vanished
+with the whole airfield.
 """
 import re
 
@@ -132,6 +140,32 @@ def protect_problems(output: str) -> list[str]:
     return problems
 
 
+RUNWAY = re.compile(
+    r"^surface-objective: end runway (0x[0-9a-f]+) (\S+) hp (\d+)/(\d+) (retail|redrawn \S+)(?: drawn (\d+))?$",
+    re.M,
+)
+
+
+def runway_problems(output: str) -> list[str]:
+    runs = parts(output)
+    if len(runs) != 2:
+        return [f"{len(runs)} runs finished, want 2"]
+    problems: list[str] = []
+    for run, want in zip(runs, ["redrawn STRIP.OT", "retail"]):
+        rows = [m for m in RUNWAY.finditer(run) if m.group(1) == "0x50000000"]
+        if not rows:
+            problems.append(f"{want}: no line for the template's runway 0x50000000")
+            continue
+        m = rows[0]
+        if m.group(2) != "STRIP.OT" or m.group(3) != "0":
+            problems.append(f"{want}: the bombs did not bring the runway down: {m.group(0)}")
+        if m.group(5) != want:
+            problems.append(f"{want}: the runway is {m.group(5)}")
+        if not m.group(6) or int(m.group(6)) == 0:
+            problems.append(f"{want}: the destroyed runway is not drawn: {m.group(0)}")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     run = ["--surface-objective"]
     return [
@@ -156,5 +190,18 @@ def scenarios() -> list[Scenario]:
             check=protect_problems,
             notes="A multiplayer mission (open seating) with the human in the first enemy plane: Redfor defends "
                   "the target. Reads the templates from the retail media until the import keeps them.",
+        ),
+        Scenario(
+            name="surface-runway-stays", lane="ai",
+            args=run + ["UKR", "QUSTRIP", "--defenses", "0", "0", "--seconds", "150", "--runway-art"],
+            timeout=300,
+            then=[
+                Step(run + ["UKR", "QUSTRIP", "--defenses", "0", "0", "--seconds", "150", "--runway-art",
+                            "--retail-airfields"], timeout=300),
+            ],
+            expect=[r"^surface-objective: t=\S+ every target is down$"],
+            check=runway_problems,
+            notes="B15: the splash of the bombs on the airstrip's buildings destroys its runway, which stays "
+                  "drawn, redrawn (B14) and retail. Builds the scenery on the CPU, no window.",
         ),
     ]

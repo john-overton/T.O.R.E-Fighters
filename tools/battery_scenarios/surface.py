@@ -28,6 +28,14 @@ theater with a ground target and a 50 nm enemy distance. Red starts within
 at the target; both on the map. See
 docs/spec/surface-defenses.md.
 
+`surface-building-grounding` (B13, 2026-10-12) runs `--surface-dump
+--grounding`: every OT the import and the retail media hold, with its shape's
+lowest and highest point and the lift that stands it on the ground. Buildings
+stand on their lowest point (the factory hall FACTD, 89 percent below its
+origin, is lifted 42.7 ft; the hangar 26.7 ft), and that point agrees with the
+shape's F2 ground offset within 3 ft; runways, bridges and roads are not
+lifted.
+
 The engagement scenarios run `--surface-trace`, which flies the player on a
 scripted straight line past one surface unit and prints what its controller
 does (phases, shots, bursts, radar, HARM rolls, battery changes), the RWR's
@@ -600,8 +608,44 @@ def start_placement_problems(output: str) -> list[str]:
     return problems
 
 
+GROUNDING = re.compile(
+    r"^grounding: (\S+) shape \S+ size (\w+) low (-?[\d.]+) high (-?[\d.]+) below \d+% f2 (\S+) "
+    r"lift (-?[\d.]+) hp \S+$",
+    re.M,
+)
+
+
+def grounding_problems(output: str) -> list[str]:
+    rows = {m.group(1): m for m in GROUNDING.finditer(output)}
+    problems: list[str] = []
+    if len(rows) < 150:
+        problems.append(f"{len(rows)} OT types surveyed, want the retail data's 167")
+    for name, m in rows.items():
+        low, lift, size, f2 = float(m.group(3)), float(m.group(6)), m.group(2), m.group(5)
+        tied = size == "MapTied"
+        if tied and lift != 0:
+            problems.append(f"{name}: a runway, bridge or road lifted {lift} ft")
+        if not tied and abs(lift - max(-low, 0.0)) > 0.11:
+            problems.append(f"{name}: lifted {lift} ft, its lowest point is {low} ft")
+        if not tied and f2 != "-" and low < 0 and abs(float(f2) - low) > 3.0:
+            problems.append(f"{name}: lowest point {low} ft is {abs(float(f2) - low):.1f} ft from its F2 offset {f2}")
+    for name, want in [("FACTD.OT", 42.7), ("HANGR.OT", 26.7), ("FACT1.OT", 162.7)]:
+        m = rows.get(name)
+        if m is None or abs(float(m.group(6)) - want) > 0.11:
+            problems.append(f"{name}: lift {m and m.group(6)}, want {want} ft")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     return [
+        Scenario(
+            name="surface-building-grounding", lane="ai",
+            args=["--surface-dump", "--grounding"], timeout=300,
+            expect=[r"^grounding: \d+ types, \d+ lifted$"],
+            check=grounding_problems,
+            notes="B13: buildings stand on their lowest point. Reads the OT records the import lacks from the "
+                  "retail media.",
+        ),
         Scenario(
             name="surface-resolve-all", lane="ai",
             args=["--surface-dump", "--all"], timeout=300,
