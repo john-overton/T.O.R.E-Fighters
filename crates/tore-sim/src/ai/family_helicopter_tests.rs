@@ -19,6 +19,9 @@ fn at2(rounds: u32) -> Store {
         minimum_range_ft: 500.,
         maximum_range_ft: 18_000.,
         round_speed_fps: None,
+        release_speed_share: 1.,
+        fuze_arm_s: 0.,
+        frag_radius_ft: 0.,
     }
 }
 
@@ -28,6 +31,9 @@ fn rockets(rounds: u32) -> Store {
         maximum_range_ft: 12_000.,
         minimum_range_ft: 50.,
         round_speed_fps: Some(2_000.),
+        release_speed_share: 1.,
+        fuze_arm_s: 0.,
+        frag_radius_ft: 0.,
         ..at2(rounds)
     }
 }

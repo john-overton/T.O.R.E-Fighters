@@ -34,10 +34,10 @@
 //!
 //! Defence, the safe test and going home are the fighters'.
 use super::{
-    CHOICE_DISTANCE_FT, Context, Order, Pass, Phase, ROCKETS_PER_PASS, Release, STRAIGHT_EXIT_FT,
-    Segment, Solution, Steer, Store, StoreKind, Strike, TURN_BACK_DEG, aim_draw, angle_difference,
-    bearing_deg, depression_deg, elevation_deg, hold_pitch_deg, horizontal, known_position,
-    objective_point, release_circle_ft, standing, steering_frame, turn_radius_ft,
+    CHOICE_DISTANCE_FT, Context, Handling, Order, Pass, Phase, ROCKETS_PER_PASS, Release,
+    STRAIGHT_EXIT_FT, Segment, Solution, Steer, Store, StoreKind, Strike, TURN_BACK_DEG, aim_draw,
+    angle_difference, bearing_deg, depression_deg, elevation_deg, hold_pitch_deg, horizontal,
+    known_position, objective_point, release_circle_ft, standing, steering_frame, turn_radius_ft,
 };
 use crate::ai::awareness::ground::{BriefedKind, ThreatLevel};
 use crate::ai::controller::{Activity, OwnState};
@@ -234,6 +234,7 @@ pub(super) fn step(s: &mut Strike, cx: &Context<'_>) -> Order {
         speed,
         afterburner: false,
         bank_deg: None,
+        handling: Handling::PLAIN,
     };
     match s.phase {
         Phase::Home | Phase::Defend | Phase::Regain | Phase::Lase => order,
@@ -386,6 +387,7 @@ fn exit_steer(s: &Strike, cx: &Context<'_>, target_at: Option<Vector>) -> Steer 
         speed: SpeedRequest::Maximum,
         afterburner: false,
         bank_deg: None,
+        handling: Handling::PLAIN,
     }
 }
 
@@ -518,6 +520,7 @@ fn attack(s: &mut Strike, cx: &Context<'_>, target: Vector, solution: Option<Sol
         speed: steer.2,
         afterburner: false,
         bank_deg: None,
+        handling: Handling::PLAIN,
     });
 
     // The release: in the pop-up's final (rockets also in its pull), or

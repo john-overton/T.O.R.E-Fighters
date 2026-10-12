@@ -784,6 +784,9 @@ pub struct Controller {
     /// A striker's order for this step (slice ST-T), set by the mission just
     /// before `step` and taken by it.
     strike: Option<super::strike::Order>,
+    /// How the adapter is to fly the strike steer this step flew (slice
+    /// ST-T2); the mission takes it right after the step.
+    strike_handling: super::strike::Handling,
     /// Write-only record of the latest advancing tick. No decision reads it.
     trace: thought::Record<ControllerTrace>,
 }
@@ -816,6 +819,11 @@ impl Controller {
         } else if self.recipient.target_order == Some(wing::TargetOrder::HoldFire) {
             self.recipient.target_order = None;
         }
+    }
+
+    /// Weapons are held (the hold preset or a hold fire order).
+    pub fn weapons_held(&self) -> bool {
+        self.recipient.target_order == Some(wing::TargetOrder::HoldFire)
     }
 
     /// A shared bearing can orient a search but never supplies a target ID,
@@ -1015,6 +1023,7 @@ impl Controller {
             mission_rejoin: None,
             mission_search_bearing: None,
             strike: None,
+            strike_handling: super::strike::Handling::PLAIN,
             trace: thought::Record::default(),
         })
     }
@@ -1029,6 +1038,13 @@ impl Controller {
     /// its release becomes a weapon request. The step takes it.
     pub fn set_strike(&mut self, order: Option<super::strike::Order>) {
         self.strike = order;
+    }
+
+    /// How the adapter is to fly this step's motion: a striker's attack
+    /// handling when the step flew its steer, else plain. Taken, so it never
+    /// outlives the step (slice ST-T2).
+    pub fn take_strike_handling(&mut self) -> super::strike::Handling {
+        std::mem::take(&mut self.strike_handling)
     }
 
     /// The controller flies a B47 defence (a missile or gunfire) now.
@@ -1151,6 +1167,7 @@ impl Controller {
     /// reroll a tactic. A tick that goes backwards is invalid input.
     pub fn step(&mut self, frame: &DecisionFrame<'_>) -> Result<IntentBatch> {
         let strike = self.strike.take();
+        self.strike_handling = super::strike::Handling::PLAIN;
         match self.last_tick {
             Some(last) if frame.tick < last => {
                 return Err(AiError::InvalidInput("controller tick went backwards"));
@@ -1333,6 +1350,7 @@ impl Controller {
                     Bank::Unconstrained,
                     |deg| Bank::Explicit(deg.round() as i32),
                 );
+            self.strike_handling = steer.handling;
             let request = MotionRequest::new(
                 steer.heading_deg.round() as i32,
                 PitchRequest::Explicit(steer.pitch_deg.round() as i32),

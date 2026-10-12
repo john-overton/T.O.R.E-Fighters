@@ -115,6 +115,9 @@ fn store(station: u8, kind: StoreKind, rounds: u32) -> Store {
         minimum_range_ft: 0.,
         maximum_range_ft: 40_000.,
         round_speed_fps: None,
+        release_speed_share: 1.,
+        fuze_arm_s: 0.,
+        frag_radius_ft: 0.,
     }
 }
 
@@ -214,6 +217,7 @@ fn a_takeover_keeps_the_human_s_store_and_its_lvl_flies_a_level_run() {
         threat: ThreatLevel::Clear,
         energy_good: energy_good(&world.own),
         dive_gate: dive_gate(10_000., 24_000., turn_radius_ft(700., 7.)),
+        retarded: false,
     });
     assert_eq!(PassChoice::Pass(strike.pass().unwrap()), table);
     assert_eq!(strike.selection().unwrap().station, StationId(1));

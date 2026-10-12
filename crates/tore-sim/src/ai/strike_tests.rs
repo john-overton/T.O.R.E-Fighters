@@ -108,6 +108,9 @@ pub(super) fn bomb(rounds: u32) -> Store {
         minimum_range_ft: 0.,
         maximum_range_ft: 20_000.,
         round_speed_fps: None,
+        release_speed_share: 1.,
+        fuze_arm_s: 1.,
+        frag_radius_ft: 300.,
     }
 }
 
@@ -191,6 +194,7 @@ fn the_pass_is_a_fixed_function_of_class_store_threat_and_speed() {
         choose_pass(PassInputs {
             class,
             kind,
+            retarded: false,
             threat,
             energy_good,
             dive_gate,
@@ -248,16 +252,60 @@ fn the_pass_is_a_fixed_function_of_class_store_threat_and_speed() {
             P(Pass::Level)
         );
     }
+    // Rockets fly the bombs' table (slice ST-T2: the roll and pull points
+    // the nose at the target after a pop-up or into a dive).
+    let rocket = StoreKind::Rocket;
+    assert_eq!(
+        choose(fighter, rocket, ThreatLevel::Missiles, true, true),
+        P(Pass::PopUp)
+    );
+    assert_eq!(
+        choose(fighter, rocket, ThreatLevel::Clear, true, true),
+        P(Pass::Dive)
+    );
+    assert_eq!(
+        choose(fighter, rocket, ThreatLevel::Clear, true, false),
+        P(Pass::Straight)
+    );
+    assert_eq!(
+        choose(fighter, rocket, ThreatLevel::Guns, false, true),
+        Regain
+    );
+    // A gun strafes, a drag bomb lays down; both regain speed first under
+    // a defended target.
     assert_eq!(
         choose(
-            fighter,
-            StoreKind::Rocket,
+            StrikeClass::Attack,
+            StoreKind::Gun,
             ThreatLevel::Missiles,
             true,
             true
         ),
-        P(Pass::Straight)
+        P(Pass::Strafe)
     );
+    assert_eq!(
+        choose(
+            StrikeClass::Attack,
+            StoreKind::Gun,
+            ThreatLevel::Guns,
+            false,
+            false
+        ),
+        Regain
+    );
+    let drag = |threat, energy_good| {
+        choose_pass(PassInputs {
+            class: StrikeClass::Attack,
+            kind: StoreKind::Bomb,
+            retarded: true,
+            threat,
+            energy_good,
+            dive_gate: true,
+        })
+    };
+    assert_eq!(drag(ThreatLevel::Missiles, true), P(Pass::Laydown));
+    assert_eq!(drag(ThreatLevel::Clear, true), P(Pass::Laydown));
+    assert_eq!(drag(ThreatLevel::Guns, false), Regain);
     // A heavy flies level whatever it carries or faces.
     for kind in [bomb, StoreKind::Seeker, StoreKind::Coordinate] {
         assert_eq!(
@@ -1333,5 +1381,151 @@ fn the_buddy_spot_rules_bind_laser_carriers_only() {
         strike.step(&world.context(0));
         assert_eq!(strike.phase(), Phase::Attack);
         assert_eq!(strike.kind, Some(StoreKind::AntiRadiation));
+    }
+}
+
+#[test]
+fn a_drag_bomb_lays_down_clear_of_its_fuze_and_its_fragments() {
+    // A Snakeye: it leaves at 66% of the speed, its fuze arms in 1 s, its
+    // fragments reach 300 ft. At 700 ft/s it is 34% behind the aircraft,
+    // so the floor (500 ft) is safe: 5.6 s of fall, 1,330 ft behind.
+    let snakeye = Store {
+        release_speed_share: 0.66,
+        ..bomb(4)
+    };
+    assert!(snakeye.retarded());
+    assert_eq!(laydown_height_ft(&snakeye, 700.), LAYDOWN_MIN_FT);
+    // A slick bomb lands under the aircraft: only height clears the 300 ft
+    // fragments (with the margin, 330 ft); the floor is higher anyway.
+    let slick = bomb(4);
+    assert!(!slick.retarded());
+    assert_eq!(laydown_height_ft(&slick, 700.), LAYDOWN_MIN_FT);
+    // Fragments of 600 ft reach over a slick bomb's 500 ft: 700 ft is the
+    // first 50 ft step past 660 ft.
+    let big = Store {
+        frag_radius_ft: 600.,
+        ..bomb(4)
+    };
+    assert_eq!(laydown_height_ft(&big, 700.), 700.);
+    // A slow arming fuze (3 s): the fall must last 3.6 s, 207 ft... and a
+    // 6 s fuze 7.2 s, 830 ft: 850 ft.
+    let slow = Store {
+        fuze_arm_s: 6.,
+        release_speed_share: 0.66,
+        ..bomb(4)
+    };
+    assert_eq!(laydown_height_ft(&slow, 700.), 850.);
+}
+
+#[test]
+fn a_dive_pulls_out_on_its_plan_and_the_plan_sets_the_floor() {
+    // 800 ft/s at 6 G: the pull-out radius is 800² / (32.174 x 5), 3,978 ft.
+    let loss = pull_out_loss_ft(800., 6., -60.);
+    assert!((loss - (3_978.4 * 0.5 + 800. * 0.866)).abs() < 2., "{loss}");
+    assert_eq!(pull_out_loss_ft(800., 6., 10.), 0.);
+    // Where the dive pulls out: never below retail's 2,000 ft.
+    let mut diving = own([0., 9_000., 0.], 800.);
+    diving.g_limit = 6.;
+    diving.flight_path_pitch_deg = -60.;
+    assert!((dive_pull_out_ft(&diving) - (loss + PULL_OUT_CLEARANCE_FT)).abs() < 1e-9);
+    let mut slow = own([0., 9_000., 0.], 300.);
+    slow.flight_path_pitch_deg = -10.;
+    assert_eq!(dive_pull_out_ft(&slow), DIVE_PULL_OUT_MIN_FT);
+    // The planned floor: high up, the steepest dive; near the ground, only
+    // a shallow one; below the clearance, a climb.
+    diving.terrain_climb_deg = -60.;
+    assert_eq!(planned_pitch_floor_deg(&diving), -MAX_DIVE_DEG);
+    diving.altitude_msl_ft = 3_000.;
+    let low = planned_pitch_floor_deg(&diving);
+    assert_eq!(low, -45., "1,731 ft of pull-out fits in 2,000 ft");
+    diving.altitude_msl_ft = 900.;
+    assert!(planned_pitch_floor_deg(&diving) > 0.);
+    // Rising ground's climb is kept; the glide-slope term is not.
+    diving.altitude_msl_ft = 9_000.;
+    diving.terrain_climb_deg = 12.;
+    assert_eq!(planned_pitch_floor_deg(&diving), 12.);
+}
+
+#[test]
+fn each_gun_burst_has_its_own_seeded_draw() {
+    let r = release_circle_ft(Experience::Average);
+    let first = burst_draw(7, OWN, 1, 1, r);
+    assert_eq!(first, burst_draw(7, OWN, 1, 1, r), "deterministic");
+    assert_ne!(first.offset_ft, burst_draw(7, OWN, 1, 2, r).offset_ft);
+    assert_ne!(first.offset_ft, burst_draw(7, OWN, 2, 1, r).offset_ft);
+    assert_ne!(first.offset_ft, aim_draw(7, OWN, 1, r).offset_ft);
+    // The circle and ring hold for bursts as for passes.
+    let mut inside = 0;
+    for burst in 1..=2_000 {
+        let d = burst_draw(11, OWN, 1, burst, r);
+        let distance = d.offset_ft[0].hypot(d.offset_ft[1]);
+        if d.inside {
+            inside += 1;
+            assert!(distance <= r + 1e-9);
+        } else {
+            assert!(distance >= r - 1e-9 && distance <= 2. * r + 1e-9);
+        }
+    }
+    assert!((1_700..=1_900).contains(&inside), "{inside}");
+}
+
+#[test]
+fn a_gun_run_fires_bursts_on_the_cue_recovers_and_draws_again() {
+    let mut world = quiet_world();
+    let gun = Store {
+        station: StationId(0),
+        kind: StoreKind::Gun,
+        rounds: 500,
+        cadence_ticks: 4,
+        maximum_range_ft: 7_000.,
+        ..bomb(500)
+    };
+    world.inputs.class = StrikeClass::Attack;
+    world.inputs.stores = vec![gun];
+    let mut strike = Strike::new(3);
+    strike.force(Some(Pass::Strafe), Some(StationId(0)));
+    strike.step(&world.context(0));
+    assert_eq!(strike.pass(), Some(Pass::Strafe));
+    assert_eq!(strike.burst(), 1);
+    // In the dive, 5,000 ft out, the cue on the burst's aim.
+    world.own.position = [0., 1_500., TARGET_AT[2] - 5_000.];
+    world.own.flight_path_pitch_deg = -STRAFE_DIVE_DEG;
+    let (offset, _) = strike.aim();
+    let aim = [TARGET_AT[0] + offset[0], 0., TARGET_AT[2] + offset[1]];
+    world.inputs.solution = Some(Solution {
+        station: StationId(0),
+        impact: Some(aim),
+        impact_seconds: Some(1.5),
+        ..solution(TARGET_AT, aim, false)
+    });
+    let mut fired = Vec::new();
+    for tick in 1..=200 {
+        if strike.step(&world.context(tick)).release.is_some() {
+            fired.push(tick);
+        }
+        if strike.segment() == Segment::Final {
+            // Keep the cue on whatever burst is being aimed.
+            let (offset, _) = strike.aim();
+            let aim = [TARGET_AT[0] + offset[0], 0., TARGET_AT[2] + offset[1]];
+            if let Some(s) = world.inputs.solution.as_mut() {
+                s.impact = Some(aim);
+            }
+        }
+    }
+    assert!(!fired.is_empty(), "a burst on the cue");
+    // Rounds at the cadence within a burst, at most a 0.5 s burst, then
+    // 0.5 s without fire, then the next burst with its own draw.
+    let first = fired[0];
+    let burst: Vec<u64> = fired
+        .iter()
+        .copied()
+        .take_while(|t| *t < first + 60)
+        .collect();
+    assert!(burst.windows(2).all(|w| w[1] - w[0] == 4), "{burst:?}");
+    assert!(burst.len() <= 15);
+    let next = fired.iter().copied().find(|t| *t >= first + 60);
+    if let Some(next) = next {
+        assert!(next >= first + 120, "recovery: {fired:?}");
+        assert!(strike.burst() >= 2);
     }
 }

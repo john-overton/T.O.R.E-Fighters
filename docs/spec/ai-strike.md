@@ -15,7 +15,10 @@ available speed](#perceived-threat-and-available-speed)) is built (ST-P), the
 strike cockpit and shared release (ST-C), and the strike tactics for
 fighters, attack jets and heavies (ST-T: target, store and pass choice, the
 skill circle, release, exit, re-attack, defence and home; [How the AI flies a
-pass](#how-the-ai-flies-a-pass)), the helicopters' and the AC-130's
+pass](#how-the-ai-flies-a-pass)), its attack maneuvers (ST-T2: the
+inverted roll-in and planned dive, gun runs, rocket pop-ups and dives, drag
+bomb laydowns, the lead on moving targets, the heavies' mission height), the
+helicopters' and the AC-130's
 families (ST-F: [Helicopters](#helicopters), [AC-130](#ac-130)), AI lasing
 and buddy lasing (ST-L: the hold on its own bomb, the lase duty a wing order
 calls, a designator lasing for its wing, dropping on a buddy's spot;
@@ -215,6 +218,8 @@ each re-attack. The four retail passes keep their retail shapes
 | Fast-high | Approach 5,000 ft above, straight on at maximum speed after 2,000 ft | retail |
 | Dive bomb | Entry only at the dive gate. Approach at a point H = max(2R, AGL at entry) above the target at corner speed until horizontal distance is under 1.5R. Roll-in: hold the bearing to the target at that moment, level, bank 180 (inverted), corner speed, until under R. Pull to 90 degrees nose down (flown at the aircraft's `maxDive`, -80 on every fighter and attack jet) and hold until AGL is under max(2R, 2,000 ft). Roll out on the roll-in heading plus 180 at corner speed, a split-S pull-through to level. Then climb 25 degrees for 10 s, then the exit run. R is the turn radius, V squared over 43.6 G ft | retail ([ST-R](../formats/ai.md#strike-maneuvers-steering-frame-and-orbit)) |
 | Level run | Straight and level at or above the release floor, with the LVL cue, for bombs dropped from altitude | opinionated (agent); the heavies' retail high pass is the model |
+| Laydown | Down to a low level height (at least 500 ft, higher if the fuze's arming or the bomb's fragments need it) 8,000 ft short of the aim, then level with the LVL cue: the drag (retarded) bomb delivery | opinionated (agent, ST-T2) |
+| Strafe | Approach 3,000 ft above the target, roll into a 15 degree dive at the aim, gun bursts on the cue, cease fire at 2,000 ft slant or 500 ft above the ground, exit | opinionated (agent, ST-T2) |
 | Orbit | Left-hand pylon turn around the target | retail for the family, numbers [fitted](#ac-130) |
 
 **The choice** for fighters and attack jets with unguided bombs, first row that
@@ -232,8 +237,9 @@ applies:
 | Case | Pass |
 | --- | --- |
 | Seeker missiles and HARM (stand-off) | Fast-high when energy is Good, else straight run; the approach ends at the store's release range. Retail's guided release rule is the model: a guided round only inside 10,000 ft or half the weapon's maximum range, one guided round in flight at a time (retail, [weapons](../formats/weapons.md#ai-release-against-ground-targets)) |
-| Rockets | Straight run with a shallow dive. The pop-up under threat Missiles is not flown with rockets (fitted, agent, ST-T): a rocket flies along the nose, and after a low pop the dive that points the nose at the target is steeper than the AI's terrain floor allows, so the run would end with no rocket fired |
-| Guns (strafing) | Straight run; attack jets strafe after their bombs and rockets are gone |
+| Rockets | The bombs' table (slice ST-T2): pop-up under threat Missiles, dive at the dive gate (from 6,000 ft, rolled in at 25 degrees), else a straight run with a shallow dive. ST-T flew rockets straight only, because the push that points the nose down after a pop was too slow; the roll and pull ([How the AI flies a pass](#how-the-ai-flies-a-pass)) fixed that |
+| Guns (strafing) | Strafe (slice ST-T2); attack jets strafe after their bombs and rockets are gone; regain first, as the table's row 1 |
+| Drag (retarded) bombs | Laydown (slice ST-T2): the low level pass is what a drag bomb is for; regain first, as the table's row 1. A bomb whose record leaves it slower than the aircraft (launch retard under 95%, the Mk 82 Snakeye's 66%) is a drag bomb |
 | Laser bombs, JDAMs | Level run (or a shallow run) to the weapon's reach. A glide bomb the sight says cannot reach from the aircraft's height or speed (its life runs out first) is approached in a descent of 400 ft/s, never below the release floor (fitted, agent, ST-L) |
 | Taken over with LVL kept | Level run whatever the table says |
 | Taken over with CCIP kept | The table's pass, flown as CCIP |
@@ -352,8 +358,9 @@ m for each band".
   opinionated), the rocket and gun spreads of their records. The bomb scatter
   is the retail dice at half the angle ([bomb
   motion](air-to-ground.md#bomb-motion)).
-- **Unguided weapons only.** The circle applies to unguided bombs, packs and
-  rockets. Smart weapons use the targeting and laser systems as the player
+- **Unguided weapons only.** The circle applies to unguided bombs, packs,
+  rockets and gun bursts (each burst its own seeded draw, slice ST-T2; John,
+  2026-10-11, later). Smart weapons use the targeting and laser systems as the player
   does, which are hard to get wrong at any skill (opinionated, John,
   2026-10-11): an AI that lases holds its **laser spot** on the target, a
   JDAM's stored point is the designated target, and seeker missiles and HARM
@@ -388,7 +395,7 @@ every skill.
 | --- | --- | --- | --- |
 | Unguided bombs, packs | Table above | CCIP mean impact, or the LVL cue, on the aim point (a pack leaves in one instant, [packs](air-to-ground.md#release-modes-and-packs)) | Cue inside `R` |
 | Rockets | Straight run, shallow dive, or pop-up | Rocket impact on the aim point, at the record's cadence | Cue inside `R` |
-| Guns | Straight run | The existing gun employment ([AI guns](ai-gun-employment.md)), unchanged | none |
+| Guns | Strafe | Bursts on the gun's ground cue (below) | Each burst inside `R` |
 | Laser bombs, laser missiles | Level or shallow run; then an offset turn holding the target inside the designator's gimbal until impact (fitted) | Target inside the reach and a spot will exist (own designator, or a same-side spot); with none, the store is not chosen | none: spot on the target |
 | JDAM | Level run | Target point stored, inside the reach | none: point on the target |
 | Mavericks, AS-14, AS-30 | Fast-high or straight | Seeker locked on the target inside zone 1 ([lock flow](air-to-ground.md#the-seekers-and-the-lock-flow)) | Lock |
@@ -409,7 +416,7 @@ spec adds none (spec-derived).
 | Heavies bomb level only. They never dive, pop up, fire rockets or strafe | retail (the bomber script flies a high pass), opinionated (John, 2026-10-11) for the class test |
 | Minimum release altitude: **max(5,000 ft AGL, the mission's airborne height)** | opinionated (John, 2026-10-11); retail uses max(altitude, 10,000 ft) |
 | Raised by perceived threat: Clear and Air +0, Guns +5,000 ft, Missiles +10,000 ft, never above 90% of the aircraft's ceiling | opinionated (John, 2026-10-11) for "raised by threat"; the amounts are fitted |
-| "The mission's airborne height" is the Quick Mission altitude setting ([Quick Mission](quick-mission-menu.md)); for an imported mission, the wing's start altitude. Read as AGL over the target area | fitted; confirm with John |
+| "The mission's airborne height" is the Quick Mission altitude setting ([Quick Mission](quick-mission-menu.md)); for an imported mission (none yet) or a striker tasked outside one, the height above the ground the striker was first tasked at. Read as AGL over the target area. Built (slice ST-T2): the host hands the setting to every striker each step | fitted; confirm with John |
 | Release is the weapon record's own burst (rounds and spacing from the record), centred on the aim point as a stick. There is no ripple setting | retail (burst fields), fitted (centring) |
 | Exit climbs toward 50,000 ft (never above the ceiling), then turns back | retail |
 | Stand-off missiles are fired from level flight at the reach | opinionated (agent) |
@@ -465,33 +472,59 @@ stateDiagram-v2
 
 ## How the AI flies a pass
 
-Built in slice ST-T (`tore_sim::ai::strike`, the bridge
+Built in slices ST-T and ST-T2 (`tore_sim::ai::strike`, the bridge
 `tore_world::ai_wings::strike`). The AI flies every pass through the same
 input-only steering adapter as every other AI maneuver (a heading, a
-flight-path pitch and a speed; [AI behaviour](ai.md)), so what it can fly is
-what that adapter and the AI's terrain floor (6 s of travel ahead) allow. The
-retail pass shapes above are kept; the rules below are how they are flown.
-All fitted (agent, 2026-10-11) unless marked.
+flight-path pitch and a speed; [AI behaviour](ai.md)). Its attack segments
+alone (a dive's or a pop-up's roll-in and final, a strafe, a pull-out) ask the
+adapter for two more handlings ([input-only control](ai.md#input-only-aircraft-control)):
+the **roll and pull**, which rolls inverted and pulls for a big nose-down
+change as retail's dive bomb does, and the **planned dive**, whose terrain
+floor is its own planned pull-out. Air combat, formation, routes and every
+other motion are flown as before. The retail pass shapes above are kept; the
+rules below are how they are flown. All fitted (agent, 2026-10-11) unless
+marked.
 
 | Rule | Value |
 | --- | --- |
 | Who | An AI aircraft with a ground picture (the Strike role or an ordered ground target) of the Fighter, Attack or Heavy class. Helicopters and the gunship fly their own families ([Helicopters](#helicopters), [AC-130](#ac-130)) |
 | Choice point | 10 nm from the target, or at once inside it; again at each turn back |
 | Target | The ordered one; else for an anti-radiation carrier the objective's SAM radars, then AAA radars, then other radars, nearest first, two attackers at most (SEAD); else the selector's (nearest briefed, then seen opportunity targets) |
-| Store | Anti-radiation at a radar first; under threat Missiles stand-off first (seeker, radar AGM, JDAM, laser, bombs, rockets); otherwise bombs, JDAM, laser, seeker, radar AGM, rockets. A laser store only with the aircraft's own designator, its laser on by hand while selected (other spots are the lasing slice's). A heavy carries no rockets into a pass |
-| Aim | The pass's seeded draw (mission seed: the aircraft's roster seed; aircraft id; pass number), unguided only. A moving target is also led by its ground speed times the cue's time of fall |
-| Approach | Flown at the aim point. A pop-up comes down to 500 ft over the target by its pull point, 10,000 ft out (16,000 ft for rockets), then pulls 25 degrees over the line of sight at corner speed for at least 4 s and until the target is 15 degrees down. A dive approaches its roll-in point (the dive's height, at least max(10,000 ft, 2R), where the aim is 30 degrees down) and starts the dive there, since the adapter noses over wings level instead of retail's inverted pull |
-| Flying the cue | Across the track the heading turns by the angle between the aim and the line the cue sweeps along. In a straight run, pop-up or dive the flight path is turned by three times the angle between the cue and a point 600 ft short of the aim (no more than 8 degrees over the line to the target) until the cue is within 600 to 900 ft short, then held, so the cue creeps across the aim; a cue that overshoots by the circle is flown again. While the cue is more than 3,000 ft short the pass flies its own line. A push that would ask the adapter for less than 0.3 G is flown wings level (a banked push turns the wrong way). Level runs, fast-high bomb runs and guided weapons hold their height and steer the cue (or the aim) across |
-| Release | When the host's shared release test passes (the cue within the gate of the aim, 10% of R and at least 10 ft, or a guided weapon's reach), in the pass's final or a pop-up's pull, with the cue inside the store's zone 1 range, above the floor for a dive or level release, and not while the sight warns LOW or FRAG. One trigger call a pass (a pack leaves whole); rockets fire one at the record's cadence while the cue stays inside the circle, at most 8. Seeker missiles fire on the lock (inside zone 1 from the mount, within 10,000 ft or half the zone-1 maximum, an emitting target for a HARM, one guided round at a time) through the AI's own missile release, observed on the ground target |
+| Store | Anti-radiation at a radar first; under threat Missiles stand-off first (seeker, radar AGM, JDAM, laser, bombs, rockets, gun); otherwise bombs, JDAM, laser, seeker, radar AGM, rockets, gun. A laser store only with the aircraft's own designator, its laser on by hand while selected (other spots are the lasing slice's). A heavy carries no rockets into a pass; only an attack jet takes its gun |
+| Weapons hold | Under the hold preset or a hold fire order the striker flies no pass: the rest of the controller flies (formation, CAP), and the strike starts again from its ingress when the hold lifts (opinionated, agent, ST-T2) |
+| Aim | The pass's seeded draw (mission seed: the aircraft's roster seed; aircraft id; pass number), unguided only; a gun run draws again for each burst (the pass's rule keyed also on the burst number). **Lead**: a moving target is aimed at where it will be when the round lands, its tracked ground velocity times the cue's time of flight (bombs, rockets and gun bursts alike; John, 2026-10-11: "add lead for moving targets"). The driver prints it as `lead_ft` |
+| Approach | Flown at the aim point. A pop-up comes down to 500 ft over the target by its pull point, 10,000 ft out (16,000 ft for rockets), then pulls 25 degrees over the line of sight at corner speed for at least 4 s and until the target is 15 degrees down. A bomb dive approaches at the dive's height (at least max(10,000 ft, 2R)) and rolls in once the aim is 45 degrees down: rolled inverted and pulled onto the line to the target, it settles in a dive of 55 to 65 degrees (retail rolls in with the target 63 degrees down and pulls to its 80 degree `maxDive`). A rocket dive starts 6,000 ft over the target and rolls in at 25 degrees. A strafe approaches 3,000 ft over the target and rolls in at 15 degrees. A laydown comes down to its height by 8,000 ft short of the aim |
+| Flying the cue | **Across** (ST-T2): the track is laid on the aim's bearing, so wings level the cue lies on the aim's line and the sideways miss closes on the first pass from 1,000 or 3,000 ft off the line; what the cue still lies off that line (a pod's or gun's offset, a crab in the wind) is trimmed out by moving the line across, by half the cue's miss across per second in a diving pass and a fifth in a level run (whose far-thrown cue swings more), at most 1,000 ft, learnt only while the track is within 1.5 degrees of the line and kept from pass to pass with the same store; in a dive a heading change turns the path across by only the dive angle's cosine, so the correction grows by it. While a dive or pop-up rolls in, the heading is the aim's bearing (the cue swings with the attitude). **Along**: in a straight run, pop-up or dive the flight path is turned by three times the angle between the cue and a point short of the aim (600 ft; 1,500 ft in a dive, whose cue creeps faster), no more than 8 degrees over the line to the target, until the cue is that margin (plus 300 ft) short, then held, so the cue creeps across the aim; a cue that overshoots by the circle is flown again. While the cue is more than 3,000 ft short the pass flies its own line. A straight run's push that would ask the adapter for less than 0.3 G is flown wings level (a banked push turns the wrong way); a dive and a pop-up roll and pull instead. Level runs, laydowns, fast-high bomb runs and guided weapons hold their height and steer the cue (or the aim) across. A gun run tracks: the flight path turns by three times the angle between the gun's ground cue and the burst's aim, the heading as above. A heavy's slow level run is held on its line the same way |
+| Release | When the host's shared release test passes (the cue, a bomb's mean path brought down to the aim point's ground, within the gate of the aim, 10% of R and at least 10 ft, or a guided weapon's reach), or (ST-T2) when an unguided cue that sweeps by faster than the gate can catch it is at its closest to the aim and lies inside John's circle around the led target (the ring's outer edge 2R for a ring draw), give or take the gate; in the pass's final or a pop-up's pull, with the cue inside the store's zone 1 range, above the floor for a bomb's dive or level release (a level run may be 200 ft under it where the ground under it rises), and not while the sight warns LOW or FRAG. One trigger call a pass (a pack leaves whole); rockets fire one at the record's cadence while the cue stays inside the circle, at most 8. Seeker missiles fire on the lock (inside zone 1 from the mount, within 10,000 ft or half the zone-1 maximum, an emitting target for a HARM, one guided round at a time) through the AI's own missile release, observed on the ground target |
+| Gun bursts | A burst opens when the gun's ground cue (the round path of the gunsight, followed to the ground) sweeps onto the burst's aim, half a burst early so the burst is centred on it, within the gate across the track (at least 25 ft) and inside the gun's reach; it fires at the gun's own cadence for the AI gun employment's 0.5 s burst while the cue stays inside the circle of the aim, then recovers 0.5 s ([AI guns](ai-gun-employment.md)) and draws the next burst's aim. Rounds leave along the barrel from the gun's mount as every AI gun round does; there is no air target to track. John's circle applies to each burst (John, 2026-10-11, later) |
+| Dive pull-out (ST-T2) | A dive pulls out where its pull-out at the present speed and the AI's G limit (radius V² / (g (G - 1)), plus 1 s of sink) bottoms out 1,000 ft over the ground, never below retail's 2,000 ft; retail's max(2R, 2,000 ft) is replaced, its turn radius being far tighter than the aircraft flies (opinionated, agent). While diving, the terrain floor is that plan instead of the general one (whose glide-slope term held ST-T's dives to about 50 degrees): the planned dive exception John allowed |
+| Laydown height (ST-T2) | The lowest 50 ft step from 500 ft at which a level release at the present speed clears the sight's LOW rule (the fall lasts the fuze's arming time, with 20% margin) and its FRAG rule (the aircraft, flying on level, is beyond the fragments' reach when the bomb bursts, with 10% margin), from the retail fall (16 t² ft) and the bomb's slower release speed. A Snakeye at 700 ft/s: 500 ft (5.6 s of fall, 1,330 ft behind the aircraft); a slick bomb (which lands under the aircraft) would need its 330 ft of fragments' height, under the 500 ft floor |
+| Strafe end | Cease fire and break off at 2,000 ft slant to the target, 500 ft above the ground, the target no longer ahead, or the gun empty |
 | Exit | Retail's: a jink of four 3 s legs at maximum speed (12 degrees up, 10 degrees to the side the draw picks) inside 10,000 ft, then 10 degrees up at maximum speed, levelling 2,000 ft over the altitude the strike began at (a dive's exit climbs back to the dive's height), turning back at max(30,000 ft, 2R) (a heavy at 50,000 ft) |
 | Defend | A B47 defence (missile or gunfire) or a fighter inside 5 nm within 45 degrees of its nose hands the flying back. Once no warning has sounded for 10 s it resumes at ingress if [safe](#egress-re-attack-and-going-home) (the safe test as written, confirmed by John on 2026-10-11); if not, it egresses to the exit distance and resumes only if safe by then, else goes home |
 | Home | No target or no usable store left: the mission's own return (a landing order with a runway, else the leader flies home) |
 
-Known limits, each an effect of flying through the input-only adapter and the
-terrain floor rather than a rule: the dive is held to about 50 degrees at
-5,000 ft by the floor; a pop-up from low with rockets cannot dive steeply
-enough (hence the straight run above); and the column's own guns can bring a
-striker down at a pop-up's low altitude.
+Known limits, each an effect of flying through the input-only adapter rather
+than a rule: an Ace's 10 m circle is rarely met on a level run's first pass
+(the cue must pass within 33 ft of the target; it releases on the re-attack), nor on a short straight rocket run (no release within two passes in the driver runs);
+and the column's own guns can bring a striker down at a pop-up's low altitude.
+(ST-T2's "level runs land 300 to 350 ft short at every skill" was not the
+sight: every run's first bomb took the same scatter draw, 1.25 degrees left
+and 1.31 low. Slice ST-LV gives each bomb its own draw and judges the cue at
+the aim point's ground, so a release over sloping ground no longer falls
+short or long by the slope.)
+
+A gun burst lands on its own aim draw (slice ST-LV measurement, A-10 GAU-8
+on the column's 150 hit point vehicle, whose volume is 15 ft across the
+centre): the rounds fall along the track about the drawn aim point, their
+middle within a few feet of it, so a burst drawn 85 to 207 ft out (skills 0
+to 2) puts none of its 17 to 20 rounds inside the vehicle (the nearest ended
+52 ft from it), and the Ace's
+burst stops after one round as the cue leaves its 33 ft circle. The hit test
+and the damage work: a GAU-8 round that enters the volume takes 13 hit points
+(80 against armour, a third for a gun, shared by the record's two rounds a
+game round), so twelve hits kill that vehicle. Whether a burst should spread
+its rounds across the circle rather than move the whole burst is for John.
 
 ## SEAD
 

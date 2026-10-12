@@ -634,8 +634,17 @@ labelled; the full reading is in [bomb sight](../formats/weapons.md#bomb-sight).
 level-flight "T" release guide. The design is an agent decision. It needs a
 designated ground object or a pinned point from any channel, the sight or Enter.
 
-- **Solution.** The impact point if released now (as CCIP) is compared with the
-  target. D is the along-track error (target beyond the impact point is
+- **Solution.** The impact point if released now is compared with the
+  target. It is the CCIP calculation (same release, same mean path) with the
+  fall taken down to the **target's ground**, not to the ground under the
+  aircraft as the CCIP pipper's (agent, slice ST-LV: a target on a 400 ft rise
+  was otherwise bombed some 500 ft short from a 5,000 ft pass, one in a hollow
+  as far beyond it). A **moving** designated object is **led** by the fall: it
+  is compared where it will be when the bomb lands (its velocity times the
+  fall, worked out once more at the ground of the led point; agent, slice
+  ST-LV, since without it a column driving at 50 ft/s drew the bombs about 900
+  ft behind it from 5,000 ft). A standing object or a pinned point is not
+  led. D is the along-track error (target beyond the impact point is
   positive), C the cross-track error. Time to release is D divided by ground
   speed, assuming the current flight path is held (fitted).
 - **The T.** The stem is the **azimuth steering line**, a vertical line on the
@@ -1103,7 +1112,7 @@ Retail data, [bomb motion](../formats/weapons.md#bomb-motion). Implemented
 | Release position and direction | The station position with the aircraft's attitude: the bomb leaves along the **nose** (heading and pitch), not along the flight path, plus the station slew (zero on every imported bomb station). Successive releases alternate sides of a paired station |
 | Release speed | The aircraft's speed times `launchRetard` / 100, at least the record's initial speed (0), clamped to 0 to 1,466 ft/s for slick, retarded and pack bombs and 0 to 2,933 ft/s for cluster. `launchRetard`: 100 slick, 66 Snakeye, 6-pack and 7-pack, 90 cluster and guided. No ejection push |
 | Path | A vacuum parabola: gravity **32 ft/s squared**, no drag, no terminal speed, no retard after release. The bomb noses over along its velocity; heading stays fixed |
-| Scatter | Retail: each bomb adds a uniform random plus or minus **3.0 degrees** (546 units) to its heading and to its pitch, the player's too. **TORE: plus or minus 1.5 degrees (273 units), opinionated (John, 2026-10-11)**, for every bomb, player and AI. The earlier "keep the player's retail 3 degrees" note (2026-10-10) is superseded |
+| Scatter | Retail: each bomb adds a uniform random plus or minus **3.0 degrees** (546 units) to its heading and to its pitch, the player's too. **TORE: plus or minus 1.5 degrees (273 units), opinionated (John, 2026-10-11)**, for every bomb, player and AI. The earlier "keep the player's retail 3 degrees" note (2026-10-10) is superseded. Each bomb rolls its error from combat's random state mixed with the release tick and the round's number (agent, slice ST-LV): rolled from combat's stream alone, a mission's first bomb, released before anything else had rolled it, took the same error every time (1.25 degrees left and 1.31 degrees low, about 330 ft short of a 5,000 ft level release), which read as a sight that bombs short |
 | Hits | Whatever terrain or object the normal collision finds; the fuze arm time and radius apply, and a bomb that reaches the ground unarmed is a dud ([warnings](#warnings)) |
 | Pods | As [Rockets](#rockets) |
 
@@ -1327,6 +1336,7 @@ records (ranges, weights, counts) are in the inventory above.
 | LVL marker timing | top of the HUD at 15 s or more, linear to 0 s | opinionated (John, 2026-10-10); numbers agent |
 | LVL stem dashed | more than 60 s out | opinionated (agent) |
 | LVL auto-release | at 0 s with the cross-track miss inside the record's collateral radius, trigger held | opinionated (John, 2026-10-10); gate agent |
+| LVL impact | the mean path brought down to the target's ground; a moving object led by the fall | opinionated (agent, slice ST-LV) |
 | Release range scale | x=390, the missile scale | spec-derived |
 | Guided bomb glide | along the nose at 90 percent of the speed; 14 ft/s squared down to 278 ft/s; 6,370 units a second (about 35 degrees a second); no fall while guiding; 60 s life | retail data |
 | Level T for guided bombs: bar | the reach's far edge less 2/5 of the reach; hold releases within 3 ticks of the bar, aim within 10 degrees of the track | opinionated (agent; John asked for release at the bar) |
@@ -1375,7 +1385,13 @@ found these promised or specified items unbuilt:
   a dud (a puff of dirt, no burst or splash).
 - A moving target with a GPS bomb: the bomb hits the stored point and misses.
 - A bomb falls on its parabola with up to 1.5 degrees of scatter: the pipper marks
-  the mean, so a single bomb can land beside it.
+  the mean, so a single bomb can land beside it. Every bomb takes its own error,
+  the first of a mission included.
+- A target on higher or lower ground than the ground under the release point:
+  the CCIP pipper (retail) is worked out over the ground under the release
+  point, so a pipper laid on a target on a rise bombs short and one in a hollow
+  long; the level T and the AI's release judge the fall at the target's ground
+  and hit.
 - Online, the host runs every solution and sends the results; clients draw
   them. Buddy lasing works across players by side.
 

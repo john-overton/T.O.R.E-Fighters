@@ -1,6 +1,6 @@
 """Tests for the AI strike driver's scenarios (tools/battery_scenarios/ai_strike.py): the output
 parsing, the consistency and behaviour checks, the release aim checks and the battery selection
-family (AI strike round, slices ST-D, ST-T and ST-L)."""
+family (AI strike round, slices ST-D, ST-T, ST-T2 and ST-L)."""
 import sys
 import unittest
 from pathlib import Path
@@ -16,7 +16,7 @@ SETUP = (
 
 
 def run(skill=2, profile="dive", named=None, releases=(), impacts=(), kills=(), egress=None, lost=None,
-        hp="200/200", extra=(), aim=(100.0, "yes")):
+        hp="200/200", extra=(), aim=(100.0, "yes"), release_fields=""):
     """One driver run's output. `releases` and `impacts` are times; an impact is (t, miss)."""
     name = named if named is not None else "none"
     out = [
@@ -30,6 +30,7 @@ def run(skill=2, profile="dive", named=None, releases=(), impacts=(), kills=(), 
         out.append(
             f"ai-strike: RELEASE t={t:.3f} n={n} weapon=MK82.JT station=1 alt_ft=4900 speed_kt=450 range_ft=13000"
             + (f" pass=1 aim_ft={aim[0]:.0f} inside={aim[1]}" if aim else "")
+            + release_fields
         )
     for n, (t, miss) in enumerate(impacts, 1):
         out.append(f"ai-strike: IMPACT t={t:.3f} n={n} miss_ft={miss} at=1.0,2.0,3.0")
@@ -809,3 +810,48 @@ class SelectionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ManeuverTests(unittest.TestCase):
+    """ST-T2: the dive angle, release height, first pass, lead and burst checks."""
+
+    def strike(self, fields, **extra):
+        out = run(2, "dive", named="dive", releases=[10.0], impacts=[(27.0, 50.0)], egress=33.0,
+                  release_fields=fields)
+        want = [dict(label="r", profile="dive", skill=2, miss=s.MISS_FT_MAX[2], **extra)]
+        return s.strike_problems(out, want)
+
+    def test_a_steep_enough_dive_passes_and_a_shallow_one_fails(self):
+        self.assertEqual(self.strike(" lead_ft=300 dive_deg=60", min_dive=45, moving=True), [])
+        shallow = self.strike(" lead_ft=300 dive_deg=30", min_dive=45)
+        self.assertTrue(any("degree dive" in p for p in shallow), shallow)
+
+    def test_release_heights_are_bounded_where_asked(self):
+        self.assertEqual(self.strike(" dive_deg=0", max_alt=5000, min_alt=4000), [])
+        self.assertTrue(any("at most" in p for p in self.strike(" dive_deg=0", max_alt=1000)))
+        self.assertTrue(any("at least 9500" in p for p in self.strike(" dive_deg=0", min_alt=9500)))
+
+    def test_a_moving_target_needs_a_lead_and_a_standing_one_none(self):
+        self.assertTrue(any("no lead" in p for p in self.strike(" lead_ft=0", moving=True)))
+        self.assertTrue(any("standing target" in p for p in self.strike(" lead_ft=40", moving=False)))
+        self.assertEqual(self.strike(" lead_ft=0", moving=False), [])
+
+    def test_the_first_release_on_pass_one_and_gun_bursts(self):
+        self.assertEqual(self.strike("", first_pass=True), [])
+        self.assertTrue(any("bursts" in p for p in self.strike("", bursts=1)))
+        self.assertEqual(self.strike(" burst=1 rounds_left=1179", bursts=1), [])
+
+    def test_a_rocket_or_gun_spread_widens_the_miss_limit(self):
+        far = s.MISS_FT_INSIDE[2] + 100
+        out = run(2, "dive", named="dive", releases=[10.0], impacts=[(27.0, far)], egress=33.0)
+        base = [dict(label="r", profile="dive", skill=2, miss=s.MISS_FT_MAX[2])]
+        self.assertTrue(any("from the target" in p for p in s.strike_problems(out, base)))
+        wide = [dict(base[0], spread=s.SCATTER_FT + 150)]
+        self.assertEqual(s.strike_problems(out, wide), [])
+
+    def test_the_maneuver_scenarios_exist(self):
+        names = {sc.name for sc in s.scenarios()}
+        for name in ("ai-strike-dive-steep", "ai-strike-strafe", "ai-strike-rockets-popup",
+                     "ai-strike-rockets-dive", "ai-strike-snakeye", "ai-strike-heavy-level",
+                     "ai-strike-offset", "ai-strike-lead-dive", "ai-strike-lead-level"):
+            self.assertIn(name, names)

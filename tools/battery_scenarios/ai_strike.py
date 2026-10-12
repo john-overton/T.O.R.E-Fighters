@@ -62,6 +62,8 @@ SCATTER_FT = 400.0
 # edge plus them.
 MISS_FT_MAX = {skill: 2 * r + GATE_FT[skill] + SCATTER_FT for skill, r in CIRCLE_FT.items()}
 MISS_FT_INSIDE = {skill: r + GATE_FT[skill] + SCATTER_FT for skill, r in CIRCLE_FT.items()}
+# The release floor under threat Clear (`strike.rs` FLOOR_CLEAR_FT).
+FLOOR_CLEAR_FT = 3000.0
 # The driver rounds the aim offset to whole feet.
 AIM_SLACK_FT = 1.0
 # A rocket or a guided weapon is judged by the target, not a miss distance.
@@ -452,13 +454,16 @@ def strike_problems(output: str, runs_wanted: list[dict]) -> list[str]:
             problems += aim_problems(run, label, want["skill"])
             if run.of("RELEASE") and all(r.get("inside") == "yes" for r in run.of("RELEASE")):
                 limit = min(limit, MISS_FT_INSIDE[want["skill"]])
+            # A rocket's or gun's own spread in place of the bomb's scatter.
+            limit += want.get("spread", SCATTER_FT) - SCATTER_FT
         for impact in run.of("IMPACT") if limit is not None else []:
             miss = number(impact.get("miss_ft"))
             if not miss <= limit:
                 problems.append(f"{label}: impact {impact.get('miss_ft')} ft from the target, want at most {limit:.0f}")
+        problems += maneuver_problems(run, label, want)
         lost_allowed = run.of("LOST") and want.get("may_lose")
         # A helicopter leaves too slowly for the driver's one-mile EGRESS inside its settle time.
-        egress_wanted = want.get("egress", True)
+        egress_wanted = want.get("egress", True) and not want.get("no_egress")
         if limit is not None and egress_wanted and run.of("RELEASE") and not run.of("EGRESS") and not lost_allowed:
             problems.append(f"{label}: no EGRESS after the release")
         if run.of("LOST") and not want.get("may_lose"):
@@ -517,6 +522,33 @@ def gunship_problems(output: str, runs_wanted: list[dict]) -> list[str]:
             problems.append(f"{label}: the target was not killed ({run.summary.get('target_hp')})")
         if run.of("LOST"):
             problems.append(f"{label}: the gunship was lost ({run.first('LOST')})")
+    return problems
+
+
+def maneuver_problems(run: Run, label: str, want: dict) -> list[str]:
+    """The ST-T2 maneuver checks a run may ask for: `min_dive` (every RELEASE in a dive at least
+    this steep, degrees), `max_alt` / `min_alt` (every RELEASE's height above the ground),
+    `first_pass` (the first RELEASE on pass 1), `moving` (True: the RELEASE lays a lead on the
+    target; False: none) and `bursts` (at least this many gun bursts)."""
+    problems: list[str] = []
+    releases = run.of("RELEASE")
+    for release in releases:
+        dive, alt = number(release.get("dive_deg")), number(release.get("alt_ft"))
+        if "min_dive" in want and not dive >= want["min_dive"]:
+            problems.append(f"{label}: released in a {release.get('dive_deg')} degree dive, want at least {want['min_dive']}")
+        if "max_alt" in want and not alt <= want["max_alt"]:
+            problems.append(f"{label}: released at {release.get('alt_ft')} ft, want at most {want['max_alt']}")
+        if "min_alt" in want and not alt >= want["min_alt"]:
+            problems.append(f"{label}: released at {release.get('alt_ft')} ft, want at least {want['min_alt']}")
+        lead = number(release.get("lead_ft"))
+        if want.get("moving") is True and not lead > 0:
+            problems.append(f"{label}: no lead on the moving target ({release.get('lead_ft')})")
+        if want.get("moving") is False and not lead == 0:
+            problems.append(f"{label}: a lead of {release.get('lead_ft')} ft on a standing target")
+    if want.get("first_pass") and releases and releases[0].get("pass") != "1":
+        problems.append(f"{label}: first release on pass {releases[0].get('pass')}, want pass 1")
+    if "bursts" in want and len([r for r in releases if "burst" in r]) < want["bursts"]:
+        problems.append(f"{label}: {len(releases)} gun bursts, want at least {want['bursts']}")
     return problems
 
 
@@ -732,6 +764,17 @@ ORDER_RUNS = [
     dict(label="refused", kind="refused"),
 ]
 
+# ST-T2: a rocket's spread and a gun burst's (the middle of the rounds that reach the ground) on
+# top of the aim, in place of the bomb's scatter: fitted from the driver runs (rockets 90 to 125 ft
+# from a 90 ft aim at skill 2; bursts 85 to 120 ft from 85 to 102 ft aims).
+ROCKET_SPREAD_FT = 250.0
+GUN_SPREAD_FT = 150.0
+# The A-10's strafing target: the column's lighter vehicle (150 hit points; the tanks have 200).
+STRAFE_UNIT = "0x50000003"
+# Static and moving targets for the lead comparison: the Ukraine column (moving, about 50 ft/s)
+# and the Ukraine factory (standing).
+LEAD_STEMS = (("QUCOL", True), ("QUFACT", False))
+
 
 def pilot_run(theater: str, stem: str, *rest: str) -> list[str]:
     return ["--a2g-run", theater, stem, "--pilot", "ai", *rest]
@@ -750,9 +793,9 @@ def scenarios() -> list[Scenario]:
     # The column, not the TVIET truck park: the park's radar-laid guns (26,200 and 44,250 ft
     # reach) shoot an A-4E down within 25 s at 5,000 ft whatever it flies.
     bomb_args = [forced(s, p, *bombs) for s, p in BOMB_RUNS]
-    # Rockets fly the straight run under every threat (a low pop-up's dive is steeper than the
-    # AI's terrain floor allows, docs/spec/ai-strike.md); two skills.
-    rocket_runs = [(2, "straight"), (3, "straight")]
+    # The straight rocket run at two skills (the pop-up and dive have their own ST-T2 scenarios).
+    # Not the Ace: on a short straight run its 10 m circle is rarely met before the run ends.
+    rocket_runs = [(1, "straight"), (2, "straight")]
     rockets = ["--aircraft", "a4e", "--load", "LAU61", "--seconds", "120"]
     maverick = ["--aircraft", "a10", "--load", "AGM65G", "--seconds", "120"]
     # Helicopters (slice ST-F) start 4 nm out at 1,500 ft and 120 kt. The AT-2 is judged by the
@@ -809,7 +852,72 @@ def scenarios() -> list[Scenario]:
                          "--from", "6", "--seconds", "150", "--skill", "2", "--buddy", "f16c")
     ai_waits = pilot_run("UKR", "QUCOL", "--aircraft", "f14", *gbu10, "--altitude", "12000", "--speed", "450",
                          "--from", "6", "--seconds", "100", "--skill", "2", "--choose-store")
-    return [
+    a4e_bombs = ["--aircraft", "a4e", "--load", "MK82"]
+
+    def run_list(entries):
+        """(args, want) pairs to (first args, then steps, wants)."""
+        return entries[0][0], [Step(a, timeout=400) for a, _ in entries[1:]], [w for _, w in entries]
+
+    def want(skill, profile, **extra):
+        label = extra.pop("label", f"skill {skill} {profile}")
+        return dict(label=label, profile=profile, skill=skill, miss=MISS_FT_MAX[skill], **extra)
+
+    steep = [(forced(s, "dive", *a4e_bombs, "--seconds", "150"),
+              want(s, "dive", min_dive=45, min_alt=FLOOR_CLEAR_FT, moving=True)) for s in SKILLS]
+    strafe = [(pilot_run("UKR", "QUCOL", "--unit", STRAFE_UNIT, "--aircraft", "a10", "--load", "GAU8",
+                         "--seconds", "90", "--skill", str(s), "--profile", "strafe"),
+               want(s, "strafe", spread=GUN_SPREAD_FT, bursts=1, no_egress=True, may_lose=True,
+                    max_alt=4000)) for s in (1, 2)]
+    rockets_popup = [(forced(2, "popup", *rockets), want(2, "popup", spread=ROCKET_SPREAD_FT, no_egress=True))]
+    rockets_dive = [(forced(2, "dive", *rockets), want(2, "dive", spread=ROCKET_SPREAD_FT, no_egress=True))]
+    snakeye = [(forced(s, "laydown", "--aircraft", "a4e", "--load", "MK82HD", "--seconds", "120"),
+                want(s, "laydown", max_alt=1000, moving=True)) for s in (1, 2)]
+    heavy = [(pilot_run("UKR", "QUFACT", "--aircraft", "c130", "--load", "MK82", "--station", "0", "--count", "8",
+                        "--mission-altitude", "10000", "--altitude", "7000", "--speed", "250", "--from", "8",
+                        "--seconds", "360", "--skill", "2", "--profile", "level"),
+              want(2, "level", min_alt=9500, moving=False, label="heavy level from the 10,000 ft mission height"))]
+    offsets = [(forced(2, p, *a4e_bombs, "--offset", str(off), "--seconds", "150"),
+                want(2, p, first_pass=True, label=f"{p} {off} ft off the line"))
+               for p in ("level", "dive") for off in (1000, 3000)]
+
+    def lead_runs(profile):
+        return [(pilot_run("UKR", stem, *a4e_bombs, "--seconds", "240", "--skill", str(s), "--profile", profile),
+                 want(s, profile, moving=moving, label=f"skill {s} {profile} {stem} {'moving' if moving else 'static'}"))
+                for stem, moving in LEAD_STEMS for s in SKILLS]
+
+    maneuvers = [
+        ("ai-strike-dive-steep", steep, 900,
+         "An A-4E's Mk 82 dive at every skill: rolled inverted onto a dive steeper than 45 degrees (retail's "
+         "roll-in), released above the 3,000 ft floor with a lead on the moving column, within the circle."),
+        ("ai-strike-strafe", strafe, 600,
+         "An A-10's GAU-8 gun run on the column's lighter vehicle at skills 1 and 2: shallow dive, each burst "
+         "on its own seeded aim inside the circle (or the ring), the bursts' middle within the circle plus "
+         "the gun's spread, break-off low."),
+        ("ai-strike-rockets-popup", rockets_popup, 600,
+         "An A-4E's LAU-61 pop-up at skill 2: the pull, the roll-in onto the column, rockets on the cue."),
+        ("ai-strike-rockets-dive", rockets_dive, 600,
+         "An A-4E's LAU-61 dive at skill 2 from 6,000 ft, rockets on the cue."),
+        ("ai-strike-snakeye", snakeye, 600,
+         "An A-4E's Mk 82 Snakeye laydown at skills 1 and 2: down to the low level height that clears the "
+         "fuze and the fragments (under 1,000 ft), released level with a lead on the column."),
+        ("ai-strike-heavy-level", heavy, 900,
+         "A C-130 with a bay of Mk 82 on the factory: its release floor is the 10,000 ft Quick Mission "
+         "altitude, not the 5,000 ft base."),
+        ("ai-strike-offset", offsets, 900,
+         "Level and dive Mk 82 passes starting 1,000 and 3,000 ft off the attack line: the sideways law lays "
+         "the track on the aim and releases on the first pass."),
+        ("ai-strike-lead-dive", lead_runs("dive"), 1200,
+         "John's comparison: the same A-4E Mk 82 dive on the moving column and the standing factory at every "
+         "skill; the moving target is led, the standing one not, both within the circle."),
+        ("ai-strike-lead-level", lead_runs("level"), 1200,
+         "The same comparison for the level run."),
+    ]
+    extra = []
+    for name, entries, timeout, notes in maneuvers:
+        first, steps, wants = run_list(entries)
+        extra.append(Scenario(name=name, lane="flight", args=first, timeout=timeout, then=steps,
+                              check=lambda out, wants=wants: strike_problems(out, wants), notes=notes))
+    return extra + [
         Scenario(
             name="ai-strike-laser-self", lane="flight",
             args=laser_pod, timeout=600,
@@ -921,7 +1029,7 @@ def scenarios() -> list[Scenario]:
             args=forced(*rocket_runs[0], *rockets), timeout=600,
             then=[Step(forced(*r, *rockets), timeout=300) for r in rocket_runs[1:]],
             check=lambda out: strike_problems(out, _runs(rocket_runs, hit=False)),
-            notes="An A-4E's LAU-61 pods on the column, straight runs at skills 2 and 3: a burst at the "
+            notes="An A-4E's LAU-61 pods on the column, straight runs at skills 1 and 2: a burst at the "
                   "record's cadence with the drawn aim inside the circle, each rocket within the circle "
                   "plus the gate plus 400 ft, and the striker leaves.",
         ),

@@ -206,6 +206,7 @@ impl Strike {
             speed: SpeedRequest::Corner,
             afterburner: distance < radius,
             bank_deg: None,
+            handling: Handling::PLAIN,
         })
     }
 
@@ -228,6 +229,7 @@ impl Strike {
             speed: SpeedRequest::Corner,
             afterburner: false,
             bank_deg: None,
+            handling: Handling::PLAIN,
         })
     }
 

@@ -87,8 +87,8 @@ fn scatter_units() -> u16 {
 
 /// One bomb's heading and pitch errors, radians, each uniform over the
 /// scatter: `roll(n)` returns a value from 0 to n - 1 of the sim's own random
-/// stream, so a replay and every machine of a network game agree. With the
-/// scatter at 0 nothing is drawn.
+/// stream (a release rolls from [`scatter_stream`]), so a replay and every
+/// machine of a network game agree. With the scatter at 0 nothing is drawn.
 pub fn scatter(mut roll: impl FnMut(u16) -> u16) -> (f64, f64) {
     let half = scatter_units();
     if half == 0 {
@@ -101,6 +101,32 @@ pub fn scatter(mut roll: impl FnMut(u16) -> u16) -> (f64, f64) {
     let heading = angle();
     let pitch = angle();
     (heading, pitch)
+}
+
+/// The random stream one released bomb's scatter is rolled from: combat's
+/// random state mixed with the release tick and the round's number
+/// (SplitMix64), a value from 0 to n - 1 a roll.
+///
+/// Combat's own stream moves only when something rolls (a hit, a jammer, a
+/// fault), so a mission's first bomb, released before anything else had
+/// rolled, used to take the very same error every time: 1.25 degrees left and
+/// 1.31 degrees low, about 330 ft short of a 5,000 ft level release, at every
+/// skill and on every target (slice ST-LV). Mixing in the tick and the round
+/// gives every bomb its own error, still a pure function of the simulation's
+/// state, so a replay, a checkpoint and every machine agree. Combat's stream
+/// itself is left as it is.
+pub fn scatter_stream(state: u32, tick: u64, round: u32) -> impl FnMut(u16) -> u16 {
+    const GOLDEN: u64 = 0x9e37_79b9_7f4a_7c15;
+    let mut seed =
+        (u64::from(state) << 32 | u64::from(round)) ^ tick.wrapping_mul(GOLDEN).rotate_left(17);
+    move |bound| {
+        seed = seed.wrapping_add(GOLDEN);
+        let mut z = seed;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^= z >> 31;
+        (((z >> 32) * u64::from(bound)) >> 32) as u16
+    }
 }
 
 /// Where a bomb leaves its aircraft and how fast it is going.
@@ -265,7 +291,14 @@ pub struct Impact {
 /// retail's predictor keeps it. Over flat ground a real bomb with no scatter
 /// lands there. `None` when the path never reaches that height.
 pub fn predict_impact(release: ReleaseState, ground: impl Fn(f64, f64) -> f64) -> Option<Impact> {
-    let height = ground(release.position[0], release.position[2]);
+    impact_at(release, ground(release.position[0], release.position[2]))
+}
+
+/// Where the mean path of `release` comes down to the height `height`: the
+/// level T and the AI's release judge a bomb against its target's ground
+/// this way, so a target higher or lower than the ground under the release
+/// point is still hit (slice ST-LV). `None` when the path never gets there.
+pub fn impact_at(release: ReleaseState, height: f64) -> Option<Impact> {
     let motion = BombMotion::new(release);
     let seconds = motion.fall_time(height)?;
     let mut position = motion.position(seconds);

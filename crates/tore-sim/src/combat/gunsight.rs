@@ -200,6 +200,85 @@ pub fn range_arc_fraction(range_ft: f64, maximum_range_ft: f64) -> f64 {
     .clamp(0., 1.)
 }
 
+/// Where the gun's rounds meet the ground: the strafing cue (AI strike
+/// round, slice ST-T2). The same round path as [`solve_observed`] (the
+/// record's speed, the bomb fall for a gravity round, along the barrel from
+/// the mount), followed until it reaches the ground under it or its range
+/// runs out. Returns the point, the seconds of flight and the slant range.
+pub fn ground_cue(
+    weapon: &Weapon,
+    launcher: &Launcher,
+    mount: Vector,
+    ground: impl Fn(f64, f64) -> f64,
+) -> Result<Option<(Vector, f64, f64)>> {
+    if !launcher
+        .position
+        .iter()
+        .chain(&launcher.velocity)
+        .all(|v| v.is_finite())
+        || !mount.iter().all(|v| v.is_finite())
+        || !launcher.speed_fps.is_finite()
+    {
+        return Err(super::invalid("nonfinite gunsight input"));
+    }
+    let maximum = f64::from(weapon.seeker.zones[1].maximum_range.max(0));
+    if maximum <= 0. {
+        return Ok(None);
+    }
+    let muzzle: Vector = std::array::from_fn(|i| {
+        launcher.position[i]
+            + launcher.basis.right[i] * mount[0]
+            + launcher.basis.up[i] * mount[1]
+            + launcher.basis.forward[i] * mount[2]
+    });
+    let movement = &weapon.movement;
+    let mut speed_f8 = launch_speed(movement, (launcher.speed_fps * 256.) as i32)? * 256;
+    let mut fall = FallState::default();
+    let initial_height_f8 = (muzzle[1] * 256.) as i32;
+    let mut height_f8 = initial_height_f8;
+    let ticks = (u64::from(movement.remove_t) * 30).min(MAX_TICKS);
+    let mut service_remainder = 0u16;
+    let mut distance = 0.;
+    let at = |distance: f64, drop: f64| -> Vector {
+        std::array::from_fn(|i| {
+            muzzle[i] + launcher.basis.forward[i] * distance - if i == 1 { drop } else { 0. }
+        })
+    };
+    let mut previous = (0., muzzle[1] - ground(muzzle[0], muzzle[2]), muzzle);
+    for tick in 0..ticks {
+        service_remainder += SERVICE_RATE;
+        let service = (service_remainder / 120) as i16;
+        service_remainder %= 120;
+        let now = (tick / 30) as u16;
+        let phase = engine_phase(movement, now, 0);
+        if weapon.flags & 0x40 != 0 {
+            let target_speed = commanded_speed(movement, phase, speed_f8, height_f8) as i16;
+            speed_f8 = axial_speed(movement, speed_f8, target_speed, false, service)?;
+        }
+        distance += f64::from(speed_f8) * f64::from(service) / 65536.;
+        height_f8 = fall.advance(weapon.flags & 4 != 0, phase, service, height_f8)?;
+        let drop = f64::from(initial_height_f8 - height_f8) / 256.;
+        let seconds = (tick + 1) as f64 * DT;
+        let point = at(distance, drop);
+        let above = point[1] - ground(point[0], point[2]);
+        if above <= 0. {
+            let fraction = (previous.1 / (previous.1 - above).max(f64::EPSILON)).clamp(0., 1.);
+            let hit: Vector =
+                std::array::from_fn(|i| previous.2[i] + (point[i] - previous.2[i]) * fraction);
+            let range = (0..3)
+                .map(|i| (hit[i] - muzzle[i]).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            return Ok(Some((hit, lerp(previous.0, seconds, fraction), range)));
+        }
+        if distance > maximum * 2. {
+            return Ok(None);
+        }
+        previous = (seconds, above, point);
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;

@@ -2,10 +2,11 @@
 //!
 //! Every field the next step reads is coded: the phase and its start, the
 //! pass, the target and store, the pass count that seeds the next aim, the
-//! drawn aim, the final's line, the release count and the exit's heading.
+//! drawn aim, the final's line, the release count, the exit's heading, a gun
+//! run's burst state and the height the striker was tasked at.
 //! `inputs` is per-step scratch: the host hands it over before every mission
 //! step and the step takes it, so between steps it is always empty and a
-//! restored strike starts without it. `Context`, `Order`, `Steer`,
+//! restored strike starts without it. `Context`, `Order`, `Steer`, `Handling`,
 //! `Selection`, `Inputs`, `LaseInputs`, `WingFacts`, `Store`, `Solution`,
 //! `PassInputs`, `PassChoice`, `TargetFacts` and `AimDraw` are per-call
 //! values, never held. The lase in progress, and whether the aircraft has a
@@ -22,6 +23,9 @@ crate::checkpoint_enum!(Pass {
     Level = 4,
     Orbit = 5,
     StandOff = 6,
+    // ST-T2's passes follow ST-F's (same-build bytes; merged at ST-INT).
+    Laydown = 7,
+    Strafe = 8,
 });
 
 crate::checkpoint_enum!(StoreKind {
@@ -112,6 +116,12 @@ crate::checkpoint_struct!(Strike {
     designator,
     laser_rounds,
     laser_set,
+    burst,
+    burst_open,
+    recovery_until,
+    cue_across_sum,
+    cue_last,
+    tasked_agl_ft,
 } skip {
     inputs = None,
 });

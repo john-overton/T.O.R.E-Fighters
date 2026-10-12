@@ -349,9 +349,9 @@ pub struct StrikeRelease<'a> {
 pub struct ReleaseAim {
     /// The aim point's ground offset from the target, feet along x and z.
     pub offset_ft: [f64; 2],
-    /// The release gate: the predicted impact (CCIP, which the LVL cue is
-    /// timed on) must lie within this many feet, along the ground, of the
-    /// aim point.
+    /// The release gate: the predicted impact on the aim point's ground (as
+    /// the LVL cue is timed; [`super::super::delivery::Delivery::impact_at`])
+    /// must lie within this many feet, along the ground, of the aim point.
     pub gate_ft: f64,
 }
 
@@ -505,15 +505,16 @@ impl State {
             return None;
         }
         let station = config.stations.get(cockpit.selected)?;
-        let target = cockpit
+        let (target, target_velocity) = cockpit
             .target_object()
             .and_then(|id| self.targets.iter().find(|t| t.id == id))
             .filter(|t| t.role == TargetRole::Surface && t.hp > 0)
-            .map(|t| t.position)
+            .map(|t| (t.position, t.velocity))
             .or(match cockpit.target {
-                Some(StrikeTarget::Point(point)) => Some(point),
+                Some(StrikeTarget::Point(point)) => Some((point, [0.; 3])),
                 _ => None,
-            });
+            })
+            .map_or((None, [0.; 3]), |(p, v)| (Some(p), v));
         let falling = self
             .projectiles
             .iter()
@@ -532,6 +533,7 @@ impl State {
                 launcher,
                 mode: cockpit.delivery_mode,
                 target,
+                target_velocity,
                 clock,
                 falling,
             },
@@ -599,9 +601,11 @@ impl State {
     /// now, on the shared solution and `aim` (docs/spec/ai-strike.md, "Skill
     /// and release precision"):
     ///
-    /// - a bomb or rocket when the predicted impact (CCIP, which the LVL cue
-    ///   is also timed on) lies within `aim.gate_ft` of the aim point
-    ///   ([`ReleaseAim::point`] of the cockpit's target);
+    /// - a bomb or rocket when the predicted impact on the aim point's
+    ///   ground (a bomb's mean path brought down to that height, as the LVL
+    ///   cue is timed, rather than to the ground under the aircraft as the
+    ///   CCIP pipper's; a rocket's flown impact) lies within `aim.gate_ft` of
+    ///   the aim point ([`ReleaseAim::point`] of the cockpit's target);
     /// - a guided weapon (the aim does not apply: no skill offset for smart
     ///   weapons) when its aim on the target (its spot or its stored point)
     ///   is IN RNG and its ground range is at most the level T's bar plus
@@ -630,11 +634,20 @@ impl State {
         let Some(solution) = self.strike_delivery(aircraft, config, launcher, ground) else {
             return false;
         };
-        let (Some(ccip), Some(target)) = (solution.ccip, self.strike_point(cockpit)) else {
+        let Some(target) = self.strike_point(cockpit) else {
             return false;
         };
         let point = aim.point(target);
-        let miss = [ccip.impact[0] - point[0], 0., ccip.impact[2] - point[2]];
+        // The bomb judged at the aim point's ground, not the ground under the
+        // aircraft (slice ST-LV).
+        let Some(impact) = solution.impact_at(ground(point[0], point[2])) else {
+            return false;
+        };
+        let miss = [
+            impact.position[0] - point[0],
+            0.,
+            impact.position[2] - point[2],
+        ];
         dot(miss, miss).sqrt() <= aim.gate_ft
     }
 
@@ -805,7 +818,8 @@ impl State {
         // A bomb leaves its station (staggered in a pack) along the nose,
         // then takes its own scatter.
         let bomb = ballistics::is_bomb(w).then(|| {
-            let (heading, pitch) = ballistics::scatter(|bound| super::draw(&mut self.rng, bound));
+            let (heading, pitch) =
+                ballistics::scatter(ballistics::scatter_stream(self.rng, self.tick, r.id));
             ballistics::ReleaseState::from_station(&launcher, station, r.round)
                 .turned(heading, pitch)
         });

@@ -72,6 +72,8 @@ mod sighting;
 #[cfg(test)]
 mod sighting_tests;
 #[cfg(test)]
+mod strafe_tests;
+#[cfg(test)]
 mod worker_tests;
 pub use handoff::{AiHandback, AiPose, AiStores, Kept};
 mod parked;

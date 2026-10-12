@@ -14,10 +14,14 @@
 //!   ground impact of a rocket fired now, flown through the very steps combat
 //!   gives an unguided round ([`rocket_impact`]).
 //! - **LVL** (opinionated, John, 2026-10-10; the design is the agent's): the
-//!   CCIP impact compared with a ground target, as an along-track error, a
+//!   impact compared with a ground target, as an along-track error, a
 //!   cross-track error, a time to release and an azimuth steering correction
-//!   ([`LevelRelease`]). While the release cue lies ahead a held trigger waits
-//!   for it and releases there ([`LevelRelease::due`]).
+//!   ([`LevelRelease`]). The impact is the bomb's mean path brought down to
+//!   the target's ground ([`Delivery::impact_at`]), not to the ground under
+//!   the aircraft as the CCIP pipper's is, so a target on higher or lower
+//!   ground is still hit (agent, slice ST-LV). While the release cue lies
+//!   ahead a held trigger waits for it and releases there
+//!   ([`LevelRelease::due`]).
 //! - **Warnings** (opinionated, agent, decision 15): LOW when the bomb would
 //!   land before its fuze arms, FRAG when its burst would reach the aircraft
 //!   flying on without descending ([`flown`]), OVERFLY when LVL has passed
@@ -203,13 +207,16 @@ impl Ccip {
     }
 }
 
-/// The level release solution: the CCIP impact against a ground target.
+/// The level release solution: the impact on the target's ground against
+/// the target.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LevelRelease {
-    /// The target point on the ground.
+    /// The target point on the ground, where a moving target will be when
+    /// the bomb lands (led by the fall).
     pub target: Vector,
-    /// D: how far the target lies beyond the impact point along the impact's
-    /// ground track, feet; negative once it is overflown.
+    /// D: how far the target lies beyond the impact point (on the target's
+    /// ground) along the impact's ground track, feet; negative once it is
+    /// overflown.
     pub along_ft: f64,
     /// C: how far the target lies right of that track, feet.
     pub cross_ft: f64,
@@ -294,6 +301,22 @@ impl Delivery {
     pub fn warning(&self) -> Option<Warning> {
         self.warnings.first().copied()
     }
+    /// Where the selected round comes down at the ground height `height`:
+    /// for a bomb its mean path brought down to that height, for a rocket its
+    /// flown impact (a rocket is already flown into the real terrain). The
+    /// level T and the AI's release judge a bomb against its target's ground
+    /// this way; the CCIP pipper keeps retail's ground under the release
+    /// point (agent, slice ST-LV). `None` without an impact.
+    pub fn impact_at(&self, height: f64) -> Option<Impact> {
+        let ccip = self.ccip.as_ref()?;
+        if self.rocket {
+            return Some(Impact {
+                position: ccip.impact,
+                seconds: ccip.seconds,
+            });
+        }
+        ballistics::impact_at(ccip.release, height)
+    }
 }
 
 /// Combat's clock at the step being solved, so a rocket's fly-out takes the
@@ -328,6 +351,9 @@ pub struct Situation<'a> {
     pub mode: DeliveryMode,
     /// The designated ground target's position, if any.
     pub target: Option<Vector>,
+    /// Its velocity, feet a second (zero for a pinned point): the level T
+    /// leads a moving target by its fall.
+    pub target_velocity: Vector,
     pub clock: Clock,
     /// Seconds until the aircraft's last released bomb lands.
     pub falling: Option<f64>,
@@ -351,7 +377,11 @@ pub fn solve(s: Situation<'_>, ground: impl Fn(f64, f64) -> f64) -> Option<Deliv
     };
     let mode = if bomb { s.mode } else { DeliveryMode::Ccip };
     let level = (mode == DeliveryMode::Level)
-        .then(|| level_release(s.launcher, w, ccip.as_ref()?, s.target?))
+        .then(|| {
+            let release = ccip.as_ref()?.release;
+            let (led, impact) = led_impact(release, s.target?, s.target_velocity, &ground)?;
+            level_release(s.launcher, w, release.position, impact, led)
+        })
         .flatten();
     let mut warnings = Vec::new();
     if let Some(c) = &ccip {
@@ -391,15 +421,46 @@ pub fn flown(launcher: &Launcher, seconds: f64) -> Vector {
     ]
 }
 
-/// The level solution for an impact against `target`.
+/// Where a bomb released as `release` lands on the target's ground, and where
+/// the target will be by then: a target moving at `velocity` is led by the
+/// fall (the fall to its ground, then once more to the ground at the led
+/// point). Agent decision (slice ST-LV): the T is a release cue for a
+/// designated object, and without the lead a column moving at 50 ft/s drew
+/// the bombs some 900 ft behind it from 5,000 ft. A standing target or a
+/// pinned point is not led.
+fn led_impact(
+    release: ReleaseState,
+    target: Vector,
+    velocity: Vector,
+    ground: &impl Fn(f64, f64) -> f64,
+) -> Option<(Vector, Vector)> {
+    let first = ballistics::impact_at(release, ground(target[0], target[2]))?;
+    let led = [
+        target[0] + velocity[0] * first.seconds,
+        target[1],
+        target[2] + velocity[2] * first.seconds,
+    ];
+    if led == target {
+        return Some((target, first.position));
+    }
+    let impact = ballistics::impact_at(release, ground(led[0], led[2]))?;
+    let led = [
+        target[0] + velocity[0] * impact.seconds,
+        target[1],
+        target[2] + velocity[2] * impact.seconds,
+    ];
+    Some((led, impact.position))
+}
+
+/// The level solution for a bomb released at `from` landing at `impact` (on
+/// the target's ground), against `target` (led by the fall).
 fn level_release(
     launcher: &Launcher,
     weapon: &Weapon,
-    ccip: &Ccip,
+    from: Vector,
+    impact: Vector,
     target: Vector,
 ) -> Option<LevelRelease> {
-    let from = ccip.release.position;
-    let impact = ccip.impact;
     let throw = [impact[0] - from[0], impact[2] - from[2]];
     // The impact's ground track: from the release point through the impact,
     // or along the ground speed when the bomb falls straight down.

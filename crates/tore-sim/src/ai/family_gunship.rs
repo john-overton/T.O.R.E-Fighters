@@ -29,8 +29,9 @@
 //! All deterministic (John, 2026-10-11, decision 13): the draw is seeded by
 //! the aircraft's seed, its id and the burst number.
 use super::{
-    Context, Order, Pass, Phase, Segment, Steer, StoreKind, Strike, aim_draw, angle_difference,
-    bearing_deg, hold_pitch_deg, horizontal, known_position, release_circle_ft, standing,
+    Context, Handling, Order, Pass, Phase, Segment, Steer, StoreKind, Strike, aim_draw,
+    angle_difference, bearing_deg, hold_pitch_deg, horizontal, known_position, release_circle_ft,
+    standing,
 };
 use crate::ai::ScalarSpeed;
 use crate::ai::awareness::ground::BriefedKind;
@@ -177,6 +178,7 @@ pub fn orbit_steer(
         speed: SpeedRequest::Explicit(ScalarSpeed(orbit_speed_fps)),
         afterburner: false,
         bank_deg: Some(bank),
+        handling: Handling::PLAIN,
     }
 }
 

@@ -51,11 +51,7 @@ pub(super) fn step(
         let Some(actor) = wings.mission.actor(id) else {
             continue;
         };
-        let mut stores = describe(config, actor.stations());
-        // The gunship's linked guns are its strike stores (slice ST-F).
-        if config.strike_class == tore_sim::models::strike_class::StrikeClass::Gunship {
-            stores.extend(super::gunship::gun_stores(config, actor.stations()));
-        }
+        let stores = strike_stores(config, actor.stations());
         let launcher = crate::combat::launcher(actor.flight());
         let selection = actor.strike().and_then(strike::Strike::selection);
         let side = state
@@ -114,10 +110,21 @@ pub(super) fn step(
             }) || state
                 .guided_flights()
                 .any(|(_, f)| f.owner == id && f.kind == missiles::Guidance::Laser);
-            let (impact, seconds, warning, due, reach_ok) = if sel.kind == StoreKind::Gun {
+            let gunship =
+                config.strike_class == tore_sim::models::strike_class::StrikeClass::Gunship;
+            let (impact, seconds, warning, due, reach_ok) = if sel.kind == StoreKind::Gun && gunship
+            {
                 // The gunship's guns are trained and fired by their own
-                // bridge (`super::gunship`).
+                // bridge (`super::gunship`, slice ST-F).
                 (None, None, false, false, true)
+            } else if sel.kind == StoreKind::Gun {
+                // The gun's ground cue (slice ST-T2); the striker judges its
+                // own bursts.
+                let mount = config.stations[station].mount;
+                let cue = tore_sim::combat::gunsight::ground_cue(w, &launcher, mount, ground)
+                    .ok()
+                    .flatten();
+                (cue.map(|c| c.0), cue.map(|c| c.1), false, false, true)
             } else if sel.kind.seeker() {
                 let due = seeker_due(
                     sel.kind,
@@ -130,8 +137,11 @@ pub(super) fn step(
                 (None, None, false, due, true)
             } else {
                 let delivery = state.strike_delivery(id, config, &launcher, &ground);
-                let ccip = delivery.as_ref().and_then(|d| d.ccip);
-                let impact = ccip.map(|c| c.impact);
+                // The cue on the target's ground, as the release test judges
+                // it (slice ST-LV).
+                let cue = delivery
+                    .as_ref()
+                    .and_then(|d| d.impact_at(ground(position[0], position[2])));
                 let warning = delivery.as_ref().is_some_and(|d| {
                     d.warnings
                         .iter()
@@ -154,7 +164,13 @@ pub(super) fn step(
                         true,
                     ),
                 };
-                (impact, ccip.map(|c| c.seconds), warning, due, reach_ok)
+                (
+                    cue.map(|c| c.position),
+                    cue.map(|c| c.seconds),
+                    warning,
+                    due,
+                    reach_ok,
+                )
             };
             Some(Solution {
                 station: sel.station,
@@ -174,7 +190,7 @@ pub(super) fn step(
             class: config.strike_class,
             stores,
             designator,
-            mission_height_ft: None,
+            mission_height_ft: wings.mission_height_ft,
             solution,
             lase,
         };
@@ -294,8 +310,23 @@ fn lase_inputs(
     }
 }
 
-/// What each of a striker's ground stores is to the tactics. Guns and
-/// air-to-air stores are left out.
+/// A striker's stores as the tactics see them: [`describe`], except that
+/// the gunship's guns are its linked guns as its own bridge trains them
+/// (slice ST-F), not the strafing gun (slice ST-T2).
+pub(super) fn strike_stores(
+    config: &live::Configuration,
+    specs: &[tore_sim::ai::mission::StationSpec],
+) -> Vec<Store> {
+    let mut stores = describe(config, specs);
+    if config.strike_class == tore_sim::models::strike_class::StrikeClass::Gunship {
+        stores.retain(|s| s.kind != StoreKind::Gun);
+        stores.extend(super::gunship::gun_stores(config, specs));
+    }
+    stores
+}
+
+/// What each of a striker's ground stores is to the tactics: its gun too
+/// (slice ST-T2); air-to-air stores are left out.
 pub(super) fn describe(
     config: &live::Configuration,
     specs: &[tore_sim::ai::mission::StationSpec],
@@ -306,24 +337,41 @@ pub(super) fn describe(
         .enumerate()
         .filter_map(|(index, station)| {
             let w = &station.weapon;
-            let kind = kind(w)?;
+            let gun = live::is_gun(w);
+            let kind = if gun { StoreKind::Gun } else { kind(w)? };
             let spec = specs.iter().find(|s| usize::from(s.station.0) == index)?;
             let rounds = match spec.store.rounds {
                 Rounds::Finite(n) => n,
                 Rounds::Unlimited => u32::MAX,
             };
             let zone = w.seeker.zones[1];
+            let period =
+                u64::from(w.burst.game_burst_t.max(1)) * tore_sim::ai::QUARTER_SECOND_TICKS;
+            // A gun fires its rounds evenly through the record's period, the
+            // AI gun employment's cadence (docs/spec/ai-gun-employment.md).
+            let cadence_ticks = if gun {
+                let rounds = u64::from(w.burst.actual_rounds_per_game.max(1))
+                    * u64::from(w.burst.game_rounds_in_burst.max(1));
+                (period / rounds).max(1)
+            } else {
+                period
+            };
             Some(Store {
                 station: StationId(index as u8),
                 kind,
                 rounds: if spec.store.inhibited { 0 } else { rounds },
-                cadence_ticks: u64::from(w.burst.game_burst_t.max(1))
-                    * tore_sim::ai::QUARTER_SECOND_TICKS,
+                cadence_ticks,
                 fire_range_ft: strike::GUIDED_CLOSE_FT.max(f64::from(zone.maximum_range) / 2.),
                 minimum_range_ft: f64::from(zone.minimum_range.max(0)),
                 maximum_range_ft: f64::from(zone.maximum_range.max(0)),
                 round_speed_fps: (kind == StoreKind::Rocket)
                     .then(|| f64::from(w.movement.maximum_speed)),
+                release_speed_share: match w.movement.launch_retard {
+                    0 => 1.,
+                    retard => f64::from(retard) / 100.,
+                },
+                fuze_arm_s: f64::from(w.damage.fuze_arm_t) / 4.,
+                frag_radius_ft: f64::from(w.damage.collateral_radius.max(0)),
             })
         })
         .collect()
@@ -403,12 +451,9 @@ impl AiWings {
             return Capability::default();
         };
         let designator = config.sight_sensor().is_some_and(|s| s.laser);
-        let mut stores = describe(config, actor.stations());
         // Every bombing class strikes (slice ST-F); the gunship with its
         // linked guns.
-        if config.strike_class == tore_sim::models::strike_class::StrikeClass::Gunship {
-            stores.extend(super::gunship::gun_stores(config, actor.stations()));
-        }
+        let stores = strike_stores(config, actor.stations());
         Capability {
             strike: strike::has_usable_store(&stores, designator, config.strike_class),
             designator: self.can_lase(id),
@@ -466,6 +511,100 @@ impl AiWings {
     /// The object AI aircraft `id` is lasing, if it is.
     pub fn lasing_for(&self, id: u32) -> Option<u32> {
         self.mission.actor(id).and_then(|actor| actor.lasing())
+    }
+
+    /// The mission's airborne height, feet (the Quick Mission altitude
+    /// setting), for a heavy striker's release floor; the host sets it
+    /// before every step.
+    pub fn set_mission_height(&mut self, height_ft: Option<f64>) {
+        self.mission_height_ft = height_ft;
+    }
+
+    /// Whether `event` is a striker's gun burst at its strike target (a gun
+    /// run, slice ST-T2), which [`Self::release_strafe`] makes.
+    pub(super) fn striker_gun(&self, event: &tore_sim::ai::mission::LaunchEvent) -> bool {
+        self.mission
+            .actor(event.actor)
+            .and_then(|a| a.strike())
+            .and_then(strike::Strike::selection)
+            .is_some_and(|sel| {
+                sel.kind == StoreKind::Gun
+                    && sel.station == event.station
+                    && sel.target == event.target
+            })
+    }
+
+    /// One round of a striker's gun run (slice ST-T2): fired along the
+    /// barrel from the gun's mount as every AI gun round is (the round, its
+    /// tracer and its debit as [`Self::realise`] makes them), with no air
+    /// target to track: the striker aimed the gun's ground cue itself.
+    /// Returns how many it made (0 or 1).
+    pub(super) fn release_strafe(
+        &mut self,
+        event: &tore_sim::ai::mission::LaunchEvent,
+        projectiles: &mut Vec<live::Projectile>,
+        weapon: &tore_formats::weapons::Weapon,
+        ordinal: u64,
+    ) -> u32 {
+        let Some(actor) = self.mission.actor(event.actor) else {
+            return 0;
+        };
+        if !actor.alive() || projectiles.len() >= live::MAX_PROJECTILES {
+            self.dropped_launches += 1;
+            return 0;
+        }
+        let flight = actor.flight();
+        let basis = tore_sim::attitude::Basis::new(flight.yaw, flight.pitch, flight.bank);
+        let mount = actor
+            .stations()
+            .iter()
+            .find(|s| s.station == event.station)
+            .map_or([0.; 3], |s| s.mount);
+        let origin: Vector = std::array::from_fn(|i| {
+            flight.position[i]
+                + basis.right[i] * mount[0]
+                + basis.up[i] * mount[1]
+                + basis.forward[i] * mount[2]
+        });
+        let Ok(speed) = launch_speed(&weapon.movement, (flight.speed * 256.) as i32) else {
+            self.dropped_launches += 1;
+            return 0;
+        };
+        let launched = (self.mission.tick() / 30) as u16;
+        if !self
+            .mission
+            .actor_mut(event.actor)
+            .is_some_and(|a| a.debit_gun_round(event.station))
+        {
+            return 0;
+        }
+        let id = self.next_projectile_id;
+        self.next_projectile_id = self.next_projectile_id.wrapping_add(1);
+        projectiles.push(live::Projectile {
+            id,
+            owner: event.actor,
+            weapon: Some(weapon.clone()),
+            guidance: None,
+            motion: None,
+            guidance_ticks: None,
+            age: 0,
+            incoming: None,
+            station: usize::from(event.station.0),
+            position: origin,
+            previous: origin,
+            direction: basis.forward,
+            speed_f8: speed * 256,
+            launched_t: launched,
+            target: None,
+            fall: FallState::default(),
+            gun_round: Some(
+                (ordinal % u64::from(weapon.burst.actual_rounds_per_game.max(1))) as u8,
+            ),
+            tracer: ordinal.is_multiple_of(3),
+        });
+        self.ai_shots.insert(id, event.actor);
+        self.realised_launches += 1;
+        1
     }
 
     /// Forces AI aircraft `id`'s pass and store (the headless driver's

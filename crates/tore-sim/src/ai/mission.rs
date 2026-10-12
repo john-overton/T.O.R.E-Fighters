@@ -2894,6 +2894,9 @@ impl AiMission {
         // Write-only records start afresh on every mission step.
         actor.trace = ActorTrace::begin(tick);
         actor.adapter.set_gun_aim(None);
+        actor
+            .adapter
+            .set_strike_handling(super::strike::Handling::PLAIN);
         actor.trace.clearance = clearance;
         actor.route_random.clear_log();
         actor.controller.set_formation_observation(traffic.to_vec());
@@ -3493,6 +3496,8 @@ impl AiMission {
             };
             actor.controller.step(&frame)?
         };
+        // How the adapter flies a striker's attack steer (slice ST-T2).
+        let handling = actor.controller.take_strike_handling();
         // The frame is gone; keep what the controller saw.
         actor.trace.targets = targets;
         actor.trace.stations = stations;
@@ -3614,6 +3619,7 @@ impl AiMission {
 
         // 6. Motion through the adapter and this actor's own flight model.
         actor.adapter.set_gun_aim(batch.gun_aim);
+        actor.adapter.set_strike_handling(handling);
         let motion = batch
             .motion
             .map(|intent| actor.avoid_traffic(tick, intent, world));
@@ -4834,7 +4840,14 @@ impl AiActor {
         };
         let input = match intent {
             Some(intent) => {
-                let floor = self.controller.terrain_floor(&dummy_frame(own))?;
+                // A striker's planned dive takes its own pull-out floor
+                // (slice ST-T2); everything else the B44 floor.
+                let general = self.controller.terrain_floor(&dummy_frame(own))?;
+                let floor = if self.adapter.strike_handling().planned_dive {
+                    Some(super::strike::planned_pitch_floor_deg(own))
+                } else {
+                    general
+                };
                 let output = self.adapter.controls(
                     &self.flight,
                     intent,

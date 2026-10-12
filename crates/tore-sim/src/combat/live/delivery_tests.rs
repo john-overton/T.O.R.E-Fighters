@@ -277,6 +277,83 @@ fn a_held_trigger_releases_once_when_the_marker_meets_the_crossbar() {
 }
 
 #[test]
+fn a_held_level_release_hits_a_target_on_higher_or_lower_ground() {
+    // Slice ST-LV. The target stands 400 ft above or below the sea-level
+    // ground the aircraft releases over. The real bomb (its scatter taken
+    // off, so the mean path flies) lands on the target, not 500 ft short of
+    // it or beyond it as when the T judged the fall against the ground under
+    // the aircraft.
+    for height in [400., -400.] {
+        let ground = move |_: f64, z: f64| if z > 15_000. { height } else { 0. };
+        let mut s = carrying(mk82(), 4);
+        // The target's box stands on its own ground.
+        let bounds = crate::airport::OrientedBox {
+            center: [0., height + 6., 20_000.],
+            half: [10., 6., 20.],
+            heading: 0.,
+            pitch: 0.,
+            bank: 0.,
+        };
+        s.add_ground_target(TARGET, bounds, 1_000, 0x100, NO_SIDE)
+            .unwrap();
+        s.cheats.easy_targeting = true;
+        s.own_mut().sensors.select_ground(TARGET);
+        let target = s.targets.iter().find(|t| t.id == TARGET).unwrap().position;
+        s.command(0, Command::ToggleSeekerMode, pass(5_000., 0., 450., 0.));
+        let speed = 450. * KNOT;
+        let mut released = None;
+        for tick in 0..(20. * 120.) as u64 {
+            let launcher = pass(5_000., speed * tick as f64 / 120., 450., 0.);
+            let before = bombs(&s);
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher,
+                }],
+                ground,
+            );
+            if bombs(&s) > before {
+                let id = s.projectiles.iter().find(|p| p.station == 1).unwrap().id;
+                let station = s.own().configuration().stations[1].clone();
+                let mean = ReleaseState::from_station(&launcher, &station, 0);
+                s.bombs
+                    .insert(id, crate::combat::ballistics::BombMotion::new(mean));
+                released = Some(id);
+                break;
+            }
+        }
+        let id = released.expect("the held trigger released");
+        let mut landed = None;
+        for _ in 0..(30 * 120) {
+            let last = s
+                .projectiles
+                .iter()
+                .find(|p| p.id == id)
+                .map(|p| p.position);
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: away(),
+                }],
+                ground,
+            );
+            if !s.projectiles.iter().any(|p| p.id == id) {
+                landed = last;
+                break;
+            }
+        }
+        let at = landed.expect("the bomb came down");
+        let miss = (at[0] - target[0]).hypot(at[2] - target[2]);
+        assert!(
+            miss < 30.,
+            "{height} ft: landed {miss:.0} ft from the target ({at:?})"
+        );
+    }
+}
+
+#[test]
 fn a_press_before_the_cue_waits_and_a_miss_outside_the_radius_never_releases() {
     // Pressed and let go well before the cue: nothing falls.
     let mut s = carrying(mk82(), 4);

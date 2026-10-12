@@ -84,6 +84,7 @@ fn solved(
             launcher,
             mode,
             target,
+            target_velocity: [0.; 3],
             clock: CLOCK,
             falling: None,
         },
@@ -166,6 +167,93 @@ fn the_dot_trail_marks_each_quarter_second_of_the_fall() {
         assert_eq!(*dot, motion.position(k as f64 * 0.25));
     }
     assert!(dots.last().unwrap()[1] >= -1e-9);
+}
+
+/// [`solved`] over `ground`, against a target moving at `velocity`.
+fn solved_over(
+    station: &Station,
+    launcher: &Launcher,
+    target: Vector,
+    velocity: Vector,
+    ground: impl Fn(f64, f64) -> f64,
+) -> Delivery {
+    solve(
+        Situation {
+            index: 3,
+            station,
+            launcher,
+            mode: DeliveryMode::Level,
+            target: Some(target),
+            target_velocity: velocity,
+            clock: CLOCK,
+            falling: None,
+        },
+        ground,
+    )
+    .expect("a bomb station")
+}
+
+#[test]
+fn the_level_t_brings_the_bomb_down_on_the_targets_ground() {
+    // Slice ST-LV. Level at 5,000 ft and 450 kt over sea level; the target
+    // stands on a 400 ft plateau, or in a 400 ft hollow. The T is due where
+    // the bomb's mean path meets the target's ground, not the ground under
+    // the aircraft (where the CCIP pipper, retail, still works it out).
+    let s = station(mk82());
+    let launcher = pass(5_000., 450., 0.);
+    let release = ReleaseState::from_station(&launcher, &s, 0);
+    for height in [400., -400.] {
+        let ground = move |_: f64, z: f64| if z > 6_000. { height } else { 0. };
+        let lands = ballistics::impact_at(release, height).unwrap().position;
+        let target = [lands[0], height, lands[2]];
+        let d = solved_over(&s, &launcher, target, [0.; 3], ground);
+        // The pipper is still over the ground under the release point.
+        assert_eq!(d.ccip.unwrap().impact[1], 0.);
+        let l = d.level.unwrap();
+        assert!(l.along_ft.abs() < 1e-6, "{height}: D {}", l.along_ft);
+        assert!(l.cross_ft.abs() < 1e-6);
+        assert!(l.due());
+        // The same bomb over the plateau falls about 400 x 759 / 566 ft
+        // short of where it would land at sea level, beyond it in the hollow.
+        let sea = predict_impact(release, |_, _| 0.).unwrap().position;
+        let gap = sea[2] - lands[2];
+        assert!((gap.abs() - 520.).abs() < 60., "{height}: {gap}");
+        assert_eq!(gap > 0., height > 0.);
+    }
+}
+
+#[test]
+fn the_level_t_leads_a_moving_target_by_the_fall() {
+    // Slice ST-LV: a column driving at 50 ft/s toward the aircraft is due
+    // where it will be when the bomb lands, not where it is now.
+    let s = station(mk82());
+    let launcher = pass(5_000., 450., 0.);
+    let release = ReleaseState::from_station(&launcher, &s, 0);
+    let lands = predict_impact(release, |_, _| 0.).unwrap();
+    let velocity = [0., 0., -50.];
+    let now = [
+        lands.position[0],
+        0.,
+        lands.position[2] + 50. * lands.seconds,
+    ];
+    let l = solved_over(&s, &launcher, now, velocity, |_, _| 0.)
+        .level
+        .unwrap();
+    assert!(l.along_ft.abs() < 1e-6, "D {}", l.along_ft);
+    assert!(l.due());
+    assert!((l.target[2] - lands.position[2]).abs() < 1e-6);
+    // The column now under the impact point is overflown by the time it lands.
+    let under = [lands.position[0], 0., lands.position[2]];
+    let l = solved_over(&s, &launcher, under, velocity, |_, _| 0.)
+        .level
+        .unwrap();
+    assert!((l.along_ft + 50. * lands.seconds).abs() < 1e-6);
+    // A standing target is not led.
+    let l = solved_over(&s, &launcher, under, [0.; 3], |_, _| 0.)
+        .level
+        .unwrap();
+    assert!(l.along_ft.abs() < 1e-6);
+    assert_eq!(l.target, under);
 }
 
 #[test]
@@ -330,6 +418,7 @@ fn rockets_get_a_pipper_and_never_the_level_release() {
             launcher: &launcher,
             mode: DeliveryMode::Ccip,
             target: None,
+            target_velocity: [0.; 3],
             clock: CLOCK,
             falling: None,
         },

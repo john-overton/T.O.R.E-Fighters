@@ -136,6 +136,9 @@ fn gun(station: u8, rounds: u32) -> Store {
         minimum_range_ft: 0.,
         maximum_range_ft: 13_000.,
         round_speed_fps: Some(3_450.),
+        release_speed_share: 1.,
+        fuze_arm_s: 0.,
+        frag_radius_ft: 0.,
     }
 }
 

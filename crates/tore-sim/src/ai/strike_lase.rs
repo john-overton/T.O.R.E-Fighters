@@ -453,6 +453,7 @@ impl Strike {
                 speed: SpeedRequest::Corner,
                 afterburner: false,
                 bank_deg: None,
+                handling: Handling::PLAIN,
             };
         }
         // The orbit turns toward the target's side, chosen when the hold
@@ -508,6 +509,7 @@ impl Strike {
             },
             afterburner: false,
             bank_deg: None,
+            handling: Handling::PLAIN,
         }
     }
 }

@@ -141,6 +141,9 @@ pub(super) fn gun_stores(
                 minimum_range_ft: f64::from(zone.minimum_range.max(0)),
                 maximum_range_ft: f64::from(zone.maximum_range.max(0)),
                 round_speed_fps: Some(f64::from(w.movement.initial_speed)),
+                release_speed_share: 1.,
+                fuze_arm_s: 0.,
+                frag_radius_ft: 0.,
             })
         })
         .collect()

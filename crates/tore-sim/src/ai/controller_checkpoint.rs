@@ -166,6 +166,9 @@ crate::checkpoint_struct!(ActiveManeuver {
 // `strike`: per-tick scratch. The mission hands a striker's order over with
 // `set_strike` immediately before `Controller::step`, which takes it.
 //
+// `strike_handling`: per-tick scratch. The step sets it from the strike
+// steer it flew and the mission takes it before flying the motion.
+//
 // `trace`: a why-record. `Controller::trace` hands it to the debug panels and
 // `thought::Record` takes no part in equality.
 crate::checkpoint_struct!(Controller {
@@ -214,6 +217,7 @@ crate::checkpoint_struct!(Controller {
     gun_views = Vec::new(),
     formation_traffic = Vec::new(),
     strike = None,
+    strike_handling = crate::ai::strike::Handling::PLAIN,
     trace = crate::ai::thought::Record::default(),
 });
 

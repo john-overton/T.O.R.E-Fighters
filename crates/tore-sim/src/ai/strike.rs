@@ -79,11 +79,11 @@ pub const POPUP_EXIT_FT: f64 = 1_500.;
 /// horizon (fitted, agent): the AI's terrain floor (6 s of travel ahead)
 /// allows only a shallow dive from a low pop, too shallow for rockets.
 pub const POPUP_DIVE_DEG: f64 = 15.;
-/// Rockets pop from farther out (fitted, agent): they fly along the nose, so
-/// the dive after the pop must point at the target, which from a low pop the
-/// terrain floor does not allow; popping at 16,000 ft gives a long shallow
-/// dive instead.
+/// Rockets pop from farther out and pull until the target is farther down
+/// (slice ST-T2, fitted, agent): they fly along the nose, so the dive after
+/// the pop must point at the target from inside the pods' reach.
 pub const ROCKET_POPUP_PULL_AT_FT: f64 = 16_000.;
+pub const ROCKET_POPUP_DIVE_DEG: f64 = 15.;
 /// The pop-up's approach heads for its pull point until this much short of
 /// it (fitted).
 pub const POPUP_LEAD_FT: f64 = 2_000.;
@@ -99,14 +99,6 @@ pub const DIVE_CLIMB_DEG: f64 = 25.;
 pub const DIVE_CLIMB_TICKS: u64 = 10 * 120;
 /// The steepest dive any fighter or attack jet flies (retail `maxDive`).
 pub const MAX_DIVE_DEG: f64 = 80.;
-/// The dive starts once the aim point is this far below the horizon
-/// (fitted, agent). Retail rolls in at R from a height of 2R, the target 63
-/// degrees down, and pulls inverted to 80 degrees. T.O.R.E's input-only
-/// adapter cannot roll inverted: it noses over wings level, more slowly, and
-/// the AI's terrain floor (6 s of travel ahead) holds the dive to about 50
-/// degrees at 5,000 ft; so it starts at 30 degrees and the cue flying takes
-/// it as steep as the floor allows.
-pub const DIVE_START_DEG: f64 = 30.;
 /// The approach heads for the roll-in point until this much short of it
 /// (fitted).
 pub const DIVE_ROLLIN_LEAD_FT: f64 = 2_000.;
@@ -122,6 +114,21 @@ pub const CUE_ACQUIRE_FT: f64 = 3_000.;
 pub const CUE_MARGIN_FT: f64 = 600.;
 pub const CUE_HOLD_TOLERANCE_FT: f64 = 300.;
 pub const CUE_PITCH_GAIN: f64 = 3.;
+/// A dive's cue margin (slice ST-T2, fitted, agent): the cue creeps faster
+/// in a steep dive, so it is held this far short.
+pub const DIVE_CUE_MARGIN_FT: f64 = 1_500.;
+/// What the cue still lies off the aim's line (a pod's or gun's offset, a
+/// crab in the wind) is trimmed out: the line is moved across by this share
+/// per second of the cue's miss across, at most [`CUE_TRIM_LIMIT_FT`]
+/// (slice ST-T2, fitted, agent; faster trims chase a level run's swinging
+/// cue).
+pub const CUE_TRACK_INTEGRAL: f64 = 0.2;
+/// A diving pass's trim (straight run, pop-up, dive, strafe): its cue sits
+/// closer and steadier, so it trims faster.
+pub const CUE_TRACK_INTEGRAL_DIVING: f64 = 0.5;
+/// The trim learns only while the track is within this of its line.
+pub const CUE_TRIM_ON_LINE_DEG: f64 = 1.5;
+pub const CUE_TRIM_LIMIT_FT: f64 = 1_000.;
 /// The input-only adapter closes a pitch error over 3 s (docs/spec/ai.md,
 /// "Input-only aircraft control"); a request that would ask for less than
 /// [`PUSH_G`] holds the wings level (fitted, agent).
@@ -150,6 +157,9 @@ pub const TURN_BACK_DEG: f64 = 15.;
 /// 3,000 ft under threat Clear or Air, 5,000 ft under Guns or Missiles).
 pub const FLOOR_CLEAR_FT: f64 = 3_000.;
 pub const FLOOR_DEFENDED_FT: f64 = 5_000.;
+/// A level run releases down to this much below its floor, the ground
+/// under it rising a little from the target's (slice ST-T2, fitted, agent).
+pub const LEVEL_FLOOR_SLACK_FT: f64 = 200.;
 /// A heavy's release floor: max(5,000 ft AGL, the mission's airborne
 /// height), raised by threat, at most 90% of its ceiling (spec, "Heavy
 /// bombers").
@@ -196,6 +206,82 @@ pub const WAIT_TICKS: u64 = 2 * 120;
 /// Class word bits of a SAM and an AAA unit (retail type `+0x0d`).
 pub const CLASS_SAM: u16 = 0x1000;
 pub const CLASS_AAA: u16 = 0x800;
+/// A bomb dive rolls in once the aim is this far below the horizon (slice
+/// ST-T2, fitted, agent): with the roll and pull ([`Handling::RollAndPull`])
+/// the nose comes down about 15 degrees past it, so the dive settles near
+/// 60 degrees, retail's roll-in geometry (the target 63 degrees down from
+/// 2R high at R out) flown short of retail's 80 degree `maxDive`.
+pub const DIVE_ROLLIN_DEG: f64 = 55.;
+/// A dive or pop-up's roll-in is done once the flight path is within this
+/// of the line to the target (slice ST-T2, fitted, agent); the cue is flown
+/// from then on.
+pub const ROLLIN_DONE_DEG: f64 = 5.;
+/// A rocket dive rolls in at this depression (fitted, agent): rockets fly
+/// along the nose, so a moderate dive keeps the slant inside the pods' reach.
+pub const ROCKET_DIVE_ROLLIN_DEG: f64 = 25.;
+/// A rocket dive starts from this height over the target (fitted, agent),
+/// so the slant at the roll-in is inside the pods' 12,000 ft reach.
+pub const ROCKET_DIVE_HEIGHT_FT: f64 = 6_000.;
+/// The planned pull-out (slice ST-T2, fitted, agent): a dive is pulled out
+/// at the steady G limit with this much reaction time, and bottoms out this
+/// high above the highest ground ahead.
+pub const PULL_OUT_REACTION_S: f64 = 1.;
+pub const PULL_OUT_CLEARANCE_FT: f64 = 1_000.;
+/// Strafing (slice ST-T2, fitted, agent): the run comes in this high, rolls
+/// into a dive of this angle at the aim, opens fire inside the gun's reach
+/// and ceases fire (then breaks off) at this slant range or height.
+pub const STRAFE_HEIGHT_FT: f64 = 3_000.;
+pub const STRAFE_DIVE_DEG: f64 = 15.;
+pub const STRAFE_CEASE_FT: f64 = 2_000.;
+pub const STRAFE_BREAK_AGL_FT: f64 = 500.;
+/// The strafe's roll-in is done once the flight path is within this of the
+/// line to the aim.
+pub const STRAFE_ROLLIN_DONE_DEG: f64 = 5.;
+/// Gun tracking: the flight path turns by this many times the angle between
+/// the gun's ground cue and the burst's aim point.
+pub const GUN_PITCH_GAIN: f64 = 3.;
+/// A burst opens once the gun's ground cue sweeps onto the burst's aim point
+/// within this across the track (or the gate, if larger): about a gun's own
+/// spread at strafing range (fitted, agent).
+pub const GUN_GATE_MIN_FT: f64 = 25.;
+/// Drag (retarded) bombs fly a low level pass (slice ST-T2, fitted, agent):
+/// never below this height, down to it by this far short of the aim. The
+/// release height also clears the fuze's arming time by [`LOW_MARGIN`] and
+/// the store's fragments by [`FRAG_MARGIN`] (the sight's LOW and FRAG
+/// rules, docs/spec/air-to-ground.md).
+pub const LAYDOWN_MIN_FT: f64 = 500.;
+pub const LAYDOWN_LEAD_FT: f64 = 8_000.;
+pub const LOW_MARGIN: f64 = 1.2;
+pub const FRAG_MARGIN: f64 = 1.1;
+
+/// How the adapter flies a strike steer (slice ST-T2). Only a striker's
+/// attack segments ask for more than [`Handling::PLAIN`]; every other AI
+/// motion is flown as before.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Handling {
+    /// Roll the lift onto the wanted direction and pull: a nose-down change
+    /// of more than a gentle push rolls inverted and pulls (retail's dive
+    /// bomb roll-in), a smaller one unloads or pushes wings level. Flown for
+    /// a roll-in and a pull-out, not while the cue is flown (a banked pull
+    /// swings the nose, and with it the bomb's cue, across the track).
+    pub pull: bool,
+    /// A planned dive: the terrain floor is the dive's planned pull-out
+    /// ([`planned_pitch_floor_deg`]) instead of the general one, so the dive
+    /// can be steep and still recover.
+    pub planned_dive: bool,
+}
+
+impl Handling {
+    /// The ordinary input-only adapter.
+    pub const PLAIN: Self = Self {
+        pull: false,
+        planned_dive: false,
+    };
+    pub const PULL: Self = Self {
+        pull: true,
+        planned_dive: false,
+    };
+}
 
 /// A pass (spec, "Pass choice").
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -210,10 +296,14 @@ pub enum Pass {
     /// A helicopter's stand-off attack: low to the weapon's range, unmask,
     /// fire, mask (slice ST-F).
     StandOff,
+    /// A low level pass for drag (retarded) bombs (slice ST-T2).
+    Laydown,
+    /// A gun run: a shallow dive with bursts (slice ST-T2).
+    Strafe,
 }
 
 impl Pass {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 9] = [
         Self::Straight,
         Self::PopUp,
         Self::FastHigh,
@@ -221,6 +311,8 @@ impl Pass {
         Self::Level,
         Self::Orbit,
         Self::StandOff,
+        Self::Laydown,
+        Self::Strafe,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -231,6 +323,8 @@ impl Pass {
             Self::Level => "level",
             Self::Orbit => "orbit",
             Self::StandOff => "standoff",
+            Self::Laydown => "laydown",
+            Self::Strafe => "strafe",
         }
     }
 }
@@ -254,14 +348,17 @@ pub enum StoreKind {
     RadarAgm,
     /// HARM and the other anti-radiation missiles.
     AntiRadiation,
-    /// One of the gunship's linked guns (slice ST-F), never chosen here.
+    /// A gun: one of the gunship's linked guns (slice ST-F; flown by its
+    /// family, never chosen by the fixed-wing table) or a fixed-wing
+    /// striker's gun for strafing (slice ST-T2).
     Gun,
 }
 
 impl StoreKind {
-    /// Unguided: the skill circle applies (John, 2026-10-11).
+    /// Unguided: the skill circle applies (John, 2026-10-11; to each gun
+    /// burst, John, 2026-10-11, later).
     pub fn unguided(self) -> bool {
-        matches!(self, Self::Bomb | Self::Rocket)
+        matches!(self, Self::Bomb | Self::Rocket | Self::Gun)
     }
     /// Released on a seeker's lock through the AI's own missile release.
     pub fn seeker(self) -> bool {
@@ -292,6 +389,20 @@ pub struct Store {
     /// A rocket's speed for its cue's drop, ft/s; `None` for a bomb, which
     /// leaves at the aircraft's speed.
     pub round_speed_fps: Option<f64>,
+    /// A bomb's speed at release as a share of the aircraft's (the record's
+    /// launch retard): below 1 for a drag bomb, which flies a laydown.
+    pub release_speed_share: f64,
+    /// The fuze's arming time, seconds, and the fragments' reach, feet (the
+    /// sight's LOW and FRAG rules).
+    pub fuze_arm_s: f64,
+    pub frag_radius_ft: f64,
+}
+
+impl Store {
+    /// A drag (retarded) bomb: it leaves slower than the aircraft.
+    pub fn retarded(&self) -> bool {
+        self.kind == StoreKind::Bomb && self.release_speed_share < 0.95
+    }
 }
 
 /// What the host worked out for the striker's selection this tick, from its
@@ -351,6 +462,21 @@ pub struct Steer {
     /// adapter picks for the heading: the gunship's orbit flies its bank
     /// (slice ST-F). `None` everywhere else.
     pub bank_deg: Option<f64>,
+    pub handling: Handling,
+}
+
+impl Steer {
+    /// A steer the ordinary adapter flies.
+    pub fn plain(heading_deg: f64, pitch_deg: f64, speed: SpeedRequest, afterburner: bool) -> Self {
+        Self {
+            heading_deg,
+            pitch_deg,
+            speed,
+            afterburner,
+            handling: Handling::PLAIN,
+            bank_deg: None,
+        }
+    }
 }
 
 /// A store to release now, at the striker's target.
@@ -506,6 +632,20 @@ pub struct Strike {
     laser_rounds: bool,
     /// The AI turned the laser on by hand ([`Strike::laser_set`]).
     laser_set: bool,
+    /// A gun run's bursts (slice ST-T2): the burst being aimed or fired
+    /// (from 1 each pass), the tick it opened, and the end of the recovery
+    /// after the last one.
+    burst: u32,
+    burst_open: Option<u64>,
+    recovery_until: u64,
+    /// The trim across the aim's line, feet (see [`CUE_TRACK_INTEGRAL`]).
+    cue_across_sum: f64,
+    /// Last tick's cue: its distance from the drawn aim, feet, and whether
+    /// it lay inside the circle the draw allows around the led target.
+    cue_last: Option<(f64, bool)>,
+    /// The striker's height above the ground when it was first tasked: a
+    /// heavy's "mission airborne height" when the host gives none.
+    tasked_agl_ft: Option<f64>,
     /// The host's inputs for this step, consumed by it.
     inputs: Option<Inputs>,
 }
@@ -543,6 +683,12 @@ impl Strike {
             designator: false,
             laser_rounds: false,
             laser_set: false,
+            burst: 0,
+            burst_open: None,
+            recovery_until: 0,
+            cue_across_sum: 0.,
+            cue_last: None,
+            tasked_agl_ft: None,
             inputs: None,
         }
     }
@@ -567,6 +713,16 @@ impl Strike {
     pub fn aim(&self) -> ([f64; 2], bool) {
         (self.aim_ft, self.inside)
     }
+    /// The lead on a moving target for the current pass: its ground
+    /// velocity times the cue's time of fall, feet along x and z.
+    pub fn lead(&self) -> [f64; 2] {
+        self.lead_ft
+    }
+    /// A gun run's burst being aimed or fired (from 1 each pass), 0 for any
+    /// other store.
+    pub fn burst(&self) -> u32 {
+        self.burst
+    }
     /// Done: the mission sends it home.
     pub fn home(&self) -> bool {
         self.phase == Phase::Home
@@ -577,6 +733,17 @@ impl Strike {
         self.forced = pass;
         self.forced_station = station;
     }
+    /// Weapons are held: any pass in hand is dropped and the strike starts
+    /// again from its ingress (a striker sent home stays home).
+    pub fn stand_down(&mut self, tick: u64) {
+        if !matches!(self.phase, Phase::Home | Phase::Ingress) {
+            self.enter(Phase::Ingress, tick);
+            self.released = 0;
+            self.holding = None;
+            self.burst_open = None;
+        }
+    }
+
     /// The host's description for the next step.
     pub fn set_inputs(&mut self, inputs: Inputs) {
         self.inputs = Some(inputs);
@@ -649,6 +816,9 @@ impl Strike {
             .stores
             .iter()
             .any(|s| s.kind == StoreKind::Laser && s.rounds > 0);
+        if self.tasked_agl_ft.is_none() {
+            self.tasked_agl_ft = Some(own.agl_ft);
+        }
         if cx.recovering {
             self.phase = Phase::Home;
             self.lase = None;
@@ -769,13 +939,12 @@ impl Strike {
                 order
             }
             Phase::Regain => {
-                order.steer = Some(Steer {
-                    heading_deg: own.heading_deg,
-                    pitch_deg: 0.,
-                    speed: SpeedRequest::Maximum,
-                    afterburner: true,
-                    bank_deg: None,
-                });
+                order.steer = Some(Steer::plain(
+                    own.heading_deg,
+                    0.,
+                    SpeedRequest::Maximum,
+                    true,
+                ));
                 order.activity = Some(Activity::Pursuing);
                 order
             }
@@ -939,6 +1108,7 @@ impl Strike {
             self.pass_number = 0;
         }
         self.target = Some(target);
+        let same_store = self.station == Some(store.station);
         self.station = Some(store.station);
         self.kind = Some(store.kind);
         self.threat = threat;
@@ -950,6 +1120,7 @@ impl Strike {
             None => choose_pass(PassInputs {
                 class: inputs.class,
                 kind: store.kind,
+                retarded: store.retarded(),
                 threat,
                 energy_good: energy_good(own),
                 dive_gate: dive_gate(agl, distance, radius),
@@ -971,16 +1142,32 @@ impl Strike {
         self.jink_side = draw.side;
         self.gate_ft = (GATE_SHARE * radius_ft).max(GATE_FLOOR_FT);
         self.holding = None;
+        // The trim belongs to the store's mount and the wind: it carries over
+        // to the next pass with the same store.
+        if !same_store {
+            self.cue_across_sum = 0.;
+        }
+        self.cue_last = None;
         self.released = 0;
         self.next_release = 0;
+        self.burst_open = None;
+        self.recovery_until = 0;
+        self.burst = 0;
+        if store.kind == StoreKind::Gun {
+            // Each burst has its own draw (John, 2026-10-11, later).
+            self.next_burst(cx);
+        }
         let floor = self.floor(cx, threat);
         self.hold_ft = Some(match pass {
             Pass::Level => target_at[1] + agl.max(floor),
             Pass::FastHigh => target_at[1] + FAST_HIGH_OFFSET_FT.max(floor),
+            Pass::Dive if store.kind == StoreKind::Rocket => target_at[1] + ROCKET_DIVE_HEIGHT_FT,
             Pass::Dive => target_at[1] + agl.max(2. * radius).max(DIVE_GATE_MIN_FT),
             Pass::PopUp => target_at[1] + POPUP_OFFSET_FT,
             // The families' own passes are never a fighter's.
             Pass::Straight | Pass::Orbit | Pass::StandOff => target_at[1],
+            Pass::Laydown => target_at[1] + laydown_height_ft(&store, own.speed.0),
+            Pass::Strafe => target_at[1] + STRAFE_HEIGHT_FT,
         });
         // A target behind is not attacked from where it stands: the exit
         // opens the distance and turns back (fitted).
@@ -1073,7 +1260,7 @@ impl Strike {
     fn floor(&self, cx: &Context<'_>, threat: ThreatLevel) -> f64 {
         match cx.inputs.class {
             StrikeClass::Heavy => heavy_floor_ft(
-                cx.inputs.mission_height_ft,
+                cx.inputs.mission_height_ft.or(self.tasked_agl_ft),
                 threat,
                 cx.ceiling_ft - cx.own.position[1] + cx.own.agl_ft,
             ),
@@ -1089,6 +1276,21 @@ impl Strike {
             EXIT_TURN_MIN_FT
         };
         base.max(2. * radius)
+    }
+
+    /// Draws the next gun burst's aim (slice ST-T2): John's circle applies
+    /// to each burst, by a draw keyed on the pass and the burst number.
+    fn next_burst(&mut self, cx: &Context<'_>) {
+        self.burst += 1;
+        let draw = burst_draw(
+            self.seed,
+            cx.aircraft,
+            self.pass_number,
+            self.burst,
+            release_circle_ft(cx.experience),
+        );
+        self.aim_ft = draw.offset_ft;
+        self.inside = draw.inside;
     }
 
     /// Leave the pass: the exit run.
@@ -1112,13 +1314,12 @@ impl Strike {
             // Fighters keep what they have above the floor.
             altitude = altitude.max(own.position[1].min(ground + floor + 20_000.));
         }
-        Steer {
-            heading_deg: bearing_deg(own.position, point),
-            pitch_deg: hold_pitch_deg(own.position[1], altitude),
+        Steer::plain(
+            bearing_deg(own.position, point),
+            hold_pitch_deg(own.position[1], altitude),
             speed,
-            afterburner: false,
-            bank_deg: None,
-        }
+            false,
+        )
     }
 
     fn exit_steer(&self, cx: &Context<'_>, target_at: Option<Vector>) -> Steer {
@@ -1138,25 +1339,23 @@ impl Strike {
             } else {
                 0.
             };
-            Steer {
-                heading_deg: wrap_deg(self.exit_heading_deg + self.jink_side * step),
-                pitch_deg: if climbing { JINK_CLIMB_DEG } else { 0. },
-                speed: SpeedRequest::Maximum,
-                afterburner: true,
-                bank_deg: None,
-            }
+            Steer::plain(
+                wrap_deg(self.exit_heading_deg + self.jink_side * step),
+                if climbing { JINK_CLIMB_DEG } else { 0. },
+                SpeedRequest::Maximum,
+                true,
+            )
         } else {
-            Steer {
-                heading_deg: self.exit_heading_deg,
-                pitch_deg: if climbing {
+            Steer::plain(
+                self.exit_heading_deg,
+                if climbing {
                     EXIT_CLIMB_DEG
                 } else {
                     hold_pitch_deg(own.position[1], cap)
                 },
-                speed: SpeedRequest::Maximum,
-                afterburner: true,
-                bank_deg: None,
-            }
+                SpeedRequest::Maximum,
+                true,
+            )
         }
     }
 
@@ -1173,23 +1372,16 @@ impl Strike {
             }
             _ => [0.; 2],
         };
-        let aim = [
-            target[0]
-                + if kind.unguided() {
-                    self.aim_ft[0] + self.lead_ft[0]
-                } else {
-                    0.
-                },
-            target[1],
-            target[2]
-                + if kind.unguided() {
-                    self.aim_ft[1] + self.lead_ft[1]
-                } else {
-                    0.
-                },
-        ];
+        let offset = if kind.unguided() {
+            [
+                self.aim_ft[0] + self.lead_ft[0],
+                self.aim_ft[1] + self.lead_ft[1],
+            ]
+        } else {
+            [0.; 2]
+        };
+        let aim = [target[0] + offset[0], target[1], target[2] + offset[1]];
         let distance = horizontal(own.position, target);
-        let radius = turn_radius_ft(own.speed.0, own.g_limit);
         let floor = self.floor(cx, self.threat);
         let mut order = Order {
             steer: None,
@@ -1213,18 +1405,27 @@ impl Strike {
         let afterburner = pass == Pass::FastHigh;
         let ahead =
             angle_difference(own.heading_deg, bearing_deg(own.position, target)).abs() < 90.;
+        let reach = horizontal(own.position, aim);
 
         // The approach and the pass's own end.
-        let level_like =
-            pass == Pass::Level || (pass == Pass::FastHigh && !kind.seeker()) || kind.level_run();
+        let level_like = matches!(pass, Pass::Level | Pass::Laydown)
+            || (pass == Pass::FastHigh && !kind.seeker())
+            || kind.level_run();
         if self.segment == Segment::Approach {
             match pass {
                 Pass::PopUp if distance < popup_pull_at(kind) && ahead && !kind.seeker() => {
                     self.segment_to(Segment::Pull, cx.tick)
                 }
-                Pass::Dive if depression_deg(own.position, aim) >= DIVE_START_DEG => {
+                Pass::Dive if depression_deg(own.position, aim) >= dive_rollin_deg(kind) => {
                     self.segment_to(Segment::Final, cx.tick)
                 }
+                Pass::Strafe if depression_deg(own.position, aim) >= STRAFE_DIVE_DEG => {
+                    self.segment_to(Segment::Final, cx.tick)
+                }
+                Pass::Laydown if reach <= LAYDOWN_LEAD_FT => {
+                    self.segment_to(Segment::Final, cx.tick)
+                }
+                Pass::Laydown | Pass::Strafe => {}
                 Pass::Straight if kind.unguided() => self.segment_to(Segment::Final, cx.tick),
                 _ if level_like || kind.seeker() => self.segment_to(Segment::Final, cx.tick),
                 _ => {}
@@ -1232,7 +1433,7 @@ impl Strike {
         }
         if self.segment == Segment::Pull
             && cx.tick.saturating_sub(self.since) >= POPUP_PULL_TICKS
-            && (depression_deg(own.position, target) >= POPUP_DIVE_DEG
+            && (depression_deg(own.position, target) >= popup_dive_deg(kind)
                 || distance < 2. * POPUP_EXIT_FT)
         {
             self.segment_to(Segment::Final, cx.tick);
@@ -1245,39 +1446,36 @@ impl Strike {
                     ..order
                 };
             }
-            order.steer = Some(Steer {
-                heading_deg: own.heading_deg,
-                pitch_deg: DIVE_CLIMB_DEG,
-                speed: SpeedRequest::Corner,
-                afterburner: false,
-                bank_deg: None,
-            });
+            order.steer = Some(self.climb_steer(cx));
             return order;
         }
+        let pull_out = dive_pull_out_ft(own);
         let ended = match pass {
-            _ if self.released > 0 && !self.burst_left(cx, solution, aim) => true,
-            Pass::Dive => {
-                (self.segment == Segment::Final
-                    && own.agl_ft < (2. * radius).max(DIVE_PULL_OUT_MIN_FT))
-                    || (self.segment == Segment::Approach && !ahead)
+            _ if kind == StoreKind::Rocket
+                && self.released > 0
+                && !self.burst_left(cx, solution, aim) =>
+            {
+                true
             }
+            Pass::Dive => (self.segment == Segment::Final && own.agl_ft < pull_out) || !ahead,
             Pass::PopUp => self.segment == Segment::Final && (distance < POPUP_EXIT_FT || !ahead),
             Pass::Straight | Pass::Orbit | Pass::StandOff => distance < STRAIGHT_EXIT_FT,
             Pass::FastHigh => distance < FAST_HIGH_EXIT_FT && !level_like,
-            Pass::Level => false,
+            Pass::Level | Pass::Laydown => false,
+            Pass::Strafe => {
+                !ahead
+                    || (self.segment == Segment::Final
+                        && (slant(own.position, target) < STRAFE_CEASE_FT
+                            || own.agl_ft < STRAFE_BREAK_AGL_FT))
+                    || (kind == StoreKind::Gun && self.rounds_left(cx) == 0)
+            }
         } || (level_like && self.overflown(cx, target, aim, solution))
             || (kind.seeker() && distance < STRAIGHT_EXIT_FT)
             || (kind.level_run() && distance < GUIDED_EXIT_FT);
         if ended {
             if pass == Pass::Dive && self.segment == Segment::Final {
                 self.segment_to(Segment::Climb, cx.tick);
-                order.steer = Some(Steer {
-                    heading_deg: own.heading_deg,
-                    pitch_deg: DIVE_CLIMB_DEG,
-                    speed: SpeedRequest::Corner,
-                    afterburner: false,
-                    bank_deg: None,
-                });
+                order.steer = Some(self.climb_steer(cx));
                 return order;
             }
             self.exit(cx);
@@ -1291,10 +1489,21 @@ impl Strike {
                 // Every approach is flown at the aim, so the cue starts in
                 // line with it (the aim is the target for a guided store).
                 let along = [aim[0] - own.position[0], aim[2] - own.position[2]];
-                let reach = along[0].hypot(along[1]).max(1.);
-                let u = [along[0] / reach, along[1] / reach];
+                let length = along[0].hypot(along[1]).max(1.);
+                let u = [along[0] / length, along[1] / length];
                 let short_of = |by: f64, height: f64| -> Vector {
                     [aim[0] - u[0] * by, height, aim[2] - u[1] * by]
+                };
+                // The roll-in point of a dive: the dive's height, where the
+                // aim will be `deg` down (fitted, agent); over the target
+                // once inside it (retail).
+                let rollin = |deg: f64| -> Vector {
+                    let at = (hold - target[1]) / deg.to_radians().tan();
+                    if reach > at + DIVE_ROLLIN_LEAD_FT {
+                        short_of(at, hold)
+                    } else {
+                        short_of(0., hold)
+                    }
                 };
                 let point = match pass {
                     // A low approach under the radar: down to 500 ft over
@@ -1305,74 +1514,108 @@ impl Strike {
                     }
                     Pass::PopUp => short_of(0., target[1] + POPUP_OFFSET_FT),
                     Pass::FastHigh => short_of(0., hold),
-                    // The roll-in point: the dive's height, where the aim
-                    // will be the dive's start angle down (fitted, agent);
-                    // over the target once inside it (retail).
-                    Pass::Dive => {
-                        let rollin = (hold - target[1]) / DIVE_START_DEG.to_radians().tan();
-                        if reach > rollin + DIVE_ROLLIN_LEAD_FT {
-                            short_of(rollin, hold)
-                        } else {
-                            short_of(0., hold)
-                        }
-                    }
+                    Pass::Dive => rollin(dive_rollin_deg(kind)),
+                    Pass::Strafe => rollin(STRAFE_DIVE_DEG),
+                    // Down to the laydown height by its lead point.
+                    Pass::Laydown => short_of(LAYDOWN_LEAD_FT, hold),
                     _ => short_of(0., target[1]),
                 };
                 let (heading, pitch) = steering_frame(own.position, point);
+                Steer::plain(heading, pitch, speed, afterburner)
+            }
+            Segment::Pull => Steer::plain(
+                bearing_deg(own.position, aim),
+                (-depression_deg(own.position, target) + POPUP_PULL_DEG).min(MAX_DIVE_DEG),
+                SpeedRequest::Corner,
+                false,
+            ),
+            // A gun run tracks: the flight path turns the gun's ground cue
+            // onto the burst's aim (fitted, agent).
+            Segment::Final if kind == StoreKind::Gun => {
+                // Rolled in onto the line to the aim first, as a dive.
+                let line = steering_frame(own.position, aim).1;
+                let rolling_in = own.flight_path_pitch_deg > line + STRAFE_ROLLIN_DONE_DEG;
+                let (heading, pitch) = match solution.and_then(|s| s.impact) {
+                    Some(cue) if !rolling_in => {
+                        let turn =
+                            elevation_deg(own.position, aim) - elevation_deg(own.position, cue);
+                        // Across, the track on the aim's line, as a dive.
+                        (
+                            self.line_heading(cx, aim, cue, true),
+                            own.flight_path_pitch_deg + GUN_PITCH_GAIN * turn,
+                        )
+                    }
+                    _ => (bearing_deg(own.position, aim), line),
+                };
                 Steer {
                     heading_deg: heading,
-                    pitch_deg: pitch,
-                    speed,
-                    afterburner,
+                    pitch_deg: pitch.clamp(-2. * STRAFE_DIVE_DEG, STRAFE_DIVE_DEG),
+                    speed: SpeedRequest::Corner,
+                    afterburner: false,
+                    handling: Handling::PULL,
                     bank_deg: None,
                 }
             }
-            Segment::Pull => Steer {
-                heading_deg: bearing_deg(own.position, aim),
-                pitch_deg: (-depression_deg(own.position, target) + POPUP_PULL_DEG)
-                    .min(MAX_DIVE_DEG),
-                speed: SpeedRequest::Corner,
-                afterburner: false,
-                bank_deg: None,
-            },
             Segment::Final if level_like || kind.seeker() => {
-                let heading = solution
-                    .and_then(|s| s.impact)
-                    .filter(|_| kind.unguided())
-                    .map_or_else(
-                        || bearing_deg(own.position, aim),
-                        |impact| cue_heading_deg(own, cx.velocity, aim, impact),
-                    );
+                let impact = solution.and_then(|s| s.impact).filter(|_| kind.unguided());
+                let heading = match impact {
+                    Some(impact) => self.line_heading(cx, aim, impact, false),
+                    None => bearing_deg(own.position, aim),
+                };
                 let pitch = if kind.seeker() && pass != Pass::Level && pass != Pass::FastHigh {
                     steering_frame(own.position, target).1
+                } else if pass == Pass::Laydown {
+                    // Below the release floor by design: the laydown's own
+                    // height clears the fuze and the fragments.
+                    hold_pitch_deg(own.position[1], hold)
                 } else {
                     hold_pitch_deg(
                         own.position[1],
                         hold.max(own.position[1] - own.agl_ft + floor),
                     )
                 };
-                Steer {
-                    heading_deg: heading,
-                    pitch_deg: pitch,
-                    speed,
-                    afterburner,
-                    bank_deg: None,
-                }
+                Steer::plain(heading, pitch, speed, afterburner)
             }
             Segment::Final => {
-                let (heading, pitch) = match solution.and_then(|s| s.impact) {
+                let (heading, pitch, rolling_in) = match solution.and_then(|s| s.impact) {
                     Some(impact) => {
                         let line = steering_frame(own.position, target).1;
-                        let pitch = self.fly_cue(cx, aim, impact, line);
-                        (cue_heading_deg(own, cx.velocity, aim, impact), pitch)
+                        // A dive or a pop-up first rolls in onto its line
+                        // (slice ST-T2): until the flight path is within
+                        // [`ROLLIN_DONE_DEG`] of it, the cue is not flown.
+                        let rolling_in = matches!(pass, Pass::Dive | Pass::PopUp)
+                            && self.holding.is_none()
+                            && own.flight_path_pitch_deg > line + ROLLIN_DONE_DEG;
+                        // While rolling in the cue swings with the attitude,
+                        // so the heading is the bearing to the aim.
+                        if rolling_in {
+                            (bearing_deg(own.position, aim), line, true)
+                        } else {
+                            // The roll and pull tracks the cue onto the aim
+                            // and holds it there, as a gun run does (slice
+                            // ST-T2); a straight run creeps it across.
+                            let pitch = self.fly_cue(cx, aim, impact, line, pass);
+                            // A dive or pop-up is rolled and pulled, so
+                            // steered on its track; a straight run on its
+                            // body heading.
+                            let on_track = matches!(pass, Pass::Dive | Pass::PopUp);
+                            (self.line_heading(cx, aim, impact, on_track), pitch, false)
+                        }
                     }
-                    None => steering_frame(own.position, aim),
+                    None => {
+                        let (heading, pitch) = steering_frame(own.position, aim);
+                        (heading, pitch, matches!(pass, Pass::Dive | Pass::PopUp))
+                    }
                 };
-                // A push over (the adapter pushes negative G for a pitch far
-                // below the flight path, where a banked push turns the wrong
-                // way) is flown wings level (fitted, agent: retail rolls
-                // inverted and pulls, which the input-only adapter cannot).
-                let heading = if pushes(own, pitch) {
+                // A dive or a pop-up rolls and pulls (slice ST-T2); a straight
+                // run flies a push over wings level (the adapter pushes
+                // negative G for a pitch far below the flight path, where a
+                // banked push turns the wrong way; fitted, agent).
+                let handling = Handling {
+                    pull: rolling_in || matches!(pass, Pass::Dive | Pass::PopUp),
+                    planned_dive: pass == Pass::Dive,
+                };
+                let heading = if !handling.pull && pushes(own, pitch) {
                     own.heading_deg
                 } else {
                     heading
@@ -1383,6 +1626,7 @@ impl Strike {
                     speed: SpeedRequest::Corner,
                     afterburner: false,
                     bank_deg: None,
+                    handling,
                 }
             }
             Segment::Climb | Segment::Guide => unreachable!("handled above"),
@@ -1390,29 +1634,43 @@ impl Strike {
         order.steer = Some(steer);
 
         // The release.
+        if kind == StoreKind::Gun {
+            if self.segment == Segment::Final {
+                order.release = self.fire_gun(cx, aim, solution);
+            }
+            return order;
+        }
         if matches!(self.segment, Segment::Final | Segment::Pull)
             && let Some(s) = solution
             && cx.tick >= self.next_release
         {
+            // The release floor is a bomb's (rockets dive below it and pull
+            // out on the plan, slice ST-T2).
             let floor_ok = match pass {
-                Pass::Dive | Pass::Level => own.agl_ft >= floor,
+                Pass::Dive => own.agl_ft >= floor,
+                // A level run holds its height over the target; the ground
+                // under it may rise a little (fitted, agent).
+                Pass::Level => own.agl_ft >= floor - LEVEL_FLOOR_SLACK_FT,
                 _ => true,
-            } || !kind.unguided();
+            } || kind != StoreKind::Bomb;
             let first = self.released == 0;
             let in_zone = !kind.unguided()
                 || s.impact.is_some_and(|i| {
-                    let range = (horizontal(own.position, i).powi(2)
-                        + (own.position[1] - i[1]).powi(2))
-                    .sqrt();
+                    let range = slant(own.position, i);
                     self.store(cx).is_none_or(|st| {
                         range >= st.minimum_range_ft
                             && (st.maximum_range_ft <= 0. || range <= st.maximum_range_ft)
                     })
                 });
+            // The release test (slice ST-T2): the shared gate around the
+            // drawn aim, or the cue's closest pass by the aim inside John's
+            // circle around the (led) target.
+            let passing = self.cue_passing(cx, s.impact, aim, offset, target);
+            let due = s.due || passing;
             let fire = in_zone
                 && match kind {
                     StoreKind::Rocket => {
-                        (first && s.due)
+                        (first && due)
                             || (!first
                                 && self.released < ROCKETS_PER_PASS
                                 && s.impact.is_some_and(|i| {
@@ -1425,6 +1683,7 @@ impl Strike {
                     StoreKind::Laser if self.takeover.is_some() => {
                         first && s.due && !s.guided_in_flight
                     }
+                    k if k.unguided() => first && due,
                     _ => first && s.due,
                 };
             if fire && floor_ok && !s.warning && self.rounds_left(cx) > 0 {
@@ -1451,6 +1710,179 @@ impl Strike {
             }
         }
         order
+    }
+
+    /// The heading that lays the track on the aim's bearing (slice ST-T2,
+    /// fitted, agent): on that track, wings level, the cue lies on the line
+    /// to the aim, so the sideways miss closes on the first pass from any
+    /// reasonable offset. What the cue still lies off that line (a pod's or
+    /// gun's offset, a crab in the wind) is trimmed out slowly by moving the
+    /// line across ([`CUE_TRACK_INTEGRAL`]). In a dive a heading change turns the path
+    /// across by only the dive angle's cosine, so the correction grows by
+    /// it. `on_track` lays the correction on the track (a rolled and pulled
+    /// steer), else on the body heading (the plain adapter steers that).
+    fn line_heading(
+        &mut self,
+        cx: &Context<'_>,
+        aim: Vector,
+        impact: Vector,
+        on_track: bool,
+    ) -> f64 {
+        let own = cx.own;
+        let Some(u) = track_unit(cx.velocity) else {
+            return bearing_deg(own.position, aim);
+        };
+        let track = wrap_deg(u[0].atan2(u[1]).to_degrees());
+        // The cue's miss across the track, feet (positive: the aim lies right).
+        let right = [u[1], -u[0]];
+        let cross = (aim[0] - impact[0]) * right[0] + (aim[2] - impact[2]) * right[1];
+        // The track is laid on a point the trim has moved across from the
+        // aim; the trim learns only once the track is on that line, so it
+        // does not chase the cue's swing while the heading still settles.
+        let point = [
+            aim[0] + right[0] * self.cue_across_sum,
+            aim[1],
+            aim[2] + right[1] * self.cue_across_sum,
+        ];
+        let off_line = angle_difference(track, bearing_deg(own.position, point));
+        if off_line.abs() < CUE_TRIM_ON_LINE_DEG {
+            // A level run's cue, thrown far ahead, swings with every small
+            // heading change: it trims slower.
+            let gain = if self
+                .pass
+                .is_some_and(|p| matches!(p, Pass::Level | Pass::Laydown | Pass::FastHigh))
+            {
+                CUE_TRACK_INTEGRAL
+            } else {
+                CUE_TRACK_INTEGRAL_DIVING
+            };
+            self.cue_across_sum = (self.cue_across_sum + gain * cross / 120.)
+                .clamp(-CUE_TRIM_LIMIT_FT, CUE_TRIM_LIMIT_FT);
+        }
+        let correction = off_line / own.flight_path_pitch_deg.to_radians().cos().max(0.25);
+        let base = if on_track { track } else { own.heading_deg };
+        wrap_deg(base + correction.clamp(-30., 30.))
+    }
+
+    /// Whether the cue is passing the drawn aim point at its closest now
+    /// (slice ST-T2, fitted, agent): its distance from the aim grew this tick
+    /// after shrinking, and last tick it lay inside John's circle around the
+    /// led target (the ring's outer edge, 2R, for a ring draw), give or take
+    /// the release gate. A cue that
+    /// sweeps by the aim faster than the gate can catch it is released at
+    /// its best, never outside the circle the draw allows.
+    fn cue_passing(
+        &mut self,
+        cx: &Context<'_>,
+        impact: Option<Vector>,
+        aim: Vector,
+        offset: [f64; 2],
+        target: Vector,
+    ) -> bool {
+        let Some(impact) = impact else {
+            self.cue_last = None;
+            return false;
+        };
+        let distance = horizontal(impact, aim);
+        let led = [
+            target[0] + offset[0] - self.aim_ft[0],
+            target[1],
+            target[2] + offset[1] - self.aim_ft[1],
+        ];
+        // The circle the draw allows, with the release gate's own tolerance.
+        let radius =
+            release_circle_ft(cx.experience) * if self.inside { 1. } else { 2. } + self.gate_ft;
+        let passing = self.cue_last.is_some_and(|(last, inside)| {
+            distance > last && inside && last <= release_circle_ft(cx.experience)
+        });
+        self.cue_last = Some((distance, horizontal(impact, led) <= radius));
+        passing
+    }
+
+    /// The pull-out after a dive: wings level, nose up 25 degrees (retail),
+    /// pulled with the roll and pull's full authority.
+    fn climb_steer(&self, cx: &Context<'_>) -> Steer {
+        // On the track the aircraft flies, so the roll and pull asks for no
+        // turn (the body heading drifts from it in the pull).
+        let track = track_unit(cx.velocity).map_or(cx.own.heading_deg, |u| {
+            wrap_deg(u[0].atan2(u[1]).to_degrees())
+        });
+        Steer {
+            heading_deg: track,
+            pitch_deg: DIVE_CLIMB_DEG,
+            speed: SpeedRequest::Corner,
+            afterburner: false,
+            handling: Handling::PULL,
+            bank_deg: None,
+        }
+    }
+
+    /// A gun run's fire (slice ST-T2; John, 2026-10-11, later: the circle
+    /// applies to each burst). A burst opens when the gun's ground cue sweeps
+    /// onto the burst's drawn aim point, half a burst early so the burst is
+    /// centred on it, across the track within the gate (at least
+    /// [`GUN_GATE_MIN_FT`]), with the cue inside the gun's reach. It fires
+    /// at the gun's cadence for the AI's 0.5 s burst while the cue stays
+    /// inside the circle of the aim point, then recovers 0.5 s (the AI gun
+    /// employment's policy, docs/spec/ai-gun-employment.md) and draws the
+    /// next burst's aim.
+    fn fire_gun(
+        &mut self,
+        cx: &Context<'_>,
+        aim: Vector,
+        solution: Option<Solution>,
+    ) -> Option<Release> {
+        let s = solution?;
+        let cue = s.impact?;
+        let store = self.store(cx)?;
+        if store.rounds == 0 {
+            return None;
+        }
+        let own = cx.own;
+        let tick = cx.tick;
+        let range = slant(own.position, cue);
+        let in_zone = range >= store.minimum_range_ft
+            && (store.maximum_range_ft <= 0. || range <= store.maximum_range_ft);
+        match self.burst_open {
+            Some(start) => {
+                let on = in_zone
+                    && tick < start + super::gunnery::BURST_TICKS
+                    && horizontal(cue, aim) <= release_circle_ft(cx.experience);
+                if !on {
+                    self.burst_open = None;
+                    self.recovery_until = tick + super::gunnery::RECOVERY_TICKS;
+                    self.next_burst(cx);
+                    return None;
+                }
+            }
+            None => {
+                if tick < self.recovery_until || !in_zone {
+                    return None;
+                }
+                let u = track_unit(cx.velocity)?;
+                let d = [aim[0] - cue[0], aim[2] - cue[2]];
+                let short = d[0] * u[0] + d[1] * u[1];
+                let across = d[0] * u[1] - d[1] * u[0];
+                let sweep = cx.velocity[0].hypot(cx.velocity[2])
+                    * (super::gunnery::BURST_TICKS as f64 / 120.)
+                    / 2.;
+                let gate = self.gate_ft.max(GUN_GATE_MIN_FT);
+                if short > sweep || short < -gate || across.abs() > gate {
+                    return None;
+                }
+                self.burst_open = Some(tick);
+                self.next_release = tick;
+            }
+        }
+        if tick < self.next_release {
+            return None;
+        }
+        self.released += 1;
+        self.next_release = tick + store.cadence_ticks.max(1);
+        Some(Release {
+            station: s.station,
+            target: s.target,
+        })
     }
 
     fn store(&self, cx: &Context<'_>) -> Option<Store> {
@@ -1484,8 +1916,22 @@ impl Strike {
     /// within that margin short of the aim; then the flight path is held and
     /// the cue creeps across the aim, as it does in any steady dive or level
     /// run. A cue that overshoots by the circle is flown again.
-    fn fly_cue(&mut self, cx: &Context<'_>, aim: Vector, impact: Vector, line: f64) -> f64 {
+    fn fly_cue(
+        &mut self,
+        cx: &Context<'_>,
+        aim: Vector,
+        impact: Vector,
+        line: f64,
+        pass: Pass,
+    ) -> f64 {
         let own = cx.own;
+        // A steep dive holds its cue farther short, so the cue's sideways
+        // error is gone before it creeps onto the aim (slice ST-T2, fitted).
+        let margin = if pass == Pass::Dive {
+            DIVE_CUE_MARGIN_FT
+        } else {
+            CUE_MARGIN_FT
+        };
         let Some(u) = track_unit(cx.velocity) else {
             return line;
         };
@@ -1499,15 +1945,11 @@ impl Strike {
         if short > CUE_ACQUIRE_FT {
             return line;
         }
-        if (0.0..=CUE_MARGIN_FT + CUE_HOLD_TOLERANCE_FT).contains(&short) {
+        if (0.0..=margin + CUE_HOLD_TOLERANCE_FT).contains(&short) {
             self.holding = Some(own.flight_path_pitch_deg);
             return own.flight_path_pitch_deg;
         }
-        let q = [
-            aim[0] - u[0] * CUE_MARGIN_FT,
-            aim[1],
-            aim[2] - u[1] * CUE_MARGIN_FT,
-        ];
+        let q = [aim[0] - u[0] * margin, aim[1], aim[2] - u[1] * margin];
         let turn = elevation_deg(own.position, q) - elevation_deg(own.position, impact);
         (own.flight_path_pitch_deg + CUE_PITCH_GAIN * turn).min(line + 8.)
     }
@@ -1552,6 +1994,8 @@ pub enum PassChoice {
 pub struct PassInputs {
     pub class: StrikeClass,
     pub kind: StoreKind,
+    /// A drag (retarded) bomb.
+    pub retarded: bool,
     pub threat: ThreatLevel,
     pub energy_good: bool,
     pub dive_gate: bool,
@@ -1571,16 +2015,16 @@ pub fn choose_pass(i: PassInputs) -> PassChoice {
         } else {
             Pass::Straight
         }),
-        // The spec's pop-up under threat Missiles is not flown with rockets
-        // (fitted, agent): after a low pop the dive that points the nose at
-        // the target is steeper than the AI's terrain floor allows, so the
-        // run would end without a rocket. A straight run with its shallow
-        // dive it is, under every threat.
-        StoreKind::Rocket => P(Pass::Straight),
         StoreKind::Laser | StoreKind::Coordinate => P(Pass::Level),
-        _ => {
+        kind => {
             if !i.energy_good && i.threat >= ThreatLevel::Guns {
                 PassChoice::Regain
+            } else if kind == StoreKind::Gun {
+                // A gun run (slice ST-T2).
+                P(Pass::Strafe)
+            } else if i.retarded {
+                // A drag bomb is made for the low level pass (slice ST-T2).
+                P(Pass::Laydown)
             } else if i.threat == ThreatLevel::Missiles {
                 P(Pass::PopUp)
             } else if i.dive_gate {
@@ -1631,6 +2075,7 @@ pub fn choose_store(
             K::Laser,
             K::Bomb,
             K::Rocket,
+            K::Gun,
         ]
     } else {
         &[
@@ -1641,6 +2086,7 @@ pub fn choose_store(
             K::Seeker,
             K::RadarAgm,
             K::Rocket,
+            K::Gun,
         ]
     };
     order.iter().find_map(|kind| {
@@ -1648,7 +2094,10 @@ pub fn choose_store(
             K::AntiRadiation => target.radar || target.emitting,
             K::Laser => designator,
             K::Rocket => class != StrikeClass::Heavy,
-            K::Command | K::Gun => false,
+            // Attack jets strafe once their bombs and rockets are gone
+            // (spec, "Bombing class"); the driver may force any gun.
+            K::Gun => class == StrikeClass::Attack,
+            K::Command => false,
             _ => true,
         };
         allowed
@@ -1698,14 +2147,19 @@ pub fn sead_order(
 
 /// Whether any of the stores can attack a ground target now: a store with
 /// rounds, the command-guided AT-2 only for a helicopter (slice ST-F flies
-/// it), and a laser weapon only for an aircraft with a designator of its
-/// own. The target choice and a flight lead's order (which a wingman
+/// it), a gun only for an attack jet or the gunship, and a laser weapon only
+/// when a spot is assured (`designator`). The target choice and a flight lead's order (which a wingman
 /// refuses without one) both ask it.
 pub fn has_usable_store(stores: &[Store], designator: bool, class: StrikeClass) -> bool {
     stores.iter().any(|s| {
         s.rounds > 0
             && (s.kind != StoreKind::Command || class == StrikeClass::Helicopter)
             && (s.kind != StoreKind::Laser || designator)
+            // A gun strafes for an attack jet (slice ST-T2) and is the
+            // gunship's weapon (slice ST-F); a fighter's gun is no reason
+            // to take a ground order.
+            && (s.kind != StoreKind::Gun
+                || matches!(class, StrikeClass::Attack | StrikeClass::Gunship))
     })
 }
 
@@ -1822,6 +2276,113 @@ pub fn energy_good(own: &OwnState) -> bool {
     own.speed.0 >= own.limits.corner.0
 }
 
+/// Where a pop-up pulls up, feet from the target.
+fn popup_pull_at(kind: StoreKind) -> f64 {
+    if kind == StoreKind::Rocket {
+        ROCKET_POPUP_PULL_AT_FT
+    } else {
+        POPUP_PULL_AT_FT
+    }
+}
+
+/// How far down the target is when a pop-up's pull ends, degrees.
+fn popup_dive_deg(kind: StoreKind) -> f64 {
+    if kind == StoreKind::Rocket {
+        ROCKET_POPUP_DIVE_DEG
+    } else {
+        POPUP_DIVE_DEG
+    }
+}
+
+/// The depression a dive rolls in at (slice ST-T2): a bomb's steep dive,
+/// a rocket's moderate one.
+pub fn dive_rollin_deg(kind: StoreKind) -> f64 {
+    if kind == StoreKind::Rocket {
+        ROCKET_DIVE_ROLLIN_DEG
+    } else {
+        DIVE_ROLLIN_DEG
+    }
+}
+
+/// The height a pull-out from a dive of `pitch_deg` (negative down) at
+/// `speed_fps` and `g` loses (slice ST-T2, fitted, agent): the physical
+/// pull-out arc, radius V² / (g (G - 1)), plus [`PULL_OUT_REACTION_S`] of
+/// the sink before it starts. Retail's turn radius is far tighter than the
+/// aircraft flies, so the plan uses the physical one.
+pub fn pull_out_loss_ft(speed_fps: f64, g: f64, pitch_deg: f64) -> f64 {
+    let dive = (-pitch_deg).clamp(0., 90.).to_radians();
+    let radius = speed_fps * speed_fps / (32.174 * (g - 1.).max(0.5));
+    radius * (1. - dive.cos()) + speed_fps * dive.sin() * PULL_OUT_REACTION_S
+}
+
+/// Where a dive pulls out, feet above the ground (slice ST-T2): high enough
+/// to bottom out [`PULL_OUT_CLEARANCE_FT`] over the ground from the present
+/// dive at the present speed, and never below retail's 2,000 ft. Retail
+/// pulls out at max(2R, 2,000 ft) with its own turn radius; the plan
+/// replaces 2R (opinionated, agent).
+pub fn dive_pull_out_ft(own: &OwnState) -> f64 {
+    DIVE_PULL_OUT_MIN_FT.max(
+        pull_out_loss_ft(own.speed.0, own.g_limit, own.flight_path_pitch_deg)
+            + PULL_OUT_CLEARANCE_FT,
+    )
+}
+
+/// The planned dive's terrain floor (slice ST-T2, the exception John
+/// allowed): the steepest flight path, in the B44 floor's 5 degree steps,
+/// from which the pull-out still bottoms out [`PULL_OUT_CLEARANCE_FT`]
+/// over the highest ground ahead, and climbs when rising ground ahead asks
+/// for a climb. It replaces the general B44 floor, whose dive
+/// test assumes retail's tight turn radius, only while a striker flies a
+/// planned dive.
+pub fn planned_pitch_floor_deg(own: &OwnState) -> f64 {
+    let margin = own.altitude_msl_ft - own.terrain_ahead_ft - PULL_OUT_CLEARANCE_FT;
+    let floor = (0..=16)
+        .map(|i| -MAX_DIVE_DEG + 5. * f64::from(i))
+        .find(|pitch| pull_out_loss_ft(own.speed.0, own.g_limit, *pitch) <= margin)
+        .unwrap_or(10.);
+    // The general floor's glide-slope term (no descent through the ground
+    // at the end of the look-ahead) is what holds a dive shallow; a planned
+    // dive keeps only a climb that rising ground ahead asks for.
+    if own.terrain_climb_deg > 0. {
+        floor.max(own.terrain_climb_deg.min(90.))
+    } else {
+        floor
+    }
+}
+
+/// A drag bomb's laydown height above the target (slice ST-T2, fitted,
+/// agent): the lowest whole 50 ft from [`LAYDOWN_MIN_FT`] at which a level
+/// release at `speed_fps` clears the sight's LOW rule (the fall lasts the
+/// fuze's arming time, with [`LOW_MARGIN`]) and its FRAG rule (the aircraft,
+/// flying on level, is beyond the fragments' reach when the bomb bursts,
+/// with [`FRAG_MARGIN`]), using the retail fall (16 t² ft) and the bomb's
+/// slower release speed.
+pub fn laydown_height_ft(store: &Store, speed_fps: f64) -> f64 {
+    let safe = |height: f64| {
+        let fall = (height / 16.).sqrt();
+        let behind = speed_fps * fall * (1. - store.release_speed_share.clamp(0., 1.));
+        fall >= LOW_MARGIN * store.fuze_arm_s
+            && behind.hypot(height) >= FRAG_MARGIN * store.frag_radius_ft
+    };
+    (0..200)
+        .map(|i| LAYDOWN_MIN_FT + 50. * f64::from(i))
+        .find(|h| safe(*h))
+        .unwrap_or(LAYDOWN_MIN_FT + 10_000.)
+}
+
+/// A gun burst's aim (slice ST-T2): the pass's draw rule ([`aim_draw`])
+/// keyed also on the burst number, so each burst has its own point in the
+/// circle (90%) or the ring (10%), the same on every host.
+pub fn burst_draw(seed: u64, aircraft: u32, pass: u32, burst: u32, radius_ft: f64) -> AimDraw {
+    let key = seed ^ mix(u64::from(burst) ^ 0x4755_4E00_0000_0000);
+    aim_draw(key, aircraft, pass, radius_ft)
+}
+
+/// The straight-line distance between two points, feet.
+fn slant(a: Vector, b: Vector) -> f64 {
+    (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt()
+}
+
 /// The retail steering frame (spec, "The steering frame"): straight at the
 /// point; a pitch within 3 degrees snaps level while the point is 3,000 ft
 /// or more away; clamped to the 80 degree climb and dive limits. Returns
@@ -1848,20 +2409,13 @@ pub fn cue_heading_deg(own: &OwnState, velocity: Vector, aim: Vector, impact: Ve
     };
     let right = [u[1], -u[0]];
     let cross = (aim[0] - impact[0]) * right[0] + (aim[2] - impact[2]) * right[1];
-    let reach = horizontal(own.position, aim).max(500.);
+    // The slant, not the ground distance: in a steep dive a small heading
+    // change already moves the cue far across (slice ST-T2).
+    let reach = slant(own.position, aim).max(500.);
     // `right` points to the right of the track (headings turn clockwise,
     // from +z toward +x), so an aim to the right turns the heading up.
     let correction = (CUE_HEADING_GAIN * cross.atan2(reach).to_degrees()).clamp(-30., 30.);
     wrap_deg(own.heading_deg + correction)
-}
-
-/// Where a pop-up pulls up, feet from the target.
-fn popup_pull_at(kind: StoreKind) -> f64 {
-    if kind == StoreKind::Rocket {
-        ROCKET_POPUP_PULL_AT_FT
-    } else {
-        POPUP_PULL_AT_FT
-    }
 }
 
 /// Whether flying `pitch` (degrees) asks the adapter for less than
