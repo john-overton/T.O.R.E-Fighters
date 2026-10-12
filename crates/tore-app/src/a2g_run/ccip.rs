@@ -113,17 +113,22 @@ impl Pass {
         );
         // The ground along the approach (slice ST-G): the target's, then 4,000
         // to 16,000 ft short of it, which is what the pipper's fall crosses.
-        let relief: Vec<String> = [0., 4_000., 8_000., 12_000., 16_000., 24_000., 32_000., 48_000., 64_000.]
-            .iter()
-            .map(|back| {
-                let unit = [forward[0], forward[2]];
-                let norm = unit[0].hypot(unit[1]).max(1e-9);
-                let x = aim[0] - unit[0] / norm * back;
-                let z = aim[2] - unit[1] / norm * back;
-                format!("{back:.0}:{:.0}", scene.ground(x, z))
-            })
-            .collect();
-        println!("a2g-run: relief ft short of target:ground {}", relief.join(" "));
+        let relief: Vec<String> = [
+            0., 4_000., 8_000., 12_000., 16_000., 24_000., 32_000., 48_000., 64_000.,
+        ]
+        .iter()
+        .map(|back| {
+            let unit = [forward[0], forward[2]];
+            let norm = unit[0].hypot(unit[1]).max(1e-9);
+            let x = aim[0] - unit[0] / norm * back;
+            let z = aim[2] - unit[1] / norm * back;
+            format!("{back:.0}:{:.0}", scene.ground(x, z))
+        })
+        .collect();
+        println!(
+            "a2g-run: relief ft short of target:ground {}",
+            relief.join(" ")
+        );
         Ok(Self {
             heading,
             pitch,
