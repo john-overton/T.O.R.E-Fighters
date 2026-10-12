@@ -730,7 +730,10 @@ beyond them.
     everything the world needs to resolve the same surface again: template,
     defense levels, seed, the enemy's nationality, the night rule, whether
     positions jitter and the template relocates, and the enemy distance that
-    sets the starts. The viewer rebuilds the terrain with it, so the
+    sets the starts. A tenth value `1` marks the [Quick Mission front
+    line](spec/surface-defenses.md#the-front-line) (Blue and Red ground units
+    in contact); it is left out when there is none, which is how every
+    recording made before the front line reads. The viewer rebuilds the terrain with it, so the
     template, its defenses, the added trucks and radars, the parked aircraft
     and the starts are the flight's.
   - **The airfield scene**, `world.airfield_scene=N`, written only when N is
