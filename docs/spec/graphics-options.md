@@ -32,8 +32,8 @@ shown below the options.
 | Render scale | 75%, 100%, 125%, 150%, 200% | 100% |
 | Spotting aid | Off, Subtle, Strong | Subtle |
 | Terrain filtering | Off, On | On |
-| Building distance (city fill prototype only) | 10 nm, 20 nm, 30 nm | 30 nm |
-| Building detail (city fill prototype only) | 1 nm, 2 nm, 5 nm, 10 nm, 20 nm | 5 nm |
+| Building distance (city fill) | 10 nm, 20 nm, 30 nm | 30 nm |
+| Building detail (city fill) | 1 nm, 2 nm, 5 nm, 10 nm, 20 nm | 5 nm |
 
 Choices are saved in `graphics-v1.conf` in the application data directory,
 beside `preferences-v1.conf`. A missing file uses the defaults quietly; an unreadable or malformed one uses them and logs a warning saying why.
@@ -131,19 +131,28 @@ grain, and thin features such as far roads fade.
 
 ## Building distance and building detail
 
-Shown only while the experimental city fill is switched on
-(`TORE_CITY_FILL=1`; see the [feature matrix](../features.md)). John asked
+Shown whenever the city fill is on, which it is by default (hidden only
+under the developer switch `TORE_CITY_FILL=0`; see the
+[feature matrix](../features.md)). John asked
 on 2026-10-10 for both settings and their defaults; the steps are agent
 choices. Building distance is how far city fill buildings are drawn.
 Building detail is the distance inside which they are drawn with full
 texture and detail; beyond it they are plain blocks in each building's
-main colour, and over a band a quarter beyond the detail distance each
-building changes at its own distance, so the edge does not show as a line.
-The target display (target window, TV and gunsight views) draws every
-building it sees at full detail whatever the setting. The values are saved
+main colour. Over a band a quarter beyond the detail distance the block
+fades out over its full detail building, so the change is gradual and the
+edge does not show as a line. Buildings also fade in rather than appear:
+over the last 15% of the building distance (4.5 nm of the default 30) and
+while they grow from one to two pixels on screen (John, 2026-10-11, "let's
+try phase in transitions"; the band widths are agent choices, fitted). The
+fade is a fixed dither pattern spread over each pixel's anti-aliasing
+samples, so with 4x a pixel blends in quarter steps and a still view never
+shimmers; with anti-aliasing off it is a screen-door pattern. The target
+display (target window, TV and gunsight views) draws every building it sees
+at full detail whatever the setting, and fades them in at its own draw
+distance. The values are saved
 only when they differ from the defaults. Measured costs are in the city
-fill notes; at 4K the 5 nm default adds about 2 to 4 ms over Kiev, 1 nm
-about 1 ms.
+fill notes; at 4K the 5 nm default adds about 2 to 5 ms over Kiev, 1 nm
+about 1 ms. The fades cost about 0.1 to 0.4 ms more at 4K (2026-10-12).
 
 ## Command line
 

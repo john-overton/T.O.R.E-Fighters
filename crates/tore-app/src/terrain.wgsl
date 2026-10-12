@@ -347,22 +347,57 @@ fn placed_vertex(position:vec3<f32>,p:vec3<f32>,uv:vec2<f32>,layer:f32,color:vec
 @vertex fn object_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32)->VertexOut {
  return placed_vertex(position+scene.origin.xyz,position-scene.local_eye.xyz,uv,layer,color,index);
 }
-// CF0 city fill: a kit piece drawn per instance. `place.xyz` is the base
-// relative to the render origin; `turn` holds the heading's cosine and sine
-// and the height share (sinking at the draw distance, a stub when flattened).
+// City fill: a kit piece drawn per instance. `place.xyz` is the base
+// relative to the render origin and `place.w` the building's fixed hash;
+// `turn` holds the heading's cosine and sine, the height share (a stub when
+// flattened) and the coverage while fading in. The coverage and hash ride
+// in `terrain_normal`, which only the terrain's own fragment shader reads.
 @vertex fn fill_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32,@location(5) place:vec4<f32>,@location(6) turn:vec4<f32>)->VertexOut {
  let local=vec3<f32>(position.x,position.y*turn.z,position.z);
  let p=place.xyz+vec3<f32>(local.x*turn.x+local.z*turn.y,local.y,local.z*turn.x-local.x*turn.y);
- return placed_vertex(p+scene.origin.xyz,p-scene.local_eye.xyz,uv,layer,color,index);
+ var out=placed_vertex(p+scene.origin.xyz,p-scene.local_eye.xyz,uv,layer,color,index);
+ out.terrain_normal=vec3<f32>(turn.w,place.w,0.0);
+ return out;
 }
-// CF0 city fill far level of detail: the unit box scaled to a building's
-// half footprint (`size.xy`) and height (`turn.z`, feet), in the colour
-// index `place.w`.
+// City fill far level of detail: the unit box scaled to a building's half
+// footprint (`size.xy`) and height (`turn.z`, feet), in the colour index
+// `place.w`, with its coverage `turn.w` and hash `size.z` in `uv` (a box
+// has no texture).
 @vertex fn fill_box_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32,@location(5) place:vec4<f32>,@location(6) turn:vec4<f32>,@location(7) size:vec4<f32>)->VertexOut {
  let local=vec3<f32>(position.x*size.x,position.y*turn.z,position.z*size.y);
  let p=place.xyz+vec3<f32>(local.x*turn.x+local.z*turn.y,local.y,local.z*turn.x-local.x*turn.y);
- return placed_vertex(p+scene.origin.xyz,p-scene.local_eye.xyz,uv,-1.0,color,place.w);
+ var out=placed_vertex(p+scene.origin.xyz,p-scene.local_eye.xyz,uv,-1.0,color,place.w);
+ out.uv=vec2<f32>(turn.w,size.z);
+ return out;
 }
+// The world pass's sample count, set when the city fill's pipelines are
+// built.
+override FILL_SAMPLES:u32=4u;
+// The 4 by 4 ordered dither matrix.
+fn bayer4(p:vec2<u32>)->u32 {
+ var m=array<u32,16>(0u,8u,2u,10u,12u,4u,14u,6u,3u,11u,1u,9u,15u,7u,13u,5u);
+ return m[(p.y&3u)*4u+(p.x&3u)];
+}
+// A fading city fill building's coverage as a sample mask: each sample of
+// the pixel has a fixed threshold, the 4 by 4 ordered pattern (shifted by
+// the building's hash) interleaved across the samples, and is kept while
+// the threshold is below `alpha`. With 4 samples a pixel takes 1, 2, 3 then
+// 4 samples as `alpha` grows, so a resolved pixel blends smoothly; with one
+// sample it is a screen-door dither. The same pixel and hash always give
+// the same mask, so a still view does not shimmer, and a smaller `alpha`
+// keeps a subset of a larger one's samples.
+fn fill_coverage(clip:vec2<f32>,alpha:f32,hash:f32)->u32 {
+ if alpha>=1.0 {return 0xffffffffu;}
+ let n=clamp(FILL_SAMPLES,1u,8u);
+ let h=u32(hash*65536.0);
+ let cell=bayer4(vec2<u32>(clip)+vec2<u32>(h&3u,(h>>2u)&3u));
+ var mask=0u;
+ for(var s=0u;s<n;s++){
+  if (f32(s*16u+cell)+0.5)/f32(16u*n)<alpha {mask|=1u<<s;}
+ }
+ return mask;
+}
+struct FillOut { @location(0) color:vec4<f32>, @builtin(sample_mask) mask:u32 }
 // CF0 city fill shadow casters: the unit box per building, one entry per
 // shadow cascade (instance_index is the building here, not the cascade).
 fn fill_shadow(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,size:vec4<f32>,cascade:u32)->ShadowOut {
@@ -467,14 +502,29 @@ fn aircraft_color(in:VertexOut,normal:vec3<f32>)->vec4<f32>{
  if in.layer>=0.0 {discard;}
  return aircraft_color(in,surface_normal(in.direction));
 }
-// CF0 city fill: only untextured triangles reach this pass, so it needs no
+// City fill: only untextured triangles reach this pass, so it needs no
 // discard and keeps the early depth test.
 @fragment fn fill_solid_fragment(in:VertexOut)->@location(0) vec4<f32>{
  return aircraft_color(in,surface_normal(in.direction));
 }
-// CF0 city fill far boxes: the surface lighting without the shadow lookups,
-// flare light or panel sheen, so a distant box costs little per pixel.
-@fragment fn fill_far_fragment(in:VertexOut)->@location(0) vec4<f32>{
+// City fill full detail while fading in at the draw distance (a view whose
+// full detail reaches it, such as the target display): the coverage mask.
+@fragment fn fill_solid_fade_fragment(in:VertexOut)->FillOut{
+ return FillOut(aircraft_color(in,surface_normal(in.direction)),fill_coverage(in.clip.xy,in.terrain_normal.x,in.terrain_normal.y));
+}
+@fragment fn fill_decal_fade_fragment(in:VertexOut)->FillOut{
+ return FillOut(airport_color(in),fill_coverage(in.clip.xy,in.terrain_normal.x,in.terrain_normal.y));
+}
+// City fill far boxes: the surface lighting without the shadow lookups,
+// flare light or panel sheen, so a distant box costs little per pixel. A box
+// fading in, or fading out over its full detail building, keeps only its
+// coverage's samples.
+@fragment fn fill_far_fragment(in:VertexOut)->FillOut{
+ let mask=fill_coverage(in.clip.xy,in.uv.x,in.uv.y);
+ if mask==0u {discard;}
+ return FillOut(fill_far_color(in),mask);
+}
+fn fill_far_color(in:VertexOut)->vec4<f32>{
  let normal=surface_normal(in.direction);
  var color=in.color;
  if surface.sun.w>0.0 {
@@ -492,6 +542,9 @@ fn aircraft_color(in:VertexOut,normal:vec3<f32>)->vec4<f32>{
  return vec4<f32>(color,1.0);
 }
 @fragment fn airport_fragment(in:VertexOut)->@location(0) vec4<f32>{
+ return airport_color(in);
+}
+fn airport_color(in:VertexOut)->vec4<f32>{
  if in.layer<0.0 {discard;}
  if in.layer>=0.0 {
   let tex=sample_tile(in.uv,i32(in.layer),0,-1,in.light_row,vec2<f32>(-1.0));

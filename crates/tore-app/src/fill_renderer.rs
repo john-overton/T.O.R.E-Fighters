@@ -1,14 +1,24 @@
-//! City fill buildings, CF0 prototype (`tore_world::city`), drawn in three
-//! tiers set by the Graphics screen (John, 2026-10-10; defaults 30 nm and
-//! 5 nm): full detail (the kit piece with its textures) inside the building
-//! detail distance, a blend band a quarter beyond it where each building
-//! turns from its far box to full detail at its own fixed distance, and the
-//! far box (its footprint in its brightened mean colour, untextured, a cheap
-//! shader) out to the building distance. Buildings sink into the ground over
-//! the last nautical mile, and anything smaller than one pixel on screen is
-//! not drawn. The target display (camera slot 4: the target window and the
-//! TV and gunsight views) draws every building it sees at full detail, culled
-//! to its own narrow view.
+//! City fill buildings (`tore_world::city`), drawn in three tiers set by the
+//! Graphics screen (John, 2026-10-10; defaults 30 nm and 5 nm): full detail
+//! (the kit piece with its textures) inside the building detail distance, a
+//! blend band a quarter beyond it where each building cross-fades from its
+//! far box to full detail, and the far box (its footprint in its brightened
+//! mean colour, untextured, a cheap shader) out to the building distance.
+//! Anything smaller than one pixel on screen is not drawn.
+//!
+//! Transitions fade (John, 2026-10-11: "let's try phase in transitions"):
+//! a building fades in over the last [`FADE_SHARE`] of the building
+//! distance and while it grows from one to two pixels on screen, and in the
+//! blend band the full building is drawn whole with its box over it at the
+//! remaining coverage. Coverage is a fixed ordered dither across each pixel's
+//! samples (`fill_coverage` in terrain.wgsl), so a resolved 4x pixel blends
+//! in quarter steps, nothing is sorted and a still view never shimmers. Only
+//! the far boxes, and full detail in a view whose full detail reaches the
+//! fade band, use the dithered fragment shaders; the full detail passes of
+//! the main view keep their early depth test. The target display (camera
+//! slot 4: the target window and the TV and gunsight views) draws every
+//! building it sees at full detail, culled to its own narrow view, and fades
+//! at its draw distance too.
 //!
 //! The per-view work is on the GPU: a compute pass culls every building
 //! against the view and writes the full detail lists per piece and the far
@@ -85,9 +95,9 @@ impl Tiers {
     }
 }
 
-/// The length over which a building sinks into the ground before the draw
-/// distance (fitted).
-pub const SINK_FT: f64 = NM;
+/// The share of the building distance over which buildings fade in before
+/// it (fitted, 2026-10-11): 4.5 nm of the default 30.
+pub const FADE_SHARE: f64 = 0.15;
 /// Buildings nearer than this cast shadows (nautical miles, fitted). Measured
 /// at 4K over Cairo at 2,000 ft: 0.5 nm costs nothing measurable, 1 nm 1.3
 /// ms more and 3 nm 3.4 ms more, mostly in the middle and far cascades.
@@ -385,9 +395,10 @@ pub struct FillRenderer {
     flattened_version: u64,
     cull: wgpu::ComputePipeline,
     finish: wgpu::ComputePipeline,
-    solid: wgpu::RenderPipeline,
-    decal: wgpu::RenderPipeline,
-    far: wgpu::RenderPipeline,
+    pipelines: Pipelines,
+    /// The prepared view's full detail reaches the fade band: it draws with
+    /// the fading pipelines.
+    fading: bool,
     /// One shadow caster pipeline per shadow cascade.
     shadow: [wgpu::RenderPipeline; 3],
     /// Buildings inside this cast shadows, nautical miles.
@@ -453,6 +464,21 @@ fn shadow_pipelines(
     })
 }
 
+/// The city fill's render pipelines: full detail solid art and texture
+/// details, each opaque and fading, and the far boxes.
+struct Pipelines {
+    solid: wgpu::RenderPipeline,
+    decal: wgpu::RenderPipeline,
+    solid_fade: wgpu::RenderPipeline,
+    decal_fade: wgpu::RenderPipeline,
+    far: wgpu::RenderPipeline,
+}
+
+/// Depth bias of the far boxes, in reversed-depth steps: in the blend band a
+/// box covers its full detail building (and its texture details, one step
+/// in front), whose walls may lie in the box's own planes.
+const FAR_BIAS: i32 = 3;
+
 fn pipelines(
     device: &wgpu::Device,
     shader: &wgpu::ShaderModule,
@@ -460,7 +486,8 @@ fn pipelines(
     samples: u32,
     material_layout: &wgpu::BindGroupLayout,
     lighting_layout: &wgpu::BindGroupLayout,
-) -> [wgpu::RenderPipeline; 3] {
+) -> Pipelines {
+    let constants = [("FILL_SAMPLES", f64::from(samples))];
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("City fill layout"),
         bind_group_layouts: &[material_layout, lighting_layout],
@@ -504,7 +531,10 @@ fn pipelines(
             fragment: Some(wgpu::FragmentState {
                 module: shader,
                 entry_point: Some(fragment),
-                compilation_options: Default::default(),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &constants,
+                    ..Default::default()
+                },
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: None,
@@ -517,8 +547,8 @@ fn pipelines(
             },
             // The static airport passes' depth rules: solid art, then
             // coplanar texture details one reversed-depth ULP in front. Each
-            // pass draws only its own triangles, and the solid passes have no
-            // discard, so they keep the early depth test.
+            // pass draws only its own triangles, and the opaque solid pass
+            // has no discard, so it keeps the early depth test.
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: true,
@@ -537,29 +567,43 @@ fn pipelines(
             cache: None,
         })
     };
-    [
-        make(
+    Pipelines {
+        solid: make(
             "City fill surfaces",
             "fill_vertex",
             &near,
             "fill_solid_fragment",
             0,
         ),
-        make(
+        decal: make(
             "City fill texture details",
             "fill_vertex",
             &near,
             "airport_fragment",
             1,
         ),
-        make(
+        solid_fade: make(
+            "City fill surfaces fading in",
+            "fill_vertex",
+            &near,
+            "fill_solid_fade_fragment",
+            0,
+        ),
+        decal_fade: make(
+            "City fill texture details fading in",
+            "fill_vertex",
+            &near,
+            "fill_decal_fade_fragment",
+            1,
+        ),
+        far: make(
             "City fill far boxes",
             "fill_box_vertex",
             &far,
             "fill_far_fragment",
-            0,
+            FAR_BIAS,
         ),
-    ]
+    }
 }
 
 /// Words in the cull uniform.
@@ -757,7 +801,7 @@ impl FillRenderer {
                 })
             })
             .collect();
-        let [solid, decal, far] = pipelines(
+        let pipelines = pipelines(
             device,
             shader,
             format,
@@ -785,9 +829,8 @@ impl FillRenderer {
             flattened_version: 0,
             cull,
             finish,
-            solid,
-            decal,
-            far,
+            pipelines,
+            fading: false,
             shadow,
             shadow_nm: std::env::var("TORE_CITY_FILL_SHADOW_NM")
                 .ok()
@@ -817,7 +860,7 @@ impl FillRenderer {
         material_layout: &wgpu::BindGroupLayout,
         lighting: &crate::surface_lighting::SurfaceLighting,
     ) {
-        [self.solid, self.decal, self.far] = pipelines(
+        self.pipelines = pipelines(
             device,
             shader,
             format,
@@ -886,8 +929,11 @@ impl FillRenderer {
         p[16..19].copy_from_slice(&up);
         p[20] = (t.full_nm * NM * zoom) as f32;
         p[21] = (t.blend_nm * NM * zoom) as f32;
-        p[22] = (t.draw_nm * NM * zoom) as f32;
-        p[23] = SINK_FT as f32;
+        let draw = t.draw_nm * NM * zoom;
+        let fade = (draw * FADE_SHARE).max(1.);
+        p[22] = draw as f32;
+        p[23] = fade as f32;
+        self.fading = t.blend_nm * NM * zoom > draw - fade;
         p[24] = aspect / f * 1.05;
         p[25] = 1. / f * 1.05;
         p[26] = f * height * 0.5;
@@ -942,10 +988,16 @@ impl FillRenderer {
         pass.set_bind_group(0, bind, &[]);
         pass.set_vertex_buffer(0, self.vertices.slice(..));
         let pieces = self.art.ranges.len() as u64;
-        pass.set_pipeline(&self.far);
+        let p = &self.pipelines;
+        pass.set_pipeline(&p.far);
         pass.set_vertex_buffer(1, self.boxes.slice(..));
         pass.draw_indirect(&self.args, 2 * pieces * 16);
-        for (kind, pipeline) in [&self.solid, &self.decal].into_iter().enumerate() {
+        let passes = if self.fading {
+            [&p.solid_fade, &p.decal_fade]
+        } else {
+            [&p.solid, &p.decal]
+        };
+        for (kind, pipeline) in passes.into_iter().enumerate() {
             pass.set_pipeline(pipeline);
             for (p, range) in self.art.ranges.iter().enumerate() {
                 let first = u64::from(self.art.piece_table[p * 8]) * 32;
@@ -987,5 +1039,193 @@ impl FillRenderer {
             full: counts[..pieces].iter().map(|&c| c as usize).sum(),
             boxes: counts[pieces] as usize,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tore_world::city::{self, CityFill};
+
+    /// One box-shaped kit piece, `half` feet each way and `height` tall, at
+    /// each `(x, z)` on flat ground, its full detail mesh the far box.
+    fn synthetic(at: &[(i32, i32)], half: i64, height: i64) -> FillArt {
+        let piece = city::kit::Piece {
+            source: "T.OT".into(),
+            shape: "T.SH".into(),
+            faces: Vec::new(),
+            origin: [0.; 3],
+            scale: 1.,
+            half: [half, half],
+            height,
+            class: city::kit::Class::Tower,
+            cut: false,
+        };
+        let layout = city::Layout {
+            layout: "TEST.MM".into(),
+            map: city::mask::LightMap::default(),
+            kit: city::kit::Kit {
+                pieces: vec![piece],
+            },
+            cities: Vec::new(),
+            instances: at
+                .iter()
+                .map(|&(x, z)| city::Instance {
+                    piece: 0,
+                    x,
+                    z,
+                    heading: 0,
+                    core: true,
+                    city: 0,
+                })
+                .collect(),
+            candidates: at.len(),
+            inputs: Vec::new(),
+        };
+        let fill = Arc::new(CityFill::assemble(
+            Arc::new(layout),
+            vec![0.; at.len()],
+            vec![false; at.len()],
+        ));
+        let mut vertices = unit_box();
+        for v in vertices.chunks_exact_mut(10) {
+            v[0] *= half as f32;
+            v[1] *= height as f32;
+            v[2] *= half as f32;
+            v[9] = 40.;
+        }
+        let end = (vertices.len() / 10) as u32;
+        vertices.extend(unit_box());
+        let box_range = end..(vertices.len() / 10) as u32;
+        let radius = ((2 * half * half) as f64).sqrt() as f32;
+        let piece_table = vec![
+            0,
+            40f32.to_bits(),
+            (half as f32).to_bits(),
+            (half as f32).to_bits(),
+            (height as f32).to_bits(),
+            radius.to_bits(),
+            0,
+            0,
+        ];
+        let mut records = Vec::new();
+        for (n, &(x, z)) in at.iter().enumerate() {
+            records.extend([
+                (x as f32).to_bits(),
+                0f32.to_bits(),
+                (z as f32).to_bits(),
+                0,
+                1f32.to_bits(),
+                0f32.to_bits(),
+                (n as f32 / at.len() as f32).to_bits(),
+                0,
+            ]);
+        }
+        FillArt {
+            fill,
+            vertices,
+            ranges: vec![[0..end, end..end]],
+            box_range,
+            piece_table,
+            records,
+        }
+    }
+
+    /// The tiers on the GPU (production cull shader): a building inside the
+    /// detail distance draws at full detail only, one in the blend band both
+    /// (its box dithered over it), one beyond as its box, one fading in at
+    /// the building distance or by size as its box, and none past the
+    /// building distance. The target display's view draws full detail out
+    /// to its draw distance, with its fading pipelines.
+    #[test]
+    #[ignore = "requires a GPU adapter"]
+    fn gpu_buildings_fade_in_and_cross_fade_by_tier() {
+        pollster::block_on(async {
+            let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+            let adapter = instance
+                .request_adapter(&wgpu::RequestAdapterOptions::default())
+                .await
+                .unwrap();
+            let (device, queue) = adapter
+                .request_device(&wgpu::DeviceDescriptor::default())
+                .await
+                .unwrap();
+            let nm = |n: f64| (n * NM) as i32;
+            // 1,131 ft across its diagonal: at 256 pixels high it is about
+            // 14 pixels at 3 nm and 1.4 at 29 nm (between one and two:
+            // fading in by size).
+            let at = [
+                (0, nm(3.)),
+                (0, nm(5.6)),
+                (0, nm(8.)),
+                (0, nm(29.)),
+                (0, nm(31.)),
+            ];
+            let art = Arc::new(synthetic(&at, 400, 1_000));
+            let world = tore_world::test_support::terrain();
+            let mut scenery = crate::scenery::tests::scenery();
+            scenery.fill = Some(Arc::clone(&art));
+            // A zero-sized vertex buffer is not portable.
+            if scenery.vertices.is_empty() {
+                scenery.vertices = vec![0.; 30];
+            }
+            // With and without anti-aliasing (the coverage's sample count).
+            for samples in [1, 4] {
+                let mut renderer = crate::sim_renderer::SimRenderer::new(
+                    &device,
+                    &queue,
+                    wgpu::TextureFormat::Rgba8Unorm,
+                    &scenery,
+                    crate::graphics::Options::default(),
+                    samples,
+                );
+                let image = device.create_texture(&wgpu::TextureDescriptor {
+                    label: None,
+                    size: wgpu::Extent3d {
+                        width: 256,
+                        height: 256,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                });
+                let mut stats = |slot: usize| {
+                    let mut camera = Camera::new();
+                    camera.position = [0., 500., 0.];
+                    camera.weather_slot = slot;
+                    let mut encoder = device.create_command_encoder(&Default::default());
+                    renderer.draw(
+                        &device,
+                        &queue,
+                        &mut encoder,
+                        &image.create_view(&Default::default()),
+                        [256, 256],
+                        &camera,
+                        &world,
+                        &scenery,
+                    );
+                    queue.submit([encoder.finish()]);
+                    let fill = renderer.fill.as_ref().unwrap();
+                    (fill.stats(&device, &queue).unwrap(), fill.fading)
+                };
+                let (main, fading) = stats(0);
+                // Full: 3 and 5.6 nm. Boxes: 5.6 (over its full detail), 8 and
+                // 29 nm (fading in). 31 nm: past the building distance.
+                assert_eq!((main.full, main.boxes), (2, 3));
+                assert!(
+                    !fading,
+                    "the main view's full detail keeps its early depth test"
+                );
+                let (target, fading) = stats(4);
+                // Full detail to the draw distance but 29 nm, still a box while
+                // under two pixels.
+                assert_eq!((target.full, target.boxes), (3, 1));
+                assert!(fading, "the target display's full detail fades in");
+            }
+        });
     }
 }
