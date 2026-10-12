@@ -1411,6 +1411,7 @@ fn orders_for_scripted_ace(
             source: DefenseSource::Missile,
             heading_deg: 200.,
             pitch_deg: -10.,
+            rotorcraft: false,
         })),
         1_560 => controller.set_defense_motion(None),
         1_680 => controller.set_search_contact(Some(SearchContact {

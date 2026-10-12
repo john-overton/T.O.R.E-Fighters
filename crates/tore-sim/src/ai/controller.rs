@@ -237,6 +237,10 @@ pub struct DefenseMotion {
     pub source: DefenseSource,
     pub heading_deg: f64,
     pub pitch_deg: f64,
+    /// A helicopter's defence (slice ST-H, docs/spec/ai-strike.md,
+    /// "Helicopter defence"): flown at maximum speed, not corner speed, which
+    /// sinks a helicopter.
+    pub rotorcraft: bool,
 }
 
 /// A launch warning delivered to this actor and nobody else (B47).
@@ -1291,11 +1295,16 @@ impl Controller {
                 self.next_motion_id += 1;
                 id
             });
+            let (speed_request, speed) = if defense.rotorcraft {
+                (SpeedRequest::Maximum, frame.own.limits.maximum)
+            } else {
+                (SpeedRequest::Corner, frame.own.limits.corner)
+            };
             let request = MotionRequest::new(
                 defense.heading_deg.round() as i32,
                 PitchRequest::Explicit(defense.pitch_deg.round() as i32),
                 Bank::Unconstrained,
-                SpeedRequest::Corner,
+                speed_request,
                 Duration::Timed(1),
             );
             batch.motion = Some(MotionIntent {
@@ -1303,7 +1312,7 @@ impl Controller {
                 request,
                 heading_deg: defense.heading_deg,
                 flight_path_pitch_deg: defense.pitch_deg,
-                speed: frame.own.limits.corner,
+                speed,
                 bank: Bank::Unconstrained,
                 completion: Completion::Deadline(
                     motion::deadline_for(Duration::Timed(1), clock).expect("timed defense"),
@@ -4232,6 +4241,25 @@ mod tests {
                     assert!(batch.motion.is_some(), "{aircraft:?} {level:?} at {tick}");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn a_defence_flies_corner_speed_but_a_helicopters_flies_maximum() {
+        let scene = Scene::new();
+        for (rotorcraft, speed) in [(false, own().limits.corner), (true, own().limits.maximum)] {
+            let mut c = controller(Experience::Average);
+            c.set_defense_motion(Some(DefenseMotion {
+                source: DefenseSource::Missile,
+                heading_deg: 90.,
+                pitch_deg: -4.,
+                rotorcraft,
+            }));
+            let motion = c.step(&scene.frame(0, own())).unwrap().motion.unwrap();
+            assert_eq!(motion.speed, speed, "rotorcraft {rotorcraft}");
+            assert_eq!(motion.heading_deg, 90.);
+            assert_eq!(motion.flight_path_pitch_deg, -4.);
+            assert!(c.defending());
         }
     }
 

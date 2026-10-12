@@ -646,6 +646,12 @@ struct Watch {
     bursts: BTreeMap<(u32, u32), Burst>,
     /// The last combat tick whose hits on the target were counted.
     hits_tick: u64,
+    /// The lowest height above the ground the striker flew at, feet, and the
+    /// seconds a helicopter break was flown (slice ST-H).
+    min_agl_ft: f64,
+    break_ticks: u64,
+    /// The striker's hit points last reported (`HURT` lines, slice ST-H).
+    hp: Option<i32>,
 }
 
 /// One gun burst of a strafing run: its release number, the rounds fired,
@@ -702,6 +708,9 @@ impl Watch {
             gun_rounds: BTreeMap::new(),
             bursts: BTreeMap::new(),
             hits_tick: 0,
+            min_agl_ft: f64::INFINITY,
+            break_ticks: 0,
+            hp: None,
         }
     }
 
@@ -813,6 +822,61 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
             flight.speed / FPS_PER_KNOT,
             w.gunship_rounds,
         );
+    }
+    // The lowest the striker flew and, for a helicopter, its break once a
+    // second (slice ST-H): heading, the threat's bearing and the break's
+    // angle off it, what the terrain hid, the height, speed and bank.
+    if alive && let Some(actor) = scene.actor(w.plane) {
+        let f = actor.flight();
+        w.min_agl_ft = w
+            .min_agl_ft
+            .min(f.position[1] - scene.ground(f.position[0], f.position[2]));
+        if let Some((b, bearing)) = actor.trace().rotor_break {
+            w.break_ticks += 1;
+            if tick.is_multiple_of(120) {
+                println!(
+                    "ai-strike: BREAK t={t:.3} heading={:.0} track={:.0} bearing={} offset={:.0} masked_s={} blocked_s={} pitch={:.0} agl_ft={:.0} speed_kt={:.0} bank={:.0}",
+                    f.yaw.to_degrees().rem_euclid(360.),
+                    f.velocity[0]
+                        .atan2(f.velocity[2])
+                        .to_degrees()
+                        .rem_euclid(360.),
+                    bearing.map_or("none".to_owned(), |b| format!("{b:.0}")),
+                    b.offset_deg,
+                    b.masked_s,
+                    b.blocked_s,
+                    b.flight_path_pitch_deg,
+                    f.position[1] - scene.ground(f.position[0], f.position[2]),
+                    f.speed / FPS_PER_KNOT,
+                    f.bank.to_degrees(),
+                );
+            }
+        }
+    }
+    if let Some(row) = state.targets.iter().find(|row| row.id == w.plane.0)
+        && w.hp != Some(row.hp)
+    {
+        if w.hp.is_some() {
+            // The systems the hits have damaged: fault index and count.
+            let faults = scene.actor(w.plane).map_or(String::new(), |a| {
+                a.flight()
+                    .systems
+                    .counts
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, n)| **n > 0)
+                    .map(|(i, n)| format!("{i}x{n}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            });
+            println!(
+                "ai-strike: HURT t={t:.3} hp={}/{} faults={}",
+                row.hp,
+                row.initial_hp,
+                if faults.is_empty() { "none" } else { &faults }
+            );
+        }
+        w.hp = Some(row.hp);
     }
     if let Some(phase) = scene
         .actor(w.plane)
@@ -1071,7 +1135,11 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
                     "not-flying"
                 }
             });
-        println!("ai-strike: LOST t={t:.3} reason={reason}");
+        let crashed = scene.actor(w.plane).is_some_and(|a| a.flight().crashed);
+        println!(
+            "ai-strike: LOST t={t:.3} reason={reason} crashed={}",
+            if crashed { "yes" } else { "no" }
+        );
     }
 }
 
@@ -1462,6 +1530,37 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
             cfg.order.map_or("none", |(name, _)| name),
             cfg.mode.map_or("none", DeliveryMode::label),
         );
+        // The mission's hostile SAM and gun sites, once (slice ST-H): where
+        // they stand against the target and the start, for reading a
+        // defended run.
+        let start = pass.start;
+        for site in scene
+            .world
+            .combat
+            .state
+            .targets
+            .iter()
+            .filter(|row| row.category & 0x1800 != 0 && row.aircraft.is_none() && row.hp > 0)
+        {
+            println!(
+                "ai-strike: SITE id={:#010x} name={} class={} hp={} target_ft={:.0} start_ft={:.0}",
+                site.id,
+                scene
+                    .world
+                    .combat
+                    .ground_name(site.id)
+                    .unwrap_or("unnamed")
+                    .replace(' ', "_"),
+                if site.category & 0x1000 != 0 {
+                    "SAM"
+                } else {
+                    "AAA"
+                },
+                site.hp,
+                horizontal(site.position, target_at),
+                horizontal(site.position, start),
+            );
+        }
     }
     let mut human = false;
     if ordering {
@@ -1808,7 +1907,7 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
     let t = scene.seconds();
     let hp_end = scene.target_row().map(|r| r.hp);
     println!(
-        "ai-strike: summary t={t:.3} ran_s={:.1} profile={} releases={} impacts={} kills={} egress={} lost={} activity={} target_hp={}/{} closest_ft={} store_rounds_left={} gun_rounds={} bursts={} fall_s={:.1} blind_s={:.1}",
+        "ai-strike: summary t={t:.3} ran_s={:.1} profile={} releases={} impacts={} kills={} egress={} lost={} activity={} target_hp={}/{} closest_ft={} store_rounds_left={} gun_rounds={} bursts={} fall_s={:.1} blind_s={:.1} min_agl_ft={} break_s={:.1}",
         t - started,
         watch.profile.map_or("none", Profile::label),
         watch.releases,
@@ -1833,6 +1932,12 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         watch.gunship_bursts,
         watch.fall_ticks as f64 / 120.,
         watch.blind_ticks as f64 / 120.,
+        if watch.min_agl_ft.is_finite() {
+            format!("{:.0}", watch.min_agl_ft)
+        } else {
+            "none".to_owned()
+        },
+        watch.break_ticks as f64 / 120.,
     );
     if watch.releases == 0 {
         println!("ai-strike: no release");

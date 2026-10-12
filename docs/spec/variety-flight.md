@@ -141,26 +141,32 @@ The fits that predate it and still apply to the top speeds are below.
 
 ## AI wingmen
 
-Opinionated, agent decision 2026-10-08: the AI does not fly the helicopters
-(AH-64, Mi-24, CH-47), the V-22, the AV-8 or the Yak-141 yet. On the legacy
-adapter the rotorcraft start at zero speed, drop about 400 feet and fly like
-airplanes (the CH-47 pitches to 69 degrees). A headless probe of the AV-8 and
-the Yak-141 shows they fly an airborne fight and land, but on a ground start the
-second wingman never leaves the taxiway (333 seconds checked, against a takeoff
-at 66 seconds for the F/A-18D and 54 seconds for the F-15). All six stay
-player-flyable.
+Opinionated, agent decision 2026-10-08, revised 2026-10-12 (slice ST-H, John's
+decision of 2026-10-11): the AI flies the AH-64 and the Mi-24. It does not yet
+fly the CH-47, the V-22, the AV-8 or the Yak-141. On the legacy adapter the
+rotorcraft start at zero speed, drop about 400 feet and fly like airplanes (the
+CH-47 pitches to 69 degrees). A headless probe of the AV-8 and the Yak-141 shows
+they fly an airborne fight and land, but on a ground start the second wingman
+never leaves the taxiway (333 seconds checked, against a takeoff at 66 seconds
+for the F/A-18D and 54 seconds for the F-15). All six stay player-flyable.
 
 - Quick Mission's five AI wing fields (friendly wings 2 and 3, enemy wings 1 to 3)
-  do not list them. Friendly wing 1 shares the player's list, so a player who
-  picks one flies with no AI wingmen: the wing count drops to one, with a notice.
-  The multiplayer lobby's wing 1 is for people and keeps its size.
-- A mission file or lobby spec that puts one in a wing other than friendly
-  wing 1 is refused (`AircraftId::ai_flyable`).
+  list the AH-64 and the Mi-24 and do not list the other four. Friendly wing 1
+  shares the player's list, so a player who picks one of the four flies with no
+  AI wingmen: the wing count drops to one, with a notice. A player in an AH-64 or
+  a Mi-24 has AI wingmen on an airborne start; on a ground start the wing is the
+  player alone, because the AI cannot lift a helicopter off the ground. The
+  multiplayer lobby's wing 1 is for people and keeps its size.
+- A mission file or lobby spec that puts one of the four in a wing other than
+  friendly wing 1 is refused (`AircraftId::ai_flyable`).
 - The probe options `--probe-enemy-aircraft` and `--probe-friendly-aircraft`
-  refuse them, and `--probe-matrix` skips them as opponents.
+  refuse the four, and `--probe-matrix` skips them as opponents.
+- How the AI flies the two helicopters (their start height, no landing, no fuel
+  schedule, the strike passes and the defence) is in
+  [AI strike](ai-strike.md#ai-helicopters-in-quick-mission).
 
-The overhaul's second project, AI wingmen, will restore them: the AI will fly
-these aircraft through their inputs on the same physics a player uses (VTOL
+The overhaul's second project, AI wingmen, restores the other four: the AI will
+fly these aircraft through their inputs on the same physics a player uses (VTOL
 overhaul decision 7). Until then this list stays, and it is the one switch to
 undo.
 

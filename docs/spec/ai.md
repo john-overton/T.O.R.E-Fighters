@@ -269,11 +269,17 @@ Family binding and catalog counts remain in the experience spec.
 | Family | Behavior present | Inputs and missing contract |
 | --- | --- | --- |
 | F-117 | Shares fighter air combat; ground pass requests a 5000 vertical offset and speed operand 300 while target remains ahead/valid | Target pose, maximum/minimum speed and attack path; offset axes are the [steering frame](../formats/ai.md#strike-maneuvers-steering-frame-and-orbit); release timing is the weapon service's gates ([weapons](../formats/weapons.md#ai-release-against-ground-targets)) |
-| Helicopter | Shares IR/radar response entry, distinct pursuit and pop-up attack; missile response turns toward a target with off-beam below 90 degrees, otherwise chooses a +/-90-degree break | Helicopter motion limits and target geometry; do not reuse fighter aerobatic trajectories |
+| Helicopter | Shares IR/radar response entry, distinct pursuit and pop-up attack; missile response turns toward a target with off-beam below 90 degrees, otherwise chooses a +/-90-degree break | Helicopter motion limits and target geometry; do not reuse fighter aerobatic trajectories. T.O.R.E builds the break (beamed to the threat, at speed and height, with terrain masking) as [helicopter defence](ai-strike.md#helicopter-defence) |
 | Bomber | Aircraft attack handler exits; ground attack uses a high pass; IR/radar reactions choose a +/-90-degree break | Target type, altitude, available stores, wing state and evasion limits; exit does not prove that defensive weapons cannot fire |
 | AC-130 | Ground attack repeatedly requests a circle with speed halfway between corner and maximum | Target pose and orbit parameters; the six circle arguments (left, 4,000 ft radius, 2,000 ft up, 35 degrees of bank capped by `maxBank`, speed, 5 s) and the gun arcs are in [Strike maneuvers, steering frame and orbit](../formats/ai.md#strike-maneuvers-steering-frame-and-orbit); the hit test is open |
 | Large/airliner | Handles hit and evade; hit requests a downward pitch from 0 through -24 degrees and speed operand 2000 | Damage event and aircraft limits; positive speed clamp prevents assuming literal 2000-unit achieved flight |
 | MOTH | Fighter-derived air behavior with distinct ground attack and shorter egress operands | Exact special-aircraft configuration and maneuver consumers; no ordinary aircraft alias |
+
+A helicopter does not fly the fighter reactions of B47 below: its break, its
+speed and height and its use of terrain are in
+[AI strike](ai-strike.md#helicopter-defence), and a helicopter keeps no fuel
+schedule and is never put through the airfield sequences (B48; see
+[AI helicopters in Quick Mission](ai-strike.md#ai-helicopters-in-quick-mission)).
 
 For the T.O.R.E strike behaviour of these families (heavies level-bomb from a
 minimum of 5,000 ft AGL raised by threat, helicopters pop up, the AC-130
@@ -1254,6 +1260,7 @@ through `Controller::fallbacks`.
 | `weapon_service` | B42 phases and retries, timing profiles for all twelve aircraft, B45 ammunition debit, seeker envelopes by role, detection range and stated signature modifiers, class eligibility, store score, in-flight track check and AI support extension, device schedule | Missile burst pacing after a shot, hit-chance rule, signature producers that need sensor state |
 | `gunnery` | [Live gun employment](ai-gun-employment.md): shared-physics lead, fixed-barrel release, individual-round burst/recovery and tracking | Original skill accuracy, timing and maneuvering-target tracking |
 | `threat` | B47 warning delay, receiver gates, countermeasure gate and dispenser selection, decoy roll, script fallback reversal, reason ranking | Decoyed-missile time shortening, restart effect on an in-flight move |
+| `helicopter_defense` | B20 helicopter break: plus or minus 90 degrees to the threat's bearing, the side by the smaller turn, terrain-masking search, speed and height kept ([AI strike](ai-strike.md#helicopter-defence)) | Retail's turn toward a target that is ahead; the threat's site when no site is known |
 | `route` | B48 waypoint completion by octant, route command with landing hand-off, leader jitter and floors, join-landing, cruise speed, fuel states, wingman bingo route (also flown by leaders and singletons, fitted) | Original damage-triggered disengagement policy; authored response is in `damage` |
 | `airfield` | [AI airfield sequences](ai-airfield.md): hold, turn and runway-free gates, taxi-out, line-up, roll, climb-out, marshal square, approach gates, final, rollout, taxi-back and parking slots; bug-out, bingo, ordered and join landings; player landing priority | Vertical, STOVL and carrier variants; retail nose attitudes on final and rollout and the stopped pivot have fitted substitutes |
 | `wing` | B43 spacing clamps, formation table and names, player spacing values, mode 9 speed, control side effects, target sharing cap; B46 receiver outcomes, player break/approach values, reply rules | Approach steering point, mode 9 negative-band entry |

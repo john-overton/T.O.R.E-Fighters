@@ -26,7 +26,7 @@ python3 tools/battery.py --lane ai --jobs 6 --tag ai
 python3 tools/battery.py --scenario 'ai-regress-*'
 ```
 
-About 584 scenarios, each one `--ai-probe-ticks` run (plus the roster probe and
+About 588 scenarios, each one `--ai-probe-ticks` run (plus the roster probe and
 the 1,008-case probe matrix). With the other lanes running on the same Ryzen 9
 7900X, the whole lane took 26 minutes at `--jobs 5` (final run 2026-09-28:
 444 of 445 passed, the one failure is the known failure below). The probe
@@ -59,6 +59,7 @@ minutes cost about 4 minutes.
 | Other theaters | `ai-theater-*` | all 16 base theaters: a 4 v 4 fight, an 8 v 8 without the leader attacking, wing-of-3 takeoffs at airports 1 and 3, and a pair ordered to land at airport 1 |
 | Every aircraft's takeoff | `ai-takeoff-*` | all 14 aircraft as a ground-started pair at Zaporizhzhya (UKR 1), Ras Al Khaimah (PGU 2), Chateaudun (FRA 3) and Nuchon Ni (NSK 5) |
 | Long runs elsewhere | `ai-long-15v15-pgu`, `ai-long-15v15-vla` | 30 minutes of 15 v 15 in the Persian Gulf and Vladivostok |
+| Helicopters (slice ST-H) | `ai-fight-heli-wings-vs-jets`, `ai-fight-heli-vs-heli`, `ai-fight-heli-player-wing`, `ai-rtb-heli-land-order` | Mi-24 and AH-64 as the AI's wings: friendly wings 2 and 3 against two Su-27s, AH-64s against Mi-24s, a player in an AH-64 with two AI AH-64 wingmen on an airborne start, and a Mi-24 wing told to land (it must not enter the airfield sequence). The probe's own checks apply: no anomaly, no dead aircraft with a live activity, no open ground hazard |
 | Random configurations | `ai-fuzz-NNNN` | seeded whole configurations from `tools/battery_scenarios/_ai_fuzz.py` (theater and layout variant, sizes, three aircraft types, skill, mission, separation, geometry, adapter, ground start, orders, threats and faults at random ticks, attack script, 1 to 5 minutes); the first 60 of 400 fixed seeds by default, `TORE_AI_FUZZ=all` for all; `python3 tools/_ai_fuzz_cmd.py SEED` prints a seed's command |
 | Creator objectives | `ai-objective-*` | ten group setups (`--probe-group GROUP:CHOICE[:survive]`: free, CAP, targets, protection, self-defense, hold, required survival on either side) at four fight sizes; the debrief's targets, protected aircraft and SUCCESS or FAILURE must match the aircraft left alive ([debrief rules](../spec/debrief.md)) |
 | Order drills | `ai-orders-cycle-*` | the four player wing orders cycled twelve times through a fight, in the air and after a ground start; every order must be answered |
