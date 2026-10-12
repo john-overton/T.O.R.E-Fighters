@@ -601,7 +601,7 @@ fn assembled(
         parts.push((tile, offset));
     }
     let (materials, patches) = compose(&parts, links, 0.);
-    let runways = parts
+    let runways: Vec<DrawnRunway> = parts
         .iter()
         .enumerate()
         .flat_map(|(k, (plan, offset))| {
@@ -665,6 +665,7 @@ fn assembled(
         .unwrap();
         objects.push((runway(2, line), plan_anchors(tile, offset, &frame, 0.)));
     }
+    let continues = super::continued_runways(&runways, tile.map(|t| t.0), links);
     let built = Built {
         plan: base.applies_to.clone(),
         strip_id: 1,
@@ -679,6 +680,7 @@ fn assembled(
         added: Vec::new(),
         snapped: 0,
         runway_line: None,
+        continues,
     };
     (built, objects)
 }
@@ -718,6 +720,13 @@ fn every_plan_and_pair_passes_the_ai_route_audit() {
     for (name, built, objects) in &cases {
         let all = std::slice::from_ref(built);
         let components = audit::components(built);
+        // A pair's continuing runways are one straight runway, at the
+        // measured offset and 60 ft either side (John's Spassk Dalniy step).
+        if let Some(alignment) = audit::alignment(built) {
+            assert_eq!(alignment.problem(), None, "{name}: {alignment:?}");
+        } else {
+            assert!(!name.contains('+'), "{name}: no continuing runways");
+        }
         for (runway, anchors) in objects {
             let anchors =
                 anchors.unwrap_or_else(|| panic!("{name}: {} has no AI points", runway.name));
@@ -750,6 +759,29 @@ fn every_plan_and_pair_passes_the_ai_route_audit() {
         }
     }
     assert_eq!(cases.len(), 12 + 4 * 3);
+}
+
+/// The audit's alignment verdict: a lateral step, a turn or a gap is named,
+/// an overlap of the pavements (the pads) is not a problem.
+#[test]
+fn the_alignment_verdict_names_a_step_a_turn_and_a_gap() {
+    let straight = audit::Alignment {
+        offset_ft: 0.,
+        heading_deg: 0.,
+        gap_ft: -190.,
+        threshold_gap_ft: 30.,
+    };
+    assert_eq!(straight.problem(), None);
+    let stepped = audit::Alignment {
+        offset_ft: 21.,
+        heading_deg: 1.,
+        gap_ft: 40.,
+        ..straight
+    };
+    let why = stepped.problem().unwrap();
+    assert!(why.contains("21.0 ft off the line"), "{why}");
+    assert!(why.contains("1.00 degrees"), "{why}");
+    assert!(why.contains("40 ft gap"), "{why}");
 }
 
 /// A pair's tile is moved across the base runway its main runway continues

@@ -178,6 +178,10 @@ pub struct Built {
     /// are copies of its base's, so its retail line lies beside its
     /// pavement; `None` keeps the retail line (every base and pad).
     pub runway_line: Option<RunwayLine>,
+    /// For a pair's pavement owner: the indices in `runways` of the base
+    /// runway and the tile runway that continue each other (`[pair]
+    /// continues`), which the audit checks run as one straight runway.
+    pub continues: Option<[usize; 2]>,
 }
 
 /// A drawn runway in its airport's frame: the plan's, moved by the tile's
@@ -301,6 +305,20 @@ fn plan_anchors(
         parking_heading: (heading + a.parking_heading.to_radians())
             .rem_euclid(std::f64::consts::TAU),
     })
+}
+
+/// The indices in `drawn` of the base runway and the tile runway a pair's
+/// `continues` joins.
+fn continued_runways(
+    drawn: &[DrawnRunway],
+    tile: Option<&Plan>,
+    links: Option<&Plan>,
+) -> Option<[usize; 2]> {
+    let names = links?.pair.as_ref()?.continues.as_ref()?;
+    let tile_name = format!("{} {}", tile?.applies_to, names[1]);
+    let base_at = drawn.iter().position(|r| r.name == names[0])?;
+    let tile_at = drawn.iter().position(|r| r.name == tile_name)?;
+    Some([base_at, tile_at])
 }
 
 /// A copy of a lone second tile's plan with every runway end marked: no
@@ -502,6 +520,7 @@ pub(super) fn apply(
                 })
             })
             .collect();
+        let continued = continued_runways(&drawn_runways, tile_plan, links);
         let airport_lights = lights::lights(&parts, links, &patches, &materials, &frame, &height);
         let heading = base.stance.heading;
         let anchors = plan_anchors(base_plan, [0., 0.], &frame, heading);
@@ -610,6 +629,7 @@ pub(super) fn apply(
             added: relaid.added,
             snapped,
             runway_line,
+            continues: continued,
         };
         apply_edits(std::slice::from_ref(&built), sources);
         if let (Some(tile_id), Some(tile_plan)) = (tile_id, tile_plan) {
@@ -639,6 +659,7 @@ pub(super) fn apply(
                 added: Vec::new(),
                 snapped: 0,
                 runway_line: line,
+                continues: None,
             });
         }
         out.push(built);

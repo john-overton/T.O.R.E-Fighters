@@ -380,7 +380,28 @@ included, and for every runway object:
 - checks that the runway object's line, which the ILS localizer and glide
   path follow, lies on a drawn runway: both thresholds within 2 ft of its
   centre line, inside its paved length, at its heading within 0.05 degrees
-  (or on two runways that are one line, for a joined tile runway).
+  (or on two runways that are one line, for a joined tile runway);
+- for a pair, checks the two runways its plan says continue each other
+  (`[pair] continues`) are one straight runway on the drawn pavement (a
+  `pair alignment` line): both tile ends within 10 ft of the base runway's
+  centre line, headings within 0.5 degrees, and no gap wider than 10 ft
+  between the paved ends (`fitted`). The layouts place a tile 150 to 560 ft
+  into its base's pavement, the 220 ft overrun pads included, so the
+  pavements overlap by that much: one continuous surface, reported as a
+  negative `gap_ft` and not a problem. The build lines the tile up across the
+  base runway; without it 224 of the 430 pairs of the import were more than
+  10 ft off and up to 64 ft (John, Spassk Dalniy, 2026-10-11: the runway
+  jogged sideways halfway down);
+- reports drawn pavement on water (a `water` line, no failure): pavement
+  samples every 50 ft where the ground picture is the water cutout (255) or
+  the cell is water class, split into runway and other pavement, with whether
+  the retail runway line is wet too (retail placement, kept). The import has
+  8 such fields: 4 with the retail runway line on water (CUB 1 and 16,
+  GRE 3, IRA 9), and 4 where only our aprons and taxiways reach a shore
+  (CUB 10, GRE 4, PGU 4, WTA 11: 1 to 24 per cent of the
+  pavement). Vladivostok's Lake Khanka is not seen: it is painted in
+  ordinary land indices (teal in that theater's palette) over elevation 0
+  cells, so neither the picture nor the cell class marks it.
 
 It prints one line per runway object and a `PROBLEM` line for each failure;
 `--svg DIRECTORY` draws each airfield overhead with its routes, and

@@ -21,6 +21,17 @@ pub const HALF_TRACK_FT: f64 = 6.;
 /// of its centre line and this many degrees of its heading.
 pub const LINE_OFFSET_FT: f64 = 2.;
 pub const LINE_HEADING_DEG: f64 = 0.05;
+/// Two runways a pair's plan says continue each other must lie on one line
+/// within this lateral offset (feet) and heading difference (degrees), and
+/// their paved ends must not leave a gap wider than [`JOIN_GAP_FT`]
+/// (`fitted`, agent decision 2026-10-12, after John's Spassk Dalniy report
+/// of a visible sideways step halfway down a paired runway). The layouts
+/// place a tile 150 to 560 ft into its base's pavement, the 220 ft overrun
+/// pads included, which is one continuous surface, so an overlap is
+/// reported but not a problem.
+pub const ALIGN_OFFSET_FT: f64 = 10.;
+pub const ALIGN_HEADING_DEG: f64 = 0.5;
+pub const JOIN_GAP_FT: f64 = 10.;
 
 /// Where the AI stops on a route (the first taxi-out point, every taxi-in
 /// point) it runs on this far before its turn to the next leg is done: about
@@ -284,6 +295,127 @@ pub fn line_runway(pavement: &Built, runway: &Runway) -> Result<String, String> 
         }
     }
     Err(best.map_or_else(|| "no drawn runway".into(), |(_, why)| why))
+}
+
+/// How a pair's continuing runways lie against each other (see
+/// [`alignment`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Alignment {
+    /// The most either tile runway end lies off the base runway's centre
+    /// line, feet.
+    pub offset_ft: f64,
+    /// The heading difference of the two runways, degrees (0 to 90, the
+    /// runways being undirected).
+    pub heading_deg: f64,
+    /// The distance between the two runways' paved ends along the base
+    /// runway: positive a gap, negative an overlap (the pavements share
+    /// that length), feet.
+    pub gap_ft: f64,
+    /// The same between the runways' thresholds, overrun pads left out.
+    pub threshold_gap_ft: f64,
+}
+
+impl Alignment {
+    /// Why this is not one straight runway, if it is not.
+    pub fn problem(&self) -> Option<String> {
+        let mut why = Vec::new();
+        if self.offset_ft > ALIGN_OFFSET_FT {
+            why.push(format!("{:.1} ft off the line", self.offset_ft));
+        }
+        if self.heading_deg > ALIGN_HEADING_DEG {
+            why.push(format!("{:.2} degrees off the heading", self.heading_deg));
+        }
+        if self.gap_ft > JOIN_GAP_FT {
+            why.push(format!("a {:.0} ft gap between the ends", self.gap_ft));
+        }
+        (!why.is_empty()).then(|| why.join(", "))
+    }
+}
+
+/// The alignment of the two runways a pair's plan says continue each other
+/// (`[pair] continues`), measured on the drawn pavement: `None` for a field
+/// with no such pair. Their paved extent counts each runway's overrun pad.
+pub fn alignment(pavement: &Built) -> Option<Alignment> {
+    let [i, j] = pavement.continues?;
+    let (base, tile) = (pavement.runways.get(i)?, pavement.runways.get(j)?);
+    let d = geometry::direction(base.heading);
+    let side = geometry::right_of(d);
+    let dt = geometry::direction(tile.heading);
+    let ends = [
+        geometry::add(tile.from, geometry::scale(dt, -tile.pad)),
+        geometry::add(tile.from, geometry::scale(dt, tile.length + tile.pad)),
+    ];
+    let across = |p: Point| geometry::dot(geometry::sub(p, base.from), side).abs();
+    let along = |p: Point| geometry::dot(geometry::sub(p, base.from), d);
+    let (t0, t1) = (
+        along(ends[0]).min(along(ends[1])),
+        along(ends[0]).max(along(ends[1])),
+    );
+    let (b0, b1) = (-base.pad, base.length + base.pad);
+    let (s0, s1) = (
+        along(geometry::add(tile.from, geometry::scale(dt, 0.))),
+        along(geometry::add(tile.from, geometry::scale(dt, tile.length))),
+    );
+    let (s0, s1) = (s0.min(s1), s0.max(s1));
+    Some(Alignment {
+        threshold_gap_ft: (s0 - base.length).max(0. - s1),
+        offset_ft: across(ends[0]).max(across(ends[1])),
+        heading_deg: ((tile.heading - base.heading + 90.).rem_euclid(180.) - 90.).abs(),
+        gap_ft: (t0 - b1).max(b0 - t1),
+    })
+}
+
+/// How much of an airfield's drawn pavement lies on water cells (see
+/// [`water`]), sampled every [`WATER_STEP_FT`].
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Water {
+    /// Samples on a drawn runway's pavement, and how many are on water.
+    pub runway: (usize, usize),
+    /// Samples on the other pavement (taxiways, aprons, links), and how many
+    /// are on water.
+    pub other: (usize, usize),
+}
+
+/// The spacing of the water samples, feet.
+pub const WATER_STEP_FT: f64 = 50.;
+
+/// Samples every drawn patch of `pavement` against `over_water` (world
+/// `x, z`), split into runway pavement and the rest.
+pub fn water(pavement: &Built, over_water: &dyn Fn(f64, f64) -> bool) -> Water {
+    let mut out = Water::default();
+    for patch in &pavement.patches {
+        let Some((min, max)) = geometry::bounds(std::iter::once(&patch.poly)) else {
+            continue;
+        };
+        let mut x = min[0];
+        while x <= max[0] {
+            let mut z = min[1];
+            while z <= max[1] {
+                let p = [x, z];
+                if geometry::contains(&patch.poly, p) {
+                    let on_runway = pavement.runways.iter().any(|r| {
+                        let d = geometry::direction(r.heading);
+                        let rel = geometry::sub(p, r.from);
+                        let along = geometry::dot(rel, d);
+                        let across = geometry::dot(rel, geometry::right_of(d)).abs();
+                        across <= r.width * 0.5 && along >= -r.pad && along <= r.length + r.pad
+                    });
+                    let w = pavement.frame.world(p);
+                    let wet = over_water(w[0], w[2]);
+                    let bucket = if on_runway {
+                        &mut out.runway
+                    } else {
+                        &mut out.other
+                    };
+                    bucket.0 += 1;
+                    bucket.1 += usize::from(wet);
+                }
+                z += WATER_STEP_FT;
+            }
+            x += WATER_STEP_FT;
+        }
+    }
+    out
 }
 
 /// What one overlay on [`svg`] draws: a polyline in world `[x, z]`.

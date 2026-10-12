@@ -1450,6 +1450,18 @@ impl Terrain {
         self.theater.cell(col as usize, row as usize).class == 1
     }
 
+    /// Whether the terrain is drawn as open water under the point: the T2
+    /// cell is water class, or its colour is the water cutout (255) that the
+    /// renderer leaves to the ocean pass. The airport audit uses it to find
+    /// pavement drawn over the sea.
+    pub fn drawn_as_water(&self, x: f64, z: f64) -> bool {
+        self.over_water(x, z) || {
+            let col = (x / f64::from(CELL_FEET)).floor() as usize;
+            let row = (z / f64::from(CELL_FEET)).floor() as usize;
+            self.theater.cell(col, row).color == 255
+        }
+    }
+
     /// Explicit authored standard atmosphere, shared wind and rendered terrain.
     /// No weather-derived temperature/pressure is inferred from LAY colors.
     pub fn air_data(

@@ -97,9 +97,24 @@ pub fn run() -> AppResult<()> {
     }
     let tracks = read_tracks(&track_paths)?;
     let (mut objects, mut airfields, mut routes_walked, mut problems) = (0, 0, 0, 0);
+    // Pavement on water cells: fields touched, with the retail runway line
+    // itself wet (retail placement, kept) or only our added pavement wet.
+    let (mut pairs, mut pair_problems) = (0, 0);
+    let (mut wet_fields, mut wet_retail, mut wet_ours) = (0, 0, 0);
     for code in &theaters {
         let world = crate::scenery::launch_terrain(&resources, code, None)?;
         let scene = &world.airport_scene;
+        // Open water as the terrain mesh draws it: the ground picture's
+        // water cutout under a point, else the cell's own water.
+        let base = tore_formats::theater::base_theater(&world.layout).unwrap_or("");
+        let texel = tore_world::city::mask::ground_texel(&resources, &world.environment, base);
+        // Open water as the terrain mesh draws it: the ground picture's
+        // water cutout (255) under the point, or the cell's water class or
+        // cutout colour. A theater that paints its lakes in ordinary land
+        // indices (Vladivostok's Lake Khanka is teal in indices 192 to 197)
+        // or at sea-level elevation is not seen: neither marks water.
+        let wet_at =
+            |x: f64, z: f64| texel(x as i64, z as i64) == Some(255) || world.drawn_as_water(x, z);
         let wanted = |airport: u32| {
             fields.is_empty() || fields.iter().any(|(c, a)| c == code && *a == airport)
         };
@@ -130,6 +145,52 @@ pub fn run() -> AppResult<()> {
             let pavement = &world.redrawn[*owner];
             airfields += 1;
             let components = audit::components(pavement);
+            let here = scene.runway(objects_here[0]).expect("listed above").airport;
+            // A pair's continuing runways are one straight runway.
+            if let Some(alignment) = audit::alignment(pavement) {
+                pairs += 1;
+                println!(
+                    "airfield-audit: {code} airport {here} pair alignment offset_ft={:.1} heading_deg={:.2} gap_ft={:.1} threshold_gap_ft={:.1}",
+                    alignment.offset_ft,
+                    alignment.heading_deg,
+                    alignment.gap_ft,
+                    alignment.threshold_gap_ft
+                );
+                if let Some(why) = alignment.problem() {
+                    println!(
+                        "airfield-audit: PROBLEM {code} airport {here}: the pair's runways are not one straight runway: {why}"
+                    );
+                    problems += 1;
+                    pair_problems += 1;
+                }
+            }
+            // Drawn pavement on water cells, and whether the retail runway
+            // line is on water there too (then it is retail placement).
+            let wet = audit::water(pavement, &wet_at);
+            if wet.runway.1 + wet.other.1 > 0 {
+                let retail_wet = objects_here.iter().any(|object| {
+                    let runway = scene.runway(*object).expect("listed above");
+                    let near = runway.threshold(tore_sim::airport::ApproachEnd::Near);
+                    let far = runway.threshold(tore_sim::airport::ApproachEnd::Far);
+                    (0..=100).any(|k| {
+                        let f = f64::from(k) / 100.;
+                        wet_at(
+                            near[0] + (far[0] - near[0]) * f,
+                            near[2] + (far[2] - near[2]) * f,
+                        )
+                    })
+                });
+                wet_fields += 1;
+                if retail_wet {
+                    wet_retail += 1;
+                } else {
+                    wet_ours += 1;
+                }
+                println!(
+                    "airfield-audit: water {code} airport {here} runway_samples={}/{} other_samples={}/{} retail_runway_line_on_water={retail_wet}",
+                    wet.runway.1, wet.runway.0, wet.other.1, wet.other.0
+                );
+            }
             let mut overlays = Vec::new();
             let mut marks = Vec::new();
             let mut first_airport = 0;
@@ -307,6 +368,9 @@ pub fn run() -> AppResult<()> {
             }
         }
     }
+    println!(
+        "airfield-audit: {pairs} paired runways checked ({pair_problems} not straight); {wet_fields} airfields have drawn pavement on water cells ({wet_retail} with the retail runway line wet too, {wet_ours} only from our pavement)"
+    );
     println!(
         "airfield-audit: {} theaters, {airfields} airfields, {objects} runway objects, {routes_walked} routes, {problems} problems",
         theaters.len()
