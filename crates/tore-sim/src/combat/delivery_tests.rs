@@ -88,6 +88,7 @@ fn solved(
             clock: CLOCK,
             falling: None,
             ballistic: false,
+            beyond_life: false,
         },
         |_, _| 0.,
     )
@@ -189,6 +190,7 @@ fn solved_over(
             clock: CLOCK,
             falling: None,
             ballistic: false,
+            beyond_life: false,
         },
         ground,
     )
@@ -426,19 +428,88 @@ fn rockets_get_a_pipper_and_never_the_level_release() {
             clock: CLOCK,
             falling: None,
             ballistic: false,
+            beyond_life: false,
         },
         |_, _| 0.,
     );
     assert!(solved_guided.is_none());
 }
 
+/// The human's solution: the rocket pipper carries on past the lifetime.
+fn solved_beyond(station: &Station, launcher: &Launcher) -> Option<Delivery> {
+    solve(
+        Situation {
+            index: 0,
+            station,
+            launcher,
+            mode: DeliveryMode::Ccip,
+            target: None,
+            target_velocity: [0.; 3],
+            clock: CLOCK,
+            falling: None,
+            ballistic: false,
+            beyond_life: true,
+        },
+        |_, _| 0.,
+    )
+}
+
 #[test]
-fn a_rocket_that_never_comes_down_has_no_pipper() {
-    // Climbing away: its 20 s life ends first.
+fn the_ais_rocket_gate_still_sees_no_impact_where_the_life_ends_first() {
+    // Climbing away, or level too high: the 20 s life ends first, and the AI's
+    // solution (no continuation) has no pipper, as before the human's
+    // pipper was made permanent.
     let s = station(lau61());
-    let d = solved(&s, &pass(1_500., 400., 30.), DeliveryMode::Ccip, None);
-    assert!(d.ccip.is_none());
-    assert!(d.warnings.is_empty());
+    for launcher in [pass(1_500., 400., 30.), pass(3_000., 400., 0.)] {
+        let d = solved(&s, &launcher, DeliveryMode::Ccip, None);
+        assert!(d.ccip.is_none());
+        assert!(d.warnings.is_empty());
+    }
+}
+
+#[test]
+fn a_human_rockets_pipper_is_on_the_ground_past_the_lifetime() {
+    let s = station(lau61());
+    // Level at 3,000 ft: the rocket sinks 1,500 ft in its 20 s, so the AI's
+    // fly-out has no impact; the continuation brings it down on the ground.
+    let level = pass(3_000., 400., 0.);
+    assert!(rocket_impact(&s.weapon, &level, &s, CLOCK, &|_, _| 0.).is_none());
+    let c = solved_beyond(&s, &level).unwrap().ccip.unwrap();
+    assert!(c.impact[1].abs() < 5., "{}", c.impact[1]);
+    assert!(c.seconds > 20., "{}", c.seconds);
+    assert!(c.impact[2] > 0.);
+    // A steeper pass reaches the same ground inside the life, and the
+    // continuation agrees with the in-life solution exactly there.
+    let dive = pass(1_500., 400., -10.);
+    let inside = rocket_impact(&s.weapon, &dive, &s, CLOCK, &|_, _| 0.).unwrap();
+    let beyond = rocket_impact_beyond(&s.weapon, &dive, &s, CLOCK, &|_, _| 0.).unwrap();
+    assert_eq!(inside.1, beyond.1);
+    // Nose above the horizon: no ground, so the pipper marks where the round
+    // stands when its life ends, 20 s out and above the aircraft.
+    let climb = pass(1_500., 400., 30.);
+    let c = solved_beyond(&s, &climb).unwrap().ccip.unwrap();
+    assert!((c.seconds - 20.).abs() < 0.1, "{}", c.seconds);
+    assert!(c.impact[1] > 1_500. && c.impact[2] > 10_000.);
+    assert!(!c.in_range());
+}
+
+#[test]
+fn the_continuation_follows_rising_ground() {
+    // A ridge 2,000 ft up, 20,000 ft out, stops a level pass the flat ground
+    // would not.
+    let s = station(lau61());
+    let level = pass(3_000., 400., 0.);
+    let ridge = |_: f64, z: f64| if z > 20_000. { 2_000. } else { 0. };
+    let flat = rocket_impact_beyond(&s.weapon, &level, &s, CLOCK, &|_, _| 0.).unwrap();
+    let hit = rocket_impact_beyond(&s.weapon, &level, &s, CLOCK, &ridge).unwrap();
+    assert!(
+        hit.1.seconds < flat.1.seconds,
+        "{} {}",
+        hit.1.seconds,
+        flat.1.seconds
+    );
+    // It lands on the face of the ridge, at its foot (the step is a tenth of a second).
+    assert!(hit.1.position[1] <= 2_000. && (hit.1.position[2] - 20_000.).abs() < 400.);
 }
 
 #[test]
@@ -524,6 +595,7 @@ fn the_ccip_pipper_lays_on_a_target_on_a_rise_or_in_a_hollow() {
                 clock: CLOCK,
                 falling: None,
                 ballistic: false,
+                beyond_life: false,
             },
             ground,
         )
