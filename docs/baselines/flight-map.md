@@ -87,6 +87,6 @@ mission changes it, so it is always known. No retail comparison was run.
 - The preview set is unchanged (eight views of one Ukraine mission); the
   airfields now carry their side. Before and after renders are kept under
   `.local/surface-close/renders/cl-ms/`.
-- The creator's map already drew airfields by side; it is unchanged.
+- Start markers are viewer-relative too (own side's start friendly, the other hostile; the words stay BLUE START and RED START), with a unit test for both viewers. The creator's map already drew airfields by side from the Blue pilot's view; it is unchanged.
 - Not run: windowed scenarios, the full battery, a networked Redfor seat,
   Windows and macOS.

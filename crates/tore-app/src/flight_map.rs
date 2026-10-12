@@ -433,7 +433,7 @@ impl Map {
         if self.filters.shows(Category::Mission)
             && let Some(plan) = markup
         {
-            let route = if own == DEFAULT_OWNSHIP_SIDE {
+            let viewer_side = if own == DEFAULT_OWNSHIP_SIDE {
                 PlanSide::Blue
             } else {
                 PlanSide::Red
@@ -443,11 +443,18 @@ impl Map {
                 font,
                 &projection,
                 plan,
-                Some(route),
+                Some(viewer_side),
                 &mut markers,
                 &mut labels,
             );
-            let placed = place_starts(pixels, &projection, plan, &mut markers, &mut labels);
+            let placed = place_starts(
+                pixels,
+                &projection,
+                plan,
+                viewer_side,
+                &mut markers,
+                &mut labels,
+            );
             draw_placed(pixels, icons, font, &placed, &mut labels);
             start_fields = &plan.start_fields;
         }
@@ -1207,12 +1214,25 @@ struct Placed<'a> {
     off_map: bool,
 }
 
+/// The tile of a start marker for a viewer on side `viewer`: the viewer's
+/// own side's starts are friendly, the other side's hostile, as for airfields
+/// and surface units.
+fn start_tile(marker: PlanSide, viewer: PlanSide) -> Tile {
+    if marker == viewer {
+        Tile::Friendly
+    } else {
+        Tile::Hostile
+    }
+}
+
 /// Places the plan's starts in the order listed, moving a crowded one aside
-/// with a leader as the in-game map does.
+/// with a leader as the in-game map does. `viewer` is the side whose view the
+/// map shows.
 fn place_starts<'a>(
     pixels: &mut [u8],
     projection: &Projection,
     plan: &'a Plan,
+    viewer: PlanSide,
     markers: &mut Vec<(i32, i32)>,
     labels: &mut Vec<(i32, i32, i32, i32)>,
 ) -> Vec<Placed<'a>> {
@@ -1225,10 +1245,7 @@ fn place_starts<'a>(
         let icon = (marker.heading.rem_euclid(std::f64::consts::TAU) / std::f64::consts::FRAC_PI_4)
             .round() as usize
             % 8;
-        let tile = match marker.side {
-            PlanSide::Blue => Tile::Friendly,
-            PlanSide::Red => Tile::Hostile,
-        };
+        let tile = start_tile(marker.side, viewer);
         placed.push(Placed {
             at,
             icon,
@@ -1377,6 +1394,15 @@ mod tests {
             assert_eq!(airfield_tile(Allegiance::Neutral, own), Tile::Neutral);
             assert_eq!(airfield_tile(Allegiance::Unknown, own), Tile::Neutral);
         }
+    }
+    #[test]
+    fn a_start_is_friendly_to_its_own_side_and_hostile_to_the_other() {
+        use PlanSide::{Blue, Red};
+        assert_eq!(start_tile(Blue, Blue), Tile::Friendly);
+        assert_eq!(start_tile(Red, Blue), Tile::Hostile);
+        // A Redfor viewer: RED START is friendly, BLUE START hostile.
+        assert_eq!(start_tile(Red, Red), Tile::Friendly);
+        assert_eq!(start_tile(Blue, Red), Tile::Hostile);
     }
     #[test]
     fn symbols_take_the_blue_row_for_friends_the_red_row_for_foes_and_grey_for_neither() {

@@ -97,9 +97,9 @@ and the map reads it without any detection. The scene records it from Blue's
 point of view; a Redfor pilot (a networked game's Redfor seat) sees friendly
 and hostile swapped, as the tower and the wing's landing orders already do.
 The airfields a start names (BLUE START, RED START) are drawn as the start
-symbols described under [Mission markup](#mission-markup), in each side's own
-colour whichever side the viewer flies; the creator's mission map draws its
-airfields on blue, red or grey tiles by the Blue pilot's view.
+symbols described under [Mission markup](#mission-markup), on the same
+viewer-relative tile; the creator's mission map draws its airfields on blue,
+red or grey tiles by the Blue pilot's view.
 
 ## Category controls
 
@@ -155,8 +155,14 @@ same function from the same mission data:
   ground start (the airfield symbol is then not drawn again) or the airborne
   point with its heading, plus BLUE WING n or RED WING n for another wing that
   starts more than 3 nautical miles from its side's start. The creator's map
-  shows both starts to everyone, so the flight map does too, in each side's
-  own colour, whichever side the viewer flies. Each machine of a networked game
+  shows both starts to everyone, so the flight map does too. The words stay
+  BLUE START and RED START, but the tile is the viewer's: the viewer's own
+  side's starts (and its WING n markers) are on the friendly blue tile and the
+  other side's on the hostile red one, as for airfields and surface units
+  (John 2026-10-12, agent wording). A Blue pilot sees BLUE START blue and RED
+  START red; a Redfor pilot sees RED START blue and BLUE START red. The
+  creator's map is the Blue pilot's view, where the two colourings coincide.
+  Each machine of a networked game
   builds the same mission, so each sees the same markup.
 - **The route**: a thin line from the viewer's own side's start to the edge of
   the objective area, in the map's one line style (a one-pixel ink line over a
