@@ -298,8 +298,8 @@ impl Mover {
 
     /// [`Self::step`], and with `hold` the unit brakes to a stand where it
     /// is (at its usual rate, still turning toward its leg) instead of
-    /// driving on: a land unit holds while one of its weapons engages a
-    /// ground unit or ship ([`engaging_surface`]). Nothing about the hold
+    /// driving on: a land unit holds while one of its weapons fights a
+    /// ground unit or ship in reach ([`engaging_surface`]). Nothing about the hold
     /// is kept: the next tick without it drives on.
     pub fn step_held(
         &mut self,
@@ -421,16 +421,20 @@ impl Mover {
     }
 }
 
-/// Whether one of the unit's weapons engages a ground unit or ship: its
-/// controller holds a surface target, from preparing to the pause between
-/// bursts and a magazine swap. A land unit on a route holds while it does
-/// (docs/spec/surface-defenses.md, "Surface against surface").
+/// Whether one of the unit's weapons fights a ground unit or ship: its
+/// controller holds a surface target inside the weapon's launch gates (the
+/// fire zone), or has started a burst at one (to the pause between bursts and
+/// a magazine swap). A target seen only inside the detection zone does not
+/// count, so a column keeps driving until it is in reach. A land unit on a
+/// route holds while it fights (docs/spec/surface-defenses.md, "Surface
+/// against surface").
 pub fn engaging_surface(state: &SurfaceUnitState) -> bool {
     state.engagers.iter().any(|engager| {
-        engager
-            .controller
-            .target()
-            .is_some_and(super::fire::is_surface_id)
+        engager.controller.fighting()
+            && engager
+                .controller
+                .target()
+                .is_some_and(super::fire::is_surface_id)
     })
 }
 

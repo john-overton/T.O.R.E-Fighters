@@ -344,6 +344,20 @@ impl Controller {
             _ => self.target,
         }
     }
+    /// Whether the controller fights its target now: the target is inside the
+    /// launch gates (Track with the gates met, which needs the fire zone) or
+    /// a burst has started (Fire, Pause, Reload). A target seen only in the
+    /// detection zone (Prepare, or Track with the gates failing) does not
+    /// count. A routed land unit holds while one of its weapons fights a
+    /// ground unit or ship (docs/spec/surface-defenses.md, "Surface against
+    /// surface").
+    pub fn fighting(&self) -> bool {
+        match self.phase {
+            Phase::Fire | Phase::Pause | Phase::Reload => self.target.is_some(),
+            Phase::Track => self.target.is_some() && self.gates_failed_since.is_none(),
+            _ => false,
+        }
+    }
     /// The burst or salvo in progress, as `(start tick, rounds, span ticks,
     /// rounds released)`: round k leaves at the first tick at or after
     /// `start + k * span / rounds`. A networked host tells clients a gun
