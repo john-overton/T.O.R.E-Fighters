@@ -143,13 +143,16 @@ class CatalogTests(unittest.TestCase):
             source = Path(directory) / 'FA_2.LIB'
             source.mkdir()
             (source / 'F18.PT').write_bytes(plane())
-            (source / 'M61.JT').write_bytes(store(initialSpeed='2933', fuelT='0', sig='0'))
+            (source / 'M61.JT').write_bytes(store(initialSpeed='2933', fuelT='0', sig='0',
+                                                  maxSndDist='7000', freqAdj='-10'))
             (source / 'T72.NT').write_bytes(b'[brent\'s_relocatable_format]\n'
                                             b':names\nstring "M61.JT"\nend\n')
             aircraft, weapons = catalogs(Path(directory), LAYOUT)
         self.assertEqual(aircraft[0]['internal_gun'], 'M61.JT')
         self.assertEqual(weapons[0]['aircraft_default_stations'], 1)
         self.assertEqual(weapons[0]['surface_type_references'], 1)
+        self.assertEqual(weapons[0]['max_sound_distance_ft'], 7000)
+        self.assertEqual(weapons[0]['frequency_adjust'], -10)
         self.assertEqual(weapons[0]['archive'], 'FA_2.LIB')
 
     def test_unreadable_surface_records_are_skipped(self):
