@@ -853,6 +853,67 @@ pub fn build(
     build_with_terrain(state, plane, launcher, wings, cockpit, None)
 }
 
+/// How long a plane's terrain-aware cruise fly-out time is kept, ticks (8
+/// a second). Agent design: the HUD shows it to a tenth of a second, and the
+/// fly-out samples the terrain on every step (review M1).
+pub const TERRAIN_TTI_TICKS: u64 = 15;
+
+/// The terrain-aware fly-out time of each plane's selected cruise weapon,
+/// kept for [`TERRAIN_TTI_TICKS`] while the station, target and launch mode
+/// stay the same, so a readout built every rendered frame and at every
+/// snapshot flies it at most eight times a second. Presentation only:
+/// nothing in the simulation reads it.
+#[derive(Debug, Default)]
+pub struct TerrainTti(std::sync::Mutex<std::collections::BTreeMap<u32, TtiEntry>>);
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct TtiEntry {
+    tick: u64,
+    station: usize,
+    target: Option<u32>,
+    mode: LaunchMode,
+    seconds: Option<f64>,
+}
+
+impl TerrainTti {
+    /// Forgets every kept time (a restart or a loaded checkpoint).
+    pub fn clear(&mut self) {
+        self.0
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+    }
+
+    fn seconds(
+        &self,
+        plane: u32,
+        own: &live::Ownship,
+        at: &live::LauncherView<'_>,
+        own_tick: u64,
+    ) -> Option<f64> {
+        let key = TtiEntry {
+            tick: own_tick,
+            station: own.selected,
+            target: at.weapon_observation().map(|o| o.id),
+            mode: own.launch_mode,
+            seconds: None,
+        };
+        let mut kept = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(entry) = kept.get(&plane)
+            && (entry.station, entry.target, entry.mode) == (key.station, key.target, key.mode)
+            && (entry.tick..entry.tick + TERRAIN_TTI_TICKS).contains(&own_tick)
+        {
+            return entry.seconds;
+        }
+        let seconds = at.terrain_solution().map(|s| s.seconds);
+        kept.insert(plane, TtiEntry { seconds, ..key });
+        seconds
+    }
+}
+
 /// Build the same readout with fresh launch visibility and terrain-aware
 /// cruise fly-out time. The launch range scale stays energy-only.
 pub fn build_with_terrain(
@@ -862,6 +923,20 @@ pub fn build_with_terrain(
     wings: Option<&AiWings>,
     cockpit: Option<&Cockpit>,
     ground: Option<&dyn Fn(f64, f64) -> f64>,
+) -> Option<CockpitReadout> {
+    build_with_terrain_kept(state, plane, launcher, wings, cockpit, ground, None)
+}
+
+/// [`build_with_terrain`], keeping the terrain-aware fly-out time in `kept`
+/// ([`TerrainTti`]).
+pub fn build_with_terrain_kept(
+    state: &live::State,
+    plane: u32,
+    launcher: Launcher,
+    wings: Option<&AiWings>,
+    cockpit: Option<&Cockpit>,
+    ground: Option<&dyn Fn(f64, f64) -> f64>,
+    kept: Option<&TerrainTti>,
 ) -> Option<CockpitReadout> {
     let view = state.view(plane)?;
     let own = view.ownship();
@@ -883,7 +958,12 @@ pub fn build_with_terrain(
         band: at.favorable_firing_band(),
         in_range: at.in_estimated_range(),
         hit_percent: at.estimated_hit_percent(),
-        solution_seconds: at.terrain_solution().map(|s| s.seconds),
+        solution_seconds: match kept {
+            Some(kept) if at.flies_terrain_solution() => {
+                kept.seconds(plane, own, &at, state.tick())
+            }
+            _ => at.terrain_solution().map(|s| s.seconds),
+        },
         harm: HarmCue::of(own, at.readiness()),
     };
 

@@ -17,8 +17,9 @@
 //!   `dummy_configs`, `airport_objects`, `ground_sides`, `ground_looks`,
 //!   `surface_targets`;
 //! - local, one machine's: `tape` (the recorder's list, which the app owns),
-//!   `last_launcher` (read only to write the tape) and `notes` (the mission
-//!   recorder's command notes, which nothing in flight reads);
+//!   `last_launcher` (read only to write the tape), `terrain_tti` (the
+//!   readout's kept fly-out times, cleared on a load) and `notes` (the
+//!   mission recorder's command notes, which nothing in flight reads);
 //! - rebuilt: `RenderHistory::places` is each snapshot's target index by id,
 //!   built again from the coded snapshots, as `set_current` and `advance` do.
 //!
@@ -129,6 +130,8 @@ impl Combat {
             tape: _,
             // Local: read only to write the tape.
             last_launcher: _,
+            // Local: the readout's kept fly-out times.
+            terrain_tti: _,
             // Local: the mission recorder's notes, which no tick reads.
             notes: _,
         } = self;
@@ -186,8 +189,10 @@ impl Combat {
             surface: surface_slot,
             tape: _,
             last_launcher: _,
+            terrain_tti: terrain_tti_slot,
             notes: _,
         } = self;
+        terrain_tti_slot.clear();
         *contrail_sortie_slot = contrail_sortie;
         *contrails_slot = contrails;
         *triggers_slot = triggers;

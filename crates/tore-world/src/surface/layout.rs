@@ -149,7 +149,8 @@ pub const BARRAGE_ZONE: &str = "A_M1939.NT";
 /// The front's centre stands this far from the targets' centroid, nm: the
 /// first band, then the second when no site in the first passes.
 pub const FRONT_BANDS_NM: [[i64; 2]; 2] = [[5, 10], [10, 20]];
-/// Every template unit and every start is at least this far from the
+/// Every template unit, every leg of a routed unit's path, both airborne
+/// starts and every ground-start runway are at least this far from the
 /// front's centre, nm, so no front unit reaches the objective and no start
 /// sits in the fighting.
 pub const FRONT_CLEAR_NM: i64 = 4;

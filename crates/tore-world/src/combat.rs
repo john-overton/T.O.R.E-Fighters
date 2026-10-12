@@ -195,6 +195,10 @@ pub struct Combat {
     /// Combat holds no file: the app owns the writer.
     tape: Option<Vec<crate::combat_tape::Entry>>,
     last_launcher: Option<Launcher>,
+    /// Each plane's terrain-aware cruise fly-out time, kept a few ticks for
+    /// the readout (review M1). Local presentation: nothing in flight reads
+    /// it.
+    terrain_tti: crate::readout::TerrainTti,
     /// Player commands since the mission recorder last looked. Nothing in
     /// flight reads them.
     notes: std::collections::VecDeque<CommandNote>,
@@ -359,13 +363,14 @@ impl Combat {
         cockpit: Option<&crate::world::Cockpit>,
         ground: Option<&dyn Fn(f64, f64) -> f64>,
     ) -> Option<crate::readout::CockpitReadout> {
-        let mut readout = crate::readout::build_with_terrain(
+        let mut readout = crate::readout::build_with_terrain_kept(
             &self.state,
             plane,
             launcher,
             wings,
             cockpit,
             ground,
+            Some(&self.terrain_tti),
         )?;
         if let Some(brief) = readout.target_window.as_mut()
             && brief.objective.is_none()
@@ -627,6 +632,7 @@ impl Combat {
             render: RenderHistory::default(),
             tape: None,
             last_launcher: None,
+            terrain_tti: Default::default(),
             notes: Default::default(),
         }
     }
@@ -1313,6 +1319,7 @@ impl Combat {
         let l = launcher(s);
         self.record_tape(if self.range { "reset" } else { "reset-scene" }, l);
         self.last_launcher = Some(l);
+        self.terrain_tti.clear();
         let weapon_rules = self.state.weapon_rules;
         let friendly_fire = self.state.friendly_fire;
         let host = if self.open {
@@ -2062,6 +2069,7 @@ pub mod fixtures {
             weapon_boxes: BTreeMap::new(),
             tape: None,
             last_launcher: None,
+            terrain_tti: Default::default(),
             notes: Default::default(),
         }
     }

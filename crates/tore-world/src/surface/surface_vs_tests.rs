@@ -282,8 +282,13 @@ fn a_unit_engaging_a_surface_target_holds_and_one_engaging_aircraft_does_not() {
     f.jet.side = RED;
     assert!(!movement::engaging_surface(f.unit_state(RED_TANK)));
     f.run(TPS);
-    // Preparing on the Blue tank already counts.
+    // Preparing on the Blue tank does not count yet (review M2): only a
+    // target inside the gates, or a burst started.
     assert_eq!(f.phase(RED_TANK), Phase::Prepare);
+    assert!(!movement::engaging_surface(f.unit_state(RED_TANK)));
+    // Past the preparation, inside the fire zone: it fights.
+    f.run(20 * TPS);
+    assert!(f.phase(RED_TANK).locked());
     assert!(movement::engaging_surface(f.unit_state(RED_TANK)));
     f.kill(BLUE_TANK);
     f.run(TPS);
@@ -294,6 +299,73 @@ fn a_unit_engaging_a_surface_target_holds_and_one_engaging_aircraft_does_not() {
     f.run(25 * TPS);
     assert!(f.phase(RED_TANK).locked());
     assert!(!movement::engaging_surface(f.unit_state(RED_TANK)));
+}
+
+/// Review M2: a routed tank that sees an enemy tank in its detection zone
+/// (20,000 ft) but out of its fire zone (5,000 ft) keeps driving, closes, and
+/// only then halts and fires. Before the fix it halted on sight, 12,000 ft
+/// out, and never fired.
+#[test]
+fn a_column_closes_on_a_tank_it_sees_out_of_reach_then_halts_and_fires() {
+    use movement::{Course, Leg, Mover, Rig};
+    let mut f = Fixture::new(
+        vec![
+            tank(RED_TANK, 0., 0., RED),
+            tank(BLUE_TANK, 0., 12_000., BLUE),
+        ],
+        Vec::new(),
+    );
+    // The jet is Red's own and out of everyone's way.
+    f.jet.side = RED;
+    let rig = Rig {
+        centre: [0.; 3],
+        half: [6., 5., 15.],
+    };
+    let course = Course {
+        legs: vec![Leg {
+            to: [0., 20_000.],
+            speed: 50.,
+        }],
+        start: [0, 0, 0],
+        start_angles: [0, 0, 0],
+        turn_rate: 15f64.to_radians(),
+        top_speed: 50.,
+        acceleration: 5.,
+        ship: false,
+        rig: Some(rig),
+        lane: 0.,
+    };
+    let flat = |_: f64, _: f64| 0.;
+    let mut mover = Mover::start(&course, 0.);
+    let mut seen_driving = None;
+    let mut halted = None;
+    for tick in 0..240 * TPS {
+        let hold = movement::engaging_surface(f.unit_state(RED_TANK));
+        mover.step_held(&course, true, hold, flat);
+        f.state.unit_mut(UnitId(RED_TANK)).unwrap().mover = Some(mover);
+        f.live
+            .move_ground_target(RED_TANK, mover.bounds(&rig), mover.velocity(), true);
+        f.step();
+        let gap = 12_000. - mover.position()[2];
+        let target = f.unit_state(RED_TANK).engagers[0].controller.target();
+        if target == Some(BLUE_TANK) && gap > 6_000. && mover.speed_feet() > 40. {
+            seen_driving.get_or_insert(gap);
+        }
+        if halted.is_none() && mover.speed_feet() == 0. && tick > TPS {
+            halted = Some(gap);
+        }
+    }
+    let seen = seen_driving.expect("it drives on with the tank in sight");
+    assert!(seen > 6_000., "{seen}");
+    let halted = halted.expect("it halts");
+    assert!(
+        halted <= 5_000. && halted > 1_000.,
+        "halted {halted} ft out"
+    );
+    assert!(rounds_at(&f, RED_TANK, BLUE_TANK) > 0);
+    // It stays halted while it fights.
+    assert_eq!(mover.speed_feet(), 0.);
+    assert!(movement::engaging_surface(f.unit_state(RED_TANK)));
 }
 
 #[test]

@@ -803,6 +803,18 @@ separate, described in [air-to-ground](air-to-ground.md#terrain-at-lock-and-laun
 The energy envelope can therefore show an otherwise reachable shot while
 MASK or a missing track prevents a lock or launch.
 
+The terrain-aware fly-out samples the terrain on every step to impact, so it
+is not run every tick (agent design, review fix 2026-10-12). A guiding cruise
+missile works out its time to impact on its first guiding tick and then every
+15 ticks (8 a second, staggered by projectile id), counting down in between.
+Other guided weapons still work it out every tick. The HUD's launch fly-out
+time for a selected cruise weapon is kept for 15 ticks while the station,
+target and launch mode stay the same. Both are time cues only; nothing in
+flight reads them. In a probe over rolling hills the guiding missile's cost
+fell from about 550 to 37 microseconds a tick, with the same time to impact to
+a tenth of a millisecond, and the HUD fly-out from about 2.5 to 5.7 ms on every
+frame to the same cost eight times a second.
+
 Measured checks are in the [terrain validation](../baselines/surface-terrain.md).
 
 These clearance numbers are not recovered original behaviour or real missile

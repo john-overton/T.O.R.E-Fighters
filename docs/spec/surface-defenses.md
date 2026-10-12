@@ -512,9 +512,12 @@ lists as the template's `<tank>`, `<afv>` and `<aaa>` slots
   centroid, on the bearing toward Blue's side of the theater's front (turned by
   up to 90 degrees); when no site in that band passes, 10 to 20 nm. Up to 24
   candidates per band, the first that passes wins. A candidate must keep 4 nm
-  from every template unit and parked aircraft (so no front unit's gun or
-  missile reaches the targets and the front can neither destroy nor protect
-  the objective) and from both starts (so nobody starts in the fighting), and
+  from every template unit and parked aircraft and from every leg of a routed
+  unit's path, start to last waypoint (so no front unit's gun or missile
+  reaches the targets, wherever a column or truck drives, and the front can
+  neither destroy nor protect the objective), and from both airborne starts
+  and every runway a ground start of either side may use (so nobody starts or
+  takes off in the fighting), and
   every unit must stand on land where a ground unit may (level, off the sea,
   clear of layout objects and runways: the same rule as the template's units)
   and see every unit of the other line over the terrain (the weapons' own line
@@ -525,7 +528,9 @@ lists as the template's `<tank>`, `<afv>` and `<aaa>` slots
   the targets, with 13 to 32 pairs in sight and reach and the nearest opposing
   pair 2,146 to 2,601 ft apart (the farthest pair in reach 4,056 ft, inside a
   tank gun's 5,000); the 25 without are naval targets (fleets, cargo ships, the
-  Taiwan sea scenarios) with no land within 20 nm of them.
+  Taiwan sea scenarios) with no land within 20 nm of them. The route and
+  runway rules (review fix, 2026-10-12) changed none of these builds: the
+  same survey after them stands the same 191 fronts in the same places.
 - **How.** The line's axis runs from the centre toward the targets, turned by
   up to 45 degrees. Blue's line stands 1,200 ft back from the centre on the
   Blue end of the axis, Red's 1,200 ft on the other: the lines are 2,400 ft
@@ -934,8 +939,8 @@ The follower (fitted: the retail waypoint consumer is untraced):
 - **Fire.** Guns fire while moving (fitted; retail behaviour unknown). The unit
   fires from where it is: its combat target (aim point, velocity, orientation),
   its hit box and its mounts follow the pose every tick. A land unit halts while
-  it engages a ground unit or ship and drives on afterwards ([surface against
-  surface](#surface-against-surface)).
+  it fights a ground unit or ship in reach and drives on afterwards; one it only
+  sees does not stop it ([surface against surface](#surface-against-surface)).
 
 The state of a moving unit is a position, heading, speed, leg and halt reason in
 whole units (1/65536 ft, 2^32 binary angles), so a checkpoint resumes the march
@@ -1129,7 +1134,7 @@ is eligible only if `react` names its class).
 | Damage | The record's damage for the target's class (`damage[0..4]`: the T-72 and M1 guns 200 against everything, so one 125 mm round kills a 200 point tank) | retail |
 | Locks and painting | Fed for aircraft only: a ground unit has no RWR, and a ship's lock tone would be meaningless | defined (agent) |
 | The SS-N-9's support | The Sarancha's radar comes on while a ship of the other side is inside the SS-N-9's 250,000 ft detection range (its air search keeps the SA-N-4's 100,000 ft), and it supports its missiles from its own radar like any self-contained launcher | defined (agent) |
-| Columns | A land unit on a route halts while one of its weapons engages a ground unit or ship (from preparing to the pause between bursts and a magazine swap): it brakes at its usual 5 ft/s squared where it is and drives on, from rest, when none does. Fighting aircraft does not stop it, and ships fight under way. Nothing about the halt is kept: it follows from the controllers' state, which the checkpoint already holds | fitted (agent): a column stops to fight; the retail waypoint consumer is untraced |
+| Columns | A land unit on a route halts while one of its weapons fights a ground unit or ship: the target is inside the weapon's launch gates (its fire zone, arc and line of sight), or a burst has started (to the pause between bursts and a magazine swap). A target seen only inside the detection zone does not halt it, so a column closes to firing range first (review fix 2026-10-12: halting on sight froze a column for good on an enemy out of reach). It brakes at its usual 5 ft/s squared where it is and drives on, from rest, when none does. Fighting aircraft does not stop it, and ships fight under way. Nothing about the halt is kept: it follows from the controllers' state, which the checkpoint already holds | fitted (agent): a column stops to fight; the retail waypoint consumer is untraced |
 | Supply | Unchanged: trucks rearm and refill whatever a unit fired at | defined (John) |
 | Stock | Unchanged; a ship's missile mounts hold the record's `maxItems` 32,767 (unlimited), so a Sarancha fires an SS-N-9 every 8 s (`reloadT` 32) while a ship is in reach | retail |
 

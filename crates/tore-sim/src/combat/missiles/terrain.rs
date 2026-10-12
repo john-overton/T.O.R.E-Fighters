@@ -248,4 +248,46 @@ mod tests {
             motion.aim_over_terrain(position, target, &ridge)[1] > motion.aim(position, target)[1]
         );
     }
+
+    /// Review M1 timing probe: one HUD terrain-aware fly-out over hills, as
+    /// `LauncherView::terrain_solution` flies it, against the energy-only
+    /// one. `cargo test --release -p tore-sim terrain_fly_out_cost --
+    /// --ignored --nocapture`.
+    #[test]
+    #[ignore = "timing probe"]
+    fn terrain_fly_out_cost() {
+        let (m, initial) = flight();
+        let hills = |x: f64, z: f64| 600. + 500. * (x / 2500.).sin() * (z / 3100.).sin();
+        let start = [0., 1500., 0.];
+        for (name, range) in [("in reach", 30_000.), ("out of reach", 400_000.)] {
+            let target = [0., hills(0., range), range];
+            let time = |ground: Option<&dyn Fn(f64, f64) -> f64>| {
+                let begin = std::time::Instant::now();
+                let mut answer = None;
+                for _ in 0..20 {
+                    answer = intercept_with_terrain(
+                        &m,
+                        initial,
+                        start,
+                        [0., 0., 1.],
+                        target,
+                        [0.; 3],
+                        0,
+                        7200,
+                        ground,
+                    );
+                }
+                (
+                    begin.elapsed().as_secs_f64() * 1e6 / 20.,
+                    answer.map(|s| s.seconds),
+                )
+            };
+            let flat = time(None);
+            let terrain = time(Some(&hills));
+            println!(
+                "m1 {name}: energy-only {:.0} us {:?}, terrain {:.0} us {:?}",
+                flat.0, flat.1, terrain.0, terrain.1
+            );
+        }
+    }
 }
