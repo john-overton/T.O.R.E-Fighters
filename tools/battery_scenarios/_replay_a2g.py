@@ -7,7 +7,8 @@ the run drew it (every bomb's fall included), and the events and words say what
 happened.
 
 * a Mk 82 AIR 7-pack: one `weapon.release` listing seven rounds in order, the
-  CCIP sight, seven bombs falling to the ground in the Tacview file;
+  CCIP sight, seven bombs falling to the ground in the Tacview file, and the
+  pack's station recorded loaded, then empty (`stores.*`, slice BP3);
 * a Mk 82 from 300 ft in a dive, which lands before its fuze arms: a dud, with
   its words and no damage;
 * an LAU-61 held for a second: a salvo of rockets of the rocket class, counted
@@ -166,11 +167,27 @@ def pack_problems(work: Path, out: str, acmi: str) -> list[str]:
     for oid, first, last in falls:
         if first - last < 300:
             problems.append(f"pack: bomb {oid} fell {first - last:.0f} m in the Tacview file, want about 900")
+    problems += stores_problems(rows, "pack")
     summary = (work / "log-pack" / "summary.txt")
     text = summary.read_text() if summary.exists() else ""
     if not re.search(r"You released 7 x \S+ from station \d+.*\(ccip\), 0 left", text):
         problems.append("pack: the summary does not say the pack was released")
     return problems
+
+
+def stores_problems(rows: list[dict], label: str) -> list[str]:
+    """The stores on pylons (slice BP3): the player's layout is recorded with its one pack loaded, and the pack's
+    station reads empty once it has gone (the replay draws it so; `--verify-render` compares every tick)."""
+    layouts = kind(rows, "stores.layout")
+    stations = kind(rows, "stores.station")
+    items = kind(rows, "stores.items")
+    if not layouts or not stations:
+        return [f"{label}: the recording has no stores layout"]
+    if not any(d["fields"].get("items", 0) >= 1 for d in stations):
+        return [f"{label}: no recorded station starts loaded"]
+    if not any(0 in d["fields"].get("items", []) for d in items):
+        return [f"{label}: no stores.items entry shows the released station empty"]
+    return []
 
 
 def dud_problems(work: Path, out: str) -> list[str]:

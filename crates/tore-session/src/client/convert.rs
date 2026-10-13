@@ -33,6 +33,7 @@ use tore_world::world::World;
 
 pub(crate) mod events;
 pub(crate) mod smooth;
+pub mod stores;
 
 /// A data link journal entry as a replay's `datalink.*` event: the one
 /// mapping both the single-player recorder and the capture conversion use.
@@ -614,6 +615,22 @@ impl Conversion {
         let mut events = events::Events::new(seen, flight.plane, &weapon_ids, first, last);
         let net = self.net_events(flight);
         let mut net = net.into_iter().peekable();
+        // Each aircraft's drawn stores as the host told them (protocol 26),
+        // by aircraft, in tick order; one never told is as its loadout
+        // built it.
+        let mut told: BTreeMap<u32, Vec<(u64, Vec<crate::wire::events::StationStores>)>> =
+            BTreeMap::new();
+        for received in &seen.events {
+            if let crate::wire::events::WireEvent::Stores { aircraft, loads } =
+                &received.event.event
+            {
+                let states = told.entry(*aircraft).or_default();
+                let tick = u64::from(received.event.tick);
+                let at = states.partition_point(|(t, _)| *t <= tick);
+                states.insert(at, (tick, loads.clone()));
+            }
+        }
+        let mut stores_watch = stores::StoresWatch::default();
         // The tick each aircraft's pilot was first seen out of it.
         let pilot_from: BTreeMap<u32, u32> = seen
             .states
@@ -705,6 +722,26 @@ impl Conversion {
             frame.projectiles.truncate(replay::limits::MAX_PROJECTILES);
             frame.debris.truncate(replay::limits::MAX_DEBRIS);
             frame.escapees.truncate(replay::limits::MAX_ESCAPEES);
+            // The stores each aircraft carries (B3), as the game drew them.
+            if let Some(world) = self.client.mission() {
+                for id in frame.aircraft.iter().map(|a| a.id).collect::<Vec<_>>() {
+                    let Some(config) = world.aircraft_configuration(id) else {
+                        continue;
+                    };
+                    let loads = told
+                        .get(&id)
+                        .and_then(|states| {
+                            let after = states.partition_point(|(t, _)| *t <= tick);
+                            states.get(after.checked_sub(1)?)
+                        })
+                        .map_or_else(
+                            || tore_world::snapshot::as_built_stores(config),
+                            |(_, loads)| loads.clone(),
+                        );
+                    let poses = tore_world::snapshot::store_poses_of(config, &loads);
+                    frame.events.extend(stores_watch.events(id, &poses));
+                }
+            }
             events.fill(tick, &mut frame);
             while let Some((_, event)) = net.next_if(|(t, _)| *t <= tick) {
                 frame.events.push(event);

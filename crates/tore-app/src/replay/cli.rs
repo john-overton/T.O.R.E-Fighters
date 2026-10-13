@@ -363,6 +363,7 @@ pub fn verify(
     let presentation = Presentation::from_header(recording.header());
     let identities = Identities::of(&recording);
     let marks = convert::recorded_marks(&recording);
+    let stores = tore_replay::stores::StoreTrack::from_events(recording.events());
     let flown: std::collections::BTreeMap<u64, u64> = devices.iter().copied().collect();
     let mut track = super::devices::DeviceTrack::new(recording.events());
     let none = super::devices::digest(&Default::default());
@@ -381,6 +382,11 @@ pub fn verify(
         let effects = recording.live_effects(snapshot.tick, convert::EFFECT_LOOKBACK_TICKS)?;
         let mut rebuilt = convert::snapshot(&frame, &effects, &presentation, &identities);
         rebuilt.marks = convert::marks_at(&marks, snapshot.tick);
+        tore_session::client::convert::stores::put_recorded(
+            &stores,
+            snapshot.tick,
+            std::iter::once(&mut rebuilt.player).chain(&mut rebuilt.targets),
+        );
         result.compared += 1;
         let difference = convert::difference(snapshot, &rebuilt).or_else(|| {
             let expected = *flown.get(&snapshot.tick)?;

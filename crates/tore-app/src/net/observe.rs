@@ -125,6 +125,8 @@ pub struct Feeder {
     surface: Option<bool>,
     /// Each surface unit's state as last recorded, for its stock changes.
     surface_told: BTreeMap<u32, tore_session::wire::events::SurfaceUnitView>,
+    /// Each aircraft's stores as last recorded (B3, protocol 26).
+    stores: tore_session::client::convert::stores::StoresWatch,
 }
 
 impl Feeder {
@@ -357,6 +359,10 @@ impl Feeder {
         }
         frame.aircraft.sort_by_key(|a| a.id);
         frame.aircraft.truncate(replay::limits::MAX_AIRCRAFT);
+        // The stores each aircraft carries, as the host told them (B3).
+        frame
+            .events
+            .extend(self.stores.poses(picture.targets.iter()));
         for pose in &picture.projectiles {
             let weapon = self.weapon(pose, around.world, out);
             let new = !self.launched.contains_key(&pose.id);

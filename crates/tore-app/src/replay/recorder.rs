@@ -365,6 +365,9 @@ pub struct Recorder {
     why: why::Why,
     /// The surface world of a format 3 recording.
     surface_watch: surface::Watch,
+    /// Each aircraft's stores as last recorded (B3), so only changes are
+    /// events.
+    stores: tore_session::client::convert::stores::StoresWatch,
     /// The AI aircraft's chaff and flares left as the last tick was
     /// recorded, for the releases its end collects.
     dispensers: devices::Dispensers,
@@ -447,6 +450,7 @@ impl Recorder {
             infos: BTreeMap::new(),
             why: why::Why::default(),
             surface_watch: surface::Watch::default(),
+            stores: Default::default(),
             dispensers: devices::Dispensers::new(),
             ground: ground::Watch::default(),
             state_clock: None,
@@ -952,7 +956,9 @@ impl Recorder {
         }
         frame.new_puffs = new_puffs(tick.combat);
 
-        let mut events = Vec::new();
+        // The stores each aircraft carries (B3): its layout the first time,
+        // then each change, so the viewer draws them emptying.
+        let mut events = self.stores.poses(aircraft.iter().copied());
         // Decoy rolls first: they explain this tick's spoofed outcomes.
         self.decoys(&tick, &frame, &mut events);
         self.dispensers = devices::dispensers(tick.wings);

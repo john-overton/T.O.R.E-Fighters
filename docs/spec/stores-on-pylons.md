@@ -45,10 +45,26 @@ loaded stores drawn on the aircraft ("I'd love positions and drawn pylons").
 | Guns | Keep their muzzle (gun mount, AC-130 barrel) | unchanged |
 | Bomb packs | Each bomb of a pack keeps its pack stagger, added to the pylon's side | unchanged |
 
-The bomb sight (CCIP and the level T) still predicts from the record's
-right-hand position. A left-side release lands up to the station's span
-(about 8 to 14 ft on a fighter wing) to the left of the pipper; this is inside
-the bomb scatter and is left for a later pass.
+**The bomb sight aims from the pylon the next store leaves** (John,
+2026-10-12, slice BP3). The CCIP pipper, the level T and the rocket pipper
+predict the release from the side of the selected station the next store
+will leave, by the same rule the release uses: the whole releases left on
+the station once that store has gone, odd for the mirror (left), even for the
+record's own position (right). So on a pair of wing Mk 82s the pipper first
+shows the left bomb's fall, and after that bomb goes it moves to the right
+bomb's. With unlimited ammunition the release's projectile number picks the
+side, as the release does. The AI's release gate reads the same solution from
+the pylon its next store leaves, so an AI bomb is judged from where it
+drops (agent decision: the AI's next side is worked out from its weapon
+service's rounds before the debit, which is what the release then debits).
+
+| Sight | Predicts from | Provenance |
+| --- | --- | --- |
+| CCIP (bombs) | The next store's pylon, pack offset 0 | opinionated, John 2026-10-12 |
+| Level T (bombs) | The CCIP's release point, so the same pylon | opinionated, John 2026-10-12 |
+| Rocket pipper | The next rocket's pod | opinionated, John 2026-10-12 |
+| AI release gate | The AI's next store's pylon | agent decision |
+| Guided weapon sights, gun sights | Unchanged (the aircraft, the gun's muzzle) | unchanged |
 
 ## Drawing (opinionated, John 2026-10-12)
 
@@ -68,16 +84,27 @@ Where the stores come from:
 
 - **Single player, the host, AI aircraft:** the render snapshot carries each
   aircraft's stations and their stores left ([`AircraftPose::stores`]).
-- **Network clients:** a client draws its own aircraft's stores from its
-  loadout (the session's copy of the mission) and the rounds and start-load
-  bits of its cockpit readout, which the wire already carries. The wire
-  carries no per-station counts for any other aircraft, and this slice does
-  not change the protocol (protocol 26 belongs to slice BF), so a client
-  draws no stores on other aircraft. It still sees every store leave from the
-  right pylon, because projectiles come from the host. Drawing them needs the
-  per-station counts of every aircraft on the wire: open.
-- **Mission replays:** recordings carry no loadout, so a replay draws no
-  stores. Recording the stores needs a replay format change: open.
+- **Network clients (protocol 26, slice BP3, John 2026-10-12):** a client
+  draws every aircraft's pylons and stores from its own copy of the
+  aircraft's loadout (the session's copy of the mission, which every game
+  builds the same), as the loadout built it until the host says otherwise.
+  The host sends a **Stores** event for an aircraft when what it draws
+  changes (a release that empties a whole store, a jettison, a rearm): the
+  aircraft's drawn stations with the whole stores still on each. A player
+  seated later, a resumed seat after a migration and an observer are told
+  every aircraft not as built when they start. The client puts each told
+  state at its tick, so a station empties when the picture reaches the
+  release, the same moment the store appears as a weapon. The seat's own
+  aircraft is still drawn from its cockpit readout, which is newer. A
+  Stores event is about 14 bytes for a fighter's six stations and costs
+  nothing while nothing changes ([the protocol](../formats/net-protocol.md#stores-protocol-26)).
+- **Mission replays (slice BP3, John 2026-10-12):** a recording keeps each
+  aircraft's drawn stations the first time it is recorded and their whole
+  stores whenever one empties, as `stores.*` events; the viewer draws each
+  aircraft's stores at the tick it shows, forward, backward and after a
+  seek. A converted network capture and an observer's live recording keep
+  them too. A recording made before them has none, so its aircraft carry no
+  stores ([replays](../REPLAYS.md#stores)).
 
 ## Performance
 
@@ -95,4 +122,5 @@ vertices a frame.
 - Code: `tore_sim::combat::hardpoints` (the rule), `combat::live::cockpit`
   (`release_round`), `tore_world::ai_wings` (AI missiles),
   `tore_world::snapshot::store_poses`, `tore-app/src/pylons.rs` (drawing).
-- Scenario: `stores-release-origin` in the battery.
+- Scenarios: `a2g-release-origin`, `net-stores` (a client sees another
+  player's and an AI's stores empty) and `replay-stores` in the battery.
