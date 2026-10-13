@@ -21,6 +21,22 @@ multiplayer mission (a Redfor player): the targets are a Protect objective, the
 column's guns and missiles fire at Blue only, and a Blue plane destroying the
 column's tanks takes the line from "Protected the 3 friendly objectives" to
 "Protected 0 of 3 friendly objectives".
+
+`surface-runway-stays` (B15, 2026-10-12) bombs `~QUSTRIP` (Ukraine, an
+airstrip): the Mk 82s on its hangars, shelters, tower and stores bring the
+template's own runway (`STRIP.OT`, 750 hit points) down with their splash.
+The runway must still be drawn (`--runway-art` counts its vertex floats), on
+the redrawn airport (B14: the template's strip is redrawn with the STRIP plan)
+and on the retail airfield shape (`--retail-airfields`), where it once vanished
+with the whole airfield.
+
+`surface-wrecks-burn` (B16, 2026-10-12) bombs `~QUSTRIP` (its hangars,
+shelters, tower, fuel and stores) and `~QFFACT` (France, a factory: FACT1,
+FACTD and its bunkers) and reads the `end wreck` lines `--runway-art` adds:
+no destroyed object may draw nothing (men aside), and every one whose class
+burns must have its fire. Then `~QUCOL` twice: its destroyed vehicles must
+burn or not the same way both times (the pick is fixed per object and
+mission, never a random stream).
 """
 import re
 
@@ -132,6 +148,70 @@ def protect_problems(output: str) -> list[str]:
     return problems
 
 
+RUNWAY = re.compile(
+    r"^surface-objective: end runway (0x[0-9a-f]+) (\S+) hp (\d+)/(\d+) (retail|redrawn \S+)(?: drawn (\d+))?$",
+    re.M,
+)
+
+
+def runway_problems(output: str) -> list[str]:
+    runs = parts(output)
+    if len(runs) != 2:
+        return [f"{len(runs)} runs finished, want 2"]
+    problems: list[str] = []
+    for run, want in zip(runs, ["redrawn STRIP.OT", "retail"]):
+        rows = [m for m in RUNWAY.finditer(run) if m.group(1) == "0x50000000"]
+        if not rows:
+            problems.append(f"{want}: no line for the template's runway 0x50000000")
+            continue
+        m = rows[0]
+        if m.group(2) != "STRIP.OT" or m.group(3) != "0":
+            problems.append(f"{want}: the bombs did not bring the runway down: {m.group(0)}")
+        if m.group(5) != want:
+            problems.append(f"{want}: the runway is {m.group(5)}")
+        if not m.group(6) or int(m.group(6)) == 0:
+            problems.append(f"{want}: the destroyed runway is not drawn: {m.group(0)}")
+    return problems
+
+
+WRECK = re.compile(
+    r"^surface-objective: end wreck (0x[0-9a-f]+) (\S+) drawn (?:moving )?(\d+) class (\w+) fire (yes|no)$", re.M
+)
+WRECKS = re.compile(
+    r"^surface-objective: end wrecks (\d+) hidden (\d+) should-burn (\d+) burning (\d+) runway-craters (\d+)$", re.M
+)
+
+
+def wreck_problems(output: str) -> list[str]:
+    runs = parts(output)
+    if len(runs) != 4:
+        return [f"{len(runs)} runs finished, want 4"]
+    problems: list[str] = []
+    for run, name in zip(runs[:2], ["~QUSTRIP", "~QFFACT"]):
+        summary = WRECKS.search(run)
+        if not summary:
+            problems.append(f"{name}: no end wrecks line")
+            continue
+        total, hidden = int(summary.group(1)), int(summary.group(2))
+        if total < 5:
+            problems.append(f"{name}: only {total} objects destroyed")
+        if hidden:
+            gone = [m.group(0) for m in WRECK.finditer(run) if m.group(3) == "0" and "moving" not in m.group(0)]
+            problems.append(f"{name}: {hidden} destroyed objects vanished: {gone}")
+        for m in WRECK.finditer(run):
+            if m.group(4) in ("Building", "Hard") and m.group(5) != "yes":
+                problems.append(f"{name}: {m.group(1)} {m.group(2)} ({m.group(4)}) does not burn")
+    picks = [
+        sorted((m.group(1), m.group(5)) for m in WRECK.finditer(run) if m.group(4) in ("Vehicle", "None"))
+        for run in runs[2:]
+    ]
+    if not picks[0]:
+        problems.append("~QUCOL: no destroyed vehicle")
+    elif picks[0] != picks[1]:
+        problems.append(f"~QUCOL: the vehicle fires differ between runs: {picks[0]} against {picks[1]}")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     run = ["--surface-objective"]
     return [
@@ -156,5 +236,33 @@ def scenarios() -> list[Scenario]:
             check=protect_problems,
             notes="A multiplayer mission (open seating) with the human in the first enemy plane: Redfor defends "
                   "the target. Reads the templates from the retail media until the import keeps them.",
+        ),
+        Scenario(
+            name="surface-runway-stays", lane="ai",
+            args=run + ["UKR", "QUSTRIP", "--defenses", "0", "0", "--seconds", "150", "--runway-art"],
+            timeout=300,
+            then=[
+                Step(run + ["UKR", "QUSTRIP", "--defenses", "0", "0", "--seconds", "150", "--runway-art",
+                            "--retail-airfields"], timeout=300),
+            ],
+            expect=[r"^surface-objective: t=\S+ every target is down$"],
+            check=runway_problems,
+            notes="B15: the splash of the bombs on the airstrip's buildings destroys its runway, which stays "
+                  "drawn, redrawn (B14) and retail. Builds the scenery on the CPU, no window.",
+        ),
+        Scenario(
+            name="surface-wrecks-burn", lane="ai",
+            args=run + ["UKR", "QUSTRIP", "--defenses", "0", "0", "--seconds", "150", "--runway-art"],
+            timeout=300,
+            then=[
+                Step(run + ["FRA", "QFFACT", "--defenses", "0", "0", "--seconds", "150", "--runway-art"],
+                     timeout=300),
+                Step(run + ["UKR", "QUCOL", "--defenses", "0", "0", "--runway-art"], timeout=300),
+                Step(run + ["UKR", "QUCOL", "--defenses", "0", "0", "--runway-art"], timeout=300),
+            ],
+            expect=[r"^surface-objective: end wrecks \d+ hidden 0 "],
+            check=wreck_problems,
+            notes="B16: destroyed buildings never vanish and burn; a vehicle's fire is a fixed pick. Builds "
+                  "the scenery on the CPU, no window.",
         ),
     ]

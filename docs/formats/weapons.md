@@ -334,6 +334,11 @@ The player trigger and the AI both release through `PROJFire` (`0x4c2170`):
   `0x453291`), so successive releases alternate sides of a paired station.
   `PROJAdd` raises a launch altitude under 10 ft to 10 ft (`0x4c0b30` to
   `0x4c0b47`).
+  Whether the count is read before or after the release's own debit is
+  unknown (the next step is a read of `PROJFire`'s debit against its
+  `HARDPos` call). The positions per aircraft are in
+  [hardpoint positions](aircraft-ordnance.md#hardpoint-positions); how T.O.R.E
+  uses them is in [stores on pylons](../spec/stores-on-pylons.md).
 - **Direction**: the aircraft's attitude (`0x50ce9d`, heading and pitch, not
   its direction of motion at `0x50cea3`) plus the station's slew angles
   (`0x45335e` to `0x45337d`, or a full composition at `0x453383` for an

@@ -238,6 +238,14 @@ def scenarios() -> list[Scenario]:
             notes="Two LAU-61 pods tapped, held a second and held empty; two LAU-10 pods held.",
         ),
         Scenario(
+            name="a2g-rocket-smoke", lane="flight",
+            args=run + ["--aircraft", "a4e", "--load", "LAU61", "--altitude", "1500", "--dive", "10",
+                        "--speed", "400", "--hold", "1"],
+            timeout=300,
+            expect=[r"^a2g-run: motors lit [1-9]\d* burnt-out-in-flight \d+ missile-smoke max-puffs [1-9]\d*$"],
+            notes="Bug B6 (slice BF): a LAU-61 salvo's rockets, which have no seeker, smoke while their motors burn.",
+        ),
+        Scenario(
             name="a2g-gun-key", lane="flight",
             args=["--a2g-run", "UKR", "QUCOL", "--attack", "strafe", "--from", "1", "--aircraft", "a4e",
                   "--load", "MK82", "--altitude", "2000", "--dive", "10", "--speed", "400",

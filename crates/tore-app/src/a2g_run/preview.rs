@@ -89,6 +89,16 @@ fn shots() -> Vec<Shot> {
         ..shot
     };
     let after = |shot: Shot, after| Shot { after, ..shot };
+    let rocket = |name, caption, place| Shot {
+        name,
+        caption,
+        aircraft: AircraftId::A4E,
+        load: "LAU61",
+        place,
+        knots: 400.,
+        level: false,
+        after: 0.,
+    };
     vec![
         fab(ccip(
             "ccip-f18-beyond",
@@ -187,6 +197,46 @@ fn shots() -> Vec<Shot> {
             level: false,
             after: 0.,
         },
+        // The rocket pipper is always shown (John, 2026-10-12): level at
+        // 3,000 ft it stands past the rocket's 20 s life, in a steep dive it
+        // is a close-in impact on the bore line, climbing it marks where the
+        // rocket's life ends.
+        rocket(
+            "rocket-a4e-level-3000",
+            "Rocket pipper, level at 3,000 ft (was missing)",
+            Place::Level {
+                altitude: 3_000.,
+                seconds: 0.,
+                right: 0.,
+            },
+        ),
+        rocket(
+            "rocket-a4e-shallow-2",
+            "Rocket pipper, 2 degrees down from 3,000 ft (was missing)",
+            Place::Dive {
+                dive: 2.,
+                altitude: 3_000.,
+                back: 1_000.,
+            },
+        ),
+        rocket(
+            "rocket-a4e-steep-65",
+            "Rocket pipper, 65 degree dive (shown before too)",
+            Place::Dive {
+                dive: 65.,
+                altitude: 3_000.,
+                back: 1_000.,
+            },
+        ),
+        rocket(
+            "rocket-a4e-climb",
+            "Rocket pipper, climbing 10 degrees: where the life ends",
+            Place::Dive {
+                dive: -10.,
+                altitude: 3_000.,
+                back: 1_000.,
+            },
+        ),
     ]
 }
 
@@ -218,6 +268,8 @@ fn options(shot: &Shot) -> Options {
         render: None,
         record: None,
         verify: false,
+        scene_at: Vec::new(),
+        condition: None,
         ai: super::ai::Config::new(),
     }
 }

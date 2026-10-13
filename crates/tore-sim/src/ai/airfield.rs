@@ -476,6 +476,10 @@ pub enum Control {
         yaw: f64,
     },
     Air(AirGuidance),
+    /// A hover or slow flight (slice H1, for the vertical sequences of
+    /// slice H2): flown by the rotor adapter on a helicopter or the V-22
+    /// and by the jet-lift law on the AV-8 and Yak-141.
+    Hover(super::rotor_adapter::HoverGuidance),
 }
 
 /// Airborne guidance, flown through the ordinary steering adapter.
@@ -2171,7 +2175,7 @@ mod tests {
             let step = seq.step(s);
             match step.command.control {
                 Control::Ground { throttle, .. } => (throttle, step.command.brakes),
-                Control::Air(_) => panic!("ground control"),
+                Control::Air(_) | Control::Hover(_) => panic!("ground control"),
             }
         };
         let near = on_ground([380., 0., 7750.], 90., 50.);

@@ -1,0 +1,883 @@
+//! Pylons and the stores still on them, drawn under every aircraft that
+//! carries a combat loadout (B3 and BP2, docs/spec/stores-on-pylons.md).
+//!
+//! Retail draws no stores on aircraft; this is an opinionated addition John
+//! asked for on 2026-10-12. What each station holds comes from the render
+//! snapshot ([`StorePose`]); this module only turns it into vertices:
+//!
+//! - **Where.** A station's stores hang at its source hardpoint position, a
+//!   paired station's split between that position and its mirror, as
+//!   [`Rack::sides`] counts them, which is also the side the next one leaves
+//!   from. A wing side with two stores, or four or more, has two pylons, an
+//!   inboard and an outboard one ([`Rack::pylon`], John 2026-10-12), and
+//!   each store leaves from its own pylon, so a released store appears in
+//!   flight where it hung.
+//! - **Several on one pylon** sit on a fitted rack: two side by side, three
+//!   as a triple ejector rack (two shoulders, one below), more as such racks
+//!   one behind another. The slots keep the full load's layout, and the
+//!   highest-numbered slot empties first.
+//! - **Stores** use the weapon's own shape, refitted to the real store's size
+//!   ([`crate::store_sizes`]). Retail has no rocket pod or fuel tank shape,
+//!   so those, and a store with no shape, are fitted bodies.
+//! - **Pylons** are fitted slabs from the top of the store's body (its lugs)
+//!   up into the model's underside, each corner meeting the surface above
+//!   it ([`Airframe::underside`]). A store with nothing above it beside a
+//!   wingtip hangs on a rail that joins the tip ([`Airframe::tip_edge`]).
+//!   A pylon stays when its stores are gone.
+//!
+//! All geometry is solid colour in the aircraft vertex format, so it joins
+//! the batch of the aircraft it hangs from with no extra draw call.
+use crate::{aircraft::Airframe, render_snapshot::CombatArt};
+use std::collections::HashMap;
+use std::sync::Mutex;
+use tore_formats::shape::Shape;
+use tore_sim::attitude::{Basis, Vector};
+use tore_sim::combat::hardpoints::Rack;
+use tore_world::snapshot::{StoreLook, StorePose};
+
+/// Pylon and rack grey, linear RGB (fitted).
+const PYLON: [f32; 3] = [0.5, 0.52, 0.54];
+/// Tank and pod body colours (fitted).
+const TANK: [f32; 3] = [0.55, 0.57, 0.6];
+const POD: [f32; 3] = [0.4, 0.43, 0.4];
+/// A store with no shape: length and diameter, feet (fitted).
+const PLAIN: [f64; 2] = [8., 0.9];
+/// A pylon's height when nothing of the model is above or beside it (a
+/// rail), feet.
+const RAIL: f64 = 0.35;
+/// A pylon's thickness, feet.
+const PYLON_WIDTH: f64 = 0.35;
+/// How far a pylon reaches into the surface it hangs from, feet, so no
+/// sliver of sky shows at the joint. Retail wings are single faces, so a
+/// deeper sink would show through on top.
+const SINK: f64 = 0.02;
+/// A rack beam's depth under its pylon, feet.
+const RACK_DEPTH: f64 = 0.3;
+
+/// The model surfaces stores meet, looked up once per point
+/// ([`Airframe::underside`], [`Airframe::tip_edge`]).
+#[derive(Debug, Default)]
+pub struct MountCache {
+    undersides: Mutex<HashMap<[i64; 4], Option<f64>>>,
+    edges: Mutex<HashMap<[i64; 4], Option<[f64; 3]>>>,
+}
+
+impl MountCache {
+    pub fn underside(&self, key: [i64; 4], find: impl FnOnce() -> Option<f64>) -> Option<f64> {
+        if let Some(found) = self
+            .undersides
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&key).copied())
+        {
+            return found;
+        }
+        let found = find();
+        if let Ok(mut m) = self.undersides.lock() {
+            m.insert(key, found);
+        }
+        found
+    }
+    pub fn tip_edge(
+        &self,
+        key: [i64; 4],
+        find: impl FnOnce() -> Option<[f64; 3]>,
+    ) -> Option<[f64; 3]> {
+        if let Some(found) = self.edges.lock().ok().and_then(|m| m.get(&key).copied()) {
+            return found;
+        }
+        let found = find();
+        if let Ok(mut m) = self.edges.lock() {
+            m.insert(key, found);
+        }
+        found
+    }
+}
+
+/// A store's size, feet: length, largest cross-section width (fins
+/// included, which spaces a rack), how far its body's top (where its lugs
+/// are) is above its origin, how far ahead of its origin its middle is,
+/// and the body's half width.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Dims {
+    pub length: f64,
+    pub diameter: f64,
+    pub top: f64,
+    pub middle: f64,
+    pub radius: f64,
+}
+
+impl Dims {
+    /// A fitted body centred on its origin.
+    const fn body([length, diameter]: [f64; 2]) -> Self {
+        Self {
+            length,
+            diameter,
+            top: diameter / 2.,
+            middle: 0.,
+            radius: diameter / 2.,
+        }
+    }
+    /// A weapon shape's own size, its lugs on the top of its body.
+    pub fn of(shape: &Shape) -> Self {
+        let Some(b) = crate::store_sizes::body(shape) else {
+            return Self::body(PLAIN);
+        };
+        Self {
+            length: b.length,
+            diameter: (2. * b.reach[0].max(b.reach[1])).max(0.2),
+            top: b.centre[1] + b.half[1],
+            middle: (b.along[0] + b.along[1]) / 2.,
+            radius: b.half[0],
+        }
+    }
+}
+
+/// Where slot `slot` of a pylon loaded with `loaded` stores of `size`
+/// (length, diameter) sits against the pylon's point: feet right, up
+/// and forward.
+pub fn slot_offset(slot: u16, loaded: u16, length: f64, diameter: f64) -> Vector {
+    if loaded <= 1 {
+        return [0.; 3];
+    }
+    let spread = 0.55 * diameter;
+    let groups = loaded.div_ceil(3);
+    let group = slot / 3;
+    let forward = (f64::from(group) - f64::from(groups - 1) / 2.) * 1.05 * length;
+    let [right, up] = match slot % 3 {
+        0 => [-spread, 0.],
+        1 => [spread, 0.],
+        _ => [0., -0.95 * diameter],
+    };
+    [right, up, forward]
+}
+
+/// One drawn pylon of a station's side: where it hangs (feet right, up and
+/// forward of the aircraft, already mirrored for the left side) and the
+/// side's slots on it, in loading order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Pylon {
+    pub point: Vector,
+    pub slots: Vec<u16>,
+}
+
+/// The pylons of one side (0 right, 1 left) of a station with `rack` at
+/// `mount`, loaded with `per_side` stores on that side.
+pub fn pylons(rack: Rack, mount: Vector, side: usize, per_side: u16) -> Vec<Pylon> {
+    let mirror = if side == 1 { -1. } else { 1. };
+    let count = rack.pylons(per_side);
+    (0..count)
+        .map(|p| {
+            let slots: Vec<u16> = (0..per_side)
+                .filter(|s| rack.pylon(per_side, *s).0 == p)
+                .collect();
+            let outboard = slots.first().map_or(0., |s| rack.pylon(per_side, *s).1);
+            let right = if mount[0].abs() > 1e-9 {
+                (mount[0] + outboard * mount[0].signum()) * mirror
+            } else {
+                0.
+            };
+            Pylon {
+                point: [right, mount[1], mount[2]],
+                slots,
+            }
+        })
+        .collect()
+}
+
+/// The vertices of `stores`, hung under an aircraft at `position` (relative
+/// to the render origin) with `attitude` (yaw, pitch, bank), appended to
+/// `out`. `airframe` gives the surfaces the pylons meet; `palette` the
+/// shapes' colours.
+pub fn vertices(
+    out: &mut Vec<f32>,
+    stores: &[StorePose],
+    position: Vector,
+    [yaw, pitch, bank]: [f64; 3],
+    airframe: Option<&Airframe>,
+    art: &CombatArt,
+    palette: &[[u8; 3]; 256],
+) {
+    if stores.is_empty() {
+        return;
+    }
+    let basis = Basis::new(yaw, pitch, bank);
+    let at = |offset: Vector| -> Vector {
+        std::array::from_fn(|i| {
+            position[i]
+                + basis.right[i] * offset[0]
+                + basis.up[i] * offset[1]
+                + basis.forward[i] * offset[2]
+        })
+    };
+    for store in stores {
+        let shape = store
+            .shape
+            .as_deref()
+            .and_then(|name| art.shape(name))
+            .filter(|_| store.look == StoreLook::Store);
+        let dims = dims(store, shape);
+        let loaded = store.rack.sides(store.mount, store.loaded.max(store.items));
+        let held = store.rack.sides(store.mount, store.items);
+        for side in 0..2 {
+            if loaded[side] == 0 {
+                continue;
+            }
+            for pylon in pylons(store.rack, store.mount, side, loaded[side]) {
+                let on = pylon.slots.len() as u16;
+                hanger(out, &at, airframe, &pylon, &dims, on);
+                for (k, slot) in pylon.slots.iter().enumerate() {
+                    if *slot >= held[side] {
+                        continue;
+                    }
+                    let offset = slot_offset(k as u16, on, dims.length, dims.diameter);
+                    let centre = at(std::array::from_fn(|i| pylon.point[i] + offset[i]));
+                    match (store.look, shape) {
+                        (StoreLook::Store, Some(shape)) => {
+                            mesh(out, shape, centre, &basis, palette)
+                        }
+                        (look, _) => body(
+                            out,
+                            &basis,
+                            centre,
+                            [dims.length, dims.diameter],
+                            match look {
+                                StoreLook::Tank => TANK,
+                                StoreLook::Pod => POD,
+                                StoreLook::Store => PYLON,
+                            },
+                        ),
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The size `store` draws at.
+fn dims(store: &StorePose, shape: Option<&Shape>) -> Dims {
+    match (store.look, shape) {
+        (StoreLook::Pod | StoreLook::Tank, _) if store.body[0] > 0. => Dims::body(store.body),
+        (StoreLook::Pod, _) => Dims::body(tore_world::snapshot::POD_BODY),
+        (StoreLook::Tank, _) => Dims::body(tore_world::snapshot::tank_body(2_000.)),
+        (StoreLook::Store, Some(shape)) => Dims::of(shape),
+        (StoreLook::Store, None) => Dims::body(PLAIN),
+    }
+}
+
+/// What holds a pylon's `on` stores of `dims` up: the pylon slab from the
+/// stores' lugs into the model's underside, a rack beam under it when it
+/// carries several, a post down to a triple rack's lower store; or, with
+/// nothing above, a rail joining a wingtip beside it, or a short rail.
+fn hanger(
+    out: &mut Vec<f32>,
+    at: &impl Fn(Vector) -> Vector,
+    airframe: Option<&Airframe>,
+    pylon: &Pylon,
+    dims: &Dims,
+    on: u16,
+) {
+    let p = pylon.point;
+    let lugs = p[1] + dims.top;
+    let middle = p[2] + dims.middle;
+    // A pylon is longer than it is deep: at least twice its depth below
+    // the surface over it, and no longer than most of the store.
+    let depth = airframe
+        .and_then(|a| a.underside(p[0], middle, lugs, 6))
+        .map_or(0., |surface| surface - lugs);
+    let length = (0.55 * dims.length)
+        .max(2. * depth)
+        .min(0.85 * dims.length.max(4.))
+        .clamp(1.5, 10.);
+    // A rack: a beam over the stores, as wide as the side-by-side pair and
+    // as long as the racks one behind another, and a post down to each
+    // triple rack's lower store.
+    let mut top_of_rack = lugs;
+    if on >= 2 {
+        let groups = on.div_ceil(3);
+        let width = 2. * (0.55 * dims.diameter + dims.radius.max(0.15));
+        let long = f64::from(groups - 1) * 1.05 * dims.length + length;
+        block(
+            out,
+            at,
+            [p[0], lugs + RACK_DEPTH / 2., middle],
+            [width, RACK_DEPTH, long],
+            PYLON,
+        );
+        for group in 0..groups {
+            let lower = group * 3 + 2;
+            if lower < on {
+                let offset = slot_offset(lower, on, dims.length, dims.diameter);
+                let from = p[1] + offset[1] + dims.top;
+                block(
+                    out,
+                    at,
+                    [p[0], (from + lugs) / 2., middle + offset[2]],
+                    [PYLON_WIDTH, lugs - from, length * 0.6],
+                    PYLON,
+                );
+            }
+        }
+        top_of_rack = lugs + RACK_DEPTH;
+    }
+    let Some(airframe) = airframe else {
+        block(
+            out,
+            at,
+            [p[0], top_of_rack + RAIL / 2., middle],
+            [PYLON_WIDTH, RAIL, length],
+            PYLON,
+        );
+        return;
+    };
+    match airframe.underside(p[0], middle, top_of_rack, 6) {
+        Some(surface) if surface - top_of_rack <= 0.05 => {}
+        Some(surface) => {
+            // The slab runs fore and aft only as far as the surface over it
+            // goes (not out ahead of a wing's leading edge), and its top
+            // follows that surface from end to end.
+            let [back, front] = along_surface(airframe, p[0], middle, length, top_of_rack, surface);
+            let half = PYLON_WIDTH / 2.;
+            slab(
+                out,
+                at,
+                [p[0] - half, p[0] + half],
+                [back[0], front[0]],
+                top_of_rack,
+                [back[1], front[1], back[1], front[1]].map(|h| h + SINK),
+            );
+        }
+        None => {
+            let rail = (0.6 * dims.length).clamp(3., 9.);
+            match airframe.tip_edge(p[0], p[1], middle, rail / 2.) {
+                // A wingtip launcher: from inside the tip out over the
+                // store, as deep as both the tip's edge and the store's
+                // upper half.
+                Some([edge, low, high]) if edge < p[0].abs() => {
+                    let side = p[0].signum();
+                    let inner = (edge - 0.3) * side;
+                    let outer = p[0] + 0.1 * side;
+                    let bottom = low.min(p[1] + dims.top - dims.radius).min(lugs - 0.15);
+                    let top = high.max(lugs);
+                    block(
+                        out,
+                        at,
+                        [(inner + outer) / 2., (top + bottom) / 2., middle],
+                        [(outer - inner).abs(), top - bottom, rail],
+                        PYLON,
+                    );
+                }
+                _ => block(
+                    out,
+                    at,
+                    [p[0], top_of_rack + RAIL / 2., middle],
+                    [PYLON_WIDTH, RAIL, length],
+                    PYLON,
+                ),
+            }
+        }
+    }
+}
+
+/// The back and front ends of a pylon `length` long centred at `middle`
+/// (feet forward) under `right`, as [forward, surface height]: as far as
+/// the model's underside over it reaches, at least 1.5 ft, and within
+/// 1.5 ft of `surface`, the height over its middle. Where nothing of the
+/// model is straight over the middle (the pylon reached inboard for it), it
+/// keeps its length and meets `surface` flat.
+fn along_surface(
+    airframe: &Airframe,
+    right: f64,
+    middle: f64,
+    length: f64,
+    from: f64,
+    surface: f64,
+) -> [[f64; 2]; 2] {
+    const STEPS: i32 = 6;
+    let over = |forward: f64| {
+        airframe
+            .underside(right, forward, from, 0)
+            .filter(|h| (h - surface).abs() < 1.5)
+    };
+    if over(middle).is_none() {
+        return [
+            [middle - length / 2., surface],
+            [middle + length / 2., surface],
+        ];
+    }
+    let step = length / 2. / f64::from(STEPS);
+    let end = |sign: f64| -> [f64; 2] {
+        let mut last = [middle, surface];
+        for k in 1..=STEPS {
+            let forward = middle + sign * step * f64::from(k);
+            match over(forward) {
+                Some(h) => last = [forward, h],
+                None => break,
+            }
+        }
+        // At least 0.75 ft either side of the middle.
+        if (last[0] - middle).abs() < 0.75 {
+            last[0] = middle + sign * 0.75;
+        }
+        last
+    };
+    [end(-1.), end(1.)]
+}
+
+/// A pylon slab between `x` and `z` (right and forward, feet, aircraft
+/// frame), its flat bottom at `bottom` and each top corner at its own
+/// height ([left back, left front, right back, right front]), both windings.
+fn slab(
+    out: &mut Vec<f32>,
+    at: &impl Fn(Vector) -> Vector,
+    x: [f64; 2],
+    z: [f64; 2],
+    bottom: f64,
+    tops: [f64; 4],
+) {
+    let low = |i: usize, j: usize| at([x[i], bottom, z[j]]);
+    let high = |i: usize, j: usize| at([x[i], tops[i * 2 + j], z[j]]);
+    let quads = [
+        [low(0, 0), low(0, 1), high(0, 1), high(0, 0)],
+        [low(1, 0), high(1, 0), high(1, 1), low(1, 1)],
+        [low(0, 1), low(1, 1), high(1, 1), high(0, 1)],
+        [low(0, 0), high(0, 0), high(1, 0), low(1, 0)],
+        [low(0, 0), low(1, 0), low(1, 1), low(0, 1)],
+        [high(0, 0), high(0, 1), high(1, 1), high(1, 0)],
+    ];
+    for quad in quads {
+        quad_both(out, quad, PYLON);
+    }
+}
+
+/// The texture-only faces (the missile exhaust sheets) the flying store
+/// omits too.
+fn texture_only(face: &tore_formats::shape::Face) -> bool {
+    matches!(face.subtype, 0x4c | 0x5c | 0x6c | 0x7c)
+}
+
+/// A weapon shape at `centre`, along the aircraft's axes: what
+/// `render_snapshot` draws for the same store once it is released.
+fn mesh(
+    out: &mut Vec<f32>,
+    shape: &Shape,
+    centre: Vector,
+    basis: &Basis,
+    palette: &[[u8; 3]; 256],
+) {
+    for face in &shape.faces {
+        if texture_only(face) {
+            continue;
+        }
+        for i in 1..face.positions.len().saturating_sub(1) {
+            for j in [0, i, i + 1] {
+                let q = face.positions[j];
+                let pos = std::array::from_fn(|k| {
+                    centre[k]
+                        + (basis.right[k] * f64::from(q[0])
+                            + basis.up[k] * f64::from(q[2])
+                            + basis.forward[k] * f64::from(q[1]))
+                            / 3.
+                });
+                vertex(
+                    out,
+                    pos,
+                    palette[face.colors[j] as usize].map(|c| f32::from(c) / 255.),
+                );
+            }
+        }
+    }
+}
+
+/// A box centred on `centre` (aircraft frame, feet) of `size` right, up and
+/// forward, both windings so either cull mode shows it.
+fn block(
+    out: &mut Vec<f32>,
+    at: &impl Fn(Vector) -> Vector,
+    centre: Vector,
+    size: Vector,
+    color: [f32; 3],
+) {
+    let corner = |sx: f64, sy: f64, sz: f64| {
+        at([
+            centre[0] + sx * size[0] / 2.,
+            centre[1] + sy * size[1] / 2.,
+            centre[2] + sz * size[2] / 2.,
+        ])
+    };
+    let faces: [[[f64; 3]; 4]; 6] = [
+        [[1., -1., -1.], [1., 1., -1.], [1., 1., 1.], [1., -1., 1.]],
+        [
+            [-1., -1., 1.],
+            [-1., 1., 1.],
+            [-1., 1., -1.],
+            [-1., -1., -1.],
+        ],
+        [[-1., 1., -1.], [-1., 1., 1.], [1., 1., 1.], [1., 1., -1.]],
+        [
+            [-1., -1., 1.],
+            [-1., -1., -1.],
+            [1., -1., -1.],
+            [1., -1., 1.],
+        ],
+        [[-1., -1., 1.], [1., -1., 1.], [1., 1., 1.], [-1., 1., 1.]],
+        [
+            [1., -1., -1.],
+            [-1., -1., -1.],
+            [-1., 1., -1.],
+            [1., 1., -1.],
+        ],
+    ];
+    for quad in faces {
+        let p = quad.map(|[x, y, z]| corner(x, y, z));
+        quad_both(out, p, color);
+    }
+}
+
+/// A fitted round body (tank or pod) centred on `centre`: an eight-sided
+/// tube of `[length, diameter]` along the aircraft's forward axis, with
+/// pointed ends a fifth of its length each.
+fn body(
+    out: &mut Vec<f32>,
+    basis: &Basis,
+    centre: Vector,
+    [length, diameter]: [f64; 2],
+    color: [f32; 3],
+) {
+    const SIDES: usize = 8;
+    let radius = diameter / 2.;
+    let ring = |k: usize, along: f64, scale: f64| -> Vector {
+        let angle = k as f64 * std::f64::consts::TAU / SIDES as f64;
+        let (s, c) = angle.sin_cos();
+        std::array::from_fn(|i| {
+            centre[i]
+                + basis.right[i] * c * radius * scale
+                + basis.up[i] * s * radius * scale
+                + basis.forward[i] * along
+        })
+    };
+    let half = length / 2.;
+    let shoulder = half - length / 5.;
+    let tip =
+        |along: f64| -> Vector { std::array::from_fn(|i| centre[i] + basis.forward[i] * along) };
+    for k in 0..SIDES {
+        let n = (k + 1) % SIDES;
+        quad_both(
+            out,
+            [
+                ring(k, -shoulder, 1.),
+                ring(n, -shoulder, 1.),
+                ring(n, shoulder, 1.),
+                ring(k, shoulder, 1.),
+            ],
+            color,
+        );
+        for (end, along) in [(half, shoulder), (-half, -shoulder)] {
+            let t = [tip(end), ring(k, along, 1.), ring(n, along, 1.)];
+            for p in [t, [t[0], t[2], t[1]]] {
+                for q in p {
+                    vertex(out, q, color);
+                }
+            }
+        }
+    }
+}
+
+fn quad_both(out: &mut Vec<f32>, p: [Vector; 4], color: [f32; 3]) {
+    for tri in [
+        [p[0], p[1], p[2]],
+        [p[0], p[2], p[3]],
+        [p[0], p[2], p[1]],
+        [p[0], p[3], p[2]],
+    ] {
+        for q in tri {
+            vertex(out, q, color);
+        }
+    }
+}
+
+/// One lit solid-colour vertex in the aircraft format, as a flying weapon's.
+fn vertex(out: &mut Vec<f32>, pos: Vector, color: [f32; 3]) {
+    out.extend([
+        pos[0] as f32,
+        pos[1] as f32,
+        pos[2] as f32,
+        0.,
+        0.,
+        -1.,
+        color[0],
+        color[1],
+        color[2],
+        -1.,
+    ]);
+}
+
+/// The stores of the flown aircraft drawn with `airframe` over its presented
+/// flight state, as a new vertex list: none once its wreck is gone.
+pub fn for_flown(
+    stores: &[StorePose],
+    state: &crate::flight::State,
+    airframe: &Airframe,
+    art: &CombatArt,
+    scenery: &crate::scenery::Scenery,
+) -> Vec<f32> {
+    let mut out = Vec::new();
+    if !state.wreck_gone() {
+        vertices(
+            &mut out,
+            stores,
+            scenery.relative(state.position),
+            [state.yaw, state.pitch, state.bank],
+            Some(airframe),
+            art,
+            &airframe.palette,
+        );
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tore_sim::combat::hardpoints::Rack;
+
+    #[test]
+    fn rack_slots_spread_side_by_side_then_below_then_behind() {
+        let dims = |slot, loaded| slot_offset(slot, loaded, 8., 1.);
+        assert_eq!(dims(0, 1), [0.; 3]);
+        let two = [dims(0, 2), dims(1, 2)];
+        assert!(two[0][0] < 0. && two[1][0] > 0. && two[0][1] == 0.);
+        let third = dims(2, 3);
+        assert_eq!(third[0], 0.);
+        assert!(third[1] < -0.9);
+        // Six: two triple racks, one ahead of the other.
+        assert!(dims(0, 6)[2] < 0. && dims(3, 6)[2] > 0.);
+        assert!(
+            Rack {
+                location: 4,
+                paired: true
+            }
+            .two_sided([10., 0., 0.])
+        );
+    }
+
+    #[test]
+    fn a_pair_draws_one_store_a_side_and_its_pylons_stay() {
+        let art = CombatArt::synthetic(Default::default());
+        let pair = StorePose {
+            hardpoint: 6,
+            mount: [10., -2., 0.],
+            rack: Rack {
+                location: 4,
+                paired: true,
+            },
+            shape: None,
+            look: StoreLook::Store,
+            items: 2,
+            loaded: 2,
+            body: [0.; 2],
+        };
+        let draw = |items: u16| {
+            let mut out = Vec::new();
+            vertices(
+                &mut out,
+                &[StorePose {
+                    items,
+                    ..pair.clone()
+                }],
+                [0.; 3],
+                [0.; 3],
+                None,
+                &art,
+                &[[0; 3]; 256],
+            );
+            out
+        };
+        let full = draw(2);
+        let one = draw(1);
+        let none = draw(0);
+        assert!(full.len() > one.len() && one.len() > none.len());
+        // Both pylons remain with nothing on them, one a side.
+        let xs: Vec<f32> = none.chunks_exact(10).map(|v| v[0]).collect();
+        assert!(xs.iter().any(|x| *x > 9.) && xs.iter().any(|x| *x < -9.));
+        // With one left, it hangs on the right: the left went first.
+        let count =
+            |v: &[f32], right: bool| v.chunks_exact(10).filter(|v| (v[0] > 0.) == right).count();
+        assert!(count(&one, true) > count(&none, true));
+        assert_eq!(count(&one, false), count(&none, false));
+    }
+
+    /// A synthetic airframe whose model is one flat wing face at the
+    /// reference height, 0 to 15 ft out and 8 ft either side of the
+    /// reference point fore and aft.
+    fn flat_wing() -> Airframe {
+        let wing = Shape {
+            lines: Vec::new(),
+            faces: vec![tore_formats::shape::Face {
+                positions: vec![
+                    [0., -24., 0.],
+                    [45., -24., 0.],
+                    [45., 24., 0.],
+                    [0., 24., 0.],
+                ],
+                colors: vec![1; 4],
+                fog: Default::default(),
+                uv: Vec::new(),
+                texture: String::new(),
+                subtype: 0x20,
+                normal: None,
+                address: 0x1000,
+            }],
+            billboards: Vec::new(),
+            state_words: Default::default(),
+        };
+        Airframe::synthetic(
+            tore_formats::aircraft::AircraftId::Rafale,
+            vec![wing],
+            None,
+            crate::combat_view::render_hash_tests::damage(),
+            None,
+        )
+    }
+
+    fn plain(mount: Vector, location: u8, items: u16) -> StorePose {
+        StorePose {
+            hardpoint: 0,
+            mount,
+            rack: Rack {
+                location,
+                paired: true,
+            },
+            shape: None,
+            look: StoreLook::Store,
+            items,
+            loaded: items,
+            body: [0.; 2],
+        }
+    }
+
+    /// The drawn grey (pylon and rack) vertices: [right, up, forward].
+    fn grey(out: &[f32]) -> Vec<[f32; 3]> {
+        out.chunks_exact(10)
+            .filter(|v| v[6] == PYLON[0] && v[7] == PYLON[1] && v[8] == PYLON[2])
+            .map(|v| [v[0], v[1], v[2]])
+            .collect()
+    }
+
+    fn draw(stores: &[StorePose], airframe: &Airframe) -> Vec<f32> {
+        let art = CombatArt::synthetic(Default::default());
+        let mut out = Vec::new();
+        // Shapeless stores draw grey too: draw them as tanks to tell apart.
+        let stores: Vec<StorePose> = stores
+            .iter()
+            .map(|s| StorePose {
+                look: StoreLook::Tank,
+                body: PLAIN,
+                ..s.clone()
+            })
+            .collect();
+        vertices(
+            &mut out,
+            &stores,
+            [0.; 3],
+            [0.; 3],
+            Some(airframe),
+            &art,
+            &[[0; 3]; 256],
+        );
+        out
+    }
+
+    #[test]
+    fn a_pylon_runs_from_the_stores_lugs_into_the_wing_with_no_gap() {
+        let airframe = flat_wing();
+        let store = plain([8., -2., 0.], 4, 2);
+        let out = draw(std::slice::from_ref(&store), &airframe);
+        let lugs = -2. + PLAIN[1] / 2.;
+        let ys: Vec<f32> = grey(&out).iter().map(|v| v[1]).collect();
+        let low = ys.iter().copied().fold(f32::MAX, f32::min);
+        let high = ys.iter().copied().fold(f32::MIN, f32::max);
+        assert!(
+            (f64::from(low) - lugs).abs() < 1e-4,
+            "pylon bottom {low} vs lugs {lugs}"
+        );
+        assert!(
+            f64::from(high) >= 0. && f64::from(high) <= SINK + 1e-4,
+            "pylon top {high} meets the wing at 0"
+        );
+        // The store's top touches the pylon's bottom.
+        let tank_top = out
+            .chunks_exact(10)
+            .filter(|v| v[6] == TANK[0])
+            .map(|v| v[1])
+            .fold(f32::MIN, f32::max);
+        assert!((f64::from(tank_top) - lugs).abs() < 1e-4);
+    }
+
+    #[test]
+    fn four_stores_on_a_wing_row_hang_from_two_pylons_a_wing() {
+        let wing = Rack {
+            location: 4,
+            paired: true,
+        };
+        let mount = [8., -2., 0.];
+        let right = pylons(wing, mount, 0, 2);
+        assert_eq!(right.len(), 2);
+        assert_eq!(right[0].slots, [0]);
+        assert_eq!(right[1].slots, [1]);
+        let spread = tore_sim::combat::hardpoints::DUAL_PYLON_SPREAD;
+        assert!((right[0].point[0] - (8. - spread)).abs() < 1e-9, "inboard");
+        assert!((right[1].point[0] - (8. + spread)).abs() < 1e-9, "outboard");
+        let left = pylons(wing, mount, 1, 2);
+        assert!((left[1].point[0] + 8. + spread).abs() < 1e-9, "mirrored");
+        // One a side: one pylon. Three: one pylon's triple rack. Six: two
+        // pylons with three each. A fuselage pair keeps one pylon.
+        assert_eq!(pylons(wing, mount, 0, 1).len(), 1);
+        assert_eq!(pylons(wing, mount, 0, 3).len(), 1);
+        let six = pylons(wing, mount, 0, 6);
+        assert_eq!(
+            six.iter().map(|p| p.slots.len()).collect::<Vec<_>>(),
+            [3, 3]
+        );
+        let fuselage = Rack {
+            location: 1,
+            paired: true,
+        };
+        assert_eq!(pylons(fuselage, [3., -5., 0.], 0, 2).len(), 1);
+        // Drawn: four grey slabs, one over each store, the empty ones stay.
+        let airframe = flat_wing();
+        for items in [4, 1, 0] {
+            let out = draw(
+                &[StorePose {
+                    loaded: 4,
+                    ..plain(mount, 4, items)
+                }],
+                &airframe,
+            );
+            let xs = grey(&out);
+            for x in [8. - spread, 8. + spread, -8. + spread, -8. - spread] {
+                assert!(
+                    xs.iter().any(|v| (f64::from(v[0]) - x).abs() < PYLON_WIDTH),
+                    "a pylon at {x} with {items} left"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_wingtip_store_hangs_on_a_rail_joined_to_the_tip() {
+        let airframe = flat_wing();
+        // A store 1.2 ft out past the 15 ft tip, level with the wing.
+        let tip = plain([16.2, 0.2, 0.], 5, 2);
+        let out = draw(&[tip], &airframe);
+        let rail: Vec<[f32; 3]> = grey(&out).into_iter().filter(|v| v[0] > 0.).collect();
+        let inner = rail.iter().map(|v| v[0]).fold(f32::MAX, f32::min);
+        let outer = rail.iter().map(|v| v[0]).fold(f32::MIN, f32::max);
+        assert!(inner < 15., "rail reaches into the tip: {inner}");
+        assert!(outer > 16.2, "rail reaches over the store: {outer}");
+        let low = rail.iter().map(|v| v[1]).fold(f32::MAX, f32::min);
+        let high = rail.iter().map(|v| v[1]).fold(f32::MIN, f32::max);
+        let lugs = 0.2 + PLAIN[1] / 2.;
+        assert!(f64::from(low) <= 0. && f64::from(high) >= lugs - 1e-4);
+    }
+}

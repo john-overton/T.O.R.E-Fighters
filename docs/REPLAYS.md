@@ -657,7 +657,7 @@ is positive right wing down.
 | Aircraft | Position, attitude, velocity, airspeed, G, the 22 animated devices (including actual nozzle pitch/yaw, nacelle conversion, collective, gun mount poses and linked gun membership), engine heat, flags (engine, afterburner, airborne, on the ground, crashed, wreck gone, alive, ejected, and animated: whether anything moves the devices, since straight-flight fixtures keep the model's neutral pose), wreck phase, fuel (internal and external tanks, see [Versions and damage](#versions-and-damage)), pilot controls, the auxiliary body rates that thrust-vectoring paddles and plumes follow, hit points, regional damage and the failed structural section |
 | Projectiles | Owner, weapon, target, position, previous position, direction, speed, tracer, inbound on the player, age, and the seeker's state |
 | Debris and ejected pilots | Position and attitude or heading |
-| Effects and puffs | Only those released this tick; the viewer ages them itself. A hit, kill or ground strike stores its [explosion type](spec/explosions.md) in its effect code (64 to 87 hit, 96 to 119 kill, 128 to 151 ground, the type less 15 added); a crater is 160 plus its size and lasts for good; a crash-site fire is code 7; the crash-site column is puff kind 3, stored in its own byte; the viewer drifts every puff with the recorded wind, and each column puff also by the cone its release point gives it; replayed flare smoke drifts with the wind as in flight. Older builds read these codes as unknown kinds and skip them; recordings made before explosion types draw and sound their plain hit, kill or ground effect |
+| Effects and puffs | Only those released this tick; the viewer ages them itself. A hit, kill or ground strike stores its [explosion type](spec/explosions.md) in its effect code (64 to 87 hit, 96 to 119 kill, 128 to 151 ground, the type less 15 added); a crater is 160 plus its size and lasts for good; a crash-site fire is code 7; the crash-site column is puff kind 3, stored in its own byte; the viewer drifts every puff with the recorded wind, and each column puff also by the cone its release point gives it; replayed flare smoke drifts with the wind as in flight. Older builds read these codes as unknown kinds and skip them; recordings made before explosion types draw and sound their plain hit, kill or ground effect. An effect not drawn at its type's size keeps its scale in the effect scales section (id 10, [below](#versions-and-damage)) |
 | Surface objects | Hit points, when they change |
 | Surface units (format 3) | Each unit that follows a route: position and attitude every tick, and whether it is a wreck. A launcher's rails (every rail of the unit, when any changes) and a gun's spare magazines, when they change. The piece a parked aircraft's debris is. Standing units are in the rebuilt scenery and cost nothing |
 | Events and display trees | See [the vocabulary](../crates/tore-replay/src/vocab.rs) |
@@ -774,8 +774,10 @@ beyond them.
   - **The airfield scene**, `world.airfield_scene=N`, written only when N is
     not 0. 0 is the retail airfields, which every recording before the field
     has; 1 is the [redrawn airports](formats/redrawn-airports.md), the
-    default since 2026-10-11 (protocol 24), so a recording of a flight over
-    the redrawn airports is a format 3 file. A flight with
+    default since 2026-10-11 (protocol 24), with a ground target template's
+    own runway piece still retail; 2 (since 2026-10-12, slice BG) is the
+    redraw with that piece redrawn too, what a flight records now. A
+    recording of a flight over the redrawn airports is a format 3 file. A flight with
     `TORE_REDRAWN_AIRPORTS=0` writes scene 0 and, with no other format 3
     content, stays format 2. The viewer rebuilds the
     scene the header names, whatever `TORE_REDRAWN_AIRPORTS` says: an old
@@ -819,7 +821,13 @@ beyond them.
   - **Surface unit registry**: a unit's id, short name (`SA-6`), label
     (`SA-6 #18`), side, hit points and position, in the entities section.
     The logs and exports name a surface shooter or victim by it, and a
-    wreck's fire is sized by its hit points.
+    wreck's fire is sized by its hit points. Since B16 (2026-10-12, no
+    format change) every destroyed building burns and about half the
+    vehicles do (a fixed pick, the same in the recording as in flight), so
+    `surface.wreck` says `burning` false for the others; the fires, a
+    building's scorch and the craters on bombed runways are ordinary recorded
+    marks, and the viewer draws each destroyed building's ruin from the
+    rebuilt scenery, older recordings included.
   - **Events**: `surface.burst`, `surface.phase`, `surface.rearm`,
     `surface.refill`, `surface.radar` and `surface.wreck` (see
     [the vocabulary](../crates/tore-replay/src/vocab.rs)). Unknown event kinds
@@ -829,6 +837,22 @@ beyond them.
     `surface` field true; the unit joins the registry when first named, and
     its `surface.wreck` names the unit that destroyed it. Older recordings
     have none, as no unit fired at the ground before.
+- **Effect scales** (slice BF, 2026-10-12, no format number change): the
+  size each spawned effect is drawn at, percent of its explosion type's
+  ([size by weapon](spec/explosions.md#size-by-weapon)), in a new chunk
+  section, id 10, written only for the frames that spawn an effect not drawn
+  at 100: for each such frame its gap from the last, how many, and for each
+  its index among the frame's spawned effects and its scale byte (0 a dud's
+  inert puff). Both formats carry it. An older build skips the unknown
+  section, as it always has, and draws every explosion full size; a
+  recording made before it has none, and this build draws its explosions
+  full size too. A crater spawn's scale is its crater's drawn size, and a
+  crater of size 0 (code 160) is a gun round's pock mark, which an older
+  build draws as nothing. Craters and pock marks have no cap (John,
+  2026-10-12); a recording costs about 24 bytes a mark. The motor flame of a missile or rocket is not recorded:
+  the viewer dates each round's motor from its recorded age and the
+  weapon's record in the import, so a recording of any age draws the flame
+  only while the motor burns.
 - The air-to-ground round (slice RA) adds events and a weapon class and **no
   format change**: a recording is still format 3 with surface content and
   format 2 without, and both versions open unchanged. See

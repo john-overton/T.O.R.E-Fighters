@@ -15,8 +15,9 @@ exports:
 * the launcher rails drop as SAMs fire and come back, on the tick the
   `surface.rearm` event says, after the truck's rearm time, and a gun's spare
   magazine arrives on the tick of its `surface.refill`;
-* each destroyed tank has a `surface.wreck` event with its fire, and the
-  summary names every unit ("SA-6 #9"), never a raw id;
+* each destroyed tank has a `surface.wreck` event saying whether it burns
+  (about half do since B16, a fixed pick) and, when it does, its fire's
+  width, and the summary names every unit ("SA-6 #9"), never a raw id;
 * two identical runs make recordings that match.
 
 Further steps record a vulnerable pass at `~QUCOL` (the player is shot down: the
@@ -156,8 +157,12 @@ def long_run_problems(work: Path, s: dict[int, str]) -> list[str]:
         problems.append(f"{len(wrecks)} wrecks recorded, the three flagged targets fell")
     for w in wrecks:
         f = w["fields"]
-        if f.get("burning") is not True or not f.get("fire_ft", 0) > 20:  # a tank burns
-            problems.append(f"wreck {w['subject']} burns {f.get('burning')} with a fire of {f.get('fire_ft')} ft")
+        # About half the vehicles burn (B16, a fixed pick); one that does
+        # has a tank-sized fire, one that does not has none.
+        burning = f.get("burning")
+        if burning not in (True, False) or (burning and not f.get("fire_ft", 0) > 20) \
+                or (burning is False and "fire_ft" in f):
+            problems.append(f"wreck {w['subject']} burns {burning} with a fire of {f.get('fire_ft')} ft")
         if w["subject"] not in units:
             problems.append(f"wreck {w['subject']} is not in the registry")
 

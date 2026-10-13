@@ -179,6 +179,8 @@ impl World {
             mates: &[],
             wing: WingFacts::default(),
             ceiling_ft: 50_000.,
+            terrain: None,
+            threat_bearing_deg: None,
         }
     }
 }

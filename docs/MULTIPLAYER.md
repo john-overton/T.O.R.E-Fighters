@@ -1345,7 +1345,7 @@ target window come from the host's own readout, not from the drawn aircraft.
 | Item | Value |
 | --- | --- |
 | Connecting | The client repeats each handshake step every 250 ms and gives up after 10 seconds |
-| Dropped player | 5 seconds without a valid packet; the AI takes the plane at once. A game whose loop is stalled (a window dragged, a long frame) keeps its plane for up to 60 seconds through its [keepalive](ARCHITECTURE.md#a-stalled-game-stays-connected-ef-k) (EF-K, agent decision), flown neutral meanwhile |
+| Dropped player | 5 seconds without a valid packet; the AI takes the plane at once. A game whose loop is stalled (a window dragged, a long frame) keeps its plane for up to 60 seconds through its [keepalive](ARCHITECTURE.md#a-stalled-game-stays-connected-ef-k) (EF-K, agent decision), flown neutral meanwhile. The same 60 seconds cover a game building the mission as it joins or as a flight starts, which a slow machine can take longer than 5 seconds over ([a long mission build](ARCHITECTURE.md#a-long-mission-build-slice-net), slice NET, agent decision) |
 | Players per server | A setting, default 30 (John, 2026-09-28); a co-op mission seats at most its 15 friendly planes |
 | Default port | UDP 26900, a setting |
 

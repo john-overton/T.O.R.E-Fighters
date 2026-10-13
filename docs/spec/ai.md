@@ -1267,6 +1267,8 @@ through `Controller::fallbacks`.
 | `fitted` | One named, documented fitted rule per unresolved branch a fighter/strike actor can reach, with its constants | Nothing; this file exists because the branches are unresolved |
 | `controller` | `Controller::new` and `Controller::step`, persistent state, seeded draws at documented decision points only, reason ranking, target selection, tactical choice, motion resolution, weapon cadence, wing requests, fuel | Families other than fighter/strike are rejected, not served fighter behavior |
 | `steering_adapter` | Motion intent to flight controls through the B44 rate limits, and the AI-only experience G adjustment | Ceiling test and ground contact are caller concerns; the control gains are fitted |
+| `rotor_adapter` | [Rotorcraft control](#rotorcraft-and-jet-lift-control): steer and hover requests flown on the helicopters and the V-22 through the autopilot's rotor laws, the V-22 nacelle schedule | Nothing retail; every gain and number is fitted |
+| `jet_lift` | [Jet-lift control](#rotorcraft-and-jet-lift-control): the AV-8's and Yak-141's hover, vertical climb and descent | Transition to wingborne flight and short takeoff (slice H2) |
 | `mission` | Actor-owned sensors, stores, flight model and decision state; ammunition debited before a launch event | Missile physics deliberately not duplicated; the host realises each launch |
 | `damage` | [Authored fault responses](systems-damage.md#ai-pilot-response-to-faults): recovery commitment, power protection/restart, maneuver limits and fire danger | Original AI procedures; unreachable or missing recovery runway and irrecoverable failures can still be fatal |
 | `launch` | Quick Mission launch payload: side, wing, member, aircraft, resolved experience and the enemy-skill override | Nothing; loadout carriage stays with the host |
@@ -1450,6 +1452,63 @@ fitted controller restriction. Actual axis-specific faults and regional damage
 also act through the shared flight model. [Fault responses](systems-damage.md#ai-pilot-response-to-faults)
 end offensive engagement when recovery is needed and add protective power,
 speed and maneuver requests. These never overwrite achieved flight motion.
+
+### Rotorcraft and jet-lift control
+
+*Built in slice H1 of the helicopter and VTOL AI pass (2026-10-12; AI work
+requested by John). Fitted, agent decisions, unless a row says otherwise.*
+The controller above flies a load factor on the stick and a speed on the
+throttle. On a helicopter the stick tilts the rotor disk, the throttle is a
+governed engine's power lever and the lift comes from the collective, which
+that controller never moved: a helicopter could hardly climb or descend, slowed
+until it sank when asked for less speed, and could not hover. The helicopters
+(AH-64, Mi-24, CH-47) and the V-22 on the researched model are therefore flown
+by their own adapter (`ai::rotor_adapter`), which takes the same steer requests
+(heading, flight path, speed with Maximum resolved, explicit or free bank) and
+hover requests the airfield sequences use. It flies through the player
+autopilot's own laws (`autopilot::rotor_law`, the [hover hold and coupled
+heading modes](autopilot.md)) with targets it commands, so the player's and the
+AI's rotorcraft obey one set of gains. Every other aircraft keeps the
+controller above unchanged.
+
+| Rule | Value | Label |
+| --- | --- | --- |
+| Engines | The throttle is held at 1: governed engines, power never cut for speed | fitted (agent) |
+| Forward flight | Climb on the collective, speed on the cyclic (the ground speed along the heading, the wind along it added so the airspeed is the one asked), pedals coordinating the turn. Climb = speed x sin(flight path), at most 3,000 ft/min either way (the helicopter defence's 10 degree path at 150 kt); pitch at most 15 degrees | fitted (agent); the law and its gains are the player A modes' |
+| Bank | An explicit bank, or the heading error over 1 s as a turn rate, banked as atan(speed x rate / g) with speed floored at 40 kt; at most 60 degrees or the aircraft's maximum bank (45 left a Mi-24 at 158 kt circling a lead-in point it could not turn inside) | fitted (agent) |
+| Height before speed | Below 1,000 ft over the ground, outside pointing: the cyclic is asked for at most 10 ft/s of speed change at a time; sinking more than 2 ft/s below the descent asked (or below level when a climb is asked; any sink once the collective is at full travel or the rotor droops under 95 percent) it stops accelerating, slows by up to 10 ft/s and eases the bank by up to half. A 180 degree turn at 200 ft asking 160 kt loses 15 to 20 ft (without it the AH-64 flew into the ground) | fitted (agent) |
+| Terrain floor | The B44 floor on the flight path, as for every aircraft, but with a minimum height of 100 ft instead of the fighters' 300, so the 200 ft masking height of the helicopter defence and the stand-off attack can be flown | B44 spec-derived; the 100 ft fitted (agent) |
+| Defence's speed rule | The helicopter defence comes down no faster than it can hold its maximum speed; the adapter holds the speed on the cyclic whatever the path, so the defence allows it 10 kt over the maximum before it levels off | fitted (agent) |
+| Pointing | A requested path steeper than 12 degrees that also asks for more than 3,000 ft/min (a pop-up's pull, a rocket run's dive at speed) is flown with the nose on the path (pitch up to 30 degrees) and the speed on the collective (never under 0.2 of it); back to forward flight below 8 degrees | fitted (agent): rockets leave along the nose |
+| Hover | Hover hold's cascade toward a commanded point, wheel height and heading: position to ground velocity (0.15 per second, at most the commanded closing speed) to tilt (at most 20 degrees) to attitude; height to climb (0.25 per second, within the commanded climb and sink) to collective; heading to pedals. An optional slow-flight velocity rides on top (air taxi) | fitted (agent); the gains are hover hold's |
+| Hover entry | The cascade takes over at a hover request below 40 kt of ground speed (hover hold's band). Faster, it slows first on the forward law toward the point, the speed wanted being sqrt(2 x 4 ft/s² x distance ahead) | fitted (agent) |
+| V-22 nacelles | A schedule against indicated airspeed: 87 degrees (the published helicopter preset) to 40 kt, 80 at 80, 75 at 110 (the wing's published stall), 60 at 125, 45 at 135, 30 at 145, 15 at 155, 0 from 165. Asked to slow, the nacelles come up as if 2 kt slower for each knot too fast. The demand stays inside the angles the corridor allows, never aft within 10 kt of the 200 kt aft lock, and the speed asked is paced to 10 kt inside the corridor at the present angle, so the protection never has to override it. 87 degrees in a hover | fitted (agent); the preset, the corridor and the stall speed published |
+| V-22 law | From 75 degrees of nacelle up (down to 72 once in it) the forward law flies the collective as on a helicopter; below, the climb on the pitch and the speed on the collective, its power lever, as the player A modes do, the climb error handed to that law four times over (a few feet a second of sink is a fraction of a degree of path at 280 ft/s) | fitted (agent) |
+| Memory | The laws' integrators and the regime are the actor's own and are checkpointed | spec-derived (checkpoint rule) |
+
+Measured on the PT records over flat ground (the [rotor
+probe](../testing/lane-flight.md#rotor-probe) and its unit tests): every
+rotorcraft holds a point within 3.1 ft in calm air and a 15 kt wind, moves its
+point 500 ft in 31 to 33 s without overshoot, climbs from 20 to 500 ft at 25 to
+27 ft/s and settles on 500 ft, flies 40, 80 and 120 kt climbing or descending
+1,000 ft/min within 35 ft/min and 3.2 kt, and slows from 120 kt to a hover over a
+point 3,000 ft ahead losing at most 5.4 ft, and turns 180 degrees at 200 ft asking
+160 kt losing 15 to 20 ft. The V-22 converts from a hover to airplane mode in 25 s
+on its way to 220 kt and back to a hover, within 88 ft of its height, with no
+corridor override.
+
+**Jet lift** (`ai::jet_lift`, the AV-8 and Yak-141). Used only for the hovers,
+vertical takeoffs and landings the airfield sequences ask for (slice H2);
+wingborne flight stays on the controller above. Throttle for height (0.03 per
+ft/s of climb error plus an integrator), the nozzle for the speed along the
+heading (the wanted acceleration as an angle off vertical, from 60 degrees to
+the braking stop), the bank (at most 10 degrees) for the speed across, the nose
+held level, the heading on the pedals through the puffers. Fitted, agent. On the
+PT records, clean, both hold a point exactly in calm air and set down at a
+commanded 5 ft/s sink: the AV-8 touches at 4.9 ft/s, the Yak-141 at 7.5 ft/s
+(the jets lose lift to suck-down near the ground). A loaded AV-8 cannot hover
+(the manual's "never be able to fully hover"); the law then sinks at full
+throttle and the caller must choose a runway.
 
 ## Live integration and authored boundaries
 

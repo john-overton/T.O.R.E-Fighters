@@ -268,6 +268,7 @@ fn fifteen_second_stall(strict: bool) {
     assert!(game.guest.kept.running(), "the guest's keepalive runs");
     assert!(!game.king.kept.running(), "the King over the link has none");
     let king_before = game.king.corrections();
+    let before_stall = game.guest.bot.client.clone_stats();
 
     let stall = Instant::now();
     game.guest_stalled = true;
@@ -325,9 +326,18 @@ fn fifteen_second_stall(strict: bool) {
         snapshots >= 10,
         "only {snapshots} snapshots kept through the stall: {stats:#?}"
     );
+    // The host held real inputs for as many ticks as the guest's inputs ran
+    // ahead of it when the stall began: the input margin the host reported
+    // and the half of the round trip still in flight. On a quiet machine
+    // that is a few ticks; on a loaded runner far more (macOS Intel, run
+    // 38308953880: a 94 ms round trip, a margin of 28 ticks, and 565 ticks
+    // repeated in 306 snapshots of 2, 47 short of all of them).
+    let lead = u64::try_from(before_stall.input_margin.unwrap_or(0).max(0)).unwrap_or(0)
+        + (before_stall.round_trip.as_secs_f64() * 60.).ceil() as u64;
     assert!(
-        repeated > 0 && repeated + 30 >= snapshots * per,
-        "{repeated} ticks repeated in {snapshots} snapshots of {per} ticks"
+        repeated > 0 && repeated + 30 + lead >= snapshots * per,
+        "{repeated} ticks repeated in {snapshots} snapshots of {per} ticks, \
+         the guest {lead} ticks ahead at the stall: {before_stall:#?}"
     );
     // It takes the host's newest state rather than step 15 seconds of
     // backlog (a catch-up, not a correction) ...

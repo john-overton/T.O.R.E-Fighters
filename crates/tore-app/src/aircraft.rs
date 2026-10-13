@@ -34,6 +34,9 @@ pub struct Airframe {
     pub hud: tore_formats::hud::Hud,
     pub flight_menu: Vec<tore_formats::ui::MenuNode>,
     pub poses: Vec<Shape>,
+    /// The clean model's surfaces where drawn pylons and wingtip rails
+    /// meet it (B3, BP2), worked out the first time a store is drawn there.
+    mounts: crate::pylons::MountCache,
 }
 impl Deref for Airframe {
     type Target = AircraftType;
@@ -248,6 +251,7 @@ impl Airframe {
             flight_menu,
             poses,
             streamer,
+            mounts: Default::default(),
         })
     }
     /// The stored daytime cockpit palette, before weather, sunlight or HUD
@@ -418,6 +422,58 @@ impl Airframe {
             extent(
                 shape.faces.iter().flat_map(|f| f.positions.iter().copied()),
                 scale,
+            )
+        })
+    }
+    /// How far above source hardpoint `hardpoint`'s position the clean
+    /// model's underside is, feet: the lowest face straight above it (or up
+    /// to 3 ft inboard of it), or `None` when nothing of the model is within
+    /// 12 ft above it (a wingtip rail beside the wing).
+    pub fn pylon_top(&self, hardpoint: usize) -> Option<f64> {
+        let h = self.profile.hardpoints.get(hardpoint)?;
+        let [right, up, forward] = h.position.map(|v| f64::from(v) / 3.);
+        Some(self.underside(right, forward, up, 6)? - up)
+    }
+    /// The height (feet up of the reference point) of the clean model's
+    /// lowest face over the point `right`, `forward` that is at most 12 ft
+    /// above `from`, looking straight up and, when nothing is there, up to
+    /// `inboard_steps` half feet inboard (a pod under the gap between a body
+    /// and a nacelle). The model is mirror symmetric, so a left-hand point is
+    /// looked up on the right.
+    pub fn underside(&self, right: f64, forward: f64, from: f64, inboard_steps: u8) -> Option<f64> {
+        let right = right.abs();
+        let key =
+            [right, forward, from, f64::from(inboard_steps)].map(|v| (v * 100.).round() as i64);
+        self.mounts.underside(key, || {
+            let scale = f64::from(self.animation_scale());
+            let shape = self.poses.first()?;
+            (0..=inboard_steps).find_map(|step| {
+                let inboard = f64::from(step) * 0.5;
+                underside(shape, scale, right - inboard, forward, from).map(|h| from + h)
+            })
+        })
+    }
+    /// The clean model's outermost edge inboard of a wingtip store at
+    /// `right`, `up`, `forward` (feet), over `half_length` feet fore and aft
+    /// of it: how far out it is and its lowest and highest point there, or
+    /// `None` when nothing of the model is within 4 ft inboard.
+    pub fn tip_edge(
+        &self,
+        right: f64,
+        up: f64,
+        forward: f64,
+        half_length: f64,
+    ) -> Option<[f64; 3]> {
+        let right = right.abs();
+        let key = [right, up, forward, half_length].map(|v| (v * 100.).round() as i64);
+        self.mounts.tip_edge(key, || {
+            let scale = f64::from(self.animation_scale());
+            tip_edge(
+                self.poses.first()?,
+                scale,
+                right,
+                up,
+                [forward - half_length, forward + half_length],
             )
         })
     }
@@ -814,6 +870,7 @@ impl Airframe {
         };
         let contrail_offsets = contrail_offsets(id, &poses[0], rig.as_ref(), engines);
         Self {
+            mounts: Default::default(),
             kind: Arc::new(AircraftType::synthetic(id, contrail_offsets)),
             nozzle_bounds: nozzle_bounds(id, &poses[0]),
             engine_material,
@@ -873,6 +930,89 @@ fn streamer_world_points(
         });
     }
     Some(points)
+}
+
+/// The height above `from` (feet up) of the lowest face of `shape` straight
+/// above the point `right` and `forward` feet from the reference point, up
+/// to 12 ft above it. Shape positions are right, forward and up in source
+/// units; `scale` turns them into feet.
+fn underside(shape: &Shape, scale: f64, right: f64, forward: f64, from: f64) -> Option<f64> {
+    let mut lowest: Option<f64> = None;
+    for face in &shape.faces {
+        let p: Vec<[f64; 3]> = face
+            .positions
+            .iter()
+            .map(|q| [q[0], q[1], q[2]].map(|v| f64::from(v) * scale))
+            .collect();
+        for i in 1..p.len().saturating_sub(1) {
+            let [a, b, c] = [p[0], p[i], p[i + 1]];
+            // Barycentric weights of the point in the triangle's plan view.
+            let d = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
+            if d.abs() < 1e-9 {
+                continue;
+            }
+            let u = ((b[1] - c[1]) * (right - c[0]) + (c[0] - b[0]) * (forward - c[1])) / d;
+            let v = ((c[1] - a[1]) * (right - c[0]) + (a[0] - c[0]) * (forward - c[1])) / d;
+            let w = 1. - u - v;
+            if u < 0. || v < 0. || w < 0. {
+                continue;
+            }
+            let height = u * a[2] + v * b[2] + w * c[2] - from;
+            if (0. ..=12.).contains(&height) && lowest.is_none_or(|l| height < l) {
+                lowest = Some(height);
+            }
+        }
+    }
+    lowest
+}
+
+/// The outermost point of `shape` (scaled to feet by `scale`) on the right
+/// at most 0.3 ft outboard of `right` and 4 ft inboard of it, between
+/// `forward[0]` and `forward[1]` and within 3 ft of `up`: [how far right,
+/// lowest, highest] of the model within 0.3 ft of that edge.
+fn tip_edge(shape: &Shape, scale: f64, right: f64, up: f64, forward: [f64; 2]) -> Option<[f64; 3]> {
+    let mut points = Vec::new();
+    for face in &shape.faces {
+        let p: Vec<[f64; 3]> = face
+            .positions
+            .iter()
+            .map(|q| [q[0], q[1], q[2]].map(|v| f64::from(v) * scale))
+            .collect();
+        for i in 0..p.len() {
+            let [mut a, mut b] = [p[i], p[(i + 1) % p.len()]];
+            if a[1] > b[1] {
+                std::mem::swap(&mut a, &mut b);
+            }
+            if b[1] < forward[0] || a[1] > forward[1] {
+                continue;
+            }
+            let at = |t: f64| -> [f64; 3] { std::array::from_fn(|k| a[k] + t * (b[k] - a[k])) };
+            let span = b[1] - a[1];
+            let [t0, t1] = if span < 1e-9 {
+                [0., 1.]
+            } else {
+                [
+                    ((forward[0] - a[1]) / span).max(0.),
+                    ((forward[1] - a[1]) / span).min(1.),
+                ]
+            };
+            points.extend([at(t0), at(t1)]);
+        }
+    }
+    let near = |q: &[f64; 3]| q[0] <= right + 0.3 && q[0] >= right - 4. && (q[2] - up).abs() <= 3.;
+    let edge = points
+        .iter()
+        .filter(|q| near(q))
+        .map(|q| q[0])
+        .fold(f64::MIN, f64::max);
+    if edge == f64::MIN {
+        return None;
+    }
+    let (low, high) = points
+        .iter()
+        .filter(|q| near(q) && q[0] >= edge - 0.3)
+        .fold((f64::MAX, f64::MIN), |(l, h), q| (l.min(q[2]), h.max(q[2])));
+    Some([edge, low, high])
 }
 
 #[cfg(test)]

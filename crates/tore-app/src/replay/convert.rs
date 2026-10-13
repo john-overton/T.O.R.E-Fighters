@@ -249,6 +249,7 @@ pub fn aircraft_pose(
         airborne: state.flags.airborne,
         wreck: wreck_phase(state.wreck_phase),
         crashed: state.flags.crashed,
+        stores: Vec::new(),
     }
 }
 
@@ -391,6 +392,7 @@ pub fn projectile_pose(
         target: state.target,
         incoming: state.incoming,
         speed_f8: (state.speed * 256.).round() as i32,
+        powered: false,
     }
 }
 
@@ -595,6 +597,7 @@ pub fn mark_spawn(mark: &blast::Mark) -> replay::EffectSpawn {
         },
         position: mark.position,
         duration_ticks: mark.ticks,
+        scale: mark.scale,
     }
 }
 
@@ -618,8 +621,8 @@ pub fn recorded_marks(recording: &replay::Recording) -> Vec<(u64, replay::Effect
         .unwrap_or_default()
 }
 
-/// The craters and fires alive at `tick`, keeping only the newest up to the
-/// simulation's caps.
+/// The craters and fires alive at `tick`, keeping only the newest fires up
+/// to the simulation's cap (craters have none since 2026-10-12).
 pub fn marks_at(marks: &[(u64, replay::EffectSpawn)], tick: u64) -> Vec<MarkPose> {
     let mut alive: Vec<MarkPose> = marks
         .iter()
@@ -639,25 +642,24 @@ pub fn marks_at(marks: &[(u64, replay::EffectSpawn)], tick: u64) -> Vec<MarkPose
                 ticks,
                 born: *start,
                 serial: 0,
+                scale: e.scale,
             };
             MarkPose::of(&mark, tick)
         })
         .collect();
-    for (fire, cap) in [(false, blast::MAX_CRATERS), (true, blast::MAX_FIRES)] {
-        let count = alive
-            .iter()
-            .filter(|m| (m.kind == blast::MarkKind::Fire) == fire)
-            .count();
-        let mut drop = count.saturating_sub(cap);
-        alive.retain(|m| {
-            if drop > 0 && (m.kind == blast::MarkKind::Fire) == fire {
-                drop -= 1;
-                false
-            } else {
-                true
-            }
-        });
-    }
+    let fires = alive
+        .iter()
+        .filter(|m| m.kind == blast::MarkKind::Fire)
+        .count();
+    let mut drop = fires.saturating_sub(blast::MAX_FIRES);
+    alive.retain(|m| {
+        if drop > 0 && m.kind == blast::MarkKind::Fire {
+            drop -= 1;
+            false
+        } else {
+            true
+        }
+    });
     alive
 }
 
@@ -755,6 +757,7 @@ pub fn effect_pose(effect: &replay::LiveEffect) -> Option<EffectPose> {
         position: effect.position,
         ticks: u16::try_from(left).ok().filter(|left| *left > 0)?,
         blast,
+        scale: effect.scale,
     })
 }
 
@@ -784,6 +787,7 @@ impl EffectWatch {
         let same = |a: &EffectPose, b: &EffectPose| {
             a.kind == b.kind
                 && a.blast == b.blast
+                && a.scale == b.scale
                 && a.ticks == b.ticks
                 && a.position.map(f64::to_bits) == b.position.map(f64::to_bits)
         };
@@ -800,6 +804,7 @@ impl EffectWatch {
                 kind: effect_kind(effect.kind, effect.blast),
                 position: effect.position,
                 duration_ticks: u32::from(effect.ticks),
+                scale: effect.scale,
             })
             .collect()
     }
@@ -1472,6 +1477,7 @@ mod tests {
             position: [x, 5000., 0.],
             ticks,
             blast: None,
+            scale: tore_sim::combat::blast_scale::FULL,
         }
     }
 
@@ -1483,6 +1489,7 @@ mod tests {
             position: [1., 2., 3.],
             ticks: 100,
             blast,
+            scale: tore_sim::combat::blast_scale::FULL,
         };
         for (kind, blast) in [
             (Destroyed, Some(33)),
@@ -1496,6 +1503,7 @@ mod tests {
                 kind: effect_kind(kind, blast),
                 position: [1., 2., 3.],
                 duration_ticks: 100,
+                scale: tore_replay::EffectSpawn::FULL_SCALE,
             };
             assert_eq!(effect_pose(&recorded), Some(pose(kind, blast)));
         }
@@ -1510,15 +1518,17 @@ mod tests {
             ticks: 1000,
             born: 10,
             serial: 0,
+            scale: 100,
         };
         let mut marks = vec![(11, mark_spawn(&fire))];
-        for i in 0..=blast::MAX_CRATERS as u64 {
+        for i in 0..=300_u64 {
             let crater = blast::Mark {
                 position: [i as f64, 0., 0.],
                 kind: blast::MarkKind::Crater(9),
                 ticks: blast::FOREVER,
                 born: i,
                 serial: i,
+                scale: 159,
             };
             marks.push((i, mark_spawn(&crater)));
         }
@@ -1529,11 +1539,12 @@ mod tests {
             .collect();
         assert_eq!(fires.len(), 1);
         assert_eq!(fires[0].age, 489);
-        assert_eq!(at.len(), blast::MAX_CRATERS + 1);
-        // The oldest crater went when the 257th was dug.
+        // Every crater stays, at its recorded scale (no cap since
+        // 2026-10-12).
+        assert_eq!(at.len(), 301 + 1);
         assert!(
             at.iter()
-                .all(|m| m.position[0] != 0. || m.kind == blast::MarkKind::Fire)
+                .all(|m| m.kind == blast::MarkKind::Fire || m.scale == 159)
         );
         // The fire is out 1,000 ticks after it was recorded.
         assert!(
@@ -1739,9 +1750,18 @@ mod tests {
                 player_pose.crashed = true;
                 player_pose.damage.hp = 0;
                 let name = format!("scene-{with_models}-{ai_poses}.tore-replay");
-                let replayed = round_trip(dir.path(), &name, &live);
+                let mut replayed = round_trip(dir.path(), &name, &live);
                 for (a, b) in live.iter().zip(&replayed) {
                     assert_eq!(difference(a, b), None);
+                }
+                // A recording keeps no motor state: the viewer dates each
+                // round's motor from its recorded age and the import
+                // (`Playback::add_motors`), which this test has no import
+                // for, so it takes the live picture's.
+                for (a, b) in live.iter().zip(replayed.iter_mut()) {
+                    for (pa, pb) in a.projectiles.iter().zip(b.projectiles.iter_mut()) {
+                        pb.powered = pa.powered;
+                    }
                 }
                 // The drawable player state a replay rebuilds.
                 let [a, b] = [&live[1].player, &replayed[1].player].map(|p| pose_state(&player, p));
@@ -1768,7 +1788,14 @@ mod tests {
                     for camera in fixture::cameras() {
                         if with_models {
                             let batches = [&a, &b].map(|s| {
-                                aircraft_batches(s, &view.models, &camera, &world, &scenery)
+                                aircraft_batches(
+                                    s,
+                                    &view.models,
+                                    &view.art,
+                                    &camera,
+                                    &world,
+                                    &scenery,
+                                )
                             });
                             assert_eq!(batches[0].len(), batches[1].len());
                             for ((ma, va, ca), (mb, vb, cb)) in batches[0].iter().zip(&batches[1]) {
@@ -1835,6 +1862,7 @@ mod tests {
             airborne: true,
             wreck: Some(wreck::Phase::Grounded),
             crashed: true,
+            stores: Vec::new(),
         };
         for phase in [
             None,

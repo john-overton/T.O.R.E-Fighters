@@ -23,6 +23,7 @@
 use crate::wire::events::{SurfaceUnitView, WireEvent};
 use crate::wire::from_world;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use tore_sim::combat::blast::MarkKind;
 use tore_sim::combat::live::{self, DeviceNote};
 use tore_sim::combat::missiles::TargetRole;
 use tore_world::snapshot::{EffectPose, MarkPose};
@@ -63,13 +64,18 @@ pub struct Timed {
     pub event: Wide,
 }
 
-type EffectKey = (u8, [u64; 3], Option<u8>);
+/// The gun pock marks a newly seated player is told of at most, the
+/// newest (agent decision, slice BF, 2026-10-12): about 13.5 KB of events.
+pub const SEAT_POCK_MARKS: usize = 1_000;
+
+type EffectKey = (u8, [u64; 3], Option<u8>, u8);
 
 fn effect_key(effect: &live::Effect) -> EffectKey {
     (
         effect.kind as u8,
         effect.position.map(f64::to_bits),
         effect.blast,
+        effect.scale,
     )
 }
 
@@ -407,9 +413,27 @@ impl Tracker {
     /// protocol's "first snapshot").
     pub fn standing(world: &World, tick: u64) -> Vec<Timed> {
         let state = &world.combat.state;
+        // Every crater and fire, but only the newest gun pock marks: a long
+        // mission's thousands would hold every other event back for a minute
+        // in the snapshots' event share (agent decision, slice BF,
+        // 2026-10-12; a late joiner misses only older pock marks).
+        let pocks = state
+            .marks
+            .iter()
+            .filter(|m| m.kind == MarkKind::Crater(tore_sim::combat::blast::POCK))
+            .count();
+        let mut skip = pocks.saturating_sub(SEAT_POCK_MARKS);
         let marks = state
             .marks
             .iter()
+            .filter(move |mark| {
+                if skip > 0 && mark.kind == MarkKind::Crater(tore_sim::combat::blast::POCK) {
+                    skip -= 1;
+                    false
+                } else {
+                    true
+                }
+            })
             .map(|mark| Wide::Event(from_world::mark_event(&MarkPose::of(mark, state.tick()))));
         let effects = state
             .effects
@@ -461,6 +485,7 @@ fn effect_pose(effect: &live::Effect) -> EffectPose {
         position: effect.position,
         ticks: effect.ticks,
         blast: effect.blast,
+        scale: effect.scale,
     }
 }
 

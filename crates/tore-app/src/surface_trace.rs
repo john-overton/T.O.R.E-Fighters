@@ -9,7 +9,7 @@
 //!     [--altitude FT] [--speed KT] [--pass FT] [--from NM] [--seconds S]
 //!     [--condition NAME] [--chaff S] [--flares S] [--harm-at NM] [--kill-at S]
 //!     [--player-side red] [--invulnerable] [--quiet-shots] [--no-relocate] [--front]
-//!     [--drain] [--drain-reserve] [--kill-truck-at S] [--area]
+//!     [--drain] [--drain-reserve] [--kill-truck-at S] [--solo] [--area]
 //! ```
 //!
 //! `--area` with no `STEM` flies a Quick Mission with no ground target whose
@@ -34,6 +34,11 @@
 //! `--drain-reserve` empties their spare magazines too, and `--kill-truck-at
 //! S` destroys every supply truck within 0.1 mile of the unit at S seconds.
 //! A truck's rearm and reserve refill print as `rearm` and `refill` lines.
+//! The accuracy probe (docs/spec/surface-defenses.md, "Small arms"): `--solo`
+//! lays down every other armed unit's weapons so the summary's `hits` are the
+//! subject's alone, and with `--near FT` the subject's own type within FT of it
+//! keeps firing beside it; `--skill` and `--rng` fix the experience and the
+//! surface's random stream.
 //!
 //! The import does not keep the ground target templates and the types only
 //! they name yet, so the trace adds what the pack lacks from the retail
@@ -95,6 +100,7 @@ struct Options {
     no_relocate: bool,
     no_front: bool,
     all_units: bool,
+    solo: bool,
     near: f64,
     skill: Option<i32>,
     rng: Option<u64>,
@@ -135,6 +141,7 @@ fn options() -> AppResult<Options> {
         // would draw from the surface's random stream and add contacts.
         no_front: true,
         all_units: false,
+        solo: false,
         near: 0.,
         skill: None,
         rng: None,
@@ -189,6 +196,7 @@ fn options() -> AppResult<Options> {
             "--front" => o.no_front = false,
             "--no-front" => o.no_front = true,
             "--all-units" => o.all_units = true,
+            "--solo" => o.solo = true,
             "--near" => o.near = next()?.parse()?,
             "--skill" => o.skill = Some(next()?.parse()?),
             "--rng" => o.rng = Some(next()?.parse()?),
@@ -478,6 +486,35 @@ pub fn run() -> AppResult<()> {
     }
     if let Some(rng) = o.rng {
         world.combat.surface.rng = rng;
+    }
+    if o.solo {
+        // `--solo`: every other armed unit lays its weapons down, so the hits
+        // the summary counts are the subject's alone (the accuracy probe).
+        // With `--near FT` the subject's own type within FT of it keeps
+        // fighting beside it (a squad's neighbours at an airfield).
+        let surface = &mut world.terrain.surface;
+        let here = surface
+            .unit(unit)
+            .map(|u| (u.position, u.resource.clone()))
+            .expect("chosen from the surface");
+        let keep: BTreeSet<UnitId> = surface
+            .units
+            .iter()
+            .filter(|u| {
+                u.id == unit
+                    || (o.near > 0.
+                        && u.resource == here.1
+                        && f64::from(u.position[0] - here.0[0])
+                            .hypot(f64::from(u.position[2] - here.0[2]))
+                            <= o.near)
+            })
+            .map(|u| u.id)
+            .collect();
+        for other in &mut surface.arsenal.units {
+            if !keep.contains(&other.unit) {
+                other.weapons.clear();
+            }
+        }
     }
     let surface = &world.terrain.surface;
     let arms = surface.arsenal.arms(unit).ok_or("the unit has no arms")?;

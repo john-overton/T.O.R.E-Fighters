@@ -88,6 +88,28 @@ class ScatterReachTests(unittest.TestCase):
         self.assertAlmostEqual(retail / now, 2.0, delta=0.05)
 
 
+def _rocket_run(fall: float, y: float, rocket: str = "yes") -> str:
+    return (
+        f"a2g-run: sight t=0.017 mode CCIP rocket {rocket} arc 0 glyph 0x20 range 71903.4 max 12000 "
+        f"in-range no slant 71082 fall {fall} impact 442126.3 {y} 1362792.3 target-gap 33136.3 "
+        "retail-gap - warnings none\na2g-run: done\n"
+    )
+
+
+class RocketShallowTests(unittest.TestCase):
+    def test_a_ground_point_past_the_life_passes(self):
+        out = _rocket_run(25.97, -0.0) + _rocket_run(41.9, -0.0)
+        self.assertEqual(a2g_sights.rocket_shallow_problems(out), [])
+
+    def test_a_point_inside_the_life_or_in_the_air_fails(self):
+        self.assertTrue(a2g_sights.rocket_shallow_problems(_rocket_run(15.0, 0.0) + _rocket_run(41.9, 0.0)))
+        self.assertTrue(a2g_sights.rocket_shallow_problems(_rocket_run(30.0, 900.0) + _rocket_run(41.9, 0.0)))
+
+    def test_no_impact_fails(self):
+        none = "a2g-run: sight t=0.017 mode CCIP no-impact warnings none\na2g-run: done\n"
+        self.assertTrue(a2g_sights.rocket_shallow_problems(none + _rocket_run(41.9, 0.0)))
+
+
 class CatalogTests(unittest.TestCase):
     def problems(self, text):
         # The scenario checks 36 aircraft; the sample lists three.

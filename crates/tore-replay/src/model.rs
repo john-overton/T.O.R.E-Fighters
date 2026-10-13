@@ -862,6 +862,15 @@ pub struct EffectSpawn {
     pub kind: EffectKind,
     pub position: [f64; 3],
     pub duration_ticks: u32,
+    /// How big the explosion is drawn, percent of its type's size; 100 (the
+    /// default, and every effect of a recording made before it) is its own
+    /// size, 0 a dud's inert puff. Stored in the effect scales section.
+    pub scale: u8,
+}
+
+impl EffectSpawn {
+    /// The scale of an effect drawn at its type's own size.
+    pub const FULL_SCALE: u8 = 100;
 }
 
 /// Smoke puff kinds.

@@ -242,6 +242,74 @@ square. When the camera looks outside the candidate gun's arc the outline goes
 dashed, and when it looks outside the box an arrowhead sits just outside the
 nearest edge, pointing the way (forward is right, aft left).
 
+### Seeker window
+
+Opinionated, requested by John on 2026-10-12 ("launching a seeker weapon opens
+the target cam: with all six windows in small mode active, pop it up at the top
+right; with large windows active, pop it up to the left of the right window").
+The rest, marked agent decision, fills in what he did not say.
+
+The instrument windows come in two layouts (Escape, Pref, Large windows?):
+**large** is four windows of 162 by 160 pixels in the corners; **small** is
+six of 96 by 95 along the bottom ([placement](../FLIGHT-CONTROLS.md#instruments),
+[bezel spec](instrument-bezel.md#window-placement)). John's "small mode" and
+"large windows" are those two. The target camera is the window Shift+4 toggles.
+
+A launch of a seeker weapon of the list above, when the target camera window is
+not open, opens it:
+
+| Layout | Windows open | Where it goes |
+| --- | --- | --- |
+| Small | all six | The top right corner, 8 pixels in from both edges, 96 by 95 (John) |
+| Large | all four | At the top, to the left of the top-right window, an 8 pixel gap between them, 162 by 160 (John) |
+| Either | fewer than the layout holds | The next free slot, as Shift+4 would put it (agent decision) |
+
+The pop-up is a fifth (or seventh) window: none of the player's windows is
+closed to make room, and it scales and anchors to the screen edges as the others
+do. With the Weapon diagnostics panel shown (Escape, Pref) it sits 104 pixels
+lower, as the large layout's top-right window does, so the two never overlap.
+It is the same window as Shift+4: the same page, the same hit testing and the
+same 24 Hz refresh.
+
+```mermaid
+flowchart TD
+    L[Seeker weapon launched] --> O{Target camera window open?}
+    O -->|yes| K[Nothing opens or closes]
+    O -->|no| F{Free slot in the layout?}
+    F -->|yes| S[Open in the next free slot]
+    F -->|no| P[Pop up: small top right, large left of the right window]
+    S --> E{View ends?}
+    P --> E
+    E -->|"weapon lands"| C[Close what the launch opened]
+    E -->|"Clear designation"| R[Stay open as the player's window]
+    E -->|"player presses Shift+4"| M[Closed by hand, stays closed]
+```
+
+What happens next is the agent's decision, so the player's own choices win:
+
+- **When the view ends** (the newest seeker weapon lands, so the page has
+  nothing left to follow), the window the launch opened closes and the other
+  windows are as they were. A window that was already open stays open.
+- **Clear designation** (the way back to the pod view) keeps the window open as
+  the player's own, now showing the pod view; Shift+4 closes it.
+- **Shift+4** while the view runs closes the window and it stays closed until
+  the next launch. Other Shift+digit keys keep working: with the pop-up out,
+  opening a window replaces the oldest regular window and the pop-up stays;
+  closing a regular window lets the camera slide into the freed slot.
+- **Changing layout** (Escape, Pref, Large windows?) during the view opens the
+  window again in the new layout by the same table. A pop-up the player kept
+  does not move to the other layout.
+- **Several launches.** Each new launch opens the window if it is closed (a
+  window the player closed after the first launch opens again for the second).
+  The window closes when the last one lands.
+- **Preferences.** The saved window choice leaves out the window a launch
+  opened and any pop-up.
+- **Replays and online.** Only the player's own windows are touched: the
+  trigger is the player's own weapons in the picture, on a single-player host
+  and on a client alike; nothing is on the wire, and other players' windows are
+  unaffected. The replay viewer has no instrument windows, so it has none to
+  open.
+
 ### Preview
 
 `--panel-snapshot OUT.ppm --target-cam-preview MODE` draws the page from a
@@ -260,9 +328,10 @@ Opinionated, requested by John on 2026-10-10 (the target display shows when it
 is lasing, and shows when the spot is someone else's; decision 8 puts a
 targeting pod page on every aircraft with a FLIR or a laser, using the AC-130
 sight keys). The layout, the show rule and the buddy form are agent choices.
-Retail shows the weapon's own view in the IR/Laser window after launch; the
-weapon camera in the flight views already does that, so this page keeps the
-pod view. The sight, the laser and the buddy rule are specified in
+Retail shows the weapon's own view in the IR/Laser window after launch; this
+page does that for the weapons that have a seeker picture
+([seeker view](#seeker-view), John 2026-10-12, which reverses the earlier
+choice to keep the pod view). The sight, the laser and the buddy rule are specified in
 [air-to-ground](air-to-ground.md#the-targeting-sight); this section covers
 what the page and its camera show. The AC-130 keeps its
 [gunsight page](#ac-130-gunsight), whose look this page does not change.
@@ -296,6 +365,8 @@ flowchart TD
 ```
 
 ### The camera
+
+Seeker view aside (below), the camera is the sight's:
 
 - **Eye and direction.** The camera looks along the sight's body-relative
   look angles (heading, elevation) from the sensor's eye: four feet under the
@@ -351,6 +422,66 @@ cloud and fog), outside the gimbal, or terrain across the line. BUDDY shows when
 the spot the aircraft's laser weapons would home on is a buddy's, either
 because the aircraft has no designator, or has one that is off.
 
+### Seeker view
+
+Opinionated, requested by John on 2026-10-12 ("every weapon with a seeker view
+switches the target cam to the last missile or bomb fired or dropped, until
+impact"). It reverses the earlier line that kept the pod view after a launch.
+The list of weapons, the camera, the page and the way back are the agent's
+choices, labelled below.
+
+- **Which weapons.** The air-to-ground weapons with a seeker picture: the
+  infrared AGMs (AGM-65G, AGM-65A and the AGM-84E SLAM, class 8), the laser
+  missiles (AS-14, AS-30 and AT-12, class 12) and the AT-2 (retail's
+  "optical" label; John 2026-10-12 added it, so its view is the missile's nose
+  view like the others, and it stays steered from the launcher's sight). The
+  data has no "has a picture" flag, so the list is `missiles::SEEKER_VIEW`
+  (agent decision). Weapons without a picture keep today's behaviour: the
+  anti-radiation missiles (HARM, Shrike), the active and supported radar
+  missiles, the laser bombs and the JDAMs (they follow a spot or a point and
+  carry no camera; John 2026-10-12: "JDAM no"), rockets and free-fall bombs.
+  There is no TV or IR guided bomb in the data; the list grows by one line if
+  one is added.
+- **When.** From the tick the player's weapon appears until it lands (it
+  leaves the picture), whatever the page showed before (the targeting page, the
+  plain window or nothing but a grey screen), on any aircraft except the
+  AC-130, whose gunsight keeps the page. A newer seeker weapon takes the page
+  from an older one; when the newest lands the older one, if still flying, is
+  next. A bomb or HARM released after a Maverick does not take the page. A
+  launch also opens the window if it is not open
+  ([seeker window](#seeker-window)).
+- **Camera.** From four feet ahead of the weapon (its own body hidden),
+  looking at its target while the target is inside the 45 degree cone of the
+  AGM records' zone 1, otherwise along its nose; level, 15 degrees tall (step 2
+  of the sight's zoom ladder, fitted). Nothing is smoothed: the picture is the
+  weapon's position at the 24 Hz refresh.
+- **Page.** The weapon's record name on the name row (`AGM65G`), SEEKER under
+  it, the crosshair, a 11 pixel square on the target when it is in the
+  picture, and `RNG` with the distance on the bottom row (weapon to target,
+  else to the aircraft; nautical miles with one decimal, whole feet under a
+  nautical mile). No laser rows, no pod marks.
+- **Back to the pod.** The Clear designation key (Semicolon or L, the existing
+  binding; no new key) sends the page back to the targeting pod view for as
+  long as that weapon flies, as the pilot would for other targeting; it still
+  clears the designation as before. The window stays open then, as the
+  player's own. The next seeker launch takes the page again.
+- **Where it runs.** The page reads the picture (the projectiles, with their
+  owner, record name and target), so a single-player host, an online client
+  (for the client's own weapons) and a recording all build it the same way;
+  nothing is on the wire. The replay viewer has no instrument pages, so it has
+  no target camera: its missile views (Ctrl+F12, Alt+F12 and the F12 views)
+  already follow a weapon.
+
+```mermaid
+flowchart TD
+    A[Camera 4 page] --> W{Player has a seeker weapon in flight?}
+    W -->|no| N[Page as before: gunsight, targeting page or plain window]
+    W -->|yes| C{Pilot pressed Clear designation since its launch?}
+    C -->|yes| N
+    C -->|no| S[Seeker view of the newest one]
+    S -->|weapon lands| N
+```
+
 ### Preview
 
 `--panel-snapshot OUT.ppm --target-cam-preview MODE` draws the page from a
@@ -361,10 +492,18 @@ synthetic readout on the same synthetic grey scene the gunsight preview uses
 `lase-mask` / `lase-mask-range`, `lase-mask-terrain`, `lase-pin`, `ready`,
 `slew`, `limit`, `tti`, `impact`, `buddy` (a sight aircraft whose weapon homes
 on a buddy's spot), `both` (own LASE with a second BUDDY row), `buddy-nosight`
-(the buddy form), `flir` and `flir-tracked` (no laser rows). The HUD's laser box
+(the buddy form), `flir` and `flir-tracked` (no laser rows), `seeker` (the seeker view of a Maverick). The HUD's laser box
 is `--hud-snapshot OUT.ppm --hud-snapshot-state laser-lsr|laser-bud|laser-both|
 laser-ready|laser-mask|laser-edge`
 ([HUD](air-to-ground.md#laser-on-the-hud)).
+
+`--panel-snapshot OUT.ppm --window-layout-preview before|launch|free|landed
+--instrument-layout small|large --window-size 640x480` draws the whole set of
+windows on a plain backdrop (no GPU) and prints where the target camera went,
+for the [seeker window](#seeker-window); with `--capture-flight` or in flight
+the same flag sets the windows on the real screen (the window is then kept, as
+no weapon is flying). The battery scenarios `flight-window-seeker-*` run all
+eight layout and mode pairs.
 
 The host builds the page from the readout (`combat_view::readout`, which calls
 `instruments::targeting::Page::new`), completes it with the presented look and

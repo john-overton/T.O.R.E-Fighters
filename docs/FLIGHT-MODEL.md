@@ -139,7 +139,7 @@ cargo run --release --locked -p tore-sim --example jet_probe -- PATH/FA_2.LIB/AV
 | Controls | Original roll-rate maximum in the hybrid path; G authority from aircraft envelopes/loading. Response filtering, pitch/yaw coupling and actuator travel are fitted. |
 | Departure | Source warning/stall transitions and spin entry, with connected severity/control/lift attenuation. Initial stall classification uses a fitted below-clean-envelope gate. Hybrid spin torque, damping, surface response and threshold recovery are fitted; PT maximum yaw rate bounds angular velocity. The original two reviewed aircraft use spinExit −2; X-31 additionally disables spin entry. |
 | Propulsion/fuel/devices | Per-aircraft military/AB thrust and fuel consumption; engine/fuel/throttle gates; gear, flaps, brake, hook and burner state. Lapse, exhaust ramp and three-second actuator travel remain fitted. |
-| Ground contact | Native landing limits classify touchdown. Hybrid accepts only caller-declared landable ground with gear deployed and within limits; water and unsafe touchdowns crash. Aircraft-owned CG clearance, load-scaled tire scrub/friction, smooth wheel unloading and crash severity policy are fitted ([takeoff rules](spec/takeoff-ground-contact.md)). |
+| Ground contact | Native landing limits classify touchdown. Hybrid accepts only caller-declared landable ground with gear deployed and within limits; water and unsafe touchdowns crash, except that on a landable surface a touchdown over the landing limits but inside a hard-landing band (2 times sink and side speed, 1.5 times forward speed, roll and pitch) damages the gear and survives. One shared touchdown rule (`touchdown::assess`) also lets helicopters, the V-22 in helicopter mode and hovering AV-8/Yak-141 land on open ground or flat roofs within sink, ground speed and slope limits, used by contact, the AI ejection check and the AI go-around check ([rule](spec/touchdown.md)). Aircraft-owned CG clearance, load-scaled tire scrub/friction, smooth wheel unloading and crash severity policy are fitted ([takeoff rules](spec/takeoff-ground-contact.md)). |
 | Wind | Explicit world wind in ft/s via `research::Surface`; airborne aerodynamic forces use air-relative velocity and position uses ground velocity. Hybrid aerodynamics also use full wind during rollout; the [MTOW crosswind/tailwind rule](spec/runway-wind.md) affects tire grip and difficulty cues, with static parked hold. Synthetic advection test holds airspeed unchanged and checks 400-foot drift over ten seconds at 40 ft/s. |
 | Payload | `State::set_payload` validates finite, nonnegative mass against current fuel + empty weight and MTOW. Added mass affects loading/forces. The flight model reads it through `State::carried_lbs`, which the Ignore weapon weights cheat reduces to external fuel only ([cheats](spec/cheats.md)); Pull extra G raises the positive G limit to 9. This is mass-only: UI loadout, station release, external fuel transfer and store-specific drag are not implemented. |
 | Time/replay | Fixed 120 Hz simulation; authored fractional bridge to native 256-unit time; seeded native RNG helper. Same-host deterministic replay is tested. Original scheduler/global RNG draw ordering and cross-architecture bit identity are not established. |
@@ -402,6 +402,16 @@ actuators and engine progression remain in the shared systems model. Damaged
 pilots can request recovery but cannot repair a component or override physics.
 Ground-started AI aircraft use the researched model for runway contact.
 An airborne AI actor switches to that model when its landing sequence begins.
+AI helicopters (AH-64, Mi-24, CH-47) and the AI V-22 fly the researched model, and
+so their powered-lift physics, from the mission start under every AI flight model,
+single player's `standard` included: an intended default change of 2026-10-12
+(opinionated: John's request for AI helicopter and VTOL hover, takeoff and landing;
+the mechanism the lead's decision, slice H1), because on the legacy model a
+rotorcraft flies as an aeroplane and cannot hover. They are flown by their own
+[rotorcraft control](spec/ai.md#rotorcraft-and-jet-lift-control), which commands the
+collective, cyclic, pedals and V-22 nacelles. The vectoring jets keep the AI flight
+model's choice. The player's adapter flags (`--legacy-flight` and the others) do
+not apply to AI aircraft and are unchanged.
 The control mapping accounts for current flap lift and low-speed G authority.
 [Takeoff, landing and return to base](spec/ai-airfield.md) define the sequence.
 The three player adapters stay distinct. Exact input-replay validation is

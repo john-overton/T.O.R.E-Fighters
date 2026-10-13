@@ -20,6 +20,17 @@ use tore_sim::{
         live::EffectKind,
     },
 };
+use tore_world::surface::wreck::FireClass;
+
+/// Impact flashes a picture lights at most (bug B11; agent decision).
+pub const MAX_IMPACT_LIGHTS: usize = 24;
+/// An impact as seen: where, which explosion, its scale and the
+/// presentation tick it went off on.
+type ImpactSeen = (Vector, u8, u8, f64);
+
+/// Impacts remembered for their flash and smoke at most, the newest
+/// (agent decision).
+pub const MAX_IMPACTS: usize = 96;
 
 /// Surface unit ids: the theater layout's at `0x4000_0000`, the template's
 /// at `0x5000_0000`, added trucks and radars above them. Rounds a surface
@@ -30,8 +41,8 @@ pub fn is_unit(id: u32) -> bool {
 
 /// How a gun record's muzzle looks: an index into [`LOOKS`]. 0 is the
 /// light cannon (the Shilka, the Vulcan, the 30 mm and 25 mm), 1 the 37 mm
-/// and 57 mm, 2 the 85 mm and 100 mm flak and the tank guns. Small arms and
-/// the invisible barrage zone have no flash.
+/// and 57 mm, 2 the 85 mm and 100 mm flak and the tank guns, 3 a squad's small
+/// arms. The invisible barrage zone has no flash.
 pub fn muzzle_class(record: &str) -> Option<usize> {
     match record.to_ascii_uppercase().trim_end_matches(".JT") {
         "ZSU23" | "2S6" | "PHALANX" | "AAA30" | "AAA30BAD" | "BMP2" | "BTR80" | "M113" | "M2" => {
@@ -39,6 +50,7 @@ pub fn muzzle_class(record: &str) -> Option<usize> {
         }
         "ZSU57" | "M1939" => Some(1),
         "KS12" | "KS19" | "M1" | "T72" => Some(2),
+        "SMLARMS" => Some(3),
         _ => None,
     }
 }
@@ -48,7 +60,7 @@ pub fn muzzle_class(record: &str) -> Option<usize> {
 /// bigger flame seen from farther off, so its flash is longer and its light
 /// stronger than the same calibre on the gunship. Light is in the flare
 /// light's units, feet squared.
-pub const LOOKS: [Look; 3] = [
+pub const LOOKS: [Look; 4] = [
     Look {
         life: 5.,
         length: 8.,
@@ -75,6 +87,18 @@ pub const LOOKS: [Look; 3] = [
         puff_life: 420.,
         puff_radius: [5., 26.],
         puff_opacity: 0.5,
+    }, // A squad's small arms (opinionated, John, 2026-10-12: airfield small
+    // arms get a muzzle flash like the other light guns; the size is the
+    // agent's): a rifle or light machine gun, a spark under a metre long
+    // that a cannon's flicker dwarfs.
+    Look {
+        life: 3.,
+        length: 3.,
+        light: 50.,
+        puffs: 0,
+        puff_life: 0.,
+        puff_radius: [0.; 2],
+        puff_opacity: 0.,
     },
 ];
 
@@ -185,7 +209,14 @@ pub struct Tracker {
     /// it (a replay does): a wreck first seen already dead starts its smoke
     /// then, not as if it had just died ten seconds ago.
     deaths: BTreeMap<u32, u64>,
+    /// How wide each scene object's wreck fire is drawn (B16), when the
+    /// mission's scene is known ([`scene_fire_widths`]).
+    fire_widths: std::sync::Arc<BTreeMap<u32, f64>>,
     serial: u32,
+    /// Impacts still flashing or smoking (bug B11, John's 2026-10-12
+    /// addition): where, which explosion, its scale and the presentation
+    /// tick it went off on ([`crate::impact_fx`]), by place and tick.
+    impacts: BTreeMap<(i64, i64, i64, i64), ImpactSeen>,
 }
 
 /// An effect that is a flak burst: the simulation's own flak effect, or an
@@ -226,6 +257,7 @@ impl Tracker {
             self.shots.clear();
             self.launches.clear();
             self.bursts.clear();
+            self.impacts.clear();
             self.wrecks.clear();
             self.alive.clear();
         }
@@ -298,7 +330,37 @@ impl Tracker {
         }
         self.bursts
             .retain(|_, b| (picture.tick.saturating_sub(b.born) as f64) <= puff::LIFE_TICKS + 1.);
+        for (position, kind, scale, born) in
+            crate::impact_fx::detonations(&picture.effects, picture.tick)
+        {
+            let (x, y, z) = cell(position);
+            self.impacts.insert(
+                (x, y, z, born.round() as i64),
+                (position, kind, scale, born),
+            );
+        }
+        let now = picture.tick as f64;
+        self.impacts.retain(|_, (_, kind, scale, born)| {
+            now - *born <= crate::impact_fx::lasts(*kind, *scale) + 1.
+        });
+        // The newest `MAX_IMPACTS` only, so a long gun burst stays bounded.
+        while self.impacts.len() > MAX_IMPACTS {
+            let oldest = self
+                .impacts
+                .iter()
+                .min_by(|a, b| a.1.3.total_cmp(&b.1.3))
+                .map(|(key, _)| *key);
+            if let Some(key) = oldest {
+                self.impacts.remove(&key);
+            }
+        }
         self.wrecks_of(picture);
+    }
+
+    /// How wide each scene object's wreck fire is drawn
+    /// ([`scene_fire_widths`]).
+    pub fn set_fire_widths(&mut self, widths: std::sync::Arc<BTreeMap<u32, f64>>) {
+        self.fire_widths = widths;
     }
 
     /// A replay's record of when each destroyed unit died.
@@ -327,7 +389,12 @@ impl Tracker {
             if pose.crashed {
                 if let Some(fire) = fire_at(picture, pose.position) {
                     // Its fire is drawn as big as the unit.
-                    self.fires.push((fire, fire_width(pose.damage.initial_hp)));
+                    let width = self
+                        .fire_widths
+                        .get(&pose.id)
+                        .copied()
+                        .unwrap_or_else(|| fire_width(pose.damage.initial_hp));
+                    self.fires.push((fire, width));
                     continue;
                 }
                 if self.wrecks.contains_key(&pose.id) {
@@ -394,6 +461,23 @@ impl Tracker {
         }
         for burst in self.bursts.values() {
             draw_burst(burst, now, out);
+        }
+        // Every impact's flash, the newest first and at most
+        // `MAX_IMPACT_LIGHTS` of them, so a long gun burst cannot crowd out
+        // the flares and bombs (the scene lights the strongest 16).
+        let mut newest: Vec<_> = self.impacts.values().copied().collect();
+        newest.sort_by(|a, b| b.3.total_cmp(&a.3));
+        let mut lit = 0;
+        for (position, kind, scale, born) in newest {
+            if lit < MAX_IMPACT_LIGHTS
+                && let Some((position, strength)) =
+                    crate::impact_fx::light(position, kind, scale, now - born)
+            {
+                out.lights.push(FlareLight { position, strength });
+                lit += 1;
+            }
+            // Its dust and smoke, as big and as long as the weapon.
+            crate::impact_fx::smoke(position, kind, scale, now - born, &mut out.puffs);
         }
         self.draw_wrecks(now, out);
         out.fires.extend(self.fires.iter().copied());
@@ -574,6 +658,43 @@ pub fn fire_width(hit_points: i32) -> f64 {
     (30. * (f64::from(hit_points.max(1)) / 100.).sqrt()).clamp(24., 140.)
 }
 
+/// How a building's or fixed object's wreck fire is drawn (B16;
+/// opinionated, agent, 2026-10-12): as wide as `BUILDING_SHARE` of the
+/// object's smaller plan side, from `BUILDING_FT[0]` to `BUILDING_FT[1]`
+/// feet; fuel, ammunition and industry burn hard, `HARD_SHARE` of the larger
+/// side from `HARD_FT[0]` to `HARD_FT[1]`. A crash site's fire is 100 ft.
+pub mod object_fire {
+    pub const BUILDING_SHARE: f64 = 0.6;
+    pub const BUILDING_FT: [f64; 2] = [24., 90.];
+    pub const HARD_SHARE: f64 = 1.1;
+    pub const HARD_FT: [f64; 2] = [60., 160.];
+}
+
+/// The wreck fire width of every scene object whose fire class burns as a
+/// building or hard: by its contact box's plan size (`scene`) and class
+/// (`classes`). Units that burn as vehicles keep [`fire_width`].
+pub fn scene_fire_widths(
+    classes: &BTreeMap<u32, FireClass>,
+    scene: &tore_sim::airport::Scene,
+) -> BTreeMap<u32, f64> {
+    scene
+        .objects
+        .iter()
+        .filter_map(|object| {
+            let [x, _, z] = object.bounds.half;
+            let (small, large) = (2. * x.min(z), 2. * x.max(z));
+            let width = match classes.get(&object.id)? {
+                FireClass::Building => (small * object_fire::BUILDING_SHARE)
+                    .clamp(object_fire::BUILDING_FT[0], object_fire::BUILDING_FT[1]),
+                FireClass::Hard => (large * object_fire::HARD_SHARE)
+                    .clamp(object_fire::HARD_FT[0], object_fire::HARD_FT[1]),
+                FireClass::None | FireClass::Vehicle => return None,
+            };
+            Some((object.id, width))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -595,6 +716,7 @@ mod tests {
             target: None,
             incoming: false,
             speed_f8: 0,
+            powered: false,
         }
     }
     fn picture(tick: u64) -> RenderSnapshot {
@@ -639,7 +761,7 @@ mod tests {
                 round(3, "ZSU57.JT", true, [300., 10., 0.]),
                 round(4, "KS19.JT", true, [900., 10., 0.]),
                 round(5, "A_M1939.JT", true, [0., 10., 600.]),
-                round(6, "SMLARMS.JT", true, [0., 10., 900.]),
+                round(6, "SMLARMS.JT", true, [1500., 10., 0.]),
             ],
             ..picture(102)
         };
@@ -647,21 +769,26 @@ mod tests {
         let slots: Vec<usize> = tracker.shots().map(|s| s.slot).collect();
         assert_eq!(
             slots,
-            [0, 1, 2],
-            "the barrage zone and small arms flash nothing"
+            [0, 1, 2, 3],
+            "the barrage zone flashes nothing, small arms flash their own spark"
         );
         // The same rounds seen again are not more shots.
         tracker.observe(&next, 103., true);
-        assert_eq!(tracker.shots().count(), 3);
+        assert_eq!(tracker.shots().count(), 4);
         // The shot sits on the muzzle, along the barrel, with its light.
         let out = drawn(&tracker, 102.);
-        assert_eq!(out.flashes.len(), 3);
-        assert_eq!(out.lights.len(), 3);
+        assert_eq!(out.flashes.len(), 4);
+        assert_eq!(out.lights.len(), 4);
         assert_eq!(out.flashes[0].position, [0., 10., 0.]);
         assert_eq!(out.flashes[0].direction, [0., 1., 0.]);
         // Bigger guns throw more light, and the big ones leave smoke.
         assert!(out.lights[0].strength < out.lights[1].strength);
         assert!(out.lights[1].strength < out.lights[2].strength);
+        // A squad's small arms are the smallest spark: shorter and dimmer
+        // than the light cannon's flicker, and no smoke.
+        assert_eq!(out.flashes[3].kind, 3);
+        assert!(LOOKS[3].length < LOOKS[0].length && LOOKS[3].light < LOOKS[0].light);
+        assert_eq!(LOOKS[3].puffs, 0);
         assert_eq!(out.puffs.len(), LOOKS[1].puffs + LOOKS[2].puffs);
         // Gone after the flash's life; the smoke outlives it.
         let late = drawn(&tracker, 102. + LOOKS[2].life + 2.);
@@ -770,6 +897,7 @@ mod tests {
             position: at,
             ticks,
             blast: Some(kind),
+            scale: tore_sim::combat::blast_scale::FULL,
         }
     }
 
@@ -842,12 +970,14 @@ mod tests {
                     position: [1.; 3],
                     ticks: 40,
                     blast: Some(18),
+                    scale: tore_sim::combat::blast_scale::FULL,
                 },
                 EffectPose {
                     kind: EffectKind::Hit,
                     position: [9.; 3],
                     ticks: 239,
                     blast: Some(27),
+                    scale: tore_sim::combat::blast_scale::FULL,
                 },
             ],
             ..picture(5000)
@@ -941,6 +1071,7 @@ mod tests {
                 position: [5010., 0., 5020.],
                 age: 10,
                 strength: 1.,
+                scale: 100,
             }],
             ..picture(3000)
         };
@@ -965,6 +1096,7 @@ mod tests {
                 position: [9000., 0., 9000.],
                 age: 1,
                 strength: 1.,
+                scale: 100,
             }],
             ..bare
         };
@@ -1045,12 +1177,13 @@ mod tests {
         for heavy in ["KS12.JT", "KS19.JT", "M1.JT", "T72.JT"] {
             assert_eq!(muzzle_class(heavy), Some(2), "{heavy}");
         }
+        assert_eq!(muzzle_class("SMLARMS.JT"), Some(3));
         assert_eq!(muzzle_class("A_M1939.JT"), None);
         assert_eq!(muzzle_class("AIM9M.JT"), None);
         // Every gun of the tuning table either flashes or is named here as
         // one that does not.
         for row in tore_sim::combat::surface_guns::TABLE {
-            let silent = ["A_M1939.JT", "SMLARMS.JT"].contains(&row.record);
+            let silent = ["A_M1939.JT"].contains(&row.record);
             assert_eq!(muzzle_class(row.record).is_none(), silent, "{}", row.record);
         }
     }

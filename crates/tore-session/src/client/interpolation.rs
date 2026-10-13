@@ -502,6 +502,7 @@ pub fn aircraft_pose(
         airborne: state.status.airborne,
         wreck: state.status.wreck,
         crashed: state.status.crashed,
+        stores: Vec::new(),
     }
 }
 
@@ -671,6 +672,10 @@ fn projectile_pose(
         speed_f8: (speed * 256.)
             .round()
             .clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32,
+        // The wire carries no motor state: the game's client works it out
+        // from the weapon's motor and the round's age, as it does the smoke
+        // (tore-app `regen`).
+        powered: false,
     }
 }
 

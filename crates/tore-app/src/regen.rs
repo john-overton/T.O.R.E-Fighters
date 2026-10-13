@@ -70,10 +70,10 @@ pub struct Motor {
 }
 
 impl Motor {
-    /// The motor of `weapon`, or `None` for one that leaves no smoke (a gun
-    /// round, or a store with no signature).
+    /// The motor of `weapon`, or `None` for one that has none (a gun round
+    /// or a bomb). A rocket's motor smokes as a missile's does (bug B6).
     pub fn of(weapon: &Weapon) -> Option<Self> {
-        if weapon.seeker.signature == 0 {
+        if tore_sim::combat::live::is_gun(weapon) {
             return None;
         }
         // `missiles::phase` is the rule; the two ticks it switches on are
@@ -127,6 +127,22 @@ pub struct Effects {
 }
 
 impl Effects {
+    /// Marks each projectile of `picture` whose motor is burning, by its
+    /// weapon's motor and the client tick it was first drawn on, as the
+    /// smoke is dated (bug B7: the flame goes out at burnout). The wire
+    /// says nothing of the motor.
+    pub fn mark_powered(
+        &self,
+        picture: &mut RenderSnapshot,
+        motor: &dyn Fn(&str) -> Option<Motor>,
+    ) {
+        for projectile in picture.projectiles.iter_mut().filter(|p| !p.gun) {
+            projectile.powered = self.first_seen.get(&projectile.id).is_some_and(|first| {
+                motor(&projectile.weapon).is_some_and(|m| m.powered(self.tick - first))
+            });
+        }
+    }
+
     /// Advances one 120 Hz client tick over `picture`, then lets `releases`
     /// go (a device appears where it left, as in combat).
     pub fn step(
@@ -285,6 +301,7 @@ mod tests {
             target: None,
             incoming: false,
             speed_f8: 256 * 1_000,
+            powered: false,
         }
     }
 
@@ -309,6 +326,7 @@ mod tests {
             airborne: true,
             wreck: None,
             crashed: false,
+            stores: Vec::new(),
         }
     }
 
@@ -458,12 +476,14 @@ mod tests {
                     position: [10., 100., 10.],
                     age: 0,
                     strength: 1.,
+                    scale: 100,
                 },
                 MarkPose {
                     kind: MarkKind::Crater(0),
                     position: [500., 100., 10.],
                     age: 0,
                     strength: 1.,
+                    scale: 100,
                 },
             ],
             ..RenderSnapshot::default()

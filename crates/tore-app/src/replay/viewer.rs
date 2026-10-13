@@ -11,6 +11,7 @@ use crate::aircraft::Airframe;
 use crate::flight;
 use crate::flight_canvas::FlightCanvas;
 use crate::flight_views::{self, Body, Reference, Rig, Scene};
+use crate::pylons;
 use crate::render_snapshot::{self, CombatArt};
 use crate::renderer::Renderer;
 use crate::replay::clock::{self, Clock, Direction};
@@ -900,14 +901,20 @@ impl Viewer {
             recording.weapons().filter_map(|w| w.shape.as_deref()),
             resources,
         );
-        Self::assemble(
+        let mut viewer = Self::assemble(
             path,
             recording,
             (world, scenery),
             (ownship, models, art),
             options,
             growth,
-        )
+        )?;
+        viewer.playback.add_motors(resources);
+        // Other aircraft's launches name their weapon record.
+        viewer
+            .sound
+            .set_launches(crate::audio::LaunchSounds::of(resources));
+        Ok(viewer)
     }
 
     /// A viewer from loaded parts.
@@ -1138,6 +1145,9 @@ impl Viewer {
             return;
         }
         self.playback.extend(Arc::clone(&recording));
+        if let Some(growth) = &self.growth {
+            self.playback.add_motors(&growth.resources);
+        }
         self.sound.extend(Arc::clone(&recording));
         self.scanner.feed(Arc::clone(&recording));
         self.weather.set_end(last);
@@ -3040,6 +3050,8 @@ impl Viewer {
         // barrels, as live flight draws them.
         let flash_now = tick as f64 + self.clock.alpha();
         let mounts = crate::gun_flash::mounts(&picture, None);
+        self.gun_flash
+            .set_fire_widths(std::sync::Arc::clone(&self.scenery.fire_widths));
         Self::observe_surface(
             (&self.tracks, &self.recording),
             &mut self.gun_flash,
@@ -3082,6 +3094,7 @@ impl Viewer {
         renderer.dummies(render_snapshot::aircraft_batches(
             &picture,
             &self.models,
+            &self.art,
             &camera,
             &self.world,
             &self.scenery,
@@ -3119,6 +3132,13 @@ impl Viewer {
         renderer.aircraft(
             &self.ownship,
             &player,
+            &pylons::for_flown(
+                &picture.player.stores,
+                &player,
+                &self.ownship,
+                &self.art,
+                &self.scenery,
+            ),
             self.player != convert::NO_PLAYER && camera.hidden_target != Some(self.player),
             &camera,
             &self.world,

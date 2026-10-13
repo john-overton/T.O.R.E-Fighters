@@ -101,6 +101,8 @@ mod score_tests;
 mod succession_tests;
 #[cfg(test)]
 mod tick_tests;
+#[cfg(test)]
+mod touchdown_tests;
 
 /// The whole mission. The app drives it and presents it.
 pub struct World {
@@ -1117,6 +1119,9 @@ impl World {
             // A heavy striker's floor reads the mission's airborne height
             // (slice ST-T2).
             bridge.set_mission_height(self.setup.mission.map(|(altitude, _)| altitude));
+            // The radars painting each aircraft: a helicopter learns where
+            // they stand (slice H4).
+            bridge.set_painting(self.combat.surface.painting.clone());
             let stepped = bridge.step(&mut self.combat.state, &humans, &self.terrain);
             // The A-G page lists aircraft only in an airfield sequence.
             for (id, attached) in bridge.airfield_attachment() {

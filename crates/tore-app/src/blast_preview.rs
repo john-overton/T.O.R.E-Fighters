@@ -170,6 +170,7 @@ pub fn run() -> AppResult<()> {
                 position: point,
                 ticks: life - elapsed.min(life - 1),
                 blast: Some(shot.kind),
+                scale: tore_sim::combat::blast_scale::FULL,
             }];
             let marks: Vec<MarkPose> = if shot.crater {
                 vec![MarkPose {
@@ -177,6 +178,7 @@ pub fn run() -> AppResult<()> {
                     position: point,
                     age: u64::from(elapsed),
                     strength: 1.,
+                    scale: 100,
                 }]
             } else {
                 Vec::new()

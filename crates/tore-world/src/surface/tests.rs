@@ -377,7 +377,8 @@ fn combat_registers_every_unit_with_its_side() {
     );
     assert!(world.combat.state.is_parked(SURFACE_UNIT_BASE + 16));
     // Units explode with their own record's look; base-layout buildings keep
-    // the fitted ground-object one.
+    // the fitted ground-object blast. Since B16 a building that burns
+    // scorches the ground round it (a crater as wide as its plan).
     let look = |id| {
         world
             .combat
@@ -386,9 +387,15 @@ fn combat_registers_every_unit_with_its_side() {
             .map(|l| (l.explosion, l.crater))
     };
     assert_eq!(look(SURFACE_UNIT_BASE), Some((21, 6)));
-    assert_eq!(look(SURFACE_UNIT_BASE + 12), Some((0, 0)));
+    assert!(look(SURFACE_UNIT_BASE + 12).is_some_and(|(blast, scorch)| blast == 0 && scorch > 0));
     assert_eq!(look(LAYOUT_OBJECT_BASE), Some((21, 6)));
-    assert_eq!(look(LAYOUT_OBJECT_BASE + 2), None);
+    assert!(
+        look(LAYOUT_OBJECT_BASE + 2).is_some_and(|(blast, scorch)| blast
+            == tore_sim::combat::blast::GROUND_OBJECT
+            && scorch > 0),
+        "{:?}",
+        look(LAYOUT_OBJECT_BASE + 2)
+    );
     assert_eq!(surface.targets().count(), 3);
     assert_eq!(world.combat.surface.units.len(), surface.units.len());
     // A restart keeps the sides.

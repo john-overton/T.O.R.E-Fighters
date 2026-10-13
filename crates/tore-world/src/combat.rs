@@ -442,7 +442,41 @@ impl Combat {
     /// side its surface gives it, and starts the surface units' state.
     pub fn add_scene_targets(&mut self, terrain: &Terrain) -> WorldResult<()> {
         let sides = terrain.surface.object_sides.clone();
-        let looks = terrain
+        // Which wrecks burn (B16, docs/spec/surface-defenses.md, "Wreck
+        // fires"): a fixed pick per object and mission for vehicles.
+        let fires = crate::surface::wreck::scene_fires(&terrain.surface, &terrain.airport_scene);
+        let burns = |id: u32| fires.get(&id).is_some_and(|class| class.burns());
+        let runways: std::collections::BTreeSet<u32> = terrain
+            .airport_scene
+            .objects
+            .iter()
+            .filter(|object| object.runway)
+            .map(|object| object.id)
+            .collect();
+        // A burning building scorches the ground round its foot: a crater
+        // mark at least as wide as its plan.
+        let scorch: BTreeMap<u32, u8> = terrain
+            .airport_scene
+            .objects
+            .iter()
+            .filter(|object| {
+                matches!(
+                    fires.get(&object.id),
+                    Some(
+                        crate::surface::wreck::FireClass::Building
+                            | crate::surface::wreck::FireClass::Hard
+                    )
+                )
+            })
+            .map(|object| {
+                (
+                    object.id,
+                    crate::surface::wreck::scorch_size(object.bounds.half),
+                )
+            })
+            .collect();
+        let scorched = |id: u32, crater: u8| scorch.get(&id).map_or(crater, |s| crater.max(*s));
+        let mut looks: BTreeMap<u32, live::GroundLook> = terrain
             .surface
             .units
             .iter()
@@ -451,18 +485,25 @@ impl Combat {
                     unit.id.0,
                     live::GroundLook {
                         explosion: unit.explosion?,
-                        crater: unit.crater?,
-                        // Wrecks that stay burn (docs/spec/surface-defenses.md,
-                        // "Destroyed looks").
-                        burns: matches!(
-                            unit.look,
-                            crate::surface::DestroyedLook::DamagedShape(_)
-                                | crate::surface::DestroyedLook::Wreck(_)
-                        ),
+                        crater: scorched(unit.id.0, unit.crater?),
+                        burns: burns(unit.id.0),
+                        // A template's own runway is one of its units.
+                        pavement: runways.contains(&unit.id.0),
                     },
                 ))
             })
             .collect();
+        // Every other building and fixed object of the scene explodes as
+        // before (the large ground blast) and burns on its scorch; a runway
+        // takes the craters of the weapons that hit it.
+        for object in &terrain.airport_scene.objects {
+            looks.entry(object.id).or_insert(live::GroundLook {
+                explosion: tore_sim::combat::blast::GROUND_OBJECT,
+                crater: scorched(object.id, 0),
+                burns: burns(object.id),
+                pavement: object.runway,
+            });
+        }
         let parked = terrain
             .surface
             .parked_scene
@@ -733,6 +774,35 @@ impl Combat {
             .filter(|actor| actor.alive() && actor.flight().afterburner_active())
             .map(|actor| actor.id())
             .collect();
+        // The AI aircraft's stores as drawn: what each station holds now
+        // (B3). An unlimited store shows its loaded quantity.
+        let ai_stores: BTreeMap<u32, Vec<crate::snapshot::StorePose>> = wings
+            .into_iter()
+            .flat_map(|wings| {
+                wings.mission().actors().iter().filter_map(move |actor| {
+                    let config = wings.configuration(actor.id())?;
+                    let rounds = |index: usize| {
+                        let loaded = config.stations.get(index).map_or(0, |s| {
+                            u32::from(s.count) * tore_sim::combat::live::pod_rounds(&s.weapon)
+                        });
+                        actor
+                            .stations()
+                            .iter()
+                            .find(|spec| usize::from(spec.station.0) == index)
+                            .map_or(loaded, |spec| match spec.rounds() {
+                                tore_sim::ai::weapon_service::Rounds::Finite(rounds) => rounds,
+                                tore_sim::ai::weapon_service::Rounds::Unlimited => loaded,
+                            })
+                    };
+                    let loaded =
+                        |index: usize| config.stations.get(index).is_some_and(|s| s.count > 0);
+                    Some((
+                        actor.id(),
+                        crate::snapshot::store_poses(config, rounds, loaded),
+                    ))
+                })
+            })
+            .collect();
         // The last devices drawn hold once an aircraft stops flying.
         let simulated = |id: u32| {
             flying
@@ -809,6 +879,7 @@ impl Combat {
                 airborne: true,
                 wreck: player.wreck.as_ref().map(|wreck| wreck.phase),
                 crashed: player.crashed,
+                stores: own_stores(own),
             },
             targets: self
                 .state
@@ -850,6 +921,7 @@ impl Combat {
                     airborne: t.airborne,
                     wreck: t.wreck.as_ref().map(|wreck| wreck.phase),
                     crashed: t.hp <= 0,
+                    stores: ai_stores.get(&t.id).cloned().unwrap_or_default(),
                 })
                 .chain(others.iter().map(|(own, pose)| AircraftPose {
                     id: own.aircraft,
@@ -872,6 +944,7 @@ impl Combat {
                     airborne: true,
                     wreck: pose.wreck,
                     crashed: pose.crashed,
+                    stores: own_stores(own),
                 }))
                 .collect(),
             projectiles: self
@@ -893,6 +966,7 @@ impl Combat {
                         target: p.target,
                         incoming: p.incoming.is_some(),
                         speed_f8: p.speed_f8,
+                        powered: self.state.motor_powered(p),
                     }
                 })
                 .collect(),
@@ -905,6 +979,7 @@ impl Combat {
                     position: e.position,
                     ticks: e.ticks,
                     blast: e.blast,
+                    scale: e.scale,
                 })
                 .collect(),
             marks: self
@@ -1067,6 +1142,7 @@ impl Combat {
                 kind: live::EffectKind::Destroyed,
                 ticks: u16::from(row.seconds) * 60,
                 blast: Some(kind),
+                scale: tore_sim::combat::blast_scale::FULL,
             });
         }
         let site = at(4000., 0.);
@@ -1077,6 +1153,7 @@ impl Combat {
                 kind: blast::MarkKind::Crater(size),
                 ticks: blast::FOREVER,
                 born: 0,
+                scale: tore_sim::combat::blast_scale::FULL,
                 serial: u64::MAX - size as u64,
             });
         }
@@ -1769,6 +1846,16 @@ pub fn feedback(
         Event::OwnshipDestroyed { aircraft: who } if *who == aircraft => Some(F::Crash),
         _ => None,
     }
+}
+
+/// A flown aircraft's stores as drawn: each station's rounds left, and the
+/// stations its mission started with (B3).
+fn own_stores(own: &live::Ownship) -> Vec<crate::snapshot::StorePose> {
+    crate::snapshot::store_poses(
+        own.configuration(),
+        |index| u32::from(own.rounds(index)),
+        |index| own.was_loaded(index),
+    )
 }
 
 #[cfg(test)]
@@ -2471,6 +2558,7 @@ pub mod fixtures {
             kind,
             ticks,
             blast: None,
+            scale: tore_sim::combat::blast_scale::FULL,
         };
         let effects = vec![
             effect(EffectKind::Flare, [10., 5050., 500.], 45),

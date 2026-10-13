@@ -635,6 +635,7 @@ mod tests {
                     kind: replay::EffectKind::Fire,
                     position: [900., 20., 900.],
                     duration_ticks: u32::MAX,
+                    scale: tore_replay::EffectSpawn::FULL_SCALE,
                 });
             }
             assert!(effects.frame(&mut frame).is_empty());

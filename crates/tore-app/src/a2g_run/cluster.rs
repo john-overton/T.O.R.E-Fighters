@@ -97,6 +97,7 @@ pub(super) fn run(scene: &mut Scene, o: &Options) -> AppResult<()> {
         position: burst.position,
         ticks: burst.ticks,
         blast: burst.blast,
+        scale: tore_sim::combat::blast_scale::FULL,
     };
     let flashes = cluster_flash::derive(&pose);
     let again = cluster_flash::derive(&pose);

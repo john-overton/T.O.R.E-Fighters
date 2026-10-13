@@ -89,6 +89,26 @@ pub fn aim_error_deg(skill: i32, radar: bool) -> f64 {
         [1.5, 1.0, 0.7, 0.5][index]
     }
 }
+/// A squad's small arms aim error per burst at an aircraft, degrees: 4 times
+/// the visual guns' ([`aim_error_deg`]), so 6.0, 4.0, 2.8 and 2.0 for novice,
+/// average, veteran and ace (fitted, agent, 2026-10-12; John's report that
+/// airfield guns "shoot with very high accuracy"). Riflemen and light machine
+/// guns shoot by eye with no mount, no sight and no lead computer. Together
+/// with their poor lead ([`SMALL_ARMS_LEAD`]) a squad hits about one round in a
+/// hundred of a 400 kt jet 300 ft over it, whatever its experience
+/// (docs/spec/surface-defenses.md, "Small arms"). Squads shooting at ground
+/// units keep the old error, a quarter of the visual guns'
+/// ([`surface_aim_error_deg`]).
+pub fn small_arms_aim_error_deg(skill: i32) -> f64 {
+    aim_error_deg(skill, false) * SMALL_ARMS_ERROR_FACTOR
+}
+/// The share of the correct lead a squad's small arms give an aircraft
+/// (fitted, agent, 2026-10-12): the aim point carries the target on at this
+/// share of its velocity. 0 shoots where the target was seen.
+pub const SMALL_ARMS_LEAD: f64 = 0.3;
+/// How much wider a squad's small arms aim error at an aircraft is than the
+/// visual guns' (fitted, agent, 2026-10-12).
+pub const SMALL_ARMS_ERROR_FACTOR: f64 = 4.0;
 /// A gun's aim error per burst at a ground object or ship, degrees: a
 /// quarter of [`aim_error_deg`] (fitted, agent, 2026-10-11). A target on the
 /// ground or the sea moves in a plane, slowly, and a tank gunner lays on it

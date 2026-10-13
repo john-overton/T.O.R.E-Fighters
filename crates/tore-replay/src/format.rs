@@ -39,6 +39,9 @@ pub(crate) const SECTION_TREES: u64 = 6;
 pub(crate) const SECTION_CHECKSUMS: u64 = 7;
 pub(crate) const SECTION_ROTORS: u64 = 8;
 pub(crate) const SECTION_DISK_TILT: u64 = 9;
+/// The scale of each spawned effect not drawn at its type's own size (slice
+/// BF, 2026-10-12). Older readers skip it and draw every effect full size.
+pub(crate) const SECTION_EFFECT_SCALES: u64 = 10;
 
 /// The oldest format version that can hold `header`'s recording: 3 for a
 /// world with a ground target, a redrawn airfield scene or surface units
@@ -144,7 +147,8 @@ pub(crate) fn read_sections(body: &[u8]) -> Result<Vec<(u64, &[u8])>> {
         let id = input.uv()?;
         let n = input.count(body.len(), "section bytes")?;
         let payload = input.bytes(n)?;
-        if (SECTION_STRINGS..=SECTION_DISK_TILT).contains(&id) && out.iter().any(|(i, _)| *i == id)
+        if (SECTION_STRINGS..=SECTION_EFFECT_SCALES).contains(&id)
+            && out.iter().any(|(i, _)| *i == id)
         {
             return Err(corrupt(format!("section {id} appears twice in one chunk")));
         }

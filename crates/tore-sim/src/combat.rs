@@ -4,6 +4,7 @@
 use std::io::{Error, ErrorKind};
 pub mod ballistics;
 pub mod blast;
+pub mod blast_scale;
 pub mod countermeasures;
 pub mod debris;
 pub mod delivery;
@@ -12,6 +13,7 @@ pub mod gun_round;
 pub mod gunship;
 pub mod gunship_impact;
 pub mod gunsight;
+pub mod hardpoints;
 pub mod laser;
 pub mod ledger;
 pub mod loading;

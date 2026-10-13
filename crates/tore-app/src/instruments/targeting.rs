@@ -44,6 +44,9 @@ const LIMIT_MARGIN: f64 = 0.5;
 /// The laser cue blinks twice a second: lit for the first quarter second of
 /// each half.
 const BLINK_TICKS: u64 = 30;
+/// The seeker picture's zoom step on the sight ladder: a 15 degree tall
+/// picture (fitted, agent choice 2026-10-12).
+pub const SEEKER_ZOOM_STEP: u8 = 2;
 /// A buddy-form picture frames a spot area this tall, feet (fitted).
 const BUDDY_FRAME_FT: f64 = 500.;
 
@@ -55,6 +58,10 @@ pub enum Form {
     Sight,
     /// An aircraft with no sight looking at a buddy's laser spot.
     Buddy,
+    /// The nose view of the player's last seeker weapon in flight, until it
+    /// lands (docs/spec/target-window.md, "Seeker view"). Never chosen by
+    /// [`form`]: the host raises it from the picture.
+    Seeker,
 }
 
 /// The weapon records that go for the ground and are neither bombs, rocket
@@ -309,6 +316,42 @@ impl Page {
         })
     }
 
+    /// The seeker form: `weapon` is the record's name, `mark` where the
+    /// weapon's target stands when it is known, `range_ft` the distance the
+    /// bottom row reads (the weapon to its target, else to the aircraft).
+    pub fn seeker(
+        weapon: &str,
+        mark: Option<Vector>,
+        range_ft: f64,
+        tick: u64,
+        view: SightView,
+    ) -> Self {
+        Self {
+            form: Form::Seeker,
+            mode: SightMode::Free,
+            look: [0.; 2],
+            zoom: SEEKER_ZOOM_STEP,
+            returning: false,
+            gimbal: None,
+            mark,
+            cue: None,
+            second_buddy: false,
+            range_ft: Some(range_ft),
+            tti: None,
+            notice: None,
+            gimbal_limit: false,
+            limit_notice: false,
+            eye: super::gunsight::EYE_ICON,
+            bearing: String::new(),
+            range: range_text(range_ft),
+            owner: Some(tore_formats::text::upper(
+                weapon.split('.').next().unwrap_or(weapon),
+            )),
+            tick,
+            view: Some(view),
+        }
+    }
+
     /// Completes the page with this frame's presented look, the client's zoom
     /// and the camera's view, the presented point of a tracked object and the
     /// lasing pilot's callsign.
@@ -406,6 +449,10 @@ pub(super) fn draw(
     target: Option<(&TargetReadout, &super::TargetLink)>,
 ) {
     let fit = |s: &str, limit: usize| super::fit_width(f, s, limit);
+    if page.form == Form::Seeker {
+        draw_seeker(r, f, page);
+        return;
+    }
     let tracked = matches!(page.mode, SightMode::Tracked(_));
     let target = target.filter(|_| tracked && page.form == Form::Sight);
     // Name row.
@@ -530,8 +577,27 @@ pub(super) fn draw(
     r.text(f, range, 136 - text_width(f, range), 103, INK);
 }
 
+/// The seeker form: the weapon's name, SEEKER, a square on its target when
+/// the target is in the picture, the crosshair, and the distance on the
+/// bottom row (docs/spec/target-window.md, "Seeker view").
+fn draw_seeker(r: &mut Raster, f: &Font, page: &Page) {
+    let name = page.owner.as_deref().unwrap_or("SEEKER");
+    centred(r, f, &super::fit_width(f, name, 119), 3, 1, 120, false);
+    centred(r, f, "SEEKER", 16, 1, 120, false);
+    let mut marks = Pixels::new();
+    if let Some(view) = &page.view
+        && let Some((x, y)) = page.mark.and_then(|point| view.project(point))
+    {
+        marks.extend(square(x.round() as i32, y.round() as i32, 10));
+    }
+    marks.extend(crosshair());
+    stamp(r, &marks);
+    r.text(f, "RNG", 1, 103, INK);
+    r.text(f, &page.range, 136 - text_width(f, &page.range), 103, INK);
+}
+
 /// Preview modes for `--target-cam-preview` that draw the targeting page.
-pub const PREVIEW_MODES: &str = "lase, lase-off, lase-mask, lase-mask-range, lase-mask-terrain, lase-pin, ready, slew, limit, tti, impact, buddy, both, buddy-nosight, flir, flir-tracked";
+pub const PREVIEW_MODES: &str = "lase, lase-off, lase-mask, lase-mask-range, lase-mask-terrain, lase-pin, ready, slew, limit, tti, impact, buddy, both, buddy-nosight, flir, flir-tracked, seeker";
 
 /// One synthetic page: see [`super::gunsight::Preview`].
 pub struct Preview {
@@ -681,6 +747,11 @@ pub fn preview(mode: &str) -> Option<Preview> {
         "flir-tracked" => {
             page.cue = None;
             page.range_ft = Some(26_000.);
+        }
+        "seeker" => {
+            page = Page::seeker("AGM65G.JT", Some(at(14., -6.)), 18_000., 0, view);
+            target = None;
+            object = Some((at(14., -6.), 11, 8));
         }
         _ => return None,
     }

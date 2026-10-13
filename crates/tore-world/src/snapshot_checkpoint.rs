@@ -14,7 +14,7 @@
 
 use super::{
     AircraftPose, Damage, DebrisPose, Draw, EffectPose, Engine, MarkPose, PilotPose,
-    ProjectilePose, RenderSnapshot, SurfacePose,
+    ProjectilePose, RenderSnapshot, StoreLook, StorePose, SurfacePose,
 };
 use tore_sim::checkpoint::{Checkpoint, CheckpointError, Loader, Saver, invalid};
 use tore_sim::combat::live::EffectKind;
@@ -77,7 +77,39 @@ tore_sim::checkpoint_struct!(AircraftPose {
     airborne,
     wreck,
     crashed,
+    stores,
 });
+
+tore_sim::checkpoint_struct!(StorePose {
+    hardpoint,
+    mount,
+    rack,
+    shape,
+    look,
+    items,
+    loaded,
+    body,
+});
+
+// How a store is drawn. Written by hand so a new variant fails to compile.
+impl Checkpoint for StoreLook {
+    fn save(&self, s: &mut Saver, _: Option<&Self>) -> Result<(), CheckpointError> {
+        s.writer().write_varint(match self {
+            Self::Store => 0,
+            Self::Pod => 1,
+            Self::Tank => 2,
+        });
+        Ok(())
+    }
+    fn load(l: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
+        match l.reader().read_varint()? {
+            0 => Ok(Self::Store),
+            1 => Ok(Self::Pod),
+            2 => Ok(Self::Tank),
+            other => invalid(format!("a store look has no variant {other}")),
+        }
+    }
+}
 
 tore_sim::checkpoint_struct!(Engine {
     lit,
@@ -109,6 +141,7 @@ tore_sim::checkpoint_struct!(ProjectilePose {
     target,
     incoming,
     speed_f8,
+    powered,
 });
 
 // `EffectKind` belongs to `tore-sim`, so its coder cannot be written here
@@ -148,11 +181,13 @@ impl Checkpoint for EffectPose {
             position,
             ticks,
             blast,
+            scale,
         } = self;
         s.writer().write_varint(effect_kind_number(*kind));
         position.save(s, base.map(|b| &b.position))?;
         ticks.save(s, base.map(|b| &b.ticks))?;
-        blast.save(s, base.map(|b| &b.blast))
+        blast.save(s, base.map(|b| &b.blast))?;
+        scale.save(s, base.map(|b| &b.scale))
     }
     fn load(l: &mut Loader<'_>, base: Option<&Self>) -> Result<Self, CheckpointError> {
         let kind = effect_kind(l.reader().read_varint()?)?;
@@ -161,6 +196,7 @@ impl Checkpoint for EffectPose {
             position: Checkpoint::load(l, base.map(|b| &b.position))?,
             ticks: Checkpoint::load(l, base.map(|b| &b.ticks))?,
             blast: Checkpoint::load(l, base.map(|b| &b.blast))?,
+            scale: Checkpoint::load(l, base.map(|b| &b.scale))?,
         })
     }
 }
@@ -170,6 +206,7 @@ tore_sim::checkpoint_struct!(MarkPose {
     position,
     age,
     strength,
+    scale,
 });
 
 tore_sim::checkpoint_struct!(DebrisPose {
@@ -231,6 +268,7 @@ mod tests {
             airborne: id != 5,
             wreck: (id == 4).then_some(wreck::Phase::Falling),
             crashed: id == 4,
+            stores: Vec::new(),
         }
     }
 
@@ -256,6 +294,7 @@ mod tests {
                     target: (n == 2).then_some(4),
                     incoming: n == 2,
                     speed_f8: -(n as i32) * 256_000,
+                    powered: n == 1,
                 })
                 .collect(),
             effects: [
@@ -274,6 +313,7 @@ mod tests {
                 position: [n as f64, t, -t],
                 ticks: 60 - n as u16,
                 blast: (n % 2 == 0).then_some(30 + n as u8),
+                scale: 50 * (n % 4) as u8,
             })
             .collect(),
             marks: vec![
@@ -282,12 +322,14 @@ mod tests {
                     position: [5., 6., 7.],
                     age: tick,
                     strength: 1.,
+                    scale: 159,
                 },
                 MarkPose {
                     kind: MarkKind::Fire,
                     position: [8., 9., 10.],
                     age: tick + 3,
                     strength: 0.123_456_79,
+                    scale: 100,
                 },
             ],
             debris: vec![

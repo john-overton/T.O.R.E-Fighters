@@ -337,6 +337,20 @@ class StrikeTests(unittest.TestCase):
         self.assertTrue(any("unhurt" in p for p in s.strike_problems(self.good(), wanted)))
         self.assertEqual(s.strike_problems(self.good(hp="gone/200"), wanted), [])
 
+    def test_threat_decisions_are_wanted_in_order_and_a_known_ring_is_not_fired_into(self):
+        held = [dict(label="held", decisions=["hold_off", "home"], no_release=True)]
+        quiet = dict(breaks=0, released=False, killed=False)
+        self.assertEqual(s.heli_defense_problems(heli_run(decisions=["threat_hold_off", "threat_home"], **quiet), held), [])
+        self.assertNotEqual(s.heli_defense_problems(heli_run(decisions=["threat_home", "threat_hold_off"], **quiet), held), [])
+        self.assertNotEqual(s.heli_defense_problems(heli_run(decisions=["threat_hold_off"], **quiet), held), [])
+        self.assertNotEqual(
+            s.heli_defense_problems(heli_run(breaks=0, decisions=["threat_hold_off", "threat_home"]), held), [])
+        sead = [dict(label="sead", decisions=["hold_off", "resume"], sead=True, release=True)]
+        resumed = heli_run(breaks=0, decisions=["threat_hold_off", "threat_resume"], sead=True)
+        self.assertEqual(s.heli_defense_problems(resumed, sead), [])
+        no_sead = heli_run(breaks=0, decisions=["threat_hold_off", "threat_resume"])
+        self.assertNotEqual(s.heli_defense_problems(no_sead, sead), [])
+
     def test_the_run_count_must_match(self):
         self.assertTrue(any("1 runs" in p for p in s.strike_problems(self.good(), self.wanted() * 2)))
 
@@ -393,14 +407,28 @@ class GunshipTests(unittest.TestCase):
         self.assertNotEqual(s.gunship_problems(gunship_run(lost=100.0), self.want), [])
         self.assertNotEqual(s.gunship_problems(gunship_run(bursts=0), self.want), [])
 
+    def test_threat_decisions_are_wanted_in_order_and_a_known_ring_is_not_fired_into(self):
+        held = [dict(label="held", decisions=["hold_off", "home"], no_release=True)]
+        quiet = dict(breaks=0, released=False, killed=False)
+        self.assertEqual(s.heli_defense_problems(heli_run(decisions=["threat_hold_off", "threat_home"], **quiet), held), [])
+        self.assertNotEqual(s.heli_defense_problems(heli_run(decisions=["threat_home", "threat_hold_off"], **quiet), held), [])
+        self.assertNotEqual(s.heli_defense_problems(heli_run(decisions=["threat_hold_off"], **quiet), held), [])
+        self.assertNotEqual(
+            s.heli_defense_problems(heli_run(breaks=0, decisions=["threat_hold_off", "threat_home"]), held), [])
+        sead = [dict(label="sead", decisions=["hold_off", "resume"], sead=True, release=True)]
+        resumed = heli_run(breaks=0, decisions=["threat_hold_off", "threat_resume"], sead=True)
+        self.assertEqual(s.heli_defense_problems(resumed, sead), [])
+        no_sead = heli_run(breaks=0, decisions=["threat_hold_off", "threat_resume"])
+        self.assertNotEqual(s.heli_defense_problems(no_sead, sead), [])
+
     def test_the_run_count_must_match(self):
         self.assertNotEqual(s.gunship_problems(gunship_run(), self.want * 2), [])
 
 
 def heli_run(profile="popup", breaks=6, offset=90, kt=130, pitch=-10, blocked=0, released=True, killed=True,
-             lost=None, min_agl=1400, aircraft="Mi24", quick=False, start_alt=1500):
-    """One helicopter run of the driver: `breaks` BREAK lines (one a second), and a pop-up that may
-    release and kill."""
+             lost=None, min_agl=1400, aircraft="Mi24", quick=False, start_alt=1500, decisions=(), sead=False):
+    """One helicopter run of the driver: `breaks` BREAK lines (one a second), the THREAT
+    `decisions` (slice H4), and a pop-up that may release and kill."""
     out = [
         f"ai-strike: setup aircraft={aircraft} load=AT2.JT station=1 count=4 rounds=4 target=0x50000001 name=T-90 "
         "target_at=999570,7,789571 hp=200 skill=2 profile=none handback=none order=none mode=none",
@@ -414,6 +442,11 @@ def heli_run(profile="popup", breaks=6, offset=90, kt=130, pitch=-10, blocked=0,
             f"ai-strike: BREAK t={20 + n}.000 heading=350 track=345 bearing=22 offset={offset} masked_s=0 "
             f"blocked_s={blocked} pitch={pitch} agl_ft=1400 speed_kt={kt} bank=-30"
         )
+    for n, decision in enumerate(decisions):
+        out.append(f"ai-strike: THREAT t={30 + n}.000 decision={decision} target=0x50000001 ring=0x5000000b "
+                   'words="threat on target, holding off"')
+    if sead:
+        out.append("ai-strike: SEAD t=60.000 killed=3")
     if released:
         out.append("ai-strike: RELEASE t=70.000 n=1 weapon=AT2.JT station=1 alt_ft=1600 speed_kt=123 range_ft=9200"
                    " pass=1 aim_ft=0 inside=yes")
@@ -460,6 +493,20 @@ class HelicopterTests(unittest.TestCase):
         quiet = [dict(label="stand-off", profile="popup", breaks=5, release=False)]
         self.assertEqual(s.heli_defense_problems(heli_run(released=False, killed=False), quiet), [])
 
+    def test_threat_decisions_are_wanted_in_order_and_a_known_ring_is_not_fired_into(self):
+        held = [dict(label="held", decisions=["hold_off", "home"], no_release=True)]
+        quiet = dict(breaks=0, released=False, killed=False)
+        self.assertEqual(s.heli_defense_problems(heli_run(decisions=["threat_hold_off", "threat_home"], **quiet), held), [])
+        self.assertNotEqual(s.heli_defense_problems(heli_run(decisions=["threat_home", "threat_hold_off"], **quiet), held), [])
+        self.assertNotEqual(s.heli_defense_problems(heli_run(decisions=["threat_hold_off"], **quiet), held), [])
+        self.assertNotEqual(
+            s.heli_defense_problems(heli_run(breaks=0, decisions=["threat_hold_off", "threat_home"]), held), [])
+        sead = [dict(label="sead", decisions=["hold_off", "resume"], sead=True, release=True)]
+        resumed = heli_run(breaks=0, decisions=["threat_hold_off", "threat_resume"], sead=True)
+        self.assertEqual(s.heli_defense_problems(resumed, sead), [])
+        no_sead = heli_run(breaks=0, decisions=["threat_hold_off", "threat_resume"])
+        self.assertNotEqual(s.heli_defense_problems(no_sead, sead), [])
+
     def test_the_run_count_must_match(self):
         self.assertNotEqual(s.heli_defense_problems(heli_run(), self.want * 2), [])
 
@@ -476,13 +523,19 @@ class HelicopterTests(unittest.TestCase):
         scenarios = {sc.name: sc for sc in s.scenarios()}
         defended = scenarios["ai-strike-heli-defended"]
         argsets = [defended.args] + [step.args for step in defended.then]
-        self.assertEqual(len(argsets), 4)
+        self.assertEqual(len(argsets), 7)
         self.assertTrue(all("mi24" in a for a in argsets))
         self.assertNotIn("--profile", [x for a in argsets for x in a], "the AI chooses its pass")
         heli = scenarios["ai-strike-heli"]
         self.assertNotIn("--profile", [x for a in [heli.args] + [st.args for st in heli.then] for x in a])
-        honest = [heli_run(breaks=25), heli_run(), heli_run(killed=False),
-                  heli_run(profile="standoff", released=False, killed=False)]
+        held = ["threat_hold_off", "threat_home"]
+        honest = [heli_run(profile="standoff", breaks=0),
+                  heli_run(breaks=0),
+                  heli_run(breaks=0, released=False, killed=False, decisions=held),
+                  heli_run(breaks=0, released=False, killed=False, decisions=held),
+                  heli_run(breaks=0, decisions=["threat_hold_off", "threat_resume"], sead=True),
+                  heli_run(breaks=8, decisions=["threat_leave", "threat_hold_off", "threat_resume"]),
+                  heli_run(profile="standoff", breaks=3, released=False, killed=False, decisions=held)]
         self.assertEqual(defended.check("\n".join(honest)), [])
         quick = scenarios["qmc-strike-heli"]
         self.assertEqual(len([quick.args] + [st.args for st in quick.then]), 2)
@@ -725,6 +778,20 @@ class LaserSelfTests(unittest.TestCase):
 
     def test_an_honest_pair_of_runs_passes(self):
         self.assertEqual(self.check(), [])
+
+    def test_threat_decisions_are_wanted_in_order_and_a_known_ring_is_not_fired_into(self):
+        held = [dict(label="held", decisions=["hold_off", "home"], no_release=True)]
+        quiet = dict(breaks=0, released=False, killed=False)
+        self.assertEqual(s.heli_defense_problems(heli_run(decisions=["threat_hold_off", "threat_home"], **quiet), held), [])
+        self.assertNotEqual(s.heli_defense_problems(heli_run(decisions=["threat_home", "threat_hold_off"], **quiet), held), [])
+        self.assertNotEqual(s.heli_defense_problems(heli_run(decisions=["threat_hold_off"], **quiet), held), [])
+        self.assertNotEqual(
+            s.heli_defense_problems(heli_run(breaks=0, decisions=["threat_hold_off", "threat_home"]), held), [])
+        sead = [dict(label="sead", decisions=["hold_off", "resume"], sead=True, release=True)]
+        resumed = heli_run(breaks=0, decisions=["threat_hold_off", "threat_resume"], sead=True)
+        self.assertEqual(s.heli_defense_problems(resumed, sead), [])
+        no_sead = heli_run(breaks=0, decisions=["threat_hold_off", "threat_resume"])
+        self.assertNotEqual(s.heli_defense_problems(no_sead, sead), [])
 
     def test_the_run_count_must_match(self):
         self.assertTrue(any("1 runs" in p for p in s.laser_self_problems(laser_run())))

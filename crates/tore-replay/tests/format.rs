@@ -664,6 +664,7 @@ fn limits_are_refused_and_the_writer_keeps_going() {
                 kind: EffectKind::Other(3),
                 position: [0.; 3],
                 duration_ticks: 1,
+                scale: EffectSpawn::FULL_SCALE,
             }],
             ..Frame::default()
         },
@@ -1031,6 +1032,9 @@ fn explosion_crater_and_fire_kinds_round_trip() {
                     } else {
                         u32::MAX
                     },
+                    // Full size, a dud's inert puff and a scaled impact:
+                    // the effect scales section carries the last two.
+                    scale: [EffectSpawn::FULL_SCALE, 0, 159][usize::from(kind.code() % 3)],
                 })
                 .collect(),
             new_puffs: vec![PuffSpawn {
@@ -1049,6 +1053,7 @@ fn explosion_crater_and_fire_kinds_round_trip() {
                     kind: EffectKind::Other(7),
                     position: [0.; 3],
                     duration_ticks: 1,
+                    scale: EffectSpawn::FULL_SCALE,
                 }],
                 ..Frame::default()
             })

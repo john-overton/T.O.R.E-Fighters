@@ -27,6 +27,7 @@ pub mod parked;
 pub mod resolve;
 pub mod supply;
 pub mod units;
+pub mod wreck;
 
 pub use units::{
     Battery, BatteryState, BatterySystem, Engager, GroupTransform, MountStock, ParkedAircraft,
@@ -203,7 +204,9 @@ pub enum DestroyedLook {
     Wreck(String),
     /// Bunkers with a damaged variant: swap to that object (`~BNK5.OT`).
     DamagedObject(String),
-    /// Other buildings: removed, with a crater and fire (current behaviour).
+    /// Other buildings: the scenery draws the damage branch of their shape,
+    /// a generated ruin, or (pavement, bridge ends) their intact look; they
+    /// never vanish (B16).
     Removed,
     /// Men and invisible barrage zones: gone.
     Vanish,

@@ -22,6 +22,7 @@ use tore_world::mission::{
     ground_targets,
 };
 pub mod allegiance;
+pub mod loadout_memory;
 pub mod map;
 pub mod matrix;
 pub mod remember;

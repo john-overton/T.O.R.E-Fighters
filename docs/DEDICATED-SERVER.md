@@ -319,7 +319,8 @@ flowchart TD
   time. A player who leaves, or whose game goes silent for 5 seconds, gives
   the plane back to the AI at once; it is not held for a rejoin until stage K.
   *Since EF-K* a game that is still running but whose loop is held up (a
-  window dragged on Windows, a long frame, a screenshot) is not silent: a
+  window dragged on Windows, a long frame, a screenshot, or since slice NET
+  a mission build on a slow machine as it joins) is not silent: a
   small thread of the game sends a
   [keepalive](formats/net-protocol.md#keepalive) once a second for up to a
   minute, and the player keeps the plane, which flies on with its last

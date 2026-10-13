@@ -143,6 +143,7 @@ fn ownship_pose(template: &flight::State, pose: &AircraftPose) -> flight::State 
 pub fn aircraft_batches<'a>(
     snapshot: &RenderSnapshot,
     models: &'a [Airframe],
+    art: &CombatArt,
     camera: &Camera,
     world: &Terrain,
     scenery: &Scenery,
@@ -151,10 +152,37 @@ pub fn aircraft_batches<'a>(
         tore_workers::shared(),
         snapshot,
         models,
+        art,
         camera,
         world,
         scenery,
     )
+}
+
+/// One aircraft drawn with its own model: the airframe, then the pylons and
+/// stores it carries (B3).
+fn target_vertices(
+    model: &Airframe,
+    pose: &flight::State,
+    target: &AircraftPose,
+    art: &CombatArt,
+    camera: &Camera,
+    world: &Terrain,
+    scenery: &Scenery,
+) -> Vec<f32> {
+    let mut vertices = model.vertices(pose, camera, world, scenery);
+    if !pose.wreck_gone() {
+        crate::pylons::vertices(
+            &mut vertices,
+            &target.stores,
+            scenery.relative(pose.position),
+            [pose.yaw, pose.pitch, pose.bank],
+            Some(model),
+            art,
+            &model.palette,
+        );
+    }
+    vertices
 }
 
 // Fitted dispatch threshold: preserve the inline path for small formations.
@@ -170,6 +198,7 @@ fn aircraft_batches_with<'a>(
     workers: &tore_workers::Executor,
     snapshot: &RenderSnapshot,
     models: &'a [Airframe],
+    art: &CombatArt,
     camera: &Camera,
     world: &Terrain,
     scenery: &Scenery,
@@ -191,7 +220,7 @@ fn aircraft_batches_with<'a>(
         })
         .sum();
     if !workers.should_dispatch(count, MIN_AIRCRAFT_JOBS) {
-        return aircraft_batches_serial(snapshot, models, camera, world, scenery);
+        return aircraft_batches_serial(snapshot, models, art, camera, world, scenery);
     }
 
     let selected: Vec<_> = selected().collect();
@@ -220,7 +249,7 @@ fn aircraft_batches_with<'a>(
         match job {
             AircraftJob::Target(target) => {
                 let pose = model_pose(model.start(world), target, snapshot.tick);
-                model.vertices(&pose, camera, world, scenery)
+                target_vertices(model, &pose, target, art, camera, world, scenery)
             }
             AircraftJob::Debris(piece) => {
                 let mut pose = model.start(world);
@@ -264,6 +293,7 @@ fn aircraft_batches_with<'a>(
 fn aircraft_batches_serial<'a>(
     snapshot: &RenderSnapshot,
     models: &'a [Airframe],
+    art: &CombatArt,
     camera: &Camera,
     world: &Terrain,
     scenery: &Scenery,
@@ -284,7 +314,9 @@ fn aircraft_batches_serial<'a>(
             {
                 let pose = model_pose(model.start(world), target, snapshot.tick);
                 let first = vertices.len() / 10;
-                vertices.extend(model.vertices(&pose, camera, world, scenery));
+                vertices.extend(target_vertices(
+                    model, &pose, target, art, camera, world, scenery,
+                ));
                 contacts.extend(Contact::new(
                     first,
                     vertices.len() / 10,
@@ -358,9 +390,8 @@ pub fn combat_geometry(
         [pose.yaw, pose.pitch, pose.bank] = piece.attitude;
         v.extend(ownship.fragment_vertices(&pose, camera, world, scenery));
     }
-    // Attached external stores are hidden until the dedicated ordnance
-    // rendering pass. Loadout/flight state and launched projectiles remain
-    // independent of this presentation decision in every camera.
+    // Stores still on their pylons are drawn with their aircraft
+    // (`crate::pylons`); here only what is in flight.
     for p in &snapshot.projectiles {
         if Some(p.id) == camera.hidden_projectile {
             continue;
@@ -388,8 +419,10 @@ pub fn combat_geometry(
                 tracer_brightness(&p.weapon),
                 tracer_width(&p.weapon),
             );
-        } else if !p.gun {
-            // A visible thin strip marks the actual swept projectile segment.
+        } else if !p.gun && p.powered {
+            // The motor's flame: a thin bright strip over the swept segment
+            // while the motor burns, and nothing after burnout or on a bomb
+            // (bug B7).
             let right = Basis::new(f64::from(camera.yaw), f64::from(camera.pitch), 0.).right;
             let previous = local(p.previous);
             let a: Vector = std::array::from_fn(|i| previous[i] + right[i] * 0.4);
@@ -398,6 +431,19 @@ pub fn combat_geometry(
                 vertex(&mut v, pos, [1., 0.8, 0.3]);
             }
         }
+    }
+    // The sparks of impacts (bug B11), as short tracer streaks.
+    for spark in crate::impact_fx::sparks(&snapshot.effects, |x, z| {
+        f64::from(world.height(x as f32, z as f32))
+    }) {
+        tracer(
+            &mut v,
+            local(spark.from),
+            local(spark.to),
+            &eye,
+            spark.brightness,
+            spark.width,
+        );
     }
     // Explosions, fires and craters are drawn by effect_renderer.
     CombatGeometry {
@@ -411,6 +457,9 @@ pub fn combat_geometry(
 pub struct CombatArt {
     pub smoke: Pic,
     shapes: BTreeMap<String, Shape>,
+    /// The same shapes as carried on a pylon, where that differs from in
+    /// flight (a retarded bomb's fins are closed until release).
+    stores: BTreeMap<String, Shape>,
     pub effects: crate::effect_renderer::Art,
     pub escape: Option<crate::ejection_art::Art>,
 }
@@ -425,6 +474,7 @@ impl CombatArt {
         Ok(Self {
             smoke,
             shapes: BTreeMap::new(),
+            stores: BTreeMap::new(),
             effects: crate::effect_renderer::Art::load(data),
             escape: match crate::ejection_art::Art::load(data) {
                 Ok(art) => Some(art),
@@ -449,6 +499,11 @@ impl CombatArt {
             data,
         );
     }
+    /// A loaded weapon shape by name as carried on a pylon (the stores on
+    /// pylons draw with it).
+    pub(crate) fn shape(&self, name: &str) -> Option<&Shape> {
+        self.stores.get(name).or_else(|| self.shapes.get(name))
+    }
     /// Loads named weapon shapes; a missing or empty one draws as a strip.
     pub fn add_shapes<'a>(
         &mut self,
@@ -462,7 +517,13 @@ impl CombatArt {
                 .filter(|shape| !shape.faces.is_empty());
             match shape {
                 Some(shape) => {
-                    self.shapes.insert(name.to_owned(), shape);
+                    // Refitted to the real store's size where it is known
+                    // (crate::store_sizes, BP2), in flight and on a pylon.
+                    let (store, flight) = crate::store_sizes::variants(name, shape);
+                    if let Some(store) = store {
+                        self.stores.insert(name.to_owned(), store);
+                    }
+                    self.shapes.insert(name.to_owned(), flight);
                 }
                 None => log::warn!(
                     "Combat: {name} uses a tracer marker; line/point drawing remains open"
@@ -483,6 +544,7 @@ impl CombatArt {
                 glyphs: Vec::new(),
             },
             shapes,
+            stores: BTreeMap::new(),
             effects: crate::effect_renderer::Art::empty(),
             escape: None,
         }
@@ -761,11 +823,23 @@ mod tests {
             for smooth in [false, true] {
                 scenery.smooth_weather = smooth;
                 for camera in crate::combat_view::render_hash_tests::cameras() {
-                    let expected =
-                        aircraft_batches_serial(&snapshot, &models, &camera, &world, &scenery);
+                    let expected = aircraft_batches_serial(
+                        &snapshot,
+                        &models,
+                        &CombatArt::synthetic(Default::default()),
+                        &camera,
+                        &world,
+                        &scenery,
+                    );
                     for executor in &executors {
                         let actual = aircraft_batches_with(
-                            executor, &snapshot, &models, &camera, &world, &scenery,
+                            executor,
+                            &snapshot,
+                            &models,
+                            &CombatArt::synthetic(Default::default()),
+                            &camera,
+                            &world,
+                            &scenery,
                         );
                         assert_batches_identical(&expected, &actual);
                     }
@@ -788,9 +862,23 @@ mod tests {
         for count in 0..MIN_AIRCRAFT_JOBS {
             let mut snapshot = formation(count, false);
             snapshot.debris.clear();
-            let expected = aircraft_batches_serial(&snapshot, &models, &camera, &world, &scenery);
-            let actual =
-                aircraft_batches_with(&executor, &snapshot, &models, &camera, &world, &scenery);
+            let expected = aircraft_batches_serial(
+                &snapshot,
+                &models,
+                &CombatArt::synthetic(Default::default()),
+                &camera,
+                &world,
+                &scenery,
+            );
+            let actual = aircraft_batches_with(
+                &executor,
+                &snapshot,
+                &models,
+                &CombatArt::synthetic(Default::default()),
+                &camera,
+                &world,
+                &scenery,
+            );
             assert_batches_identical(&expected, &actual);
         }
     }
@@ -814,7 +902,14 @@ mod tests {
             for target in &mut snapshot.targets {
                 target.airborne = true;
             }
-            let expected = aircraft_batches_serial(&snapshot, &models, &camera, &world, &scenery);
+            let expected = aircraft_batches_serial(
+                &snapshot,
+                &models,
+                &CombatArt::synthetic(Default::default()),
+                &camera,
+                &world,
+                &scenery,
+            );
             for workers in [0, 1, 2, 4, 8] {
                 let executor = if workers == 0 {
                     tore_workers::Executor::serial()
@@ -822,7 +917,15 @@ mod tests {
                     tore_workers::Executor::parallel(workers).unwrap()
                 };
                 let build = || {
-                    aircraft_batches_with(&executor, &snapshot, &models, &camera, &world, &scenery)
+                    aircraft_batches_with(
+                        &executor,
+                        &snapshot,
+                        &models,
+                        &CombatArt::synthetic(Default::default()),
+                        &camera,
+                        &world,
+                        &scenery,
+                    )
                 };
                 assert_batches_identical(&expected, &build());
                 for _ in 0..20 {

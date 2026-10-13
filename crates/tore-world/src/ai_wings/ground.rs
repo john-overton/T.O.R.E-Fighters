@@ -38,13 +38,31 @@ pub(super) fn step(
         return;
     }
     let subjects = subjects(state, &world.surface);
+    let painted = revealed(&wings.painting, &world.surface.arsenal);
     wings.mission.observe_ground(
         GroundScene {
             subjects: &subjects,
             weather: state.sensor_weather(),
+            painted: &painted,
         },
         ground,
     );
+}
+
+/// What a radar painting an aircraft gives away (slice H4): the radar, and
+/// for a battery's radar the launchers it guides for, as (aircraft, unit)
+/// pairs.
+fn revealed(painting: &[(u32, u32)], arsenal: &fire::Arsenal) -> Vec<(u32, u32)> {
+    let mut pairs = Vec::new();
+    for &(plane, emitter) in painting {
+        pairs.push((plane, emitter));
+        for battery in arsenal.batteries.iter().filter(|b| b.radar.0 == emitter) {
+            pairs.extend(battery.launchers.iter().map(|unit| (plane, unit.0)));
+        }
+    }
+    pairs.sort_unstable();
+    pairs.dedup();
+    pairs
 }
 
 /// Briefs every Strike actor not yet briefed.

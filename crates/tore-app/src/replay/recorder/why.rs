@@ -127,6 +127,8 @@ struct Mind {
     ejection: Option<&'static str>,
     /// The no-laze decision in force (slice ST-G).
     no_laze: Option<(tore_sim::ai::strike::NoLaze, StationId)>,
+    /// A helicopter's last threat decision, by decision and tick (slice H4).
+    threat_call: Option<(tore_sim::ai::helicopter_threat::Decision, u64)>,
     /// Fitted fallbacks already reported.
     fallbacks: BTreeSet<&'static str>,
     choice: Option<Choice>,
@@ -948,6 +950,24 @@ fn decide(look: &Look, mind: &mut Mind, fallbacks: &[Fallback], events: &mut Vec
     }
     mind.no_laze = no_laze.map(|(decision, station, _)| (decision, station));
 
+    // A helicopter's threat decision (slice H4): hold off, resume, switch
+    // targets, home, or leave an ambush's ring.
+    let threat_call = actor
+        .strike()
+        .and_then(|strike| strike.threat_call())
+        .copied();
+    if let Some(call) = threat_call
+        && mind.threat_call != Some((call.decision, call.tick))
+    {
+        events.push(threat_decision_event(id, &call));
+        mind.remember(Change {
+            tick: number,
+            what: format!("strike: {}", call.decision.reason()),
+            why: call.decision.words().to_owned(),
+        });
+    }
+    mind.threat_call = threat_call.map(|call| (call.decision, call.tick));
+
     // Airfield sequence.
     let airfield = actor.airfield_phase();
     if !first && airfield != mind.airfield {
@@ -1105,6 +1125,21 @@ fn strike_decision_event(
         .with(field::STATION, i64::from(station.0))
         .with(field::WEAPON, weapon);
     if let Some(target) = target {
+        event = event.with_object(target);
+    }
+    event
+}
+
+/// An `ai.strike` event for a helicopter's threat decision (slice H4): the
+/// aircraft, the target it concerns, the decision in words, the fixed
+/// `reason` key (`threat_hold_off`, `threat_resume`, `threat_retarget`,
+/// `threat_home`, `threat_leave`).
+fn threat_decision_event(id: u32, call: &tore_sim::ai::helicopter_threat::Call) -> Event {
+    let mut event = Event::new(kind::AI_STRIKE)
+        .with_subject(id)
+        .with(field::DECISION, call.decision.words())
+        .with(field::REASON, call.decision.reason());
+    if let Some(target) = call.target {
         event = event.with_object(target);
     }
     event

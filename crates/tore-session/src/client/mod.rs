@@ -58,6 +58,8 @@ pub mod diagnostics;
 mod gun_key_tests;
 pub mod interpolation;
 #[cfg(test)]
+mod load_tests;
+#[cfg(test)]
 mod lobby_tests;
 #[cfg(test)]
 mod matrix_tests;
@@ -687,6 +689,7 @@ struct Shown {
     position: [f64; 3],
     ticks: u16,
     blast: Option<u8>,
+    scale: u8,
 }
 
 /// The client session. See the module documentation.
@@ -711,7 +714,7 @@ pub struct Client {
     released: Vec<ReceivedEvent>,
     held: VecDeque<ReceivedEvent>,
     effects: Vec<Shown>,
-    marks: Vec<(u32, MarkKind, [f64; 3])>,
+    marks: Vec<(u32, MarkKind, [f64; 3], u8)>,
     destroyed: BTreeMap<u32, u32>,
     /// Each surface unit's states the host has told (protocol 22), by
     /// unit, oldest first, each from its tick; the picture takes the newest
@@ -758,6 +761,12 @@ pub struct Client {
     /// whether only a flight's build (its loadouts) failed.
     unable: Option<String>,
     unable_flight: bool,
+    /// How long the last mission build held the loop up (wall clock): the
+    /// figure a keepalive thread covers on a slow machine (slice NET).
+    last_build: Option<Duration>,
+    /// Mission builds so far: [`Client::receive_from`] ends its batch after
+    /// one (slice NET).
+    builds: u64,
     /// Why the host said it disconnects the player.
     goodbye: Option<Goodbye>,
     /// The automatic ready ([`ClientConfig::auto_ready`]): a Take plane is
@@ -907,6 +916,8 @@ impl Client {
             loaded: None,
             unable: None,
             unable_flight: false,
+            last_build: None,
+            builds: 0,
             goodbye: None,
             auto_pending: false,
             auto_plane: None,
@@ -1017,6 +1028,15 @@ impl Client {
 
     /// Reads every datagram waiting on `socket` (at most 1,024) and takes
     /// each, at `now`.
+    ///
+    /// A datagram that completes the host's Mission (or a flight's
+    /// loadouts) builds the mission's world, which can hold this call up
+    /// for seconds on a slow machine. The batch stops there (slice NET):
+    /// what arrived meanwhile waits for the caller's next turn, which
+    /// stamps it with that turn's time. Read now with the stale `now`, the
+    /// host's packets of the whole build would count as heard before it,
+    /// and the next update would close the connection for 5 seconds of
+    /// silence the moment the build was over.
     pub fn receive_from<D: Datagrams + ?Sized>(
         &mut self,
         now: Duration,
@@ -1027,7 +1047,11 @@ impl Client {
             let Some((len, from)) = socket.recv_datagram(&mut buf)? else {
                 break;
             };
+            let builds = self.builds;
             self.receive(now, from, &buf[..len]);
+            if self.builds != builds {
+                break;
+            }
         }
         Ok(())
     }
@@ -1090,6 +1114,13 @@ impl Client {
     /// once the connection has closed.
     pub fn keepalive_datagram(&self) -> Option<Vec<u8>> {
         self.net.keepalive_datagram()
+    }
+
+    /// How long the last mission build took, wall clock (`None` before
+    /// the first): the client builds inside [`Client::receive`], so this is
+    /// how long that call held the game's loop up (slice NET).
+    pub fn last_build_time(&self) -> Option<Duration> {
+        self.last_build
     }
 
     /// The host's address: the one the race chose, for a join through the
@@ -1670,17 +1701,19 @@ impl Client {
                 position: e.position,
                 ticks: (f64::from(e.ticks) - (render - f64::from(e.tick))).max(0.) as u16,
                 blast: e.blast,
+                scale: e.scale,
             })
             .collect();
         let marks = self
             .marks
             .iter()
             .filter(|(tick, ..)| f64::from(*tick) <= render)
-            .map(|(tick, kind, position)| MarkPose {
+            .map(|(tick, kind, position, scale)| MarkPose {
                 kind: *kind,
                 position: *position,
                 age: (render - f64::from(*tick)).max(0.) as u64,
                 strength: 1.,
+                scale: *scale,
             })
             .collect();
         let pilots = presented
@@ -2197,10 +2230,13 @@ impl Client {
     /// host's as `check` says.
     fn build_mission(&mut self, spec: MissionSpec, number: u32, check: Check<'_>) {
         let reads = ResourceReads::new(&self.resources);
+        let started = std::time::Instant::now();
         let built = match &mut self.builder {
             Some(builder) => builder(&spec, &reads),
             None => World::new(&spec, &reads, Seating::Open),
         };
+        self.last_build = Some(started.elapsed());
+        self.builds += 1;
         let ours = reads.manifest();
         let differences = match check {
             Check::Whole(manifest) => ours.differences(manifest),
@@ -2788,15 +2824,21 @@ impl Client {
                 position: at,
                 ticks,
                 blast,
+                scale,
             } => self.effects.push(Shown {
                 tick: event.tick,
                 kind: *kind,
                 position: position(at),
                 ticks: *ticks,
                 blast: *blast,
+                scale: *scale,
             }),
-            WireEvent::Mark { kind, position: at } => {
-                self.marks.push((event.tick, *kind, position(at)));
+            WireEvent::Mark {
+                kind,
+                position: at,
+                scale,
+            } => {
+                self.marks.push((event.tick, *kind, position(at), *scale));
             }
             WireEvent::GroundDestroyed { object } => {
                 self.destroyed.entry(*object).or_insert(event.tick);
@@ -3101,6 +3143,7 @@ fn player_pose(
         airborne: true,
         wreck: flight.wreck.as_ref().map(|w| w.phase),
         crashed: flight.crashed,
+        stores: Vec::new(),
     }
 }
 
@@ -3133,6 +3176,7 @@ fn ground_poses(world: &World) -> Vec<AircraftPose> {
             airborne: t.airborne,
             wreck: None,
             crashed: t.hp <= 0,
+            stores: Vec::new(),
         })
         .collect()
 }

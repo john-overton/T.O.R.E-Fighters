@@ -90,6 +90,28 @@ impl SightStyle {
 pub enum PipperCue {
     On((f64, f64)),
     Caret((f64, f64)),
+    /// A rocket's pipper off the field of view: an arrowhead pinned at the
+    /// edge where it left, pointing the way to the impact (the unit
+    /// direction). Opinionated, John 2026-10-12: the rocket pipper is always
+    /// shown.
+    Edge((f64, f64), (f64, f64)),
+}
+
+/// The rocket pipper's cue for an impact projected at `impact`: the pipper
+/// on the field, else an arrowhead pinned at the field's edge nearest the
+/// impact and pointing at it, else (behind the view) the caret under
+/// `reference`. Never nothing: the rocket pipper is always shown.
+pub fn rocket_cue(reference: (f64, f64), impact: Option<(f64, f64)>) -> PipperCue {
+    let Some((x, y)) = impact else {
+        return PipperCue::Caret((reference.0.clamp(LEFT, RIGHT), bottom()));
+    };
+    if (LEFT..=RIGHT).contains(&x) && (TOP..=bottom()).contains(&y) {
+        return PipperCue::On((x, y));
+    }
+    let at = (x.clamp(LEFT, RIGHT), y.clamp(TOP, bottom()));
+    let (dx, dy) = (x - at.0, y - at.1);
+    let length = dx.hypot(dy);
+    PipperCue::Edge(at, (dx / length, dy / length))
 }
 
 /// The pipper cue for an impact projected at `impact` (`None` when it cannot
@@ -247,9 +269,7 @@ fn draw_ccip(
     let cue = if line {
         pipper_cue(reference, impact)
     } else {
-        impact
-            .filter(|(x, y)| (LEFT..=RIGHT).contains(x) && (TOP..=bottom()).contains(y))
-            .map(PipperCue::On)
+        Some(rocket_cue(reference, impact))
     };
     let Some(cue) = cue else {
         return;
@@ -282,6 +302,7 @@ fn draw_ccip(
             }
             caret(paint, point);
         }
+        PipperCue::Edge(point, toward) => arrowhead(paint, point, toward),
     }
 }
 
@@ -347,6 +368,18 @@ pub fn pipper(paint: &mut hud::Paint<'_>, (x, y): (f64, f64), arc: f64) {
 fn caret(paint: &mut hud::Paint<'_>, (x, y): (f64, f64)) {
     paint.line((x - 5., y - 6.), (x, y));
     paint.line((x, y), (x + 5., y - 6.));
+}
+
+/// An arrowhead with its tip at `tip`, pointing along the unit `toward`: the
+/// [`caret`] turned to any direction.
+fn arrowhead(paint: &mut hud::Paint<'_>, (x, y): (f64, f64), (dx, dy): (f64, f64)) {
+    let (px, py) = (-dy, dx);
+    for side in [-1., 1.] {
+        paint.line(
+            (x - dx * 6. + px * 5. * side, y - dy * 6. + py * 5. * side),
+            (x, y),
+        );
+    }
 }
 
 /// What the T needs to be drawn: the bomb sight's level release and the
@@ -546,5 +579,49 @@ mod tests {
         assert_eq!(clock(75.), "1:15");
         assert_eq!(clock(-3.), "0:00");
         assert_eq!(clock(f64::INFINITY), "-:--");
+    }
+    #[test]
+    fn the_rocket_pipper_is_always_shown() {
+        let centre = (320., 240.);
+        // On the field: the pipper.
+        assert_eq!(
+            rocket_cue(centre, Some((330., 250.))),
+            PipperCue::On((330., 250.))
+        );
+        // Below, above and beside the field: an arrowhead pinned at the edge
+        // nearest it, pointing at the impact.
+        let PipperCue::Edge(at, toward) = rocket_cue(centre, Some((330., 900.))) else {
+            panic!("below the field");
+        };
+        assert_eq!(at, (330., bottom()));
+        assert!((toward.0).abs() < 1e-9 && (toward.1 - 1.).abs() < 1e-9);
+        let PipperCue::Edge(at, toward) = rocket_cue(centre, Some((330., -400.))) else {
+            panic!("above the field");
+        };
+        assert_eq!(at, (330., TOP));
+        assert!((toward.1 + 1.).abs() < 1e-9);
+        let PipperCue::Edge(at, toward) = rocket_cue(centre, Some((1_000., 240.))) else {
+            panic!("beside the field");
+        };
+        assert_eq!(at, (RIGHT, 240.));
+        assert!((toward.0 - 1.).abs() < 1e-9);
+        // A corner points diagonally.
+        let PipperCue::Edge(at, toward) = rocket_cue(centre, Some((RIGHT + 50., bottom() + 50.)))
+        else {
+            panic!("corner");
+        };
+        assert_eq!(at, (RIGHT, bottom()));
+        assert!((toward.0 - toward.1).abs() < 1e-9 && toward.0 > 0.);
+        // Behind the view: the caret under the flight path.
+        assert_eq!(rocket_cue(centre, None), PipperCue::Caret((320., bottom())));
+    }
+
+    #[test]
+    fn an_edge_arrowhead_is_the_caret_turned() {
+        let caret_pixels = lit(|p| caret(p, (320., 300.)));
+        let arrow_pixels = lit(|p| arrowhead(p, (320., 300.), (0., 1.)));
+        assert_eq!(caret_pixels, arrow_pixels);
+        let right = lit(|p| arrowhead(p, (456., 240.), (1., 0.)));
+        assert!(right.contains(&(456, 240)) && right.contains(&(450, 235)));
     }
 }

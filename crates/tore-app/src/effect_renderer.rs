@@ -7,6 +7,9 @@
 //! picks the type from the shell's record. The light and dark puff a burst
 //! leaves are `surface_fx.rs`'s.
 //!
+//! An impact is drawn at its weapon's size against its explosion type's
+//! (the effect's `scale`, docs/spec/explosions.md, "Size by weapon").
+//!
 //! A large ground explosion also throws out a shockwave: a ring of
 //! `SMOKE.PIC` dust (or white spray on water) that races outward from the
 //! blast and fades (docs/spec/explosions.md, "Shockwave"). It is drawn from
@@ -24,6 +27,15 @@ use tore_sim::combat::{
 
 /// Explosions, fires and craters drawn at once.
 const MAX_INSTANCES: usize = 4096;
+/// Craters and pock marks drawn at once at most, the nearest: the rest of
+/// [`MAX_INSTANCES`] stays free for explosions and fires, however many
+/// marks a long mission leaves (agent decision, 2026-10-12).
+pub const MAX_MARK_INSTANCES: usize = 3072;
+/// A flat mark is drawn out to this many times its half width, at most
+/// [`MARK_DRAW_FT`]: a 5 ft gun pock mark to 10,000 ft, where it is half a
+/// pixel across, a 500 lb bomb's crater to about 95 nmi (agent decision).
+pub const MARK_DRAW_WIDTHS: f64 = 4_000.;
+pub const MARK_DRAW_FT: f64 = 2_200_000.;
 /// Center relative to the eye, extent, mode, art cell, layer, opacity and
 /// emissive flag.
 const INSTANCE_BYTES: usize = 13 * 4;
@@ -284,7 +296,9 @@ fn sprites(art: &Art, effects: &[EffectPose], marks: &[MarkPose]) -> Vec<Sprite>
         let sprite = match mark.kind {
             MarkKind::Crater(size) => {
                 let (_, layout) = SHEETS[CRATER_SHEET];
-                let half = blast::crater_half_width(size);
+                // At its weapon's scale; a gun round's pock mark is a small
+                // crater (John, 2026-10-12).
+                let half = blast::mark_half_width(size, mark.scale);
                 Sprite {
                     position: mark.position,
                     extent: [half, half],
@@ -340,6 +354,13 @@ fn sprites(art: &Art, effects: &[EffectPose], marks: &[MarkPose]) -> Vec<Sprite>
             )
         } else {
             continue;
+        };
+        // The weapon's size (bugs B8 to B10): one factor for the fireball and
+        // its shockwave alike, so a later shockwave pass inherits it.
+        let width = if effect.kind == EffectKind::DebrisImpact {
+            width
+        } else {
+            width * tore_sim::combat::blast_scale::factor(effect.scale)
         };
         if !art.present[sheet] || width <= 0. {
             continue;
@@ -421,6 +442,42 @@ pub struct EffectRenderer {
     /// drawn, in feet.
     fires: Vec<([f64; 3], f64)>,
     count: u32,
+}
+
+/// What the camera at `eye` draws, in drawing order: the nearest
+/// [`MAX_MARK_INSTANCES`] flat marks within their draw distance, far to
+/// near, then everything else far to near, [`MAX_INSTANCES`] in all.
+fn visible(sprites: &[Sprite], eye: [f64; 3]) -> Vec<&Sprite> {
+    let distance = |s: &Sprite| -> f64 {
+        let offset: [f64; 3] = std::array::from_fn(|i| s.position[i] - eye[i]);
+        offset.iter().map(|v| v * v).sum::<f64>().sqrt()
+    };
+    let mut flat: Vec<(f64, &Sprite)> = Vec::new();
+    let mut rest: Vec<(f64, &Sprite)> = Vec::new();
+    for s in sprites {
+        let d = distance(s);
+        if s.mode == Mode::Flat {
+            let reach = (s.extent[0].max(s.extent[1]) * MARK_DRAW_WIDTHS).min(MARK_DRAW_FT);
+            if d - s.radius() < reach {
+                flat.push((d, s));
+            }
+        } else if d - s.radius() < MARK_DRAW_FT {
+            rest.push((d, s));
+        }
+    }
+    if flat.len() > MAX_MARK_INSTANCES {
+        flat.select_nth_unstable_by(MAX_MARK_INSTANCES - 1, |a, b| a.0.total_cmp(&b.0));
+        flat.truncate(MAX_MARK_INSTANCES);
+    }
+    flat.sort_by(|a, b| b.0.total_cmp(&a.0));
+    rest.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let room = MAX_INSTANCES - flat.len();
+    // Far to near, so when explosions outnumber the room the nearest stay.
+    let skip = rest.len().saturating_sub(room);
+    flat.into_iter()
+        .chain(rest.into_iter().skip(skip))
+        .map(|(_, s)| s)
+        .collect()
 }
 
 /// A fire this near a fitted fire's spot (feet, level) is that fire.
@@ -620,17 +677,9 @@ impl EffectRenderer {
     pub fn update(&mut self, queue: &wgpu::Queue, camera: &Camera) {
         let eye = camera.position;
         let fitted = fit_fires(&self.sprites, &self.fires);
-        let mut visible: Vec<_> = fitted
-            .iter()
-            .filter_map(|s| {
-                let offset: [f64; 3] = std::array::from_fn(|i| s.position[i] - eye[i]);
-                let distance: f64 = offset.iter().map(|v| v * v).sum::<f64>().sqrt();
-                (distance - s.radius() < 2_200_000.).then_some((s.mode != Mode::Flat, distance, s))
-            })
-            .collect();
-        visible.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.total_cmp(&a.1)));
+        let visible = visible(&fitted, eye);
         let mut instances = Vec::with_capacity(visible.len().min(MAX_INSTANCES) * INSTANCE_BYTES);
-        for (_, _, s) in visible.into_iter().take(MAX_INSTANCES) {
+        for s in visible {
             // Relative to the eye in full precision, far from the origin too.
             let offset: [f32; 3] = std::array::from_fn(|i| (s.position[i] - eye[i]) as f32);
             let values = offset.into_iter().chain([
@@ -678,6 +727,7 @@ mod tests {
             position: [100., 0., 200.],
             ticks,
             blast,
+            scale: tore_sim::combat::blast_scale::FULL,
         }
     }
 
@@ -729,6 +779,46 @@ mod tests {
         // An old recording's flak (no type) draws as the small one.
         let legacy = sprites(&art, &[effect(EffectKind::Flak, None, 240)], &[]);
         assert_eq!(SHEETS[legacy[0].layer].0, "FLAKA.PIC");
+    }
+
+    #[test]
+    fn an_impact_draws_at_its_weapons_scale_with_its_shockwave() {
+        let art = Art::synthetic();
+        let at = |scale: u8| {
+            let pose = EffectPose {
+                scale,
+                ..effect(EffectKind::Ground, Some(35), 200)
+            };
+            sprites(&art, &[pose], &[])
+        };
+        let full = at(100);
+        let big = at(159);
+        let dud = at(tore_sim::combat::blast_scale::INERT);
+        let fireball = |s: &[Sprite]| *s.iter().find(|s| s.layer == 8).unwrap();
+        let width = f64::from(blast::rolled_size(35, [100., 0., 200.]));
+        assert_eq!(fireball(&full).extent[0], width / 2.);
+        assert!((fireball(&big).extent[0] - 1.59 * width / 2.).abs() < 1e-9);
+        // The inert marker draws full size.
+        assert_eq!(fireball(&dud).extent[0], width / 2.);
+        // The shockwave ring scales with it.
+        let ring = |s: &[Sprite]| {
+            s.iter()
+                .filter(|s| s.layer == SMOKE_SHEET)
+                .map(|s| s.extent[0])
+                .fold(0., f64::max)
+        };
+        assert!((ring(&big) - 1.59 * ring(&full)).abs() < 1e-9);
+        // A 20 mm hit at half size.
+        let hit = sprites(
+            &art,
+            &[EffectPose {
+                scale: 50,
+                ..effect(EffectKind::Hit, Some(18), 60)
+            }],
+            &[],
+        );
+        let small = f64::from(blast::rolled_size(18, [100., 0., 200.]));
+        assert_eq!(hit[0].extent[0], small / 4.);
     }
 
     #[test]
@@ -826,6 +916,7 @@ mod tests {
             position: [x, 10., 0.],
             age: 0,
             strength: 1.,
+            scale: 100,
         };
         let drawn = sprites(&art, &[], &[fire(0.), fire(500.)]);
         // Both are the crash site's 100 feet until one is fitted.
@@ -851,6 +942,7 @@ mod tests {
             position: [0., 10., 0.],
             age,
             strength,
+            scale: 100,
         };
         let drawn = sprites(
             &art,
@@ -920,5 +1012,43 @@ mod tests {
         let some = sprites(&missing, &[burst(EffectKind::Ground, 60)], &[]);
         assert!(some.iter().all(|s| s.layer != 19));
         assert!(some.len() > 1);
+    }
+
+    /// The CPU cost of a long mission's marks each frame (slice BF,
+    /// 2026-10-12): 20,000 gun pock marks and 1,000 craters spread over a
+    /// 20 nmi square, the camera over its middle. Run with `--ignored
+    /// --nocapture` in a release build for frame numbers.
+    #[test]
+    #[ignore]
+    fn a_long_missions_marks_cost_a_frame() {
+        let art = Art::synthetic();
+        let marks: Vec<MarkPose> = (0..21_000_u64)
+            .map(|n| MarkPose {
+                kind: MarkKind::Crater(if n < 20_000 { blast::POCK } else { 9 }),
+                position: [
+                    (n * 37_301 % 120_000) as f64,
+                    0.,
+                    (n * 91_127 % 120_000) as f64,
+                ],
+                age: n,
+                strength: 1.,
+                scale: if n < 20_000 { 50 } else { 159 },
+            })
+            .collect();
+        let eye = [60_000., 3_000., 60_000.];
+        let frames = 60;
+        let start = std::time::Instant::now();
+        let mut drawn = 0;
+        for _ in 0..frames {
+            let all = sprites(&art, &[], &marks);
+            let fitted = fit_fires(&all, &[]);
+            drawn = visible(&fitted, eye).len();
+        }
+        let per_frame = start.elapsed().as_secs_f64() * 1000. / f64::from(frames);
+        println!(
+            "mark stress: {per_frame:.2} ms a frame for 21000 marks, {drawn} drawn (cap {MAX_MARK_INSTANCES}); sprite memory {} bytes",
+            marks.len() * std::mem::size_of::<Sprite>()
+        );
+        assert!(drawn <= MAX_MARK_INSTANCES);
     }
 }

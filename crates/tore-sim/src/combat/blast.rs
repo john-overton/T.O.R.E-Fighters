@@ -131,10 +131,18 @@ pub const FIRE_FADE_TICKS: u32 = 60 * 120;
 pub const FIRE_SIZE: u8 = 100;
 pub const FIRE_SOUND: &str = "&FIRE.5K";
 pub const FIRE_SOUND_FT: f64 = 2000.;
-/// A weapon crater stays for the whole mission, as in the original; the
-/// oldest is dropped past this many.
-pub const MAX_CRATERS: usize = 256;
+/// Crash fires burning at once; the oldest goes out past this many. Weapon
+/// craters and gun pock marks have no cap: every one stays for the whole
+/// mission (opinionated, John, 2026-10-12; the 256 crater cap is gone).
 pub const MAX_FIRES: usize = 64;
+/// The crater size a gun round's pock mark is kept as: a crater of size 0
+/// is the small scorched dent a shell up to 57 mm leaves, sized by its
+/// scale ([`mark_half_width`]). An older build draws it as nothing.
+pub const POCK: u8 = 0;
+/// A pock mark's half width at a scale of 100, feet (fitted, agent
+/// decision, 2026-10-12): a 20 to 40 mm shell's at 50 is 2.5 ft, 5 ft
+/// across, so a strafing run leaves a line seen from a low pass.
+pub const POCK_HALF_FT: f64 = 5.;
 /// Marker for a mark that never runs out.
 pub const FOREVER: u32 = u32::MAX;
 
@@ -142,6 +150,17 @@ pub const FOREVER: u32 = u32::MAX;
 /// original crater size, at most 333.
 pub fn crater_half_width(size: u8) -> f64 {
     f64::from((u16::from(size) * 16).min(333))
+}
+
+/// A crater or pock mark's drawn half width in feet: the crater's at its
+/// scale ([`super::blast_scale::factor`]), at most 333, or a pock mark's.
+pub fn mark_half_width(size: u8, scale: u8) -> f64 {
+    let factor = super::blast_scale::factor(scale);
+    if size == POCK {
+        POCK_HALF_FT * factor
+    } else {
+        (crater_half_width(size) * factor).min(333.)
+    }
 }
 
 /// The original's variety: some explosion types are sometimes drawn and
@@ -258,6 +277,10 @@ pub struct Mark {
     /// Serial number, rising by one for each mark, so a recording can tell
     /// new marks from old.
     pub serial: u64,
+    /// A crater's drawn scale, percent ([`super::blast_scale`]): its
+    /// weapon's, so a 2,000 lb bomb's crater is bigger than a 500 lb's
+    /// (John, 2026-10-12); 100 for a crash's crater and a fire.
+    pub scale: u8,
 }
 impl Mark {
     /// A fire's strength: full, then fading to nothing over its last minute.
@@ -368,12 +391,17 @@ mod tests {
         assert_eq!(crater_half_width(3), 48.);
         assert_eq!(crater_half_width(18), 288.);
         assert_eq!(crater_half_width(30), 333.);
+        // Scaled, still at most 333; a pock mark is a few feet.
+        assert_eq!(mark_half_width(9, 100), 144.);
+        assert_eq!(mark_half_width(18, 200), 333.);
+        assert_eq!(mark_half_width(POCK, 50), 2.5);
         let mut fire = Mark {
             position: [0.; 3],
             kind: MarkKind::Fire,
             ticks: CRASH_TICKS,
             born: 0,
             serial: 0,
+            scale: 100,
         };
         assert_eq!(fire.strength(), 1.);
         fire.ticks = FIRE_FADE_TICKS / 2;

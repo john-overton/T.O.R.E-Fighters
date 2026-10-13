@@ -137,9 +137,16 @@ pub fn roster_probe(
                     if was_alive && actor.alive() && !struck {
                         replay.damage_fraction = actor.flight().damage_fraction;
                         replay.payload_lbs = actor.flight().payload_lbs;
-                        replay.step(actor.last_input(), |x, z| {
-                            f64::from(world.height(x as f32, z as f32))
-                        });
+                        // A researched actor (a rotorcraft since slice H1)
+                        // flies on the surface the bridge gives it, runways
+                        // and wind included; a legacy one on the terrain.
+                        if replay.research.is_some() {
+                            replay.step_surface(actor.last_input(), |x, z| world.surface(x, z));
+                        } else {
+                            replay.step(actor.last_input(), |x, z| {
+                                f64::from(world.height(x as f32, z as f32))
+                            });
+                        }
                         if &replay != actor.flight() {
                             return Err(
                                 format!("AI input replay diverged {} {level:?}", id.pt()).into()

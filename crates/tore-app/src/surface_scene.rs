@@ -1,7 +1,8 @@
 //! `--surface-scene OUT_DIR THEATER STEM [--surface-seed N] [--seconds S]
 //! [--surface-only] [--kill all|LIST] [--burn S] [--rails N] [--focus LIST]
 //! [--views LIST] [--look YAW,PITCH] [--tag NAME] [--distance FT]
-//! [--defenses AAA SAM] [--intruder EAST,UP,NORTH] [--blue LIST] [--no-aim]`:
+//! [--defenses AAA SAM] [--intruder EAST,UP,NORTH] [--blue LIST] [--no-aim]
+//! [--time HH:MM]`:
 //! renders a
 //! Quick Mission ground target as the game draws it, offscreen at 1080p, for
 //! review (docs/spec/surface-defenses.md, "Destroyed looks and drawing").
@@ -10,8 +11,9 @@
 //! tick, no window, no audio; `--surface-only` steps just the surface
 //! movement, for long marches), then optionally destroys units (`--kill`:
 //! `all` the template's units and parked aircraft, or a comma list of
-//! template ordinals, unit types such as `SA3.NT` and `within:FEET` of the
-//! focus) and lets them burn
+//! template ordinals, unit types such as `SA3.NT`, `within:FEET` of the
+//! focus and `runways`, every runway object, the layout's too, within the
+//! framed distance) and lets them burn
 //! for `--burn` seconds of whole-world ticks, and sets every launcher's
 //! rails to at most `--rails` rounds. Each view (`oblique`, `close`, `low`,
 //! `top`, `deck`) frames the focus (`--focus`: `routed`, `parked`, `all`, or
@@ -27,6 +29,15 @@
 //! the focus at 300 knots, so the defenses lock on and fire at it;
 //! `--blue` hands template objects (ordinals) to Blue, as `--surface-battle`
 //! does, so units fight each other.
+//!
+//! The scene's other static objects (buildings, bridges, runways) are named
+//! `object:TYPE` (`object:HANGR.OT`) in `--focus` and `--kill`, and
+//! `within:FEET` takes them too, so a destroyed airport's hangars, tower and
+//! fuel tanks can be framed burning (B16). `--bomb-runway N` drops N Mk 82s
+//! along the runway nearest the focus, then steps `--burn` seconds (at
+//! least 12), to show the craters a bombed runway keeps. `--focus near:ITEM` frames only
+//! the one ITEM nearest the template (`near:object:BR1MID.OT`). `--time 22:00` starts the mission
+//! at night.
 use crate::{AppResult, camera::Camera, reel::Gpu, scenery::Scenery, surface_dump};
 use std::path::Path;
 use tore_formats::aircraft::AircraftId;
@@ -58,6 +69,10 @@ struct Options {
     intruder: Option<[f64; 3]>,
     blue: Vec<u32>,
     no_aim: bool,
+    /// Mission start time, hours and minutes (`--time 22:00` for night).
+    time: Option<[i32; 2]>,
+    /// Mk 82s dropped along the runway nearest the focus (B16 craters).
+    bomb_runway: usize,
 }
 
 fn options() -> AppResult<Options> {
@@ -82,6 +97,8 @@ fn options() -> AppResult<Options> {
         intruder: None,
         blue: Vec::new(),
         no_aim: false,
+        time: None,
+        bomb_runway: 0,
     };
     let list = |text: String| -> Vec<String> {
         text.split(',')
@@ -123,6 +140,12 @@ fn options() -> AppResult<Options> {
                 }
             }
             "--no-aim" => o.no_aim = true,
+            "--bomb-runway" => o.bomb_runway = next()?.parse()?,
+            "--time" => {
+                let text = next()?;
+                let (h, m) = text.split_once(':').ok_or("--time HH:MM")?;
+                o.time = Some([h.parse()?, m.parse()?]);
+            }
             "--defenses" => {
                 let level = |text: String| {
                     Defense::parse(&text).ok_or_else(|| format!("unknown defense level {text}"))
@@ -134,7 +157,7 @@ fn options() -> AppResult<Options> {
         }
     }
     let [out, theater, stem] = positional.as_slice() else {
-        return Err("--surface-scene OUT_DIR THEATER STEM [--surface-seed N] [--seconds S] [--surface-only] [--kill all|LIST] [--burn S] [--rails N] [--focus LIST] [--views LIST] [--look YAW,PITCH] [--tag NAME] [--distance FT] [--defenses AAA SAM] [--intruder EAST,UP,NORTH] [--blue LIST] [--no-aim]".into());
+        return Err("--surface-scene OUT_DIR THEATER STEM [--surface-seed N] [--seconds S] [--surface-only] [--kill all|LIST] [--burn S] [--rails N] [--focus LIST] [--views LIST] [--look YAW,PITCH] [--tag NAME] [--distance FT] [--defenses AAA SAM] [--intruder EAST,UP,NORTH] [--blue LIST] [--no-aim] [--time HH:MM] [--bomb-runway N]".into());
     };
     o.out = out.clone();
     o.theater = theater.to_ascii_uppercase();
@@ -146,7 +169,7 @@ fn options() -> AppResult<Options> {
 /// `all`, its ordinal, or its type.
 fn named(list: &[String], id: u32, resource: &str) -> bool {
     list.iter().any(|item| {
-        item == "all"
+        (item == "all" && !resource.starts_with("object:"))
             || item.parse::<u32>().ok() == Some(id.wrapping_sub(SURFACE_UNIT_BASE))
             || item.eq_ignore_ascii_case(resource)
     })
@@ -182,22 +205,69 @@ fn places(world: &World) -> Vec<(u32, String, [f64; 3], bool)> {
             false,
         )
     }));
+    // The scene's other static objects (buildings, bridges, runways), as
+    // `object:TYPE` (B16): named only on purpose, never by default.
+    let known: std::collections::BTreeSet<u32> = out.iter().map(|(id, ..)| *id).collect();
+    out.extend(
+        world
+            .terrain
+            .airport_scene
+            .objects
+            .iter()
+            .filter(|object| {
+                !known.contains(&object.id) && surface.unit(UnitId(object.id)).is_none()
+            })
+            .map(|object| {
+                (
+                    object.id,
+                    format!("object:{}", object.object_type),
+                    object.bounds.center,
+                    false,
+                )
+            }),
+    );
     out
 }
 
 /// The places `o.focus` names (every template unit when it names none).
+/// `near:ITEM` names only the one place ITEM names nearest the template's
+/// units (a theater has many bridges of one type).
 fn focused(
     o: &Options,
     all: Vec<(u32, String, [f64; 3], bool)>,
 ) -> Vec<(u32, String, [f64; 3], bool)> {
+    let matches = |item: &str, id: u32, resource: &str, routed: bool| match item {
+        "routed" => routed,
+        "parked" => resource.starts_with("parked "),
+        _ => named(&[item.to_owned()], id, resource),
+    };
+    let units: Vec<_> = all
+        .iter()
+        .filter(|(_, resource, ..)| !resource.starts_with("object:"))
+        .cloned()
+        .collect();
+    let middle = centre(&units);
+    let mut nearest = std::collections::BTreeSet::new();
+    for item in &o.focus {
+        if let Some(item) = item.strip_prefix("near:") {
+            let best = all
+                .iter()
+                .filter(|(id, resource, _, routed)| matches(item, *id, resource, *routed))
+                .min_by(|a, b| {
+                    let d = |p: &[f64; 3]| (p[0] - middle[0]).hypot(p[2] - middle[2]);
+                    d(&a.2).total_cmp(&d(&b.2))
+                });
+            nearest.extend(best.map(|(id, ..)| *id));
+        }
+    }
     all.into_iter()
         .filter(|(id, resource, _, routed)| {
-            o.focus.is_empty()
-                || o.focus.iter().any(|item| match item.as_str() {
-                    "routed" => *routed,
-                    "parked" => resource.starts_with("parked "),
-                    _ => named(std::slice::from_ref(item), *id, resource),
-                })
+            (o.focus.is_empty() && !resource.starts_with("object:"))
+                || nearest.contains(id)
+                || o.focus
+                    .iter()
+                    .filter(|item| !item.starts_with("near:"))
+                    .any(|item| matches(item, *id, resource, *routed))
         })
         .collect()
 }
@@ -225,6 +295,72 @@ fn framed(center: [f64; 3], radius: f64, yaw: f64, pitch: f64) -> Camera {
     camera
 }
 
+/// Drops `count` Mk 82s on the runway nearest `center`, spaced along its
+/// middle 70 percent, each from a 45 degree dive (B16: a bombed runway shows
+/// its craters).
+fn bomb_runway(
+    world: &mut World,
+    resources: &std::collections::BTreeMap<String, Vec<u8>>,
+    center: [f64; 3],
+    count: usize,
+) -> AppResult<()> {
+    use tore_sim::combat::{FallState, live::Projectile};
+    let runway = world
+        .terrain
+        .airport_scene
+        .runways
+        .iter()
+        .min_by(|a, b| {
+            let d = |r: &tore_sim::airport::Runway| {
+                (r.approach_center[0] - center[0]).hypot(r.approach_center[2] - center[2])
+            };
+            d(a).total_cmp(&d(b))
+        })
+        .ok_or("--bomb-runway: no runway")?
+        .clone();
+    let bomb = {
+        let bytes = resources.get("MK82.JT").ok_or("missing MK82.JT")?;
+        tore_formats::weapons::Weapon::parse("MK82.JT", bytes)?
+    };
+    let state = &mut world.combat.state;
+    for n in 0..count {
+        let along = (n as f64 + 0.5) / count as f64 * 0.7 - 0.35;
+        let x = runway.approach_center[0] + runway.heading.sin() * runway.length_ft * along;
+        let z = runway.approach_center[2] + runway.heading.cos() * runway.length_ft * along;
+        let y = runway
+            .support_height(x, z)
+            .unwrap_or(runway.approach_center[1]);
+        let release = crate::surface_objective::dive_release([x, y, z], [0.; 3], runway.heading);
+        let from = release.position;
+        let speed = release.speed();
+        state.projectiles.push(Projectile {
+            id: 0x00F8_0000 + n as u32,
+            owner: 0,
+            weapon: Some(bomb.clone()),
+            guidance: None,
+            motion: None,
+            guidance_ticks: None,
+            age: 0,
+            incoming: None,
+            station: 0,
+            position: from,
+            previous: from,
+            direction: release.velocity.map(|v| v / speed),
+            speed_f8: (speed * 256.) as i32,
+            launched_t: (state.tick() / 30) as u16,
+            target: None,
+            fall: FallState::default(),
+            gun_round: None,
+            tracer: false,
+        });
+    }
+    println!(
+        "surface-scene: {count} bombs on runway {:#010x}",
+        runway.object
+    );
+    Ok(())
+}
+
 pub fn run() -> AppResult<()> {
     let o = options()?;
     let out = Path::new(&o.out);
@@ -234,6 +370,10 @@ pub fn run() -> AppResult<()> {
     let mut spec = MissionSpec::new(&o.theater, AircraftId::F18);
     spec.ground_target = Some(o.stem.clone());
     spec.surface_seed = o.seed;
+    spec.weather.redrawn_airports = crate::scenery::redrawn_airports()?;
+    if o.time.is_some() {
+        spec.weather.time = o.time;
+    }
     (spec.aaa, spec.sam) = o.defenses;
     if o.intruder.is_some() {
         spec.cheats.damage = tore_sim::cheats::Damage::Invulnerable;
@@ -312,6 +452,13 @@ pub fn run() -> AppResult<()> {
     step(&mut world, &mut scenery, 1, false)?;
     let focus = focused(&o, places(&world));
     if focus.is_empty() {
+        let mut types = std::collections::BTreeMap::<String, usize>::new();
+        for (_, resource, ..) in places(&world) {
+            *types.entry(resource).or_default() += 1;
+        }
+        for (resource, count) in types {
+            println!("surface-scene: place {resource} x{count}");
+        }
         return Err("nothing to frame".into());
     }
     let center = centre(&focus);
@@ -323,7 +470,7 @@ pub fn run() -> AppResult<()> {
             + 40.
     });
     if !o.kill.is_empty() {
-        let doomed: Vec<u32> = places(&world)
+        let mut doomed: Vec<u32> = places(&world)
             .into_iter()
             .filter(|(id, resource, at, _)| {
                 named(&o.kill, *id, resource.trim_start_matches("parked "))
@@ -337,6 +484,21 @@ pub fn run() -> AppResult<()> {
             })
             .map(|(id, ..)| id)
             .collect();
+        if o.kill.iter().any(|item| item == "runways") {
+            doomed.extend(
+                world
+                    .terrain
+                    .airport_scene
+                    .runways
+                    .iter()
+                    .filter(|runway| {
+                        (runway.approach_center[0] - center[0])
+                            .hypot(runway.approach_center[2] - center[2])
+                            <= radius
+                    })
+                    .map(|runway| runway.object),
+            );
+        }
         for target in world
             .combat
             .state
@@ -351,6 +513,15 @@ pub fn run() -> AppResult<()> {
             &mut world,
             &mut scenery,
             (o.burn * 120.).round() as u64,
+            false,
+        )?;
+    }
+    if o.bomb_runway > 0 {
+        bomb_runway(&mut world, &resources, center, o.bomb_runway)?;
+        step(
+            &mut world,
+            &mut scenery,
+            (o.burn.max(12.) * 120.).round() as u64,
             false,
         )?;
     }
@@ -413,6 +584,7 @@ pub fn run() -> AppResult<()> {
     // units and the smoke of wrecks without a fire (`surface_fx`).
     let now = snapshot.tick as f64;
     let mut tracker = crate::gun_flash::Tracker::default();
+    tracker.set_fire_widths(std::sync::Arc::clone(&scenery.fire_widths));
     tracker.observe(&snapshot, now, |_| None);
     let guns = tracker.draw(now, |_| None);
     let tag = o

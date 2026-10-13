@@ -561,7 +561,7 @@ adapter. Use `--aircraft rafale` for the exact Rafale C identity.
 The powered-lift aircraft (`av8`, `yak141`, `v22`, `ah64`, `mi24`, `ch47`) start in
 trimmed forward flight. `--maneuver hover` starts one at rest in the air in its own
 hover trim (hands off it holds), and `--replay-input TAPE` flies a `tore-pilot 3`
-tape from there; the battery's `flight-powered-*` scenarios do exactly this
+tape from there. `--maneuver settle:SINK_FPS` starts a powered-lift aircraft 60 ft over flat open ground in its hover trim and holds that sink rate on the collective (the throttle on the jets) until it is down, then prints a `touchdown:` line, the probe of the [touchdown rule](spec/touchdown.md); the battery's `flight-powered-*` scenarios do exactly this
 ([flight lane](testing/lane-flight.md#powered-lift-scenarios-vtol-overhaul)).
 
 For an individual aircraft's actual surface geometry, before broad integration
@@ -1581,6 +1581,29 @@ picks the theater (default UKR):
 TORE_DATA_DIR=.local/surface-data target/debug/tore-app --blast-preview .local/tmp/blast
 ```
 
+`--impact-preview OUT_DIR` (first argument) renders weapon impacts side by
+side offscreen, each with its own record's land explosion, its
+[size by weapon](spec/explosions.md#size-by-weapon) and its
+[light and sparks](spec/explosions.md#impact-light-and-sparks): a row of a
+20 mm, a 105 mm, a 250 lb, a 500 lb and a 2,000 lb impact 900 ft apart at
+0.1, 0.3, 0.6 and 1 second, close views of the 20 mm and 105 mm, and an
+eight-round 20 mm burst, by day and at night. `TORE_CITY_FILL=0` keeps the
+city fill out of the row:
+
+```sh
+TORE_CITY_FILL=0 TORE_DATA_DIR=.local/tmp-me/profile target/debug/tore-app --impact-preview .local/tmp/impacts
+```
+
+On a player's `--a2g-run`, `--render-scene DIR --scene-at S,...` draws the
+world offscreen S seconds after the first rocket, missile or bomb leaves,
+chasing the newest one from just behind and beside it (`DIR/scene-tS.png`),
+and `--condition night` flies the run at night: the way to look at motor
+smoke, the motor flame ending at burnout and impacts in a real run:
+
+```sh
+TORE_CITY_FILL=0 TORE_DATA_DIR=.local/tmp-me/profile target/debug/tore-app --a2g-run UKR QUCOL --attack release --from 1 --aircraft a4e --load LAU61 --altitude 1500 --dive 10 --speed 400 --hold 1.5 --render-scene .local/tmp/rockets --scene-at 0.6,1.5,3
+```
+
 `--cockpit-sheet OUT_DIR [ID,ID,...]` (first argument) renders every flyable
 aircraft's cockpit with live mirrors, its cockpit art with the mirror masks
 tinted (centre red, left green, right blue) and two contact sheets, offscreen;
@@ -1612,6 +1635,15 @@ every base layout and every template placement and lists each moved unit on
 the wrong class (`surface-class-sweep`).
 `--starts [THEATER ...]` builds one mission per theater with a ground target
 and reports where Blue and Red start (`surface-start-placement`).
+`--grounding [TYPE ...]` lists every OT (or the types named) with its shape's
+lowest and highest point about its origin, the share below it, its F2 ground
+offset and the lift that stands it on the ground, in world feet at its drawn
+size ([building grounding](formats/objects-and-shapes.md#building-grounding-2026-10-12),
+`surface-building-grounding`).
+`--damage [TYPE ...]` lists every OT (or the types named) with where retail
+keeps its destroyed look: its `~` variant, the damage branch inside its shape
+(intact and damaged face counts and heights) or neither
+([destroyed looks of buildings](formats/objects-and-shapes.md#destroyed-looks-of-buildings-and-bridges-2026-10-12)).
 `--surface-sheets` renders each template from above and closer, heavy
 defenses, at its retail spot (seed 1, no jitter or relocation); `--variants`
 adds the placed layout with seeds 1 and 2. A marker per unit: red Redfor, blue
@@ -1684,8 +1716,9 @@ The `surface-*` engagement battery scenarios run it.
 draws it, offscreen at 1080p (no window): it steps the whole world
 `--seconds S` (`--surface-only` steps just the moving units, for long
 marches), optionally destroys units (`--kill all`, or a comma list of
-template ordinals, unit types such as `SA3.NT`, and `within:FEET` of the
-framed units) and lets them burn for `--burn S` seconds, sets every
+template ordinals, unit types such as `SA3.NT`, `within:FEET` of the
+framed units and `runways`, every runway object within the framed distance,
+the layout's too) and lets them burn for `--burn S` seconds, sets every
 launcher's rails to at most `--rails N` rounds, then writes one PNG per view
 (`--views oblique,close,low,top,deck`, or `--look YAW,PITCH` in degrees)
 framing `--focus` (`routed`, `parked`, ordinals or types) within
@@ -1696,6 +1729,11 @@ in the game, stepped every tick; `--no-aim` draws them unturned.
 circling that far from the focus so the defenses lock on and fire, `--blue
 ORDINALS` hands template objects to Blue so units fight each other, and each
 focused unit prints its aim (`aim ... body ... turrets ... holds ...`).
+The scene's other static objects are named `object:TYPE` (`object:HANGR.OT`)
+in `--focus` and `--kill` (and `within:FEET` takes them), `near:ITEM` frames
+only the one ITEM nearest the template, `--bomb-runway N` drops N Mk 82s
+along the runway nearest the focus, and `--time HH:MM` sets the start time
+(night views); with no focus left the run lists every place by type (B16).
 `--surface-preview
 OUT_DIR destroyed` draws one unit of each class beside its destroyed look,
 read from the records, and the four carriers with their damaged islands.
@@ -1705,6 +1743,8 @@ TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/sc
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes PGU QPGSAM --focus 8 --distance 14 --look 30,-25 --rails 1
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes FRA QFFLT --focus CLEM.NT --distance 420 --kill CLEM.NT --burn 30
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes UKR QUCOL --seconds 30 --focus 10 --views close --distance 40 --intruder 5000,3000,2000
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes UKR QUSTRIP --kill within:600 --focus near:object:BRDMID.OT --distance 700 --time 23:00
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes UKR QUSTRIP --bomb-runway 8 --focus 0 --distance 1200
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-preview .local/destroyed destroyed
 ```
 
@@ -1752,7 +1792,9 @@ TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --a2g-run UKR QUCOL --air
 `--surface-fx-preview OUT_DIR [SCENE ...]` renders what the surface defenses
 look like, offscreen, by day, at dusk and at night: `flak` (the KS-12 and
 KS-19 bursts over North Vietnam, wide and close to the jet), `zsu23` and
-`zsu57` (muzzle flash, firing light and tracers beside a gun), `sam` (an SA-6
+`zsu57` (muzzle flash, firing light and tracers beside a gun), `troops` (an
+airfield squad's soldiers and tracers) and `squadkill` (the same squad killed
+as it opens fire), `sam` (an SA-6
 leaving its rail, at the pad and up its path), `wreck` (a destroyed ZSU-23
 smoking) and `map` (the flight map over the same target). Each scene is the
 real game: it builds the mission, flies the player past the unit, steps the
@@ -1778,7 +1820,13 @@ SAM and AAA hits and launches, the kill rows, friendly fire and who shot the
 player down. `--redfor` builds the multiplayer mission and seats the human in
 the first enemy plane, so the targets are a Protect objective and a Blue plane
 drops the bombs; `--defenses AAA SAM` and `--surface-seed N` as above. The
-`surface-objective-*` battery scenarios run it.
+`surface-objective-*` battery scenarios run it. An `end runway` line gives each
+runway within 20,000 ft of a target with its hit points and whether it is
+redrawn (`redrawn PLAN`) or `retail`; `--runway-art` also builds the scenery on
+the CPU and adds the vertex floats the runway draws now (`drawn N`), and
+`--retail-airfields` builds the retail airfield shapes instead of the redraw.
+The `surface-runway-stays` scenario uses them (B15: bombs on `~QUSTRIP`'s
+buildings bring its 750 hit point runway down, and it stays drawn).
 
 `--record PATH` records the run as a mission recording (a format 3 file, see
 [Mission replays](REPLAYS.md#versions-and-damage)); `--verify-render` then reads

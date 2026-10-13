@@ -14,7 +14,7 @@ use crate::research::Surface;
 use tore_formats::aircraft::{Aircraft, AircraftId};
 use tore_input::{FlightAxis, LiftCommand, StabilityLevel, TrimAxis};
 
-const KT: f64 = 1.687_81;
+pub(super) const KT: f64 = 1.687_81;
 /// The aircraft hover hold flies.
 const HOVERING: [AircraftId; 4] = [
     AircraftId::Ah64,
@@ -32,7 +32,7 @@ const POWERED: [AircraftId; 6] = [
     AircraftId::Yak141,
 ];
 
-fn aircraft(id: AircraftId) -> Aircraft {
+pub(super) fn aircraft(id: AircraftId) -> Aircraft {
     match id {
         AircraftId::Ah64 | AircraftId::Mi24 => helicopter::tests::pt_aircraft(id),
         AircraftId::Ch47 => tandem::tests::pt_aircraft(),
@@ -41,13 +41,19 @@ fn aircraft(id: AircraftId) -> Aircraft {
     }
 }
 
-fn wrap(angle: f64) -> f64 {
+pub(super) fn wrap(angle: f64) -> f64 {
     (angle + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
 }
 
 /// A hybrid flight of `id` at `height`, heading `heading` (rad), at `level`,
 /// with the Easy flight physics cheat `easy`, not yet trimmed.
-fn flight(id: AircraftId, height: f64, heading: f64, level: StabilityLevel, easy: bool) -> State {
+pub(super) fn flight(
+    id: AircraftId,
+    height: f64,
+    heading: f64,
+    level: StabilityLevel,
+    easy: bool,
+) -> State {
     let mut s = State::new(&aircraft(id), [0., height, 0.]).unwrap();
     s.enable_research(1).unwrap();
     s.cheats.unlimited_fuel = true;
@@ -67,7 +73,7 @@ fn flight(id: AircraftId, height: f64, heading: f64, level: StabilityLevel, easy
 /// (rad) in `wind` (ft/s, world axes): the wind along the heading comes off
 /// the airspeed and the wind across it is a drift. The V-22 flies at its
 /// 87-degree helicopter preset.
-fn moving(
+pub(super) fn moving(
     id: AircraftId,
     height: f64,
     knots: f64,
@@ -93,7 +99,7 @@ fn moving(
 }
 
 /// Flat ground at `height` in a steady `wind`.
-fn ground(height: f64, wind: [f64; 3]) -> impl Fn(f64, f64) -> Surface {
+pub(super) fn ground(height: f64, wind: [f64; 3]) -> impl Fn(f64, f64) -> Surface {
     move |_, _| Surface {
         wind,
         ..Surface::runway(height)
@@ -101,11 +107,11 @@ fn ground(height: f64, wind: [f64; 3]) -> impl Fn(f64, f64) -> Surface {
 }
 
 /// Flat ground at sea level in a steady `wind`.
-fn steady(wind: [f64; 3]) -> impl Fn(f64, f64) -> Surface {
+pub(super) fn steady(wind: [f64; 3]) -> impl Fn(f64, f64) -> Surface {
     ground(0., wind)
 }
 
-const CALM: [f64; 3] = [0.; 3];
+pub(super) const CALM: [f64; 3] = [0.; 3];
 
 fn press(switch: Switch) -> PilotInput {
     PilotInput {

@@ -231,6 +231,8 @@ impl AiWings {
             ground_ceiling: _,
             // Setup: the host sets it before every step (slice ST-T2).
             mission_height_ft: _,
+            // Setup: the host sets it before every step (slice H4).
+            painting: _,
         } = self;
         reports.save(s, None)?;
         slots.save(s, None)?;
@@ -317,6 +319,8 @@ impl AiWings {
             ground_ceiling: _,
             // Setup: the host sets it before every step (slice ST-T2).
             mission_height_ft: _,
+            // Setup: the host sets it before every step (slice H4).
+            painting: _,
         } = self;
         *reports = Checkpoint::load(l, None)?;
         *slots = Checkpoint::load(l, None)?;

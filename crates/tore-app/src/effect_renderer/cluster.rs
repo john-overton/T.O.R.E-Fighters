@@ -101,6 +101,7 @@ mod tests {
             position: [1_000_000., 40., 790_000.],
             ticks: 120,
             blast,
+            scale: tore_sim::combat::blast_scale::FULL,
         }
     }
 

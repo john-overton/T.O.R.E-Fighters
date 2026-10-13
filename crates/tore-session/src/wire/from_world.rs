@@ -254,6 +254,7 @@ fn targets_picture(world: &World) -> RenderSnapshot {
                 airborne: t.airborne,
                 wreck: t.wreck.as_ref().map(|wreck| wreck.phase),
                 crashed: t.hp <= 0,
+                stores: Vec::new(),
             })
             .collect(),
         projectiles: state
@@ -274,6 +275,7 @@ fn targets_picture(world: &World) -> RenderSnapshot {
                     target: p.target,
                     incoming: p.incoming.is_some(),
                     speed_f8: p.speed_f8,
+                    powered: state.motor_powered(p),
                 }
             })
             .collect(),
@@ -681,6 +683,7 @@ pub fn effect_event(effect: &EffectPose) -> WireEvent {
         position: position(effect.position),
         ticks: effect.ticks,
         blast: effect.blast,
+        scale: effect.scale,
     }
 }
 
@@ -689,6 +692,7 @@ pub fn mark_event(mark: &MarkPose) -> WireEvent {
     WireEvent::Mark {
         kind: mark.kind,
         position: position(mark.position),
+        scale: mark.scale,
     }
 }
 

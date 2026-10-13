@@ -2,10 +2,60 @@
 //! invented; no retail data is involved.
 #![allow(dead_code)]
 
-use std::f64::consts::{PI, TAU};
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 use std::path::PathBuf;
 use tore_replay::vocab::{channel, field, kind, node, outcome, unit};
 use tore_replay::*;
+
+/// Sine, cosine and tangent from additions, multiplications, divisions and
+/// an exact remainder only, so the scenarios below are the same to the bit
+/// on every platform. The platforms' maths libraries differ in the last bit
+/// (macOS, Windows and 32-bit Windows all differed from Linux on CI,
+/// 2026-10-12), and a recording's key records hold exact values, so any
+/// such difference moved the bytes of a written file. Accuracy is about
+/// 1e-13, plenty for a synthetic flight.
+pub trait DetTrig {
+    fn det_sin(self) -> f64;
+    fn det_cos(self) -> f64;
+    fn det_tan(self) -> f64;
+}
+
+impl DetTrig for f64 {
+    fn det_sin(self) -> f64 {
+        // Into -pi..pi, then -pi/2..pi/2 by sin(pi - x) = sin(x).
+        let x = (self + PI).rem_euclid(TAU) - PI;
+        let x = if x > FRAC_PI_2 {
+            PI - x
+        } else if x < -FRAC_PI_2 {
+            -PI - x
+        } else {
+            x
+        };
+        // Taylor series to x^19 in Horner form.
+        let x2 = x * x;
+        let mut sum = 1.;
+        for n in (1..=9).rev() {
+            let k = f64::from(2 * n);
+            sum = 1. - x2 / (k * (k + 1.)) * sum;
+        }
+        x * sum
+    }
+
+    fn det_cos(self) -> f64 {
+        (self + FRAC_PI_2).det_sin()
+    }
+
+    fn det_tan(self) -> f64 {
+        self.det_sin() / self.det_cos()
+    }
+}
+
+/// [`tore_replay::forward`] with [`DetTrig`], for the scenarios.
+pub fn forward(attitude: [f64; 3]) -> [f64; 3] {
+    let (sy, cy) = (attitude[0].det_sin(), attitude[0].det_cos());
+    let (sp, cp) = (attitude[1].det_sin(), attitude[1].det_cos());
+    [sy * cp, sp, cy * cp]
+}
 
 /// A fresh, empty directory for one test.
 pub fn temp_dir(name: &str) -> PathBuf {
@@ -140,21 +190,21 @@ impl Flier {
                 -1.
             };
             (
-                sign * (4. + 3. * (phase * 1.7).sin()),
-                0.9 * (phase * 0.9).sin(),
-                60. * (phase * 0.4).cos(),
+                sign * (4. + 3. * (phase * 1.7).det_sin()),
+                0.9 * (phase * 0.9).det_sin(),
+                60. * (phase * 0.4).det_cos(),
             )
         } else {
             (
-                0.3 * (t * 0.25).sin(),
-                0.05 * (t * 0.1).sin(),
-                5. * (t * 0.05).cos(),
+                0.3 * (t * 0.25).det_sin(),
+                0.05 * (t * 0.1).det_sin(),
+                5. * (t * 0.05).det_cos(),
             )
         };
         self.bank = wrap(self.bank + roll_rate * dt);
         self.pitch = (self.pitch + pitch_rate * dt).clamp(-1.5, 1.5);
         self.speed = (self.speed + accel * dt).clamp(150., 1_800.);
-        let turn = 32.174 * self.bank.tan().clamp(-9., 9.) / self.speed;
+        let turn = 32.174 * self.bank.det_tan().clamp(-9., 9.) / self.speed;
         self.yaw = (self.yaw + turn * dt).rem_euclid(TAU);
         let forward = forward([self.yaw, self.pitch, self.bank]);
         let velocity = forward.map(|v| v * self.speed);
@@ -182,24 +232,24 @@ impl Flier {
             position: self.position,
             attitude: [self.yaw, self.pitch, self.bank],
             velocity,
-            airspeed: self.speed + 3. * (t * 0.3).sin(),
+            airspeed: self.speed + 3. * (t * 0.3).det_sin(),
             g,
             devices: [
                 gear,
                 0.,
                 if self.violent {
-                    0.5 + 0.5 * (t * 0.7).sin()
+                    0.5 + 0.5 * (t * 0.7).det_sin()
                 } else {
                     0.
                 },
                 0.,
                 0.,
-                0.6 + 0.3 * (t * 0.2).sin(),
+                0.6 + 0.3 * (t * 0.2).det_sin(),
                 pitch_control * 0.9,
                 roll_control * 0.9,
-                0.1 * (t * 1.3).sin(),
+                0.1 * (t * 1.3).det_sin(),
                 self.speed,
-                0.8 + 0.15 * (t * 0.05).sin(),
+                0.8 + 0.15 * (t * 0.05).det_sin(),
                 0.,
                 0.,
                 0.,
@@ -212,7 +262,7 @@ impl Flier {
                 0.,
                 0.,
             ],
-            heat: 0.7 + 0.2 * (t * 0.05).sin(),
+            heat: 0.7 + 0.2 * (t * 0.05).det_sin(),
             flags: AircraftFlags {
                 engine_on: true,
                 afterburner: self.speed < 600.,
@@ -225,20 +275,20 @@ impl Flier {
             controls: [
                 pitch_control,
                 roll_control,
-                0.1 * (t * 1.1).sin(),
-                0.8 + 0.15 * (t * 0.05).sin(),
+                0.1 * (t * 1.1).det_sin(),
+                0.8 + 0.15 * (t * 0.05).det_sin(),
             ],
             // Thrust vectoring follows the stick on violent flights only, so
             // both a busy and an idle rate channel are exercised.
             auxiliary_rates: if self.violent {
-                [roll_rate * 0.1, pitch_rate * 0.5, 0.2 * (t * 0.9).sin()]
+                [roll_rate * 0.1, pitch_rate * 0.5, 0.2 * (t * 0.9).det_sin()]
             } else {
                 [0.; 3]
             },
             // A rotor speed on the violent flights only, wandering about the
             // governed 100 percent, so a busy and an idle channel both run.
             rotor_speed: if self.violent {
-                1. + 0.12 * (t * 0.3).sin() + 0.05 * (t * 2.1).sin()
+                1. + 0.12 * (t * 0.3).det_sin() + 0.05 * (t * 2.1).det_sin()
             } else {
                 0.
             },
@@ -246,8 +296,8 @@ impl Flier {
             // violent flights, so a busy and a level channel both run.
             disk_tilt: if self.violent {
                 [
-                    [0.08 * (t * 0.7).sin(), 0.05 * (t * 1.3).cos()],
-                    [-0.03 * (t * 0.4).sin(), 0.02 * (t * 2.9).sin()],
+                    [0.08 * (t * 0.7).det_sin(), 0.05 * (t * 1.3).det_cos()],
+                    [-0.03 * (t * 0.4).det_sin(), 0.02 * (t * 2.9).det_sin()],
                 ]
             } else {
                 [[0.; 2]; 2]
@@ -361,6 +411,7 @@ pub fn rich_scenario(start: u64, ticks: u64, seed: u64) -> Scenario {
                 kind: EffectKind::Launch,
                 position: shooter.position,
                 duration_ticks: 60,
+                scale: EffectSpawn::FULL_SCALE,
             });
         }
         if let Some(m) = &mut missile {
