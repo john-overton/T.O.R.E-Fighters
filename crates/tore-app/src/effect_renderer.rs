@@ -7,6 +7,9 @@
 //! picks the type from the shell's record. The light and dark puff a burst
 //! leaves are `surface_fx.rs`'s.
 //!
+//! An impact is drawn at its weapon's size against its explosion type's
+//! (the effect's `scale`, docs/spec/explosions.md, "Size by weapon").
+//!
 //! A large ground explosion also throws out a shockwave: a ring of
 //! `SMOKE.PIC` dust (or white spray on water) that races outward from the
 //! blast and fades (docs/spec/explosions.md, "Shockwave"). It is drawn from
@@ -340,6 +343,13 @@ fn sprites(art: &Art, effects: &[EffectPose], marks: &[MarkPose]) -> Vec<Sprite>
             )
         } else {
             continue;
+        };
+        // The weapon's size (bugs B8 to B10): one factor for the fireball and
+        // its shockwave alike, so a later shockwave pass inherits it.
+        let width = if effect.kind == EffectKind::DebrisImpact {
+            width
+        } else {
+            width * tore_sim::combat::blast_scale::factor(effect.scale)
         };
         if !art.present[sheet] || width <= 0. {
             continue;
@@ -678,6 +688,7 @@ mod tests {
             position: [100., 0., 200.],
             ticks,
             blast,
+            scale: tore_sim::combat::blast_scale::FULL,
         }
     }
 
@@ -729,6 +740,46 @@ mod tests {
         // An old recording's flak (no type) draws as the small one.
         let legacy = sprites(&art, &[effect(EffectKind::Flak, None, 240)], &[]);
         assert_eq!(SHEETS[legacy[0].layer].0, "FLAKA.PIC");
+    }
+
+    #[test]
+    fn an_impact_draws_at_its_weapons_scale_with_its_shockwave() {
+        let art = Art::synthetic();
+        let at = |scale: u8| {
+            let pose = EffectPose {
+                scale,
+                ..effect(EffectKind::Ground, Some(35), 200)
+            };
+            sprites(&art, &[pose], &[])
+        };
+        let full = at(100);
+        let big = at(159);
+        let dud = at(tore_sim::combat::blast_scale::INERT);
+        let fireball = |s: &[Sprite]| *s.iter().find(|s| s.layer == 8).unwrap();
+        let width = f64::from(blast::rolled_size(35, [100., 0., 200.]));
+        assert_eq!(fireball(&full).extent[0], width / 2.);
+        assert!((fireball(&big).extent[0] - 1.59 * width / 2.).abs() < 1e-9);
+        // The inert marker draws full size.
+        assert_eq!(fireball(&dud).extent[0], width / 2.);
+        // The shockwave ring scales with it.
+        let ring = |s: &[Sprite]| {
+            s.iter()
+                .filter(|s| s.layer == SMOKE_SHEET)
+                .map(|s| s.extent[0])
+                .fold(0., f64::max)
+        };
+        assert!((ring(&big) - 1.59 * ring(&full)).abs() < 1e-9);
+        // A 20 mm hit at half size.
+        let hit = sprites(
+            &art,
+            &[EffectPose {
+                scale: 50,
+                ..effect(EffectKind::Hit, Some(18), 60)
+            }],
+            &[],
+        );
+        let small = f64::from(blast::rolled_size(18, [100., 0., 200.]));
+        assert_eq!(hit[0].extent[0], small / 4.);
     }
 
     #[test]

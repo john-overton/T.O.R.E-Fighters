@@ -391,6 +391,7 @@ pub fn projectile_pose(
         target: state.target,
         incoming: state.incoming,
         speed_f8: (state.speed * 256.).round() as i32,
+        powered: false,
     }
 }
 
@@ -595,6 +596,7 @@ pub fn mark_spawn(mark: &blast::Mark) -> replay::EffectSpawn {
         },
         position: mark.position,
         duration_ticks: mark.ticks,
+        scale: tore_replay::EffectSpawn::FULL_SCALE,
     }
 }
 
@@ -755,6 +757,7 @@ pub fn effect_pose(effect: &replay::LiveEffect) -> Option<EffectPose> {
         position: effect.position,
         ticks: u16::try_from(left).ok().filter(|left| *left > 0)?,
         blast,
+        scale: effect.scale,
     })
 }
 
@@ -784,6 +787,7 @@ impl EffectWatch {
         let same = |a: &EffectPose, b: &EffectPose| {
             a.kind == b.kind
                 && a.blast == b.blast
+                && a.scale == b.scale
                 && a.ticks == b.ticks
                 && a.position.map(f64::to_bits) == b.position.map(f64::to_bits)
         };
@@ -800,6 +804,7 @@ impl EffectWatch {
                 kind: effect_kind(effect.kind, effect.blast),
                 position: effect.position,
                 duration_ticks: u32::from(effect.ticks),
+                scale: effect.scale,
             })
             .collect()
     }
@@ -1472,6 +1477,7 @@ mod tests {
             position: [x, 5000., 0.],
             ticks,
             blast: None,
+            scale: tore_sim::combat::blast_scale::FULL,
         }
     }
 
@@ -1483,6 +1489,7 @@ mod tests {
             position: [1., 2., 3.],
             ticks: 100,
             blast,
+            scale: tore_sim::combat::blast_scale::FULL,
         };
         for (kind, blast) in [
             (Destroyed, Some(33)),
@@ -1496,6 +1503,7 @@ mod tests {
                 kind: effect_kind(kind, blast),
                 position: [1., 2., 3.],
                 duration_ticks: 100,
+                scale: tore_replay::EffectSpawn::FULL_SCALE,
             };
             assert_eq!(effect_pose(&recorded), Some(pose(kind, blast)));
         }
@@ -1739,9 +1747,18 @@ mod tests {
                 player_pose.crashed = true;
                 player_pose.damage.hp = 0;
                 let name = format!("scene-{with_models}-{ai_poses}.tore-replay");
-                let replayed = round_trip(dir.path(), &name, &live);
+                let mut replayed = round_trip(dir.path(), &name, &live);
                 for (a, b) in live.iter().zip(&replayed) {
                     assert_eq!(difference(a, b), None);
+                }
+                // A recording keeps no motor state: the viewer dates each
+                // round's motor from its recorded age and the import
+                // (`Playback::add_motors`), which this test has no import
+                // for, so it takes the live picture's.
+                for (a, b) in live.iter().zip(replayed.iter_mut()) {
+                    for (pa, pb) in a.projectiles.iter().zip(b.projectiles.iter_mut()) {
+                        pb.powered = pa.powered;
+                    }
                 }
                 // The drawable player state a replay rebuilds.
                 let [a, b] = [&live[1].player, &replayed[1].player].map(|p| pose_state(&player, p));

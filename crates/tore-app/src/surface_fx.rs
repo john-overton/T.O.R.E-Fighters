@@ -21,6 +21,16 @@ use tore_sim::{
     },
 };
 
+/// Impact flashes a picture lights at most (bug B11; agent decision).
+pub const MAX_IMPACT_LIGHTS: usize = 24;
+/// An impact as seen: where, which explosion, its scale and the
+/// presentation tick it went off on.
+type ImpactSeen = (Vector, u8, u8, f64);
+
+/// Impacts remembered for their flash and smoke at most, the newest
+/// (agent decision).
+pub const MAX_IMPACTS: usize = 96;
+
 /// Surface unit ids: the theater layout's at `0x4000_0000`, the template's
 /// at `0x5000_0000`, added trucks and radars above them. Rounds a surface
 /// unit fires are owned by it.
@@ -186,6 +196,10 @@ pub struct Tracker {
     /// then, not as if it had just died ten seconds ago.
     deaths: BTreeMap<u32, u64>,
     serial: u32,
+    /// Impacts still flashing or smoking (bug B11, John's 2026-10-12
+    /// addition): where, which explosion, its scale and the presentation
+    /// tick it went off on ([`crate::impact_fx`]), by place and tick.
+    impacts: BTreeMap<(i64, i64, i64, i64), ImpactSeen>,
 }
 
 /// An effect that is a flak burst: the simulation's own flak effect, or an
@@ -226,6 +240,7 @@ impl Tracker {
             self.shots.clear();
             self.launches.clear();
             self.bursts.clear();
+            self.impacts.clear();
             self.wrecks.clear();
             self.alive.clear();
         }
@@ -298,6 +313,30 @@ impl Tracker {
         }
         self.bursts
             .retain(|_, b| (picture.tick.saturating_sub(b.born) as f64) <= puff::LIFE_TICKS + 1.);
+        for (position, kind, scale, born) in
+            crate::impact_fx::detonations(&picture.effects, picture.tick)
+        {
+            let (x, y, z) = cell(position);
+            self.impacts.insert(
+                (x, y, z, born.round() as i64),
+                (position, kind, scale, born),
+            );
+        }
+        let now = picture.tick as f64;
+        self.impacts.retain(|_, (_, kind, scale, born)| {
+            now - *born <= crate::impact_fx::lasts(*kind, *scale) + 1.
+        });
+        // The newest `MAX_IMPACTS` only, so a long gun burst stays bounded.
+        while self.impacts.len() > MAX_IMPACTS {
+            let oldest = self
+                .impacts
+                .iter()
+                .min_by(|a, b| a.1.3.total_cmp(&b.1.3))
+                .map(|(key, _)| *key);
+            if let Some(key) = oldest {
+                self.impacts.remove(&key);
+            }
+        }
         self.wrecks_of(picture);
     }
 
@@ -394,6 +433,23 @@ impl Tracker {
         }
         for burst in self.bursts.values() {
             draw_burst(burst, now, out);
+        }
+        // Every impact's flash, the newest first and at most
+        // `MAX_IMPACT_LIGHTS` of them, so a long gun burst cannot crowd out
+        // the flares and bombs (the scene lights the strongest 16).
+        let mut newest: Vec<_> = self.impacts.values().copied().collect();
+        newest.sort_by(|a, b| b.3.total_cmp(&a.3));
+        let mut lit = 0;
+        for (position, kind, scale, born) in newest {
+            if lit < MAX_IMPACT_LIGHTS
+                && let Some((position, strength)) =
+                    crate::impact_fx::light(position, kind, scale, now - born)
+            {
+                out.lights.push(FlareLight { position, strength });
+                lit += 1;
+            }
+            // Its dust and smoke, as big and as long as the weapon.
+            crate::impact_fx::smoke(position, kind, scale, now - born, &mut out.puffs);
         }
         self.draw_wrecks(now, out);
         out.fires.extend(self.fires.iter().copied());
@@ -595,6 +651,7 @@ mod tests {
             target: None,
             incoming: false,
             speed_f8: 0,
+            powered: false,
         }
     }
     fn picture(tick: u64) -> RenderSnapshot {
@@ -770,6 +827,7 @@ mod tests {
             position: at,
             ticks,
             blast: Some(kind),
+            scale: tore_sim::combat::blast_scale::FULL,
         }
     }
 
@@ -842,12 +900,14 @@ mod tests {
                     position: [1.; 3],
                     ticks: 40,
                     blast: Some(18),
+                    scale: tore_sim::combat::blast_scale::FULL,
                 },
                 EffectPose {
                     kind: EffectKind::Hit,
                     position: [9.; 3],
                     ticks: 239,
                     blast: Some(27),
+                    scale: tore_sim::combat::blast_scale::FULL,
                 },
             ],
             ..picture(5000)

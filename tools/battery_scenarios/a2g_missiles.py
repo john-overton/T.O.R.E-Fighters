@@ -269,6 +269,15 @@ def scenarios() -> list[Scenario]:
                    "--speed", "450", "--seconds", "90"]
     return [
         Scenario(
+            name="a2g-missile-burnout", lane="flight",
+            args=col + ["--aircraft", "a10", "--load", "AGM65G", "--attack", "maverick", "--from", "6",
+                        "--altitude", "3000"],
+            timeout=300,
+            expect=[r"^a2g-run: motors lit 1 burnt-out-in-flight 1 missile-smoke max-puffs [1-9]\d*$"],
+            notes="Bug B7 (slice BF): a Maverick's motor lights, smokes and burns out before impact, which ends its "
+                  "smoke and its drawn flame.",
+        ),
+        Scenario(
             name="a2g-terrain-cruise", lane="flight",
             args=run + ["VLA", "QVARMOR", "--aircraft", "f18", "--load", "AGM65A", "--attack", "maverick",
                         "--from", "6", "--altitude", "1100", "--heading", "60", "--speed", "350",

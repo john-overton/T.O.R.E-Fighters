@@ -3257,6 +3257,7 @@ mod tests {
                 position: shot.position,
                 ticks: 20,
                 blast,
+                scale: tore_sim::combat::blast_scale::FULL,
             }];
             tick(&mut recorder, &mut combat, &landed, 11, &mut ui);
             // The same burst a tick on, one tick shorter: not a new one.

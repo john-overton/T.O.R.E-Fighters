@@ -177,6 +177,7 @@ pub(crate) fn frame(tick: u64) -> Frame {
         } else {
             45
         },
+        scale: tore_replay::EffectSpawn::FULL_SCALE,
     };
     match tick {
         LAUNCH => frame.new_effects.push(effect(EffectKind::Launch, 1)),
@@ -429,6 +430,7 @@ impl Growing {
                     kind: EffectKind::Crater(3),
                     position: [1_000. + tick as f64, 0., 2_000.],
                     duration_ticks: u32::MAX,
+                    scale: tore_replay::EffectSpawn::FULL_SCALE,
                 });
             }
             self.writer.push(&frame).unwrap();

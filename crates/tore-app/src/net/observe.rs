@@ -413,6 +413,7 @@ impl Feeder {
                     kind: convert::effect_kind(effect.kind, effect.blast),
                     position: effect.position,
                     duration_ticks: u32::from(effect.ticks),
+                    scale: effect.scale,
                 });
             }
             playing.insert(seen);
@@ -427,6 +428,7 @@ impl Feeder {
                     },
                     position: mark.position,
                     duration_ticks: blast::FOREVER,
+                    scale: replay::EffectSpawn::FULL_SCALE,
                 });
             }
         }
@@ -955,6 +957,7 @@ mod tests {
             target: Some(3),
             incoming: false,
             speed_f8: 1_000 * 256,
+            powered: false,
         }
     }
 
@@ -1143,6 +1146,7 @@ mod tests {
             position: [1., 2., 3.],
             ticks: 30,
             blast: None,
+            scale: tore_sim::combat::blast_scale::FULL,
         };
         let crater = MarkPose {
             kind: blast::MarkKind::Crater(2),

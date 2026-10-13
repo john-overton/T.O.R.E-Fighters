@@ -4,7 +4,8 @@
 //! theater's start, 20 mm, 105 mm, then 250 lb, 500 lb and 2,000 lb bombs
 //! left to right, seen from low beside the row by day and at night, a few
 //! moments into the explosions; then close views of a 20 mm and a 105 mm
-//! hit, and a night close view of a 20 mm burst. A development aid: no
+//! hit, and an eight-round 20 mm burst; the row also 3 and 6 seconds on,
+//! when only the smoke is left. A development aid: no
 //! window opens, nothing is simulated, the effects are placed by hand with
 //! each record's own explosion type, and drawn the way a picture of the
 //! game draws them (sprites, lights, sparks).
@@ -62,15 +63,20 @@ const ROW: [Impact; 5] = [
 const SPACING: f64 = 900.;
 
 /// The effect an impact of `weapon` on open ground shows `elapsed` ticks in.
+/// None once it has played out.
 fn ground_hit(weapon: &Weapon, position: [f64; 3], elapsed: u16) -> Option<EffectPose> {
     let kind = weapon.effects.land_explosion;
     let row = blast::explosion(kind)?;
     let life = u16::from(row.seconds) * 120;
+    if elapsed >= life {
+        return None;
+    }
     Some(EffectPose {
         kind: EffectKind::Ground,
         position,
-        ticks: life.saturating_sub(elapsed).max(1),
+        ticks: life - elapsed,
         blast: Some(kind),
+        scale: tore_sim::combat::blast_scale::of(weapon),
     })
 }
 
@@ -94,6 +100,9 @@ fn record(
 struct Shot {
     name: String,
     effects: Vec<EffectPose>,
+    /// Each impact as it went off and the picture tick it did: the flash
+    /// and smoke follow it from there.
+    births: Vec<(u64, EffectPose)>,
     eye: [f64; 3],
     look: [f64; 3],
     fov: f64,
@@ -137,7 +146,13 @@ pub fn run() -> AppResult<()> {
         };
         let middle = spot(2.);
         let mut shots = Vec::new();
-        for seconds in [0.1, 0.3, 0.6, 1.0] {
+        let row_births: Vec<(u64, EffectPose)> = row
+            .iter()
+            .enumerate()
+            .filter_map(|(n, (_, weapon))| ground_hit(weapon, spot(n as f64), 0))
+            .map(|e| (10_000, e))
+            .collect();
+        for seconds in [0.1, 0.3, 0.6, 1.0, 3.0, 6.0] {
             let elapsed = (seconds * 120.) as u16;
             let effects = row
                 .iter()
@@ -147,6 +162,7 @@ pub fn run() -> AppResult<()> {
             shots.push(Shot {
                 name: format!("row-t{seconds:.2}s-{light}"),
                 effects,
+                births: row_births.clone(),
                 eye: [middle[0], middle[1] + 300., middle[2] - 2_500.],
                 look: [middle[0], middle[1] + 60., middle[2]],
                 fov: 80.,
@@ -161,6 +177,10 @@ pub fn run() -> AppResult<()> {
                 shots.push(Shot {
                     name: format!("close-{}-t{seconds:.2}s-{light}", impact.label),
                     effects: ground_hit(weapon, at, elapsed).into_iter().collect(),
+                    births: ground_hit(weapon, at, 0)
+                        .map(|e| (10_000, e))
+                        .into_iter()
+                        .collect(),
                     eye: [at[0] - 260., at[1] + 60., at[2] - 420.],
                     look: [at[0], at[1] + 15., at[2]],
                     fov: 30.,
@@ -171,22 +191,27 @@ pub fn run() -> AppResult<()> {
         // A 20 mm burst: eight hits a few feet apart, a tick or two between.
         let (_, cannon) = &row[0];
         let at = spot(0.);
+        let place = |k: u16| {
+            let along = f64::from(k) * 9.;
+            [
+                at[0] + along,
+                ground(at[0] + along, at[2] + f64::from(k % 3) * 6.),
+                at[2] + f64::from(k % 3) * 6.,
+            ]
+        };
         for seconds in [0.1, 0.25] {
             let elapsed = (seconds * 120.) as u16;
             let effects = (0..8_u16)
-                .filter_map(|k| {
-                    let along = f64::from(k) * 9.;
-                    let position = [
-                        at[0] + along,
-                        ground(at[0] + along, at[2] + f64::from(k % 3) * 6.),
-                        at[2] + f64::from(k % 3) * 6.,
-                    ];
-                    ground_hit(cannon, position, elapsed.saturating_sub(k * 2))
-                })
+                .filter_map(|k| ground_hit(cannon, place(k), elapsed.saturating_sub(k * 2)))
                 .collect();
             shots.push(Shot {
                 name: format!("burst-20mm-t{seconds:.2}s-{light}"),
                 effects,
+                births: (0..8_u16)
+                    .filter_map(|k| {
+                        ground_hit(cannon, place(k), 0).map(|e| (10_000 + u64::from(k) * 2, e))
+                    })
+                    .collect(),
                 eye: [at[0] - 300., at[1] + 90., at[2] - 520.],
                 look: [at[0] + 30., at[1] + 10., at[2]],
                 fov: 30.,
@@ -210,10 +235,25 @@ pub fn run() -> AppResult<()> {
                 effects: shot.effects.clone(),
                 ..RenderSnapshot::default()
             };
-            // The lights the picture's effects give, as a flight draws them.
+            // The light and smoke the impacts give, as a flight draws them:
+            // the tracker sees each go off, then draws at the shot's time.
             let mut tracker = crate::gun_flash::Tracker::default();
+            let mut ticks: Vec<u64> = shot.births.iter().map(|(t, _)| *t).collect();
+            ticks.dedup();
+            for tick in ticks {
+                let born = RenderSnapshot {
+                    tick,
+                    effects: shot
+                        .births
+                        .iter()
+                        .filter(|(t, _)| *t == tick)
+                        .map(|(_, e)| *e)
+                        .collect(),
+                    ..RenderSnapshot::default()
+                };
+                tracker.observe(&born, tick as f64, |_| None);
+            }
             let now = picture.tick as f64;
-            tracker.observe(&picture, now, |_| None);
             let drawn = tracker.draw(now, |_| None);
             let device = &gpu.device;
             let queue = &gpu.queue;

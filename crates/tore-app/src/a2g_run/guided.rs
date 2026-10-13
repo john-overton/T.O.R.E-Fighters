@@ -197,6 +197,7 @@ pub(super) fn scene(
         owner,
         record: None,
         scenes: super::scene_render::Plan::new(o.ai.render_scene.clone(), &o.scene_at),
+        motors: Default::default(),
     };
     let scene = scene.recording(o)?;
     let row = scene.target_row().ok_or("the target has no row")?;

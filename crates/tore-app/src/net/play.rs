@@ -729,7 +729,6 @@ impl App {
         ) {
             ours.copy_flattened(told);
         }
-        self.combat_view.show_picture(frame.picture.clone());
 
         // The weather clock follows the host's tick.
         let behind = frame.tick.saturating_sub(flight.weather_steps);
@@ -757,7 +756,10 @@ impl App {
                     sortie: self.world.combat.contrail_sortie(),
                 },
             );
+            // The motors that burn draw their flame (bug B7).
+            session.mark_powered(&mut frame.picture, &self.theater_resources);
         }
+        self.combat_view.show_picture(frame.picture.clone());
 
         // What the frame shows, presented.
         let session = self.net.as_ref().expect("a session");

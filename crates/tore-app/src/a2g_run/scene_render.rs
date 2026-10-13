@@ -42,8 +42,48 @@ impl Plan {
     }
 }
 
+/// What the run's motors did (bugs B6 and B7): the most missile smoke
+/// puffs in the air at once, the rounds whose motor burned, and the rounds
+/// whose motor was seen to burn out while still flying.
+#[derive(Default)]
+pub(crate) struct Motors {
+    max_puffs: usize,
+    lit: std::collections::BTreeSet<u32>,
+    burnt_out: std::collections::BTreeSet<u32>,
+}
+
+impl Motors {
+    fn observe(&mut self, state: &tore_sim::combat::live::State) {
+        let puffs = state
+            .smoke
+            .puffs
+            .iter()
+            .filter(|p| p.kind == tore_sim::combat::smoke::Kind::Missile)
+            .count();
+        self.max_puffs = self.max_puffs.max(puffs);
+        for p in &state.projectiles {
+            if state.motor_powered(p) {
+                self.lit.insert(p.id);
+            } else if self.lit.contains(&p.id) {
+                self.burnt_out.insert(p.id);
+            }
+        }
+    }
+
+    /// The `a2g-run: motors` line.
+    pub fn line(&self) -> String {
+        format!(
+            "a2g-run: motors lit {} burnt-out-in-flight {} missile-smoke max-puffs {}",
+            self.lit.len(),
+            self.burnt_out.len(),
+            self.max_puffs
+        )
+    }
+}
+
 /// Draws the frames due after the tick just stepped.
 pub(crate) fn after_step(scene: &mut Scene) -> AppResult<()> {
+    scene.motors.observe(&scene.world.combat.state);
     if !scene.scenes.active() {
         return Ok(());
     }

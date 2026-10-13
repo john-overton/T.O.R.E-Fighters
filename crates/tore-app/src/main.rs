@@ -72,6 +72,7 @@ mod hud;
 mod hud_aperture;
 mod il76_animation;
 mod ils_survey;
+mod impact_fx;
 mod impact_preview;
 mod input;
 mod input_catalog;

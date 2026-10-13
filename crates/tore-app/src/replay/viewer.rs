@@ -900,14 +900,16 @@ impl Viewer {
             recording.weapons().filter_map(|w| w.shape.as_deref()),
             resources,
         );
-        Self::assemble(
+        let mut viewer = Self::assemble(
             path,
             recording,
             (world, scenery),
             (ownship, models, art),
             options,
             growth,
-        )
+        )?;
+        viewer.playback.add_motors(resources);
+        Ok(viewer)
     }
 
     /// A viewer from loaded parts.
@@ -1138,6 +1140,9 @@ impl Viewer {
             return;
         }
         self.playback.extend(Arc::clone(&recording));
+        if let Some(growth) = &self.growth {
+            self.playback.add_motors(&growth.resources);
+        }
         self.sound.extend(Arc::clone(&recording));
         self.scanner.feed(Arc::clone(&recording));
         self.weather.set_end(last);

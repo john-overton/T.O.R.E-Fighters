@@ -316,6 +316,8 @@ pub(crate) struct Scene {
     record: Option<crate::surface_objective::Record>,
     /// The frames `--render-scene` and `--scene-at` ask for.
     scenes: scene_render::Plan,
+    /// What the run's motors did, for the `motors` line.
+    motors: scene_render::Motors,
 }
 
 impl Scene {
@@ -362,6 +364,7 @@ impl Scene {
                 o.ai.render_scene.clone().filter(|_| !o.ai.active),
                 &o.scene_at,
             ),
+            motors: Default::default(),
         };
         let scene = scene.recording(o)?;
         let row = scene.target_row().ok_or("the target has no row")?;
@@ -519,6 +522,7 @@ impl Scene {
 
     /// Prints the kills and the target, and finishes the recording.
     fn finish(&mut self) -> AppResult<()> {
+        println!("{}", self.motors.line());
         let state = &self.world.combat.state;
         for kill in state
             .ledger

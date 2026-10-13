@@ -388,8 +388,10 @@ pub fn combat_geometry(
                 tracer_brightness(&p.weapon),
                 tracer_width(&p.weapon),
             );
-        } else if !p.gun {
-            // A visible thin strip marks the actual swept projectile segment.
+        } else if !p.gun && p.powered {
+            // The motor's flame: a thin bright strip over the swept segment
+            // while the motor burns, and nothing after burnout or on a bomb
+            // (bug B7).
             let right = Basis::new(f64::from(camera.yaw), f64::from(camera.pitch), 0.).right;
             let previous = local(p.previous);
             let a: Vector = std::array::from_fn(|i| previous[i] + right[i] * 0.4);
@@ -398,6 +400,19 @@ pub fn combat_geometry(
                 vertex(&mut v, pos, [1., 0.8, 0.3]);
             }
         }
+    }
+    // The sparks of impacts (bug B11), as short tracer streaks.
+    for spark in crate::impact_fx::sparks(&snapshot.effects, |x, z| {
+        f64::from(world.height(x as f32, z as f32))
+    }) {
+        tracer(
+            &mut v,
+            local(spark.from),
+            local(spark.to),
+            &eye,
+            spark.brightness,
+            spark.width,
+        );
     }
     // Explosions, fires and craters are drawn by effect_renderer.
     CombatGeometry {

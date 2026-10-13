@@ -565,6 +565,7 @@ mod tests {
             target: None,
             incoming: false,
             speed_f8: 0,
+            powered: false,
         }
     }
 
