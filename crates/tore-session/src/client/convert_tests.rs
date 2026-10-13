@@ -775,7 +775,7 @@ mod events {
 
     fn run(seen: &FlightSeen, player: u32, first: u64, last: u64) -> Vec<replay::Frame> {
         let weapons = BTreeMap::from([("AIM-120C".to_owned(), 5u32)]);
-        let mut events = Events::new(seen, player, &weapons, first, last);
+        let mut events = Events::new(seen, player, &weapons, first, last, None);
         (first..=last)
             .map(|tick| {
                 let mut frame = replay::Frame {
@@ -786,6 +786,83 @@ mod events {
                 frame
             })
             .collect()
+    }
+
+    /// nr-fx3: the host's City flattened events become the replay's
+    /// knocked-down buildings, by where each stands in the client's own
+    /// fill; those told with a late seat's backlog stand flat from the
+    /// replay's first tick.
+    #[test]
+    fn city_flattened_events_are_recorded_by_place() {
+        use std::sync::Arc;
+        use tore_world::city::{CityFill, Instance, Layout, kit};
+        let instances: Vec<Instance> = (0..10)
+            .map(|n| Instance {
+                piece: 0,
+                x: n * 100,
+                z: 7,
+                heading: 0,
+                core: false,
+                city: 0,
+            })
+            .collect();
+        let layout = Arc::new(Layout {
+            layout: "TEST".into(),
+            map: Default::default(),
+            kit: kit::Kit {
+                pieces: vec![kit::Piece {
+                    source: "TEST".into(),
+                    shape: "TEST.SH".into(),
+                    faces: Vec::new(),
+                    origin: [0.; 3],
+                    scale: 1.,
+                    half: [20, 30],
+                    height: 40,
+                    class: kit::Class::House,
+                    cut: false,
+                }],
+            },
+            cities: Vec::new(),
+            instances,
+            candidates: 10,
+            inputs: Vec::new(),
+        });
+        let fill = CityFill::assemble(layout, vec![0.; 10], vec![false; 10]);
+        let seen = seen(vec![
+            (
+                5,
+                WireEvent::CityFlattened {
+                    buildings: vec![1, 2],
+                },
+            ),
+            (
+                30,
+                WireEvent::CityFlattened {
+                    buildings: vec![4, 99],
+                },
+            ),
+        ]);
+        let weapons = BTreeMap::new();
+        let mut events = Events::new(&seen, 0, &weapons, 20, 40, Some(&fill));
+        let frames: Vec<replay::Frame> = (20..=40)
+            .map(|tick| {
+                let mut frame = replay::Frame {
+                    tick,
+                    ..replay::Frame::default()
+                };
+                events.fill(tick, &mut frame);
+                frame
+            })
+            .collect();
+        assert_eq!(frames[0].city_fell, [[100, 7], [200, 7]]);
+        // An index past the fill has no place and is left out.
+        assert_eq!(frames[10].city_fell, [[400, 7]]);
+        assert_eq!(frames.iter().filter(|f| !f.city_fell.is_empty()).count(), 2);
+        // Without the mission's fill there is nowhere to put them.
+        let mut events = Events::new(&seen, 0, &weapons, 20, 40, None);
+        let mut frame = replay::Frame::default();
+        events.fill(20, &mut frame);
+        assert!(frame.city_fell.is_empty());
     }
 
     #[test]

@@ -173,7 +173,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     # Replay lane.
     "replay-recording": (
         "recording, reading and corrupting replay files",
-        ("replay-rec-*", "replay-surface", "replay-a2g", "replay-corrupt-*", "replay-watch-*", "ai-record-*", "ai-determinism-recordings"),
+        ("replay-rec-*", "replay-surface", "replay-a2g", "replay-city-strike", "replay-corrupt-*", "replay-watch-*", "ai-record-*", "ai-determinism-recordings"),
     ),
     "replay-cli": (
         "command-line errors, speeds, ticks, small tools",
@@ -709,7 +709,8 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/surface_drive.rs", ("surface",), "the surface movement drive"),
     _r("crates/tore-app/src/surface_battle.rs", ("surface",), "the surface battle drive and survey"),
     _r("crates/tore-app/src/surface_parked.rs", ("surface",), "the parked aircraft drive"),
-    _r("crates/tore-app/src/city_fires.rs", ("surface",), "the burning city fill buildings' fires and smoke (--city-fires)"),
+    _r("crates/tore-app/src/city_fires.rs", ("surface", "replay-recording"), "the burning city fill buildings' fires and smoke (--city-fires); a replay's knocked-down buildings (nr-fx3)"),
+    _r("crates/tore-app/src/night_glow*", ("surface", "replay-recording"), "the night glow of explosions and fires and the fires' ground light (nr-fx3)"),
     _r("crates/tore-app/src/city_fill_dump.rs", ("surface",), "the city fill dump, and --city-fires, which surface-city-fires runs"),
     _r("crates/tore-app/src/blast_preview.rs", ("replay-cli",), "the explosion and cluster burst preview (offscreen renders)"),
     _r("crates/tore-app/src/a2g_radar.rs", ("a2g",), "the ground pages drive"),
@@ -781,6 +782,7 @@ RULES: tuple[Rule, ...] = (
     _r("tools/battery_scenarios/surface_battle.py", ("surface",), "surface units fighting each other", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/surface_parked.py", ("surface",), "parked aircraft scenarios", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/surface_fires.py", ("surface",), "burning city fill scenarios", unit_tests=("test_battery",)),
+    _r("tools/battery_scenarios/replay_city.py", ("replay-recording",), "the recorded city strike scenario", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/a2g_radar.py", ("a2g",), "ground page scenarios", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/a2g_release_origin.py", ("a2g",), "release origin scenario", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/a2g_bombs.py", ("a2g",), "bomb and rocket motion scenarios", unit_tests=("test_battery",)),

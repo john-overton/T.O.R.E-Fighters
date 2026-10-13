@@ -1144,7 +1144,7 @@ display's view), `--sequence` (every frame along a path, for watching
 transitions), `--sweep` (a still camera with one tier moving: building
 detail, building distance or smallest size, printing the pixels that pop per
 step) and `--bench` / `--target-bench` (frame times fill off then on, 4K by
-default); `--burn NAME@X,Z,H,PITCH,YAW,RADIUS,FRAMES` knocks every building within RADIUS ft flat, draws the burning city and times FRAMES frames with the fires drawn and with them off. `--city-fires THEATER X,Z,RADIUS [--repeat N]` (no window, no GPU) prints how many burn and what a frame draws and costs on the CPU; `TORE_NO_CITY_FIRES=1` stops drawing the fires (a developer aid like `TORE_CITY_FILL=0`). The fade work was measured with `--sweep` and `--bench` over Kiev
+default); `--burn NAME@X,Z,H,PITCH,YAW,RADIUS,FRAMES` knocks every building within RADIUS ft flat, draws the burning city and times FRAMES frames with the fires drawn and with them off. `TORE_CITY_DUMP_TIME=HH:MM` sets the dump's time of day (noon by default), for the burning city at night (nr-fx3). `--city-fires THEATER X,Z,RADIUS [--repeat N]` (no window, no GPU) prints how many burn and what a frame draws and costs on the CPU; `TORE_NO_CITY_FIRES=1` stops drawing the fires (a developer aid like `TORE_CITY_FILL=0`). The fade work was measured with `--sweep` and `--bench` over Kiev
 (UKR, `--bench 671744,1330000,500,0,100,600`).
 
 `TORE_WEATHER_SMOOTH=0|1` selects stepped or smooth weather presentation (default
@@ -1594,6 +1594,14 @@ city fill out of the row:
 TORE_CITY_FILL=0 TORE_DATA_DIR=.local/tmp-me/profile target/debug/tore-app --impact-preview .local/tmp/impacts
 ```
 
+Add `night-range` after the folder for the [night
+glow](spec/explosions.md#night-glow) set (nr-fx3): a 250 lb, a 500 lb and a
+2,000 lb bomb 1,200 ft apart with a 24 ft, a 90 ft and a 160 ft fire behind
+them, at night, seen from 0.3, 2, 5, 10, 20 and 30 nm (3,000 ft up, 800 ft a
+mile farther out) 0.15 s and 1 s after the bombs (`night-RR.Rnm-tS.SSs.png`);
+each picture also prints the night haze ramp. `TORE_NIGHT_GLOW=0` draws them
+without the glow points and fire light, the before picture.
+
 Add `shockwave` after the folder for the [climate](spec/explosions.md#climate)
 set: a 500 lb bomb, a 2,000 lb bomb and an AGM-65G 1,300 ft apart on open
 land near the theater's start, seen from low beside the row at 0.1, 0.5, 2,
@@ -1863,6 +1871,25 @@ first difference. `--run-on` keeps the run going to `--seconds` after every
 target is down, so supply trucks rearm the emptied launchers, and
 `--vulnerable` takes the player's invulnerability away, so the defenses can
 shoot it down. The `replay-surface` scenario uses all four.
+
+`--city-strike N` (nr-fx3) also drops N Mk 84s, four a pass from the first
+pass, on the standing city fill buildings nearest the target (at least 600 ft
+apart), printing each aim point and, at the end, `surface-objective: city
+flattened N buildings`. With `--record` the recording keeps them in its city
+section. The `replay-city-strike` scenario records one and draws it back:
+
+```sh
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-objective UKR QUCOL --surface-seed 1 --from 2 --run-on --seconds 40 --city-strike 12 --record .local/tmp/city.tore-replay --verify-render
+```
+
+`--replay-stills REPLAY FRAME_PLAN OUT_DIR` (first argument) draws a
+recording's frames offscreen through the replay viewer, as PNG files
+(`still-NN-tTICK.png`), with no window, no audio written and no ffmpeg. The
+plan is the reel director's (`--reel-render`, one frame a line: tick,
+anchor, eye, target, field of view, visual time in minutes or -1, view,
+rate, fixed-eye tick or -1); anchor 4294967294 puts the eye and target in
+world feet. A plan's rows may jump backwards, which is how the stills check a
+seek.
 
 The per-theater acceptance run ([baseline](baselines/surface-defenses.md)) adds
 `--shuttle` (fly the line back and forth across the site for the whole run, so

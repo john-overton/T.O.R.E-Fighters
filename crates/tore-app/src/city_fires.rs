@@ -27,6 +27,10 @@
 //!   separate budget from the simulation's 8,192 and the renderer's own cap.
 //!   Farther fires show their flame only.
 //!
+//! - **Past the sprites, glow points.** The nearest [`MAX_FAR_GLOWS`] of the
+//!   rest are drawn as night glow points only ([`crate::night_glow`], nr-fx3),
+//!   so a burning city shows to the limit of the night scene.
+//!
 //! Agent decisions (2026-10-13): the caps and ranges above, the fire width
 //! (a building fire's rule: 0.6 of the smaller plan side, 24 to 90 ft, as
 //! `surface_fx::object_fire`), and a column density of half the wrecks'.
@@ -84,7 +88,15 @@ pub struct CityFire {
 pub struct Frame {
     pub fires: Vec<CityFire>,
     pub puffs: Vec<Puff>,
+    /// The burning buildings past the fire sprites' reach or budget, the
+    /// nearest [`MAX_FAR_GLOWS`]: drawn as night glow points only
+    /// (nr-fx3), so a burning city shows from afar.
+    pub glows: Vec<crate::night_glow::Glow>,
 }
+
+/// Burning buildings drawn as glow points only, at most, the nearest past
+/// the fire sprites (agent decision, nr-fx3).
+pub const MAX_FAR_GLOWS: usize = 2_048;
 
 /// The burning buildings of one city fill, and the clock their animation
 /// runs on.
@@ -169,23 +181,44 @@ impl CityFires {
     /// What to draw for a camera at `eye` at presentation tick `now`: the
     /// nearest fires and the nearest columns' smoke.
     pub fn frame(&self, eye: Vector, now: f64) -> Frame {
-        let mut near: Vec<(f64, usize)> = self
-            .blazes
-            .iter()
-            .enumerate()
-            .filter_map(|(at, b)| {
-                let d = (b.position[0] - eye[0])
-                    .hypot(b.position[2] - eye[2])
-                    .hypot(b.position[1] - eye[1]);
-                (d <= b.width * REACH_WIDTHS).then_some((d, at))
-            })
-            .collect();
+        let mut near: Vec<(f64, usize)> = Vec::new();
+        let mut far: Vec<(f64, usize)> = Vec::new();
+        for (at, b) in self.blazes.iter().enumerate() {
+            let d = (b.position[0] - eye[0])
+                .hypot(b.position[2] - eye[2])
+                .hypot(b.position[1] - eye[1]);
+            if d <= b.width * REACH_WIDTHS {
+                near.push((d, at));
+            } else {
+                far.push((d, at));
+            }
+        }
         if near.len() > MAX_SPRITES {
             near.select_nth_unstable_by(MAX_SPRITES - 1, |a, b| a.0.total_cmp(&b.0));
-            near.truncate(MAX_SPRITES);
+            far.extend(near.drain(MAX_SPRITES..));
         }
         near.sort_by(|a, b| a.0.total_cmp(&b.0));
-        let mut frame = Frame::default();
+        if far.len() > MAX_FAR_GLOWS {
+            far.select_nth_unstable_by(MAX_FAR_GLOWS - 1, |a, b| a.0.total_cmp(&b.0));
+            far.truncate(MAX_FAR_GLOWS);
+        }
+        let mut frame = Frame {
+            glows: far
+                .iter()
+                .map(|&(_, at)| {
+                    let b = &self.blazes[at];
+                    crate::night_glow::Glow {
+                        // The middle of the fire's art (FIRE.SH is about
+                        // as tall as it is wide).
+                        position: [b.position[0], b.position[1] + b.width * 0.4, b.position[2]],
+                        width: b.width,
+                        strength: crate::night_glow::fire_light(b.width),
+                        heat: 0.,
+                    }
+                })
+                .collect(),
+            ..Frame::default()
+        };
         let mut columns = 0;
         for &(d, at) in &near {
             let b = &self.blazes[at];
@@ -308,9 +341,13 @@ mod tests {
         // The nearest come first.
         let first = frame.fires[0].position;
         assert_eq!((first[0], first[2]), (0., 0.));
-        // Farther than a fire's reach nothing is drawn.
+        // Past the sprites the nearest of the rest glow (nr-fx3).
+        assert_eq!(frame.glows.len(), MAX_FAR_GLOWS);
+        // Farther than a fire's reach no sprite or smoke is drawn, only the
+        // glow points.
         let far = fires.frame([0., 500., 2_000_000.], 100_000.);
         assert!(far.fires.is_empty() && far.puffs.is_empty());
+        assert_eq!(far.glows.len(), MAX_FAR_GLOWS);
     }
 
     #[test]
@@ -325,6 +362,114 @@ mod tests {
         let grown = fires.frame(eye, 1_000. + 20_000.);
         assert_eq!(young.puffs.len(), 480 / STEP_TICKS as usize + 1);
         assert_eq!(grown.puffs.len() as u64, PUFFS_PER_COLUMN);
+    }
+
+    /// nr-fx3: the recorder writes each knocked-down building by where it
+    /// stands, only what changed, and a stand-again after a restart.
+    #[test]
+    fn the_recorder_writes_knocked_down_buildings_by_where_they_stand() {
+        use crate::replay::recorder::city_change;
+        let fill = fill(300);
+        let mut last = None;
+        let mut frame = tore_replay::Frame::default();
+        city_change(&fill, &mut last, &mut frame);
+        assert!(frame.city_fell.is_empty() && !frame.city_stood);
+        fill.knock_down([5, 101]);
+        let mut frame = tore_replay::Frame::default();
+        city_change(&fill, &mut last, &mut frame);
+        assert_eq!(frame.city_fell, [[500, 0], [100, 100]]);
+        // Unchanged: nothing.
+        let mut frame = tore_replay::Frame::default();
+        city_change(&fill, &mut last, &mut frame);
+        assert!(frame.city_fell.is_empty());
+        fill.knock_down([7]);
+        let mut frame = tore_replay::Frame::default();
+        city_change(&fill, &mut last, &mut frame);
+        assert_eq!(
+            (frame.city_fell.as_slice(), frame.city_stood),
+            (&[[700, 0]][..], false)
+        );
+        // A restart: the city stands again, then one falls.
+        fill.reset();
+        fill.knock_down([9]);
+        let mut frame = tore_replay::Frame::default();
+        city_change(&fill, &mut last, &mut frame);
+        assert_eq!(
+            (frame.city_fell.as_slice(), frame.city_stood),
+            (&[[900, 0]][..], true)
+        );
+    }
+
+    /// nr-fx3: a replay rebuilds the fill and finds each recorded building
+    /// by where it stands, even when the rebuilt fill numbers its buildings
+    /// differently (another build, other import resources), and its fires
+    /// burn there; playing back or seeking earlier takes them away again.
+    #[test]
+    fn a_replay_finds_its_knocked_down_buildings_by_place_and_they_burn() {
+        use crate::replay::viewer::city_index;
+        let flight = fill(300);
+        let mut last = None;
+        let mut track = tore_replay::CityTrack::default();
+        for (tick, ids) in [(100, vec![5_u32, 101]), (200, vec![250])] {
+            flight.knock_down(ids);
+            let mut frame = tore_replay::Frame::default();
+            crate::replay::recorder::city_change(&flight, &mut last, &mut frame);
+            track
+                .changes
+                .push((tick, frame.city_stood, frame.city_fell));
+        }
+        // The same fill: the same buildings, at any tick.
+        let same = fill(300);
+        let index = city_index(&same, &track.all());
+        let at = |tick| -> Vec<u32> {
+            let mut ids: Vec<u32> = track
+                .flattened_at(tick)
+                .iter()
+                .filter_map(|p| index.get(p).copied())
+                .collect();
+            ids.sort_unstable();
+            ids
+        };
+        assert!(at(99).is_empty());
+        assert_eq!(at(150), [5, 101]);
+        assert_eq!(at(250), [5, 101, 250]);
+        // A different fill: the same places hold other indices.
+        let moved = {
+            let base = fill(400);
+            let layout = std::sync::Arc::new(tore_world::city::Layout {
+                instances: base.layout.instances[100..].to_vec(),
+                layout: base.layout.layout.clone(),
+                map: base.layout.map.clone(),
+                kit: base.layout.kit.clone(),
+                cities: Vec::new(),
+                candidates: 300,
+                inputs: Vec::new(),
+            });
+            CityFill::assemble(layout, vec![5.; 300], vec![false; 300])
+        };
+        let index = city_index(&moved, &track.all());
+        let mut ids: Vec<u32> = track
+            .flattened_at(250)
+            .iter()
+            .filter_map(|p| index.get(p).copied())
+            .collect();
+        ids.sort_unstable();
+        // [500, 0] is not in the moved fill (it starts at index 100 of the
+        // original); [100, 100] is its index 1 and [5000, 200] its 150.
+        assert_eq!(ids, [1, 150]);
+        moved.set_flattened(&ids);
+        let mut fires = CityFires::new();
+        fires.observe(&moved, 0.);
+        let burning: Vec<_> = fires
+            .blazes()
+            .iter()
+            .map(|b| (b.position[0], b.position[2]))
+            .collect();
+        assert_eq!(burning, [(100., 100.), (5_000., 200.)]);
+        // Seeking back before the strike: the city stands whole again.
+        moved.set_flattened(&[]);
+        fires.observe(&moved, 10.);
+        assert!(fires.blazes().is_empty());
     }
 
     #[test]

@@ -9,7 +9,9 @@ pub const MAX_FLARE_LIGHTS: usize = 16;
 /// sun at about 63 feet (strength / distance², in feet²).
 pub const FLARE_STRENGTH: f64 = 4000.;
 // Mirrors of FLARE_RANGE, FLARE_SOFTENING and FLARE_COLOR in
-// surface_lighting.wgsl.
+// surface_lighting.wgsl. A light stronger than a flare reaches farther, by
+// the square root of its strength in flares (nr-fx3), FLARE_UNIT there being
+// FLARE_STRENGTH.
 const FLARE_RANGE: f64 = 1500.;
 const FLARE_SOFTENING: f64 = 25.;
 const FLARE_COLOR: [f64; 3] = [1.0, 0.75, 0.45];
@@ -117,7 +119,8 @@ pub fn glow(lights: &[FlareLight], point: [f64; 3]) -> [f32; 3] {
         .iter()
         .map(|light| {
             let d2: f64 = (0..3).map(|i| (light.position[i] - point[i]).powi(2)).sum();
-            let edge = (1. - d2 * d2 / FLARE_RANGE.powi(4)).clamp(0., 1.);
+            let range2 = FLARE_RANGE.powi(2) * (light.strength / FLARE_STRENGTH).max(1.);
+            let edge = (1. - d2 * d2 / range2.powi(2)).clamp(0., 1.);
             light.strength * edge * edge / (d2 + FLARE_SOFTENING)
         })
         .sum();

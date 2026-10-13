@@ -8,6 +8,7 @@
 
 mod checksum;
 mod chunk;
+mod city;
 mod codec;
 mod error;
 mod events;
@@ -28,6 +29,7 @@ pub mod vocab;
 mod writer;
 
 pub use checksum::state_checksum;
+pub use city::CityTrack;
 pub use error::{Error, Result};
 pub use model::*;
 pub use predict::precision;

@@ -215,6 +215,9 @@ struct Options {
     follow_terrain: bool,
     runway_art: bool,
     retail_airfields: bool,
+    /// Mk 84s dropped on the city fill buildings nearest the target, four a
+    /// pass (nr-fx3: a recorded city strike).
+    city_strike: usize,
 }
 
 fn options() -> AppResult<Options> {
@@ -240,6 +243,7 @@ fn options() -> AppResult<Options> {
         follow_terrain: false,
         runway_art: false,
         retail_airfields: false,
+        city_strike: 0,
     };
     let mut positional = Vec::new();
     let mut it = args.iter();
@@ -268,12 +272,13 @@ fn options() -> AppResult<Options> {
             "--follow-terrain" => o.follow_terrain = true,
             "--runway-art" => o.runway_art = true,
             "--retail-airfields" => o.retail_airfields = true,
+            "--city-strike" => o.city_strike = next()?.parse()?,
             other if other.starts_with("--") => return Err(format!("unknown {other}").into()),
             other => positional.push(other.to_owned()),
         }
     }
     let [theater, stem] = positional.as_slice() else {
-        return Err("--surface-objective THEATER STEM [--surface-seed N] [--defenses AAA SAM] [--redfor] [--from NM] [--altitude FT] [--seconds S] [--kill-friendly] [--record PATH [--verify-render]] [--run-on] [--vulnerable] [--no-relocate] [--no-jitter] [--shuttle] [--follow-terrain]".into());
+        return Err("--surface-objective THEATER STEM [--surface-seed N] [--defenses AAA SAM] [--redfor] [--from NM] [--altitude FT] [--seconds S] [--kill-friendly] [--record PATH [--verify-render]] [--run-on] [--vulnerable] [--no-relocate] [--no-jitter] [--shuttle] [--follow-terrain] [--city-strike N]".into());
     };
     o.theater = theater.to_ascii_uppercase();
     o.stem = stem.trim_start_matches('~').to_ascii_uppercase();
@@ -478,6 +483,45 @@ pub fn run() -> AppResult<()> {
     if o.kill_friendly && friendly.is_none() {
         return Err("no friendly unit that is not a target to destroy".into());
     }
+    // The city strike's aim points: the standing fill buildings nearest the
+    // target, one Mk 84 each.
+    let city_bomb = {
+        let name = "MK84.JT";
+        let bytes = resources.get(name).ok_or("missing MK84.JT")?;
+        Weapon::parse(name, bytes)?
+    };
+    let mut city_aims: Vec<Vector> = Vec::new();
+    if o.city_strike > 0 {
+        let fill = world
+            .terrain
+            .city_fill
+            .clone()
+            .ok_or("--city-strike needs a theater with a city fill")?;
+        let mut near: Vec<(f64, Vector)> = (0..fill.len())
+            .filter(|&n| fill.standing(n))
+            .map(|n| {
+                let i = &fill.layout.instances[n];
+                let at = [f64::from(i.x), f64::from(fill.base[n]), f64::from(i.z)];
+                (distance(at, center), at)
+            })
+            .collect();
+        near.sort_by(|a, b| a.0.total_cmp(&b.0));
+        // Spread out: skip aim points within 600 ft of one already chosen.
+        for (_, at) in near {
+            if city_aims.len() >= o.city_strike {
+                break;
+            }
+            if city_aims.iter().all(|a| distance(*a, at) > 600.) {
+                city_aims.push(at);
+            }
+        }
+        for at in &city_aims {
+            println!(
+                "surface-objective: city strike aim {:.0},{:.0},{:.0}",
+                at[0], at[1], at[2]
+            );
+        }
+    }
     let mut out = TickOutput::default();
     let mut next_bomb = BOMB_ID_BASE;
     let mut next_strike = over_at;
@@ -559,6 +603,35 @@ pub fn run() -> AppResult<()> {
                 });
                 next_bomb += 1;
             }
+            // The city strike, four a pass.
+            let pass: Vec<Vector> = city_aims.drain(..city_aims.len().min(4)).collect();
+            for at in pass {
+                let release = dive_release(at, [0.; 3], heading);
+                let from = release.position;
+                let state = &mut world.combat.state;
+                state.ledger.launch(next_bomb, owner, None, ShotKind::Bomb);
+                state.projectiles.push(Projectile {
+                    id: next_bomb,
+                    owner,
+                    weapon: Some(city_bomb.clone()),
+                    guidance: None,
+                    motion: None,
+                    guidance_ticks: None,
+                    age: 0,
+                    incoming: None,
+                    station: 0,
+                    position: from,
+                    previous: from,
+                    direction: unit(release.velocity),
+                    speed_f8: (release.speed() * 256.) as i32,
+                    launched_t: (state.tick() / 30) as u16,
+                    target: None,
+                    fall: FallState::default(),
+                    gun_round: None,
+                    tracer: false,
+                });
+                next_bomb += 1;
+            }
             line(t, "bombs placed");
         }
         let input = SeatInput {
@@ -615,6 +688,14 @@ pub fn run() -> AppResult<()> {
         }
         let t = world.tick() as f64 / 120.;
         tally.tick(&world, t, &targets);
+    }
+    if o.city_strike > 0
+        && let Some(fill) = &world.terrain.city_fill
+    {
+        println!(
+            "surface-objective: city flattened {} buildings",
+            fill.flattened().len()
+        );
     }
     for id in &targets {
         if let Some(row) = world.combat.state.targets.iter().find(|row| row.id == *id) {

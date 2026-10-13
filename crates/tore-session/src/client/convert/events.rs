@@ -35,6 +35,9 @@ enum Put {
     Hp(u32, i32),
     /// A launcher's rails or a gun's spares changed (protocol 22).
     Stock(replay::SurfaceStock),
+    /// Where the city fill buildings the host knocked down stand (protocol
+    /// 25), recorded since nr-fx3 so the replay shows them flat and burning.
+    City(Vec<[i32; 2]>),
 }
 
 /// A flight's events, by tick.
@@ -52,6 +55,7 @@ impl Events {
         weapons: &BTreeMap<String, u32>,
         first: u64,
         last: u64,
+        city: Option<&tore_world::city::CityFill>,
     ) -> Self {
         let name = |index: NameIndex| seen.names.name(index).unwrap_or_default().to_owned();
         let stems = |names: &[NameIndex]| -> String {
@@ -61,7 +65,12 @@ impl Events {
         // Each surface unit's state as last told, for its changes.
         let mut told: BTreeMap<u32, crate::wire::events::SurfaceUnitView> = BTreeMap::new();
         for received in &seen.events {
-            let tick = u64::from(received.event.tick);
+            let mut tick = u64::from(received.event.tick);
+            // Buildings already flat when the seat joined are told with the
+            // backlog: they stand flat from the replay's first tick.
+            if tick < first && matches!(received.event.event, WireEvent::CityFlattened { .. }) {
+                tick = first;
+            }
             if tick < first || tick > last {
                 continue;
             }
@@ -276,9 +285,19 @@ impl Events {
                 | WireEvent::Feedback { .. }
                 | WireEvent::YourAircraftExploded { .. }
                 | WireEvent::Sound { .. }
-                | WireEvent::SurfaceBurstEnd { .. }
-                // Recordings do not yet show knocked-down fill buildings.
-                | WireEvent::CityFlattened { .. } => Vec::new(),
+                | WireEvent::SurfaceBurstEnd { .. } => Vec::new(),
+                // Named by where each stands, as the recorder does.
+                WireEvent::CityFlattened { buildings } => city
+                    .map(|fill| {
+                        vec![Put::City(
+                            buildings
+                                .iter()
+                                .filter_map(|&n| fill.layout.instances.get(n as usize))
+                                .map(|i| [i.x, i.z])
+                                .collect(),
+                        )]
+                    })
+                    .unwrap_or_default(),
                 // Stores (protocol 27) are kept by the conversion's frames.
                 WireEvent::Stores { .. } => Vec::new(),
             };
@@ -308,6 +327,11 @@ impl Events {
                     }
                 }
                 Put::Stock(stock) => frame.surface_stock.push(stock),
+                Put::City(buildings) => {
+                    frame.city_fell.extend(buildings);
+                    frame.city_fell.sort_unstable();
+                    frame.city_fell.dedup();
+                }
             }
             self.next = self.put.next();
         }

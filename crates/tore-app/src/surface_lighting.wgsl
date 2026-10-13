@@ -127,11 +127,16 @@ fn sunlight_transmission(altitude:f32)->f32 {
  return exp(-path/600.0);
 }
 // Light from burning flares reaching a point, inverse square with a smooth
-// 1,500-foot cutoff and no shadows. A zero normal lights from every side.
+// cutoff and no shadows: 1,500 feet for a flare's strength or less, and
+// farther for a stronger light by the square root of its strength in
+// flares, so the cutoff falls where the light is as dim as a flare's is at
+// 1,500 feet (nr-fx3: a big fire or blast lights farther). A zero normal
+// lights from every side.
 // At night eyes adapt to the dark, so flare light counts up to four times as
 // much against the night scene. Mirrored by countermeasure_renderer::glow
 // (daylight strength) for smoke puffs.
 const FLARE_RANGE:f32=1500.0;
+const FLARE_UNIT:f32=4000.0;
 const FLARE_NIGHT_GAIN:f32=4.0;
 const FLARE_SOFTENING:f32=25.0;
 const FLARE_COLOR:vec3<f32>=vec3<f32>(1.0,0.75,0.45);
@@ -141,7 +146,8 @@ fn flare_light(relative:vec3<f32>,normal:vec3<f32>)->vec3<f32> {
   let flare=surface.flares[i];
   let to=flare.xyz-relative;
   let d2=dot(to,to);
-  let edge=clamp(1.0-d2*d2/(FLARE_RANGE*FLARE_RANGE*FLARE_RANGE*FLARE_RANGE),0.0,1.0);
+  let range2=FLARE_RANGE*FLARE_RANGE*max(flare.w/FLARE_UNIT,1.0);
+  let edge=clamp(1.0-d2*d2/(range2*range2),0.0,1.0);
   var facing=1.0;
   if dot(normal,normal)>0.0 {facing=max(dot(normal,to)*inverseSqrt(max(d2,0.000001)),0.0);}
   total+=flare.w*facing*edge*edge/(d2+FLARE_SOFTENING);

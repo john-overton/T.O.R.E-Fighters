@@ -612,3 +612,48 @@ buildings; the theater holds 438,258), the machine busy with other agents
   burning columns at the full ten puffs a second and thins past that: 500
   burning sources hold 7,000 of the 8,192 puffs with every column standing
   (unit test `many_burning_columns_thin_out_to_fit_the_budget_with_every_column_standing`).
+
+## Night glow and recorded city strikes (nr-fx3, 2026-10-13)
+
+Implementation mode, slice FX3. Contract: [night
+glow](../spec/explosions.md#night-glow) and the replays' [city
+section](../REPLAYS.md#versions-and-damage). Release build, Linux x86_64
+(Ryzen 9 7900X, RTX 4070), other agents running (`nice -n 10`, load average
+3 to 7).
+
+- **Whole frame, 1080p offscreen with readback**, Ukraine's Town 1 at 23:00
+  (`TORE_CITY_DUMP_TIME=23:00 --city-fill-dump UKR --size 1920,1080 --burn
+  town1@180224,606208,900,30,0,RADIUS,120`, looking down at the fires from
+  900 ft), the night glow on against `TORE_NIGHT_GLOW=0`, two runs each:
+
+  | Burning | With glow and fire light | Without | Glow's cost |
+  | ---: | ---: | ---: | ---: |
+  | 563 (6,000 ft round the centre) | 3.51, 3.38 ms | 3.12, 3.04 ms | +0.34 to +0.39 ms |
+  | 49,311 (all of Town 1) | 4.02, 4.05 ms | 3.64, 3.88 ms | +0.17 to +0.38 ms |
+
+  Looking away from the fires (the same camera turned to the sky) the cost
+  is 0.06 ms or less with 563 burning and about 0.15 ms with 49,311: the
+  CPU pass over the frame's glowing sprites and the 2,048 far city glows,
+  and the culled quads. Looking at them it is the halos' fill (each a quad
+  at most twice the art's width, additive). The cap is 4,096 glow points
+  and 8 fire lights, so a busier scene costs no more.
+- **Renders** of the night set, the burning city from 900 ft to 20 nm and a
+  recorded city strike replayed: `.local/next-round/renders/nr-fx3/`
+  (local only). The night haze ramp of Ukraine's clear night is 0.5 at the
+  eye to 1.0 at 20,992 ft (3.5 nm), which is why the art faded out by 5 to
+  10 miles; the glow takes it at a tenth of the distance.
+- **A recorded city strike** (`--surface-objective UKR QUCOL --surface-seed
+  1 --from 2 --run-on --seconds 40 --city-strike 12 --record`): 12 Mk 84s
+  flattened 66 fill buildings in 3 changes; the recording is 741 KB for 42 s
+  and replays tick for tick (`verify-render: PASS ticks=5041`). Its city
+  entries cost a few hundred bytes.
+- **Finding: the fill a replay rebuilds can number its buildings
+  differently.** `--surface-objective` adds the retail archives' extra
+  shapes and pictures to the resources it builds the world from, and its
+  city fill held 438,169 buildings where the replay viewer's (the import's
+  resources) held 438,258, so an index named another building 10,000 ft
+  away. The city section therefore names buildings by where they stand, and
+  the viewer finds them there. A game and its own replay built from the
+  same import agree either way; a network game's host and clients send
+  indices, which is safe only while both build the fill from the same
+  resources (protocol 25 as is).

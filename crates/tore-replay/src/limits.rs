@@ -27,6 +27,9 @@ pub const MAX_SURFACE_CHANGES_PER_TICK: usize = 4096;
 pub const MAX_SURFACE_UNITS: usize = 4096;
 /// Launcher and magazine changes in one frame (format 3).
 pub const MAX_SURFACE_STOCK_PER_TICK: usize = 4096;
+/// City fill buildings knocked down in one frame: the fill's own building
+/// budget (nr-fx3).
+pub const MAX_CITY_PER_TICK: usize = 500_000;
 /// Events in one frame.
 pub const MAX_EVENTS_PER_TICK: usize = 1024;
 /// Fields on one event.

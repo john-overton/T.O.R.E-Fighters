@@ -368,6 +368,54 @@ pub fn music() -> AppResult<()> {
     Ok(())
 }
 
+/// A director frame's anchor that is the world itself: its eye and target
+/// are world feet (nr-fx3, for stills of a fixed place).
+pub const WORLD_ANCHOR: u32 = u32::MAX - 1;
+
+/// `--replay-stills REPLAY FRAME_PLAN OUT_DIR`: the director's frames of a
+/// recording as PNG files, offscreen, no audio written and no ffmpeg (nr-fx3:
+/// stills of a recorded city strike). Each plan row is a director frame
+/// (`--reel-render`'s format); anchor 4294967294 places the eye and target
+/// in world feet. Writes `OUT_DIR/still-NN-tTICK.png`.
+pub fn stills() -> AppResult<()> {
+    let args: Vec<_> = std::env::args().skip(2).collect();
+    let [replay, plan, out] = args.as_slice() else {
+        return Err("--replay-stills REPLAY FRAME_PLAN OUT_DIR".into());
+    };
+    let assets = load_assets()?;
+    let plan = std::fs::read_to_string(plan)?
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .map(Frame::parse)
+        .collect::<AppResult<Vec<_>>>()?;
+    let mut viewer = Viewer::open(
+        Path::new(replay),
+        &assets.theater_resources,
+        &Options::default(),
+    )?;
+    viewer.finish_tracks();
+    let mut gpu = pollster::block_on(Gpu::new(&viewer.scenery))?;
+    viewer.director_guns(&mut gpu, &assets.theater_resources)?;
+    let audio = crate::audio::Audio::offline(
+        assets.sounds,
+        &assets.music_scores,
+        &assets.theater_resources,
+    )?;
+    let out = Path::new(out);
+    std::fs::create_dir_all(out)?;
+    for (index, frame) in plan.iter().enumerate() {
+        let previous = index.checked_sub(1).map(|i| &plan[i]);
+        let pixels = viewer.director_frame(&mut gpu, frame, previous, &audio)?;
+        let path = out.join(format!("still-{index:02}-t{}.png", frame.tick));
+        std::fs::write(
+            &path,
+            crate::replay::png::encode_rgba(WIDTH, HEIGHT, &pixels)?,
+        )?;
+        println!("Replay still: {}", path.display());
+    }
+    Ok(())
+}
+
 pub fn run() -> AppResult<()> {
     let args: Vec<_> = std::env::args().skip(2).collect();
     let hud_layer = args.iter().any(|a| a == "--hud-layer");
