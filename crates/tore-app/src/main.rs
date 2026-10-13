@@ -4236,6 +4236,8 @@ impl ApplicationHandler for App {
                         let flash_player = (self.hornet.profile.id
                             == tore_formats::aircraft::AircraftId::Ac130)
                             .then_some((frame.plane.0, presented));
+                        self.gun_flash
+                            .set_fire_widths(Arc::clone(&self.scenery.fire_widths));
                         self.gun_flash.observe(
                             &picture,
                             flash_now,

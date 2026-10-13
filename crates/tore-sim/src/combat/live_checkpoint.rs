@@ -208,7 +208,8 @@ type GroundLook = super::GroundLook;
 crate::checkpoint_struct!(GroundLook {
     explosion,
     crater,
-    burns
+    burns,
+    pavement
 });
 
 // The type facts the ground pages read of a ground object.

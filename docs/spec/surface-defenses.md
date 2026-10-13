@@ -1561,9 +1561,11 @@ John accepted the recommended looks (12.4).
 | --- | --- | --- |
 | Ships | Swap to the `_A` shape (every ship has one), keep it in place, burning with fire and smoke for 15 minutes | retail shapes |
 | Carriers | The `_A` hull, the island's own damage branch (`shape::DAMAGED_WORD`), the deck tractors as they were and the deck crew gone, burning | retail shapes, fitted parts rule |
-| Ground vehicles, SAM launchers, AAA guns | Replace with the DEST.SH wreck ("Destroyed Vehicle", DEST.OT, hp 0) at the unit's pose, standing on its own lowest point like the unit it replaces, fire and smoke for 15 minutes | retail wreck object; the swap rule is untraced (fitted) |
-| Buildings with a damaged variant (`~BNK5`, `~BNK6`, `~BNK8`, and in layouts `~COLTWR`) | Swap to the damaged OT's shape; no fire | retail |
-| Other buildings | Removed, with the crater the hit leaves; no fire | current behaviour |
+| Ground vehicles, SAM launchers, AAA guns (and a layout's vehicles with no unit record, such as parked fuel trucks) | Replace with the DEST.SH wreck ("Destroyed Vehicle", DEST.OT, hp 0) at the unit's pose, standing on its own lowest point like the unit it replaces; about half of them burn with fire and smoke for 15 minutes, the others only smoke ([wreck fires](#wreck-fires)) | retail wreck object; the swap rule is untraced (fitted); the half that burn: John, 2026-10-12 |
+| Buildings with a damaged variant (`~BNK5`, `~BNK6`, `~BNK8`, and in layouts `~COLTWR`) | Swap to the damaged OT's shape; burns | retail look; fire John, 2026-10-12 |
+| Buildings whose shape holds a damage branch (57 types: hangars, towers, fuel tanks, factories, stores, bunkers, masts, bridge spans; [the survey](../formats/objects-and-shapes.md#destroyed-looks-of-buildings-and-bridges-2026-10-12)) | The shape's own damaged copy (`shape::DAMAGED_WORD`), on its own lowest point; burns, except a bridge, whose span breaks or drops | retail shapes (B16, 2026-10-12); the condition the original draws it on is unknown, here destruction |
+| Other buildings (city and town blocks, houses, apartments, industry without a branch, sites, tents, crates) | A ruin generated from the intact shape: split, sunk to 6 to 30 percent of its height, its fallen roof partly charred; burns | fitted, agent decision (B16, 2026-10-12) |
+| Runways, roads, lots, crops, bridge ends, rocks | Stay as they stood; a runway keeps the craters of every weapon that hit it | runway B15; the rest agent decision (B16) |
 | Parked aircraft | The aircraft look: type 30 explosion, the crash crater (none on a deck), fire and smoke for 15 minutes, one fragment drawn with the type's own `_B` or `_D` shape | existing aircraft path |
 | Men, barrage zones | Removed | |
 
@@ -1573,9 +1575,60 @@ size on land, rather than one fitted value for all ground objects.
 - **The fire.** However a burning wreck died (a hit, splash, the host's
   destroyed event), it gets one fire with its smoke column, the crash site's
   look, at the foot of its hit box, for 15 minutes; the oldest fire goes out
-  when 64 burn at once, as for crash sites (fitted).
+  when 64 burn at once, as for crash sites (fitted). See [wreck
+  fires](#wreck-fires).
+- **Nothing vanishes** (B16, John 2026-10-12): every destroyed building and
+  fixed object stays drawn in its destroyed look, in live flight, online
+  and in replays. Only men and the invisible barrage zones go, and a parked
+  aircraft explodes as an aircraft does (its crash site and pieces).
+- **What destruction does in play is unchanged**: the same explosion, the
+  same splash, objectives, scoring and debrief; a destroyed object's
+  contact is as before.
 - **A moving unit** destroyed stops where it died and its wreck lies there.
 - **A replay** shows the wreck of every object it recorded as destroyed.
+
+### Wreck fires
+
+B16 (John, 2026-10-12): destroyed objects stay on fire.
+
+- **Who burns.** Every destroyed building and fixed object, and ships, as
+  before. Ground vehicles, SAM launchers and guns burn about half the time:
+  the pick is a fixed function of the object's id and the mission's surface
+  digest (`tore_world::surface::wreck::vehicle_burns`), never a random
+  stream, so every machine in an online game and every replay of the same
+  mission agrees. Pavement (runways, airstrips, roads, lots, crop fields),
+  bridges, rocks, flags, the crater object and men do not burn (agent
+  decision). A vehicle that does not burn smokes for 15 minutes, as a wreck
+  with no fire always has.
+- **How hard.** Fuel, ammunition and industry (FUEL, OILW, SUPPLY, STORE,
+  CRATE, CONT, FACT, FCTY, IND, PRDR, REACT, NUC, SILO types) burn hard: a
+  fire 1.1 times the larger side of the object's plan, 60 to 160 ft wide.
+  Other buildings burn smaller: 0.6 times the smaller side, 24 to 90 ft. A
+  vehicle's or ship's fire keeps the width its hit points give, 24 to 140 ft;
+  a crash site's is 100 ft. Opinionated, agent fit (B16).
+- **The scorch.** A burning building leaves a crater mark round its foot
+  reaching a tenth past the larger half of its plan (16 ft of half width a
+  size unit, sizes 2 to 16; the type's own crater word when larger): the
+  burnt ground the ruin stands on. On water, none.
+- **How long.** 15 minutes, as a crash site, fading over the last minute
+  (agent decision: the fire is the crash site's, so it keeps its life; the
+  ruin and the scorch stay for the mission).
+- **The cap.** Fires share the crash sites' 64: past it the oldest goes
+  out. Craters keep their 256. A whole airfield of about 30 buildings and its
+  vehicles fits.
+- **Simulation data.** The fire and scorch are ordinary combat marks, so
+  they are deterministic, travel online as the crash sites' do and are
+  recorded and replayed with no format change; a ground object's look
+  (`GroundLook`) gained the pavement flag, carried in checkpoints. No protocol
+  change. Fire widths and the ruins are presentation only.
+
+### Craters on pavement
+
+A weapon that hits a runway or airstrip leaves its own crater there, as it
+would on open ground (B16, John 2026-10-12): bombing a runway pocks it
+whether or not it is destroyed, and a destroyed runway keeps its pavement and
+every crater (B15). Other objects leave a crater only when destroyed (their
+scorch). Craters last the mission; past 256 the oldest goes.
 
 ### Drawing
 

@@ -814,7 +814,13 @@ beyond them.
   - **Surface unit registry**: a unit's id, short name (`SA-6`), label
     (`SA-6 #18`), side, hit points and position, in the entities section.
     The logs and exports name a surface shooter or victim by it, and a
-    wreck's fire is sized by its hit points.
+    wreck's fire is sized by its hit points. Since B16 (2026-10-12, no
+    format change) every destroyed building burns and about half the
+    vehicles do (a fixed pick, the same in the recording as in flight), so
+    `surface.wreck` says `burning` false for the others; the fires, a
+    building's scorch and the craters on bombed runways are ordinary recorded
+    marks, and the viewer draws each destroyed building's ruin from the
+    rebuilt scenery, older recordings included.
   - **Events**: `surface.burst`, `surface.phase`, `surface.rearm`,
     `surface.refill`, `surface.radar` and `surface.wreck` (see
     [the vocabulary](../crates/tore-replay/src/vocab.rs)). Unknown event kinds
