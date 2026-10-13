@@ -48,6 +48,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [The city fill (protocol 25)](#the-city-fill-protocol-25) (built under protocol 25)
 - [Protocol 26: explosions sized by weapon](#protocol-26-explosions-sized-by-weapon) (built under protocol 26)
 - [Protocol 27 (stores)](#protocol-27-stores) (built under protocol 27)
+- [Protocol 28 (host loading)](#protocol-28-host-loading) (built under protocol 28)
 - [Limits](#limits)
 - [Captures](#captures)
 - [Versions](#versions)
@@ -100,7 +101,7 @@ version.
 | 7 | Disconnect | both | versioned |
 | 8 | Discover query | anyone to a host | `TORE-HELLO` |
 | 9 | Discover answer | host to the asker | `TORE-HELLO` |
-| 10 | [Keepalive](#keepalive) (protocol 5) | client to host | versioned |
+| 10 | [Keepalive](#keepalive) (protocol 5; host to client since 28) | both | versioned |
 | 11 | [Punch](#punch) (protocol 9) | host to client | versioned |
 | 12 | [Reach](#reach-and-reach-answer) (stage K, protocol 13) | game to game | versioned |
 | 13 | [Reach answer](#reach-and-reach-answer) (stage K, protocol 13) | game to game | versioned |
@@ -278,8 +279,10 @@ While it is stopped, a small thread of the game speaks for it.
 | Checksum | 32 bits | As every packet, under the versioned id |
 | Kind | 8 bits | 10 |
 | Connection id | 32 bits | The number the host gave in Accepted |
+| Flags | 8 bits | Since protocol 28: bit 0 set, the host is loading a mission ([host loading](#protocol-28-host-loading)); the other bits 0. A player's keepalive sends 0 |
 
-Nine bytes, smaller than the empty Payload (19 bytes) it stands in for.
+Ten bytes since protocol 28 (nine before), smaller than the empty Payload
+(19 bytes) it stands in for.
 
 - **Who sends it.** Only a game joined over UDP, from a thread that holds a
   clone of the game's own socket, so it comes from the connection's address.
@@ -296,8 +299,7 @@ Nine bytes, smaller than the empty Payload (19 bytes) it stands in for.
   client builds the mission's world in the turn that reads the last of the
   host's Mission message (or a flight's loadouts), which on a slow machine
   takes longer than the 5-second timeout. The keepalive covers the build on
-  the host's side, within the same 60-second bound; no separate loading
-  grace exists. On the client's side the turn stops reading after that
+  the host's side, within the same 60-second bound. On the client's side the turn stops reading after that
   datagram: what the host sent during the build is read on the next turn,
   at that turn's time, so the client does not judge the host silent for the
   length of the build ([details](../ARCHITECTURE.md#a-long-mission-build-slice-net)).
@@ -311,7 +313,13 @@ Nine bytes, smaller than the empty Payload (19 bytes) it stands in for.
   stale, one of another version fails its checksum, and none of them keeps
   anything alive. A host before protocol 5 drops the kind as invalid, but
   versions must match to join anyway.
-- **A client** that receives one counts it as unexpected.
+- **A client** takes one only from its host (protocol 28): from the host's
+  address with its connection's id it counts as hearing from the host, and
+  marked loading it says the host is building a mission until the host's
+  next Payload ([host loading](#protocol-28-host-loading)). Any other is
+  counted as from an unknown address, stale or malformed, and keeps nothing
+  alive. A joined game's peers router passes it to the client (it dropped
+  the kind before protocol 28).
 
 ## Discovery
 
@@ -2029,6 +2037,66 @@ removing it would need a new protocol version, so it waits for one.
   lineages are host state the readout (`TargetBrief`'s objective) and the
   Debrief message already carry. No message, packet or golden sample changed.
 
+## Protocol 28 (host loading)
+
+*Built (slice NET2, 2026-10-13); John's decision unless marked.* A host
+builds a mission's world on its own loop: when the King changes the mission
+or a setting that rebuilds it (friendly fire, the loadout rule), when a
+flight starts with the players' loadouts, and for the next mission after an
+end. Its loop sends nothing meanwhile. Before protocol 28 a build longer than
+5 seconds dropped every player for silence, and one longer than 1.5 seconds
+set the standbys racing to take the game over. John (2026-10-13): keep the
+build on the loop and send keepalives during it, not a worker thread ("other
+games take a minute or two to load; 5 s is so short").
+
+```mermaid
+sequenceDiagram
+  participant H as Host loop
+  participant T as Loading thread
+  participant P as Player (and standby)
+  H->>T: start, with every player's loading Keepalive
+  Note over H: the mission builds
+  T->>P: Keepalive, loading (at 0.25 s)
+  T->>P: Keepalive, loading (every 0.5 s)
+  Note over P: connection kept, no migration race
+  H->>T: stop (the build is done)
+  H->>P: Payload (loading ends)
+```
+
+- **The packet.** The transport's [Keepalive](#keepalive) gains a flags
+  byte; bit 0 says the host is loading. A host sends it to each player with
+  that player's connection id, from its own address, so it needs the same
+  identity as a Payload.
+- **When the host sends it.** *Agent decisions:* a quarter second into a
+  build (a quick build sends none), then every half second, until the build
+  ends or has run for 3 minutes. The 3-minute bound is *fitted*: John asked
+  for load times up to a couple of minutes; the longest build measured is
+  7.5 s in a debug build on a loaded machine (slice NET). A host stuck past
+  the bound is dropped by its players 5 seconds later and replaced by a
+  standby, as before.
+- **Who sends it.** A thread the host starts just before the build and stops
+  right after it (`tore_net::Loading`), on a clone of the host's socket that
+  the program gives it: the dedicated server, a game that hosts (its own
+  player through a send-only copy of the in-process link) and a hosting
+  `tore-bot`. A relayed player is reached as a Relay frame through the relay
+  channels open when the build began. The thread only sends; it never reads
+  the socket or touches the host's state.
+- **What a player does.** It counts the keepalive as hearing from the host
+  (no 5-second timeout), and while the host's newest word since its last
+  Payload is a loading keepalive it counts the host lost only after **4
+  seconds** of silence instead of 1.5 (*agent decision*: eight missed
+  keepalives). Standby 1 takes over at the same 4 seconds and standby 2 three
+  seconds later, so a host that dies in its build is still replaced. The
+  host's next Payload ends the loading.
+- **The log.** A build the thread spoke for logs one line on the host, the
+  same in the dedicated server, a hosting game and a hosting bot: "loaded the
+  mission in 15.0 s; 3 players kept through it (30 rounds of loading
+  keepalives)". A hosting bot's players print "the host is loading a
+  mission" and "the host is back after N ms of loading".
+- **Not covered.** The first build of a host, before anyone joins, needs
+  none. A player's own build is the client side's (slice NET). The build
+  itself is no faster: a worker thread is for when load times are worked on.
+
 ## Limits of stage L
 
 Stage L's limits are in [Limits](#limits) (the "Stage L (protocol 10)" row).
@@ -2797,7 +2865,7 @@ Decoders check every count and length against these before reading on.
 | Seats per host | 30 |
 | Players and slots in a lobby state, settings, loadouts at a flight's start | 64 each |
 | Chat line (protocol 4) | 80 characters of printable ASCII, 5 lines in 5 seconds a player, a quick message's sound 12 characters |
-| Keepalive (protocol 5) | 1 a second from a stalled game, for at most 60 seconds of stall |
+| Keepalive (protocol 5) | 1 a second from a stalled game, for at most 60 seconds of stall; from a loading host (protocol 28) 2 a second to each player, for at most 3 minutes of build |
 | Punch (protocol 9) | 5 to each of at most 8 addresses for each introduction, at most 10 introductions a second; a race tries at most 12 addresses |
 | Phase 2 (protocol 8) | Settings in one message 64; players in Scores 64; rows in Results 1,024; a password 255 bytes; Observe at most twice a second from one connection |
 | Stage K (protocol 13) | Standbys 2; addresses of a standby or a candidate 8; candidates in a reach test 3, five Reaches to each address, one test every 10 seconds; Reaches answered 10 a second from one address; checkpoint chunks 4,096 bytes, 4 unacknowledged; ticks in a Ticks record 60; a Backlog 1,200 ticks and 256 commands; an Upload test 2 seconds; tokens a game keeps 32 |
@@ -2928,12 +2996,14 @@ again with an observer; the capture format did not change for it.
   Stores event (code 22), every aircraft's drawn stations and the whole
   stores on each, sent when they change and at a seat, so a client draws
   every aircraft's pylons and stores.
+  28 since the networking slice NET2 ([host loading](#protocol-28-host-loading)):
+  the Keepalive's flags byte, sent by a host building a mission.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
   protocol 5 it holds one transport packet too, the Keepalive, sealed for the
-  version; since protocol 7 also the Challenge answer's bytes before its
-  padding; since protocol 9 also a Punch; since protocol 13 also a Reach,
+  version, and since protocol 28 the loading one too; since protocol 7 also
+  the Challenge answer's bytes before its padding; since protocol 9 also a Punch; since protocol 13 also a Reach,
   its answer and the Challenge answer's token); when
   they differ it fails and says to raise the version and refresh the copy
   (`TORE_UPDATE_WIRE_GOLDEN=1 cargo test --locked -p tore-session
@@ -2967,7 +3037,10 @@ watch the network can read it. What the protocol does guard against:
   connection's address and its id, so they add nothing a stranger could not
   already do with an empty Payload: they only keep a connection from timing
   out, are never answered, are smaller than an empty Payload, and a game sends
-  at most one a second, for at most a minute of stall.
+  at most one a second, for at most a minute of stall. A host's loading
+  keepalive (protocol 28) is taken only from the host's address with the
+  connection's id; a forged one could at most hold a player's migration off
+  for 4 seconds, which an empty Payload from the same spot already could.
 - **Malformed packets.** Every decoder is bounded and returns an error instead
   of panicking; a seeded fuzz test feeds each one random and mutated packets.
 - **Floods.** Connect requests are rate-limited per address and in total, and

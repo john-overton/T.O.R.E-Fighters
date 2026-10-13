@@ -597,20 +597,36 @@ below is fitted (agent).
   `ground-target` line. With a ground target the strengths man the target's
   slots as before and no area defenses stand (never both). Free flight has no
   creator and so never has them.
-- **How many.**
+- **How many.** Rolled like the target templates' defense slots (John,
+  2026-10-13, nr-b23b; the first build of 2026-10-12 had fixed counts of 2, 4
+  and 6 SAM sites and 4, 8 and 12 gun sites). A mission has **ten SAM site
+  slots and ten gun site slots** (agent decision, 2026-10-13: the ten
+  `<sam>` and ten `<aaa>` slots of 79 of the 95 templates). Each slot is
+  manned with the template chance for its strength, the
+  [roll](#templates-and-defended-slots) of the creator's field 31 (guns) or
+  32 (SAMs):
 
-  | Strength | SAM sites | Gun sites |
-  | --- | ---: | ---: |
-  | none | 0 | 0 |
-  | light | 2 | 4 |
-  | moderate | 4 | 8 |
-  | heavy | 6 | 12 |
+  | Strength | Chance a slot is manned | Sites of a kind (ten slots) | Mean |
+  | --- | ---: | ---: | ---: |
+  | none | 0 percent | 0 | 0 |
+  | light | 25 percent | 0 to 10 | 2.5 |
+  | moderate | 60 percent | 0 to 10 | 6 |
+  | heavy | 100 percent | exactly 10 | 10 |
 
-  Each site is two units of one type, so heavy is 12 launchers and 24 guns
-  plus the SAM sites' radars. The template rolls (25, 60 and 100 percent of
-  ten slots each) give about the same numbers of units around a target; here
-  the counts are fixed, as a scattered site rolled away would leave a hole in
-  a map-wide layer.
+  Each slot draws once from its own stream (the surface seed, the layout and
+  the slot's number, the Roll purpose), exactly as a template's slot does,
+  against 100: manned when the draw is under the percent. SAM slots and gun
+  slots roll apart. The draw does not depend on the other slots or on how
+  the sites later fall, so a site keeps its type and place whatever its
+  neighbours rolled, and a slot manned at light is manned at moderate and
+  heavy for the same seed. A manned slot is a **site of two units of one
+  type**, so heavy is 20 launchers and 20 guns, light about 5 and 5, with
+  the SAM sites' radars and trucks on top. A light mission can roll no site
+  of a kind (one seed in about 18 for ten slots at 25 percent), as a lightly
+  defended template can; the rule is the same. Every machine and every
+  replay rolls the same slots, since the seed is the mission's (below).
+  `site_counts` (the sweep's expected count) is the rolls alone; a site that
+  finds no place is left out, as below.
 - **Which.** Each site's type is a uniform pick from the enemy nationality's
   equipment group for `<sam>` or `<aaa>`, the lists the target's slots draw
   from ([templates](#templates-and-defended-slots)); with the night rule's
@@ -618,9 +634,24 @@ below is fitted (agent).
   battery rules ([SAM batteries](#sam-batteries)) then group each SA-2, SA-3,
   SA-6 or HAWK site into a battery with its radar vehicle, added beside it;
   area batteries never take a base-layout radar or launcher, nor the other
-  way round. Skill average (1). No supply trucks, no route, no front line, no
-  destroy flag: they are not objectives, and destroying one scores as any
-  enemy ground unit does.
+  way round. Skill average (1). No route, no front line, no destroy flag:
+  they are not objectives, and destroying one scores as any enemy ground unit
+  does.
+- **Supply trucks** (John, 2026-10-13: "supply trucks for area SAMs: yes").
+  The [template rule](#resupply) applies to the SAM sites: every SAM unit
+  gets a MISTRK 200 to 400 ft from it (the slot truck) and every area SAM
+  battery one more (SA-2, SA-3, SA-6, HAWK sites), served to the battery's
+  first launcher, all added after the sites are placed with the template's
+  placement rule and the resupply reach of 528 ft, from their own stream of
+  the surface seed (Supply purpose). They are ordinary supply trucks in
+  `Surface::trucks` (ids from `0x5800_0000`), so the whole
+  [resupply](#resupply) applies unchanged: a live truck of the same side
+  within 528 ft rearms all of a launcher's empty rails after the system's
+  time (300, 420 or 600 s), a destroyed truck stops it at once, and a site
+  whose truck is dead stays empty. Guns get none (John asked for the SAM
+  sites only; agent decision, 2026-10-13: a gun site still uses its two spare
+  magazines). A truck is a targetable passive vehicle that is never a
+  target of the mission. The first build had none.
 - **Where.** The front axis runs from the centroid of the theater layout's
   Blue placements to that of its Red ones ([relocation](#relocation)); its
   midpoint splits the sides. Every theater's layout has both, so every
@@ -649,7 +680,11 @@ below is fitted (agent).
   - Measured with `--surface-dump --area-sweep --seeds 2` (16 theaters,
     light to heavy, 96 builds): every unit keeps every rule, and every theater
     but the Kurils stands every site. The Kurils (a chain of small islands)
-    stand 8 to 26 of their 12 to 36 units.
+    stand what the islands hold and leave the rest out: with the rolled counts
+    8 of 8, 22 of 24 and 30 of 40 units (seed 1) and 8 of 10, 16 of 22 and
+    26 of 40 (seed 2) at light, moderate and heavy, about two thirds of a
+    heavy mission. John, 2026-10-13: fine, no looser rule for the small
+    islands.
 - **Facing and sight.** Each unit faces away from its site's centre. They
   fight by the ordinary [Surface AI](#surface-ai) rules: a site engages an
   aircraft of the other side in its reach, so a Blue pilot flying over Red's
@@ -666,11 +701,22 @@ below is fitted (agent).
   ([Replays](#replays)). Online no wire byte changes: the mission text carries
   the strengths and the host draws the seed, as for a ground target
   ([Multiplayer](#multiplayer)); a build with the area defenses and one
-  without disagree on the digest and refuse each other.
+  without disagree on the digest and refuse each other. So do a build with
+  the rolled counts and one with the first build's fixed counts: the surface
+  digest of a rolled mission carries a "rolled" mark, the first build's
+  digest does not.
+- **Older recordings.** The rolled counts are marked in the replay header by
+  `world.area_rolled=1`. A recording from the first build (2026-10-12) has
+  the five-field `world.area_defense` and no mark, so it rebuilds its fixed
+  counts of sites (2, 4 and 6 SAM sites, 4, 8 and 12 gun sites) with no trucks
+  and replays as it was made; the header keeps its shape and a build from
+  before the mark keeps the key as an unknown extra
+  ([Replays](#replays)). The online path has no old mode: every machine of a
+  game rolls.
 
 ```mermaid
 flowchart LR
-    S[Strengths, no target] --> N[2 to 6 SAM sites, 4 to 12 gun sites]
+    S[Strengths, no target] --> N[Ten SAM slots and ten gun slots, each rolled 25, 60 or 100 percent]
     N --> F{Every third site of a kind}
     F -->|yes| A[2 to 5 nm from a Red airfield]
     F -->|no| B[Band: 10 to 60 nm past the midpoint toward Red]
@@ -680,6 +726,7 @@ flowchart LR
     B --> U
     D --> U
     U --> R[SA-6 and the like: a battery with its radar]
+    U --> T[Every SAM unit and battery: a supply truck]
 ```
 
 ### The units of the movement and range words
@@ -1040,13 +1087,13 @@ changed.
 
 | Question | Answer |
 | --- | --- |
-| Drawn? | Yes: each TROOPS unit draws a group of soldier sprites (six in the renders, the SOLDIER sprite sheet), standing on the ground, always facing the viewer; never absent. |
-| Visible at a pilot's range? | A man is 4 ft tall, a few pixels at 1,000 ft. Beyond 1,000 ft he is drawn larger by the distance over 1,000 ft, up to six times (24 ft) from 6,000 ft out, so a squad stays a few pixels tall as a dark group on a field (opinionated, agent, 2026-10-12; presentation only, the hit box is unchanged). Deck crew are not scaled. |
-| Hit box | The shape's contact volume: 30 ft wide, 6.6 ft tall, 12 ft deep, centred on the squad; 75 hit points. |
+| Drawn? | Yes: each TROOPS unit draws its shape, a group of flat textured soldier cards (the SOLDIER art) in fixed directions, so a card seen edge-on is a thin line; never absent. The shape is centred on the unit's origin, so the squad stands on its bottom, 3.3 ft up, like every ground object (slice GROUND, 2026-10-13; until then the soldiers stood waist deep; [grounding](../formats/objects-and-shapes.md#grounding-every-object-stands-on-the-bottom-of-its-shape)). |
+| Visible at a pilot's range? | A man is 4 ft tall, a few pixels at 1,000 ft. Beyond 1,000 ft a man (the SOLDIER sprite and the TROOPS cards alike) is drawn larger by the distance over 1,000 ft, up to three times from 3,000 ft out, growing up from his feet, which stay on the ground (opinionated: the boost agent, 2026-10-12; the 3x cap John, 2026-10-13, was 6x; presentation only, the hit box is unchanged). The squad's cards are drawn every frame for it, not in the standing scenery (agent decision, slice GROUND, 2026-10-13: until then the boost reached only sprites, so squads were never enlarged). Deck crew are not scaled. |
+| Hit box | The shape's contact volume: 30 ft wide, 6.6 ft tall, 12 ft deep, standing on the ground with the soldiers; 75 hit points. |
 | Killed by | Guns (the A-4E's Mk 12 kills a squad in a strafing pass; 155 rounds fired), bombs (an Mk 82 within its splash kills it), rockets and splash (an LAU-61 rocket 26 ft away took 2 hit points, so a pod's salvo is what kills), AAA and tank shells of the other side. Splash needs no hit: the collateral radius of the weapon applies to the squad as to any ground unit. |
-| After death | The unit's hit points are 0: it stops firing at once (no burst after the kill tick), the sprites vanish with their unit (the destroyed look of men, [Destroyed looks](#destroyed-looks): removed, no wreck), and its record's explosion plays. |
+| After death | The unit's hit points are 0: it stops firing at once (no burst after the kill tick), its record's explosion plays, and the squad's bodies lie where it stood: TROOPS.SH carries a damaged model (its `shape::DAMAGED_WORD` branch, 8 flat faces of fallen men, 0.3 ft high), which is drawn as its destroyed look, without fire ([Destroyed looks](#destroyed-looks); John, 2026-10-13: bodies only where retail has them). |
 | Counted | As a kill of a ground unit like every other (any destroyed combat target is recorded as a `Kill` for its shooter, and a flagged destroy target counts toward the objective). Online, retail scores no ground kills, so no score. |
-| Synced online | Like every surface unit: ids `0x5000_0000` and up, the host's destroyed events, the same hit points and vanish look on every client; no new wire field. |
+| Synced online | Like every surface unit: ids `0x5000_0000` and up, the host's destroyed events, the same hit points and destroyed look on every client; no new wire field. |
 
 The battery scenario `surface-squad-killable` kills one squad of `~QAPFAIR`
 with the A-4E's gun, with an F/A-18's Mk 82, and in the trace by `--kill-at`,
@@ -1528,6 +1575,9 @@ SAM rails and AAA magazines, within 0.1 mile (defined, John).
   Trucks are passive units, targetable, Vehicle class (0x0200), and move with the
   defended group's relocation. Never targets. Number and placement: fitted,
   agreed by John (2026-10-10).
+- **Area defenses** (a Quick Mission with no ground target) get trucks for
+  their SAM units and SAM batteries by the same rule, none for guns
+  ([area defenses](#area-defenses), John, 2026-10-13).
 - **Base layouts get no added trucks** (including no truck for their batteries);
   their units are resupplied only by trucks already standing in them (agreed by
   John, 2026-10-10).
@@ -1627,6 +1677,22 @@ per second of sustained fire matches the retail record; flak, 57 mm, 37 mm and
 tank guns keep the retail damage per round (defined, John). M163 fires the
 Phalanx record but is an M168 Vulcan, so it has its own row; the Butler keeps the
 retail 30 mm row, with no Bofors row (defined, John).
+
+**The M163's reach (research, 2026-10-13).** The M163 fires the Phalanx record,
+so it sees a target out to 50,000 ft (8.2 nm) and may fire out to 20,000 ft
+(3.3 nm), up to 15,000 ft above itself. Both numbers are the retail record's,
+read in feet as written; nothing is scaled or fitted
+([the zones of every armed unit](../formats/surface-units.md#weapon-zones-of-the-armed-units)).
+The long sight is the normal shape of retail's gun data: every radar gun
+acquires at 2 to 8 times the range it fires at (ZSU-23: sees 60,000 ft, fires
+to 7,500 ft). A radar gun paints a target on the RWR from the moment it holds
+the target in Track, so an aircraft inside the M163's 8 nm and its 25 s first
+engagement delay is painted. What is out of step is the gun's fire range, 2.7
+times the ZSU-23's, because the M163 shares the ship record. An unused
+`M163.JT` in the archive (a ZSU23 copy: sees 60,000 ft, fires to 7,500 ft)
+matches the real M168 Vulcan's effective range of about 1.2 nm. TORE keeps the
+retail record (retail). Changing the M163's ranges is a decision for John, in
+[Decisions pending](#decisions-pending).
 
 The table below is generated from the table in code by a documentation test, as
 the controls tables are; do not edit it by hand. The columns are: gun type,
@@ -1765,14 +1831,14 @@ shape's F2 ground offset, which the records give in retail feet, take the same
 factor. Runways, bridges and roads keep the retail scale. The rule and its
 evidence: [placed object scale](../formats/objects-and-shapes.md#placed-object-scale-2026-10-10).
 
-A land unit (an NT that is not a ship, a structure or a man) stands on the
-lowest point of its shape, standing or moving, and its contact and hit box
-stand with it (fitted: a vehicle's shape origin is at its turret or rails,
-and for every land unit the lowest point equals the F2 ground offset within a
-unit; a T-80 drawn on its origin hid its hull in the ground). Since slice BG
-(B13, 2026-10-12) buildings do too, bunkers included: their lowest point also
-equals their F2 offset within 3 ft ([building
-grounding](../formats/objects-and-shapes.md#building-grounding-2026-10-12)).
+Every land unit stands on the lowest point of its shape, standing or moving,
+intact or wrecked, and its contact and hit box stand with it (fitted: a
+vehicle's shape origin is at its turret or rails, and for every land unit the
+lowest point equals the F2 ground offset within a unit; a T-80 drawn on its
+origin hid its hull in the ground). Since slice BG (B13, 2026-10-12)
+buildings do too, bunkers included, and since slice GROUND (2026-10-13) men,
+the GCI radar and every other structure: one rule for every ground object
+([grounding](../formats/objects-and-shapes.md#grounding-every-object-stands-on-the-bottom-of-its-shape)).
 Ships keep their waterline (Krivak F2 -100 against its geometry's -26).
 
 ### Shapes the reader learned
@@ -1801,7 +1867,8 @@ John accepted the recommended looks (12.4).
 | Other buildings (city and town blocks, houses, apartments, industry without a branch, sites, tents, crates) | A ruin generated from the intact shape: split, sunk to 6 to 30 percent of its height, its fallen roof partly charred; burns | fitted, agent decision (B16, 2026-10-12) |
 | Runways, roads, lots, crops, bridge ends, rocks | Stay as they stood; a runway keeps the craters of every weapon that hit it | runway B15; the rest agent decision (B16) |
 | Parked aircraft | A burnt hulk: its own shape sunk, torn and charred ([parked aircraft](#parked-aircraft)), after the type 30 explosion; a scorch (none on a deck), fire and smoke for 15 minutes; no crater, no crash site and no flying piece | John, 2026-10-13 (hulk); the hulk's numbers and the fire: agent decision |
-| Men, barrage zones | Removed | |
+| Men whose shape holds a damaged model (TROOPS) | The shape's own damaged copy, the men lying on the ground, on its own lowest point; no fire | retail shape (John, 2026-10-13) |
+| Other men (SOLDIER, RUNNER, EJECT: no damaged model in retail), barrage zones | Removed | retail has no body art for them |
 
 The explosion uses the unit's own type (21 ground, 35 ship, 15 men) and crater
 size on land, rather than one fitted value for all ground objects.
@@ -1933,7 +2000,9 @@ scorch). Craters last the mission (no cap since 2026-10-12).
   target ([Aiming](#aiming)); no launcher elevates (no shape has a pitch
   part).
 - **Men** (SOLDIER) are viewer-facing sprites, 4 ft tall, upright on the
-  screen; they vanish with their unit.
+  screen; they vanish with their unit. The airfield squad (TROOPS) is flat
+  soldier cards that leave their bodies when killed. Both grow up to three
+  times larger at range, from their feet.
 - **Carriers** carry their island and deck parts from the FA.EXE carrier table
   (the catapult officer, the three deck tractors and the island; Wasp: one
   tractor and the island). Each part stands on the flight deck by its F2 ground
@@ -2276,6 +2345,7 @@ so). Each row has a fitted stand-in above.
 | --- | --- | --- | --- |
 | Units of `_maxSpeed`, `_turnRate`, `_acc`, `_dacc` | `w_speed` is feet per second with strong evidence ([units](#the-units-of-the-movement-and-range-words)); the object words are assumed to share it | feet per second; turn rate 182 per degree; acceleration fitted | Trace the waypoint consumer `GVDoCurrentWaypoint` (0x473de0) and the `_acc` readers |
 | `maxVisDist`, `zoneDist`, `searchDist` units | 78, 195 and 391 match 20,000, 50,000 and 100,000 ft at 256 ft per unit; `searchDist` is 0, 1 or 25 | 256 ft per unit; 25 read as 6,400 ft | Trace the consumers of `NPC +zoneDist` and the mission `searchDist` |
+| Why `M163.NT` mounts `PHALANX.JT` | The archive also holds `M163.JT`, a ZSU23 copy that no NT uses; the NT names PHALANX | PHALANX, as the NT says | Look for any mission or script that selects `M163.JT`, or for a retail value that overrides the mount at run time |
 | Which engagement uses `unreadyAttackT` | B42 says the producer of the unready flag is unknown | first engagement of a unit | Trace the unready flag's producer |
 | Hit chance and experience | The record's `chances[0..3]`, `taaHitChange`, `gHitChange`, `speedHitChange`, `bigPlaneChange` exist; `_PROJHitChance` (0x4c3380) is untraced; manual: skill sets "how accurately a tank or AAA site aims" | Physical shells with a fitted aim error by skill | Trace `_PROJHitChance` and the surface skill consumer |
 | Surface target ranking and `retargetT` | B41 says surface actors have extra ranking terms and "special zone behavior" | Nearest eligible; flak re-evaluates every 10 s | Trace the B41 surface terms |
@@ -2306,6 +2376,7 @@ ones follow in their own table.
 | Decision | Default | Why |
 | --- | --- | --- |
 | Relocation and start numbers | John found the target variance fine (2026-10-10); the numbers stay fitted: unanchored templates move 3 to 30 nm from their retail spot, keep within 15 nm of their retail depth along the front and may rotate freely; Blue starts plus or minus 30 degrees off the line from Red toward its own side (the distances are John's: Red within 5 nm of the target, Blue the enemy distance setting from Red) | Far enough that a template is not where you remember it, near enough to stay on the side of the map retail's designers put it |
+| M163 ranges | Retail: sees 50,000 ft, fires to 20,000 ft (the Phalanx record the M163 mounts). Options if John wants realism (opinionated, not built): (a) fire to 7,500 ft only, the unused retail `M163.JT`'s and the ZSU-23's zone 1 (about 1.2 nm); (b) also cut the sight to about 3 nm (18,000 ft) so the RWR painting starts near the gun's real radar range; (c) keep the sight and cut only the fire range. Any option changes the M163's lethality and when its painting starts, and the surface battery and guard would move | John asked on 2026-10-13 for the gun range to be looked into; the retail data does not misstate it, so changing it is a design choice, not a fix |
 | SA-19 and SA-N-11 as supported radar; ASROC held | As in [SAM missiles](#sam-missiles) | HAWK, Roland and the 2S6 carry SA-19 and would otherwise be unarmed |
 | Ground-start runway with a target | With no runway picked, the nearest friendly airfield at least 15 nm from the target, for Blue and for Enemy Wing 1's ground start (slice CL-R) | A ground start across the map from a relocated target would mean a long flight |
 | Battery size and clustering | Up to 1 SA-2 site, 4 SA-3, 4 SA-6 and 6 HAWK launchers, clustered within 1 nm; existing radars adopted within 3.5 nm (confirmed by John, 2026-10-10; the lead's change from 2 nm, 2026-10-10, so North Vietnam's GCIs pair with their SA-2 sites); Crotale self-contained; base layouts get added radars where none can be adopted | Matches real battery sizes and retail's spacing |
@@ -2334,7 +2405,8 @@ Settled during the round:
 | Having a gun rate, magazine and reload (values fitted); splash damage for every weapon; the 60 and 120 s gun swaps; the 300 to 600 s SAM rearm range; base-layout defenses active; Redfor defends in PvP; jitter; relocation and starts; batteries; supply trucks; simulated parked aircraft; one combined objective; friendly-fire failure; a fifth network entity kind | defined (John, 2026-10-10) |
 | Surface units of opposing sides in range shoot at each other, whatever their `react` masks | opinionated (John, 2026-10-11) |
 | Area defenses with no ground target: Red's side, 10 to 60 nm deep, airfield cover, counts from the strengths, the enemy group's units with radars, standing, hidden, Quick Mission only | opinionated (John, 2026-10-12, B23) |
-| Area defense site counts per strength, two units a site, one site in three by a Red airfield 2 to 5 nm out (fields 0 to 100 nm deep), 10 to 120 nm fallback, 3 nm spacing, 150 to 600 ft unit ring, 2,000 ft object and 1 nm runway clearance, no supply trucks, strengths kept when the target goes | fitted or defined (agent, 2026-10-12) |
+| Area defense site counts: ten slots a kind rolled at the template percentages (John, 2026-10-13; the ten is agent), supply trucks for the SAM units and batteries (John, 2026-10-13), one site in three by a Red airfield, the Kurils as they fall (John, 2026-10-13) | opinionated (John, 2026-10-13); slot count fitted (agent) |
+| Area defense two units a site, airfield sites 2 to 5 nm out (fields 0 to 100 nm deep), 10 to 120 nm fallback, 3 nm spacing, 150 to 600 ft unit ring, 2,000 ft object and 1 nm runway clearance, strengths kept when the target goes, no trucks for guns | fitted or defined (agent, 2026-10-12 and 2026-10-13) |
 | Weapon target flags (0x10000 air, 0x20000 surface) deciding what a surface weapon aims at; surface damage by class | retail |
 | Preference by unit class, nearest-first choice, units only (no buildings or parked aircraft), the SS-N-9 at ships only and its surface radar search, sides a surface round strikes, the quarter surface aim error, the column's halt | fitted or defined (agent, 2026-10-11) |
 | Relocation site rules and counts, battery caps and radar placement, truck counts and placement, the per-system SAM rearm timers within John's range, gun reserve, jitter numbers, emitter rule, radar on and off, HARM shutdown, experience effects, target choice, time fuze, surface splash reaching aircraft and the other side's ground objects only, barrage rule, movement rates, launch pitch, flak and gun-light looks | fitted or defined (agent) |

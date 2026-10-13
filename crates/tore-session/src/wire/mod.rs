@@ -176,7 +176,11 @@ pub fn path_words(path: Path) -> &'static str {
 /// aircraft's drawn stations and the whole stores on each, sent when they
 /// change and at a seat, so a client draws every aircraft's pylons and
 /// stores (docs/spec/stores-on-pylons.md).
-pub const PROTOCOL_VERSION: u16 = 27;
+/// 28 since the networking slice NET2: the transport's Keepalive carries a
+/// flags byte, and a host sends it marked loading to every player while it
+/// builds a mission, so its players keep the connection and its standbys
+/// hold off a migration through a long build.
+pub const PROTOCOL_VERSION: u16 = 28;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

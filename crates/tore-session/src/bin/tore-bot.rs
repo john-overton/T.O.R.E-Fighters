@@ -137,6 +137,10 @@
 //! sleep that long first, as a slow machine's debug build does: the bot's
 //! keepalive thread (the game's, slice EF-K) must keep it connected, and
 //! "mission loaded (built in N ms)" says how long each first build took.
+//! `--host-slow-build SECONDS` (a test aid, slice NET2) does the same for a
+//! hosting bot's host: every mission build after its first lasts at least
+//! that long, and the host's loading thread (protocol 28) must keep every
+//! player connected and its standbys from taking over.
 //!
 //! Host migration (stage K, slice K9; docs/ARCHITECTURE.md, "Host migration
 //! and rejoin"). `--host MISSION` makes the bot a game that hosts, as the
@@ -232,7 +236,7 @@ const USAGE: &str = "usage: tore-bot (--connect HOST[:PORT] | --master ADDRESS -
 [--capture FILE] [--token-file FILE] [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]... [--observe PLANE|none] \
 [--king NAME=VALUE[,NAME=VALUE]...] [--revive SECONDS] [--away SECONDS,FOR] [--objectives] \
 [--order SECONDS,NAME]... [--reply SECONDS,KIND]... \
-[--drop-resource NAME]... [--expect-unable] [--slow-build SECONDS] [--load STORE[,STORE]...] [--a2g lase|buddy|strike|bomb|watch]\n       \
+[--drop-resource NAME]... [--expect-unable] [--slow-build SECONDS] [--host-slow-build SECONDS] [--load STORE[,STORE]...] [--a2g lase|buddy|strike|bomb|watch]\n       \
 tore-bot --content-report [--data-dir DIR] \
 [--drop-resource NAME]...";
 
@@ -309,6 +313,10 @@ struct Options {
     /// first sleeps this long, holding the bot's loop up as a slow
     /// machine's build does.
     slow_build: Option<Duration>,
+    /// `--host-slow-build SECONDS` (a test aid, slice NET2): a hosting
+    /// bot's host builds each mission after its first for at least this
+    /// long.
+    host_slow_build: Option<Duration>,
     /// `--host`: the mission file the bot hosts.
     host: Option<PathBuf>,
     /// `--port`: the game port of a hosting bot.
@@ -500,6 +508,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         content_report: false,
         expect_unable: false,
         slow_build: None,
+        host_slow_build: None,
         host: None,
         port: tore_net::DEFAULT_PORT,
         game_name: "T.O.R.E bot game".into(),
@@ -581,6 +590,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
             "--content-report" => options.content_report = true,
             "--expect-unable" => options.expect_unable = true,
             "--slow-build" => options.slow_build = Some(seconds(&value()?)?),
+            "--host-slow-build" => options.host_slow_build = Some(seconds(&value()?)?),
             "--host" => options.host = Some(PathBuf::from(value()?)),
             "--port" => {
                 options.port = value()?
@@ -870,6 +880,8 @@ struct Running {
     /// When the bot noticed it had lost its host, and the snapshots it had
     /// then: the line saying when they came again.
     lost: Option<(Duration, u64)>,
+    /// Since when the host has said it is loading a mission (protocol 28).
+    host_loading: Option<Duration>,
     /// The migration counts line last printed.
     counts: Option<String>,
     /// `--king` stands (or the host's own settings) and the settings went:
@@ -1366,6 +1378,7 @@ fn main() -> ExitCode {
             mig: None,
             handed: false,
             lost: None,
+            host_loading: None,
             counts: None,
             start_ok: false,
             through: None,
@@ -1445,6 +1458,7 @@ fn main() -> ExitCode {
                     port: options.port,
                     standbys: options.standby.unwrap_or(true),
                     master: options.listed_on.clone(),
+                    slow_build: options.host_slow_build,
                 };
                 match Mig::hosting(setup, &resources, config) {
                     Ok((mig, sock)) => {
@@ -1617,6 +1631,23 @@ fn main() -> ExitCode {
                     r.name,
                     tore_session::bot::start_words(world, &frame.flight)
                 );
+            }
+            // A host building a mission (protocol 28, slice NET2): its
+            // loading keepalives hold the connection and the migration off.
+            match (bot.client.host_loading(), r.host_loading) {
+                (true, None) => {
+                    r.host_loading = Some(now);
+                    println!("{}: the host is loading a mission", r.name);
+                }
+                (false, Some(since)) => {
+                    r.host_loading = None;
+                    println!(
+                        "{}: the host is back after {} ms of loading",
+                        r.name,
+                        now.saturating_sub(since).as_millis()
+                    );
+                }
+                _ => {}
             }
             // A lost host: when the snapshots come again (slice K9's lines).
             match bot.client.migration() {

@@ -209,6 +209,10 @@ pub struct AreaDefense {
     pub enemy_nationality: u8,
     /// The night rule with a stealth aircraft in a friendly wing.
     pub night_stealth: bool,
+    /// The sites are counted by rolling ten slots per kind (nr-b23b,
+    /// 2026-10-13). Absent in a recording from the first build, which kept
+    /// fixed counts and rebuilds the sites it saw.
+    pub rolled: bool,
 }
 
 impl World {

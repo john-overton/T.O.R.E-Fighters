@@ -70,7 +70,7 @@ fn send(socket: &mut SimSocket, datagram: &[u8]) {
 #[test]
 fn a_fifteen_second_stall_with_keepalives_is_not_dropped() {
     let (mut w, datagram) = joined();
-    assert_eq!(datagram.len(), 9);
+    assert_eq!(datagram.len(), 10);
     let connection = w.connection_of(0);
     let before = w.server.stats(connection).unwrap();
     let mut player = w.players.remove(0);
@@ -185,11 +185,13 @@ fn a_keepalive_from_elsewhere_or_with_another_identity_keeps_nothing_alive() {
         let forged = match case {
             "other id" => Packet::Keepalive(Keepalive {
                 connection: connection.0 ^ 1,
+                loading: false,
             })
             .encode(VERSION)
             .unwrap(),
             "other version" => Packet::Keepalive(Keepalive {
                 connection: connection.0,
+                loading: false,
             })
             .encode(VERSION + 1)
             .unwrap(),
@@ -226,4 +228,69 @@ fn a_keepalive_from_elsewhere_or_with_another_identity_keeps_nothing_alive() {
         };
         assert!(now >= before + 19, "{case}: {field} {before} to {now}");
     }
+}
+
+/// The host's loop stalled (a mission build) for `time`; its players' games
+/// run on. `speak` may send datagrams for the host each step.
+fn host_stall(w: &mut World, time: Duration, mut speak: impl FnMut(&mut World, Duration)) {
+    let start = w.now();
+    while w.now() < start + time {
+        w.net.advance(MS);
+        let now = w.now();
+        speak(w, now - start);
+        for p in &mut w.players {
+            p.client.receive_from(&mut p.socket, now).unwrap();
+            p.client.update(now);
+            p.client.transmit(&mut p.socket).unwrap();
+            while let Some(event) = p.client.poll_event() {
+                p.events.push((now, event));
+            }
+        }
+    }
+}
+
+/// Protocol 28 (slice NET2): a host building a mission for 12 seconds
+/// sends its players its loading keepalives twice a second. They keep the
+/// connection, know the host is loading until its next Payload, and a
+/// keepalive with another connection's id keeps nothing alive.
+#[test]
+fn a_host_loading_for_twelve_seconds_keeps_its_players() {
+    let (mut w, _) = joined();
+    w.join("Cobra");
+    assert!(w.run_until(Duration::from_secs(1), |w| w.connected(1)));
+    let loading = w.server.loading_datagrams();
+    assert_eq!(loading.len(), 2);
+    // Viper is sent Cobra's keepalive: another connection's id.
+    let cobra_id = loading
+        .iter()
+        .find(|(to, _)| *to == player_addr(1))
+        .map(|(_, d)| d.clone())
+        .unwrap();
+    host_stall(&mut w, Duration::from_secs(12), |w, elapsed| {
+        if elapsed.as_millis() % 500 == 250 {
+            for (to, datagram) in &loading {
+                if *to == player_addr(1) {
+                    w.host_socket.send_datagram(*to, datagram).unwrap();
+                }
+            }
+            // Viper hears only Cobra's id.
+            w.host_socket
+                .send_datagram(player_addr(0), &cobra_id)
+                .unwrap();
+        }
+    });
+    let cobra = w.players[1].client.stats().expect("Cobra still joined");
+    assert!(cobra.peer_loading);
+    assert!(cobra.since_last_received < Duration::from_millis(600));
+    assert!(
+        w.players[0]
+            .events
+            .iter()
+            .any(|(_, e)| matches!(e, tore_net::ClientEvent::Closed(_))),
+        "Viper heard only another connection's keepalives and was closed"
+    );
+    // The host is back: its next Payload ends the loading.
+    w.run_for(Duration::from_secs(1));
+    let cobra = w.players[1].client.stats().expect("Cobra still joined");
+    assert!(!cobra.peer_loading);
 }

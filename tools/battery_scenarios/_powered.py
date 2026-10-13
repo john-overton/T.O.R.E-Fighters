@@ -195,12 +195,31 @@ def check_hover(output: str) -> list[str]:
     return problems
 
 
+# Slice HF2: a rotorcraft burns by the power its rotor draws. In the 15 s hover it burns between 0.1 and 0.9 lb/s
+# (docs/baselines/rotorcraft-fuel.md: 0.35 to 0.54 lb/s at 5,000 ft); the record's flow, which the burn does not read,
+# is 1 to 3 lb/s (3 for the Mi-24: 45 lb in the 15 s).
+HOVER_BURN_LB_PER_S = (0.1, 0.9)
+
+
+def check_hover_fuel(output: str) -> list[str]:
+    problems = check_hover(output)
+    found = re.search(r"fuel_start_lb=(\S+) fuel_end_lb=(\S+)", output)
+    if not found:
+        return problems + ["the hover printed no fuel line"]
+    burned = float(found[1]) - float(found[2])
+    seconds = 1800 / 120
+    low, high = HOVER_BURN_LB_PER_S
+    if not low * seconds <= burned <= high * seconds:
+        problems.append(f"the hover burned {burned:.1f} lb in {seconds:.0f} s: {burned / seconds:.2f} lb/s, not {low} to {high}")
+    return problems
+
+
 def hover_scenarios() -> list[Scenario]:
     return [
         Scenario(
             name=f"flight-powered-hover-{ac}", lane="flight", args=["--version"],
             then=[_write_step(ac, "quiet"), _fly(ac, "quiet")],
-            check=check_hover, timeout=240,
+            check=check_hover if ac in JETS else check_hover_fuel, timeout=240,
         )
         for ac in POWERED
     ]

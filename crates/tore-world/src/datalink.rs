@@ -63,7 +63,6 @@ use tore_sim::{
         missiles::{Profile, TargetRole},
     },
     datalink::has_radar,
-    models::FlightModel,
     sensors::Channel,
 };
 
@@ -571,9 +570,7 @@ fn human_state(scene: &Scene<'_>, plane: u32) -> (Fuel, Weapons, Damage) {
         .find(|c| c.plane.0 == plane)
         .map_or(Fuel::Normal, |cockpit| {
             let flight = &cockpit.flight;
-            let propulsion = &flight.model().configuration().propulsion;
-            let flow = (propulsion.military_fuel_lbs_per_second * flight.throttle.max(0.1))
-                .max(tore_sim::ai::mission::MINIMUM_FUEL_FLOW_LBS_PER_S);
+            let flow = flight.endurance_flow_lbs_per_second();
             let endurance = (flight.fuel + flight.systems.external_lbs()) / flow;
             if endurance <= 0. {
                 Fuel::Out

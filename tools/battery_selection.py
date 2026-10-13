@@ -213,6 +213,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
             "net-server-revive-150", "net-server-side-boxes", "net-server-lead-hold",
             "net-server-objective-respawn", "net-server-lineage-join", "net-server-lead-hold-callsign",
             "net-server-slow-load",
+            "net-host-slow-build",
         ),
     ),
     "net-convert": (

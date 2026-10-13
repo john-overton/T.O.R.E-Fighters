@@ -563,6 +563,11 @@ impl Scenery {
                     if moves {
                         continue;
                     }
+                    // A man drawn as cards is drawn every frame (boosted
+                    // at range); only his destroyed look stays static.
+                    if art.draws_intact_every_frame(id) {
+                        geometry = surface_art::Drawn::default();
+                    }
                     geometry.vertices.extend(parts.vertices);
                     geometry.lines.extend(parts.lines);
                 }

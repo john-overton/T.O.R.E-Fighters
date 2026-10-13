@@ -7,12 +7,12 @@ digest), draws the column's moving tanks and is told what the defenses do (radar
 launches).
 
 `net-surface-pvp`: the same mission in PvP with one bot on each side. Redfor defends the target: the Blue bot's
-debrief has the Destroy line, the Red bot's the Protect line; the template's radars never paint the Red bot. Blue's
+debrief has the Destroy line, the Red bot's the Protect line; Redfor's own radars never paint the Red bot (Blue's may). Blue's
 capture converts into a format 3 replay with the ground target, its seed and the surface units named.
 
 `net-redfor-ground-start`: the same PvP mission with `enemy-start ground auto` (slice CL-R): the Red bot takes
 Enemy Wing 1's lead parked at the Redfor field the world picks and starts there on the ground (the bot's start
-line), Blue in the air; no radar paints the Red bot on its own field.
+line), Blue in the air; no Redfor radar paints the Red bot on its own field.
 
 `net-area-defenses`: the guide's mission with no ground target and heavy AAA and SAM strengths (B23): two bots
 build the same surface with the enemy's area defenses (one digest) and nobody is refused.
@@ -30,7 +30,7 @@ from battery_scenarios.net import NET_BAD, guide_mission, server_log, start_bots
 SURFACE_LINE = re.compile(
     r"^(?P<name>\w+): surface: digest (?P<digest>[0-9a-f]{16}), moving (?P<moving>\d+), wrecks (?P<wrecks>\d+), "
     r"bursts (?P<bursts>\d+), ends (?P<ends>\d+), states (?P<states>\d+), told (?P<told>\d+), "
-    r"launches (?P<launches>\d+), flak (?P<flak>\d+), painted (?P<painted>\d+), rounds (?P<rounds>\d+)$",
+    r"launches (?P<launches>\d+), flak (?P<flak>\d+), painted (?P<painted>\d+), own (?P<own>\d+), rounds (?P<rounds>\d+)$",
     re.M,
 )
 
@@ -118,8 +118,10 @@ def drive_pvp(d: Drive) -> None:
     for problem in surface_problems(blue.text() + red.text(), ["Blue", "Red"]):
         d.problem(problem)
     red_line = last_surface(red.text()).get("Red")
-    if red_line and int(red_line["painted"]) > 0:
-        d.problem(f"the template's radars painted the Red bot (their own side) in {red_line['painted']} frames")
+    # A radar warning receiver shows every radar painting the plane, Blue's included (Blue's front-line M163 can
+    # track Red): only Redfor's own radars painting the Red bot are wrong (slice NET2).
+    if red_line and int(red_line["own"]) > 0:
+        d.problem(f"Redfor's own radars painted the Red bot in {red_line['own']} frames")
     for bot in (blue, red):
         bot.forbid(NET_BAD, "a network problem")
         bot.forbid(r"places this mission's ground target differently", "a surface digest refusal")
@@ -145,7 +147,7 @@ def drive_pvp(d: Drive) -> None:
 def drive_redfor_ground_start(d: Drive) -> None:
     """PvP over the defended column with an enemy ground start (slice CL-R): Enemy Wing 1 parks at the Redfor field
     nearest the target at least 15 nm from it, and the Red bot that takes its lead starts there on the ground, its
-    own side's field, while Blue starts in the air. The field's radars are Red's, so none paints the Red bot."""
+    own side's field, while Blue starts in the air. The field's radars are Red's, so none of them paints the Red bot (a Blue radar may)."""
     port = d.port()
     mission = weapons_hold(surface_mission()) + "enemy-start ground auto\n"
     server = start_server(d, port, mission, mode="pvp", kill_limit=5, kill_owner="total", time_limit=2)
@@ -162,8 +164,8 @@ def drive_redfor_ground_start(d: Drive) -> None:
     for problem in surface_problems(blue.text() + red.text(), ["Blue", "Red"]):
         d.problem(problem)
     red_line = last_surface(red.text()).get("Red")
-    if red_line and int(red_line["painted"]) > 0:
-        d.problem(f"a radar painted the Red bot on its own side's field in {red_line['painted']} frames")
+    if red_line and int(red_line["own"]) > 0:
+        d.problem(f"Redfor's own radars painted the Red bot on its own side's field in {red_line['own']} frames")
     for bot in (blue, red):
         bot.forbid(NET_BAD, "a network problem")
         bot.forbid(r"places this mission's ground target differently", "a surface digest refusal")

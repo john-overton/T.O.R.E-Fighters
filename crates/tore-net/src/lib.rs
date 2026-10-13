@@ -8,7 +8,9 @@
 //! dedicated server and a game that hosts: the server's dual-stack sockets
 //! ([`ServerSocket`]), the in-process [`link`] a hosting game flies through,
 //! and the sleep-then-spin wait ([`wait_until`]); and, for a joined game, the
-//! [`Keepalive`] thread that speaks for it while its loop is stalled. The wire
+//! [`Keepalive`] thread that speaks for it while its loop is stalled, and for
+//! a host the [`Loading`] thread that speaks for it while it builds a mission
+//! (protocol 28). The wire
 //! format is [`docs/formats/net-protocol.md`](../../../docs/formats/net-protocol.md),
 //! from "Overview" to "Reliable messages", "Limits", "Versions" and
 //! "Security".
@@ -92,7 +94,7 @@ pub use connection::{
 };
 pub use datagram::{Datagrams, RealClock, Transmit, bind_udp};
 pub use entropy::{Entropy, SplitMix64, TokenSource};
-pub use keepalive::{Keepalive, KeepaliveConfig};
+pub use keepalive::{Keepalive, KeepaliveConfig, Loading, LoadingConfig};
 pub use link::{LINK_ADDRESS, LinkEnd, Linked};
 pub use packet::{MAX_DATAGRAM, ReachRole, Section, Token};
 pub use platform::Platform;

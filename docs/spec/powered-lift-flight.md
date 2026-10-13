@@ -551,6 +551,17 @@ live in `crates/tore-sim/src/models/variety/lift.rs`.
 | Radii of gyration x / y / z, ft (Derived from UH-60A and F-16 published inertias, then Fit) | 4.5 / 8.5 / 9.5 | 4.5 / 11 / 12 | 9 / 10 / 12.5 | 3.2 / 8.5 / 8.3 | 3.5 / 10 / 10 | 5.5 / 13.8 / 13.5 |
 | Hover full-stick rates at Damper, roll / pitch / yaw, deg/s | 50 / 20 / 20 (PT `puffRot`) | 50 / 20 / 20 (PT) | 45 / 30 / 30 (Fit) | 90 / 45 / 90 (PT roll and yaw, pitch Fit) | 90 / 40 / 80 (PT, Fit) | 45 / 25 / 45 (Fit; PT says 90) |
 
+### Fuel (slice HF2)
+
+Fitted, John 2026-10-13. The PT `fuelConsumption` of a rotorcraft (1, 1, 3 and 1 lb/s
+for the AH-64, V-22, Mi-24 and CH-47) is not read. The burn is the turboshaft line of
+the rated power and the power the drive delivers (0.22 of full flow at idle, full flow
+at rated power, 0.6 lb/(hp h) at rated), specified with its numbers in the
+[flight model](../FLIGHT-MODEL.md#rotorcraft-fuel). Results: hover 0.35 to 0.54 lb/s, a
+cruise at 100 kt 20 to 40 percent less; tanks last 62 to 156 minutes at a hover. The
+V-22 keeps the PT's AH-64 clone tank (2,000 lb, the real aircraft carries about six
+times that). The AV-8 and Yak-141 keep the record's flow.
+
 ### Fitted rotor constants
 
 | Constant | AH-64 | Mi-24 | CH-47 | V-22 |

@@ -401,79 +401,6 @@ impl PlacedSize {
     }
 }
 
-/// Whether a placed type is a land surface unit (an NT that is not a ship,
-/// a structure or a man): it stands on the lowest point of its shape rather
-/// than on its origin (docs/spec/surface-defenses.md, "Size"; fitted: for
-/// every land unit the lowest point equals the shape's F2 ground offset
-/// within a unit, while ships and bunkers record offsets below their
-/// geometry).
-pub fn stands_on_wheels(definition: &tore_formats::static_object::Definition) -> bool {
-    use tore_formats::surface_unit::class;
-    definition
-        .resource_name
-        .to_ascii_uppercase()
-        .ends_with(".NT")
-        && definition.category & (class::SHIP | class::STRUCTURE | class::OTHER) == 0
-}
-
-/// The lowest and highest point of a drawn shape along its up axis, in shape
-/// units about its origin (faces and sprites), or `None` for an empty shape.
-pub fn shape_height_range(shape: &tore_formats::shape::Shape) -> Option<[f64; 2]> {
-    let mut range = [f64::INFINITY, f64::NEG_INFINITY];
-    let faces = shape
-        .faces
-        .iter()
-        .flat_map(|face| face.positions.iter().map(|p| f64::from(p[2])));
-    let sprites = shape.billboards.iter().flat_map(|sprite| {
-        let h = f64::from(sprite.size[1]) * 0.5;
-        let c = f64::from(sprite.center[2]);
-        [c - h, c + h]
-    });
-    for v in faces.chain(sprites) {
-        range = [range[0].min(v), range[1].max(v)];
-    }
-    range.iter().all(|v| v.is_finite()).then_some(range)
-}
-
-/// Whether a placed type stands on the lowest point of its shape rather than
-/// on its origin: a land surface unit ([`stands_on_wheels`]) or a real-size
-/// building (an OT that is not a runway, bridge or road). Retail shapes
-/// put their origin well above their base (a hangar 41 percent of its
-/// height, a factory hall 89 percent, a town block wholly), and the F2
-/// ground offset that FA 0x42e0c0 reads to stand an object on the ground
-/// equals that lowest point within 3 ft for every OT of the retail data
-/// (`--surface-dump --grounding`; B13, 2026-10-12, fitted). Ships keep their
-/// waterline, men their sprite centre, and runways, bridges and roads the
-/// map's height.
-pub fn stands_on_lowest_point(definition: &tore_formats::static_object::Definition) -> bool {
-    stands_on_wheels(definition) || is_building(definition)
-}
-
-/// A real-size OT placement that is not a runway: a building or other
-/// theater object.
-fn is_building(definition: &tore_formats::static_object::Definition) -> bool {
-    definition
-        .resource_name
-        .to_ascii_uppercase()
-        .ends_with(".OT")
-        && !definition.callbacks.iter().any(|name| name == "_STRIPProc")
-        && PlacedSize::of(definition) == PlacedSize::RealSize
-}
-
-/// How far a placed object is lifted to stand on the ground, world feet:
-/// its shape's lowest point at `scale` when it [stands on it](stands_on_lowest_point),
-/// else 0. Runways have their own pavement rule in [`Placements::stance`].
-pub fn building_lift_ft(
-    definition: &tore_formats::static_object::Definition,
-    shape: &tore_formats::shape::Shape,
-    scale: f64,
-) -> f64 {
-    match shape_height_range(shape) {
-        Some([low, _]) if stands_on_lowest_point(definition) => (-low * scale).max(0.),
-        _ => 0.,
-    }
-}
-
 /// Feet per shape unit of a placed object: the reviewed SH header exponent
 /// (`2^(e-8)`) times the [`PlacedSize`] factor of its definition. Every
 /// placed object's drawn size, contact box, collision and hit box (through
@@ -564,6 +491,12 @@ impl SurfaceSite {
         let mut types = type_infos(resources, &self.sources);
         let ground = surface_ground(theater, &self.sources, &mut types);
         crate::surface::layout::audit(surface, &ground, &mut types)
+    }
+
+    /// The SAM sites and gun sites `area` rolls on this site's layout,
+    /// before any is left out for want of a place.
+    pub fn area_site_counts(&self, area: &crate::surface::resolve::AreaDefense) -> (usize, usize) {
+        crate::surface::layout::area::site_counts(area, &format!("{}.MM", self.code))
     }
 
     /// [`crate::surface::layout::area::audit`] for a surface this site
@@ -775,7 +708,27 @@ impl Placements {
                 .get(&layout_name)
                 .ok_or_else(|| format!("missing airport layout {layout_name}"))?,
         )?;
-        let mut out = Self {
+        let mut out = Self::empty();
+        out.tiles = resources
+            .get(&layout_name)
+            .and_then(|bytes| tore_formats::theater::Environment::parse(bytes).ok())
+            .map(|e| {
+                e.textures
+                    .values()
+                    .map(|t| (i64::from(t.col), i64::from(t.row)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for placement in &layout.placements {
+            out.add_type(resources, &layout_name, &placement.object_type)?;
+        }
+        out.layout = layout;
+        Ok(out)
+    }
+
+    /// No placements and no types.
+    fn empty() -> Self {
+        Self {
             layout: tore_formats::mission::Layout {
                 resource: String::new(),
                 map: None,
@@ -789,22 +742,22 @@ impl Placements {
             strip_boxes: BTreeMap::new(),
             unreadable: Vec::new(),
             surface: Vec::new(),
-            tiles: resources
-                .get(&layout_name)
-                .and_then(|bytes| tore_formats::theater::Environment::parse(bytes).ok())
-                .map(|e| {
-                    e.textures
-                        .values()
-                        .map(|t| (i64::from(t.col), i64::from(t.row)))
-                        .collect()
-                })
-                .unwrap_or_default(),
-        };
-        for placement in &layout.placements {
-            out.add_type(resources, &layout_name, &placement.object_type)?;
+            tiles: Vec::new(),
         }
-        out.layout = layout;
-        Ok(out)
+    }
+
+    /// The definitions and shapes of `types` with no placements, for an
+    /// audit that stands each type itself ([`Self::stance`]); a type whose
+    /// record does not read is skipped.
+    pub fn of_types<'a>(
+        resources: &dyn ResourceSource,
+        types: impl IntoIterator<Item = &'a str>,
+    ) -> Self {
+        let mut out = Self::empty();
+        for object_type in types {
+            let _ = out.add_type(resources, "audit", object_type);
+        }
+        out
     }
 
     /// The layout's placements and the surface's template placements, as the
@@ -922,7 +875,8 @@ impl Placements {
         let mut min = [f64::INFINITY; 3];
         let mut max = [f64::NEG_INFINITY; 3];
         // A viewer-facing sprite (the men) spans its width across either
-        // horizontal axis and its height upward from its centre.
+        // horizontal axis and half its height either side of its centre,
+        // as `Billboard::face` draws it.
         let sprites = shape.billboards.iter().flat_map(|sprite| {
             let [w, h] = sprite.size.map(|v| v * 0.5);
             let c = sprite.center;
@@ -970,16 +924,12 @@ impl Placements {
             support_height + f64::from(placement.position[1]),
             f64::from(placement.position[2]),
         ];
+        // Every object stands on the bottom of its shape (crate::grounding);
+        // a runway on its pavement, ships and bridges on their origin.
         let grounding_offset = if runway {
             -pavement_height(shape) * scale
-        } else if stands_on_lowest_point(definition) {
-            // A vehicle, launcher or gun stands on its lowest point (its
-            // shape's origin is at its turret or rails), and so does a
-            // building (its origin is above its base, B13); ships keep
-            // their waterline.
-            (-min[1]).max(0.)
         } else {
-            0.
+            crate::grounding::placement_lift_ft(definition, shape, scale)
         };
         let origin = std::array::from_fn::<_, 3, _>(|axis| {
             support_origin[axis] + basis.up[axis] * grounding_offset
@@ -1861,50 +1811,6 @@ mod tests {
             flags: 0,
             max_visible: 0,
         }
-    }
-
-    /// A shape of one triangle spanning `low` to `high` along its up axis.
-    fn upright(low: f32, high: f32) -> tore_formats::shape::Shape {
-        tore_formats::shape::Shape {
-            lines: Vec::new(),
-            faces: vec![tore_formats::shape::Face {
-                positions: vec![[0., 0., low], [10., 0., low], [0., 0., high]],
-                colors: vec![0],
-                fog: Default::default(),
-                uv: Vec::new(),
-                texture: String::new(),
-                subtype: 0,
-                normal: None,
-                address: 0,
-            }],
-            billboards: Vec::new(),
-            state_words: Default::default(),
-        }
-    }
-
-    #[test]
-    fn buildings_and_land_units_stand_on_their_lowest_point() {
-        // B13: a factory hall whose origin is 89 percent of the way up
-        // stands on its base, at the third the real-size rule draws it.
-        let hall = upright(-128., 16.);
-        assert_eq!(shape_height_range(&hall), Some([-128., 16.]));
-        let factory = definition("FACTD.OT", "_OBJProc");
-        assert!(stands_on_lowest_point(&factory));
-        assert!((building_lift_ft(&factory, &hall, 1. / 3.) - 128. / 3.).abs() < 1e-9);
-        // A shape already standing on its origin is not lifted, nor sunk.
-        assert_eq!(building_lift_ft(&factory, &upright(4., 20.), 1.), 0.);
-        // Runways (their pavement rule), bridges and roads keep the map's
-        // height.
-        for (name, callback) in [("STRIP.OT", "_STRIPProc"), ("BRDMID.OT", "_OBJProc")] {
-            let fixed = definition(name, callback);
-            assert!(!stands_on_lowest_point(&fixed), "{name}");
-            assert_eq!(building_lift_ft(&fixed, &hall, 1.), 0., "{name}");
-        }
-        // A land unit stands on its wheels; a ship keeps its waterline.
-        let mut tank = definition("T80.NT", "_NTProc");
-        assert!(stands_on_lowest_point(&tank));
-        tank.category = tore_formats::surface_unit::class::SHIP;
-        assert!(!stands_on_lowest_point(&tank));
     }
 
     /// A data module whose CODE section is a shape header with exponent `e`.

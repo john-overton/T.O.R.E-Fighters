@@ -208,7 +208,11 @@ pub enum DestroyedLook {
     /// a generated ruin, or (pavement, bridge ends) their intact look; they
     /// never vanish (B16).
     Removed,
-    /// Men and invisible barrage zones: gone.
+    /// Men whose shape holds a damaged model (the airfield squad TROOPS):
+    /// that model, the men lying on the ground (retail shape, drawn when
+    /// they are killed; John, 2026-10-13). Nothing burns.
+    Bodies(String),
+    /// Other men and invisible barrage zones: gone.
     Vanish,
 }
 
@@ -503,6 +507,11 @@ impl Surface {
             h.u32(area.seed);
             h.u32(area.enemy_nationality as u32);
             h.u8(u8::from(area.night_stealth));
+            // Only the rolled counts say so: the first build's digest
+            // (fixed counts) stays what it was.
+            if area.rolled {
+                h.bytes(b"rolled");
+            }
         }
         h.finish()
     }

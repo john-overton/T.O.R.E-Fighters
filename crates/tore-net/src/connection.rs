@@ -264,8 +264,12 @@ pub struct Stats {
     pub since_last_received: Duration,
     /// Keepalives received since the connection started: the times the
     /// other side's game was stalled and its keepalive thread spoke for it
-    /// (slice EF-K; only a host receives them).
+    /// (slice EF-K). A player's connection counts its host's loading
+    /// keepalives here too (protocol 28).
     pub keepalives: u64,
+    /// The other side said, in its newest keepalive since its last Payload,
+    /// that it is building a mission (a host, protocol 28, slice NET2).
+    pub peer_loading: bool,
 }
 
 /// The state of an established connection.
@@ -300,6 +304,9 @@ pub(crate) struct Connection {
     /// Keepalives are standing in for the other side's game, which last
     /// sent a Payload at this time.
     stalled_since: Option<Duration>,
+    /// The other side's keepalives since its last Payload say it is
+    /// loading (a host building a mission, protocol 28).
+    peer_loading: bool,
     pub events: VecDeque<Event>,
     pub closed: Option<CloseReason>,
 }
@@ -345,6 +352,7 @@ impl Connection {
             keepalives: 0,
             last_payload: now,
             stalled_since: None,
+            peer_loading: false,
             events: VecDeque::new(),
             closed: None,
         }
@@ -381,6 +389,7 @@ impl Connection {
             messages_queued: self.sender.queued(),
             since_last_received: now.saturating_sub(self.last_received),
             keepalives: self.keepalives,
+            peer_loading: self.peer_loading,
         }
     }
 
@@ -496,6 +505,7 @@ impl Connection {
         self.recv.record(header.sequence, now);
         self.last_received = now;
         self.last_payload = now;
+        self.peer_loading = false;
         if let Some(since) = self.stalled_since.take() {
             self.events.push_back(Event::Resumed {
                 stalled_for: now.saturating_sub(since),
@@ -587,16 +597,19 @@ impl Connection {
     }
 
     /// Takes a Keepalive whose connection id and address are good: the
-    /// connection has heard from its peer. No acknowledgement, statistic or
-    /// answer comes of it; the first since a Payload raises
-    /// [`Event::Stalled`], and the next Payload [`Event::Resumed`].
-    pub(crate) fn kept_alive(&mut self, now: Duration) {
+    /// connection has heard from its peer. No acknowledgement or answer
+    /// comes of it; the first since a Payload raises [`Event::Stalled`], and
+    /// the next Payload [`Event::Resumed`]. `loading` is the keepalive's
+    /// flag (a host building a mission, protocol 28): it holds until the
+    /// next Payload.
+    pub(crate) fn kept_alive(&mut self, now: Duration, loading: bool) {
         if self.closed.is_some() {
             return;
         }
         self.now = now;
         self.last_received = self.last_received.max(now);
         self.keepalives += 1;
+        self.peer_loading = loading;
         if self.stalled_since.is_none() {
             self.stalled_since = Some(self.last_payload);
             self.events.push_back(Event::Stalled);

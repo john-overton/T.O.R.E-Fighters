@@ -765,10 +765,11 @@ fn a_mission_with_no_target_gets_the_enemys_area_defenses() {
             seed: 7,
             enemy_nationality: usize::from(spec.enemy_nationality),
             night_stealth: false,
+            rolled: true,
         })
     );
     let area: Vec<&Unit> = layout::area::units(surface).collect();
-    let wanted = (layout::AREA_SAM_SITES[3] + layout::AREA_AAA_SITES[3]) * layout::AREA_SITE_UNITS;
+    let wanted = 2 * layout::AREA_SLOTS * layout::AREA_SITE_UNITS;
     assert_eq!(area.len(), wanted, "{:?}", surface.layout_notes);
     for unit in &area {
         assert_eq!(unit.side, ENEMY_SIDE);
@@ -785,6 +786,21 @@ fn a_mission_with_no_target_gets_the_enemys_area_defenses() {
         );
     }
     assert_eq!(surface.digest(), open.terrain.surface.digest());
+    // John, 2026-10-13: the SAM units have supply trucks, which are combat
+    // targets like the template's.
+    assert!(!surface.trucks.is_empty());
+    for truck in &surface.trucks {
+        assert!(
+            single
+                .combat
+                .state
+                .targets
+                .iter()
+                .any(|t| t.id == truck.id.0),
+            "truck {:#x} is no combat target",
+            truck.id.0
+        );
+    }
     // Another seed, other places.
     spec.surface_seed = 8;
     let other = World::new(&spec, &r, Seating::SinglePlayer).unwrap();

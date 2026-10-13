@@ -36,6 +36,7 @@
 pub mod aero;
 pub mod body;
 pub mod drive;
+pub mod fuel;
 pub mod fuselage;
 pub mod helicopter;
 pub mod jet;
@@ -51,6 +52,8 @@ pub mod trim;
 mod ai_lift_tests;
 #[cfg(test)]
 mod easy_physics_tests;
+#[cfg(test)]
+mod fuel_tests;
 #[cfg(test)]
 pub(crate) mod hover_hold_tests;
 #[cfg(test)]
@@ -223,7 +226,7 @@ mod tests {
     /// The synthetic record of `id`; the single-rotor helicopters and the
     /// V-22 carry their PT's flight numbers, since their rotors size their
     /// power.
-    fn fixture(id: AircraftId) -> tore_formats::aircraft::Aircraft {
+    pub(super) fn fixture(id: AircraftId) -> tore_formats::aircraft::Aircraft {
         if id == AircraftId::Ch47 {
             tandem::tests::pt_aircraft()
         } else if matches!(id, AircraftId::Ah64 | AircraftId::Mi24) {
@@ -237,7 +240,7 @@ mod tests {
     /// The aircraft whose hover the generic control test below flies: the V-22
     /// and the single-rotor helicopters.
     const HOVER_CRAFT: [AircraftId; 3] = [AircraftId::V22, AircraftId::Ah64, AircraftId::Mi24];
-    fn hover(id: AircraftId, height: f64) -> State {
+    pub(super) fn hover(id: AircraftId, height: f64) -> State {
         let aircraft = fixture(id);
         let mut s = State::new(&aircraft, [0., height, 0.]).unwrap();
         s.enable_research(1).unwrap();
@@ -265,7 +268,7 @@ mod tests {
         jet::trim_hover(&mut s);
         s
     }
-    fn run(s: &mut State, input: &PilotInput, ticks: usize) {
+    pub(super) fn run(s: &mut State, input: &PilotInput, ticks: usize) {
         for _ in 0..ticks {
             s.step_surface(input, |_, _| crate::research::Surface::runway(0.));
         }

@@ -43,14 +43,10 @@ fn noise(point: [f32; 3], salt: u32) -> f32 {
     (v >> 40) as f32 / (1u64 << 24) as f32
 }
 
+/// The shape's lowest and highest point, by the shared grounding rule
+/// (`tore_world::grounding::height_range`).
 fn lowest(shape: &Shape) -> Option<[f32; 2]> {
-    let mut range: Option<[f32; 2]> = None;
-    for p in shape.faces.iter().flat_map(|f| f.positions.iter()) {
-        let r = range.get_or_insert([p[2], p[2]]);
-        r[0] = r[0].min(p[2]);
-        r[1] = r[1].max(p[2]);
-    }
-    range
+    tore_world::grounding::height_range(shape).map(|[low, high]| [low as f32, high as f32])
 }
 
 /// Whether a face (shape axes right, forward, up) lies near level.

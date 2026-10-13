@@ -1572,10 +1572,17 @@ impl State {
             self.elevator += (input.pitch - self.elevator) * (DT / c.equipment.control_seconds);
             self.aileron += (input.roll - self.aileron) * (DT / c.equipment.control_seconds);
         }
-        let rate = if ab {
-            c.propulsion.afterburner_fuel_lbs_per_second
-        } else {
-            c.propulsion.military_fuel_lbs_per_second * self.throttle
+        // A rotorcraft burns by the power its rotors draw (slice HF2), not by
+        // the record's flow; everything else by the record.
+        let rotor_rate = self
+            .research
+            .is_some()
+            .then(|| self.rotorcraft_fuel_flow())
+            .flatten();
+        let rate = match rotor_rate {
+            Some(rate) => rate,
+            None if ab => c.propulsion.afterburner_fuel_lbs_per_second,
+            None => c.propulsion.military_fuel_lbs_per_second * self.throttle,
         };
         if self.engine {
             self.consume_fuel(rate * DT);

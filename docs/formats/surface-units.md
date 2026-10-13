@@ -158,6 +158,63 @@ teams, 0 for fixed guns. Waypoint speeds in the same files are feet per second
 450, 400 and 250 knots), and the plan treats these words as feet per second
 too. The unit of the movement words and of `maxVisDist` is not established.
 
+## Weapon zones of the armed units
+
+Every surface weapon record (JT) carries two zones in its seeker block, both in
+feet. The record text writes the ranges with the `^` marker (`dword ^50000`),
+which stores feet times 256; the reader returns the feet as written, so
+nothing is rescaled again. The plain integers `maxVisDist`, `zoneDist` and
+`searchDist` are different: they are in 256 ft units (inference).
+
+| Zone | JT offset | Meaning |
+| --- | --- | --- |
+| zone 0 | `+0xbb` | Where the weapon can see and pick a target: the acquisition (search) range and altitude band |
+| zone 1 | `+0xcf` | Where it may launch or fire: the launch range and altitude band |
+
+Read from `FA_2.LIB` (SHA-256 `fb8b3021...`, the build in the spec) on
+2026-10-13 with `surface_inspect FA_2.LIB zones`. Ranges in feet; the guns'
+zone 1 is the record's, before TORE caps it by the shells' reach.
+
+| Unit | Record | Zone 0 range | Zone 1 range | Ratio |
+| --- | --- | ---: | ---: | ---: |
+| ZSU23 | ZSU23 | 60,000 | 50 to 7,500 | 8.0 |
+| 2S6 | 2S6 | 54,000 | 50 to 15,000 | 3.6 |
+| ZSU57, ZIF31 | ZSU57 | 60,000 | 50 to 12,000 | 5.0 |
+| KIROV, SOVR, KIEV, SARAN, BUTLER | AAA30 | 60,000 | 50 to 15,000 | 4.0 |
+| CLEM, IOWA, KITT, NIMZ, TICON, WASP | PHALANX | 50,000 | 50 to 20,000 | 2.5 |
+| **M163** | **PHALANX** | **50,000** | **50 to 20,000** | **2.5** |
+| KS12 | KS12 | 100,000 | 0 to 40,000 | 2.5 |
+| KS19 | KS19 | 100,000 | 0 to 50,000 | 2.0 |
+| M1939, A_M1939 | M1939, A_M1939 | 20,000 | 0 to 10,000 | 2.0 |
+| AAA30BAD ships | AAA30BAD | 20,000 | 50 to 10,000 | 2.0 |
+| Tanks, IFVs, APCs | M1, T72, BMP2, BTR80, M113, M2 | 20,000 | 50 to 3,000 / 5,000 | 4.0 to 6.7 |
+| SA-7, SA-9, SA-13, SA-14, SA-16, FIM-92 | own | 15,000 to 100,000 | 500 to 54,000 | |
+| SA-2 / SA-3 / SA-6 | own | 150,000 / 100,000 / 80,000 | 7,500 to 95,000 / 7,500 to 54,000 / 9,000 to 75,000 | |
+
+What this shows:
+
+- The M163's 50,000 ft (8.2 nm) detection is the retail value, read correctly.
+  It is not a misread field, a unit error or a TORE default.
+- **`M163.NT` mounts `PHALANX.JT`**, the ship Phalanx close-in weapon record
+  (its single hardpoint `defaultTypeName`), so the M163 inherits that record's
+  zone 0 of 50,000 ft and zone 1 of 50 to 20,000 ft (altitude to 15,000 ft),
+  its 10 s round life and its 6-round bursts.
+- `FA_2.LIB` also holds a dedicated **`M163.JT`**, which no NT, no other
+  archive and no `FA.EXE` string refers to (only `M163.NT` is named in
+  `FA.EXE`). It is a copy of the ZSU23 record: every field the reader keeps is
+  equal to `ZSU23.JT`'s except the names (zone 0 60,000 ft, zone 1 50 to 7,500
+  ft, altitude to 7,500 ft, life 5 s, 4-round bursts, the `hvygun` sound).
+  Whether retail ever wired it up is unknown: the data says the M163 fires
+  PHALANX.
+- Every radar-directed gun in retail acquires at 2 to 8 times the range it
+  fires at (a Shilka sees 60,000 ft and fires at 7,500 ft). The M163's 2.5 to
+  1 is among the narrowest of the radar guns (the KS-19's is 2.0 to 1). A big acquisition zone is therefore
+  the normal shape of the data, not a quirk of the M163.
+- What stands out is the M163's **fire** range: 20,000 ft (3.3 nm) is 2.7
+  times the ZSU-23's 7,500 ft, because it borrows the ship record. The real
+  M163 VADS fires effectively to about 1.2 nm (about 7,500 ft), which is
+  exactly the unused `M163.JT`'s (a ZSU23 copy) and the ZSU23's zone 1.
+
 ## Not established
 
 - The units of `maxVisDist`, `zoneDist`, `_maxSpeed`, `_turnRate`, `_acc`.
@@ -171,6 +228,7 @@ too. The unit of the movement words and of `maxVisDist` is not established.
 ```sh
 cargo run -p tore-formats --example surface_inspect -- gameassets/fighters-anthology/FA_2.LIB nt SA6
 cargo run -p tore-formats --example surface_inspect -- gameassets/fighters-anthology/FA_2.LIB summary
+cargo run -p tore-formats --example surface_inspect -- gameassets/fighters-anthology/FA_2.LIB zones
 cargo test -p tore-formats quick_template::import_tests -- --ignored
 ```
 

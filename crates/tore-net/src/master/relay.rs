@@ -395,6 +395,53 @@ impl<S: Datagrams> Datagrams for RelayFraming<S> {
     }
 }
 
+/// A socket that sends to the relayed address of any of its channels as a
+/// Relay frame to that channel's master: what a relayed host hands its
+/// loading thread ([`crate::Loading::start`], protocol 28), wrapped around a
+/// clone of its socket, with the channels open when the build began
+/// ([`Channels::list`]). A send to another relayed address is dropped; any
+/// other send goes out unchanged. It never reads.
+#[derive(Debug)]
+pub struct RelayFramings<S> {
+    socket: S,
+    /// `(channel, key, master)`, as [`Channels::list`] gives them.
+    channels: Vec<(u32, u32, SocketAddr)>,
+}
+
+impl<S> RelayFramings<S> {
+    /// Frames for `channels` on `socket`.
+    pub fn new(socket: S, channels: Vec<(u32, u32, SocketAddr)>) -> Self {
+        Self { socket, channels }
+    }
+}
+
+impl<S: Datagrams> Datagrams for RelayFramings<S> {
+    fn send_datagram(&mut self, to: SocketAddr, datagram: &[u8]) -> io::Result<()> {
+        if !is_relayed(to) {
+            return self.socket.send_datagram(to, datagram);
+        }
+        let Some(&(channel, key, master)) =
+            channel_of(to).and_then(|channel| self.channels.iter().find(|(c, _, _)| *c == channel))
+        else {
+            return Ok(());
+        };
+        match (RelayFrame {
+            channel,
+            key,
+            datagram,
+        })
+        .encode()
+        {
+            Ok(frame) => self.socket.send_datagram(master, &frame),
+            Err(_) => Ok(()),
+        }
+    }
+
+    fn recv_datagram(&mut self, _buf: &mut [u8]) -> io::Result<Option<(usize, SocketAddr)>> {
+        Ok(None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -603,5 +650,33 @@ mod tests {
             (7, 99, &[9u8; 9][..])
         );
         assert_eq!(sent[1], (a("203.0.113.5:26900"), vec![1]));
+    }
+
+    #[test]
+    fn the_loading_wrapper_frames_for_each_of_its_channels() {
+        let other = "198.51.100.9:27999";
+        let mut framing =
+            RelayFramings::new(Sent::default(), vec![(7, 99, a(MASTER)), (8, 42, a(other))]);
+        framing.send_datagram(relayed_address(7), &[7; 10]).unwrap();
+        framing.send_datagram(relayed_address(8), &[8; 10]).unwrap();
+        framing.send_datagram(relayed_address(9), &[9; 10]).unwrap();
+        framing.send_datagram(a("203.0.113.5:26900"), &[1]).unwrap();
+        let mut buf = [0u8; 16];
+        assert!(framing.recv_datagram(&mut buf).unwrap().is_none());
+        let sent = framing.socket.0;
+        assert_eq!(sent.len(), 3);
+        for (index, (master, channel, key, byte)) in
+            [(a(MASTER), 7, 99, 7u8), (a(other), 8, 42, 8u8)]
+                .into_iter()
+                .enumerate()
+        {
+            assert_eq!(sent[index].0, master);
+            let frame = RelayFrame::open(&sent[index].1).unwrap();
+            assert_eq!(
+                (frame.channel, frame.key, frame.datagram),
+                (channel, key, &[byte; 10][..])
+            );
+        }
+        assert_eq!(sent[2], (a("203.0.113.5:26900"), vec![1]));
     }
 }

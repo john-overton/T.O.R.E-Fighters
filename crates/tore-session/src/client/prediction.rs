@@ -12,7 +12,7 @@
 
 use super::seen::{OwnSample, own_sample};
 use crate::wire::inputs::{Command, InputFrame};
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 use tore_sim::attitude::Vector;
 use tore_sim::combat::live::Configuration;
@@ -24,6 +24,8 @@ use tore_world::world::plane::{ExactState, OwnPlane, OwnshipTerms, PlaneTick, We
 
 /// Ticks of inputs, commands and hashes kept (2 seconds).
 pub const HISTORY_TICKS: usize = 240;
+/// Ticks of own state hashes kept: as many as a migration's kept ticks.
+pub const EXACT_HASH_TICKS: usize = super::migrate::KEPT_TICKS;
 /// The drawn correction's time constant, seconds (95 percent within 150 ms).
 pub const BLEND_SECONDS: f64 = 0.05;
 /// A correction over this many feet, or [`SNAP_DEGREES`], is not blended.
@@ -106,6 +108,10 @@ pub struct Predictor {
     history: VecDeque<Record>,
     /// What happened, when someone asked to keep it.
     trace: Option<Vec<Trace>>,
+    /// The own state hash after each of the last [`EXACT_HASH_TICKS`]
+    /// ticks: a resume compares the old host's state at T with the one
+    /// predicted there.
+    exact_hashes: BTreeMap<u64, u64>,
 }
 
 impl Predictor {
@@ -134,6 +140,7 @@ impl Predictor {
             standing,
             history: VecDeque::new(),
             trace: None,
+            exact_hashes: BTreeMap::new(),
         }
     }
 
@@ -176,6 +183,12 @@ impl Predictor {
     /// A ground object was destroyed.
     pub fn destroyed(&mut self, object: u32) {
         self.standing.remove(&object);
+    }
+
+    /// The prediction's own state hash after `tick`, any tick of the last
+    /// [`EXACT_HASH_TICKS`].
+    pub fn exact_hash_at(&self, tick: u64) -> Option<u64> {
+        self.exact_hashes.get(&tick).copied()
     }
 
     /// The prediction's own state hash after `tick`, when it was a snapshot
@@ -231,6 +244,11 @@ impl Predictor {
         // The host gives these to the seat as its HUD lines.
         self.plane.flight.systems.messages.clear();
         self.tick = tick;
+        let hash = self.exact().hash()?;
+        self.exact_hashes.insert(tick, hash);
+        while self.exact_hashes.len() > EXACT_HASH_TICKS {
+            self.exact_hashes.pop_first();
+        }
         if self.trace.is_some() {
             let sample = own_sample(
                 tick,
@@ -245,11 +263,7 @@ impl Predictor {
                 .get_or_insert_with(Vec::new)
                 .push(Trace::Stepped(sample));
         }
-        Ok(if tick % self.ticks_per_snapshot == self.phase {
-            Some(self.exact().hash()?)
-        } else {
-            None
-        })
+        Ok((tick % self.ticks_per_snapshot == self.phase).then_some(hash))
     }
 
     /// The exact state of the prediction now.
@@ -286,6 +300,7 @@ impl Predictor {
                 self.trace.get_or_insert_with(Vec::new).push(host);
             }
             // Not reached yet: the plane is the host's from there.
+            self.exact_hashes.insert(tick, state.hash()?);
             let (plane, terms) = state.into_own_plane(self.plane.plane);
             self.plane = plane;
             self.terms = terms;
@@ -298,6 +313,7 @@ impl Predictor {
             return Ok(Restored::Stale);
         }
         let hash = state.hash()?;
+        self.exact_hashes.insert(tick, hash);
         let ours = if tick == self.tick {
             Some(self.exact().hash()?)
         } else {

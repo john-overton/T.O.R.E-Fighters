@@ -346,6 +346,27 @@ impl Server {
         }
     }
 
+    /// The loading Keepalive of every open connection, with its address
+    /// (protocol 28, slice NET2): what the host's [`crate::Loading`] thread
+    /// sends while the host builds a mission. The in-process link's
+    /// connection is among them: the hosting game's own player is held up
+    /// by the build as much as any other.
+    pub fn loading_datagrams(&self) -> Vec<(SocketAddr, Vec<u8>)> {
+        self.entries
+            .iter()
+            .filter(|(_, entry)| entry.connection.closed.is_none())
+            .filter_map(|(address, entry)| {
+                Packet::Keepalive(packet::Keepalive {
+                    connection: entry.connection.id,
+                    loading: true,
+                })
+                .encode(self.config.protocol_version)
+                .ok()
+                .map(|datagram| (*address, datagram))
+            })
+            .collect()
+    }
+
     /// Notes when a packet that arrived at `received` was sent, in the
     /// sender's time (for example the tick it carries), for the arrival
     /// spread statistic.
@@ -771,7 +792,8 @@ impl Server {
             self.counters.stale += 1;
             return;
         }
-        entry.connection.kept_alive(now);
+        // A player's game never builds for the host: its flag is ignored.
+        entry.connection.kept_alive(now, false);
         self.collect(from);
     }
 

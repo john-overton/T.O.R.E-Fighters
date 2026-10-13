@@ -37,7 +37,9 @@ use tore_net::{Datagrams, Entropy, LINK_ADDRESS, MAX_DATAGRAM, Platform, ServerS
 use tore_session::bot::Bot;
 use tore_session::client::candidate::CandidateSettings;
 use tore_session::host::content::GameContent;
-use tore_session::host::{Present, ResumeNote, Resumption, hosting_answer, reach_packet};
+use tore_session::host::{
+    LoadingSocket, Present, ResumeNote, Resumption, hosting_answer, reach_packet,
+};
 use tore_session::standby::takeover::take_over_thread;
 use tore_session::standby::{Builder, MissionKey, Note, StandbyThread};
 use tore_session::wire::messages::Message;
@@ -88,6 +90,44 @@ impl Datagrams for Sock {
     }
 }
 
+impl Sock {
+    /// A clone, for the host's loading thread.
+    fn try_clone(&self) -> std::io::Result<Self> {
+        Ok(match self {
+            Self::Udp(socket) => Self::Udp(socket.try_clone()?),
+            Self::Server(socket) => Self::Server(socket.try_clone()?),
+        })
+    }
+}
+
+/// A clone of the bot's socket for its host's loading thread (protocol 28):
+/// the network's players only, since the bot's own client hears its host
+/// on the same loop.
+struct Network(Sock);
+
+impl Datagrams for Network {
+    fn send_datagram(&mut self, to: SocketAddr, datagram: &[u8]) -> std::io::Result<()> {
+        if to == LINK_ADDRESS {
+            return Ok(());
+        }
+        self.0.send_datagram(to, datagram)
+    }
+
+    fn recv_datagram(&mut self, _buf: &mut [u8]) -> std::io::Result<Option<(usize, SocketAddr)>> {
+        Ok(None)
+    }
+}
+
+/// How the bot's host clones the bot's socket while it builds a mission
+/// (protocol 28); `None` when the socket cannot be cloned (the host then
+/// builds without a word, as before).
+fn loading_socket(sock: &Sock) -> Option<LoadingSocket> {
+    let base = sock.try_clone().ok()?;
+    Some(Box::new(move || {
+        Ok(Box::new(Network(base.try_clone()?)) as Box<dyn Datagrams + Send>)
+    }))
+}
+
 /// What a hosting bot is built from (`--host`).
 pub struct HostSetup {
     pub spec: MissionSpec,
@@ -97,6 +137,9 @@ pub struct HostSetup {
     /// List the game on this master (`--master`, a loopback master in the
     /// battery), as a hosting game does.
     pub master: Option<String>,
+    /// `--host-slow-build SECONDS` (a test aid, slice NET2): every mission
+    /// build of the host after its first lasts at least this long.
+    pub slow_build: Option<Duration>,
 }
 
 /// What a listing of the game on a master says about its host.
@@ -227,6 +270,11 @@ impl Mig {
         let mut host = Host::new(setup.spec, Arc::clone(resources), config.clone())
             .map_err(|error| format!("The game could not be hosted: {error}"))?;
         host.set_standbys_enabled(setup.standbys);
+        host.set_slow_build(setup.slow_build);
+        let sock = Sock::Server(socket);
+        if let Some(loading) = loading_socket(&sock) {
+            host.set_loading_socket(loading);
+        }
         let listing = match &setup.master {
             Some(master) => {
                 let mut listing = HostListing::new(
@@ -242,7 +290,7 @@ impl Mig {
         };
         let mut mig = Self::new(resources, config, setup.standbys);
         mig.hosted = Some(Hosted::new(host, None, listing));
-        Ok((mig, Sock::Server(socket)))
+        Ok((mig, sock))
     }
 
     /// A joined bot's: a standby when `standby` is on, with the candidates
@@ -484,6 +532,9 @@ impl Mig {
             Ok(mut host) => {
                 let tick = host.world().tick();
                 host.set_standbys_enabled(self.standbys);
+                if let Some(loading) = loading_socket(sock) {
+                    host.set_loading_socket(loading);
+                }
                 // The old host's listing goes on from this socket (K8).
                 let port = match sock {
                     Sock::Udp(socket) => socket.local_addr().map_or(0, |a| a.port()),
@@ -632,10 +683,10 @@ impl Mig {
     /// The migration's counts and the old host's progress, once a second.
     pub fn counts_line(&self, bot: &Bot) -> Option<String> {
         let counts = bot.client.migration_counts();
-        (counts.resumed + counts.failed + counts.corrected > 0).then(|| {
+        (counts.resumed + counts.failed + counts.corrected + counts.inherited > 0).then(|| {
             format!(
-                "migrations resumed {}, failed {}, corrected {}",
-                counts.resumed, counts.failed, counts.corrected
+                "migrations resumed {}, failed {}, corrected {}, inherited {}",
+                counts.resumed, counts.failed, counts.corrected, counts.inherited
             )
         })
     }
@@ -677,6 +728,7 @@ impl Hosted {
         while let Some(event) = listing.poll_event() {
             println!("{name}: listing: {event:?}");
         }
+        self.host.set_relay_channels(listing.relay_channels());
         self.sync_part();
     }
 
@@ -780,6 +832,9 @@ fn log_line(entry: &HostLog) -> Option<String> {
             address.to_string()
         }
     };
+    if let Some(text) = entry.loading_text() {
+        return Some(text);
+    }
     Some(match entry {
         HostLog::Connected {
             address, callsign, ..

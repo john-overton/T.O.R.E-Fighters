@@ -4888,21 +4888,18 @@ impl AiActor {
     ///
     /// Fitted host rule: fuel flow is the model's military flow scaled by the
     /// current throttle, floored so a shut-down engine does not report an
-    /// infinite endurance. The spec's own definition needs the throttle search
-    /// that holds cruise speed, which the host does not yet perform.
+    /// infinite endurance (a rotorcraft plans with its hover flow, see
+    /// `State::endurance_flow_lbs_per_second`). The spec's own definition
+    /// needs the throttle search that holds cruise speed, which the host does
+    /// not yet perform.
     fn endurance_s(&self) -> f64 {
-        let propulsion = &self.flight.model().configuration().propulsion;
-        let flow = (propulsion.military_fuel_lbs_per_second * self.flight.throttle.max(0.1))
-            .max(MINIMUM_FUEL_FLOW_LBS_PER_S);
-        self.flight.fuel / flow
+        self.flight.fuel / self.flight.endurance_flow_lbs_per_second()
     }
 
     /// Seconds a full internal tank lasts at the flow `endurance_s` uses.
     fn full_endurance_s(&self) -> f64 {
         let c = self.flight.model().configuration();
-        let flow = (c.propulsion.military_fuel_lbs_per_second * self.flight.throttle.max(0.1))
-            .max(MINIMUM_FUEL_FLOW_LBS_PER_S);
-        c.mass.internal_fuel_lbs / flow
+        c.mass.internal_fuel_lbs / self.flight.full_tank_endurance_flow_lbs_per_second()
     }
 
     fn time_home_s(&self) -> Option<f64> {

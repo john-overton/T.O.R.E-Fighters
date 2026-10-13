@@ -14,9 +14,7 @@
 //! as such in docs/ARCHITECTURE.md's "Built (F2-1)" notes.
 
 use super::config::{PUBLIC_IS_BROADCAST, RATE_IS_THE_FILES};
-use super::{
-    ConnectionId, CrownRule, Host, HostError, Life, LobbyEvent, Stage, StartMode, build_world,
-};
+use super::{ConnectionId, CrownRule, Host, HostError, Life, LobbyEvent, Stage, StartMode};
 use crate::settings::{self, Change, LoadoutRule, Mode, Store, number};
 use crate::wire::messages::{Lock, Message, PasswordChange, SettingsChange};
 use std::collections::BTreeMap;
@@ -306,11 +304,10 @@ impl Host {
     /// still stand). A kept loadout the new rule refuses goes back to the
     /// standard load, and its player is told, as a mission change does.
     fn respec(&mut self, spec: MissionSpec) -> Result<(), String> {
-        let (world, manifest) =
-            build_world(&spec, &self.resources).map_err(|error| match error {
-                HostError::Mission(text) => text,
-                other => other.to_string(),
-            })?;
+        let (world, manifest) = self.build(&spec).map_err(|error| match error {
+            HostError::Mission(text) => text,
+            other => other.to_string(),
+        })?;
         self.spec = spec;
         self.spec_text = self.spec.to_text();
         self.world = world;
@@ -696,7 +693,7 @@ impl Host {
         if spec == self.spec && settings == self.settings && self.court.locks.is_empty() {
             return;
         }
-        match build_world(&spec, &self.resources) {
+        match self.build(&spec) {
             Ok((world, manifest)) => {
                 self.settings = settings;
                 self.spec = spec;
