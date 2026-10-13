@@ -340,6 +340,17 @@ flowchart TD
   A game stalled for longer than a minute leaves with the usual "silent" line
   about 65 seconds after it stopped
   ([details](ARCHITECTURE.md#a-stalled-game-stays-connected-ef-k)).
+  *Since protocol 28 (slice NET2)* the server's own mission builds (a
+  King's change of the mission or of friendly fire or the loadout rule, a
+  flight starting with the players' loadouts, the next mission after an
+  end) keep every player too: a thread sends each a loading keepalive twice
+  a second for up to 3 minutes, so nobody is dropped and no standby takes
+  over while it builds. A build long enough for it logs one line:
+
+  ```text
+  loaded the mission in 15.0 s; 3 players kept through it (30 rounds of loading keepalives)
+  ```
+
   A destroyed plane stays destroyed; respawns are stage F.
 - **Ending.** The mission ends at the time limit, once the last player has been
   out of the flight for the empty timeout, or on the console's `end`. Every
