@@ -36,11 +36,11 @@ pub const INSTANCE_BYTES: usize = 6 * 4;
 
 /// A fire's light, in flares, is `FIRE_LIGHT_AT_30_FT` for a 30 ft fire
 /// (a vehicle's), growing as the width to the power `FIRE_LIGHT_POWER`, within
-/// `FIRE_LIGHT_RANGE`: a 24 ft city building fire 0.36 flares, a 90 ft one
-/// 2.6, a 160 ft fuel or ammunition fire 6.2.
-pub const FIRE_LIGHT_AT_30_FT: f64 = 0.5;
-pub const FIRE_LIGHT_POWER: f64 = 1.5;
-pub const FIRE_LIGHT_RANGE: [f64; 2] = [0.25, 8.];
+/// `FIRE_LIGHT_RANGE`: a 24 ft fire gives 0.64 flares, a 90 ft one
+/// 9, and a 160 ft fuel or ammunition fire about 28.4.
+pub const FIRE_LIGHT_AT_30_FT: f64 = 1.;
+pub const FIRE_LIGHT_POWER: f64 = 2.;
+pub const FIRE_LIGHT_RANGE: [f64; 2] = [0., 32.];
 /// The fire's light stands this share of its width above the ground.
 pub const FIRE_LIGHT_RISE: f64 = 0.35;
 /// Fires that light the ground at once, the nearest, within this many feet
@@ -71,7 +71,7 @@ pub const GLOW_SPRITE_PX: [f64; 2] = [3., 16.];
 #[cfg_attr(not(test), allow(dead_code))]
 pub const GLOW_HALO: f64 = 0.8;
 #[cfg_attr(not(test), allow(dead_code))]
-pub const GLOW_NEAR: f64 = 0.12;
+pub const GLOW_NEAR: f64 = 0.18;
 /// Haze dims a glow as it dims the ground at this share of the distance,
 /// counting only the haze ramp: on a clear night (the ramp ending at about
 /// 3.5 nm) a glow fades out by about 35 nm; in fog, far nearer.
@@ -106,9 +106,14 @@ pub fn explosion_glow(
     let flash = blast
         .and_then(|kind| crate::impact_fx::light(position, kind, scale, f64::from(elapsed)))
         .map_or(0., |(_, strength)| strength / FLARE_STRENGTH);
+    flash + explosion_ember(width, factor, elapsed, duration)
+}
+
+/// Light retained by the visible fireball after the separately tracked flash.
+pub fn explosion_ember(width: f64, factor: f64, elapsed: u16, duration: u16) -> f64 {
     let left = 1. - f64::from(elapsed) / f64::from(duration.max(1));
     let peak = crate::impact_fx::light_of(width, factor).0 / FLARE_STRENGTH;
-    flash + EMBER_SHARE * peak * left.clamp(0., 1.).powi(2)
+    EMBER_SHARE * peak * left.clamp(0., 1.).powi(2)
 }
 
 /// One glow point.
@@ -153,21 +158,13 @@ fn distance(a: Vector, b: Vector) -> f64 {
     (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt()
 }
 
-/// The ground light of the nearest fires: `fires` are each fire's base and
-/// width; at most [`MAX_FIRE_LIGHTS`], within [`FIRE_LIGHT_FT`] of `eye`.
-pub fn fire_lights(fires: &[(Vector, f64)], eye: Vector) -> Vec<FlareLight> {
-    let mut near: Vec<(f64, FlareLight)> = fires
+/// Nearby sustained effect lights, bounded before sharing the scene light budget.
+pub fn nearby_lights(lights: &[FlareLight], eye: Vector) -> Vec<FlareLight> {
+    let mut near: Vec<_> = lights
         .iter()
-        .filter_map(|&(base, width)| {
-            let position = [base[0], base[1] + width * FIRE_LIGHT_RISE, base[2]];
-            let d = distance(position, eye);
-            (d <= FIRE_LIGHT_FT).then_some((
-                d,
-                FlareLight {
-                    position,
-                    strength: fire_light(width) * FLARE_STRENGTH,
-                },
-            ))
+        .filter_map(|light| {
+            let d = distance(light.position, eye);
+            (light.strength > 0. && d <= FIRE_LIGHT_FT).then_some((d, *light))
         })
         .collect();
     if near.len() > MAX_FIRE_LIGHTS {
@@ -321,7 +318,7 @@ mod tests {
         let lights: Vec<f64> = widths.iter().map(|w| fire_light(*w)).collect();
         assert!(lights.windows(2).all(|w| w[0] < w[1]), "{lights:?}");
         assert!((fire_light(30.) - FIRE_LIGHT_AT_30_FT).abs() < 1e-12);
-        assert!((fire_light(160.) - 6.16).abs() < 0.01);
+        assert!((fire_light(160.) - 28.444444).abs() < 0.01);
         // And the light reaches farther (surface_lighting.wgsl: the reach
         // grows with the square root of the strength past one flare).
         let reach = |flares: f64| 1_500. * flares.sqrt().max(1.);
@@ -377,7 +374,7 @@ mod tests {
             // Close in, a soft halo around the art.
             let (radius, level) = on_screen(width, flares, 300., 1080., 1.);
             assert!(
-                radius > 30. && level < 0.25 * GLOW_LEVEL[1],
+                radius > 30. && level <= GLOW_NEAR * GLOW_LEVEL[1],
                 "{radius} {level}"
             );
         }
@@ -388,13 +385,20 @@ mod tests {
         let fires: Vec<(Vector, f64)> = (0..40)
             .map(|k| ([f64::from(k) * 2_000., 0., 0.], 60.))
             .collect();
-        let lights = fire_lights(&fires, [0., 500., 0.]);
+        let sources: Vec<_> = fires
+            .iter()
+            .map(|&(p, width)| FlareLight {
+                position: [p[0], p[1] + width * FIRE_LIGHT_RISE, p[2]],
+                strength: fire_light(width) * FLARE_STRENGTH,
+            })
+            .collect();
+        let lights = nearby_lights(&sources, [0., 500., 0.]);
         assert_eq!(lights.len(), MAX_FIRE_LIGHTS);
         assert!(lights.iter().all(|l| l.position[0] <= FIRE_LIGHT_FT));
         assert_eq!(lights[0].position, [0., 21., 0.]);
         assert_eq!(lights[0].strength, fire_light(60.) * FLARE_STRENGTH);
         // From 20 nm no fire lights the ground, but every glow is drawn.
-        assert!(fire_lights(&fires, [0., 500., 20. * NM]).is_empty());
+        assert!(nearby_lights(&sources, [0., 500., 20. * NM]).is_empty());
         let glows: Vec<Glow> = fires
             .iter()
             .map(|&(position, width)| Glow {

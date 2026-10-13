@@ -39,6 +39,18 @@ def scenarios() -> list[Scenario]:
         ))
     return stable + [
         Scenario(
+            name="render-night-effect-lights",
+            lane="flight",
+            args=["--impact-preview", "{work}/night", "night-range"],
+            window=True,
+            env={"TORE_PREVIEW_THEATER": "EGY", "TORE_CITY_FILL": "0"},
+            outputs=[f"night/fire-compare-{width:03d}ft.png" for width in (24, 90, 160)]
+                + ["night/night-00.3nm-t1.00s.png", "night/night-05.0nm-t0.15s.png"],
+            expect=["Impact preview:"],
+            timeout=240,
+            notes="Night fire size and flare comparisons, plus fireballs after the initial flash. Inspect the PNGs; numeric emission and fade regressions are tore-app unit tests.",
+        ),
+        Scenario(
             name="render-f14-hook-deployed",
             lane="flight",
             args=["--free-flight", "--aircraft", "f14", "--flight-devices", "0,0,0,1,0", "--flight-view", "1", "--flight-look", "75,-25", "--flight-zoom", "4", "--capture-flight", "{work}/f14-hook-deployed.ppm", "--no-audio"],

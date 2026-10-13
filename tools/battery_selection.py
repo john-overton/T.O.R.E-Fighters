@@ -42,6 +42,10 @@ from typing import Iterable, Optional, Sequence
 # --------------------------------------------------------------------------
 
 FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "render-night-effect-lights": (
+        "fire and flare comparisons and sustained explosion lighting at night",
+        ("render-night-effect-lights",),
+    ),
     # Flight lane.
     "flight-animation": ("reviewed CPU control-surface and device poses", ("flight-animation-*",)),
     "flight-maneuvers": (
@@ -710,8 +714,10 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/surface_battle.rs", ("surface",), "the surface battle drive and survey"),
     _r("crates/tore-app/src/surface_parked.rs", ("surface",), "the parked aircraft drive"),
     _r("crates/tore-app/src/city_fires.rs", ("surface", "replay-recording"), "the burning city fill buildings' fires and smoke (--city-fires); a replay's knocked-down buildings (nr-fx3)"),
-    _r("crates/tore-app/src/night_glow*", ("surface", "replay-recording"), "the night glow of explosions and fires and the fires' ground light (nr-fx3)"),
+    _r("crates/tore-app/src/night_glow*", ("surface", "replay-recording", "render-night-effect-lights"), "the night glow of explosions and fires and their surface light", windowed=True),
     _r("crates/tore-app/src/city_fill_dump.rs", ("surface",), "the city fill dump, and --city-fires, which surface-city-fires runs"),
+    _r("crates/tore-app/src/effect_renderer.rs", ("render-night-effect-lights",), "effect sprites and sustained light", windowed=True),
+    _r("crates/tore-app/src/impact_preview.rs", ("render-night-effect-lights",), "night lighting capture fixtures", windowed=True),
     _r("crates/tore-app/src/blast_preview.rs", ("replay-cli",), "the explosion and cluster burst preview (offscreen renders)"),
     _r("crates/tore-app/src/a2g_radar.rs", ("a2g",), "the ground pages drive"),
     _r("crates/tore-app/src/a2g_run/ai.rs", ("a2g", "ai-strike"), "the AI strike driver"),

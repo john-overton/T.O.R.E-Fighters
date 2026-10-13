@@ -71,7 +71,8 @@ tracers, explosions, burning flares, chaff, smoke and vapor retain their own
 presentation rather than receiving solid diffuse shading or casting solid shadows.
 Glass receives lighting but does not cast an opaque silhouette.
 
-Burning flares, lit afterburner flames at an eighth of a flare's strength
+Burning fires and explosion fireballs ([night effect light](explosions.md#night-glow)),
+burning flares, lit afterburner flames at an eighth of a flare's strength
 ([afterburner glow](engine-material.md#afterburner-glow)) and the AC-130's
 gunfire ([muzzle flash](ac130-linked-guns.md#muzzle-flash)) add their own warm
 point light to every surface this pass lights, and to water, clouds and

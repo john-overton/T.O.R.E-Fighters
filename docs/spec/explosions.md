@@ -302,18 +302,21 @@ are agent decisions tuned on renders (fitted). Code:
   by the weapon's [size](#size-by-weapon)) plus the fireball's ember after
   it, 0.3 of the flash's peak fading with the square of the time left of
   its art, so a 2,000 lb bomb's glow is brighter and lasts longer than a
-  250 lb bomb's. A fire's is 0.5 flares for a 30 ft fire, growing as its
-  width to the power 1.5, within 0.25 to 8 flares: a 24 ft city building
-  fire 0.36, a 90 ft building fire 2.6, a 160 ft fuel or ammunition fire 6.2.
+  250 lb bomb's. A fire's is 1 flare for a 30 ft fire, growing with its
+  area (width squared), capped at 32 flares: a 24 ft city building fire
+  0.64, a 90 ft building fire 9, a 160 ft fuel or ammunition fire about 28.4.
+  This stronger near-field lighting is agent-selected tuning for John's
+  2026-10-13 request to make night fires emit light comparable to their size.
   Impacts still start no fire (John, 2026-10-12), so for a bomb "its fire"
   is its fireball.
 - **Visible at every distance.** Once the art shrinks below about 16
   pixels the point takes over from it: at least 1.5 pixels in radius
   (`1.5 * (0.8 + 0.45 * sqrt(flares))`, at most 4.5), and its brightness
   `0.8 * sqrt(flares)` between 0.4 and 2.4, so it never fades for being
-  small. Closer in it is a soft halo 0.8 times the art's width at 12 % of
-  that brightness. Before this, a night explosion or fire shrank below a
-  pixel and the night haze (which here reaches full by about 3.5 nm on a
+  small. Closer in it is a soft halo 0.8 times the art's width at 18 % of
+  that brightness, with the bright point core suppressed so the resolved
+  flame artwork remains visible. Before this, a night explosion or fire
+  shrank below a pixel and the night haze (which here reaches full by about 3.5 nm on a
   clear night) took it out by 5 to 10 miles.
 - **Haze.** A light is seen through the night air about ten times as far as
   the ground: the glow takes the scene's haze ramp at a tenth of its
@@ -331,8 +334,15 @@ are agent decisions tuned on renders (fitted). Code:
   strength past one flare (the cut-off at 1,500 ft times the square root of
   the strength in flares), so the light ends where it is as dim as a
   flare's at 1,500 ft: a big fire, and a big bomb's flash, light farther.
-  Only the nearest 8 fires within 3 nm of the camera light the ground,
-  sharing the scene's 16 strongest lights with flares and flashes: the
+  A fading fire keeps its full width and source height while its light
+  strength follows its opacity linearly, reaching zero when extinguished.
+  A detonating explosion also lights surfaces through the remainder of its
+  fireball: 0.3 of its peak flash strength times the square of the fraction
+  of animation left, positioned at the center of its art. This adds only
+  the ember contribution, so the separately tracked flash is not counted
+  twice. Duds, debris puffs and shockwave dust add no sustained light.
+  Only the nearest 8 sustained fire/fireball lights within 3 nm of the
+  camera light the ground, sharing the scene's 16 strongest lights with flares and flashes: the
   ground light is culled by distance, the glow point is not.
 - All of it comes from the picture's effects, marks and burning city, so a
   networked client and a replay show the same. `TORE_NIGHT_GLOW=0` turns
