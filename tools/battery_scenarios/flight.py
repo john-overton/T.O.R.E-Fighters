@@ -2032,6 +2032,38 @@ def panel_scenarios() -> list[Scenario]:
                 timeout=120,
             )
         )
+    # The seeker window: a launch opens the target camera when every slot is
+    # taken (small: top right; large: left of the top-right window), takes a
+    # free slot otherwise, and the landing closes what the launch opened.
+    # --window-layout-preview draws the whole layout without a GPU and prints
+    # where the camera went (a 640x480 canvas).
+    popups = {
+        "small": r"x=536 y=8 w=96 h=95",
+        "large": r"x=300 y=8 w=162 h=160",
+    }
+    for layout, popup in popups.items():
+        words = layout.capitalize()
+        modes = {
+            "before": r"popup false, opened by launch false, target camera closed",
+            "launch": r"popup true, opened by launch true, target camera " + popup,
+            "free": r"popup false, opened by launch true, target camera x=\d+ y=\d+",
+            "landed": r"popup false, opened by launch false, target camera closed",
+        }
+        for mode, expected in modes.items():
+            out.append(
+                Scenario(
+                    name=f"flight-window-seeker-{layout}-{mode}",
+                    lane="flight",
+                    args=[
+                        "--panel-snapshot", "{work}/w.ppm", "--window-layout-preview", mode,
+                        "--instrument-layout", layout, "--window-size", "640x480",
+                        "--aircraft", "f16c", "--no-audio",
+                    ],
+                    outputs=["w.ppm"],
+                    expect=[rf"window layout {words} {mode}: pages \[[\d, ]+\], {expected}"],
+                    timeout=120,
+                )
+            )
     return out
 
 
