@@ -542,6 +542,10 @@ the state.
 | `flight/powered/trim.rs` | Airborne starts in trimmed forward flight and ground starts |
 | `flight/powered/readout.rs` | Pure cockpit readings (NR, TQ, nacelle, hover display, buffet) for the HUD, sound and camera |
 | `autopilot.rs` | Hover hold and the A modes on the powered-lift aircraft (`Mode::Hover`, `Loops`) |
+| `autopilot/rotor_law.rs` | The hover cascade and the coupled forward-flight law as pure functions of a commanded target (`HoverTarget`, `ForwardTarget`) and the `Loops` memory, shared by the player's modes and the AI (slice H1) |
+| `ai/rotor_adapter.rs` | The AI's control of the helicopters and the V-22: steer and hover requests (`RotorRequest`, `HoverGuidance`) flown on the rotor laws, the V-22 nacelle schedule, its regime and loops coded with the actor (`ai/rotor_checkpoint.rs`) |
+| `ai/jet_lift.rs` | The AI's jetborne law for the AV-8 and Yak-141 hover, vertical climb and descent (`JetLift`) |
+| `ai/rotor_probe.rs` | Scripted flights of the two AI laws over flat ground: the unit tests' measurements and `--rotor-probe` |
 | `cheats.rs` | `easy_physics`, read through `State::rotor_hazards()` and `State::jet_hazards()` |
 | `models/variety/lift.rs` | `PoweredLift`: every aircraft's parameters and where each comes from |
 
