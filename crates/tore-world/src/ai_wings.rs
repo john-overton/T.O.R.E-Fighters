@@ -433,8 +433,9 @@ impl ActorInsert {
 /// training targets, which only drift on a straight line, as they are.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AiFlightModel {
-    /// Single player as it is: legacy, except wingmen that start on the ground
-    /// and aircraft that begin a landing, which switch to the hybrid model.
+    /// Single player as it is: legacy, except wingmen that start on the ground,
+    /// aircraft that begin a landing, and the helicopters and the V-22 (slice
+    /// H1), which fly the hybrid model.
     #[default]
     Standard,
     /// Every AI aircraft flies the hybrid model from mission start, so a human
@@ -583,6 +584,23 @@ pub(crate) fn station_specs_loaded(
         stores.push(spec);
     }
     stores
+}
+
+/// Whether `flight` is a helicopter or the V-22. These AI aircraft fly the
+/// hybrid model (their powered-lift physics, through the AI's rotor
+/// adapter) under every AI flight model, `Standard` included: on the legacy
+/// model a rotorcraft flies as an aeroplane and the AI could never hover,
+/// take off or land it. Opinionated (John, 2026-10-12: AI helicopter and
+/// VTOL hover, takeoff and landing; the lead's decision on the mechanism,
+/// slice H1). The vectoring jets keep the AI flight model's choice.
+fn hovers(flight: &flight::State) -> bool {
+    flight.model().powered_lift().is_some_and(|lift| {
+        matches!(
+            lift.kind,
+            tore_sim::models::variety::LiftKind::Helicopter
+                | tore_sim::models::variety::LiftKind::Tiltrotor
+        )
+    })
 }
 
 /// Puts an AI aircraft on the hybrid flight model, seeded as the AI probe
@@ -1277,6 +1295,18 @@ impl AiWings {
             }
         }
         mission.start_in_formation();
+        // The helicopters and the V-22 fly the powered-lift physics under
+        // every AI flight model (slice H1).
+        for actor in mission
+            .actors_mut()
+            .iter_mut()
+            .filter(|a| !a.is_dummy() && hovers(a.flight()))
+        {
+            if actor.flight().research.is_none() {
+                let seed = 1 + actor.id() as i32;
+                enter_hybrid(actor.flight_mut(), seed)?;
+            }
+        }
         Ok(Self {
             mission,
             mission_preset: Preset::Free,
@@ -1442,7 +1472,9 @@ impl AiWings {
             .map(|spec| spec.station.0)
             .collect();
         let mut actor = AiActor::new(setup).map_err(|e| e.to_string())?;
-        if self.flight_model == AiFlightModel::AllHybrid && actor.flight().research.is_none() {
+        if (self.flight_model == AiFlightModel::AllHybrid || hovers(actor.flight()))
+            && actor.flight().research.is_none()
+        {
             enter_hybrid(actor.flight_mut(), 1 + insert.id as i32)?;
         }
         actor.set_home_runway(home);
@@ -4872,7 +4904,9 @@ mod tests {
     fn a_powered_lift_ai_aircraft_is_trimmed_as_it_joins_the_hybrid_model() {
         // VTOL overhaul decision 8 and acceptance S1: a multiplayer seat is
         // an AI actor until a human takes it, and a revival joins as one, so
-        // both begin in trimmed forward flight on every spawn path.
+        // both begin in trimmed forward flight on every spawn path. Since
+        // slice H1 the rotorcraft join it at the build under every AI
+        // flight model, and a revival of one joins it whatever the model.
         for id in [
             AircraftId::Ah64,
             AircraftId::Mi24,
@@ -4883,14 +4917,29 @@ mod tests {
             let profile = || crate::test_support::powered_profile(id);
             let (mut wings, mut targets) = led_wing_of(1, &[], 3_000., profile);
             let before = wings.mission.actor(1).unwrap().flight().clone();
-            assert!(before.research.is_none());
-            // Standard leaves the start as it is.
-            wings.set_flight_model(AiFlightModel::Standard).unwrap();
-            assert_eq!(wings.mission.actor(1).unwrap().flight(), &before, "{id:?}");
-            wings.set_flight_model(AiFlightModel::AllHybrid).unwrap();
+            let rotorcraft = matches!(id, AircraftId::Ah64 | AircraftId::Mi24 | AircraftId::V22);
+            if rotorcraft {
+                // Slice H1: the helicopters and the V-22 are built on the
+                // hybrid model, trimmed, under every AI flight model.
+                assert!(before.research.is_some(), "{id:?}");
+                let fresh = flight::State::new(&profile(), before.position).unwrap();
+                assert_ne!(before.lift_controls, fresh.lift_controls, "{id:?} trimmed");
+                for model in AiFlightModel::ALL {
+                    wings.set_flight_model(model).unwrap();
+                    assert_eq!(wings.mission.actor(1).unwrap().flight(), &before, "{id:?}");
+                }
+            } else {
+                assert!(before.research.is_none());
+                // Standard leaves the start as it is.
+                wings.set_flight_model(AiFlightModel::Standard).unwrap();
+                assert_eq!(wings.mission.actor(1).unwrap().flight(), &before, "{id:?}");
+                wings.set_flight_model(AiFlightModel::AllHybrid).unwrap();
+            }
             let flight = wings.mission.actor(1).unwrap().flight().clone();
             assert!(flight.research.is_some());
-            assert_ne!(flight.lift_controls, before.lift_controls, "{id:?} trimmed");
+            if !rotorcraft {
+                assert_ne!(flight.lift_controls, before.lift_controls, "{id:?} trimmed");
+            }
             assert_eq!(flight.lift_controls.body_rates, [0.; 3]);
             assert!(
                 (flight.speed - before.speed).abs() < 1e-9,
@@ -4914,7 +4963,11 @@ mod tests {
             );
             assert!(after.speed > 0.5 * speed, "{id:?}");
 
-            // An aircraft that joins later (a revival) is trimmed as it joins.
+            // An aircraft that joins later (a revival) is trimmed as it joins;
+            // a rotorcraft under the Standard model too (slice H1).
+            if rotorcraft {
+                wings.set_flight_model(AiFlightModel::Standard).unwrap();
+            }
             let removed = wings.remove_actor(1).unwrap();
             let mut back = ActorInsert::from_removed(removed);
             back.flight = flight::State::new(&profile(), [3000., 3_000., 0.]).unwrap();
