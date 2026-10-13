@@ -168,6 +168,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     for path in paths {
         let a = load(&path)?;
+        fuel_rows(&a);
         if tiltrotor_probe(&a, &path)? {
             continue;
         }
@@ -438,6 +439,53 @@ fn tilt_pilot(
     input.conversion = conversion;
     input.conversion_rate = rate;
     input
+}
+
+/// Slice HF2: the fuel a rotorcraft burns by the power its rotor draws, at a
+/// hover and in level flight, against what the PT record's flow would give.
+fn fuel_rows(a: &Aircraft) {
+    let mut hover = State::new(a, [0., 1_000., 0.]).unwrap();
+    hover.enable_research(1).unwrap();
+    hover.yaw = 0.;
+    hover.pitch = 0.;
+    hover.bank = 0.;
+    hover.velocity = [0.; 3];
+    hover.speed = 0.;
+    let Some(fuel) = hover.rotor_fuel() else {
+        return;
+    };
+    let lift = hover.model().powered_lift().unwrap();
+    let nacelle = lift.tiltrotor.map(|t| t.helicopter_nacelle_degrees);
+    let trim = |s: &mut State, kt: f64| match nacelle {
+        Some(n) => s.trim_tiltrotor(kt * KT, n),
+        None => s.trim_single_rotor(kt * KT) || s.trim_tandem(kt * KT),
+    };
+    let c = hover.model().configuration();
+    let tank = c.mass.internal_fuel_lbs;
+    let record = c.propulsion.military_fuel_lbs_per_second;
+    println!("== fuel, {} (slice HF2)", a.name);
+    println!(
+        "tank {tank:.0} lb; PT flow {record:.0} lb/s = {:.0} min (not read); full flow {:.3} lb/s at {:.0} hp rated",
+        tank / record / 60.,
+        fuel.full_flow(),
+        fuel.rated_power / HP
+    );
+    for kt in [0., 60., 100., 130.] {
+        let mut s = hover.clone();
+        if !trim(&mut s, kt) {
+            continue;
+        }
+        let flow = s.rotorcraft_fuel_flow().unwrap();
+        println!(
+            "{kt:>4.0} kt level: power {:.0} percent of rated, {flow:.3} lb/s, endurance {:.0} min",
+            100. * s.lift_controls.drive.engine_output[0] / fuel.rated_power,
+            tank / flow / 60.
+        );
+    }
+    println!(
+        "planning flow (hover at this weight) {:.3} lb/s",
+        hover.endurance_flow_lbs_per_second()
+    );
 }
 
 /// The V-22's rows of the probe; false for any other aircraft.

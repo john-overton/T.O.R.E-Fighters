@@ -533,6 +533,7 @@ the state.
 | `flight/powered/body.rs` | The rigid body: inertia from the radii of gyration, moments, the attitude integrator that conserves angular momentum |
 | `flight/powered/rotor.rs` | One lifting rotor: thrust, inflow, vortex ring state, ground effect, power, blade stall, the `Hazards` switches |
 | `flight/powered/drive.rs` | Rotor speed, governor and engines for any number of rotors on one drive |
+| `flight/powered/fuel.rs` | The rotorcraft fuel flow: the turboshaft line of the power the drive delivers, and the steady hover flow the AI plans with (slice HF2) |
 | `flight/powered/fuselage.rs` | Helicopter fuselage drag, tail surfaces, fin and stub wings |
 | `flight/powered/helicopter.rs` | The single-rotor AH-64 and Mi-24: rotor, tail rotor, trim |
 | `flight/powered/tandem.rs` | The CH-47's two rotors, wake interference, mixer, trim |

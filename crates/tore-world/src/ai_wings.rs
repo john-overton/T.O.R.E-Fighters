@@ -5001,14 +5001,15 @@ mod tests {
 
     #[test]
     fn a_helicopter_flies_the_vertical_landing_and_ignores_a_home_out_of_reach() {
-        // Slice ST-H (fuel states since slice H3). The runway is 110 nm
-        // away: a helicopter, whose data gives it 27 minutes of fuel against
-        // the 49 minutes the way takes at its cruise, has no fuel state to
-        // manage (the flight home is out of reach). Told to land, a jet
+        // Slice ST-H (fuel states since slice H3, HF2). The runway is 395 nm
+        // away: a helicopter, whose tank lasts about two hours at the hover
+        // flow against the 2.8 hours the way takes at its cruise, has no
+        // fuel state to manage (the flight home is out of reach). Told to
+        // land, a jet
         // begins its landing and, since slice H2, so does a helicopter: its
         // vertical one.
         use tore_sim::ai::route::FuelState;
-        let runway = runway_view(9, [0., 10., 700_000.]);
+        let runway = runway_view(9, [0., 10., 2_400_000.]);
         let airfields = Airfields {
             runways: vec![HomeRunway {
                 view: runway,
@@ -5086,8 +5087,8 @@ mod tests {
         }
     }
 
-    /// A friendly Mi-24 (3,307 lb at the fixture's 2 lb/s: 1,653 s) with a
-    /// home runway `home_ft` away, airborne and holding, and an enemy.
+    /// A friendly Mi-24 (3,307 lb, planned at its hover flow, about two
+    /// hours) with a home runway `home_ft` away, airborne and holding, and an enemy.
     fn fuel_wings(home_ft: f64) -> (AiWings, Vec<live::Target>) {
         let runway = runway_view(9, [0., 10., home_ft]);
         let airfields = Airfields {
@@ -5138,18 +5139,49 @@ mod tests {
         // sea-level 178 kt): within 5 percent of the sea-level figure.
         let sea_level = 100_000. / (178. * 1.687_81 * 0.8);
         assert!((home / sea_level - 1.).abs() < 0.05, "home {home}");
+        // Slice HF2: it plans with the hover flow of its rotor, not the
+        // record's 2 lb/s: about two hours, not 27 minutes.
+        let flight = wings.mission.actor(1).unwrap().flight();
+        let flow = flight.endurance_flow_lbs_per_second();
+        assert!(flow < 0.7, "hover flow {flow}");
         assert!(
-            (fuel.endurance_s - 1_653.).abs() < 5.,
+            (fuel.endurance_s - flight.fuel / flow).abs() < 5.,
             "{}",
             fuel.endurance_s
         );
+        assert!(fuel.endurance_s > 100. * 60., "{}", fuel.endurance_s);
         assert_eq!(fuel.state, Some(FuelState::Ok), "not bingo at the start");
+        // The reserve is five minutes, the fighters' (slice HF2): bingo
+        // under the time home plus 300 s of fuel, caution above it.
+        for (margin, expected) in [(350., FuelState::Caution), (250., FuelState::Bingo)] {
+            // The hover flow falls with the weight, so settle the tank that
+            // lasts `home + margin` at the flow it then burns.
+            for _ in 0..8 {
+                let now = wings.mission.actor(1).unwrap().flight();
+                let at = now.endurance_flow_lbs_per_second();
+                wings
+                    .mission
+                    .actor_mut(1)
+                    .unwrap()
+                    .set_internal_fuel(at * (home + margin));
+            }
+            // The judgement is renewed every few seconds.
+            let mut state = None;
+            for _ in 0..1_200 {
+                fly_one_tick(&mut wings, &mut targets, vec![]);
+                state = wings.mission.actor(1).unwrap().controller().fuel_state();
+                if state == Some(expected) {
+                    break;
+                }
+            }
+            assert_eq!(state, Some(expected), "{margin} s over the time home");
+        }
         // Short of the reserve it is bingo and turns for home at its cruise.
         wings
             .mission
             .actor_mut(1)
             .unwrap()
-            .set_internal_fuel(2. * (home + 100.));
+            .set_internal_fuel(flow * (home + 100.));
         let start = wings.mission.actor(1).unwrap().flight().position;
         let away = |wings: &AiWings| {
             let at = wings.mission.actor(1).unwrap().flight().position;

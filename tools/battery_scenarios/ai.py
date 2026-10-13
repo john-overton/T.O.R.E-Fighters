@@ -828,6 +828,12 @@ def fuel_lines(output: str, aircraft: str) -> list[tuple[int, int, int, int, str
     ]
 
 
+# Slice HF2: the least a rotorcraft's planned endurance (seconds, at its hover flow) may be at the
+# start with a full tank. The record's flow gave 33 minutes (AH-64, V-22) to 18 (Mi-24); the rotor's
+# power gives 62 to 156 minutes at a hover.
+ROTORCRAFT_MIN_ENDURANCE_S = {"Ah64": 3600, "Mi24": 6000, "Ch47": 7200, "V22": 3000}
+
+
 def rotorcraft_fuel_check(aircraft: str, *, bingo: bool) -> Callable[[str], list[str]]:
     """Slice H3: the `aircraft` the AI flies (an AH-64, Mi-24, CH-47 or V-22) keeps a fuel schedule.
     At the first line none of them is bingo or critical (with the probe's full tanks every one is
@@ -847,6 +853,8 @@ def rotorcraft_fuel_check(aircraft: str, *, bingo: bool) -> Callable[[str], list
                 problems.append(f"actor {actor} ({aircraft}) was {state} at the start with {fuel} lb, home {home} s")
             if tick == first and home == "none":
                 problems.append(f"actor {actor} ({aircraft}) had no time home at the start")
+            if tick == first and not bingo and endurance < ROTORCRAFT_MIN_ENDURANCE_S[aircraft]:
+                problems.append(f"actor {actor} ({aircraft}) planned only {endurance} s of fuel with {fuel} lb")
         if bingo:
             # Home: the way home, or (slice H2) the landing there, which a wing close to home
             # starts at once at its marshal.
@@ -1067,10 +1075,11 @@ def scenarios() -> list[Scenario]:
     # fuel and the aircraft counted are the friendly rotorcraft alone. (The V-22 is not probed here: it
     # enters the aeroplane's airfield sequence when the fight ends, which is slice H2's to replace.)
     out.append(probe("fight-heli-fuel-bingo-ah64", ["--aircraft", "ah64", "--probe-wing-size", "3", "--probe-enemy-aircraft", "su27",
-                                              "--separation", "10", "--probe-fuel", "450", "--probe-fuel-trace", "10"],
+                                              "--separation", "10", "--probe-fuel", "250", "--probe-fuel-trace", "10"],
                      ticks=16800, check=rotorcraft_fuel_check("Ah64", bingo=True),
-                     notes="The AI's AH-64 wingmen with 450 lb start on caution, turn bingo about a minute in "
-                           "and head home."))
+                     notes="The AI's AH-64 wingmen with 250 lb (about 9 minutes at the hover flow of the rotor's power, "
+                           "slice HF2) start on caution, turn bingo under the time home plus the five minute reserve "
+                           "within a minute and head home."))
 
     # 10. Ground starts: takeoff, formation, landing orders.
     for size in [1, 2, 3, 4, 5]:

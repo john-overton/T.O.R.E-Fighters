@@ -417,6 +417,44 @@ The control mapping accounts for current flap lift and low-speed G authority.
 The three player adapters stay distinct. Exact input-replay validation is
 recorded in the [AI baseline](baselines/ai-research.md).
 
+## Rotorcraft fuel
+
+Fitted (agent decision, John's requests of 2026-10-13). A helicopter or the V-22 does
+not burn the PT record's fuel flow times the throttle, as every other aircraft does.
+The records' flows (1 lb/s for the AH-64, V-22 and CH-47, 3 lb/s for the Mi-24) are
+whole-pound placeholders that would empty the Mi-24 in 18 minutes
+([evidence](formats/aircraft.md#rotorcraft-fuel-records)). The burn follows the shaft
+power the drive delivers, the turboshaft line:
+
+```text
+flow = full_flow x (0.22 + 0.78 x power / rated_power)        lb/s
+full_flow = rated shaft hp x 0.6 lb/(hp h) / 3600
+```
+
+- `power` is the drive's own lagged engine output, so a hover burns what the rotor
+  draws to hover, level flight at 60 to 100 knots burns less (translational lift), a
+  climb or a fast dash more, and an engine on the ground with the collective down only
+  the idle share. Engines off burn nothing. The rated power is the one each aircraft's
+  rotor model already carries (`models/variety/lift.rs`), so the burn scales with the
+  aircraft.
+- **0.6 lb/(hp h)** is 0.55 for turboshafts of this class (T700, TV3-117, T55 run 0.45
+  to 0.60) over the 8 percent of the engines' power that transmission and installation
+  take before the rotors. **0.22** is the idle share (a turboshaft burns about a fifth to
+  a quarter of its full flow at flight idle). Both fitted.
+- **Results** (`powered_probe`, hover and level trims at 1,000 ft at the PT weights; the
+  full table is in the [baseline](baselines/rotorcraft-fuel.md)): hover 0.47 lb/s for the
+  AH-64 (71 minutes), 0.43 for the Mi-24 (128 minutes, about 200 at 100 knots), 0.35 for
+  the CH-47 and 0.54 for the V-22. The real aircraft burn about 0.3 lb/s (AH-64D
+  cruise, 1,000 to 1,200 lb/h) and 0.5 to 0.6 (Mi-24).
+- **The player's gauge** falls at these rates in a helicopter or the V-22: the internal
+  fuel row of the systems page and the weight (a lighter aircraft hovers on less power).
+  Jets, transports and the vectoring jets keep the record's flow and the afterburner
+  rule.
+- **Planning** (the AI's bingo line and the crew voice's low-fuel call) uses one steady
+  figure, the flow of a hover at the aircraft's weight now, so the line does not swing
+  with every climb and descent. Cruise burns less, so the plan is pessimistic.
+- The Unlimited fuel cheat and the fuel starvation rules are unchanged.
+
 ## Envelope limits and loading
 
 The aircraft's PT file holds a speed and altitude polygon for each whole G. The
