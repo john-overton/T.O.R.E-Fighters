@@ -120,15 +120,24 @@ pub const DIVE_CUE_MARGIN_FT: f64 = 1_500.;
 /// What the cue still lies off the aim's line (a pod's or gun's offset, a
 /// crab in the wind) is trimmed out: the line is moved across by this share
 /// per second of the cue's miss across, at most [`CUE_TRIM_LIMIT_FT`]
-/// (slice ST-T2, fitted, agent; faster trims chase a level run's swinging
-/// cue).
-pub const CUE_TRACK_INTEGRAL: f64 = 0.2;
-/// A diving pass's trim (straight run, pop-up, dive, strafe): its cue sits
-/// closer and steadier, so it trims faster.
-pub const CUE_TRACK_INTEGRAL_DIVING: f64 = 0.5;
+/// (slice ST-T2, fitted, agent). The passes whose cue sits close and steady
+/// (straight run, pop-up, dive, strafe) use this; a level-like run points
+/// its far-thrown cue instead ([`CUE_POINT_GAIN`]).
+pub const CUE_TRACK_INTEGRAL: f64 = 0.5;
 /// The trim learns only while the track is within this of its line.
 pub const CUE_TRIM_ON_LINE_DEG: f64 = 1.5;
 pub const CUE_TRIM_LIMIT_FT: f64 = 1_000.;
+/// A level-like run (level, laydown, fast-high) points its far-thrown cue
+/// at the aim: the track turns by this share of the angle that the cue's
+/// miss across subtends from the aircraft (fitted, agent, nr-bombs
+/// 2026-10-13). A level run's cue lies 10,000 ft or more ahead, so the trim
+/// of [`CUE_TRACK_INTEGRAL`], which learns the drift through the adapter's
+/// lag, swung the cue 180 ft either side of the aim for the whole of a fast
+/// pass and put it 44 ft off at the release, outside the gate; the pointing
+/// is one first-order loop on the miss itself and settles inside 4 s.
+pub const CUE_POINT_GAIN: f64 = 0.6;
+/// The cue's range the pointing divides by is never taken under this.
+pub const CUE_POINT_MIN_RANGE_FT: f64 = 1_500.;
 /// The input-only adapter closes a pitch error over 3 s (docs/spec/ai.md,
 /// "Input-only aircraft control"); a request that would ask for less than
 /// [`PUSH_G`] holds the wings level (fitted, agent).
@@ -348,6 +357,12 @@ impl Pass {
             Self::Laydown => "laydown",
             Self::Strafe => "strafe",
         }
+    }
+
+    /// A pass whose bomb cue lies far ahead (10,000 ft or more) and steers
+    /// by pointing it at the aim ([`CUE_POINT_GAIN`]).
+    pub fn points_cue(self) -> bool {
+        matches!(self, Self::Level | Self::Laydown | Self::FastHigh)
     }
 }
 
@@ -2035,6 +2050,12 @@ impl Strike {
         // The cue's miss across the track, feet (positive: the aim lies right).
         let right = [u[1], -u[0]];
         let cross = (aim[0] - impact[0]) * right[0] + (aim[2] - impact[2]) * right[1];
+        if self.pass.is_some_and(Pass::points_cue) {
+            let range = horizontal(own.position, impact).max(CUE_POINT_MIN_RANGE_FT);
+            let turn = CUE_POINT_GAIN * cross.atan2(range).to_degrees();
+            let base = if on_track { track } else { own.heading_deg };
+            return wrap_deg(base + turn.clamp(-30., 30.));
+        }
         // The track is laid on a point the trim has moved across from the
         // aim; the trim learns only once the track is on that line, so it
         // does not chase the cue's swing while the heading still settles.
@@ -2045,17 +2066,7 @@ impl Strike {
         ];
         let off_line = angle_difference(track, bearing_deg(own.position, point));
         if off_line.abs() < CUE_TRIM_ON_LINE_DEG {
-            // A level run's cue, thrown far ahead, swings with every small
-            // heading change: it trims slower.
-            let gain = if self
-                .pass
-                .is_some_and(|p| matches!(p, Pass::Level | Pass::Laydown | Pass::FastHigh))
-            {
-                CUE_TRACK_INTEGRAL
-            } else {
-                CUE_TRACK_INTEGRAL_DIVING
-            };
-            self.cue_across_sum = (self.cue_across_sum + gain * cross / 120.)
+            self.cue_across_sum = (self.cue_across_sum + CUE_TRACK_INTEGRAL * cross / 120.)
                 .clamp(-CUE_TRIM_LIMIT_FT, CUE_TRIM_LIMIT_FT);
         }
         let correction = off_line / own.flight_path_pitch_deg.to_radians().cos().max(0.25);
