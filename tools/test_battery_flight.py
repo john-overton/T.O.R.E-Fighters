@@ -327,6 +327,7 @@ ROTOR_PROBE = (
     "ROTOR V22.PT forward 80kt -1000fpm: climb=-1009fpm speed_off=1.0kt heading_off=0.1deg flew\n"
     "ROTOR V22.PT forward 120kt +1000fpm: climb=1004fpm speed_off=0.8kt heading_off=0.0deg flew\n"
     "ROTOR V22.PT forward 120kt -1000fpm: climb=-992fpm speed_off=3.3kt heading_off=0.4deg flew\n"
+    "ROTOR V22.PT descent_turn: least_collective=0.00 nose_off_track=33.9deg steepest_pitch=3.4deg lost=683ft flew\n"
     "ROTOR V22.PT turn200: lost=18.6ft lowest=181.4ft heading_off=2.0deg flew\n"
     "ROTOR V22.PT slow120: lost=5.4ft off=1.1ft ground_speed=0.0kt hover=true flew\n"
     "ROTOR V22.PT convert: out=0.0deg 220kt converted=24.3s back=87.0deg off=0.0ft ground_speed=0.0kt hover=true height=88ft corridor_ticks=0 flew\n"
@@ -340,6 +341,7 @@ ROTOR_PROBE = (
     "ROTOR AH64.PT forward 80kt -1000fpm: climb=-1006fpm speed_off=0.6kt heading_off=0.2deg flew\n"
     "ROTOR AH64.PT forward 120kt +1000fpm: climb=1004fpm speed_off=0.5kt heading_off=0.5deg flew\n"
     "ROTOR AH64.PT forward 120kt -1000fpm: climb=-1002fpm speed_off=0.4kt heading_off=0.2deg flew\n"
+    "ROTOR AH64.PT descent_turn: least_collective=0.10 nose_off_track=9.9deg steepest_pitch=14.3deg lost=1079ft flew\n"
     "ROTOR AH64.PT turn200: lost=16.0ft lowest=184.0ft heading_off=0.5deg flew\n"
     "ROTOR AH64.PT slow120: lost=4.2ft off=0.0ft ground_speed=0.0kt hover=true flew\n"
     "ROTOR MI24.PT hold calm: off=2.4ft height=0.0ft hover=true flew\n"
@@ -352,6 +354,7 @@ ROTOR_PROBE = (
     "ROTOR MI24.PT forward 80kt -1000fpm: climb=-1007fpm speed_off=0.6kt heading_off=0.1deg flew\n"
     "ROTOR MI24.PT forward 120kt +1000fpm: climb=1003fpm speed_off=0.5kt heading_off=0.4deg flew\n"
     "ROTOR MI24.PT forward 120kt -1000fpm: climb=-1003fpm speed_off=0.4kt heading_off=0.0deg flew\n"
+    "ROTOR MI24.PT descent_turn: least_collective=0.10 nose_off_track=9.4deg steepest_pitch=3.4deg lost=833ft flew\n"
     "ROTOR MI24.PT turn200: lost=23.9ft lowest=176.1ft heading_off=0.3deg flew\n"
     "ROTOR MI24.PT slow120: lost=2.8ft off=0.0ft ground_speed=0.0kt hover=true flew\n"
     "ROTOR CH47.PT hold calm: off=0.0ft height=0.0ft hover=true flew\n"
@@ -364,6 +367,7 @@ ROTOR_PROBE = (
     "ROTOR CH47.PT forward 80kt -1000fpm: climb=-1007fpm speed_off=0.6kt heading_off=0.0deg flew\n"
     "ROTOR CH47.PT forward 120kt +1000fpm: climb=1003fpm speed_off=0.4kt heading_off=0.0deg flew\n"
     "ROTOR CH47.PT forward 120kt -1000fpm: climb=-1003fpm speed_off=0.4kt heading_off=0.0deg flew\n"
+    "ROTOR CH47.PT descent_turn: least_collective=0.10 nose_off_track=12.9deg steepest_pitch=22.6deg lost=438ft flew\n"
     "ROTOR CH47.PT turn200: lost=17.4ft lowest=182.6ft heading_off=0.0deg flew\n"
     "ROTOR CH47.PT slow120: lost=1.0ft off=0.1ft ground_speed=0.0kt hover=true flew\n"
 )
@@ -389,6 +393,8 @@ class RotorProbeTests(unittest.TestCase):
         self.assertTrue(any("land vertically" in p for p in _powered.check_rotor_probe(hard)))
         sank = ROTOR_PROBE.replace("ROTOR MI24.PT turn200: lost=23.9ft", "ROTOR MI24.PT turn200: lost=83.9ft")
         self.assertTrue(any("turn round" in p for p in _powered.check_rotor_probe(sank)))
+        unloaded = ROTOR_PROBE.replace("ROTOR CH47.PT descent_turn: least_collective=0.10", "ROTOR CH47.PT descent_turn: least_collective=0.00")
+        self.assertTrue(any("unloaded its rotor" in p for p in _powered.check_rotor_probe(unloaded)))
         slow = ROTOR_PROBE.replace("ROTOR V22.PT forward 80kt +1000fpm: climb=1008fpm speed_off=0.9kt",
                                    "ROTOR V22.PT forward 80kt +1000fpm: climb=1008fpm speed_off=9.9kt")
         self.assertTrue(any("missed" in p for p in _powered.check_rotor_probe(slow)))

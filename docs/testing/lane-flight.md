@@ -206,6 +206,7 @@ tests' bands.
 | `move500` | The point moved 500 ft diagonally | overshoot under 10 ft, arrives within 10 ft |
 | `climb500` | A vertical climb from 20 to 500 ft at 25 ft/s | fastest 23 to 27 ft/s, top under 515 ft, ends within 10 ft |
 | `forward <kt> <fpm>` | 40, 80 and 120 kt climbing and descending 1,000 ft/min | climb within 150 ft/min, speed within 5 kt, heading within 3 degrees |
+| `descent_turn` | Four seconds banked left onto a slot, then a right turn onto heading 80 slowing from 130 to 60 kt while asked 12 degrees down (about 42 ft/s), 40 s from 3,000 ft (a wingman's formation chase, slice CH47) | the helicopters never fly the collective under 0.1 and the nose stays within 30 degrees of the track (the V-22, with its power lever, is not held to it) |
 | `turn200` | 180 degrees at 200 ft asking 160 kt, more than these aircraft make | loses under 50 ft, turns round within 5 degrees in 60 s |
 | `slow120` | From 120 kt at 1,000 ft to a hover over a point 3,000 ft ahead | loses under 50 ft, ends within 10 ft hovering |
 | `convert` (V-22) | From a hover to airplane mode asking 220 kt, then a hover 15,000 ft ahead | nacelles down and over 200 kt, back over 80 degrees within 10 ft, within 300 ft of height, no corridor override |

@@ -320,6 +320,64 @@ pub fn forward(aircraft: &Aircraft, knots: f64, fpm: f64) -> Option<Forward> {
     Some(out)
 }
 
+/// A turning descent's result.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct DescentTurn {
+    /// The least collective, and the most the heading strayed from the
+    /// course (the track), degrees: an unloaded rotor lets the nose swing
+    /// away from the track.
+    pub least_collective: f64,
+    pub nose_off_track_deg: f64,
+    /// The steepest nose-down attitude, degrees.
+    pub steepest_pitch_deg: f64,
+    /// Height lost, ft.
+    pub lost_ft: f64,
+    pub crashed: bool,
+}
+
+/// From level flight at 120 kt, a wingman's formation chase: four seconds
+/// banked left onto the slot, then a turn right onto heading 50 slowing to
+/// 60 kt with a 12 degree descent (about 42 ft/s), held for 40 s from
+/// 3,000 ft over flat ground (slice CH47).
+pub fn descent_turn(aircraft: &Aircraft) -> Option<DescentTurn> {
+    let mut s = moving(aircraft, 3_000., 120., [0.; 3])?;
+    let start = wheel_height(&s);
+    let mut adapter = RotorAdapter::new();
+    let mut out = DescentTurn {
+        least_collective: 1.,
+        ..DescentTurn::default()
+    };
+    // Banked left onto the slot first, as a wingman is when the chase turns.
+    let slot = steer(-60., -1.6, 130. * KT);
+    for _ in 0..ticks(6.) {
+        let request = RotorRequest::Steer {
+            intent: &slot,
+            terrain_pitch_floor_deg: None,
+        };
+        tick(&mut s, &mut adapter, request, [0.; 3]);
+    }
+    let intent = steer(80., -12., 60. * KT);
+    for _ in 0..ticks(40.) {
+        let request = RotorRequest::Steer {
+            intent: &intent,
+            terrain_pitch_floor_deg: None,
+        };
+        tick(&mut s, &mut adapter, request, [0.; 3]);
+        out.least_collective = out.least_collective.min(s.lift_controls.collective);
+        let course = s.velocity[0].atan2(s.velocity[2]).to_degrees();
+        out.nose_off_track_deg = out
+            .nose_off_track_deg
+            .max(wrap_deg(s.yaw.to_degrees() - course).abs());
+        out.steepest_pitch_deg = out.steepest_pitch_deg.max(-s.pitch.to_degrees());
+        if s.crashed {
+            break;
+        }
+    }
+    out.lost_ft = start - wheel_height(&s);
+    out.crashed = s.crashed;
+    Some(out)
+}
+
 /// A low turn's result.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Turn {
@@ -570,6 +628,16 @@ pub fn report(aircraft: &Aircraft) -> Vec<String> {
                         ));
                     }
                 }
+            }
+            if let Some(d) = descent_turn(aircraft) {
+                lines.push(format!(
+                    "ROTOR {name} descent_turn: least_collective={:.2} nose_off_track={:.1}deg steepest_pitch={:.1}deg lost={:.0}ft {}",
+                    d.least_collective,
+                    d.nose_off_track_deg,
+                    d.steepest_pitch_deg,
+                    d.lost_ft,
+                    fate(d.crashed)
+                ));
             }
             if let Some(t) = low_turn(aircraft, 160.) {
                 lines.push(format!(
