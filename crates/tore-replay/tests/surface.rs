@@ -462,6 +462,8 @@ fn a_format_2_file_still_opens_plays_and_exports() {
     assert_eq!(recording.header().world.airfield_scene, 0);
     assert_eq!(recording.header().world.city_fill_scene, 0);
     assert_eq!(recording.surface_units().count(), 0);
+    // From before the city section (nr-fx3): the city stands whole.
+    assert!(recording.city().is_empty());
     let scenario = rich_scenario(1_000, 40, 5);
     assert_eq!(recording.frame_count() as usize, scenario.frames.len());
     for truth in &scenario.frames {
@@ -476,4 +478,83 @@ fn a_format_2_file_still_opens_plays_and_exports() {
     let summary = String::from_utf8(out).unwrap();
     assert!(summary.contains("format 2"), "{summary}");
     assert!(!summary.contains("Surface units"));
+}
+
+/// The city fill's knocked-down buildings (nr-fx3) round-trip in their own
+/// section across chunks: every frame reads back as written, the track gives
+/// the flattened set at any tick (seeking either way), and a recording
+/// without them has an empty track and otherwise identical frames.
+#[test]
+fn knocked_down_city_buildings_round_trip_in_their_own_section() {
+    let dir = temp_dir("city-section");
+    let mut header = surface_header();
+    header.world.ground_target = None;
+    header.world.airfield_scene = 0;
+    header.world.surface = false;
+    header.world.city_fill_scene = 1;
+    let fell = |tick: u64| -> (bool, Vec<[i32; 2]>) {
+        match tick {
+            10 => (false, vec![[1_090_751, 839_493], [1_090_800, 839_400]]),
+            11 => (false, vec![[-20, 7]]),
+            25 => (false, vec![[1_100_000, 836_000], [5, 5]]),
+            40 => (true, vec![]),
+            41 => (false, vec![[9, 9]]),
+            _ => (false, vec![]),
+        }
+    };
+    let frames = |with: bool| -> Vec<Frame> {
+        (0..60)
+            .map(|tick| {
+                let (stood, fell) = if with { fell(tick) } else { (false, vec![]) };
+                Frame {
+                    tick,
+                    city_fell: fell,
+                    city_stood: stood,
+                    ..Frame::default()
+                }
+            })
+            .collect()
+    };
+    let write = |name: &str, with: bool| {
+        let mut writer = Writer::create_with(
+            dir.join(name),
+            &header,
+            WriterOptions {
+                chunk_ticks: 8,
+                ..WriterOptions::default()
+            },
+        )
+        .unwrap();
+        for frame in frames(with) {
+            writer.push(&frame).unwrap();
+        }
+        Recording::open(writer.finish(&Footer::default()).unwrap()).unwrap()
+    };
+    let city = write("city.tore-replay", true);
+    let plain = write("plain.tore-replay", false);
+    for truth in frames(true) {
+        let read = city.frame(truth.tick).unwrap().unwrap();
+        assert_eq!(read, truth);
+        let mut other = plain.frame(truth.tick).unwrap().unwrap();
+        assert!(other.city_fell.is_empty() && !other.city_stood);
+        // Everything else is the same frame.
+        other.city_fell.clone_from(&read.city_fell);
+        other.city_stood = read.city_stood;
+        assert_eq!(other, read);
+    }
+    let track = city.city();
+    assert_eq!(track.changes.len(), 5);
+    assert!(track.flattened_at(9).is_empty());
+    assert_eq!(track.flattened_at(30).len(), 5);
+    // Back again, as a reverse seek asks.
+    assert_eq!(
+        track.flattened_at(10),
+        [[1_090_751, 839_493], [1_090_800, 839_400]]
+    );
+    // A restart stood the city up again.
+    assert!(track.flattened_at(40).is_empty());
+    assert_eq!(track.flattened_at(59), [[9, 9]]);
+    assert_eq!(track.all().len(), 6);
+    assert!(plain.city().is_empty());
+    let _ = std::fs::remove_dir_all(dir);
 }

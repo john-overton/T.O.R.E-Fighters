@@ -605,6 +605,13 @@ fn validate(frame: &Frame) -> Result<usize> {
     )?;
     check_count(t, "debris pieces", frame.debris_pieces.len(), MAX_DEBRIS)?;
     check_count(t, "events", frame.events.len(), MAX_EVENTS_PER_TICK)?;
+    check_count(
+        t,
+        "knocked-down city buildings",
+        frame.city_fell.len(),
+        crate::limits::MAX_CITY_PER_TICK,
+    )?;
+
     check_count(t, "display trees", frame.trees.len(), MAX_TREES_PER_TICK)?;
     unique(t, "aircraft", frame.aircraft.iter().map(|a| a.id))?;
     unique(t, "surface unit", frame.surface.iter().map(|u| u.id))?;
@@ -674,6 +681,7 @@ fn validate(frame: &Frame) -> Result<usize> {
     bound += frame.surface.len() * 96;
     bound += frame.surface_stock.len() * 24;
     bound += frame.debris_pieces.len() * 16;
+    bound += 16 + frame.city_fell.len() * 10;
     for event in &frame.events {
         bound += event_bound(event)?;
     }

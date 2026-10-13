@@ -378,6 +378,13 @@ pub struct Frame {
     pub debris_pieces: Vec<(u32, u32, u8)>,
     pub events: Vec<Event>,
     pub trees: Vec<TreeSample>,
+    /// Where the city fill's buildings knocked down on this tick stand:
+    /// their base centres, east and north in whole feet (nr-fx3, the city
+    /// section; a recording from before it has none).
+    pub city_fell: Vec<[i32; 2]>,
+    /// Every city fill building stood again before `city_fell` fell (a
+    /// restarted flight).
+    pub city_stood: bool,
     /// State checksum, set by the app once per second. See
     /// [`crate::state_checksum`].
     pub checksum: Option<u64>,

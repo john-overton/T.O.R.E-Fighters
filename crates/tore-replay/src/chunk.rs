@@ -3,13 +3,14 @@
 //! Its body is a list of sections: strings, entities, frames, spawns, events,
 //! trees and checksums. Readers skip section ids they do not know.
 
+use crate::city::{CityCoder, apply_city, get_city};
 use crate::codec::{In, put_iv, put_uv, put_xf64};
 use crate::error::{Result, corrupt};
 use crate::events::{ChecksumCoder, EventCoder, get_checksums, get_events};
 use crate::format::{
-    KIND_DATA, SECTION_CHECKSUMS, SECTION_DISK_TILT, SECTION_EFFECT_SCALES, SECTION_ENTITIES,
-    SECTION_EVENTS, SECTION_FRAMES, SECTION_ROTORS, SECTION_SPAWNS, SECTION_STRINGS, SECTION_TREES,
-    chunk, put_section, section,
+    KIND_DATA, SECTION_CHECKSUMS, SECTION_CITY, SECTION_DISK_TILT, SECTION_EFFECT_SCALES,
+    SECTION_ENTITIES, SECTION_EVENTS, SECTION_FRAMES, SECTION_ROTORS, SECTION_SPAWNS,
+    SECTION_STRINGS, SECTION_TREES, chunk, put_section, section,
 };
 use crate::frames::FrameCoder;
 use crate::limits::{MAX_REGISTERED, MAX_REGISTERED_SURFACE};
@@ -34,6 +35,7 @@ pub(crate) struct ChunkEncoder {
     checksums: ChecksumCoder,
     rotors: RotorCoder,
     tilts: TiltCoder,
+    city: CityCoder,
     aircraft: Vec<u8>,
     aircraft_count: u64,
     weapons: Vec<u8>,
@@ -56,6 +58,7 @@ impl ChunkEncoder {
         self.checksums.put(index, frame.checksum);
         self.rotors.put(index, &frame.aircraft);
         self.tilts.put(index, &frame.aircraft);
+        self.city.put(index, frame);
         self.frames += 1;
     }
 
@@ -119,6 +122,7 @@ impl ChunkEncoder {
             + self.trees.len()
             + self.rotors.len()
             + self.tilts.len()
+            + self.city.len()
             + self.aircraft.len()
             + self.weapons.len()
             + self.surface_units.len()
@@ -172,6 +176,9 @@ impl ChunkEncoder {
         }
         if let Some(payload) = self.tilts.section() {
             put_section(&mut body, SECTION_DISK_TILT, &payload);
+        }
+        if let Some(payload) = self.city.section() {
+            put_section(&mut body, SECTION_CITY, &payload);
         }
         chunk(
             KIND_DATA,
@@ -317,6 +324,9 @@ pub(crate) fn decode_frames(
     }
     if let Some(payload) = section(sections, SECTION_DISK_TILT) {
         apply_tilts(&mut out, get_tilts(payload, frames)?);
+    }
+    if let Some(payload) = section(sections, SECTION_CITY) {
+        apply_city(&mut out, get_city(payload, frames)?);
     }
     Ok(out)
 }

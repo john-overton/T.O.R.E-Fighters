@@ -12,10 +12,10 @@ use crate::error::{Error, Result, corrupt};
 use crate::events::{get_checksums, get_events};
 use crate::format::{
     CHUNK_HEADER_BYTES, ChunkHeader, IndexEntry, KIND_DATA, KIND_FOOTER, KIND_HEADER, KIND_INDEX,
-    PRELUDE_BYTES, SECTION_CHECKSUMS, SECTION_EFFECT_SCALES, SECTION_ENTITIES, SECTION_EVENTS,
-    SECTION_SPAWNS, SECTION_STRINGS, SECTION_TREES, TRAILER_BYTES, chunk_checksum, decode_footer,
-    decode_header, decode_index, read_chunk_header, read_prelude, read_sections, read_trailer,
-    section,
+    PRELUDE_BYTES, SECTION_CHECKSUMS, SECTION_CITY, SECTION_EFFECT_SCALES, SECTION_ENTITIES,
+    SECTION_EVENTS, SECTION_SPAWNS, SECTION_STRINGS, SECTION_TREES, TRAILER_BYTES, chunk_checksum,
+    decode_footer, decode_header, decode_index, read_chunk_header, read_prelude, read_sections,
+    read_trailer, section,
 };
 use crate::limits::{
     MAX_CHUNK_BYTES, MAX_CHUNK_FRAMES, MAX_CHUNKS, MAX_EVENTS_TOTAL, MAX_FILE_BYTES,
@@ -164,6 +164,8 @@ pub struct Recording {
     surface_units: BTreeMap<u32, SurfaceInfo>,
     events: Vec<TimedEvent>,
     checksums: Vec<(u64, u64)>,
+    /// The city fill's knocked-down buildings, tick by tick (nr-fx3).
+    city: crate::city::CityTrack,
     trees: HashMap<(u32, String), Vec<(usize, u64)>>,
     frame_cache: Mutex<Option<(usize, Arc<Vec<Frame>>)>>,
     spawn_cache: Mutex<HashMap<usize, Arc<Vec<FrameSpawns>>>>,
@@ -293,6 +295,7 @@ impl Recording {
             surface_units: BTreeMap::new(),
             events: Vec::new(),
             checksums: Vec::new(),
+            city: crate::city::CityTrack::default(),
             trees: HashMap::new(),
             frame_cache: Mutex::new(None),
             spawn_cache: Mutex::new(HashMap::new()),
@@ -494,6 +497,10 @@ impl Recording {
             .map(|p| get_checksums(p, header.frames))
             .transpose()?
             .unwrap_or_default();
+        let city = section(&sections, SECTION_CITY)
+            .map(|p| crate::city::get_city(p, header.frames))
+            .transpose()?
+            .unwrap_or_default();
         let event_count: usize = events.iter().map(|(_, e)| e.len()).sum();
         if self.events.len() + event_count > MAX_EVENTS_TOTAL {
             return Err(corrupt(format!(
@@ -530,6 +537,10 @@ impl Recording {
             checksums
                 .into_iter()
                 .map(|(frame, checksum)| (first + u64::from(frame), checksum)),
+        );
+        self.city.changes.extend(
+            city.into_iter()
+                .map(|(frame, stood, fell)| (first + u64::from(frame), stood, fell)),
         );
         self.chunks.push(ChunkInfo {
             offset,
@@ -629,6 +640,13 @@ impl Recording {
         let start = self.events.partition_point(|e| e.tick < from);
         let end = self.events.partition_point(|e| e.tick <= to);
         &self.events[start..end.max(start)]
+    }
+
+    /// The city fill's buildings knocked down over the recording, tick by
+    /// tick: empty in a recording from before the city section (nr-fx3) or
+    /// of a flight that flattened nothing.
+    pub fn city(&self) -> &crate::city::CityTrack {
+        &self.city
     }
 
     /// Every stored state checksum: `(tick, checksum)`.
