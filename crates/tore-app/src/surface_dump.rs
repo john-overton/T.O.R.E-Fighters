@@ -25,6 +25,14 @@
 //!   Red start. The `surface-relocate-sweep` and `surface-start-placement`
 //!   scenarios.
 //!
+//! - `--surface-dump THEATER --area [--defenses AAA SAM] [--surface-seed N]`
+//!   prints the theater's surface with the enemy area defenses of a Quick
+//!   Mission with no ground target (B23); `--surface-dump --area-sweep
+//!   [--seeds N] [--png DIR] [THEATER ...]` places them in every (named)
+//!   theater at every strength with seeds 1 to N (3), reports the area rules
+//!   each unit breaks and, with `--png`, draws each theater's heavy layout
+//!   from above. The `surface-area-sweep` scenario.
+//!
 //! The import does not keep the templates or the unit types only they name
 //! yet, so both commands add what the pack lacks from the retail `FA_2.LIB`
 //! the data directory remembers (read at runtime, never stored).
@@ -159,6 +167,9 @@ pub fn run() -> AppResult<()> {
     let mut seeds = None;
     let mut variation = Variation::ON;
     let mut separation = DUMP_SEPARATION_NM;
+    let mut area = false;
+    let mut area_sweep = false;
+    let mut png = None;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         let mut next = || {
@@ -180,6 +191,9 @@ pub fn run() -> AppResult<()> {
             "--no-front" => variation.front = false,
             "--separation" => separation = next()?.parse()?,
             "--seeds" => seeds = Some(next()?.parse()?),
+            "--area" => area = true,
+            "--area-sweep" => area_sweep = true,
+            "--png" => png = Some(std::path::PathBuf::from(next()?)),
             other if other.starts_with("--") => return Err(format!("unknown {other}").into()),
             other => positional.push(other.to_owned()),
         }
@@ -196,6 +210,9 @@ pub fn run() -> AppResult<()> {
     }
     if starts {
         return start_placement(&resources, &positional);
+    }
+    if area_sweep {
+        return area_sweep_run(&resources, seeds.unwrap_or(3), png.as_deref(), &positional);
     }
     let [theater, rest @ ..] = positional.as_slice() else {
         return Err("--surface-dump THEATER [STEM] [--defenses AAA SAM] [--surface-seed N] [--enemy-nationality N] [--night-stealth] [--no-jitter] [--no-relocate] | --all [--seeds N] | --sweep [--seeds N] [THEATER...] | --starts [THEATER...]".into());
@@ -215,8 +232,21 @@ pub fn run() -> AppResult<()> {
         }),
         _ => return Err("--surface-dump takes one template".into()),
     };
-    let terrain =
-        Terrain::for_mission_with(&resources, theater, Some(0), &overrides()?, target.as_ref())?;
+    let area = (area && target.is_none()).then(|| resolve::AreaDefense {
+        aaa: levels.0,
+        sam: levels.1,
+        seed,
+        enemy_nationality: nationality.unwrap_or(tables::ENEMY_NATIONALITY[index]),
+        night_stealth: night,
+    });
+    let terrain = Terrain::for_mission_surface(
+        &resources,
+        theater,
+        Some(0),
+        &overrides()?,
+        target.as_ref(),
+        area.as_ref(),
+    )?;
     print_surface(theater, &terrain.surface);
     Ok(())
 }
@@ -419,7 +449,7 @@ fn print_surface(theater: &str, surface: &Surface) {
             .count()
     };
     println!(
-        "surface: totals units {} layout {} template {} parked {} trucks {} added-trucks {} batteries {} added-radars {} targets {} not-drawn {} unreadable {}",
+        "surface: totals units {} layout {} template {} parked {} trucks {} added-trucks {} batteries {} added-radars {} area {} targets {} not-drawn {} unreadable {}",
         surface.units.len(),
         count(IdRange::Layout),
         count(IdRange::Template),
@@ -428,6 +458,7 @@ fn print_surface(theater: &str, surface: &Surface) {
         count(IdRange::SupplyTruck),
         surface.batteries.len(),
         count(IdRange::BatteryRadar),
+        count(IdRange::AreaDefense),
         surface.targets().count(),
         surface.units.iter().filter(|u| !u.in_scene).count(),
         surface.unreadable.len()
@@ -1170,4 +1201,238 @@ fn overhead(points: &[([f64; 3], Marker)], pitch_deg: f64, scale: f64) -> Camera
         center[1] - distance * pitch.cos(),
     ];
     camera
+}
+
+/// `--surface-dump --area-sweep`: see the module comment.
+fn area_sweep_run(
+    resources: &BTreeMap<String, Vec<u8>>,
+    seeds: u32,
+    png: Option<&Path>,
+    wanted: &[String],
+) -> AppResult<()> {
+    let (mut builds, mut problems, mut short) = (0usize, 0usize, 0usize);
+    for (index, theater, _) in jobs(wanted)? {
+        let terrain = Terrain::for_mission(resources, theater, Some(0), &overrides()?)?;
+        let site = tore_world::terrain::SurfaceSite::load(resources, theater)?;
+        let front = site.front();
+        for seed in 1..=seeds {
+            for level in 1..=3usize {
+                let area = resolve::AreaDefense {
+                    aaa: level,
+                    sam: level,
+                    seed,
+                    enemy_nationality: tables::ENEMY_NATIONALITY[index],
+                    night_stealth: false,
+                };
+                let surface = site.place_with(resources, &terrain.theater, None, Some(&area))?;
+                builds += 1;
+                let broken = site.audit_area(resources, &terrain.theater, &surface);
+                problems += broken.len();
+                for problem in &broken {
+                    println!(
+                        "surface-area-problem: {theater} seed {seed} level {level}: {problem}"
+                    );
+                }
+                let units: Vec<_> = layout::area::units(&surface).collect();
+                let wanted_units = (layout::AREA_SAM_SITES[level] + layout::AREA_AAA_SITES[level])
+                    * layout::AREA_SITE_UNITS;
+                if front.is_some() && units.len() < wanted_units {
+                    short += 1;
+                }
+                let depths: Vec<f64> = match front {
+                    Some(f) => units
+                        .iter()
+                        .map(|u| {
+                            let axis = f.axis();
+                            let len = (axis[0] as f64).hypot(axis[1] as f64);
+                            let mid = [
+                                (f.blue[0] + f.red[0]) as f64 / 2.,
+                                (f.blue[1] + f.red[1]) as f64 / 2.,
+                            ];
+                            ((f64::from(u.position[0]) - mid[0]) * axis[0] as f64
+                                + (f64::from(u.position[2]) - mid[1]) * axis[1] as f64)
+                                / len
+                                / layout::NM_FT as f64
+                        })
+                        .collect(),
+                    None => Vec::new(),
+                };
+                let (lo, hi) = depths
+                    .iter()
+                    .fold((f64::MAX, f64::MIN), |(lo, hi), d| (lo.min(*d), hi.max(*d)));
+                let radars = surface
+                    .batteries
+                    .iter()
+                    .filter(|b| b.launchers[0].range() == IdRange::AreaDefense)
+                    .count();
+                println!(
+                    "surface-area: {theater} seed {seed} level {level} front {} units {} of {wanted_units} sa-batteries {radars} depth-nm {} problems {} digest {:#018x}",
+                    u8::from(front.is_some()),
+                    units.len(),
+                    if depths.is_empty() {
+                        "none".to_owned()
+                    } else {
+                        format!("{lo:.1}..{hi:.1}")
+                    },
+                    broken.len(),
+                    surface.digest(),
+                );
+                for note in surface
+                    .layout_notes
+                    .iter()
+                    .filter(|n| n.starts_with("area"))
+                {
+                    println!("surface-area-note: {theater} seed {seed} level {level}: {note}");
+                }
+                if let (Some(dir), 3) = (png, level) {
+                    std::fs::create_dir_all(dir)?;
+                    let path = dir.join(format!("area-{theater}-seed{seed}.png"));
+                    area_map(&terrain, &surface, front, &path)?;
+                    println!("surface-area-png: {}", path.display());
+                }
+            }
+        }
+    }
+    println!("surface-area-sweep: builds {builds} problems {problems} short {short}");
+    if problems > 0 {
+        return Err(format!("{problems} area rule problems").into());
+    }
+    Ok(())
+}
+
+/// A pixel writer for [`area_map`].
+type Put<'a> = dyn FnMut(&mut Vec<u8>, i64, i64, [u8; 3]) + 'a;
+
+/// The theater from above, north up: water blue, land green by height,
+/// the front axis white from Blue's centroid to Red's, the midpoint line
+/// and the 10 and 60 nm band edges yellow, runways as squares (red Red's,
+/// blue Blue's, grey neutral), area SAM launchers magenta, guns orange and
+/// battery radars cyan.
+fn area_map(
+    terrain: &Terrain,
+    surface: &Surface,
+    front: Option<layout::Front>,
+    path: &Path,
+) -> AppResult<()> {
+    let theater = &terrain.theater;
+    let (cols, rows) = (theater.cols, theater.rows);
+    let scale = (1024 / cols.max(rows)).max(1);
+    let (w, h) = (cols * scale, rows * scale);
+    let mut rgba = vec![0u8; w * h * 4];
+    let cell = layout::ground::CELL_FT as f64;
+    // World feet to pixel: x right, z up.
+    let px = |x: f64, z: f64| -> (i64, i64) {
+        (
+            (x / cell * scale as f64) as i64,
+            h as i64 - 1 - (z / cell * scale as f64) as i64,
+        )
+    };
+    let mut put = |rgba: &mut Vec<u8>, x: i64, y: i64, c: [u8; 3]| {
+        if x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h {
+            let at = (y as usize * w + x as usize) * 4;
+            rgba[at..at + 4].copy_from_slice(&[c[0], c[1], c[2], 255]);
+        }
+    };
+    for r in 0..rows {
+        for c in 0..cols {
+            let t = theater.cell(c, r);
+            let colour = if t.class == 1 || t.color == 255 {
+                [30, 60, 120]
+            } else {
+                let e = (t.elevation as u32 * 6).min(140) as u8;
+                [40 + e, 90 + e / 2, 40 + e / 3]
+            };
+            for dy in 0..scale {
+                for dx in 0..scale {
+                    let (x, y) = (c * scale + dx, (rows - 1 - r) * scale + dy);
+                    put(&mut rgba, x as i64, y as i64, colour);
+                }
+            }
+        }
+    }
+    let line = |rgba: &mut Vec<u8>, a: [f64; 2], b: [f64; 2], c: [u8; 3], put: &mut Put<'_>| {
+        let steps = 2000;
+        for i in 0..=steps {
+            let t = i as f64 / steps as f64;
+            let (x, y) = px(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t);
+            put(rgba, x, y, c);
+        }
+    };
+    if let Some(f) = front {
+        let (b, r) = (
+            [f.blue[0] as f64, f.blue[1] as f64],
+            [f.red[0] as f64, f.red[1] as f64],
+        );
+        line(&mut rgba, b, r, [255, 255, 255], &mut put);
+        let axis = [r[0] - b[0], r[1] - b[1]];
+        let len = axis[0].hypot(axis[1]);
+        let (u, v) = (
+            [axis[0] / len, axis[1] / len],
+            [-axis[1] / len, axis[0] / len],
+        );
+        let mid = [(b[0] + r[0]) / 2., (b[1] + r[1]) / 2.];
+        let far = 3.0e6;
+        for nm in [0., 10., 60.] {
+            let d = nm * layout::NM_FT as f64;
+            let o = [mid[0] + u[0] * d, mid[1] + u[1] * d];
+            line(
+                &mut rgba,
+                [o[0] - v[0] * far, o[1] - v[1] * far],
+                [o[0] + v[0] * far, o[1] + v[1] * far],
+                if nm == 0. {
+                    [255, 255, 255]
+                } else {
+                    [250, 220, 40]
+                },
+                &mut put,
+            );
+        }
+    }
+    let blob = |rgba: &mut Vec<u8>, x: f64, z: f64, radius: i64, c: [u8; 3]| {
+        let (cx, cy) = px(x, z);
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                if dx * dx + dy * dy <= radius * radius {
+                    put(rgba, cx + dx, cy + dy, c);
+                }
+            }
+        }
+    };
+    for runway in &terrain.airport_scene.runways {
+        let colour = match surface.side_of(runway.object).0 {
+            1 => [60, 120, 255],
+            2 => [230, 40, 40],
+            _ => [170, 170, 170],
+        };
+        let c = runway.surface.center;
+        blob(&mut rgba, c[0], c[2], 4, [0, 0, 0]);
+        blob(&mut rgba, c[0], c[2], 3, colour);
+    }
+    let radars: Vec<UnitId> = surface
+        .batteries
+        .iter()
+        .filter(|b| b.launchers[0].range() == IdRange::AreaDefense)
+        .map(|b| b.radar)
+        .collect();
+    for unit in surface
+        .units
+        .iter()
+        .filter(|u| u.id.range() == IdRange::AreaDefense || radars.contains(&u.id))
+    {
+        let colour = if radars.contains(&unit.id) {
+            [40, 230, 230]
+        } else if unit.class & class::SAM != 0 {
+            [240, 40, 240]
+        } else {
+            [255, 150, 20]
+        };
+        let (x, z) = (f64::from(unit.position[0]), f64::from(unit.position[2]));
+        blob(&mut rgba, x, z, 4, [0, 0, 0]);
+        blob(&mut rgba, x, z, 3, colour);
+    }
+    std::fs::write(
+        path,
+        crate::replay::png::encode_rgba(w as u32, h as u32, &rgba)?,
+    )?;
+    Ok(())
 }

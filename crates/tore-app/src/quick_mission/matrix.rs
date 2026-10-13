@@ -1015,7 +1015,7 @@ pub fn render(
     quick.help = true;
     draw(&mut quick, "help".into(), &mut problems);
     quick.help = false;
-    quick.notice = Some(NO_TARGET_NOTICE.into());
+    quick.notice = Some(NO_FIELD_NOTICE.into());
     draw(&mut quick, "notice".into(), &mut problems);
     quick.notice = None;
     // A ground target with defenses, and the ground start the world places.

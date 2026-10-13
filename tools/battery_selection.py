@@ -255,8 +255,8 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ("net-window-*",),
     ),
     "net-surface": (
-        "a ground target online (protocol 22): a server and bots over the defended moving column, co-op and PvP, and a Redfor ground start",
-        ("net-surface-*", "net-redfor-*"),
+        "a ground target online (protocol 22): a server and bots over the defended moving column, co-op and PvP, a Redfor ground start, and the area defenses of a mission with no target",
+        ("net-surface-*", "net-redfor-*", "net-area-*"),
     ),
     "net-a2g": (
         "the air-to-ground round online (protocol 23): a lasing bot and a buddy bomber with a HARM over a radar site; "

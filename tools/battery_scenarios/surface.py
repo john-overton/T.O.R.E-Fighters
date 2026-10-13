@@ -28,6 +28,14 @@ theater with a ground target and a 50 nm enemy distance. Red starts within
 at the target; both on the map. See
 docs/spec/surface-defenses.md.
 
+`surface-area-sweep` runs `--surface-dump --area-sweep`: the enemy area
+defenses of a Quick Mission with no ground target (B23) in every theater at
+every strength with seeds 1 and 2. Every unit keeps the area rules (Red's side,
+land, level, clear of layout objects and runways), every theater but the
+Kurils (islands, mostly sea) stands every site, and a second run repeats the
+digests. `surface-area-engage` flies past the first area site of a Ukraine
+mission (heavy, seed 1, an SA-14) at 4,000 ft and expects it to launch.
+
 The engagement scenarios run `--surface-trace`, which flies the player on a
 scripted straight line past one surface unit and prints what its controller
 does (phases, shots, bursts, radar, HARM rolls, battery changes), the RWR's
@@ -600,6 +608,56 @@ def start_placement_problems(output: str) -> list[str]:
     return problems
 
 
+AREA_LINE = re.compile(
+    r"^surface-area: (\S+) seed (\d+) level (\d) front (\d) units (\d+) of (\d+) sa-batteries (\d+) "
+    r"depth-nm (\S+) problems (\d+) digest (0x[0-9a-f]+)$",
+    re.M,
+)
+# Island theaters whose Red side is mostly sea: some sites find no land.
+AREA_SHORT_OK = {"KURILE"}
+
+
+def area_sweep_problems(output: str) -> list[str]:
+    """Every theater places its area sites (all of them but the Kurils), and
+    the second run (seed 1) repeats the digests."""
+    problems: list[str] = []
+    first_run, _, again = output.partition("$ then 1:")
+    digests: dict[tuple, str] = {}
+    for m in AREA_LINE.finditer(first_run):
+        theater, seed, level = m.group(1), int(m.group(2)), int(m.group(3))
+        front, units, wanted = int(m.group(4)), int(m.group(5)), int(m.group(6))
+        digests[(theater, seed, level)] = m.group(10)
+        if not front:
+            problems.append(f"{theater}: no front")
+        if units < wanted and theater not in AREA_SHORT_OK:
+            problems.append(f"{theater} seed {seed} level {level}: {units} of {wanted} units")
+        if units == 0:
+            problems.append(f"{theater} seed {seed} level {level}: no area units")
+    if len(digests) != 16 * 2 * 3:
+        problems.append(f"{len(digests)} area builds, expected 96")
+    repeats = 0
+    for m in AREA_LINE.finditer(again):
+        key = (m.group(1), int(m.group(2)), int(m.group(3)))
+        repeats += 1
+        if digests.get(key) != m.group(10):
+            problems.append(f"{key}: digest {digests.get(key)} then {m.group(10)}")
+    if repeats != 16 * 3:
+        problems.append(f"second run built {repeats} times, expected 48")
+    return problems
+
+
+def area_engage_problems(output: str) -> list[str]:
+    """The first area unit is an enemy SAM and launches at the aircraft."""
+    run = runs(output)[0]
+    problems: list[str] = []
+    if not re.search(r"^surface-trace: subject 0x5f000000 \S+ side 2 ", run, re.M):
+        problems.append(f"subject {subject(run)} is not the first enemy area unit")
+    s = summary(run)
+    if int(s.get("missiles", "0")) < 1:
+        problems.append(f"no launch: missiles {s.get('missiles')}")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
@@ -728,6 +786,24 @@ def scenarios() -> list[Scenario]:
             expect=[r"^surface-class-sweep: \d+ placements, 0 problems$"],
             forbid=[r"^surface-class-problem:"],
             notes="Reads the templates from the retail media until the import keeps them.",
+        ),
+        Scenario(
+            name="surface-area-sweep", lane="ai",
+            args=["--surface-dump", "--area-sweep", "--seeds", "2"], timeout=900,
+            expect=[r"^surface-area-sweep: builds 96 problems 0 short \d+$"],
+            forbid=[r"^surface-area-problem:"],
+            then=[Step(["--surface-dump", "--area-sweep", "--seeds", "1"], timeout=600)],
+            check=area_sweep_problems,
+            notes="B23 area defenses. Reads the unit records from the retail media until the import keeps them.",
+        ),
+        Scenario(
+            name="surface-area-engage", lane="ai", timeout=400,
+            args=trace("UKR", "--area", "--defenses", "3", "3", "--surface-seed", "1", "--unit", "0x5f000000",
+                       "--altitude", "4000", "--speed", "350", "--from", "8", "--seconds", "120",
+                       "--invulnerable", "--quiet-shots"),
+            forbid=[r"^surface-trace: t=\S+ player crashed"],
+            check=area_engage_problems,
+            notes=TRACE_NOTES + " A Quick Mission with no ground target and heavy strengths (B23).",
         ),
         Scenario(
             name="surface-start-placement", lane="ai",
