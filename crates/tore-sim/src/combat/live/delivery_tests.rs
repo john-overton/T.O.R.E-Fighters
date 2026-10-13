@@ -70,7 +70,12 @@ fn carrying_as(weapon: Weapon, count: u16, class: StrikeClass) -> State {
             mount: [0.; 3],
             count,
             internal: false,
-            rack: Default::default(),
+            rack: crate::combat::hardpoints::Rack {
+                // Released from the record's own point (a bay): these paths
+                // start at the mount, whatever a pylon's rack would add.
+                location: 3,
+                ..Default::default()
+            },
         },
     ];
     let mut s = State::new(config, true).unwrap();

@@ -222,6 +222,12 @@ mod tests {
         missile.seeker.signature = 3;
         config.stations[0].weapon = mk82_pack(config.stations[0].weapon.clone());
         config.stations[0].mount = [3., -2., 1.];
+        // Released from the record's own point (a bay), so each bomb starts
+        // at the mount and its pack offset.
+        config.stations[0].rack = tore_sim::combat::hardpoints::Rack {
+            location: 3,
+            ..Default::default()
+        };
         wings.configs.insert(id, config.clone());
         let ground = |_: f64, _: f64| 0.;
 

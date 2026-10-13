@@ -210,7 +210,8 @@ What this shows:
   fires at (a Shilka sees 60,000 ft and fires at 7,500 ft). The M163's 2.5 to
   1 is among the narrowest of the radar guns (the KS-19's is 2.0 to 1). A big acquisition zone is therefore
   the normal shape of the data, not a quirk of the M163.
-- What stands out is the M163's **fire** range: 20,000 ft (3.3 nm) is 2.7
+- TORE replaces the M163's zones (opinionated, John, 2026-10-13): the AAA tuning row sets detection 18,000 ft and fire 7,500 ft up to 7,500 ft above, leaving the record and the ships' Phalanx alone ([AAA tuning](../spec/surface-defenses.md#aaa-tuning)). The table above is the retail data, not what the game uses for the M163.
+- What stands out in the retail data is the M163's **fire** range: 20,000 ft (3.3 nm) is 2.7
   times the ZSU-23's 7,500 ft, because it borrows the ship record. The real
   M163 VADS fires effectively to about 1.2 nm (about 7,500 ft), which is
   exactly the unused `M163.JT`'s (a ZSU23 copy) and the ZSU23's zone 1.

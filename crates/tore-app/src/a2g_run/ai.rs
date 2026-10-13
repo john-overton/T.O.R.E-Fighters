@@ -17,7 +17,7 @@
 //!     [--choose-store] [--buddy ID]
 //!     [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG]
 //!     [--defenses AAA SAM] [--surface-seed N] [--seconds S] [--sead-at S]
-//!     [--follow-threat]
+//!     [--follow-threat] [--follow-egress] [--place-site ID,BEARING,RANGE_FT]
 //! ```
 //!
 //! - `--aircraft`, `--load`, `--station`, `--count`: the striker and its store,
@@ -300,6 +300,16 @@ pub(crate) struct Config {
     /// `--seconds`) while a helicopter keeps out of a ring it means to come
     /// back from, to see whether it resumes (slice H2).
     pub follow_threat: bool,
+    /// `--follow-egress`: after the last impact the run goes on (within
+    /// `--seconds`) until the striker egresses, and settles from there, so
+    /// what happens on the way out is seen (slice HF1).
+    pub follow_egress: bool,
+    /// `--place-site ID,BEARING_DEG,RANGE_FT`: the hostile SAM or gun site
+    /// `ID` is moved, before the first tick, to that compass bearing and
+    /// range from the target, so a test can lay out the threats a
+    /// helicopter meets, an ambush among them (slice HF1, John
+    /// 2026-10-13).
+    pub place_site: Option<(u32, f64, f64)>,
 }
 
 impl Config {
@@ -640,6 +650,8 @@ struct Watch {
     last_impact: Option<f64>,
     closest: Option<(f64, f64)>,
     egress: bool,
+    /// When the striker egressed (`--follow-egress`).
+    egress_at: Option<f64>,
     lost: Option<f64>,
     activity: Option<Activity>,
     profile: Option<Profile>,
@@ -713,6 +725,7 @@ impl Watch {
             last_impact: None,
             closest: None,
             egress: false,
+            egress_at: None,
             lost: None,
             activity: None,
             profile: None,
@@ -742,11 +755,15 @@ impl Watch {
 
     /// A helicopter keeping out of a ring it means to come back from: its
     /// latest threat decision is "leave", or it is holding off (slice H2,
-    /// `--follow-threat`).
+    /// `--follow-threat`); or it has resumed and not fired since, so the
+    /// shot after the resume is seen too (slice HF1).
     fn keeping_out(&self) -> bool {
+        use tore_sim::ai::helicopter_threat::Decision;
         self.phase == Some(tore_sim::ai::strike::Phase::HoldOff)
-            || self.threat_call.is_some_and(|(decision, _)| {
-                decision == tore_sim::ai::helicopter_threat::Decision::Leave
+            || self.threat_call.is_some_and(|(decision, tick)| {
+                decision == Decision::Leave
+                    || (decision == Decision::Resume
+                        && self.last_release.is_none_or(|at| at < tick as f64 / 120.))
             })
     }
 }
@@ -1185,6 +1202,7 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
             && !w.busy()
         {
             w.egress = true;
+            w.egress_at = Some(t);
             println!(
                 "ai-strike: EGRESS t={t:.3} range_ft={range:.0} alt_ft={:.0}",
                 p[1] - scene.ground(p[0], p[2])
@@ -1213,6 +1231,68 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
             if crashed { "yes" } else { "no" }
         );
     }
+}
+
+/// `--place-site`: moves the standing hostile site `id` to `bearing` degrees
+/// and `range` feet from the target, on the ground there: its surface unit
+/// (where it sees and fires from), its arms and its combat row and hit box
+/// (where it is seen and hit). The drawn scene keeps it where the mission
+/// put it: the driver draws nothing of it. Prints a `PLACED` line.
+fn place_site(
+    scene: &mut Scene,
+    id: u32,
+    bearing: f64,
+    range: f64,
+    target_at: Vector,
+) -> AppResult<()> {
+    let (sin, cos) = bearing.to_radians().sin_cos();
+    let [x, z] = [target_at[0] + range * sin, target_at[2] + range * cos];
+    let ground = scene.ground(x, z);
+    let row = scene
+        .world
+        .combat
+        .state
+        .targets
+        .iter()
+        .find(|row| row.id == id && row.aircraft.is_none() && row.category & 0x1800 != 0)
+        .ok_or_else(|| format!("--place-site: {id:#x} is not a SAM or gun site"))?;
+    let from = row.position;
+    let bounds = scene
+        .world
+        .combat
+        .state
+        .ground_bounds(id)
+        .ok_or_else(|| format!("--place-site: {id:#x} has no hit box"))?;
+    let old_ground = scene.ground(from[0], from[2]);
+    let shift = [x - from[0], ground - old_ground, z - from[2]];
+    let moved = tore_sim::airport::OrientedBox {
+        center: std::array::from_fn(|i| bounds.center[i] + shift[i]),
+        ..bounds
+    };
+    if !scene
+        .world
+        .combat
+        .state
+        .move_ground_target(id, moved, [0.; 3], false)
+    {
+        return Err(format!("--place-site: {id:#x} could not be moved").into());
+    }
+    let surface = &mut scene.world.terrain.surface;
+    let unit = surface
+        .units
+        .iter_mut()
+        .find(|u| u.id.0 == id)
+        .ok_or_else(|| format!("--place-site: {id:#x} is not a surface unit"))?;
+    unit.position[0] = x.round() as i32;
+    unit.position[2] = z.round() as i32;
+    if let Some(arms) = surface.arsenal.units.iter_mut().find(|a| a.unit.0 == id) {
+        arms.position = [x, arms.position[1] + shift[1], z];
+    }
+    println!(
+        "ai-strike: PLACED id={id:#010x} bearing={bearing:.0} range_ft={range:.0} at={x:.0},{z:.0} moved_ft={:.0}",
+        shift[0].hypot(shift[2])
+    );
+    Ok(())
 }
 
 /// `RINGS`: the rings a helicopter striker knows now (slice H4): id,
@@ -1642,6 +1722,9 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
             cfg.order.map_or("none", |(name, _)| name),
             cfg.mode.map_or("none", DeliveryMode::label),
         );
+        if let Some((id, bearing, range)) = cfg.place_site {
+            place_site(&mut scene, id, bearing, range, target_at)?;
+        }
         // The mission's hostile SAM and gun sites, once (slice ST-H): where
         // they stand against the target and the start, for reading a
         // defended run.
@@ -2030,9 +2113,14 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         // striker has had time to leave.
         let over = [
             watch.lost,
-            watch
-                .last_impact
-                .filter(|_| !(watch.busy() || (cfg.follow_threat && watch.keeping_out()))),
+            watch.last_impact.filter(|_| {
+                !(watch.busy()
+                    || (cfg.follow_threat && watch.keeping_out())
+                    || (cfg.follow_egress && !watch.egress))
+            }),
+            watch.egress_at.filter(|_| {
+                cfg.follow_egress && !(watch.busy() || (cfg.follow_threat && watch.keeping_out()))
+            }),
         ]
         .into_iter()
         .flatten()

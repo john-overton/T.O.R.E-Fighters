@@ -502,7 +502,7 @@ the layout is an agent decision.
 | Event | When | What |
 | --- | --- | --- |
 | `stores.layout` | The first tick an aircraft is recorded with any stores, and whenever its drawn stations change (a respawn with another loadout, a jettisoned gun pod) | `count`, the stations that follow |
-| `stores.station` | Right after its layout, one per station in order | `slot`, `hardpoint`, the record's position `x_ft`, `y_ft`, `z_ft`, `location`, `paired`, `look` (store, pod or tank), `items` (whole stores on it), `loaded`, the weapon's `shape` when it has one, and a fitted pod's or tank's `length_ft` and `diameter_ft`: everything the drawing needs, so the viewer needs no loadout |
+| `stores.station` | Right after its layout, one per station in order | `slot`, `hardpoint`, the record's position `x_ft`, `y_ft`, `z_ft`, `location`, `paired`, `look` (store, pod or tank), `items` (whole stores on it), `loaded`, the weapon's `shape` when it has one, and a fitted pod's or tank's `length_ft` and `diameter_ft`; since slice PY2 (2026-10-13) the model's underside over its pylons where it has one, `over_ft`, `over_inboard_ft`, `over_outboard_ft`, `over_front_ft` and `over_rear_ft` (feet up), which hang each store under its pylon or rail, and for a wingtip station its tip edge, `tip_right_ft` and `tip_up_ft`. Everything the drawing needs, so the viewer needs no loadout; a recording without the `over` fields hangs its stores at the record's height |
 | `stores.items` | Whenever a whole store leaves (a bomb, a missile, a pod's last rocket), a jettison or a rearm | `items`: the whole stores on each station of the layout, in order |
 
 The viewer reads them once when the recording opens (again as a live or

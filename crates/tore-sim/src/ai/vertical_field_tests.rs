@@ -365,6 +365,25 @@ fn each_vertical_type_lands_vertically_at_the_landing_point_and_parks() {
                 "{kind:?} collective down"
             );
             assert_eq!(actor.activity(), Activity::Landed);
+            // Shut down (slice HF1, John 2026-10-13): a minute later the
+            // engines are off, the rotor has run down and it sits where it
+            // parked.
+            let parked_at = f.position;
+            let turning = f.lift_controls.drive.rotor_speed;
+            for _ in 0..(60 * 120) {
+                step(&mut mission);
+            }
+            let actor = &mission.actors()[0];
+            let f = actor.flight();
+            assert!(!f.engine, "{kind:?} engines still on");
+            assert!(
+                f.lift_controls.drive.rotor_speed < 0.5 * turning,
+                "{kind:?} rotor at {} of {turning}",
+                f.lift_controls.drive.rotor_speed
+            );
+            assert!(!f.crashed && on_ground(actor), "{kind:?}");
+            assert!(horizontal(f.position, parked_at) < 5., "{kind:?} moved");
+            assert_eq!(actor.airfield_phase(), Some(Phase::Parked));
         }
     }
 }
