@@ -173,7 +173,9 @@ Opinionated, not retail: the original opens on the same list head every time.
   names the player's aircraft and keeps that slot; the wings are random. The pick
   is a menu choice from the clock: nothing in a mission reads it, and once a
   mission is built it is a fixed mission, so it stays the same on every machine
-  online and on every replay.
+  online and on every replay. John confirmed on 2026-10-12 that the picks stay
+  100% random (no preference for armed combat aircraft, so a wing can be
+  transports or an AWACS) and that the player's own slot is random too.
 - **The draft is kept** in the profile as `quick-mission-v1.conf` and written
   after every menu action, so it survives the end of a flight (the debrief's OK
   returns to the creator as it was), a visit to the ordnance screen and a
@@ -182,10 +184,10 @@ Opinionated, not retail: the original opens on the same list head every time.
   selection key, so a changed import cannot turn one aircraft into another) and
   every other choice by its place in its list, with the group objectives and
   survival flags. A choice the lists no longer have keeps the creator's own value.
-- **Not kept:** the ground target's seed (each flight draws its own), the custom
-  load on the ordnance page (rebuilt for the aircraft; kept for the rest of the
-  session as before), the AI mission preset (a command-line choice), the lobby's
-  creator and the read-only lobby view. A file this build cannot read, or one
+- **Not kept in this file:** the ground target's seed (each flight draws its own),
+  the custom load on the ordnance page (it has its own file, [below](#the-custom-loadout-across-restarts)),
+  the AI mission preset (a command-line choice), the lobby's creator and the
+  read-only lobby view. A file this build cannot read, or one
   with a newer version, is left as it is and the creator opens on its defaults.
 - **Command-line and diagnostic runs** (`--snapshot`, probes, scripted runs,
   `--smoke-test`, `--launch-quick-mission`, `--ground-start`, `--ground-target`,
@@ -194,6 +196,53 @@ Opinionated, not retail: the original opens on the same list head every time.
   theater.
 - **Preview.** `--quick-mission --snapshot-state first-load` draws the creator
   with every slot random from a fixed seed.
+
+## The custom loadout across restarts
+
+Slice BQ2 (John asked on 2026-10-12: "persist the custom loadout only if the
+mission has not changed, or when re-flying a previously flown mission"; he also
+confirmed that the first-load picks stay 100% random, with no preference for
+armed combat aircraft, and that they cover every slot including the player's).
+Opinionated, requested by John; the choices below are agent decisions.
+
+- **The rule.** When the ordnance page opens for a Custom load, it shows the
+  load the player flew the last time this same mission was flown, if there is
+  one. Otherwise it opens on the aircraft's standard load, as before. A change to
+  the mission therefore drops the saved load for that mission: the player starts
+  from the standard load again.
+- **What "the same mission" means.** The theater, every aircraft (the player's and
+  all five wings, by selection key) and every other creator choice (all list
+  fields, the group objectives and the survival flags). The only field left out is
+  Standard or Custom load (field 18), which says whether the page opens, not what
+  the mission is. Not part of it, because the creator does not hold them: the
+  ground target's seed (a re-fly reuses it), the cheats, the AI mission preset
+  and the other command-line choices. The stamp is a 64-bit hash of the draft's
+  saved text, so it is the same on every launch.
+- **Re-flying.** The debrief's OK returns to the unchanged creator, so the next
+  mission is the same mission and its load comes back, after a restart too. Going
+  back to a mission flown earlier (changing the creator away and back) restores
+  that mission's load, because the profile keeps the loads of the last eight
+  missions flown with a Custom load, the oldest forgotten first. In the same
+  session, edits made on the page and not yet flown (Cancel, then reopen) are kept
+  as they always were. If no load was flown for the new mission but the aircraft
+  is unchanged, the page keeps the session's load, as before. Restarting the flight in progress never
+  touches the creator and is unchanged.
+- **When it is written.** On Fly, with the load that flew, so an abandoned edit
+  is not kept. Standard load never opens the page and writes nothing.
+- **The file.** `quick-loadouts-v1.conf` in the profile, beside the draft file:
+  a header line, then per mission a `mission HASH` line, `fuel`, `cheat`, the
+  `tank` lines and one `station N WEAPON COUNT QUANTITY` line per station, the
+  same words the mission text file uses. A file this build cannot read or with a
+  newer version is left exactly as it is: nothing is restored and nothing
+  written. A saved load that no longer fits the aircraft (a weapon the import no
+  longer has, a station that changed, a failed validation) falls back to the
+  standard load.
+- **Skipped runs.** Whatever skips the saved draft skips this too (snapshots,
+  probes, scripted runs, `--smoke-test`, `--launch-quick-mission`, the creator
+  setting flags), and so does `--loadout`, so battery scenarios build the same
+  loads as before.
+- **The multiplayer lobby** has a separate ordnance path (its Accept sends the
+  load to the lobby) and is unchanged.
 
 ## Mission wings
 

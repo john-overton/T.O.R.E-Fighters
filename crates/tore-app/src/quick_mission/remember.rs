@@ -17,10 +17,10 @@
 //! import cannot turn one aircraft into another; every other choice is its
 //! list position, checked against the list it indexes.
 //!
-//! Not kept: the ground target's seed (each flight draws its own), the
-//! loadout on the ordnance page (it is rebuilt for the aircraft; it is kept
-//! for the rest of the session), the AI mission preset (a command-line
-//! choice) and anything the multiplayer lobby's creator holds.
+//! Not kept here: the ground target's seed (each flight draws its own), the
+//! AI mission preset (a command-line choice) and anything the multiplayer
+//! lobby's creator holds. The custom loadout has its own file, kept with the
+//! mission it was made for (see [`super::loadout_memory`]).
 
 use super::{AI_AIRCRAFT_FIELDS, FIELDS, OBJECTIVE_COUNT, QuickMission, fresh_seed};
 use std::collections::BTreeMap;
@@ -185,6 +185,26 @@ impl QuickMission {
             );
         }
         text
+    }
+    /// A short stamp of the mission the creator describes now (slice BQ2,
+    /// item 19): it changes when anything that defines the mission changes
+    /// and is the same for the same mission, however many launches apart.
+    /// It covers what [`Self::remembered`] writes (the theater, every
+    /// aircraft, every list choice, the group objectives and survival
+    /// flags) except field 18, which says only whether the ordnance page
+    /// opens (Standard or Custom load), not what the mission is. Not in it,
+    /// because a draft does not hold them: the ground target's seed (a
+    /// re-fly keeps it), the cheats, the AI mission preset and the other
+    /// command-line choices. Agent decision, 2026-10-12.
+    pub fn mission_fingerprint(&self) -> String {
+        let text = self.remembered();
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for line in text.lines().filter(|l| !l.starts_with("field 18 ")) {
+            for byte in line.bytes().chain(std::iter::once(b'\n')) {
+                hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+        format!("{hash:016x}")
     }
     /// Puts a saved draft into the creator. A file that does not parse
     /// changes nothing. A choice the lists no longer have (an aircraft the

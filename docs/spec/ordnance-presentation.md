@@ -340,6 +340,16 @@ lasing](air-to-ground.md#buddy-lasing)).
   `lobby-ordnance-laser` load a laser bomb on the first station that takes one
   and show the air-to-surface page.
 
+### Opening on a saved load
+
+Slice BQ2 (John, 2026-10-12). In Quick Mission, a Custom load opens the page on
+the load flown the last time the same mission was flown, kept in the profile
+across restarts; a changed mission opens it on the aircraft's standard load. The
+rules, the file and what counts as the same mission are in [the custom loadout
+across restarts](quick-mission-menu.md#the-custom-loadout-across-restarts). A
+saved load goes through the same checks as any accepted load, and falls back to
+the standard load if it fails them. The lobby's page is not affected.
+
 ## Dragging and empty stations
 
 John requested visible weapon dragging, unloading into the catalog, station

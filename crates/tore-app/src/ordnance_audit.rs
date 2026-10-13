@@ -486,6 +486,10 @@ fn assert_roundtrip(
     if saved != mission {
         return Err("ordnance mission text changed accepted load".into());
     }
+    // The profile's saved loadout (Quick Mission, item 19) keeps the same load.
+    if super::quick_mission::loadout_memory::through_the_file(&accepted)? != accepted {
+        return Err("the saved loadout file changed an accepted load".into());
+    }
     let restored = accepted.apply(standard.clone(), data, None)?;
     if LoadoutSpec::of(&restored) != accepted
         || restored.total_lbs() != draft.total_lbs()
