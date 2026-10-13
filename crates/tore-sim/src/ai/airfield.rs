@@ -1894,7 +1894,14 @@ impl Sequence {
     fn inbound_target(&self, s: &Situation) -> ([f64; 3], f64) {
         let target = self.landing_point();
         let distance = horizontal_distance(s.position, target);
-        let (altitude, speed) = self.route.unwrap_or((target[1], s.cruise_speed_fps));
+        let (altitude, speed) = match self.route {
+            // A helicopter goes home at its own cruise and at its marshal
+            // height over the field, not on the fighters' route (fitted,
+            // slice H2; the cruise is slice H3's).
+            _ if self.lift == Lift::Rotor => (target[1] + ROTOR_MARSHAL_AGL_FT, s.cruise_speed_fps),
+            Some(route) => route,
+            None => (target[1], s.cruise_speed_fps),
+        };
         let command = super::route::route_command(
             &super::route::RouteInputs {
                 waypoint: Some(super::route::Waypoint {

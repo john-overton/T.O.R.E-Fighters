@@ -1344,7 +1344,12 @@ impl AiActor {
             approach_minimum_fps: self.approach_minimum_fps(),
             maximum_speed_fps: own.limits.maximum.0,
             corner_speed_fps: own.limits.corner.0,
-            cruise_speed_fps: super::route::cruise_speed(&own.limits).0,
+            // A rotorcraft's own cruise (slice H3) on its way home.
+            cruise_speed_fps: if super::rotor_adapter::flies(&self.flight) {
+                super::route::rotorcraft_cruise_speed(&own.limits).0
+            } else {
+                super::route::cruise_speed(&own.limits).0
+            },
             has_afterburner: config.propulsion.afterburner_thrust_lbf > 0.0,
             wind: surface(self.flight.position[0], self.flight.position[2]).wind,
             wing_position: self.identity.member,
