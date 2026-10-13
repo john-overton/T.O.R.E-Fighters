@@ -5,7 +5,9 @@
 //! left to right, seen from low beside the row by day and at night, a few
 //! moments into the explosions; then close views of a 20 mm and a 105 mm
 //! hit, and an eight-round 20 mm burst; the row also 3 and 6 seconds on,
-//! when only the smoke is left. A development aid: no
+//! when only the smoke is left. With `shockwave` after the folder it renders
+//! the climate set instead (slice B12, [`SHOCKWAVE_ROW`]). A development
+//! aid: no
 //! window opens, nothing is simulated, the effects are placed by hand with
 //! each record's own explosion type, and drawn the way a picture of the
 //! game draws them (sprites, lights, sparks).
@@ -111,10 +113,93 @@ struct Shot {
     tick: u64,
 }
 
+/// The shockwave set (slice B12, `--impact-preview OUT_DIR shockwave`): a
+/// 500 lb bomb, a 2,000 lb bomb and an AGM-65G 1,300 ft apart, seen from
+/// low beside the row 0.1, 0.5, 2, 10, 30 and 60 s after they went off, so
+/// the ring, the vapor and the lingering dust show.
+const SHOCKWAVE_ROW: [Impact; 3] = [
+    Impact {
+        label: "500lb",
+        record: "MK82.JT",
+        weight: None,
+    },
+    Impact {
+        label: "2000lb",
+        record: "MK84.JT",
+        weight: None,
+    },
+    Impact {
+        label: "agm65g",
+        record: "AGM65G.JT",
+        weight: None,
+    },
+];
+const SHOCKWAVE_SPACING: f64 = 1_300.;
+const SHOCKWAVE_SECONDS: [f64; 6] = [0.1, 0.5, 2., 10., 30., 60.];
+
+fn shockwave_shots(
+    resources: &std::collections::BTreeMap<String, Vec<u8>>,
+    world: &Terrain,
+    base: [f64; 3],
+    light: &str,
+) -> AppResult<Vec<Shot>> {
+    let row: Vec<Weapon> = SHOCKWAVE_ROW
+        .iter()
+        .map(|impact| record(resources, impact.record, impact.weight))
+        .collect::<AppResult<_>>()?;
+    let ground = |x: f64, z: f64| f64::from(world.height(x as f32, z as f32)).max(0.);
+    let spot = |n: f64| {
+        let x = base[0] + n * SHOCKWAVE_SPACING;
+        [x, ground(x, base[2]), base[2]]
+    };
+    let middle = spot(1.);
+    let births: Vec<(u64, EffectPose)> = row
+        .iter()
+        .enumerate()
+        .filter_map(|(n, weapon)| ground_hit(weapon, spot(n as f64), 0))
+        .map(|e| (10_000, e))
+        .collect();
+    Ok(SHOCKWAVE_SECONDS
+        .iter()
+        .map(|&seconds| {
+            let elapsed = (seconds * 120.) as u16;
+            Shot {
+                name: format!("shock-t{seconds:05.1}s-{light}"),
+                effects: row
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(n, weapon)| ground_hit(weapon, spot(n as f64), elapsed))
+                    .collect(),
+                births: births.clone(),
+                marks: row
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(n, weapon)| {
+                        let (size, scale) = tore_sim::combat::blast_scale::crater_of(weapon)?;
+                        Some(crate::snapshot::MarkPose {
+                            kind: blast::MarkKind::Crater(size),
+                            position: spot(n as f64),
+                            age: u64::from(elapsed),
+                            strength: 1.,
+                            scale,
+                        })
+                    })
+                    .collect(),
+                eye: [middle[0], middle[1] + 260., middle[2] - 2_400.],
+                look: [middle[0], middle[1] + 150., middle[2]],
+                fov: 75.,
+                tick: 10_000 + u64::from(elapsed),
+            }
+        })
+        .collect())
+}
+
 pub fn run() -> AppResult<()> {
     let args: Vec<_> = std::env::args().skip(2).collect();
-    let [out] = args.as_slice() else {
-        return Err("--impact-preview OUTPUT_DIRECTORY".into());
+    let (out, climate) = match args.as_slice() {
+        [out] => (out, false),
+        [out, set] if set == "shockwave" => (out, true),
+        _ => return Err("--impact-preview OUTPUT_DIRECTORY [shockwave]".into()),
     };
     let out = Path::new(out);
     std::fs::create_dir_all(out)?;
@@ -148,148 +233,176 @@ pub fn run() -> AppResult<()> {
         };
         let middle = spot(2.);
         let mut shots = Vec::new();
-        let row_births: Vec<(u64, EffectPose)> = row
-            .iter()
-            .enumerate()
-            .filter_map(|(n, (_, weapon))| ground_hit(weapon, spot(n as f64), 0))
-            .map(|e| (10_000, e))
-            .collect();
-        for seconds in [0.1, 0.3, 0.6, 1.0, 3.0, 6.0] {
-            let elapsed = (seconds * 120.) as u16;
-            let effects = row
+        if climate {
+            // Open land for the whole row and the camera: the theater's
+            // start may face the sea.
+            let land = (0..200_i32)
+                .flat_map(|ring| {
+                    (-ring..=ring).flat_map(move |a| [(a, -ring), (a, ring), (-ring, a), (ring, a)])
+                })
+                .map(|(east, north)| {
+                    [
+                        base[0] + f64::from(east) * 4_000.,
+                        0.,
+                        base[2] + f64::from(north) * 4_000.,
+                    ]
+                })
+                .find(|p| {
+                    (-4..=12).all(|i| {
+                        (-6..=2).all(|j| {
+                            !world.drawn_as_water(
+                                p[0] + f64::from(i) * 300.,
+                                p[2] + f64::from(j) * 450.,
+                            )
+                        })
+                    })
+                })
+                .ok_or("no open land near the theater's start")?;
+            shots = shockwave_shots(resources, &world, land, light)?;
+        } else {
+            let row_births: Vec<(u64, EffectPose)> = row
                 .iter()
                 .enumerate()
-                .filter_map(|(n, (_, weapon))| ground_hit(weapon, spot(n as f64), elapsed))
+                .filter_map(|(n, (_, weapon))| ground_hit(weapon, spot(n as f64), 0))
+                .map(|e| (10_000, e))
                 .collect();
-            shots.push(Shot {
-                name: format!("row-t{seconds:.2}s-{light}"),
-                effects,
-                marks: Vec::new(),
-                births: row_births.clone(),
-                eye: [middle[0], middle[1] + 300., middle[2] - 2_500.],
-                look: [middle[0], middle[1] + 60., middle[2]],
-                fov: 80.,
-                tick: 10_000 + u64::from(elapsed),
-            });
-        }
-        // Close views: a 20 mm and a 105 mm hit at the same distance.
-        for (n, (impact, weapon)) in row.iter().enumerate().take(2) {
-            for seconds in [0.05, 0.15, 0.4] {
-                let at = spot(n as f64);
+            for seconds in [0.1, 0.3, 0.6, 1.0, 3.0, 6.0] {
                 let elapsed = (seconds * 120.) as u16;
+                let effects = row
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(n, (_, weapon))| ground_hit(weapon, spot(n as f64), elapsed))
+                    .collect();
                 shots.push(Shot {
-                    name: format!("close-{}-t{seconds:.2}s-{light}", impact.label),
-                    effects: ground_hit(weapon, at, elapsed).into_iter().collect(),
+                    name: format!("row-t{seconds:.2}s-{light}"),
+                    effects,
                     marks: Vec::new(),
-                    births: ground_hit(weapon, at, 0)
-                        .map(|e| (10_000, e))
-                        .into_iter()
+                    births: row_births.clone(),
+                    eye: [middle[0], middle[1] + 300., middle[2] - 2_500.],
+                    look: [middle[0], middle[1] + 60., middle[2]],
+                    fov: 80.,
+                    tick: 10_000 + u64::from(elapsed),
+                });
+            }
+            // Close views: a 20 mm and a 105 mm hit at the same distance.
+            for (n, (impact, weapon)) in row.iter().enumerate().take(2) {
+                for seconds in [0.05, 0.15, 0.4] {
+                    let at = spot(n as f64);
+                    let elapsed = (seconds * 120.) as u16;
+                    shots.push(Shot {
+                        name: format!("close-{}-t{seconds:.2}s-{light}", impact.label),
+                        effects: ground_hit(weapon, at, elapsed).into_iter().collect(),
+                        marks: Vec::new(),
+                        births: ground_hit(weapon, at, 0)
+                            .map(|e| (10_000, e))
+                            .into_iter()
+                            .collect(),
+                        eye: [at[0] - 260., at[1] + 60., at[2] - 420.],
+                        look: [at[0], at[1] + 15., at[2]],
+                        fov: 30.,
+                        tick: 10_000 + u64::from(elapsed),
+                    });
+                }
+            }
+            // A 20 mm burst: eight hits a few feet apart, a tick or two between.
+            let (_, cannon) = &row[0];
+            let at = spot(0.);
+            let place = |k: u16| {
+                let along = f64::from(k) * 9.;
+                [
+                    at[0] + along,
+                    ground(at[0] + along, at[2] + f64::from(k % 3) * 6.),
+                    at[2] + f64::from(k % 3) * 6.,
+                ]
+            };
+            for seconds in [0.1, 0.25] {
+                let elapsed = (seconds * 120.) as u16;
+                let effects = (0..8_u16)
+                    .filter_map(|k| ground_hit(cannon, place(k), elapsed.saturating_sub(k * 2)))
+                    .collect();
+                shots.push(Shot {
+                    name: format!("burst-20mm-t{seconds:.2}s-{light}"),
+                    effects,
+                    marks: Vec::new(),
+                    births: (0..8_u16)
+                        .filter_map(|k| {
+                            ground_hit(cannon, place(k), 0).map(|e| (10_000 + u64::from(k) * 2, e))
+                        })
                         .collect(),
-                    eye: [at[0] - 260., at[1] + 60., at[2] - 420.],
-                    look: [at[0], at[1] + 15., at[2]],
+                    eye: [at[0] - 300., at[1] + 90., at[2] - 520.],
+                    look: [at[0] + 30., at[1] + 10., at[2]],
                     fov: 30.,
                     tick: 10_000 + u64::from(elapsed),
                 });
             }
-        }
-        // A 20 mm burst: eight hits a few feet apart, a tick or two between.
-        let (_, cannon) = &row[0];
-        let at = spot(0.);
-        let place = |k: u16| {
-            let along = f64::from(k) * 9.;
-            [
-                at[0] + along,
-                ground(at[0] + along, at[2] + f64::from(k % 3) * 6.),
-                at[2] + f64::from(k % 3) * 6.,
-            ]
-        };
-        for seconds in [0.1, 0.25] {
-            let elapsed = (seconds * 120.) as u16;
-            let effects = (0..8_u16)
-                .filter_map(|k| ground_hit(cannon, place(k), elapsed.saturating_sub(k * 2)))
-                .collect();
-            shots.push(Shot {
-                name: format!("burst-20mm-t{seconds:.2}s-{light}"),
-                effects,
-                marks: Vec::new(),
-                births: (0..8_u16)
-                    .filter_map(|k| {
-                        ground_hit(cannon, place(k), 0).map(|e| (10_000 + u64::from(k) * 2, e))
+            // Craters (slice BF, John 2026-10-12): the row's craters and a
+            // strafing line of 40 20 mm rounds in front of it, as the base game
+            // left them (each record's own crater size, guns none) and as now
+            // (the explosion's scale, guns a pock mark), seen from above.
+            let crater = |at: [f64; 3], (size, scale): (u8, u8)| crate::snapshot::MarkPose {
+                kind: blast::MarkKind::Crater(size),
+                position: at,
+                age: 0,
+                strength: 1.,
+                scale,
+            };
+            for (label, now) in [("before", false), ("after", true)] {
+                let mut marks: Vec<_> = row
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(n, (_, weapon))| {
+                        let made = if now {
+                            tore_sim::combat::blast_scale::crater_of(weapon)
+                        } else {
+                            (weapon.effects.crater_size > 0)
+                                .then_some((weapon.effects.crater_size, 100))
+                        };
+                        made.map(|m| crater(spot(n as f64), m))
                     })
-                    .collect(),
-                eye: [at[0] - 300., at[1] + 90., at[2] - 520.],
-                look: [at[0] + 30., at[1] + 10., at[2]],
-                fov: 30.,
-                tick: 10_000 + u64::from(elapsed),
-            });
-        }
-        // Craters (slice BF, John 2026-10-12): the row's craters and a
-        // strafing line of 40 20 mm rounds in front of it, as the base game
-        // left them (each record's own crater size, guns none) and as now
-        // (the explosion's scale, guns a pock mark), seen from above.
-        let crater = |at: [f64; 3], (size, scale): (u8, u8)| crate::snapshot::MarkPose {
-            kind: blast::MarkKind::Crater(size),
-            position: at,
-            age: 0,
-            strength: 1.,
-            scale,
-        };
-        for (label, now) in [("before", false), ("after", true)] {
-            let mut marks: Vec<_> = row
-                .iter()
-                .enumerate()
-                .filter_map(|(n, (_, weapon))| {
-                    let made = if now {
-                        tore_sim::combat::blast_scale::crater_of(weapon)
-                    } else {
-                        (weapon.effects.crater_size > 0)
-                            .then_some((weapon.effects.crater_size, 100))
-                    };
-                    made.map(|m| crater(spot(n as f64), m))
-                })
-                .collect();
-            if now {
-                let (_, cannon) = &row[0];
-                if let Some(pock) = tore_sim::combat::blast_scale::crater_of(cannon) {
-                    for k in 0..40 {
-                        let x = base[0] - 400. + f64::from(k) * 12.;
-                        let z = base[2] - 500. + f64::from(k % 3) * 3.;
-                        marks.push(crater([x, ground(x, z), z], pock));
+                    .collect();
+                if now {
+                    let (_, cannon) = &row[0];
+                    if let Some(pock) = tore_sim::combat::blast_scale::crater_of(cannon) {
+                        for k in 0..40 {
+                            let x = base[0] - 400. + f64::from(k) * 12.;
+                            let z = base[2] - 500. + f64::from(k % 3) * 3.;
+                            marks.push(crater([x, ground(x, z), z], pock));
+                        }
                     }
                 }
-            }
-            for (view, eye, look, fov) in [
-                (
-                    "row",
-                    [middle[0], middle[1] + 2_200., middle[2] - 2_600.],
-                    [middle[0], middle[1], middle[2]],
-                    40.,
-                ),
-                (
-                    "strafe",
-                    [
-                        base[0] - 220.,
-                        ground(base[0] - 160., base[2] - 500.) + 140.,
-                        base[2] - 760.,
-                    ],
-                    [
-                        base[0] - 160.,
-                        ground(base[0] - 160., base[2] - 500.),
-                        base[2] - 500.,
-                    ],
-                    40.,
-                ),
-            ] {
-                shots.push(Shot {
-                    name: format!("craters-{view}-{label}-{light}"),
-                    effects: Vec::new(),
-                    births: Vec::new(),
-                    marks: marks.clone(),
-                    eye,
-                    look,
-                    fov,
-                    tick: 20_000,
-                });
+                for (view, eye, look, fov) in [
+                    (
+                        "row",
+                        [middle[0], middle[1] + 2_200., middle[2] - 2_600.],
+                        [middle[0], middle[1], middle[2]],
+                        40.,
+                    ),
+                    (
+                        "strafe",
+                        [
+                            base[0] - 220.,
+                            ground(base[0] - 160., base[2] - 500.) + 140.,
+                            base[2] - 760.,
+                        ],
+                        [
+                            base[0] - 160.,
+                            ground(base[0] - 160., base[2] - 500.),
+                            base[2] - 500.,
+                        ],
+                        40.,
+                    ),
+                ] {
+                    shots.push(Shot {
+                        name: format!("craters-{view}-{label}-{light}"),
+                        effects: Vec::new(),
+                        births: Vec::new(),
+                        marks: marks.clone(),
+                        eye,
+                        look,
+                        fov,
+                        tick: 20_000,
+                    });
+                }
             }
         }
         for shot in &shots {
