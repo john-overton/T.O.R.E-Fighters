@@ -426,9 +426,10 @@ class GunshipTests(unittest.TestCase):
 
 
 def heli_run(profile="popup", breaks=6, offset=90, kt=130, pitch=-10, blocked=0, released=True, killed=True,
-             lost=None, min_agl=1400, aircraft="Mi24", quick=False, start_alt=1500, decisions=(), sead=False):
+             lost=None, min_agl=1400, aircraft="Mi24", quick=False, start_alt=1500, decisions=(), sead=False,
+             egress=False):
     """One helicopter run of the driver: `breaks` BREAK lines (one a second), the THREAT
-    `decisions` (slice H4), and a pop-up that may release and kill."""
+    `decisions` (slice H4), a pop-up that may release and kill, and an EGRESS (slice HF1)."""
     out = [
         f"ai-strike: setup aircraft={aircraft} load=AT2.JT station=1 count=4 rounds=4 target=0x50000001 name=T-90 "
         "target_at=999570,7,789571 hp=200 skill=2 profile=none handback=none order=none mode=none",
@@ -453,12 +454,14 @@ def heli_run(profile="popup", breaks=6, offset=90, kt=130, pitch=-10, blocked=0,
         out.append("ai-strike: IMPACT t=77.000 n=1 miss_ft=6.0 at=1.0,2.0,3.0")
     if killed:
         out.append("ai-strike: KILL t=77.000 victim=0x50000001 category=0x0400 target=yes")
+    if egress:
+        out.append("ai-strike: EGRESS t=90.000 range_ft=11000 alt_ft=250")
     if lost is not None:
         out.append(f"ai-strike: LOST t={lost:.3f} reason=destroyed crashed=yes")
     n = 1 if released else 0
     out.append(
         f"ai-strike: summary t=100.000 ran_s=100.0 profile={profile} releases={n} impacts={n} "
-        f"kills={1 if killed else 0} egress=no lost={'yes' if lost is not None else 'no'} activity=Defending "
+        f"kills={1 if killed else 0} egress={'yes' if egress else 'no'} lost={'yes' if lost is not None else 'no'} activity=Defending "
         f"target_hp={'0' if killed else '200'}/200 closest_ft=4773 store_rounds_left=3 min_agl_ft={min_agl} "
         f"break_s={float(breaks)}"
     )
@@ -534,9 +537,14 @@ class HelicopterTests(unittest.TestCase):
                   heli_run(breaks=0, released=False, killed=False, decisions=held),
                   heli_run(breaks=0, released=False, killed=False, decisions=held),
                   heli_run(breaks=0, decisions=["threat_hold_off", "threat_resume"], sead=True),
-                  heli_run(breaks=8, decisions=["threat_leave", "threat_hold_off", "threat_resume"]),
+                  heli_run(breaks=8, decisions=["threat_hold_off", "threat_resume", "threat_leave",
+                                                "threat_hold_off", "threat_resume"]),
                   heli_run(profile="standoff", breaks=3, released=False, killed=False, decisions=held)]
         self.assertEqual(defended.check("\n".join(honest)), [])
+        # Slice HF1: the ambushed run must leave and resume after it.
+        unambushed = list(honest)
+        unambushed[5] = heli_run(breaks=8, decisions=["threat_hold_off", "threat_resume"])
+        self.assertNotEqual(defended.check("\n".join(unambushed)), [])
         quick = scenarios["qmc-strike-heli"]
         self.assertEqual(len([quick.args] + [st.args for st in quick.then]), 2)
 

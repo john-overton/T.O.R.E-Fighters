@@ -248,6 +248,8 @@ its home airport at cruise speed.
   (fitted). Without anchors (fitted): it taxis on toward the far end to a spot
   400 ft before it, 250 ft further back for each higher slot, alternating 40 ft right
   and left of the centerline, never less than 150 ft ahead of where it stopped.
+  Parked, it shuts its engines down (opinionated, John 2026-10-13; slice HF1).
+  Before, it idled for the rest of the mission.
 - **Landing end without anchors** (fitted): the end with at least a knot more
   headwind, otherwise the end facing the aircraft's arrival, unless the
   ground stands above the 3 degree path to that end within the first gate's
@@ -351,6 +353,7 @@ wingman joining its leader) flies it.
 | Touchdown | below 30 ft it goes on only while the [shared touchdown rule](touchdown.md) would accept a touchdown now, at its off-field limits (10 ft/s, 20 kt; 10 kt for a jet) even on an airfield | opinionated (John's limits) / fitted |
 | On the ground | 5 s, the runway still busy | spec-derived |
 | Air taxi (helicopters) | straight up to 20 ft, then to its slot at up to 25 ft/s (15 kt), down within 15 ft, onto the slot on the parking heading, then shut down | opinionated (the lead's default, accepted by John 2026-10-12); numbers fitted |
+| Shut down (every aircraft) | parked for good (a helicopter or V-22 on its slot after the air taxi, a fixed-wing aircraft or STOVL jet at the end of its taxi in): throttle closed and the engine switch off, so the engines stop (the engine-off state the replay and the sound show); a helicopter's collective comes down too and its rotor runs down. Until slice HF1 only the throttle (and collective) came down: jets idled and the governed rotor engines kept turning. Pads as homes are later | opinionated (John, 2026-10-13: "parked AI helicopters shut down", then "fixed-wing AI shut down when they finish too") |
 | Taxi in (jets) | the runway taxi-back route, nozzles aft | fitted |
 
 Retail's 50 ft/s descent is out of the hybrid physics' reach: at full

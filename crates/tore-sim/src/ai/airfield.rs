@@ -216,11 +216,13 @@ impl Lift {
 
 /// Lift controls an airfield phase sets directly, on top of its control:
 /// the collective of a helicopter or the V-22 and the nozzle angle of a
-/// vectoring jet, degrees from aft. `None` leaves the demand where it is.
+/// vectoring jet, degrees from aft, and the engine switch (a parked
+/// helicopter shuts down, slice HF1). `None` leaves the demand where it is.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct LiftDemand {
     pub collective: Option<f64>,
     pub nozzle_deg: Option<f64>,
+    pub engine: Option<bool>,
 }
 
 /// Why an aircraft is landing.
@@ -1543,10 +1545,17 @@ impl Sequence {
                 command.control = ground(1.0, 0.0, 0.0);
                 command.lift.collective = Some(0.0);
             }
-            Phase::Parked if self.lift == Lift::Rotor => {
-                command.lift.collective = Some(0.0);
+            // Parked for good, every aircraft shuts down: engines off (and
+            // a helicopter's collective down, so its rotor runs down)
+            // (slice HF1; opinionated, John 2026-10-13, helicopters first,
+            // then fixed-wing "when they finish too").
+            Phase::Parked => {
+                if self.lift == Lift::Rotor {
+                    command.lift.collective = Some(0.0);
+                }
+                command.lift.engine = Some(false);
             }
-            Phase::Waiting | Phase::Parked => {}
+            Phase::Waiting => {}
             Phase::Taxi | Phase::TaxiClear => {
                 let target = if self.phase == Phase::Taxi {
                     self.runway
@@ -2885,6 +2894,7 @@ mod tests {
             assert_eq!(seq.phase(), Phase::Parked);
             let step = seq.step(&s);
             assert_eq!(step.command.lift.collective, Some(0.0));
+            assert_eq!(step.command.lift.engine, Some(false));
             assert!(
                 matches!(step.command.control, Control::Ground { throttle, .. } if throttle == 0.0)
             );
