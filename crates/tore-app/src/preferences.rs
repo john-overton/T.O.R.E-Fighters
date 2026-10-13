@@ -57,9 +57,9 @@ fn stability_word(level: tore_input::StabilityLevel) -> &'static str {
 impl Preferences {
     pub fn capture(ui: &FlightUi, i: &Instruments, fullscreen: bool) -> Self {
         let (large, small) = if i.layout == Layout::Large {
-            (&i.pages, &i.other_pages)
+            (i.chosen_pages(), i.other_pages.clone())
         } else {
-            (&i.other_pages, &i.pages)
+            (i.other_pages.clone(), i.chosen_pages())
         };
         Self {
             zoom: ui.zoom,
@@ -69,8 +69,8 @@ impl Preferences {
             radar_history: i.history,
             selected: i.selected,
             small: i.layout == Layout::Small,
-            large_pages: large.clone(),
-            small_pages: small.clone(),
+            large_pages: large,
+            small_pages: small,
             cockpit: ui.cockpit,
             hud: ui.hud,
             ladder: ui.ladder,

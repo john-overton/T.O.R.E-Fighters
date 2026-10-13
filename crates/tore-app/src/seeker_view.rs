@@ -7,7 +7,7 @@
 //! Presentation only: it reads the picture (`RenderSnapshot`), which a
 //! single-player host, a networked client and a replay all have, so it needs
 //! nothing of the simulation and nothing on the wire.
-use crate::instruments::{gunsight::SightView, targeting::SEEKER_ZOOM_STEP};
+use crate::instruments::{Instruments, gunsight::SightView, targeting::SEEKER_ZOOM_STEP};
 use tore_sim::{attitude::Vector, combat::missiles};
 use tore_world::snapshot::{ProjectilePose, RenderSnapshot};
 
@@ -27,6 +27,11 @@ pub struct SeekerCam {
     /// The newest weapon the pilot sent back to the pod view: it stays off
     /// the page, and only a newer launch brings the seeker view again.
     dismissed: Option<u32>,
+    /// The newest weapon already seen launched, so each launch opens the
+    /// window once ([`Self::take_launch`]).
+    launched: Option<u32>,
+    /// A launch the host has not yet answered.
+    new_launch: bool,
 }
 
 /// One frame's seeker view.
@@ -60,6 +65,12 @@ impl SeekerCam {
             .filter(|p| missiles::has_seeker_view(&p.weapon))
             .max_by_key(|p| p.id);
         self.followed = newest.map(|p| p.id);
+        if let Some(p) = newest
+            && self.launched.is_none_or(|seen| p.id > seen)
+        {
+            self.launched = Some(p.id);
+            self.new_launch = true;
+        }
         let p = newest.filter(|p| self.dismissed != Some(p.id))?;
         let target = p.target.and_then(|id| position_of(picture, id));
         let view = view(p, target);
@@ -70,6 +81,32 @@ impl SeekerCam {
             target,
             range_ft: distance(p.position, target.unwrap_or(at)),
         })
+    }
+
+    /// Whether a seeker weapon of the player's has appeared since the last
+    /// call. The host opens the target camera window on it
+    /// (docs/spec/target-window.md, "Seeker window"). A launch while the page
+    /// is dismissed counts: it brings the seeker view back.
+    pub fn take_launch(&mut self) -> bool {
+        std::mem::take(&mut self.new_launch)
+    }
+
+    /// Open the target camera window on a launch and close it again when the
+    /// view ends (docs/spec/target-window.md, "Seeker window"). Call it after
+    /// [`Self::observe`] each frame.
+    pub fn sync_window(&mut self, instruments: &mut Instruments) {
+        if self.take_launch() {
+            instruments.open_for_seeker();
+        }
+        if !self.showing() {
+            instruments.close_for_seeker();
+        }
+    }
+
+    /// Whether the seeker view has anything to show: a seeker weapon of the
+    /// player's in flight that the pilot has not sent back to the pod.
+    pub fn showing(&self) -> bool {
+        self.followed.is_some() && self.followed != self.dismissed
     }
 
     /// The pilot sent the page back to the targeting pod (the clear
@@ -199,6 +236,10 @@ mod tests {
             // No seeker picture: HARM, a laser bomb, a dumb bomb, an AAM.
             missile(2, 0, "AGM88.JT", [0., 4_900., 600.]),
             missile(3, 0, "GBU10.JT", [0., 4_900., 600.]),
+            // The JDAMs fly to a point and carry no picture (John 2026-10-12).
+            missile(10, 0, "GBU29.JT", [0., 4_900., 600.]),
+            missile(11, 0, "GBU29P.JT", [0., 4_900., 600.]),
+            missile(12, 0, "GBU30.JT", [0., 4_900., 600.]),
             missile(4, 0, "MK82.JT", [0., 4_900., 600.]),
             missile(8, 0, "AIM9M.JT", [0., 4_900., 600.]),
         ]);
@@ -208,6 +249,98 @@ mod tests {
             let one = picture(vec![missile(1, 0, weapon, [0., 4_900., 600.])]);
             assert!(SeekerCam::default().observe(&one, 0, HERE).is_some());
         }
+    }
+
+    #[test]
+    fn the_at2_takes_the_page_and_a_jdam_after_it_does_not() {
+        // John 2026-10-12: the AT-2 (retail's "optical" Swatter) gets the
+        // seeker view, the JDAMs do not.
+        let mut cam = SeekerCam::default();
+        let at2 = missile(3, 0, "AT2.JT", [0., 4_900., 600.]);
+        let jdam = missile(8, 0, "GBU30.JT", [0., 4_900., 700.]);
+        let shot = cam.observe(&picture(vec![at2, jdam]), 0, HERE).unwrap();
+        assert_eq!((shot.id, shot.weapon.as_str()), (3, "AT2.JT"));
+        assert!(missiles::has_seeker_view("AT2.JT"));
+        assert!(!missiles::has_seeker_view("GBU29.JT"));
+    }
+
+    #[test]
+    fn each_launch_is_announced_once_and_the_view_reports_when_it_ends() {
+        let mut cam = SeekerCam::default();
+        assert!(!cam.take_launch() && !cam.showing());
+        let one = missile(3, 0, "AGM65G.JT", [0., 4_900., 600.]);
+        cam.observe(&picture(vec![one.clone()]), 0, HERE);
+        assert!(cam.take_launch() && cam.showing());
+        // Seen again in flight: not a new launch.
+        cam.observe(&picture(vec![one.clone()]), 0, HERE);
+        assert!(!cam.take_launch());
+        // A second weapon is a launch; the first landing is not.
+        let two = missile(4, 0, "AT2.JT", [0., 4_900., 700.]);
+        cam.observe(&picture(vec![one, two.clone()]), 0, HERE);
+        assert!(cam.take_launch());
+        cam.observe(&picture(vec![two.clone()]), 0, HERE);
+        assert!(!cam.take_launch() && cam.showing());
+        // Clear sends the page to the pod: not showing until a new launch.
+        cam.dismiss();
+        cam.observe(&picture(vec![two.clone()]), 0, HERE);
+        assert!(!cam.showing() && !cam.take_launch());
+        let three = missile(6, 0, "AS30.JT", [0., 4_900., 800.]);
+        cam.observe(&picture(vec![two, three.clone()]), 0, HERE);
+        assert!(cam.take_launch() && cam.showing());
+        // Landed: the view ends.
+        cam.observe(&picture(vec![]), 0, HERE);
+        assert!(!cam.showing() && !cam.take_launch());
+        // Weapons without a picture never announce anything.
+        let bomb = missile(9, 0, "MK82.JT", [0., 4_900., 600.]);
+        cam.observe(&picture(vec![bomb]), 0, HERE);
+        assert!(!cam.take_launch() && !cam.showing());
+    }
+
+    #[test]
+    fn a_launch_opens_the_window_and_the_landing_closes_it_unless_the_player_kept_it() {
+        use crate::instruments::{Layout, TARGET_PAGE};
+        let mut windows = Instruments::new(Layout::Large, None);
+        windows.pages = vec![7, 5, 9, 8];
+        let mut cam = SeekerCam::default();
+        let frame = |cam: &mut SeekerCam, windows: &mut Instruments, p: Vec<ProjectilePose>| {
+            cam.observe(&picture(p), 0, HERE);
+            cam.sync_window(windows);
+        };
+        frame(&mut cam, &mut windows, vec![]);
+        assert_eq!(windows.pages, [7, 5, 9, 8]);
+        let one = missile(3, 0, "AT2.JT", [0., 4_900., 600.]);
+        frame(&mut cam, &mut windows, vec![one.clone()]);
+        assert_eq!(windows.pages, [7, 5, 9, 8, TARGET_PAGE]);
+        // Frames while it flies change nothing, and the player's close sticks.
+        frame(&mut cam, &mut windows, vec![one.clone()]);
+        windows.toggle(TARGET_PAGE);
+        frame(&mut cam, &mut windows, vec![one.clone()]);
+        assert_eq!(windows.pages, [7, 5, 9, 8]);
+        // The next launch opens it again; the landing of both closes it.
+        let two = missile(4, 0, "AGM65G.JT", [0., 4_900., 700.]);
+        frame(&mut cam, &mut windows, vec![one, two.clone()]);
+        assert_eq!(windows.pages.last(), Some(&TARGET_PAGE));
+        frame(&mut cam, &mut windows, vec![two.clone()]);
+        assert_eq!(windows.pages.last(), Some(&TARGET_PAGE));
+        frame(&mut cam, &mut windows, vec![]);
+        assert_eq!(windows.pages, [7, 5, 9, 8]);
+        // Clear designation keeps it as the player's own.
+        let three = missile(6, 0, "AS14.JT", [0., 4_900., 800.]);
+        frame(&mut cam, &mut windows, vec![three.clone()]);
+        cam.dismiss();
+        windows.keep_seeker_window();
+        frame(&mut cam, &mut windows, vec![three]);
+        frame(&mut cam, &mut windows, vec![]);
+        assert_eq!(windows.pages.last(), Some(&TARGET_PAGE));
+        // A window the player already had open stays after the view.
+        let mut open = Instruments::new(Layout::Large, None);
+        let before = open.pages.clone();
+        assert!(before.contains(&TARGET_PAGE));
+        let mut cam = SeekerCam::default();
+        let four = missile(8, 0, "AGM65A.JT", [0., 4_900., 600.]);
+        frame(&mut cam, &mut open, vec![four]);
+        frame(&mut cam, &mut open, vec![]);
+        assert_eq!(open.pages, before);
     }
 
     #[test]

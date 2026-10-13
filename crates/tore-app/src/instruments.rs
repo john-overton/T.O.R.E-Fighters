@@ -393,14 +393,18 @@ impl Layout {
     pub fn capacity(self) -> usize {
         if self == Self::Large { 4 } else { 6 }
     }
+    /// A window's rectangle on a `size` canvas. Slot [`capacity`](Self::capacity)
+    /// is the pop-up window ([`Self::rect`]).
     pub fn rect_on(self, slot: usize, size: [f64; 2]) -> (f64, f64, f64, f64) {
         let scale = (size[0] / 640.).min(size[1] / 480.);
         let (x, y, w, h) = self.rect(slot);
-        let right = match self {
-            Self::Large => slot >= 2,
-            Self::Small => slot >= 3,
-        };
-        let bottom = self == Self::Small || matches!(slot, 1 | 2);
+        let popup = slot == self.capacity();
+        let right = popup
+            || match self {
+                Self::Large => slot >= 2,
+                Self::Small => slot >= 3,
+            };
+        let bottom = !popup && (self == Self::Small || matches!(slot, 1 | 2));
         (
             if right {
                 size[0] - (640 - x) as f64 * scale
@@ -416,14 +420,32 @@ impl Layout {
             h as f64 * scale,
         )
     }
+    /// A window's rectangle in the 640x480 reference canvas. The slots are
+    /// the layout's windows in order; slot `capacity` is the pop-up that the
+    /// seeker view opens when every window is taken
+    /// (docs/spec/target-window.md, "Seeker window"):
+    ///
+    /// - small windows: the top right corner, eight pixels in from the
+    ///   edges (the row of six sits along the bottom);
+    /// - large windows: at the top, one window width and an eight pixel gap
+    ///   to the left of the top-right window.
+    ///
+    /// Opinionated, John 2026-10-12.
     pub fn rect(self, slot: usize) -> (i32, i32, i32, i32) {
-        assert!(slot < self.capacity());
+        assert!(slot <= self.capacity());
         match self {
             Self::Large => {
-                let (x, y) = [(8, 8), (8, 312), (470, 312), (470, 8)][slot];
+                let (x, y) = if slot == self.capacity() {
+                    (470 - 8 - WIDTH as i32, 8)
+                } else {
+                    [(8, 8), (8, 312), (470, 312), (470, 8)][slot]
+                };
                 (x, y, WIDTH as i32, HEIGHT as i32)
             }
             Self::Small => {
+                if slot == self.capacity() {
+                    return (640 - 8 - 96, 8, 96, 95);
+                }
                 let x = [8, 110, 212, 332, 434, 536][slot];
                 (x, 377, 96, 95)
             }
@@ -501,7 +523,14 @@ pub struct Instruments {
     /// The AC-130 target camera's bloom from a 105 mm shot, 0 to 1
     /// ([`crate::gun_flash::BLOOM`]); the host sets it each frame.
     pub sight_bloom: f64,
+    /// The target camera window (page [`TARGET_PAGE`]) is open because a
+    /// seeker weapon launched, and closes when its view ends
+    /// (docs/spec/target-window.md, "Seeker window"). Cleared when the
+    /// player closes the window or clears the designation.
+    pub seeker_opened: bool,
 }
+/// The target camera's page, Shift+4 (docs/FLIGHT-CONTROLS.md).
+pub const TARGET_PAGE: u8 = 4;
 impl Default for Instruments {
     fn default() -> Self {
         Self {
@@ -534,6 +563,7 @@ impl Default for Instruments {
             weapon_debug: false,
             designation: None,
             sight_bloom: 0.,
+            seeker_opened: false,
         }
     }
 }
@@ -556,7 +586,13 @@ impl Instruments {
         self.crosshair = None;
         self.designation = None;
     }
+    /// Switch between the large and the small windows. A pop-up window does
+    /// not carry over (it has no place in the other layout), except that a
+    /// seeker view still running opens its window again in the new layout.
     pub fn toggle_layout(&mut self) {
+        let seeker = self.seeker_opened;
+        self.close_for_seeker();
+        self.close_popup();
         self.selected = 0;
         self.pressed = None;
         self.pressed_contact = None;
@@ -566,6 +602,9 @@ impl Instruments {
         } else {
             Layout::Large
         };
+        if seeker {
+            self.open_for_seeker();
+        }
     }
 
     pub fn toggle(&mut self, page: u8) {
@@ -574,18 +613,104 @@ impl Instruments {
         self.pressed_contact = None;
         if let Some(i) = self.pages.iter().position(|p| *p == page) {
             self.pages.remove(i);
-        } else {
-            if self.pages.len() == self.layout.capacity() {
-                self.pages.remove(0);
+            if page == TARGET_PAGE {
+                self.seeker_opened = false;
             }
-            self.pages.push(page);
+        } else {
+            let capacity = self.layout.capacity();
+            if self.pages.len() >= capacity {
+                // The oldest regular window goes. A pop-up stays last, so the
+                // new window goes in before it.
+                let popup = self.pages.len() > capacity;
+                self.pages.remove(0);
+                if popup {
+                    self.pages.insert(capacity - 1, page);
+                } else {
+                    self.pages.push(page);
+                }
+            } else {
+                self.pages.push(page);
+            }
         }
+    }
+    /// Whether a window sits in the pop-up place: every regular slot is
+    /// taken and one more window is shown.
+    pub fn popup_shown(&self) -> bool {
+        self.pages.len() > self.layout.capacity()
+    }
+    fn close_popup(&mut self) {
+        if self.popup_shown() {
+            self.pages.pop();
+        }
+    }
+    /// A seeker weapon launched: open the target camera window if it is not
+    /// open (docs/spec/target-window.md, "Seeker window"). It takes the next
+    /// free slot; with every slot taken it pops up beside them
+    /// ([`Layout::rect`]) and no other window is closed. The window closes
+    /// again with [`Self::close_for_seeker`]. Returns whether it opened.
+    pub fn open_for_seeker(&mut self) -> bool {
+        if self.pages.contains(&TARGET_PAGE) {
+            return false;
+        }
+        self.pages.push(TARGET_PAGE);
+        self.seeker_opened = true;
+        true
+    }
+    /// The seeker view ended (the weapon landed): close the window a launch
+    /// opened, leaving every other window as it was. A window the player
+    /// opened, or kept, stays.
+    pub fn close_for_seeker(&mut self) {
+        if !std::mem::take(&mut self.seeker_opened) {
+            return;
+        }
+        if let Some(i) = self.pages.iter().position(|p| *p == TARGET_PAGE) {
+            self.pages.remove(i);
+            self.selected = self.selected.min(self.pages.len().saturating_sub(1));
+        }
+    }
+    /// The player sent the page back to the targeting pod (Clear
+    /// designation): the window stays open, now the player's own.
+    pub fn keep_seeker_window(&mut self) {
+        self.seeker_opened = false;
+    }
+    /// `--window-layout-preview` (review captures): every slot of the layout
+    /// taken without the target camera, then as `mode` says: `before` as it
+    /// is, `launch` after a seeker launch opened the camera, `free` the same
+    /// with only two windows open, `landed` after the weapon landed.
+    pub fn preview_window_layout(&mut self, mode: &str) {
+        let filler = [7u8, 5, 9, 8, 1, 6];
+        self.pages = filler[..self.layout.capacity()].to_vec();
+        self.selected = 0;
+        match mode {
+            "launch" | "landed" => {
+                self.open_for_seeker();
+                if mode == "landed" {
+                    self.close_for_seeker();
+                }
+            }
+            "free" => {
+                self.pages.truncate(2);
+                self.open_for_seeker();
+            }
+            _ => {}
+        }
+    }
+    /// The windows the player chose, for the preferences file: the window a
+    /// launch opened and any pop-up are not part of the choice.
+    pub fn chosen_pages(&self) -> Vec<u8> {
+        let mut pages = self.pages.clone();
+        if self.seeker_opened {
+            pages.retain(|p| *p != TARGET_PAGE);
+        }
+        pages.truncate(self.layout.capacity());
+        pages
     }
     /// Reserve the upper-right weapon diagnostic area, when that panel is
     /// shown, without changing pointer transforms.
     pub fn screen_rect(&self, slot: usize, size: [f64; 2]) -> (f64, f64, f64, f64) {
         let (x, mut y, w, h) = self.layout.rect_on(slot, size);
-        if self.weapon_debug && self.layout == Layout::Large && slot == 3 {
+        let popup = slot == self.layout.capacity();
+        if self.weapon_debug && (popup || self.layout == Layout::Large && slot == 3) {
             y += 104. * (size[0] / 640.).min(size[1] / 480.);
         }
         (x, y, w, h)
@@ -1705,6 +1830,195 @@ mod tests {
             i.toggle(page);
             assert!(i.pages.len() <= 6);
         }
+    }
+
+    /// A full set of windows without the target camera, in `layout`.
+    fn full_without_target(layout: Layout) -> Instruments {
+        let mut i = Instruments::new(layout, None);
+        i.toggle(TARGET_PAGE);
+        i.toggle(1);
+        assert_eq!(i.pages.len(), layout.capacity());
+        assert!(!i.pages.contains(&TARGET_PAGE));
+        i
+    }
+
+    #[test]
+    fn the_popup_sits_where_john_asked_and_clear_of_every_window() {
+        // John 2026-10-12: small windows, all six active: top right; large
+        // windows: to the left of the right window.
+        assert_eq!(Layout::Small.rect(6), (536, 8, 96, 95));
+        let (x, y, w, _) = Layout::Large.rect(4);
+        let right = Layout::Large.rect(3);
+        assert_eq!((x + w + 8, y), (right.0, right.1));
+        for layout in [Layout::Large, Layout::Small] {
+            let capacity = layout.capacity();
+            let (x, y, w, h) = layout.rect(capacity);
+            assert!(x >= 8 && y >= 8 && x + w <= 632 && y + h <= 472);
+            for j in 0..capacity {
+                let (a, b, c, d) = layout.rect(j);
+                assert!(x >= a + c || a >= x + w || y >= b + d || b >= y + h);
+            }
+            // On any canvas it hugs the same edges the other windows do.
+            for size in
+                [[640., 480.], [1920., 1080.], [3440., 1440.], [1024., 768.]] as [[f64; 2]; 4]
+            {
+                let scale = (size[0] / 640.).min(size[1] / 480.);
+                let (px, py, pw, ph) = layout.rect_on(capacity, size);
+                assert!((py - 8. * scale).abs() < 1e-9 && (pw - w as f64 * scale).abs() < 1e-9);
+                assert!(px + pw <= size[0] && py + ph <= size[1]);
+                assert!((size[0] - (px + pw) - (640 - x - w) as f64 * scale).abs() < 1e-9);
+                for j in 0..capacity {
+                    let (a, b, c, d) = layout.rect_on(j, size);
+                    assert!(
+                        px >= a + c - 1e-9
+                            || a >= px + pw - 1e-9
+                            || py >= b + d - 1e-9
+                            || b >= py + ph - 1e-9,
+                        "{layout:?} {size:?} slot {j}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_seeker_launch_pops_the_target_camera_up_when_every_slot_is_taken() {
+        for layout in [Layout::Large, Layout::Small] {
+            let mut i = full_without_target(layout);
+            let before = i.pages.clone();
+            assert!(i.open_for_seeker());
+            // Nothing was closed to make room; the window is the last slot.
+            assert_eq!(i.pages.len(), layout.capacity() + 1);
+            assert_eq!(i.pages[..layout.capacity()], before[..]);
+            assert_eq!(i.pages.last(), Some(&TARGET_PAGE));
+            assert!(i.popup_shown() && i.seeker_opened);
+            assert_eq!(
+                i.screen_rect(layout.capacity(), [640., 480.]),
+                layout.rect_on(layout.capacity(), [640., 480.])
+            );
+            // The view ends: the windows are as they were.
+            i.close_for_seeker();
+            assert_eq!(i.pages, before);
+            assert!(!i.popup_shown() && !i.seeker_opened);
+        }
+    }
+
+    #[test]
+    fn a_seeker_launch_takes_a_free_slot_before_it_pops_up() {
+        // Agent decision: with a slot free the window goes in it.
+        let mut i = Instruments::new(Layout::Large, Some(9));
+        assert!(i.open_for_seeker());
+        assert_eq!(i.pages, [9, TARGET_PAGE]);
+        assert!(!i.popup_shown());
+        i.close_for_seeker();
+        assert_eq!(i.pages, [9]);
+    }
+
+    #[test]
+    fn an_open_target_camera_stays_open_after_the_seeker_view() {
+        let mut i = Instruments::default();
+        assert!(i.pages.contains(&TARGET_PAGE));
+        let before = i.pages.clone();
+        assert!(!i.open_for_seeker());
+        assert!(!i.seeker_opened);
+        i.close_for_seeker();
+        assert_eq!(i.pages, before);
+    }
+
+    #[test]
+    fn the_player_can_still_close_open_and_clear_the_window() {
+        let mut i = full_without_target(Layout::Large);
+        let before = i.pages.clone();
+        // Closed by hand during the view: it stays closed.
+        i.open_for_seeker();
+        i.toggle(TARGET_PAGE);
+        assert_eq!(i.pages, before);
+        assert!(!i.seeker_opened);
+        i.close_for_seeker();
+        assert_eq!(i.pages, before);
+        // Clear designation keeps it as the player's own.
+        i.open_for_seeker();
+        i.keep_seeker_window();
+        i.close_for_seeker();
+        assert_eq!(i.pages.len(), 5);
+        assert_eq!(i.pages.last(), Some(&TARGET_PAGE));
+        // A kept pop-up is not saved in the preferences' choice.
+        assert_eq!(i.chosen_pages(), before);
+        // The player closes it with the key.
+        i.toggle(TARGET_PAGE);
+        assert_eq!(i.pages, before);
+    }
+
+    #[test]
+    fn toggling_other_windows_with_the_popup_up_leaves_it_in_place() {
+        let mut i = full_without_target(Layout::Large);
+        i.open_for_seeker();
+        let oldest = i.pages[0];
+        // Opening a window the popup's layout lacks replaces the oldest
+        // regular one, and the popup stays last.
+        let new = (0..10).find(|p| !i.pages.contains(p)).unwrap();
+        i.toggle(new);
+        assert_eq!(i.pages.len(), 5);
+        assert!(!i.pages.contains(&oldest));
+        assert_eq!(i.pages[3], new);
+        assert_eq!(i.pages.last(), Some(&TARGET_PAGE));
+        // Closing a regular window frees a slot: the camera takes it.
+        i.toggle(new);
+        assert_eq!(i.pages.len(), 4);
+        assert!(i.pages.contains(&TARGET_PAGE) && i.seeker_opened);
+        i.close_for_seeker();
+        assert!(!i.pages.contains(&TARGET_PAGE));
+    }
+
+    #[test]
+    fn switching_layouts_during_the_view_reopens_the_window_in_the_new_one() {
+        let mut i = full_without_target(Layout::Large);
+        let large = i.pages.clone();
+        i.other_pages = vec![7, 5, 6, 9, 8, 1];
+        let small = i.other_pages.clone();
+        i.open_for_seeker();
+        i.toggle_layout();
+        // The small layout is full too, so the camera pops up there; the
+        // large choice was not disturbed.
+        assert_eq!(i.layout, Layout::Small);
+        assert!(i.popup_shown() && i.seeker_opened);
+        assert_eq!(i.other_pages, large);
+        // The view ends: the small windows are as they were.
+        i.close_for_seeker();
+        assert_eq!(i.pages, small);
+        i.toggle_layout();
+        assert_eq!(i.pages, large);
+    }
+
+    #[test]
+    fn a_kept_popup_does_not_follow_a_layout_change() {
+        let mut i = full_without_target(Layout::Large);
+        i.open_for_seeker();
+        i.keep_seeker_window();
+        let large = i.chosen_pages();
+        i.toggle_layout();
+        assert_eq!(i.other_pages, large);
+        assert!(!i.popup_shown());
+    }
+
+    #[test]
+    fn the_popup_stays_below_the_weapon_diagnostic_panel() {
+        let mut i = full_without_target(Layout::Large);
+        i.open_for_seeker();
+        let size = [640., 480.];
+        let normal = i.screen_rect(4, size);
+        i.weapon_debug = true;
+        let moved = i.screen_rect(4, size);
+        assert_eq!((moved.0, moved.1 - normal.1), (normal.0, 104.));
+        // Hit testing still maps the shifted window onto its raster.
+        let (x, y, w, h) = moved;
+        assert_eq!(
+            i.canvas_point(Some((x + w / 2., y + h / 2.)), size),
+            Some((
+                (Layout::Large.rect(4).0 + Layout::Large.rect(4).2 / 2) as f64,
+                (Layout::Large.rect(4).1 + Layout::Large.rect(4).3 / 2) as f64
+            ))
+        );
     }
 }
 
