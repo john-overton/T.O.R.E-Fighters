@@ -19,6 +19,13 @@ Some types sometimes show a related type instead, so repeated hits vary.
 A destroyed aircraft adds its own type 30 blast; a destroyed ground object adds
 its unit's own blast (a large ground blast when it has none).
 
+Each impact is drawn at its weapon's size: a cannon shell's burst is half
+its type's size, the AC-130's 105 mm twice, and a bomb or warhead grows
+with its weight, so a 2,000 lb bomb's blast is clearly bigger than a 500 lb
+bomb's (see [size by weapon](#size-by-weapon)). Every impact also throws a
+brief flash of light that lights the ground around it at night and a spray
+of glowing sparks ([impact light and sparks](#impact-light-and-sparks)).
+
 Every large ground or sea explosion also throws out a shockwave: a ring of
 dust (white spray on water) that races out from the blast, slows and fades
 while the fireball burns.
@@ -83,6 +90,91 @@ rest of the explosion's two seconds. Each puff stands on the ground, growing
 from 0.12 to 0.5 of the width across, and is lit by the scene like the
 craters, not self-lit like the fireball.
 
+### Size by weapon
+
+Opinionated, John, 2026-10-12 (bugs B8 to B10). Before it, an explosion's
+size came from its type alone: a 20 mm and a 105 mm round, or a 500 lb and a
+2,000 lb bomb, drew the same. Now the impact effect carries a scale, the
+percent of its type's rolled size it is drawn at, and the fireball and its
+shockwave ring both grow with it:
+
+| Weapon | Scale | Example |
+| --- | --- | --- |
+| Guns up to 40 mm: every aircraft gun, the AC-130's 25 mm and 40 mm, AAA (ZSU-23, 2S6, M163, Phalanx, AK-630 and AK-230, 37 mm M1939), vehicle guns and small arms | 50 % on the ground and on aircraft | a 20 mm dirt puff about 37 ft wide instead of 75 |
+| The AC-130's 105 mm | 200 % | its type 22 ground blast 510 ft wide (the type's rolled width is always capped at 255) |
+| 57 mm (ZSU-57), the 85 mm and 100 mm flak guns, the 120 mm and 125 mm tank guns | 100 % | unchanged |
+| Bombs | cube root of the bomb's weight over 500 lb (a pack's weight is shared by its bombs) | 250 lb 79 % (about 200 ft wide), 500 lb 100 % (255 ft), 1,000 lb 126 %, 2,000 lb 159 % (405 ft), GBU-28 (4,500 lb) 208 % |
+| Missiles and rockets | cube root of the warhead's weight over 500 lb, at least 50 % | AGM-65G (300 lb) 84 %, Harpoon (488 lb) 99 %, SS-N-9 (1,100 lb) 130 %; a Sidewinder or a 2.75 in rocket 50 % |
+
+- The scale applies to a weapon's own impact: its hit on an aircraft or
+  object, its ground or water strike and a flak burst. A target's death
+  blast, a crash and a launch keep their type's size.
+- The retail weapon records carry no warhead weight, so the missiles' and
+  rockets' come from a table of the real weapons' published warhead weights,
+  rounded (fitted); fictional records (the AAM-L, the AEMP-1) take an agent's
+  estimate, and a record the table does not name keeps its type's size.
+- The 50 % floor for missiles and rockets is an agent decision (2026-10-12):
+  a 21 lb Sidewinder warhead would draw at 35 %, smaller than a cannon shell.
+- The scale is a byte (1 to 255 percent); 0 marks a dud bomb's inert dirt
+  puff, drawn at full size with no flash and no sparks. It rides the
+  simulation's effect, the network's Effect event
+  ([protocol 26](../formats/net-protocol.md#protocol-26-explosions-sized-by-weapon))
+  and recordings (the [effect scales section](../REPLAYS.md#versions-and-damage)),
+  so every machine and every replay draws the same size. Older recordings
+  draw every explosion at its type's size.
+- Sounds are unchanged.
+
+### Impact light and sparks
+
+Opinionated, agent design within John's request of 2026-10-12 (bug B11:
+every impact lights the night and throws sparks; he wants sharp visibility
+aids, no glint). Every weapon's hit, ground strike and kill blast, but not a
+dud's puff, a flak burst (which has its own flash) or a small round's
+splash in the water:
+
+- **Flash of light.** A point light at the burst, lifted 15 % of the
+  explosion's drawn width above the ground for a surface blast, at 2.5
+  flares per 150 ft of drawn width (a fifth of a flare to twelve flares; a
+  20 mm hit about 0.6 of a flare, a 500 lb bomb about 4, a 2,000 lb bomb
+  about 7 and the 105 mm about 8.5). It holds two ticks and fades over 10 ticks plus
+  14 per unit of the weapon's scale (about 0.15 s for a cannon shell, 0.2 s
+  for a 500 lb bomb, 0.3 s for the 105 mm), the quadratic fade of a flak
+  burst's flash. It rides the flare light path, so like every flare light
+  it counts up to four times as much against the night scene and hardly
+  shows by day. A picture lights at most its 24 newest impacts, so a long
+  gun burst cannot crowd out the flares (the scene lights its 16 strongest
+  lights).
+- **Sparks.** 6 plus 10 per unit of scale glowing streaks (at most 30): 11
+  for a cannon shell, 16 for a 500 lb bomb, 26 for the 105 mm. Each leaves
+  at 60 to 160 ft/s times the square root of the scale, upward and outward
+  from a ground burst (15 to 75 degrees up) and every way from an air burst,
+  falls under gravity, and lives 0.2 to 0.4 s plus 0.1 s per unit of scale,
+  cooling as it goes; one that lands goes out. A spark is drawn as a short
+  tracer streak (the last 0.05 s of its path, half a tracer's width, 2.2 times its radiance when fresh),
+  so it glows additively day and night. Water strikes throw none. At most
+  1,500 sparks are drawn, the newest impacts first.
+- **Smoke.** A ground burst (not one in the water, and not an air burst)
+  leaves dark dust and smoke that grows and lingers with the weapon's size
+  (opinionated, John, 2026-10-12: the whole effect, light, fireball and
+  smoke, scales by the same rule; the numbers are agent choices): 1 plus 4
+  per unit of scale puffs, at most 10 (3 for a cannon shell, 5 for a 500 lb
+  bomb, 7 for a 2,000 lb, 9 for the 105 mm), each growing from 0.15 to 0.45
+  of the explosion's drawn width across and rising 6 ft/s times the square
+  root of the scale, fading in over a quarter second behind the fireball and
+  gone after 6 seconds times the scale (3 s for a cannon shell, 4.7 s for a
+  250 lb bomb, 6 s for a 500 lb, 9.5 s for a 2,000 lb, 12 s for the 105 mm).
+  Up to 96 recent impacts are remembered for it.
+- The flash's strength grows with the drawn width, so a bigger weapon's
+  light is both brighter and reaches farther before it fades into the
+  night; the fireball and the shockwave ring scale with the width too. A
+  weapon's impact leaves no fire of its own today (fires belong to crash
+  sites and destroyed units, sized by the unit), so there is no impact fire
+  to scale.
+- All of it comes from the effect alone (where, which type, its scale and how far
+  into its life), with each spark's direction, speed and life drawn from the
+  burst's exact position, so a networked client and a replay show the same
+  and nothing reaches the simulation, the wire or a recording.
+
 Cluster bombs (agent design, 2026-10-10): the five cluster records explode as type 18 on land and water with no crater, and a ground burst of that family also draws 28 small bomblet flashes over 1,200 feet, derived from the burst's position alone; see [ordnance presentation](ordnance-presentation.md#cluster-bomb-flashes).
 
 Crash site: crash explosion type 35 on land, 34 in water; crater size 6
@@ -123,6 +215,11 @@ Fitted, by the agent:
 - A debris piece landing keeps its 15-foot `GRDLRGA` puff and stays silent.
 
 Opinionated:
+- Explosion size by weapon (John, 2026-10-12) and the impact light and
+  sparks (agent design on John's request of the same day): see
+  [size by weapon](#size-by-weapon) and
+  [impact light and sparks](#impact-light-and-sparks) for the rules, which
+  numbers are fitted and which are agent decisions.
 - The shockwave ring (agent, X1, 2026-10-10; John asked on 2026-10-10 that
   ground explosions show a shockwave). The original has no shockwave art or
   effect: neither `EXP.SH` nor any picture in the archives is a ring or wave
