@@ -900,14 +900,19 @@ impl Viewer {
             recording.weapons().filter_map(|w| w.shape.as_deref()),
             resources,
         );
-        Self::assemble(
+        let mut viewer = Self::assemble(
             path,
             recording,
             (world, scenery),
             (ownship, models, art),
             options,
             growth,
-        )
+        )?;
+        // Other aircraft's launches name their weapon record.
+        viewer
+            .sound
+            .set_launches(crate::audio::LaunchSounds::of(resources));
+        Ok(viewer)
     }
 
     /// A viewer from loaded parts.

@@ -792,13 +792,21 @@ impl App {
             vapor: &mut self.vapor,
             flight_music: &mut self.flight_music,
             rwr_warnings: &mut self.rwr_warnings,
+            launch_watch: &mut self.launch_watch,
         };
         let mut state = Seen {
             was_dead: flight.was_dead,
             was_crashed: flight.was_crashed,
             was_burning: flight.was_burning,
         };
-        presenter.present_net(&presented, &frame.events, &name, ticks, &mut state);
+        presenter.present_net(
+            &presented,
+            &frame.events,
+            &name,
+            session.launch_sounds(),
+            ticks,
+            &mut state,
+        );
         flight.was_dead = state.was_dead;
         flight.was_crashed = state.was_crashed;
         flight.was_burning = state.was_burning;
@@ -1028,12 +1036,16 @@ impl TickPresenter<'_> {
         frame: &FlightFrame,
         events: &[ReceivedEvent],
         name: &dyn Fn(NameIndex) -> Option<String>,
+        launches: &crate::audio::LaunchSounds,
         ticks: u64,
         seen: &mut Seen,
     ) {
         let plane = frame.plane.0;
         let mut weapon_cycled = false;
         let mut releases: Vec<String> = Vec::new();
+        // Other aircraft's launches: who, from where, the recording and its
+        // reach.
+        let mut others: Vec<(u32, [f64; 3], String, i16)> = Vec::new();
         let mut emissions: Vec<tore_sim::acoustics::Emission> = Vec::new();
         for received in events {
             match &received.event {
@@ -1087,6 +1099,28 @@ impl TickPresenter<'_> {
                         releases.push(sound);
                     }
                 }
+                // The player's own launch is its Release; any other
+                // aircraft's is heard from where it fired, at the reach
+                // of the weapon's record (surface units' and guns' are not
+                // aircraft launches and have no entry).
+                WireEvent::Launch {
+                    shooter,
+                    projectile,
+                    weapon,
+                } => {
+                    if *shooter != plane
+                        && !crate::surface_fx::is_unit(*shooter)
+                        && let Some(record) = name(*weapon)
+                        && let Some((sound, feet)) = launches.get(&record)
+                        && let Some(position) = crate::audio::shooter_position(
+                            frame.picture,
+                            *shooter,
+                            Some(*projectile),
+                        )
+                    {
+                        others.push((*shooter, position, sound.to_owned(), feet));
+                    }
+                }
                 WireEvent::Feedback { rumble } => self.input.feedback(rumble.event()),
                 WireEvent::YourAircraftExploded { on_impact } => {
                     self.flight_ui.message(if *on_impact {
@@ -1125,7 +1159,6 @@ impl TickPresenter<'_> {
                 | WireEvent::Mark { .. }
                 | WireEvent::GroundDestroyed { .. }
                 | WireEvent::Countermeasure { .. }
-                | WireEvent::Launch { .. }
                 | WireEvent::GunBurst { .. }
                 | WireEvent::SurfaceBurst { .. }
                 | WireEvent::SurfaceBurstEnd { .. }
@@ -1206,11 +1239,15 @@ impl TickPresenter<'_> {
                 .collect();
             let loops = crate::audio::loop_sources(frame.picture, &models);
             let sources = crate::audio::snapshot_sources(frame.picture);
-            // The wire names the recording only: the launch fades over the
-            // default distance.
+            // The player's own release names the recording only: it fades
+            // over the default distance. Another aircraft's launch names
+            // its weapon record, which gives both.
             let own_releases: Vec<crate::audio::Launch> = releases
                 .iter()
                 .map(|sound| crate::audio::Launch::named(sound))
+                .chain(others.iter().map(|(who, at, sound, feet)| {
+                    crate::audio::Launch::by(*who, *at, sound, *feet)
+                }))
                 .collect();
             for step in 0..ticks.max(1) {
                 let first = step == 0;
