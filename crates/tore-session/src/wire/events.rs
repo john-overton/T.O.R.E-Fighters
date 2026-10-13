@@ -140,6 +140,10 @@ pub enum WireEvent {
         position: [i64; 3],
         ticks: u16,
         blast: Option<u8>,
+        /// How big the explosion is drawn, percent of its type's size
+        /// (protocol 26; `tore_sim::combat::blast_scale`). Sent as one bit
+        /// when it is 100.
+        scale: u8,
     },
     /// A crater or crash-site fire, from the event's tick.
     Mark { kind: MarkKind, position: [i64; 3] },
@@ -669,6 +673,7 @@ impl WireEvent {
                 position,
                 ticks,
                 blast,
+                scale,
             } => {
                 let _ = w.write_bits(effect_code(*kind), 3);
                 write_position(w, position);
@@ -676,6 +681,13 @@ impl WireEvent {
                 bits::write_option(w, *blast, |w, blast| {
                     let _ = w.write_bits(u64::from(blast), 8);
                 });
+                bits::write_option(
+                    w,
+                    (*scale != tore_sim::combat::blast_scale::FULL).then_some(*scale),
+                    |w, scale| {
+                        let _ = w.write_bits(u64::from(scale), 8);
+                    },
+                );
             }
             Self::Mark { kind, position } => {
                 match kind {
@@ -843,6 +855,8 @@ impl WireEvent {
                 position: read_steps(r)?,
                 ticks: r.read_bits(16)? as u16,
                 blast: bits::read_option(r, |r| Ok(r.read_bits(8)? as u8))?,
+                scale: bits::read_option(r, |r| Ok(r.read_bits(8)? as u8))?
+                    .unwrap_or(tore_sim::combat::blast_scale::FULL),
             },
             12 => {
                 let kind = if r.read_bool()? {

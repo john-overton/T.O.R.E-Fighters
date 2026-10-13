@@ -687,6 +687,7 @@ struct Shown {
     position: [f64; 3],
     ticks: u16,
     blast: Option<u8>,
+    scale: u8,
 }
 
 /// The client session. See the module documentation.
@@ -1670,6 +1671,7 @@ impl Client {
                 position: e.position,
                 ticks: (f64::from(e.ticks) - (render - f64::from(e.tick))).max(0.) as u16,
                 blast: e.blast,
+                scale: e.scale,
             })
             .collect();
         let marks = self
@@ -2788,12 +2790,14 @@ impl Client {
                 position: at,
                 ticks,
                 blast,
+                scale,
             } => self.effects.push(Shown {
                 tick: event.tick,
                 kind: *kind,
                 position: position(at),
                 ticks: *ticks,
                 blast: *blast,
+                scale: *scale,
             }),
             WireEvent::Mark { kind, position: at } => {
                 self.marks.push((event.tick, *kind, position(at)));

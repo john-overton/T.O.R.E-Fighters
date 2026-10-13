@@ -401,6 +401,11 @@ pub(crate) fn event(rng: &mut SplitMix64) -> WireEvent {
             position: position(rng),
             ticks: rng.below(65_536) as u16,
             blast: chance(rng).then(|| rng.below(256) as u8),
+            scale: if chance(rng) {
+                100
+            } else {
+                rng.below(256) as u8
+            },
         },
         12 => WireEvent::Mark {
             kind: if chance(rng) {

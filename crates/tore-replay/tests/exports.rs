@@ -438,6 +438,7 @@ fn golden_frames() -> Vec<Frame> {
                 kind: EffectKind::Flare,
                 position: enemy(250).position,
                 duration_ticks: 120,
+                scale: EffectSpawn::FULL_SCALE,
             }),
             255 | 256 => {
                 let (owner, state, decoy, left) = if tick == 255 {

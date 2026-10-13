@@ -361,6 +361,7 @@ pub fn rich_scenario(start: u64, ticks: u64, seed: u64) -> Scenario {
                 kind: EffectKind::Launch,
                 position: shooter.position,
                 duration_ticks: 60,
+                scale: EffectSpawn::FULL_SCALE,
             });
         }
         if let Some(m) = &mut missile {

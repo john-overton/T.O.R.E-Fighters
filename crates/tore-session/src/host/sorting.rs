@@ -63,13 +63,14 @@ pub struct Timed {
     pub event: Wide,
 }
 
-type EffectKey = (u8, [u64; 3], Option<u8>);
+type EffectKey = (u8, [u64; 3], Option<u8>, u8);
 
 fn effect_key(effect: &live::Effect) -> EffectKey {
     (
         effect.kind as u8,
         effect.position.map(f64::to_bits),
         effect.blast,
+        effect.scale,
     )
 }
 
@@ -461,6 +462,7 @@ fn effect_pose(effect: &live::Effect) -> EffectPose {
         position: effect.position,
         ticks: effect.ticks,
         blast: effect.blast,
+        scale: effect.scale,
     }
 }
 

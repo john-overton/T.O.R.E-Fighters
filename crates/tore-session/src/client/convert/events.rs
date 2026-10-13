@@ -167,10 +167,12 @@ impl Events {
                     position,
                     ticks,
                     blast,
+                    scale,
                 } => vec![Put::Effect(replay::EffectSpawn {
                     kind: effect_kind(*effect, *blast),
                     position: feet(position),
                     duration_ticks: u32::from(*ticks),
+                    scale: *scale,
                 })],
                 WireEvent::Mark {
                     kind: mark,
@@ -182,6 +184,7 @@ impl Events {
                     },
                     position: feet(position),
                     duration_ticks: blast::FOREVER,
+                    scale: replay::EffectSpawn::FULL_SCALE,
                 })],
                 WireEvent::GroundDestroyed { object } => vec![
                     Put::Surface(*object),

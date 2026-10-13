@@ -99,11 +99,13 @@ fn frames() -> Vec<Frame> {
                         kind: EffectKind::Flak { explosion: 27 },
                         position: [1., 2., 3.],
                         duration_ticks: 120,
+                        scale: EffectSpawn::FULL_SCALE,
                     },
                     EffectSpawn {
                         kind: EffectKind::Flak { explosion: 28 },
                         position: [4., 5., 6.],
                         duration_ticks: 120,
+                        scale: EffectSpawn::FULL_SCALE,
                     },
                 ];
             }
@@ -308,6 +310,7 @@ fn a_world_without_surface_content_is_still_a_format_2_file() {
         kind: EffectKind::Flak { explosion: 27 },
         position: [0.; 3],
         duration_ticks: 1,
+        scale: EffectSpawn::FULL_SCALE,
     }];
     assert!(writer.push(&frame).is_err(), "flak needs format 3");
     frame.new_effects.clear();

@@ -274,6 +274,7 @@ fn targets_picture(world: &World) -> RenderSnapshot {
                     target: p.target,
                     incoming: p.incoming.is_some(),
                     speed_f8: p.speed_f8,
+                    powered: state.motor_powered(p),
                 }
             })
             .collect(),
@@ -681,6 +682,7 @@ pub fn effect_event(effect: &EffectPose) -> WireEvent {
         position: position(effect.position),
         ticks: effect.ticks,
         blast: effect.blast,
+        scale: effect.scale,
     }
 }
 

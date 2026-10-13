@@ -261,6 +261,7 @@ impl Client {
                 position: e.position,
                 ticks: (f64::from(e.ticks) - (render - f64::from(e.tick))).max(0.) as u16,
                 blast: e.blast,
+                scale: e.scale,
             })
             .collect();
         let marks = self

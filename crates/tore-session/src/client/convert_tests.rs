@@ -823,6 +823,7 @@ mod events {
                     position: [32, 64, 96],
                     ticks: 20,
                     blast: None,
+                    scale: 100,
                 },
             ),
             (

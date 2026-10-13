@@ -230,6 +230,7 @@ pub(crate) fn get_spawns(section: &[u8], frames: u32) -> Result<Vec<FrameSpawns>
                 kind,
                 position,
                 duration_ticks,
+                scale: EffectSpawn::FULL_SCALE,
             });
         }
         let n = input.count(MAX_PUFFS_PER_TICK, "puffs in one frame")?;
@@ -291,4 +292,82 @@ pub(crate) fn get_spawns(section: &[u8], frames: u32) -> Result<Vec<FrameSpawns>
         return Err(corrupt("the spawns section has trailing bytes"));
     }
     Ok(out)
+}
+
+/// Writer state for one chunk's effect scales section: for each frame with
+/// an effect not drawn at its type's own size, the frame (as a gap), how
+/// many, and each one's index among the frame's spawned effects and its
+/// scale. A frame whose effects are all full size costs nothing.
+#[derive(Default)]
+pub(crate) struct ScaleCoder {
+    entries: u64,
+    last_frame: Option<u32>,
+    body: Vec<u8>,
+}
+
+impl ScaleCoder {
+    pub fn put(&mut self, frame: u32, effects: &[EffectSpawn]) {
+        let scaled: Vec<(usize, u8)> = effects
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.scale != EffectSpawn::FULL_SCALE)
+            .map(|(i, e)| (i, e.scale))
+            .collect();
+        if scaled.is_empty() {
+            return;
+        }
+        let buf = &mut self.body;
+        self.entries += 1;
+        put_gap(buf, frame, &mut self.last_frame);
+        put_uv(buf, scaled.len() as u64);
+        for (index, scale) in scaled {
+            put_uv(buf, index as u64);
+            buf.push(scale);
+        }
+    }
+
+    pub fn section(&self) -> Option<Vec<u8>> {
+        if self.entries == 0 {
+            return None;
+        }
+        let mut out = Vec::with_capacity(self.body.len() + 10);
+        put_uv(&mut out, self.entries);
+        out.extend_from_slice(&self.body);
+        Some(out)
+    }
+
+    pub fn len(&self) -> usize {
+        self.body.len()
+    }
+}
+
+/// Puts the scales of the effect scales section on the spawns decoded from
+/// the same chunk. An index past a frame's effects is damage.
+pub(crate) fn apply_scales(section: &[u8], frames: u32, spawns: &mut [FrameSpawns]) -> Result<()> {
+    let mut input = In::new(section);
+    let entries = input.count(frames as usize, "effect scale entries")?;
+    let mut last_frame = None;
+    for _ in 0..entries {
+        let frame = get_gap(&mut input, &mut last_frame, frames)?;
+        let n = input.count(MAX_EFFECTS_PER_TICK, "scaled effects in one frame")?;
+        let effects = spawns
+            .iter_mut()
+            .find(|(f, ..)| *f == frame)
+            .map(|(_, effects, _)| effects);
+        let Some(effects) = effects else {
+            return Err(corrupt("an effect scale names a frame with no effects"));
+        };
+        for _ in 0..n {
+            let index = input.count(effects.len().saturating_sub(1), "effect index")?;
+            let scale = input.u8()?;
+            effects
+                .get_mut(index)
+                .ok_or_else(|| corrupt("an effect scale names no effect"))?
+                .scale = scale;
+        }
+    }
+    if !input.done() {
+        return Err(corrupt("the effect scales section has trailing bytes"));
+    }
+    Ok(())
 }
