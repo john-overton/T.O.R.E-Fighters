@@ -311,3 +311,84 @@ class PoweredTapeTests(unittest.TestCase):
         crashed = output.replace("crashed=false", "crashed=true")
         self.assertTrue(any("crashed" in p for p in _powered.check_hover(crashed)))
         self.assertTrue(any("no result" in p for p in _powered.check_hover("\n$ then 2: y\nnothing\n")))
+
+
+# The `--rotor-probe` output on the imported PTs (slice H1, 2026-10-12).
+ROTOR_PROBE = (
+    "ROTOR AV8.PT jet hover: off=0.0ft height=0.0ft touchdown=-4.9ft/s landing_off=0.0ft flew\n"
+    "ROTOR YAK141.PT jet hover: off=0.0ft height=0.0ft touchdown=-7.5ft/s landing_off=0.0ft flew\n"
+    "ROTOR V22.PT hold calm: off=2.2ft height=0.0ft hover=true flew\n"
+    "ROTOR V22.PT hold wind15: off=2.7ft height=0.0ft hover=true flew\n"
+    "ROTOR V22.PT move500: overshoot=-0.1ft arrived=31.4s off=0.1ft height=0.0ft flew\n"
+    "ROTOR V22.PT climb500: fastest=26.7ft/s top=500.0ft end=500.0ft drift=7.6ft flew\n"
+    "ROTOR V22.PT forward 40kt +1000fpm: climb=1032fpm speed_off=1.3kt heading_off=0.0deg flew\n"
+    "ROTOR V22.PT forward 40kt -1000fpm: climb=-1031fpm speed_off=1.3kt heading_off=0.0deg flew\n"
+    "ROTOR V22.PT forward 80kt +1000fpm: climb=1008fpm speed_off=0.9kt heading_off=0.0deg flew\n"
+    "ROTOR V22.PT forward 80kt -1000fpm: climb=-1009fpm speed_off=1.0kt heading_off=0.1deg flew\n"
+    "ROTOR V22.PT forward 120kt +1000fpm: climb=1004fpm speed_off=0.8kt heading_off=0.0deg flew\n"
+    "ROTOR V22.PT forward 120kt -1000fpm: climb=-992fpm speed_off=3.3kt heading_off=0.4deg flew\n"
+    "ROTOR V22.PT turn200: lost=18.6ft lowest=181.4ft heading_off=2.0deg flew\n"
+    "ROTOR V22.PT slow120: lost=5.4ft off=1.1ft ground_speed=0.0kt hover=true flew\n"
+    "ROTOR V22.PT convert: out=0.0deg 220kt converted=24.3s back=87.0deg off=0.0ft ground_speed=0.0kt hover=true height=88ft corridor_ticks=0 flew\n"
+    "ROTOR AH64.PT hold calm: off=2.6ft height=0.0ft hover=true flew\n"
+    "ROTOR AH64.PT hold wind15: off=3.1ft height=0.0ft hover=true flew\n"
+    "ROTOR AH64.PT move500: overshoot=-0.1ft arrived=31.0s off=0.1ft height=0.0ft flew\n"
+    "ROTOR AH64.PT climb500: fastest=26.0ft/s top=500.0ft end=500.0ft drift=8.9ft flew\n"
+    "ROTOR AH64.PT forward 40kt +1000fpm: climb=1032fpm speed_off=1.3kt heading_off=1.6deg flew\n"
+    "ROTOR AH64.PT forward 40kt -1000fpm: climb=-1030fpm speed_off=1.3kt heading_off=0.8deg flew\n"
+    "ROTOR AH64.PT forward 80kt +1000fpm: climb=1008fpm speed_off=0.7kt heading_off=0.7deg flew\n"
+    "ROTOR AH64.PT forward 80kt -1000fpm: climb=-1006fpm speed_off=0.6kt heading_off=0.2deg flew\n"
+    "ROTOR AH64.PT forward 120kt +1000fpm: climb=1004fpm speed_off=0.5kt heading_off=0.5deg flew\n"
+    "ROTOR AH64.PT forward 120kt -1000fpm: climb=-1002fpm speed_off=0.4kt heading_off=0.2deg flew\n"
+    "ROTOR AH64.PT turn200: lost=16.0ft lowest=184.0ft heading_off=0.5deg flew\n"
+    "ROTOR AH64.PT slow120: lost=4.2ft off=0.0ft ground_speed=0.0kt hover=true flew\n"
+    "ROTOR MI24.PT hold calm: off=2.4ft height=0.0ft hover=true flew\n"
+    "ROTOR MI24.PT hold wind15: off=2.7ft height=0.0ft hover=true flew\n"
+    "ROTOR MI24.PT move500: overshoot=-0.1ft arrived=32.5s off=0.1ft height=0.0ft flew\n"
+    "ROTOR MI24.PT climb500: fastest=26.4ft/s top=500.0ft end=500.0ft drift=9.3ft flew\n"
+    "ROTOR MI24.PT forward 40kt +1000fpm: climb=1032fpm speed_off=1.3kt heading_off=1.5deg flew\n"
+    "ROTOR MI24.PT forward 40kt -1000fpm: climb=-1031fpm speed_off=1.3kt heading_off=0.6deg flew\n"
+    "ROTOR MI24.PT forward 80kt +1000fpm: climb=1007fpm speed_off=0.7kt heading_off=0.6deg flew\n"
+    "ROTOR MI24.PT forward 80kt -1000fpm: climb=-1007fpm speed_off=0.6kt heading_off=0.1deg flew\n"
+    "ROTOR MI24.PT forward 120kt +1000fpm: climb=1003fpm speed_off=0.5kt heading_off=0.4deg flew\n"
+    "ROTOR MI24.PT forward 120kt -1000fpm: climb=-1003fpm speed_off=0.4kt heading_off=0.0deg flew\n"
+    "ROTOR MI24.PT turn200: lost=23.9ft lowest=176.1ft heading_off=0.3deg flew\n"
+    "ROTOR MI24.PT slow120: lost=2.8ft off=0.0ft ground_speed=0.0kt hover=true flew\n"
+    "ROTOR CH47.PT hold calm: off=0.0ft height=0.0ft hover=true flew\n"
+    "ROTOR CH47.PT hold wind15: off=0.4ft height=0.0ft hover=true flew\n"
+    "ROTOR CH47.PT move500: overshoot=-0.0ft arrived=33.0s off=0.1ft height=0.0ft flew\n"
+    "ROTOR CH47.PT climb500: fastest=25.5ft/s top=500.0ft end=500.0ft drift=0.6ft flew\n"
+    "ROTOR CH47.PT forward 40kt +1000fpm: climb=1031fpm speed_off=1.3kt heading_off=0.0deg flew\n"
+    "ROTOR CH47.PT forward 40kt -1000fpm: climb=-1031fpm speed_off=1.3kt heading_off=0.0deg flew\n"
+    "ROTOR CH47.PT forward 80kt +1000fpm: climb=1007fpm speed_off=0.6kt heading_off=0.0deg flew\n"
+    "ROTOR CH47.PT forward 80kt -1000fpm: climb=-1007fpm speed_off=0.6kt heading_off=0.0deg flew\n"
+    "ROTOR CH47.PT forward 120kt +1000fpm: climb=1003fpm speed_off=0.4kt heading_off=0.0deg flew\n"
+    "ROTOR CH47.PT forward 120kt -1000fpm: climb=-1003fpm speed_off=0.4kt heading_off=0.0deg flew\n"
+    "ROTOR CH47.PT turn200: lost=17.4ft lowest=182.6ft heading_off=0.0deg flew\n"
+    "ROTOR CH47.PT slow120: lost=1.0ft off=0.1ft ground_speed=0.0kt hover=true flew\n"
+)
+
+
+class RotorProbeTests(unittest.TestCase):
+    """The AI rotorcraft and jet-lift probe's checker (`flight-powered-ai-probe`)."""
+
+    def test_the_recorded_probe_passes(self):
+        self.assertEqual(_powered.check_rotor_probe(ROTOR_PROBE), [])
+
+    def test_each_failure_is_named(self):
+        dropped = ROTOR_PROBE.replace("ROTOR CH47.PT slow120", "ROTOR CH47.PT slowed")
+        self.assertTrue(any("no ROTOR line for CH47.PT slow120" in p for p in _powered.check_rotor_probe(dropped)))
+        drifting = ROTOR_PROBE.replace("ROTOR AH64.PT hold calm: off=2.6ft", "ROTOR AH64.PT hold calm: off=12.6ft")
+        self.assertTrue(any("did not hold" in p for p in _powered.check_rotor_probe(drifting)))
+        crashed = ROTOR_PROBE.replace("ROTOR MI24.PT move500: overshoot=-0.1ft arrived=32.5s off=0.1ft height=0.0ft flew",
+                                      "ROTOR MI24.PT move500: overshoot=-0.1ft arrived=32.5s off=0.1ft height=0.0ft CRASHED")
+        self.assertTrue(any("CRASHED" in p for p in _powered.check_rotor_probe(crashed)))
+        held = ROTOR_PROBE.replace("corridor_ticks=0", "corridor_ticks=4")
+        self.assertTrue(any("corridor" in p for p in _powered.check_rotor_probe(held)))
+        hard = ROTOR_PROBE.replace("touchdown=-7.5ft/s", "touchdown=-12.0ft/s")
+        self.assertTrue(any("land vertically" in p for p in _powered.check_rotor_probe(hard)))
+        sank = ROTOR_PROBE.replace("ROTOR MI24.PT turn200: lost=23.9ft", "ROTOR MI24.PT turn200: lost=83.9ft")
+        self.assertTrue(any("turn round" in p for p in _powered.check_rotor_probe(sank)))
+        slow = ROTOR_PROBE.replace("ROTOR V22.PT forward 80kt +1000fpm: climb=1008fpm speed_off=0.9kt",
+                                   "ROTOR V22.PT forward 80kt +1000fpm: climb=1008fpm speed_off=9.9kt")
+        self.assertTrue(any("missed" in p for p in _powered.check_rotor_probe(slow)))

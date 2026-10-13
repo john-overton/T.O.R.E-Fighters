@@ -658,6 +658,11 @@ pub struct FlyTrace {
     /// The adapter's whole output: the controls, its fallbacks and the
     /// rate-limited attitude it requested.
     pub adapter: Option<AdapterOutput>,
+    /// What the rotor adapter commanded, on a helicopter or the V-22
+    /// (slice H1); the fixed-wing adapter's numbers stay in `adapter`.
+    pub rotor: Option<super::rotor_adapter::RotorCommand>,
+    /// What the jet-lift law commanded in a hover (slice H1).
+    pub jet_lift: Option<super::jet_lift::JetLiftCommand>,
     /// The attitude and speed after the flight model stepped.
     pub achieved: Achieved,
 }

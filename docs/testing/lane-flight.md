@@ -185,6 +185,31 @@ battery selection family `ai-strike` (`ai-strike-*`, `ai-sead-*`, `ai-wing-*`, `
 `ai.rs`, `guided.rs`, the scenario file, the AI sources (`tore-sim/src/ai`, `tore-world/src/ai_wings`)
 and the laser and sight step (`combat/laser.rs`, `combat/live/sighting.rs`).
 
+## Rotor probe
+
+`--rotor-probe` (slice H1) flies each imported powered-lift PT through scripted
+requests to the AI's [rotorcraft and jet-lift control](../spec/ai.md#rotorcraft-and-jet-lift-control)
+over flat ground at sea level, clean, at the Damper level, and prints one `ROTOR`
+line per flight. The flights are `tore_sim::ai::rotor_probe`'s, the same ones the
+unit tests in `flight/powered/ai_lift_tests.rs` assert on the synthetic PT fixtures.
+The battery scenario `flight-powered-ai-probe` checks the lines against the unit
+tests' bands.
+
+| Line | Flight | Band |
+| --- | --- | --- |
+| `hold calm`, `hold wind15` | A hover held over a point at 200 ft for 60 s after 30 s to settle, calm and in a 15 kt wind across the heading | within 10 ft and 10 ft of height |
+| `move500` | The point moved 500 ft diagonally | overshoot under 10 ft, arrives within 10 ft |
+| `climb500` | A vertical climb from 20 to 500 ft at 25 ft/s | fastest 23 to 27 ft/s, top under 515 ft, ends within 10 ft |
+| `forward <kt> <fpm>` | 40, 80 and 120 kt climbing and descending 1,000 ft/min | climb within 150 ft/min, speed within 5 kt, heading within 3 degrees |
+| `turn200` | 180 degrees at 200 ft asking 160 kt, more than these aircraft make | loses under 50 ft, turns round within 5 degrees in 60 s |
+| `slow120` | From 120 kt at 1,000 ft to a hover over a point 3,000 ft ahead | loses under 50 ft, ends within 10 ft hovering |
+| `convert` (V-22) | From a hover to airplane mode asking 220 kt, then a hover 15,000 ft ahead | nacelles down and over 200 kt, back over 80 degrees within 10 ft, within 300 ft of height, no corridor override |
+| `jet hover` (AV-8, Yak-141) | A hover at 200 ft, then a vertical landing at a 5 ft/s sink | within 10 ft, touchdown under 8 ft/s within 15 ft of the point |
+
+```sh
+TORE_DATA_DIR=<a copy of your profile> cargo run --locked -p tore-app -- --rotor-probe --no-audio
+```
+
 ## Powered-lift scenarios (VTOL overhaul)
 
 `flight-powered-*` flies the six powered-lift aircraft (AV-8, Yak-141, V-22, AH-64,

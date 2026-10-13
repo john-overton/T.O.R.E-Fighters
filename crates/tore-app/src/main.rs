@@ -9553,6 +9553,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut fixture_wings = false;
     let mut ai_probe = None;
     let mut ai_roster_probe = false;
+    let mut rotor_probe = false;
     // Mission recordings: what happened, not re-simulation tapes.
     let mut record_mission: Option<PathBuf> = None;
     let mut verify_render = false;
@@ -9976,6 +9977,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     },
                 );
             }
+            "--rotor-probe" => rotor_probe = true,
             "--ai-probe-ticks" | "--ai-roster-probe-ticks" => {
                 ai_roster_probe = arg == "--ai-roster-probe-ticks";
                 let ticks: usize = option_number(
@@ -12639,6 +12641,20 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         }
     }
     probe_script.takeoff = maneuver == "takeoff";
+    if rotor_probe {
+        // The AI's rotorcraft and jet-lift control on each imported
+        // powered-lift PT (slice H1, docs/testing/lane-flight.md).
+        for id in tore_formats::aircraft::AircraftId::ALL {
+            let Some(bytes) = theater_resources.get(id.pt()) else {
+                continue;
+            };
+            let aircraft = tore_formats::aircraft::Aircraft::parse(bytes)?;
+            for line in tore_sim::ai::rotor_probe::report(&aircraft) {
+                println!("{line}");
+            }
+        }
+        return Ok(Outcome::Done);
+    }
     if let Some(ticks) = ai_probe {
         if ai_roster_probe {
             ai_roster_probe::roster_probe(ticks, &theater_resources, &world)?;

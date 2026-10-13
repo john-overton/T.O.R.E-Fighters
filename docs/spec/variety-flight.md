@@ -164,6 +164,15 @@ for the F/A-18D and 54 seconds for the F-15). All six stay player-flyable.
 - How the AI flies the two helicopters (their start height, no landing, no fuel
   schedule, the strike passes and the defence) is in
   [AI strike](ai-strike.md#ai-helicopters-in-quick-mission).
+- Since slice H1 (2026-10-12) every AI helicopter and the AI V-22 fly the
+  powered-lift physics from the mission start, in single player too (before, an
+  airborne AI rotorcraft in single player flew the legacy model, an aeroplane's),
+  through the AI's own [rotorcraft control](ai.md#rotorcraft-and-jet-lift-control):
+  collective for climb, cyclic for speed, coordinated pedals, a hover to a commanded
+  point and the V-22's nacelle schedule. Opinionated, John's request of 2026-10-12
+  for AI helicopter and VTOL hover, takeoff and landing; the mechanism is the lead's
+  decision. The AV-8 and Yak-141 keep the AI flight model's choice; their jet-lift
+  law flies only the hovers the airfield sequences will ask for (slice H2).
 
 The overhaul's second project, AI wingmen, restores the other four: the AI will
 fly these aircraft through their inputs on the same physics a player uses (VTOL

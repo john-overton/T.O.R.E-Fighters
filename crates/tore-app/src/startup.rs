@@ -57,6 +57,7 @@ fn interactive_arguments(args: impl Iterator<Item = OsString>) -> bool {
                     | "--missile-acceptance"
                     | "--ai-probe-ticks"
                     | "--ai-roster-probe-ticks"
+                    | "--rotor-probe"
                     | "--sensor-summary"
                     | "--validate-creator"
                     | "--validate-weather"

@@ -102,6 +102,14 @@ The heading and waypoint modes fly through each aircraft's own controls
   the pitch, as on a fixed-wing aircraft, within 15 degrees, and the power
   lever stays the pilot's, as the throttle does elsewhere.
 
+Hover hold's cascade and the coupled A modes' law are also what the AI flies its
+helicopters and V-22 with (slice H1, 2026-10-12): both live in
+`autopilot::rotor_law` as functions of a commanded target, and the player's modes
+call them with the point, height, heading and speed they captured. Nothing a
+player flies changed: a tick-by-tick state comparison of hover hold, A and Ctrl+A
+on the four rotorcraft at every stability level is identical before and after.
+How the AI uses them is in [rotorcraft control](ai.md#rotorcraft-and-jet-lift-control).
+
 ## Numbers and provenance
 
 The interaction and 30 degree commanded-bank / 20 m/s commanded-climb limits
