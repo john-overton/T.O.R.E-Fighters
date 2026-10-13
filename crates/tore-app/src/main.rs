@@ -310,6 +310,8 @@ struct App {
     flight_music: flight_music::Observer,
     /// The RWR warning tones' lock memory, reset with each flight.
     rwr_warnings: rwr_tone::Warnings,
+    /// The other aircraft's launches already sounded.
+    launch_watch: audio::LaunchWatch,
     vapor: tore_sim::vapor::Vapor,
     /// Player blackout and redout, stepped with the simulation.
     g_effects: tore_sim::g_effects::GEffects,
@@ -588,6 +590,7 @@ struct TickPresenter<'a> {
     vapor: &'a mut tore_sim::vapor::Vapor,
     flight_music: &'a mut flight_music::Observer,
     rwr_warnings: &'a mut rwr_tone::Warnings,
+    launch_watch: &'a mut audio::LaunchWatch,
 }
 
 impl TickPresenter<'_> {
@@ -774,6 +777,9 @@ impl TickPresenter<'_> {
                 f64::from(listener_camera.pitch),
                 -f64::from(listener_camera.roll),
             );
+            // Every other aircraft's launches this tick (AI wings, enemies,
+            // other players), heard from where they were fired.
+            let others = self.launch_watch.fresh(&self.world.combat.state, plane);
             audio.spatial_tick(
                 tore_sim::acoustics::Listener {
                     position: listener_camera.position,
@@ -789,6 +795,14 @@ impl TickPresenter<'_> {
                     .map(|(sound, weapon)| {
                         audio::Launch::new(sound, weapon.effects.max_sound_distance)
                     })
+                    .chain(others.iter().map(|launch| {
+                        audio::Launch::by(
+                            launch.shooter,
+                            launch.position,
+                            &launch.sound,
+                            launch.max_distance_ft,
+                        )
+                    }))
                     .collect::<Vec<_>>(),
                 flight.position,
                 Some((flight.position, flight.velocity)),
@@ -2456,6 +2470,7 @@ impl App {
         }
         self.flight_music = flight_music::Observer::new();
         self.rwr_warnings = Default::default();
+        self.launch_watch = Default::default();
         self.reset_vapor();
         self.g_effects = Default::default();
         self.flight_clock.remainder = 0.;
@@ -4136,6 +4151,7 @@ impl ApplicationHandler for App {
                                 vapor: &mut self.vapor,
                                 flight_music: &mut self.flight_music,
                                 rwr_warnings: &mut self.rwr_warnings,
+                                launch_watch: &mut self.launch_watch,
                             }
                             .present(&input, &output);
                             if !presented {
@@ -13292,6 +13308,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         gun_flash: Default::default(),
         flight_music: Default::default(),
         rwr_warnings: Default::default(),
+        launch_watch: Default::default(),
         vapor: probe_vapor,
         g_effects: Default::default(),
         flight_view,

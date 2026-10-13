@@ -85,6 +85,35 @@ disassembly addresses are in
 Not heard by ear yet; whether `&ASHVMIS.11K` is what the Maverick should sound
 like is John's call to make by listening.
 
+## Other aircraft's launches
+
+Retail plays an aircraft's launch sound for any aircraft, not only the one
+flown: the sound request carries the record's recording and `maxSndDist`, and
+it sounds when the listener is within that distance of the firing aircraft
+(John asked for this on 2026-10-12). So an AI wingman's Sidewinder, an enemy's
+bomb release and another player's Maverick online are heard.
+
+- **Same rule as the external view.** Full within 100 ft of the firing
+  aircraft, a straight-line fade to silence at the record's `maxSndDist`,
+  nothing beyond, starting at once. In a cockpit it is heard through the
+  canopy (40 percent, no treble), as every outside sound is.
+- **One sound per aircraft per release.** A seven-bomb pack from one AI
+  aircraft is one thump. Two aircraft releasing in the same tick are two
+  sounds, even for the same recording.
+- **Guns and surface units.** Gun fire keeps its own audio. Surface units'
+  missile launches are not part of this and stay as they were.
+- **Voices.** At most the four nearest launches sound in a tick (agent
+  decision); the placed-sound pool still drops the quietest when it is full.
+- **Online and replays.** The wire and a recording name the weapon (and the
+  shooter), not the recording or the reach, so the game looks the weapon up in
+  its own weapon catalog by name: the same `fireSound` and `maxSndDist` the
+  host used. Where a weapon is not in the catalog it is silent. Position is the
+  firing aircraft's at that tick. No protocol change.
+
+Agent decisions: the four-voice limit, the canopy muffling inside a cockpit
+(consistent with the other outside sounds) and starting at once with no travel
+delay (as the player's own external launch). Not heard by ear yet.
+
 ## Numbers and boundaries
 
 | Component | Established value |

@@ -742,6 +742,9 @@ pub struct NetSession {
     gun_key: bool,
     /// Each weapon record's motor, parsed once.
     motors: RefCell<BTreeMap<String, Option<Motor>>>,
+    /// Each non-gun weapon record's launch sound and reach, for other
+    /// aircraft's launches, which the wire names by record only.
+    launches: crate::audio::LaunchSounds,
     /// Session events not yet taken by the game.
     events: Vec<ClientEvent>,
     /// When the player asked to leave.
@@ -904,6 +907,11 @@ impl NetSession {
         Arc::clone(&self.resources)
     }
 
+    /// The launch sound and reach of each weapon record.
+    pub fn launch_sounds(&self) -> &crate::audio::LaunchSounds {
+        &self.launches
+    }
+
     /// Starts the join over `join`'s transport. The mission is built when
     /// the host sends it.
     pub fn start(
@@ -995,6 +1003,7 @@ impl NetSession {
             &held,
             &resources,
         );
+        let launches = crate::audio::LaunchSounds::of(&resources);
         Ok(Self {
             client,
             socket,
@@ -1011,6 +1020,7 @@ impl NetSession {
             trigger: false,
             gun_key: false,
             motors: RefCell::new(BTreeMap::new()),
+            launches,
             events: Vec::new(),
             left_at: None,
             capture,
