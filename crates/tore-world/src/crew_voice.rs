@@ -1018,9 +1018,7 @@ fn speed_limits(flight: &tore_sim::flight::State) -> tore_sim::ai::SpeedLimits {
 /// all remaining fuel at the military flow scaled by the current throttle
 /// (floored at 10%), time home is the straight distance to `home` at cruise.
 fn fuel_state(flight: &tore_sim::flight::State, home: Vector) -> FuelState {
-    let propulsion = &flight.model().configuration().propulsion;
-    let flow = (propulsion.military_fuel_lbs_per_second * flight.throttle.max(0.1))
-        .max(tore_sim::ai::mission::MINIMUM_FUEL_FLOW_LBS_PER_S);
+    let flow = flight.endurance_flow_lbs_per_second();
     let endurance = (flight.fuel + flight.systems.external_lbs()) / flow;
     let limits = speed_limits(flight);
     let distance = (home[0] - flight.position[0]).hypot(home[2] - flight.position[2]);
@@ -1029,7 +1027,8 @@ fn fuel_state(flight: &tore_sim::flight::State, home: Vector) -> FuelState {
     // and no home a full tank could not fly to and back from.
     if tore_sim::ai::rotor_adapter::flies(flight) {
         let cruise = tore_sim::ai::route::rotorcraft_cruise_speed(&limits).0;
-        let full = flight.model().configuration().mass.internal_fuel_lbs / flow;
+        let full = flight.model().configuration().mass.internal_fuel_lbs
+            / flight.full_tank_endurance_flow_lbs_per_second();
         let time_home = (cruise > 0.)
             .then(|| distance / cruise)
             .filter(|time| tore_sim::ai::route::rotorcraft_home_in_range(*time, full));

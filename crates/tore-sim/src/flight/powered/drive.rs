@@ -44,6 +44,9 @@ const ROTOR_SPEED_LIMIT: f64 = 1.5;
 pub struct DriveModel {
     /// Rated power at sea level, ft·lbf/s.
     pub rated_power: f64,
+    /// Power to hover at sea level at the reference weight (empty plus full
+    /// internal fuel), ft·lbf/s. Read by the fuel flow (see [`super::fuel`]).
+    pub hover_power: f64,
     /// Rotor energy constant `J Omega0²` of all the rotors on the drive,
     /// ft·lbf.
     pub rotor_energy: f64,
@@ -74,6 +77,7 @@ impl DriveModel {
     pub fn new(rated_power: f64, hover_power: f64, energy_seconds: f64) -> Self {
         Self {
             rated_power,
+            hover_power,
             rotor_energy: 4. * energy_seconds * hover_power,
         }
     }
