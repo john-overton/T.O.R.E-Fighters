@@ -228,7 +228,7 @@ bands read from the result line (`speed_kt`, `altitude_ft`, `crashed`, `heading_
 
 | Scenario | What it flies | What must hold |
 | --- | --- | --- |
-| `flight-powered-hover-<aircraft>` (all six) | 15 seconds hands off in the trimmed hover (the Yak-141 with 6,000 lb of fuel: full tanks leave it no hover at 5,000 ft) | Speed under 3 kt and height within 30 ft |
+| `flight-powered-hover-<aircraft>` (all six) | 15 seconds hands off in the trimmed hover (the Yak-141 with 6,000 lb of fuel: full tanks leave it no hover at 5,000 ft) | Speed under 3 kt and height within 30 ft; a rotorcraft also burns 0.1 to 0.9 lb/s (slice HF2: by the power the rotor draws, not the record's 1 to 3 lb/s) |
 | `flight-powered-hover-hold-<aircraft>` (AH-64, Mi-24, CH-47, V-22) | A hard stick pulse from the hover, hover hold engaged at 3.5 seconds, and the same pulse without the hold | The held run ends under 3 kt and within 50 ft of its height; the unheld run is drifting at over 15 kt, so the pulse is real. The jets refuse hover hold by design (unit test A2) |
 | `flight-powered-transition-<aircraft>` (all six) | Hover to forward flight: forward cyclic trim taps at the Attitude level (helicopters), the conversion keys at 85 percent lever (V-22), the manual's three nozzle steps and the forward preset (jets) | A speed over each aircraft's minimum, a height inside its band, no crash |
 | `flight-powered-corridor-v22` | Airplane-mode start at 175 kt, the nacelles asked toward helicopter mode for 20 seconds | The aircraft keeps its speed and height and never goes over the overspeed limit: the corridor protection moved the nacelles, the pilot did not |

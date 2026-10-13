@@ -290,6 +290,65 @@ shape branches, fuel/departure behavior and flight validation. Next step:
 review these differences against the hybrid configuration consumers and
 write the numerical behavior contract before registering the family.
 
+## Rotorcraft fuel records
+
+Research, 2026-10-13, slice HF2, for John's request to find out why the Mi-24 has
+18 minutes of fuel. Build: the supplied Fighters Anthology `FA_2.LIB` PT records,
+read with the existing aircraft reader (`internalFuel` is a dword, `fuelConsumption`
+and `aftFuelConsumption` are words; the object record's `weight` is the empty
+weight). The reader's reading is **whole pounds a second for all the engines
+together at full military throttle** (`fuelConsumption`), and the same at full
+afterburner (`aftFuelConsumption`); the flight model debits that times the
+throttle each second. The retail unit itself is not established (the native
+`fuel_rate` returns the value in 24.8 fixed point and the burn is scheduled in
+five-second steps, see [native flight](native-flight.md)); the reading is
+checked below against real aircraft, not against retail play.
+
+| PT | Engines | Empty lb | Internal fuel lb | `fuelConsumption` | `aftFuelConsumption` | Full tank at the record's flow |
+| --- | --- | --- | --- | --- | --- | --- |
+| AH64.PT | 2 | 18,298 | 2,000 | 1 | 0 | 33 min |
+| V22.PT | 2 | 18,298 | 2,000 | 1 | 0 | 33 min |
+| MI24.PT | 2 | 18,078 | 3,307 | 3 | 0 | 18 min |
+| CH47.PT | 2 | 18,078 | 3,307 | 1 | 0 | 55 min |
+| AV8.PT | 1 | 13,968 | 7,759 | 2 | 0 | 65 min |
+| YAK141.PT | 1 | 25,685 | 9,700 | 2 | 17 | 81 min |
+| F18.PT, F16C.PT (for scale) | 2, 1 | 23,050, 14,567 | 11,220, 6,972 | 2 | 16 | 93, 58 min |
+| A10.PT, C130.PT, E2.PT (for scale) | 2, 4, 2 | 25,600, 76,469, 39,373 | 10,700, 45,012, 12,400 | 2, 1, 1 | 0 | 89, 750, 207 min |
+
+**Findings.**
+
+- **The weight is right, the flow is the outlier.** The Mi-24's 3,307 lb is 1,500 kg,
+  the Mi-24's published internal fuel (1,500 kg, Air Force Technology; 1,720 kg
+  elsewhere). Its 3 lb/s is 4,900 kg an hour: five to six times the real aircraft's
+  cruise burn (about 800 to 1,000 kg an hour, an endurance of about two hours on
+  internal fuel; the AH-64D's published combat endurance is 2.5 hours at about
+  1,000 lb an hour). A tank cannot be 18 minutes of anything a Hind does.
+- **The unit is not the mistake.** Read the same way the jets and transports are
+  plausible: the A-10 (2 lb/s, 89 minutes at full military power), the C-130 (1 lb/s
+  total) and the F/A-18 (afterburner 16 lb/s, against roughly 10 to 12 real). The integers
+  are coarse (1, 2, 3) and set by hand, so the smallest, 1 lb/s, is a floor that no
+  aircraft burning 0.3 to 0.6 lb/s can match, and the rotorcraft records are not
+  tied to the power their rotors draw.
+- **The rotorcraft records are copies.** `V22.PT` and `AH64.PT` carry the same
+  empty weight, fuel, thrust and flow. `CH47.PT` carries the Mi-24's empty weight
+  and fuel (the real CH-47 is a 24,000 lb aircraft carrying several thousand pounds more fuel),
+  an implausible thrust (135,795 lbf, set aside by the rotor overhaul) and a flow
+  of 1 where the Mi-24 has 3. The flow of the Mi-24 and of the CH-47 therefore
+  cannot both be a measurement of anything. Retail never makes a rotorcraft
+  a fuel-limited aircraft: its flow had no player-visible consequence, which is
+  how a placeholder survives.
+- **The VTOL jets are consistent.** The AV-8 (7,759 lb, real about 7,500 lb) and the
+  Yak-141 (9,700 lb) carry a fighter's flow and a believable tank; the models add the
+  lift engines' burn (docs/spec/powered-lift-flight.md). No change.
+
+**Decision (agent, 2026-10-13, John's request).** The reader keeps the retail
+numbers. The weights are kept (they size the rotor models and the mass checks). The
+**flow of a rotorcraft is not read**: the flight model burns by the power the rotor
+draws ([FLIGHT-MODEL](../FLIGHT-MODEL.md#rotorcraft-fuel), fitted). The V-22 keeps
+the AH-64's 2,000 lb tank, which is the weak number now (a real V-22 carries about
+12,000 lb); that is the clone, flagged for John rather than changed here. The
+measured result is in the [rotorcraft fuel baseline](../baselines/rotorcraft-fuel.md).
+
 ## F-14 default external fuel
 
 Research, 2026-10-05, for [selectable tanks](../spec/external-fuel-tanks.md).
