@@ -288,6 +288,10 @@ fn apply_leaves_other_records_alone() {
         let mut restored = after.clone();
         restored.burst = before.burst;
         restored.movement = before.movement;
+        if row.zones.is_some() {
+            // The row's own replacement zones are the one other change.
+            restored.seeker = before.seeker;
+        }
         assert_eq!(restored, before, "{}", row.record);
         assert_eq!(
             after.burst.projectiles_in_pod,
@@ -685,4 +689,31 @@ fn real_data_every_row_matches_the_shipped_record() {
     for name in known {
         assert!(!is_surface_gun(name), "{name}");
     }
+}
+
+/// John (2026-10-13): the M163 sees to about 3 nm and fires to 7,500 ft, the
+/// real Vulcan's reach; the ships' Phalanx keeps the retail record's zones.
+#[test]
+fn the_m163_has_its_own_zones_and_the_ships_phalanx_keeps_the_records() {
+    let m163 = tuning("M163", "PHALANX.JT").unwrap();
+    let zones = m163.zones.expect("the M163 row replaces the zones");
+    assert_eq!(zones.detection_ft, 18_000);
+    assert_eq!(zones.fire_ft, 7_500);
+    let mut w = retail_weapon(m163);
+    w.seeker.zones[0].maximum_range = 50_000;
+    w.seeker.zones[1].maximum_range = 20_000;
+    w.seeker.zones[1].maximum_altitude = 15_000;
+    apply("M163", &mut w).unwrap();
+    assert_eq!(w.seeker.zones[0].maximum_range, 18_000);
+    assert_eq!(w.seeker.zones[1].maximum_range, 7_500);
+    assert_eq!(w.seeker.zones[1].maximum_altitude, 7_500);
+    // Idempotent, and a ship's Phalanx is untouched.
+    apply("M163", &mut w).unwrap();
+    assert_eq!(w.seeker.zones[1].maximum_range, 7_500);
+    let ship = tuning("NIMZ", "PHALANX.JT").unwrap();
+    assert!(ship.zones.is_none());
+    let mut w = retail_weapon(ship);
+    w.seeker.zones[0].maximum_range = 50_000;
+    apply("NIMZ", &mut w).unwrap();
+    assert_eq!(w.seeker.zones[0].maximum_range, 50_000);
 }
