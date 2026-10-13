@@ -181,7 +181,21 @@ pub struct GunTuning {
     pub muzzle_fps: i16,
     /// Whether the gun's rounds carry tracers; flak shells have none.
     pub tracer: bool,
+    /// Replacement detection and fire ranges, where the record's are not the
+    /// real gun's (opinionated); `None` keeps the record's zones.
+    pub zones: Option<Zones>,
     pub retail: Retail,
+}
+
+/// Replacement ranges for a gun record's seeker zones, in feet (opinionated,
+/// John 2026-10-13): the detection range (`zone0` maximum), and the fire
+/// range and ceiling (`zone1` maximum range and maximum altitude). Minimums
+/// and the other bounds stay the record's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Zones {
+    pub detection_ft: i32,
+    pub fire_ft: i32,
+    pub fire_altitude_ft: i32,
 }
 
 const fn retail(
@@ -225,6 +239,7 @@ pub const TABLE: &[GunTuning] = &[
         magazine_reload_s: 120,
         muzzle_fps: 3_180,
         tracer: true,
+        zones: None,
         retail: retail(4, 1, 4, 0, 3_666, 3_666, 20),
     },
     GunTuning {
@@ -242,6 +257,7 @@ pub const TABLE: &[GunTuning] = &[
         magazine_reload_s: 120,
         muzzle_fps: 3_150,
         tracer: true,
+        zones: None,
         retail: retail(4, 1, 4, 0, 3_666, 1_466, 20),
     },
     GunTuning {
@@ -259,6 +275,11 @@ pub const TABLE: &[GunTuning] = &[
         magazine_reload_s: 120,
         muzzle_fps: 3_380,
         tracer: true,
+        zones: Some(Zones {
+            detection_ft: 18_000,
+            fire_ft: 7_500,
+            fire_altitude_ft: 7_500,
+        }),
         retail: retail(6, 1, 4, 0, 3_666, 1_466, 40),
     },
     GunTuning {
@@ -276,6 +297,7 @@ pub const TABLE: &[GunTuning] = &[
         magazine_reload_s: 120,
         muzzle_fps: 3_280,
         tracer: true,
+        zones: None,
         retail: retail(4, 2, 12, 0, 3_666, 3_666, 20),
     },
     GunTuning {
@@ -293,6 +315,7 @@ pub const TABLE: &[GunTuning] = &[
         magazine_reload_s: 120,
         muzzle_fps: 3_600,
         tracer: true,
+        zones: None,
         retail: retail(6, 1, 4, 0, 3_666, 1_466, 40),
     },
     GunTuning {
@@ -310,6 +333,7 @@ pub const TABLE: &[GunTuning] = &[
         magazine_reload_s: 120,
         muzzle_fps: 2_950,
         tracer: true,
+        zones: None,
         retail: retail(4, 1, 4, 0, 3_666, 3_666, 20),
     },
     GunTuning {
@@ -329,6 +353,7 @@ pub const TABLE: &[GunTuning] = &[
         magazine_reload_s: 120,
         muzzle_fps: 3_440,
         tracer: true,
+        zones: None,
         retail: retail(4, 1, 4, 0, 3_666, 3_666, 20),
     },
     GunTuning {
@@ -346,6 +371,7 @@ pub const TABLE: &[GunTuning] = &[
         magazine_reload_s: 60,
         muzzle_fps: 2_890,
         tracer: true,
+        zones: None,
         retail: retail(4, 2, 12, 0, 3_960, 3_960, 20),
     },
     GunTuning {
@@ -363,6 +389,7 @@ pub const TABLE: &[GunTuning] = &[
         magazine_reload_s: 60,
         muzzle_fps: 2_890,
         tracer: true,
+        zones: None,
         retail: retail(4, 2, 12, 0, 3_960, 3_960, 20),
     },
     GunTuning {
@@ -380,6 +407,7 @@ pub const TABLE: &[GunTuning] = &[
         magazine_reload_s: 60,
         muzzle_fps: 2_620,
         tracer: false,
+        zones: None,
         retail: retail(1, 2, 16, 8, 3_520, 3_520, 40),
     },
     GunTuning {
@@ -397,6 +425,7 @@ pub const TABLE: &[GunTuning] = &[
         magazine_reload_s: 60,
         muzzle_fps: 2_950,
         tracer: false,
+        zones: None,
         retail: retail(1, 2, 16, 8, 4_400, 4_400, 60),
     },
     GunTuning {
@@ -414,6 +443,7 @@ pub const TABLE: &[GunTuning] = &[
         magazine_reload_s: 60,
         muzzle_fps: 5_866,
         tracer: false,
+        zones: None,
         retail: retail(1, 0, 16, 0, 5_866, 1_466, 20),
     },
     GunTuning {
@@ -431,6 +461,7 @@ pub const TABLE: &[GunTuning] = &[
         magazine_reload_s: 60,
         muzzle_fps: 5_866,
         tracer: false,
+        zones: None,
         retail: retail(1, 0, 16, 0, 5_866, 5_866, 20),
     },
     GunTuning {
@@ -448,6 +479,7 @@ pub const TABLE: &[GunTuning] = &[
         magazine_reload_s: 60,
         muzzle_fps: 3_150,
         tracer: true,
+        zones: None,
         retail: retail(2, 2, 12, 0, 3_666, 1_466, 20),
     },
     GunTuning {
@@ -465,6 +497,7 @@ pub const TABLE: &[GunTuning] = &[
         magazine_reload_s: 60,
         muzzle_fps: 3_280,
         tracer: true,
+        zones: None,
         retail: retail(2, 2, 12, 0, 3_666, 1_466, 20),
     },
     GunTuning {
@@ -482,6 +515,7 @@ pub const TABLE: &[GunTuning] = &[
         magazine_reload_s: 60,
         muzzle_fps: 2_910,
         tracer: true,
+        zones: None,
         retail: retail(2, 2, 12, 0, 3_666, 1_466, 20),
     },
     GunTuning {
@@ -499,6 +533,7 @@ pub const TABLE: &[GunTuning] = &[
         magazine_reload_s: 60,
         muzzle_fps: 3_600,
         tracer: true,
+        zones: None,
         retail: retail(2, 2, 12, 0, 3_666, 1_466, 20),
     },
     GunTuning {
@@ -516,6 +551,7 @@ pub const TABLE: &[GunTuning] = &[
         magazine_reload_s: 60,
         muzzle_fps: 3_000,
         tracer: true,
+        zones: None,
         retail: retail(4, 1, 4, 0, 3_666, 3_666, 20),
     },
 ];
@@ -558,7 +594,8 @@ pub fn is_small_arms(record: &str) -> bool {
 /// Puts a row of the table on the gun record `weapon` a unit of the NT
 /// `unit` fires and returns the row, or leaves the record alone and returns
 /// `None` when the table has no row for it (aircraft guns, missiles). The
-/// record keeps its retail damage, range, life, flags and fuze. The call is
+/// record keeps its retail damage, life, flags and fuze, and its zones unless
+/// the row replaces them. The call is
 /// idempotent.
 pub fn apply(unit: &str, weapon: &mut Weapon) -> Option<&'static GunTuning> {
     let row = tuning(unit, &weapon.source)?;
@@ -583,6 +620,12 @@ pub fn apply(unit: &str, weapon: &mut Weapon) -> Option<&'static GunTuning> {
     movement.minimum_speed = movement.minimum_speed.min(movement.final_speed);
     movement.maximum_speed = movement.maximum_speed.max(muzzle);
     movement.corner_speed = movement.corner_speed.max(muzzle);
+    if let Some(zones) = row.zones {
+        let seeker = &mut weapon.seeker;
+        seeker.zones[0].maximum_range = zones.detection_ft;
+        seeker.zones[1].maximum_range = zones.fire_ft;
+        seeker.zones[1].maximum_altitude = zones.fire_altitude_ft;
+    }
     Some(row)
 }
 
