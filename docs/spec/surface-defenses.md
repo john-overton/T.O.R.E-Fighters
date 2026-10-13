@@ -1040,9 +1040,9 @@ changed.
 
 | Question | Answer |
 | --- | --- |
-| Drawn? | Yes: each TROOPS unit draws a group of soldier sprites (six in the renders, the SOLDIER sprite sheet), standing on the ground, always facing the viewer; never absent. |
-| Visible at a pilot's range? | A man is 4 ft tall, a few pixels at 1,000 ft. Beyond 1,000 ft he is drawn larger by the distance over 1,000 ft, up to six times (24 ft) from 6,000 ft out, so a squad stays a few pixels tall as a dark group on a field (opinionated, agent, 2026-10-12; presentation only, the hit box is unchanged). Deck crew are not scaled. |
-| Hit box | The shape's contact volume: 30 ft wide, 6.6 ft tall, 12 ft deep, centred on the squad; 75 hit points. |
+| Drawn? | Yes: each TROOPS unit draws its shape, a group of flat textured soldier cards (the SOLDIER art) in fixed directions, so a card seen edge-on is a thin line; never absent. The shape is centred on the unit's origin, so the squad stands on its bottom, 3.3 ft up, like every ground object (slice GROUND, 2026-10-13; until then the soldiers stood waist deep; [grounding](../formats/objects-and-shapes.md#grounding-every-object-stands-on-the-bottom-of-its-shape)). |
+| Visible at a pilot's range? | A man is 4 ft tall, a few pixels at 1,000 ft. Beyond 1,000 ft a man sprite (SOLDIER) is drawn larger by the distance over 1,000 ft, up to six times (24 ft) from 6,000 ft out, growing up from his feet, which stay on the ground (opinionated, agent, 2026-10-12; presentation only, the hit box is unchanged). Deck crew are not scaled. The TROOPS cards are faces in the standing scenery, not sprites, so they are drawn at their own size at every range (found by slice GROUND, 2026-10-13). |
+| Hit box | The shape's contact volume: 30 ft wide, 6.6 ft tall, 12 ft deep, standing on the ground with the soldiers; 75 hit points. |
 | Killed by | Guns (the A-4E's Mk 12 kills a squad in a strafing pass; 155 rounds fired), bombs (an Mk 82 within its splash kills it), rockets and splash (an LAU-61 rocket 26 ft away took 2 hit points, so a pod's salvo is what kills), AAA and tank shells of the other side. Splash needs no hit: the collateral radius of the weapon applies to the squad as to any ground unit. |
 | After death | The unit's hit points are 0: it stops firing at once (no burst after the kill tick), the sprites vanish with their unit (the destroyed look of men, [Destroyed looks](#destroyed-looks): removed, no wreck), and its record's explosion plays. |
 | Counted | As a kill of a ground unit like every other (any destroyed combat target is recorded as a `Kill` for its shooter, and a flagged destroy target counts toward the objective). Online, retail scores no ground kills, so no score. |
@@ -1759,14 +1759,14 @@ shape's F2 ground offset, which the records give in retail feet, take the same
 factor. Runways, bridges and roads keep the retail scale. The rule and its
 evidence: [placed object scale](../formats/objects-and-shapes.md#placed-object-scale-2026-10-10).
 
-A land unit (an NT that is not a ship, a structure or a man) stands on the
-lowest point of its shape, standing or moving, and its contact and hit box
-stand with it (fitted: a vehicle's shape origin is at its turret or rails,
-and for every land unit the lowest point equals the F2 ground offset within a
-unit; a T-80 drawn on its origin hid its hull in the ground). Since slice BG
-(B13, 2026-10-12) buildings do too, bunkers included: their lowest point also
-equals their F2 offset within 3 ft ([building
-grounding](../formats/objects-and-shapes.md#building-grounding-2026-10-12)).
+Every land unit stands on the lowest point of its shape, standing or moving,
+intact or wrecked, and its contact and hit box stand with it (fitted: a
+vehicle's shape origin is at its turret or rails, and for every land unit the
+lowest point equals the F2 ground offset within a unit; a T-80 drawn on its
+origin hid its hull in the ground). Since slice BG (B13, 2026-10-12)
+buildings do too, bunkers included, and since slice GROUND (2026-10-13) men,
+the GCI radar and every other structure: one rule for every ground object
+([grounding](../formats/objects-and-shapes.md#grounding-every-object-stands-on-the-bottom-of-its-shape)).
 Ships keep their waterline (Krivak F2 -100 against its geometry's -26).
 
 ### Shapes the reader learned

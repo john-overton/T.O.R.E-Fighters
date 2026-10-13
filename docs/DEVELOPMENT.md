@@ -1654,11 +1654,14 @@ every base layout and every template placement and lists each moved unit on
 the wrong class (`surface-class-sweep`).
 `--starts [THEATER ...]` builds one mission per theater with a ground target
 and reports where Blue and Red start (`surface-start-placement`).
-`--grounding [TYPE ...]` lists every OT (or the types named) with its shape's
-lowest and highest point about its origin, the share below it, its F2 ground
-offset and the lift that stands it on the ground, in world feet at its drawn
-size ([building grounding](formats/objects-and-shapes.md#building-grounding-2026-10-12),
-`surface-building-grounding`).
+`--grounding [TYPE ...]` is the grounding audit: every OT, NT and PT (or the
+types named) stood on flat ground and drawn through the scenery's own code,
+with its shape's lowest and highest point about its origin, the share below
+it, its F2 ground offset, the lift that stands it on the ground, and the
+lowest drawn point of its faces, its hit box and its man sprites near and
+far, in world feet at its drawn size; anything sunk or floating is listed as
+a problem ([grounding](formats/objects-and-shapes.md#grounding-every-object-stands-on-the-bottom-of-its-shape),
+`surface-grounding`).
 `--damage [TYPE ...]` lists every OT (or the types named) with where retail
 keeps its destroyed look: its `~` variant, the damage branch inside its shape
 (intact and damaged face counts and heights) or neither
