@@ -30,8 +30,8 @@ pub fn is_unit(id: u32) -> bool {
 
 /// How a gun record's muzzle looks: an index into [`LOOKS`]. 0 is the
 /// light cannon (the Shilka, the Vulcan, the 30 mm and 25 mm), 1 the 37 mm
-/// and 57 mm, 2 the 85 mm and 100 mm flak and the tank guns. Small arms and
-/// the invisible barrage zone have no flash.
+/// and 57 mm, 2 the 85 mm and 100 mm flak and the tank guns, 3 a squad's small
+/// arms. The invisible barrage zone has no flash.
 pub fn muzzle_class(record: &str) -> Option<usize> {
     match record.to_ascii_uppercase().trim_end_matches(".JT") {
         "ZSU23" | "2S6" | "PHALANX" | "AAA30" | "AAA30BAD" | "BMP2" | "BTR80" | "M113" | "M2" => {
@@ -39,6 +39,7 @@ pub fn muzzle_class(record: &str) -> Option<usize> {
         }
         "ZSU57" | "M1939" => Some(1),
         "KS12" | "KS19" | "M1" | "T72" => Some(2),
+        "SMLARMS" => Some(3),
         _ => None,
     }
 }
@@ -48,7 +49,7 @@ pub fn muzzle_class(record: &str) -> Option<usize> {
 /// bigger flame seen from farther off, so its flash is longer and its light
 /// stronger than the same calibre on the gunship. Light is in the flare
 /// light's units, feet squared.
-pub const LOOKS: [Look; 3] = [
+pub const LOOKS: [Look; 4] = [
     Look {
         life: 5.,
         length: 8.,
@@ -75,6 +76,18 @@ pub const LOOKS: [Look; 3] = [
         puff_life: 420.,
         puff_radius: [5., 26.],
         puff_opacity: 0.5,
+    }, // A squad's small arms (opinionated, John, 2026-10-12: airfield small
+    // arms get a muzzle flash like the other light guns; the size is the
+    // agent's): a rifle or light machine gun, a spark under a metre long
+    // that a cannon's flicker dwarfs.
+    Look {
+        life: 3.,
+        length: 3.,
+        light: 50.,
+        puffs: 0,
+        puff_life: 0.,
+        puff_radius: [0.; 2],
+        puff_opacity: 0.,
     },
 ];
 
@@ -639,7 +652,7 @@ mod tests {
                 round(3, "ZSU57.JT", true, [300., 10., 0.]),
                 round(4, "KS19.JT", true, [900., 10., 0.]),
                 round(5, "A_M1939.JT", true, [0., 10., 600.]),
-                round(6, "SMLARMS.JT", true, [0., 10., 900.]),
+                round(6, "SMLARMS.JT", true, [1500., 10., 0.]),
             ],
             ..picture(102)
         };
@@ -647,21 +660,26 @@ mod tests {
         let slots: Vec<usize> = tracker.shots().map(|s| s.slot).collect();
         assert_eq!(
             slots,
-            [0, 1, 2],
-            "the barrage zone and small arms flash nothing"
+            [0, 1, 2, 3],
+            "the barrage zone flashes nothing, small arms flash their own spark"
         );
         // The same rounds seen again are not more shots.
         tracker.observe(&next, 103., true);
-        assert_eq!(tracker.shots().count(), 3);
+        assert_eq!(tracker.shots().count(), 4);
         // The shot sits on the muzzle, along the barrel, with its light.
         let out = drawn(&tracker, 102.);
-        assert_eq!(out.flashes.len(), 3);
-        assert_eq!(out.lights.len(), 3);
+        assert_eq!(out.flashes.len(), 4);
+        assert_eq!(out.lights.len(), 4);
         assert_eq!(out.flashes[0].position, [0., 10., 0.]);
         assert_eq!(out.flashes[0].direction, [0., 1., 0.]);
         // Bigger guns throw more light, and the big ones leave smoke.
         assert!(out.lights[0].strength < out.lights[1].strength);
         assert!(out.lights[1].strength < out.lights[2].strength);
+        // A squad's small arms are the smallest spark: shorter and dimmer
+        // than the light cannon's flicker, and no smoke.
+        assert_eq!(out.flashes[3].kind, 3);
+        assert!(LOOKS[3].length < LOOKS[0].length && LOOKS[3].light < LOOKS[0].light);
+        assert_eq!(LOOKS[3].puffs, 0);
         assert_eq!(out.puffs.len(), LOOKS[1].puffs + LOOKS[2].puffs);
         // Gone after the flash's life; the smoke outlives it.
         let late = drawn(&tracker, 102. + LOOKS[2].life + 2.);
@@ -1045,12 +1063,13 @@ mod tests {
         for heavy in ["KS12.JT", "KS19.JT", "M1.JT", "T72.JT"] {
             assert_eq!(muzzle_class(heavy), Some(2), "{heavy}");
         }
+        assert_eq!(muzzle_class("SMLARMS.JT"), Some(3));
         assert_eq!(muzzle_class("A_M1939.JT"), None);
         assert_eq!(muzzle_class("AIM9M.JT"), None);
         // Every gun of the tuning table either flashes or is named here as
         // one that does not.
         for row in tore_sim::combat::surface_guns::TABLE {
-            let silent = ["A_M1939.JT", "SMLARMS.JT"].contains(&row.record);
+            let silent = ["A_M1939.JT"].contains(&row.record);
             assert_eq!(muzzle_class(row.record).is_none(), silent, "{}", row.record);
         }
     }

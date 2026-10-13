@@ -515,7 +515,7 @@ pub const TABLE: &[GunTuning] = &[
         magazine: 1_000,
         magazine_reload_s: 60,
         muzzle_fps: 3_000,
-        tracer: false,
+        tracer: true,
         retail: retail(4, 1, 4, 0, 3_666, 3_666, 20),
     },
 ];
@@ -544,6 +544,15 @@ pub fn is_surface_gun(record: &str) -> bool {
     TABLE
         .iter()
         .any(|row| row.record.eq_ignore_ascii_case(record))
+}
+
+/// Whether `record` is a squad's small arms (an infantry mount): the guns
+/// whose aim error is wider than any cannon's
+/// ([`crate::ai::surface::small_arms_aim_error_deg`]).
+pub fn is_small_arms(record: &str) -> bool {
+    TABLE
+        .iter()
+        .any(|row| row.mount == Mount::Infantry && row.record.eq_ignore_ascii_case(record))
 }
 
 /// Puts a row of the table on the gun record `weapon` a unit of the NT

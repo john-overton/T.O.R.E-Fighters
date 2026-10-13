@@ -60,6 +60,9 @@
 //! - A gun aims at a surface target with a quarter of its air aim error
 //!   ([`tore_sim::ai::surface::surface_aim_error_deg`], fitted). Missile
 //!   locks and painting feed aircraft only: a ground unit has no RWR.
+//! - A squad's small arms aim at an aircraft with four times the visual guns'
+//!   error ([`tore_sim::ai::surface::small_arms_aim_error_deg`], fitted,
+//!   agent, 2026-10-12): riflemen have no sight on a jet.
 use super::{
     BatterySystem, Surface, SurfaceState, UnitId, UnitKind,
     catalog::Catalog,
@@ -1824,6 +1827,8 @@ fn fire_gun(
         // or ship); a jammer widens a radar gun's.
         let mut error = if aircraft.surface {
             control::surface_aim_error_deg(arms.skill, radar)
+        } else if surface_guns::is_small_arms(&weapon.record.source) {
+            control::small_arms_aim_error_deg(arms.skill)
         } else {
             control::aim_error_deg(arms.skill, radar)
         }
