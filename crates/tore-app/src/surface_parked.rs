@@ -5,6 +5,10 @@
 //! its type, class, hit points, gear word, size, where it stands and whether
 //! it is on a carrier deck, and every fleet aircraft left out.
 //!
+//! `--art` also builds the scenery (no window) and prints a `hulk` line for
+//! every aircraft: how many vertex floats it draws now, which is the burnt
+//! hulk of its own shape once destroyed (nr-fx2).
+//!
 //! `--strike` puts the player's own round on a parked aircraft (by its
 //! template ordinal) one second in: `bomb` (a Mk 82 released onto it from a
 //! 45 degree dive at 450 kt, 1,000 ft above it, on the bomb equation),
@@ -64,6 +68,7 @@ pub fn run() -> AppResult<()> {
     let mut seconds = 10.;
     let mut strikes: Vec<(u32, Strike)> = Vec::new();
     let mut clear_shelters = false;
+    let mut art = false;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         let mut next = || {
@@ -75,6 +80,7 @@ pub fn run() -> AppResult<()> {
             "--surface-seed" => seed = next()?.parse()?,
             "--seconds" => seconds = next()?.parse()?,
             "--clear-shelters" => clear_shelters = true,
+            "--art" => art = true,
             "--strike" => {
                 let value = next()?;
                 let (ordinal, weapon) = value
@@ -355,6 +361,22 @@ pub fn run() -> AppResult<()> {
             near(|k| matches!(k, MarkKind::Fire)),
             u8::from(row.fragment_released),
         );
+    }
+    if art {
+        // What the picture draws of each destroyed aircraft now: its burnt
+        // hulk, never nothing (nr-fx2), built on the CPU with no window.
+        let mut scenery = crate::scenery::Scenery::build(&resources, &world.terrain)?;
+        for pose in &surface.parked_scene {
+            let Some(row) = state.targets.iter().find(|t| t.id == pose.id.0) else {
+                continue;
+            };
+            let floats =
+                scenery.drawn_vertex_floats(pose.id.0, &state.targets, &world.combat.surface);
+            println!(
+                "surface-parked: hulk {:#010x} hp {} drawn {floats}",
+                row.id, row.hp
+            );
+        }
     }
     for kill in state.ledger.kills() {
         println!(

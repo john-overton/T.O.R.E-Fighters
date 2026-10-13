@@ -1144,7 +1144,7 @@ display's view), `--sequence` (every frame along a path, for watching
 transitions), `--sweep` (a still camera with one tier moving: building
 detail, building distance or smallest size, printing the pixels that pop per
 step) and `--bench` / `--target-bench` (frame times fill off then on, 4K by
-default). The fade work was measured with `--sweep` and `--bench` over Kiev
+default); `--burn NAME@X,Z,H,PITCH,YAW,RADIUS,FRAMES` knocks every building within RADIUS ft flat, draws the burning city and times FRAMES frames with the fires drawn and with them off. `--city-fires THEATER X,Z,RADIUS [--repeat N]` (no window, no GPU) prints how many burn and what a frame draws and costs on the CPU; `TORE_NO_CITY_FIRES=1` stops drawing the fires (a developer aid like `TORE_CITY_FILL=0`). The fade work was measured with `--sweep` and `--bench` over Kiev
 (UKR, `--bench 671744,1330000,500,0,100,600`).
 
 `TORE_WEATHER_SMOOTH=0|1` selects stepped or smooth weather presentation (default
@@ -1666,6 +1666,11 @@ a problem ([grounding](formats/objects-and-shapes.md#grounding-every-object-stan
 keeps its destroyed look: its `~` variant, the damage branch inside its shape
 (intact and damaged face counts and heights) or neither
 ([destroyed looks of buildings](formats/objects-and-shapes.md#destroyed-looks-of-buildings-and-bridges-2026-10-12)).
+`--faces TYPE [...]` lists every face of each named type's main shape, intact
+and damaged: its texture (and whether the pack has it), colour slots, record
+kind and extent, which is how a missing texture or a stray palette colour
+shows (the bridge's magenta patch was a colour 6 shadow quad, [ground shadow
+decals](formats/objects-and-shapes.md#ground-shadow-decals-2026-10-13)).
 `--surface-sheets` renders each template from above and closer, heavy
 defenses, at its retail spot (seed 1, no jitter or relocation); `--variants`
 adds the placed layout with seeds 1 and 2. A marker per unit: red Redfor, blue
@@ -1753,7 +1758,7 @@ ORDINALS` hands template objects to Blue so units fight each other, and each
 focused unit prints its aim (`aim ... body ... turrets ... holds ...`).
 The scene's other static objects are named `object:TYPE` (`object:HANGR.OT`)
 in `--focus` and `--kill` (and `within:FEET` takes them), `near:ITEM` frames
-only the one ITEM nearest the template, `--bomb-runway N` drops N Mk 82s
+only the one ITEM nearest the template, `--flatten FEET` knocks the city fill's buildings within FEET of the focus flat so they burn and `--frames N` times N more frames of each view (nr-fx2), `--bomb-runway N` drops N Mk 82s
 along the runway nearest the focus, and `--time HH:MM` sets the start time
 (night views); with no focus left the run lists every place by type (B16).
 `--surface-preview

@@ -31,6 +31,7 @@ mod camera;
 mod canvas_present;
 mod celestial;
 mod city_fill_dump;
+mod city_fires;
 mod clouds;
 mod cockpit_renderer;
 mod cockpit_sheet;
@@ -9730,6 +9731,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     }
     if std::env::args().nth(1).as_deref() == Some("--city-fill-survey") {
         city_fill_dump::survey()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--city-fires") {
+        city_fill_dump::fires()?;
         return Ok(Outcome::Done);
     }
     if std::env::args().nth(1).as_deref() == Some("--city-fill-dump") {

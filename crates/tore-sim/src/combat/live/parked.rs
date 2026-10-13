@@ -14,15 +14,17 @@
 //!   box), without the weapon's fuze radius (fitted: a bomb does not burst
 //!   100 ft above it), hits recorded by damage section, its own PT class
 //!   word for the debrief's kill rows. When destroyed it explodes as an aircraft (type
-//!   30), throws its fragment, and leaves the ground-crash crater and a fire
-//!   with its smoke column for 15 minutes ([`State::aircraft_crashed`]'s
-//!   marks), without the crash explosion: it did not fall. On a carrier deck
-//!   there is no crater.
+//!   30) and stays where it stood as a burnt hulk (the picture draws its own
+//!   shape charred and broken, `tore-app` `scenery::rubble`): no crash site,
+//!   no crater and no flying piece (John, 2026-10-13). It may burn: a fire
+//!   with its smoke column for 15 minutes on a small scorch under it
+//!   ([`State::burn_wrecks`]), none of it on a carrier deck's scorch. An
+//!   aircraft killed by splash burns the same way.
 //!
 //! No critical (pilot) gun kills, no system faults and no jammer: nobody is
-//! aboard and nothing is running (agent decision). Its fragment is the
-//! aircraft's own piece shape, released at the attachment point the host
-//! gives and tossed up and outward (fitted).
+//! aboard and nothing is running (agent decision). The fragment offsets and
+//! the type the host registers are no longer used by the hulk; they stay
+//! so the registration and checkpoints keep their shape.
 use super::{
     AIRCRAFT_RADIUS_FT, AircraftId, Basis, Heat, LocalizedDamage, Result, Side, State, Target,
     TargetRole, Vector, sensors,
@@ -66,12 +68,6 @@ pub struct ParkedSite {
     pub water: bool,
     pub aircraft: Option<AircraftId>,
 }
-
-/// How fast a parked aircraft's fragment is thrown when it is destroyed:
-/// upward and outward along its attachment offset, feet per second
-/// (fitted).
-const FRAGMENT_TOSS_UP_FPS: f64 = 45.;
-const FRAGMENT_TOSS_OUT_FPS: f64 = 25.;
 
 impl State {
     /// Registers a parked aircraft as a target row. Fails for an id already
@@ -142,71 +138,5 @@ impl State {
     /// The crash site of parked aircraft `id`.
     pub fn parked_site(&self, id: u32) -> Option<ParkedSite> {
         self.parked.get(&id).copied()
-    }
-
-    /// Parked aircraft `id` was destroyed: its crash crater (on land) and
-    /// fire, once, and its fragment when a section broke.
-    pub(super) fn parked_destroyed(&mut self, id: u32) {
-        use crate::combat::blast::{self, MarkKind};
-        let Some(site) = self.parked.get(&id).copied() else {
-            return;
-        };
-        if !self.crashed.insert(id) {
-            return;
-        }
-        if !site.water {
-            self.crater(
-                site.ground,
-                blast::CRASH_CRATER,
-                crate::combat::blast_scale::FULL,
-                blast::CRASH_TICKS,
-            );
-        }
-        if self
-            .marks
-            .iter()
-            .filter(|m| m.kind == MarkKind::Fire)
-            .count()
-            == blast::MAX_FIRES
-            && let Some(oldest) = self.marks.iter().position(|m| m.kind == MarkKind::Fire)
-        {
-            self.marks.remove(oldest);
-        }
-        self.mark(
-            site.ground,
-            MarkKind::Fire,
-            blast::CRASH_TICKS,
-            crate::combat::blast_scale::FULL,
-        );
-        let Some(t) = self.targets.iter_mut().find(|t| t.id == id) else {
-            return;
-        };
-        let reviewed = site
-            .aircraft
-            .zip(t.localized_damage.structural_section)
-            .and_then(|(aircraft, section)| {
-                crate::combat::debris::damage_variant(aircraft, section as usize)
-            });
-        let Some(variant) = reviewed.or(t.localized_damage.structural_variant) else {
-            return;
-        };
-        if t.fragment_released || self.debris.len() >= crate::combat::debris::MAX_PIECES {
-            return;
-        }
-        t.fragment_released = true;
-        let offset = t.fragment_offsets[variant];
-        let across = offset[0].hypot(offset[2]).max(1.);
-        // Thrown up, and outward the way the piece sits from the centre.
-        let local = [
-            offset[0] / across * FRAGMENT_TOSS_OUT_FPS,
-            FRAGMENT_TOSS_UP_FPS,
-            offset[2] / across * FRAGMENT_TOSS_OUT_FPS,
-        ];
-        let velocity = std::array::from_fn(|i| {
-            t.basis.right[i] * local[0] + t.basis.up[i] * local[1] + t.basis.forward[i] * local[2]
-        });
-        self.debris.push(crate::combat::debris::Piece::new(
-            id, variant, t.position, velocity, t.basis, offset,
-        ));
     }
 }

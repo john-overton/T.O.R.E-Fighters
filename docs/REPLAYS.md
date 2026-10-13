@@ -845,9 +845,12 @@ beyond them.
     truck's rearm) every rail of that unit is recorded with the missiles it
     holds, and a gun's spare magazines whenever they change. A unit not
     listed has its full load. The viewer draws the rails from them.
-  - **Debris pieces**: for each debris piece owned by a surface object, such
-    as a parked aircraft's fragment, its piece index (`_B` or `_D`), as
-    `DebrisPose.variant` holds it.
+  - **Debris pieces**: for each debris piece owned by a surface object, its
+    piece index (`_B` or `_D`), as `DebrisPose.variant` holds it. Since
+    nr-fx2 (2026-10-13) a destroyed parked aircraft throws none: it stays as
+    a burnt hulk the viewer draws from the rebuilt scenery wherever the
+    recording says it was destroyed, older recordings included (their
+    recorded fragment is ignored).
   - **Flak**: its own effect code, `32` plus the explosion type less 15, so
     the KS-12's type 27 and the KS-19's type 28 are recorded as flak and not
     as an ordinary hit. A format 2 recording stores a burst as a hit, and the
@@ -862,7 +865,15 @@ beyond them.
     `surface.wreck` says `burning` false for the others; the fires, a
     building's scorch and the craters on bombed runways are ordinary recorded
     marks, and the viewer draws each destroyed building's ruin from the
-    rebuilt scenery, older recordings included.
+    rebuilt scenery, older recordings included. Since nr-fx2 a building's or
+    fixed object's fire is recorded as lasting for good (the sim's own mark
+    life) and the viewer's cap of 64 counts only fires with a limited life,
+    as the simulation's does; a recording made from a networked game records
+    every fire for good (the client was never told when one ends). A parked
+    aircraft's fire lasts 15 minutes on a scorch, with no crater. The fires
+    of knocked-down city fill buildings are drawn from the fill's own
+    flattened set, which a recording does not keep, so a replay shows the
+    city whole.
   - **Events**: `surface.burst`, `surface.phase`, `surface.rearm`,
     `surface.refill`, `surface.radar` and `surface.wreck` (see
     [the vocabulary](../crates/tore-replay/src/vocab.rs)). Unknown event kinds

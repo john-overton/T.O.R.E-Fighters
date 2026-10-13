@@ -43,14 +43,10 @@ fn noise(point: [f32; 3], salt: u32) -> f32 {
     (v >> 40) as f32 / (1u64 << 24) as f32
 }
 
+/// The shape's lowest and highest point, by the shared grounding rule
+/// (`tore_world::grounding::height_range`).
 fn lowest(shape: &Shape) -> Option<[f32; 2]> {
-    let mut range: Option<[f32; 2]> = None;
-    for p in shape.faces.iter().flat_map(|f| f.positions.iter()) {
-        let r = range.get_or_insert([p[2], p[2]]);
-        r[0] = r[0].min(p[2]);
-        r[1] = r[1].max(p[2]);
-    }
-    range
+    tore_world::grounding::height_range(shape).map(|[low, high]| [low as f32, high as f32])
 }
 
 /// Whether a face (shape axes right, forward, up) lies near level.
@@ -144,11 +140,53 @@ fn pieces(face: &Face, times: usize) -> Vec<Face> {
         .collect()
 }
 
+/// How a shape breaks down: how much of its height a point keeps, which
+/// faces char, and how many are torn away.
+struct Style {
+    keep: [f32; 2],
+    /// Only faces near level are charred (a fallen roof and floors), or any.
+    level_only: bool,
+    charred_share: f32,
+    /// The share of faces missing (ripped skin), 0 for a building.
+    torn_share: f32,
+}
+
+/// A building: walls stubs and a charred roof ([`KEEP`], [`CHARRED_SHARE`]).
+const BUILDING: Style = Style {
+    keep: KEEP,
+    level_only: true,
+    charred_share: CHARRED_SHARE,
+    torn_share: 0.,
+};
+
+/// A burnt aircraft hulk (John, 2026-10-13: "a destroyed parked aircraft
+/// leaves a burnt hulk"; the numbers are the agent's, fitted by eye): the
+/// aircraft's own shape settled onto its belly, keeping 30 to 60 percent of
+/// its height, most of its skin charred whichever way it faces and a tenth
+/// of it torn away.
+const HULK: Style = Style {
+    keep: [0.30, 0.30],
+    level_only: false,
+    charred_share: 0.85,
+    torn_share: 0.10,
+};
+
+/// A building's generated ruin ([`BUILDING`]).
 pub(super) fn collapse(shape: &Shape) -> Option<Ruin> {
+    broken(shape, &BUILDING)
+}
+
+/// A parked aircraft's burnt hulk ([`HULK`]): charred, broken and sunk onto
+/// its lowest point, so it lies where the aircraft stood.
+pub(super) fn hulk(shape: &Shape) -> Option<Ruin> {
+    broken(shape, &HULK)
+}
+
+fn broken(shape: &Shape, style: &Style) -> Option<Ruin> {
     let [low, high] = lowest(shape)?;
     let height = high - low;
     let sink = |p: [f32; 3]| -> [f32; 3] {
-        let keep = KEEP[0] + KEEP[1] * noise(p, 1);
+        let keep = style.keep[0] + style.keep[1] * noise(p, 1);
         [p[0], p[1], low + (p[2] - low) * keep]
     };
     let mut walls = Shape {
@@ -159,12 +197,23 @@ pub(super) fn collapse(shape: &Shape) -> Option<Ruin> {
     };
     let mut charred = Vec::new();
     let times = splits(shape);
-    for piece in shape.faces.iter().flat_map(|face| pieces(face, times)) {
+    // A ground shadow decal is not a face of the building ([`super::surface_art`]).
+    let faces = shape
+        .faces
+        .iter()
+        .filter(|face| !super::surface_art::is_shadow_decal(face, low));
+    for piece in faces.flat_map(|face| pieces(face, times)) {
         let mut fallen = piece.clone();
         fallen.positions = piece.positions.iter().map(|p| sink(*p)).collect();
         let middle: [f32; 3] =
             std::array::from_fn(|i| piece.positions.iter().map(|p| p[i]).sum::<f32>() / 3.);
-        if height > 0. && level(&fallen) && noise(middle, 4) < CHARRED_SHARE {
+        if noise(middle, 7) < style.torn_share {
+            continue;
+        }
+        if height > 0.
+            && (!style.level_only || level(&fallen))
+            && noise(middle, 4) < style.charred_share
+        {
             let shade = 1. - CHAR_VARIES / 2. + CHAR_VARIES * noise(middle, 2);
             fallen.texture.clear();
             fallen.uv.clear();
@@ -264,6 +313,47 @@ mod tests {
         let mut busy = house();
         busy.faces = vec![busy.faces[0].clone(); 200];
         assert_eq!(collapse(&busy).unwrap().walls.faces.len(), 400);
+    }
+
+    #[test]
+    fn a_hulk_is_the_shape_sunk_to_a_belly_mostly_charred_and_partly_torn() {
+        let mut plane = house();
+        // A busy shape is not split, so every face is one piece.
+        plane.faces = (0..200)
+            .map(|n| {
+                let at = n as f32;
+                face(vec![
+                    [at, 0., -5.],
+                    [at + 1., 0., -5.],
+                    [at + 1., 3., 15.],
+                    [at, 3., 15.],
+                ])
+            })
+            .collect();
+        let hulk = hulk(&plane).unwrap();
+        let (kept, charred) = (hulk.walls.faces.len(), hulk.charred.len());
+        // A tenth torn away, most of the rest charred (a face is two
+        // triangles at 400 pieces; none split).
+        assert!(
+            (300..=380).contains(&(kept + charred)),
+            "{}",
+            kept + charred
+        );
+        assert!(
+            charred > 3 * kept,
+            "{charred} charred of {}",
+            kept + charred
+        );
+        let heights = hulk
+            .walls
+            .faces
+            .iter()
+            .chain(hulk.charred.iter().map(|(f, _)| f))
+            .flat_map(|f| f.positions.iter().map(|p| p[2]));
+        let top = heights.clone().fold(f32::MIN, f32::max);
+        // At most 60 percent of 20 feet above the lowest point, at -5.
+        assert!(top <= -5. + 20. * 0.6 + 1e-4, "{top}");
+        assert_eq!(heights.fold(f32::MAX, f32::min), -5.);
     }
 
     #[test]

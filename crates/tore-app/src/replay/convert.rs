@@ -624,7 +624,9 @@ pub fn recorded_marks(recording: &replay::Recording) -> Vec<(u64, replay::Effect
 /// The craters and fires alive at `tick`, keeping only the newest fires up
 /// to the simulation's cap (craters have none since 2026-10-12).
 pub fn marks_at(marks: &[(u64, replay::EffectSpawn)], tick: u64) -> Vec<MarkPose> {
-    let mut alive: Vec<MarkPose> = marks
+    // Whether each is a fire of limited life: only those count against the
+    // cap (a building's burns for good, nr-fx2), as in the simulation.
+    let mut alive: Vec<(bool, MarkPose)> = marks
         .iter()
         .filter(|(start, e)| *start <= tick && tick - start < u64::from(e.duration_ticks))
         .map(|(start, e)| {
@@ -644,23 +646,20 @@ pub fn marks_at(marks: &[(u64, replay::EffectSpawn)], tick: u64) -> Vec<MarkPose
                 serial: 0,
                 scale: e.scale,
             };
-            MarkPose::of(&mark, tick)
+            (mark.is_limited_fire(), MarkPose::of(&mark, tick))
         })
         .collect();
-    let fires = alive
-        .iter()
-        .filter(|m| m.kind == blast::MarkKind::Fire)
-        .count();
+    let fires = alive.iter().filter(|(limited, _)| *limited).count();
     let mut drop = fires.saturating_sub(blast::MAX_FIRES);
-    alive.retain(|m| {
-        if drop > 0 && m.kind == blast::MarkKind::Fire {
+    alive.retain(|(limited, _)| {
+        if drop > 0 && *limited {
             drop -= 1;
             false
         } else {
             true
         }
     });
-    alive
+    alive.into_iter().map(|(_, pose)| pose).collect()
 }
 
 pub use crate::regen::DeviceRelease;
@@ -1559,6 +1558,39 @@ mod tests {
                 .all(|m| m.kind != blast::MarkKind::Fire)
         );
         assert!(marks_at(&marks, 5).len() == 6);
+        // A building's fire burns for good and is outside the cap: 100 of
+        // them and a crowd of crash fires past the 64.
+        let mut crowd = Vec::new();
+        for i in 0..100_u64 {
+            let building = blast::Mark {
+                position: [i as f64, 0., 50.],
+                kind: blast::MarkKind::Fire,
+                ticks: blast::FOREVER,
+                born: i,
+                serial: i,
+                scale: 100,
+            };
+            crowd.push((i, mark_spawn(&building)));
+            let crash = blast::Mark {
+                position: [i as f64, 0., 90.],
+                kind: blast::MarkKind::Fire,
+                ticks: blast::CRASH_TICKS,
+                born: i,
+                serial: 1_000 + i,
+                scale: 100,
+            };
+            crowd.push((i, mark_spawn(&crash)));
+        }
+        let at = marks_at(&crowd, 1_000);
+        let forever = at.iter().filter(|m| m.position[2] == 50.).count();
+        let crashes: Vec<_> = at.iter().filter(|m| m.position[2] == 90.).collect();
+        assert_eq!(forever, 100);
+        assert_eq!(crashes.len(), blast::MAX_FIRES);
+        // The newest crash fires stay.
+        assert_eq!(crashes[0].position[0], 36.);
+        // A thousand ticks (and a quarter hour) on, the buildings burn alone.
+        let late = marks_at(&crowd, u64::from(blast::CRASH_TICKS) + 1_000);
+        assert_eq!(late.len(), 100);
     }
 
     #[test]

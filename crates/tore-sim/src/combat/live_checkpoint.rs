@@ -209,6 +209,7 @@ crate::checkpoint_struct!(GroundLook {
     explosion,
     crater,
     burns,
+    lasting,
     pavement
 });
 

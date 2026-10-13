@@ -573,3 +573,42 @@ Battery runs of this pass (headless unless noted, the build above):
   once (known failure, passes as marked).
 - Not run: the full battery (it waits for John), and any scenario on Windows
   or macOS.
+
+## City fill fires (nr-fx2, 2026-10-13)
+
+Implementation mode, slice FX2. Contract: [city fill
+buildings](../spec/surface-defenses.md#city-fill-buildings). Release build,
+Linux x86_64 (Ryzen 9 7900X, RTX 4070), Ukraine's Town 1 (49,311 fill
+buildings; the theater holds 438,258), the machine busy with other agents
+(`nice -n 10`), so the frame times carry a millisecond of noise.
+
+- **CPU, one frame of the burning city** (`--city-fires UKR 180224,606208,RADIUS`,
+  200 frames; rebuilding the burning set when the fill changes costs 0.007 ms
+  for 563 buildings and 0.16 ms for 49,311, once per change):
+
+  | Burning | Fire sprites drawn | Smoke puffs | CPU a frame |
+  | ---: | ---: | ---: | ---: |
+  | 563 (6,000 ft round the centre) | 563 | 1,216 | 0.04 ms |
+  | 49,311 (all of Town 1) | 1,024 | 1,216 | 0.65 to 0.70 ms |
+
+  The nearest 1,024 and 32 columns of 38 puffs are the budget; the rest of
+  the cost at 49,311 is the one pass that picks them.
+- **Whole frame, 1080p offscreen with readback** (`--city-fill-dump UKR
+  --size 1920,1080 --burn NAME@X,Z,H,PITCH,YAW,RADIUS,FRAMES`, 40 frames,
+  the same camera 900 ft up over the centre, fires drawn against
+  `TORE_NO_CITY_FIRES`'s off):
+
+  | Burning | With the fires | Fires off | Difference |
+  | ---: | ---: | ---: | ---: |
+  | 563 | 8.84 ms | 7.88 ms | +0.96 ms |
+  | 1,079 | 8.42 ms | 7.56 ms | +0.86 ms |
+  | 49,311 | 9.12 ms | 7.26 ms | +1.86 ms |
+
+  So 500 burning city buildings cost about a millisecond a frame, and the
+  whole of a 49,000 building city on fire about two, never more than the
+  budget's 1,024 sprites and 1,216 puffs. (A debug build costs 1 to 2.6 ms
+  for the same, `surface-city-fires` keeps its CPU part under 20 ms.)
+- **Smoke of the simulation's fires.** `combat/smoke.rs` keeps up to 16
+  burning columns at the full ten puffs a second and thins past that: 500
+  burning sources hold 7,000 of the 8,192 puffs with every column standing
+  (unit test `many_burning_columns_thin_out_to_fit_the_budget_with_every_column_standing`).

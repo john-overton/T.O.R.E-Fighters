@@ -125,6 +125,10 @@ pub struct GroundLook {
     /// every building and fixed object but pavement and bridges (B16,
     /// docs/spec/surface-defenses.md, "Wreck fires"); men do not.
     pub burns: bool,
+    /// The fire burns for the whole mission, not 15 minutes: a building or
+    /// fixed object's (nr-fx2, John 2026-10-13, "building fires burn the
+    /// whole mission"); a vehicle's or ship's keeps the crash sites' 15.
+    pub lasting: bool,
     /// Pavement (a runway or airstrip): a weapon that hits it leaves its
     /// own crater there, as on open ground, so a bombed runway shows its
     /// craters (B16). Other objects leave a crater only when destroyed.
@@ -385,47 +389,56 @@ impl State {
     }
 
     /// Lights the fire of every destroyed ground object whose look burns
-    /// and has not burned yet: a fire mark (the fire and its smoke column,
-    /// 15 minutes) at the foot of its box, or at its row without one, once
-    /// per object. However the object died (a hit, splash, a host's
-    /// destroyed event), it burns where its wreck stands. The oldest fire
-    /// goes out when the list is full, as for crash sites.
+    /// and has not burned yet: a fire mark (the fire and its smoke column)
+    /// at the foot of its box, or at its row without one, once per object.
+    /// A building's or fixed object's burns for the whole mission and is
+    /// not counted against the crash fires' cap; a vehicle's lasts 15
+    /// minutes like a crash site's ([`State::light_fire`]). However the
+    /// object died (a hit, splash, a host's destroyed event), it burns where
+    /// its wreck stands.
+    ///
+    /// A destroyed parked aircraft burns here too (nr-fx2, John 2026-10-13):
+    /// a burnt hulk, not a crash site. Its fire lasts 15 minutes on a small
+    /// scorch under it (none on a deck), and it throws no piece.
     pub(super) fn burn_wrecks(&mut self) {
-        use crate::combat::blast::{self, MarkKind};
-        if !self.ground_looks.values().any(|look| look.burns) {
+        use crate::combat::blast;
+        if self.ground_looks.is_empty() && self.parked.is_empty() {
             return;
         }
-        let lit: Vec<(u32, Vector)> = self
+        let lit: Vec<(u32, Vector, u32, Option<Vector>)> = self
             .targets
             .iter()
             .filter(|t| t.hp <= 0 && !self.crashed.contains(&t.id))
-            .filter(|t| self.ground_looks.get(&t.id).is_some_and(|look| look.burns))
-            .map(|t| {
+            .filter_map(|t| {
+                if let Some(site) = self.parked.get(&t.id) {
+                    return Some((t.id, site.ground, blast::CRASH_TICKS, {
+                        (!site.water).then_some(site.ground)
+                    }));
+                }
+                let look = self.ground_looks.get(&t.id).filter(|look| look.burns)?;
                 let at = self
                     .ground_bounds
                     .get(&t.id)
                     .map_or(t.position, super::collateral::foot);
-                (t.id, at)
+                let ticks = if look.lasting {
+                    blast::FOREVER
+                } else {
+                    blast::CRASH_TICKS
+                };
+                Some((t.id, at, ticks, None))
             })
             .collect();
-        for (id, at) in lit {
+        for (id, at, ticks, scorch) in lit {
             self.crashed.insert(id);
-            if self
-                .marks
-                .iter()
-                .filter(|m| m.kind == MarkKind::Fire)
-                .count()
-                >= blast::MAX_FIRES
-                && let Some(oldest) = self.marks.iter().position(|m| m.kind == MarkKind::Fire)
-            {
-                self.marks.remove(oldest);
+            if let Some(ground) = scorch {
+                self.crater(
+                    ground,
+                    blast::HULK_SCORCH,
+                    crate::combat::blast_scale::FULL,
+                    blast::FOREVER,
+                );
             }
-            self.mark(
-                at,
-                MarkKind::Fire,
-                blast::CRASH_TICKS,
-                crate::combat::blast_scale::FULL,
-            );
+            self.light_fire(at, ticks);
         }
     }
 }

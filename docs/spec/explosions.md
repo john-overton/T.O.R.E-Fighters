@@ -341,7 +341,11 @@ over the last minute.
 
 - A weapon strike on water never leaves a crater.
 - Every crater and pock mark is kept for the mission (no cap since
-  2026-10-12); at most 64 crash fires burn at once, the oldest going first.
+  2026-10-12); at most 64 fires of limited life (crash sites, burning
+  vehicles and ships, a parked aircraft's hulk) burn at once, the oldest
+  going first. A destroyed building's or fixed object's fire lasts the whole
+  mission and is outside the cap (nr-fx2, John 2026-10-13; [wreck
+  fires](surface-defenses.md#wreck-fires)).
 - An aircraft is given one crash site, however its crash is detected.
 - A missing sheet or recording skips that picture or sound; the rest play.
 

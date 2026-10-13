@@ -425,6 +425,7 @@ fn a_collateral_kill_is_credited_to_its_shooter() {
             explosion: 21,
             crater: 6,
             burns: false,
+            lasting: false,
             pavement: false,
         }
     ));
