@@ -26,6 +26,7 @@ use tore_sim::combat::blast::MarkKind;
 use tore_sim::combat::live::EffectKind;
 use tore_world::comms::{Net, Route};
 use tore_world::datalink::{ClearReason, Entry};
+pub use tore_world::snapshot::StationStores;
 use tore_world::world::OrderOutcome;
 
 /// A controller rumble, as the wire carries it: turbulence at 1/255.
@@ -215,6 +216,16 @@ pub enum WireEvent {
     /// every building already flat; a game knocks the same ones down in its
     /// copy of the mission, so its prediction and its picture fly past them.
     CityFlattened { buildings: Vec<u32> },
+    /// An aircraft's drawn stores (protocol 27, B3): every external station
+    /// it draws, in station order, with the whole stores still on it. Sent
+    /// when they change (a release, a jettison, a rearm), and at seating for
+    /// every aircraft not as its loadout built it. A client draws an
+    /// aircraft it was never told of as built, from its own copy of the
+    /// loadout.
+    Stores {
+        aircraft: u32,
+        loads: Vec<StationStores>,
+    },
 }
 
 /// The part of a surface unit's state a client draws or shows (protocol
@@ -593,6 +604,7 @@ impl WireEvent {
             Self::SurfaceBurstEnd { .. } => 19,
             Self::SurfaceUnit(_) => 20,
             Self::CityFlattened { .. } => 21,
+            Self::Stores { .. } => 22,
         }
     }
 
@@ -784,6 +796,7 @@ impl WireEvent {
             }
             Self::SurfaceUnit(view) => view.write(w)?,
             Self::CityFlattened { buildings } => write_flattened(w, buildings)?,
+            Self::Stores { aircraft, loads } => write_stores(w, *aircraft, loads)?,
         }
         Ok(())
     }
@@ -936,6 +949,13 @@ impl WireEvent {
             21 => Self::CityFlattened {
                 buildings: read_flattened(r)?,
             },
+            22 => {
+                let aircraft = read_u32(r)?;
+                Self::Stores {
+                    aircraft,
+                    loads: read_stores(r)?,
+                }
+            }
             _ => return Err(WireError::Invalid("event kind")),
         })
     }
@@ -974,6 +994,52 @@ fn read_flattened(r: &mut BitReader<'_>) -> WireResult<Vec<u32>> {
     }
     Ok(buildings)
 }
+
+/// A Stores event's stations: the aircraft, the count, then each station's
+/// index (6 bits, ascending) and its whole stores (a varint).
+fn write_stores(w: &mut BitWriter, aircraft: u32, loads: &[StationStores]) -> WireResult<()> {
+    if loads.len() > limits::STORE_STATIONS {
+        return Err(WireError::TooMany {
+            what: "store stations",
+            limit: limits::STORE_STATIONS,
+        });
+    }
+    if loads
+        .windows(2)
+        .any(|pair| pair[1].station <= pair[0].station)
+        || loads
+            .iter()
+            .any(|load| usize::from(load.station) >= limits::STORE_STATIONS)
+    {
+        return Err(WireError::Invalid("store stations"));
+    }
+    w.write_varint(u64::from(aircraft));
+    bits::write_count(w, loads.len());
+    for load in loads {
+        let _ = w.write_bits(u64::from(load.station), STATION_BITS);
+        w.write_varint(u64::from(load.items));
+    }
+    Ok(())
+}
+
+fn read_stores(r: &mut BitReader<'_>) -> WireResult<Vec<StationStores>> {
+    let count = bits::read_count(r, limits::STORE_STATIONS, "store stations")?;
+    let mut loads: Vec<StationStores> = Vec::with_capacity(count);
+    for _ in 0..count {
+        let station = r.read_bits(STATION_BITS)? as u8;
+        if loads.last().is_some_and(|last| station <= last.station) {
+            return Err(WireError::Invalid("store stations"));
+        }
+        loads.push(StationStores {
+            station,
+            items: read_u16(r)?,
+        });
+    }
+    Ok(loads)
+}
+
+/// Bits of a station index in a Stores event: a loadout has at most 64.
+const STATION_BITS: u32 = 6;
 
 /// Reads a varint that must fit 16 bits.
 fn read_u16(r: &mut BitReader<'_>) -> WireResult<u16> {

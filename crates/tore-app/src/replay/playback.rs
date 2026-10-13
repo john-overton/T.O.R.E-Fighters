@@ -85,6 +85,9 @@ pub struct Playback {
     commits: Vec<u64>,
     /// Every crater and fire the recording started.
     marks: Vec<(u64, tore_replay::EffectSpawn)>,
+    /// Every aircraft's recorded stores over time (B3): none in a recording
+    /// from before them.
+    stores: tore_replay::stores::StoreTrack,
     /// Each rotorcraft's blade angle (seconds at 100 percent rotor speed) at
     /// the start of every chunk summed so far, in chunk order: the recorded
     /// rotor speed integrated frame by frame from the recording's start
@@ -119,6 +122,7 @@ impl Playback {
             identities: Identities::of(&recording),
             commits: commit_ticks(last),
             marks: convert::recorded_marks(&recording),
+            stores: tore_replay::stores::StoreTrack::from_events(recording.events()),
             recording,
             first,
             last,
@@ -159,6 +163,7 @@ impl Playback {
                 }));
         }
         self.identities = Identities::of(&recording);
+        self.stores = tore_replay::stores::StoreTrack::from_events(recording.events());
         self.recording = recording;
         self.pair = None;
         self.smoke = None;
@@ -219,6 +224,11 @@ impl Playback {
         };
         let mut snapshot = convert::snapshot(frame, &playing, &self.presentation, &self.identities);
         snapshot.marks = convert::marks_at(&self.marks, frame.tick);
+        tore_session::client::convert::stores::put_recorded(
+            &self.stores,
+            frame.tick,
+            std::iter::once(&mut snapshot.player).chain(&mut snapshot.targets),
+        );
         // The recorded age of each round dates its motor.
         for (pose, state) in snapshot.projectiles.iter_mut().zip(&frame.projectiles) {
             pose.powered = !pose.gun

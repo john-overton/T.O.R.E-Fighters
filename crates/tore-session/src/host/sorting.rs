@@ -8,6 +8,10 @@
 //! the new things become events. It reads combat's shared state after the
 //! step, so it needs no seat and runs whether or not anyone is connected.
 //!
+//! An aircraft's drawn stores (protocol 27, B3) are a Stores event when
+//! they change (a release, a jettison, a rearm), and at a seat for every
+//! aircraft not as its loadout built them.
+//!
 //! The city fill's knocked-down buildings (protocol 25) are City flattened
 //! events: the buildings that fell at a tick, and at a seat every building
 //! already flat, so each game knocks the same ones down in its copy of the
@@ -20,7 +24,7 @@
 //! sent, since each burst in the air is an Effect; a surface missile is a
 //! Launch like any other, its shooter the unit.
 
-use crate::wire::events::{SurfaceUnitView, WireEvent};
+use crate::wire::events::{StationStores, SurfaceUnitView, WireEvent};
 use crate::wire::from_world;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use tore_sim::combat::blast::MarkKind;
@@ -117,6 +121,9 @@ pub struct Tracker {
     /// when they were (protocol 25).
     flattened: BTreeSet<u32>,
     fill_version: u64,
+    /// Each aircraft's drawn stores as last told (protocol 27), its loadout
+    /// as built (what a client draws) until the first change.
+    stores: BTreeMap<u32, Vec<StationStores>>,
 }
 
 impl Tracker {
@@ -146,6 +153,9 @@ impl Tracker {
                 .city_fill
                 .as_ref()
                 .map_or(0, |fill| fill.version()),
+            // Clients draw an untold aircraft as built, so anything else is
+            // told on the first tick sorted (protocol 27).
+            stores: BTreeMap::new(),
         }
     }
 
@@ -274,6 +284,20 @@ impl Tracker {
             if self.views.get(&view.unit) != Some(&view) {
                 self.views.insert(view.unit, view.clone());
                 push(tick, Wide::Event(WireEvent::SurfaceUnit(view)));
+            }
+        }
+
+        // Aircraft whose drawn stores changed (protocol 27): a release, a
+        // jettison, a rearm. An aircraft not yet told is compared with its
+        // loadout as built, which is how a client draws it.
+        for (aircraft, loads) in world.station_stores() {
+            let told = self
+                .stores
+                .entry(aircraft)
+                .or_insert_with(|| as_built(world, aircraft).unwrap_or_default());
+            if *told != loads {
+                told.clone_from(&loads);
+                push(tick, Wide::Event(WireEvent::Stores { aircraft, loads }));
             }
         }
 
@@ -458,13 +482,29 @@ impl Tracker {
             .as_ref()
             .map(|fill| flattened_events(&fill.flattened()))
             .unwrap_or_default();
+        // Every aircraft whose stores are not as its loadout built them
+        // (protocol 27).
+        let stores = world
+            .station_stores()
+            .into_iter()
+            .filter(|(aircraft, loads)| as_built(world, *aircraft).as_ref() != Some(loads))
+            .map(|(aircraft, loads)| Wide::Event(WireEvent::Stores { aircraft, loads }));
         marks
             .chain(effects)
             .chain(surface)
             .chain(flattened)
+            .chain(stores)
             .map(|event| Timed { tick, event })
             .collect()
     }
+}
+
+/// Aircraft `id`'s drawn stores as its loadout built them: what a client
+/// draws for an aircraft it was never told of.
+fn as_built(world: &World, id: u32) -> Option<Vec<StationStores>> {
+    world
+        .aircraft_configuration(id)
+        .map(tore_world::snapshot::as_built_stores)
 }
 
 /// City flattened events for `ids` (ascending), as many as the event's limit
@@ -623,5 +663,53 @@ mod tests {
         assert!(views(&tracker.sort(&world, &out, Vec::new(), 3)).is_empty());
         let standing = views(&Tracker::standing(&world, 3));
         assert_eq!(standing, told, "a late seat is told the hurt bunker");
+    }
+
+    fn stores(events: &[Timed]) -> Vec<(u32, Vec<StationStores>)> {
+        events
+            .iter()
+            .filter_map(|t| match &t.event {
+                Wide::Event(WireEvent::Stores { aircraft, loads }) => {
+                    Some((*aircraft, loads.clone()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// An aircraft's drawn stores are told once per change (a release), and
+    /// a player seated later is told every aircraft not as its loadout
+    /// built it; nothing is told while every aircraft is as built
+    /// (protocol 27).
+    #[test]
+    fn stores_are_told_when_they_change_and_at_a_seat() {
+        let mut world = world();
+        let mut tracker = Tracker::new(&world);
+        let out = TickOutput::default();
+        assert!(stores(&tracker.sort(&world, &out, Vec::new(), 1)).is_empty());
+        assert!(stores(&Tracker::standing(&world, 1)).is_empty(), "as built");
+        // A player takes the first plane and lets one store of its first
+        // drawn station go.
+        world
+            .take_plane(tore_world::seats::SeatId(0), tore_world::seats::PlaneId(0))
+            .unwrap();
+        assert!(stores(&tracker.sort(&world, &out, Vec::new(), 2)).is_empty());
+        let own = &world.combat.state.ownships()[0];
+        let plane = own.aircraft;
+        let built = world.station_stores()[&plane].clone();
+        let first = *built.first().expect("a drawn station");
+        let station = usize::from(first.station);
+        let debit =
+            tore_sim::combat::live::pod_rounds(&own.configuration().stations[station].weapon)
+                as u16;
+        let own = world.combat.state.ownship_mut(plane).unwrap();
+        own.ammo[station] -= debit;
+        let told = stores(&tracker.sort(&world, &out, Vec::new(), 3));
+        assert_eq!(told.len(), 1, "{told:?}");
+        assert_eq!(told[0].0, plane);
+        assert_eq!(told[0].1[0].items, first.items - 1);
+        assert_eq!(told[0].1[1..], built[1..]);
+        assert!(stores(&tracker.sort(&world, &out, Vec::new(), 4)).is_empty());
+        assert_eq!(stores(&Tracker::standing(&world, 4)), told, "a late seat");
     }
 }

@@ -172,7 +172,11 @@ pub fn path_words(path: Path) -> &'static str {
 /// event (code 11) carries the size it is drawn at, percent of its
 /// explosion type's (`tore_sim::combat::blast_scale`), as a one-bit flag and
 /// a byte when it is not 100, which a 25 game cannot read.
-pub const PROTOCOL_VERSION: u16 = 26;
+/// 27 since the stores slice (BP3): the Stores event (code 22), every
+/// aircraft's drawn stations and the whole stores on each, sent when they
+/// change and at a seat, so a client draws every aircraft's pylons and
+/// stores (docs/spec/stores-on-pylons.md).
+pub const PROTOCOL_VERSION: u16 = 27;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
@@ -290,4 +294,6 @@ pub mod limits {
     /// Buildings in one City flattened event (protocol 25); more go in
     /// several.
     pub const FLATTENED: usize = 256;
+    /// Stations in one Stores event (protocol 27): a loadout's stations.
+    pub const STORE_STATIONS: usize = 64;
 }

@@ -488,6 +488,35 @@ pack, a dud, a rocket salvo, a cluster bomb, a laser bomb on its own spot, one
 that loses its laser, a JDAM and two HARM launches, replays each tick for
 tick against the picture the run drew, and checks the events.
 
+### Stores
+
+Each aircraft's pylons and the stores still on them
+([stores on pylons](spec/stores-on-pylons.md)) are recorded as events
+(slice BP3, John 2026-10-12), so the viewer draws them emptying as they did
+in flight. There is no format change: they are new entries within format 2
+and 3, which an older reader skips. Recording them reads the tick's picture
+and draws no random number, so it changes nothing the mission does. The
+names are in `tore_replay::vocab`, the encoding in `tore_replay::stores`;
+the layout is an agent decision.
+
+| Event | When | What |
+| --- | --- | --- |
+| `stores.layout` | The first tick an aircraft is recorded with any stores, and whenever its drawn stations change (a respawn with another loadout, a jettisoned gun pod) | `count`, the stations that follow |
+| `stores.station` | Right after its layout, one per station in order | `slot`, `hardpoint`, the record's position `x_ft`, `y_ft`, `z_ft`, `location`, `paired`, `look` (store, pod or tank), `items` (whole stores on it), `loaded`, the weapon's `shape` when it has one, and a fitted pod's or tank's `length_ft` and `diameter_ft`: everything the drawing needs, so the viewer needs no loadout |
+| `stores.items` | Whenever a whole store leaves (a bomb, a missile, a pod's last rocket), a jettison or a rearm | `items`: the whole stores on each station of the layout, in order |
+
+The viewer reads them once when the recording opens (again as a live or
+growing one grows) and draws each aircraft's stores at the tick under the
+playhead from the newest entry at or before it, so a seek or reverse play
+shows what forward play showed. `--verify-render` compares the stores of
+every tick as well. The single-player recorder writes them from the tick's
+picture; a networked flight's capture conversion writes them from the
+host's Stores events ([protocol 27](formats/net-protocol.md#protocol-27-stores))
+over each aircraft's loadout, and an observer's live recording from the
+picture its client drew. A recording made before them has none, so its
+aircraft fly without stores, as they always did. On a fighter's flight the
+events cost a few hundred bytes for the whole mission.
+
 ## Network flights
 
 A networked flight is not recorded live: the game on a client does not run the
@@ -887,6 +916,10 @@ beyond them.
   entries inside format 3 (2 without surface content). A recording from
   before them opens as it did and draws the marks its other air-to-ground
   events allow.
+- The stores on pylons (2026-10-12, slice BP3) came this way:
+  `stores.layout`, `stores.station` and `stores.items` are new entries
+  inside formats 2 and 3 ([stores](#stores)). A recording from before them
+  opens as it did and draws no stores; a build from before them skips them.
 - The `kept` flag (2026-10-11, slice FX-K) is new on `player.laser`,
   `player.laser_spot` and `player.designate`: it marks entries of an aircraft
   the AI flies with the cockpit a human left. Older recordings simply stop
@@ -1454,6 +1487,9 @@ under the playhead:
   saw). The palette is then resolved for the viewer camera's height. A
   headless probe never steps the weather, so its recordings keep the launch
   sky.
+
+- Each aircraft's pylons and the stores still on them, from the recorded
+  [stores](#stores) at that tick; none in a recording from before them.
 
 There is no cockpit, HUD, instrument panel or mirror in a replay.
 

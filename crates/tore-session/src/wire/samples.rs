@@ -7,7 +7,8 @@ use super::entity::{
     EntityState, Motion, MoverState, PilotState, ProjectileState, RotorState, Status,
 };
 use super::events::{
-    EventsSection, LinkEvent, MountView, Rumble, SectionEvent, SurfaceUnitView, WireEvent,
+    EventsSection, LinkEvent, MountView, Rumble, SectionEvent, StationStores, SurfaceUnitView,
+    WireEvent,
 };
 use super::inputs::{Command, InputFrame, InputsSection, NumberedCommand};
 use super::messages::{
@@ -667,6 +668,24 @@ pub fn events() -> EventsSection {
             ticks: 120,
             blast: Some(15),
             scale: 0,
+        },
+        // Protocol 27: an aircraft's drawn stores after a release.
+        WireEvent::Stores {
+            aircraft: 0x4000_0003,
+            loads: vec![
+                StationStores {
+                    station: 1,
+                    items: 1,
+                },
+                StationStores {
+                    station: 2,
+                    items: 19,
+                },
+                StationStores {
+                    station: 63,
+                    items: 300,
+                },
+            ],
         },
     ];
     EventsSection {

@@ -562,6 +562,27 @@ impl World {
         }
     }
 
+    /// The combat loadout aircraft `id` carries: a human-flown plane's
+    /// ownship configuration, or an AI aircraft's (B3).
+    pub fn aircraft_configuration(
+        &self,
+        id: u32,
+    ) -> Option<&tore_sim::combat::live::Configuration> {
+        self.combat
+            .state
+            .ownship(id)
+            .map(|own| own.configuration())
+            .or_else(|| self.ai_wings.as_ref()?.configuration(id))
+    }
+
+    /// Every aircraft's drawn stations and the whole stores on each, by
+    /// aircraft id (B3, protocol 27).
+    pub fn station_stores(
+        &self,
+    ) -> std::collections::BTreeMap<u32, Vec<crate::snapshot::StationStores>> {
+        self.combat.station_stores(self.ai_wings.as_ref())
+    }
+
     /// The tick the next step runs. Seat inputs name it.
     pub fn tick(&self) -> u64 {
         self.combat.state.tick()

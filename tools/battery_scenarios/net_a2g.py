@@ -24,7 +24,13 @@ Cheat loading, a token file) sets up a level pass (`tore-bot --a2g strike`: A-G 
 and is killed in flight before it releases; the server keeps plane 0 for it and the AI flies it. `Stay` (plane
 1, `--a2g watch`) keeps the mission going and sees the Mk 82s leave plane 0: the AI continued the pass. Strike's
 game then joins again with its token (`--a2g watch`) and finds its cockpit as it left it: the same station, LVL,
-fewer bombs, and the designation on the same target while it stands. See docs/testing/lane-net.md.
+fewer bombs, and the designation on the same target while it stands.
+
+`net-a2g-stores` (protocol 27, slice BP3, docs/spec/stores-on-pylons.md): the same column with two enemy MiG-29s
+free to fire and invulnerable players. `Bomber` (plane 0, Mk 82s in a Cheat loading, `tore-bot --a2g bomb`) drops
+a Mk 82 in CCIP every four seconds; `Watch` (plane 1, `--a2g watch`) flies on. Each bot prints its `stores:` line:
+Watch must draw the other aircraft's stores and see plane 0's Mk 82 station and an AI aircraft's missile station
+empty as they release; Bomber must see an AI aircraft's stores empty too. See docs/testing/lane-net.md.
 """
 from __future__ import annotations
 
@@ -269,6 +275,74 @@ def drive_strike_handback(d: Drive) -> None:
     )
 
 
+STORES_MISSION = STRIKE_MISSION.replace(
+    "wing friendly 1 F16C.PT 2 average\n", "wing friendly 1 F16C.PT 2 average\nwing enemy 1 MIG29.PT 2 average\n"
+).replace("cheats easy-targeting\n", "cheats easy-targeting damage=invulnerable\n")
+
+STORES_LINE = re.compile(
+    r"^(?P<name>\w+): stores: told (?P<told>\d+), bytes (?P<bytes>\d+), largest (?P<largest>\d+), "
+    r"drawn (?P<drawn>\d+), emptied \[(?P<emptied>[\d ]*)\]$",
+    re.M,
+)
+
+
+def last_stores(text: str) -> dict[str, dict[str, str]]:
+    """Each bot's last stores line, by callsign."""
+    return {m.group("name"): m.groupdict() for m in STORES_LINE.finditer(text)}
+
+
+def stores_problems(text: str, players: tuple[int, ...]) -> list[str]:
+    """What the bots' stores lines say against `net-a2g-stores`: Watch drew the other aircraft's stores and saw
+    plane 0's and an AI aircraft's empty, Bomber saw an AI aircraft's empty, and a Stores event stayed small."""
+    problems = []
+    seen = last_stores(text)
+    for name in ("Bomber", "Watch"):
+        if name not in seen:
+            problems.append(f"{name} printed no stores line")
+    watch = seen.get("Watch")
+    if watch:
+        emptied = {int(n) for n in watch["emptied"].split()}
+        if int(watch["drawn"]) < 2:
+            problems.append(f"Watch drew stores on {watch['drawn']} other aircraft at most, not the Bomber and the AI")
+        if int(watch["told"]) == 0:
+            problems.append("Watch was told no Stores event")
+        if 0 not in emptied:
+            problems.append("Watch never drew the Bomber's (plane 0) Mk 82 station emptying")
+        if not emptied - set(players):
+            problems.append("Watch never drew an AI aircraft's stores emptying")
+        if int(watch["largest"]) > 40:
+            problems.append(f"a Stores event took {watch['largest']} bytes, more than a fighter's stations need")
+    bomber = seen.get("Bomber")
+    if bomber and not {int(n) for n in bomber["emptied"].split()} - set(players):
+        problems.append("Bomber never drew an AI aircraft's stores emptying")
+    return problems
+
+
+def drive_stores(d: Drive) -> None:
+    """Another player's and an AI's stores empty on a client's screen as they release (protocol 27)."""
+    port = d.port()
+    server = start_server(d, port, STORES_MISSION, king="first-player", loadouts="any")
+    bomber = start_bots(
+        d, port, "bomber", 120, "--callsign", "Bomber", "--slot", "0", "--a2g", "bomb", "--load", "MK82.JT",
+        "--king", "loadouts=any", "--players", "2",
+    )
+    if not server.wait_for(r"Bomber wears the crown", 60):
+        raise DriveError("the Bomber bot never wore the crown")
+    watch = start_bots(d, port, "watch", 120, "--callsign", "Watch", "--slot", "1", "--a2g", "watch")
+    watch.finish(240, 0)
+    bomber.finish(240, 0)
+    server.send("end")
+    server.finish(40, 0)
+    bomber.expect(r"^Bomber: seat \d+, plane 0, at tick \d+$", "plane 0")
+    watch.expect(r"^Watch: seat \d+, plane 1, at tick \d+$", "plane 1")
+    watch.expect(r"^Watch: a2g: saw MK82\.JT \d+ from plane 0 ", "a Mk 82 leaving plane 0")
+    for bot in (bomber, watch):
+        bot.forbid(NET_BAD, "a network problem")
+    for problem in stores_problems(bomber.text() + watch.text(), (0, 1)):
+        d.problem(problem)
+    log_must(d, server_log(d), r"joined as Bomber", r"joined as Watch", forbid=r"protocol error|bad packets|\bfault\b")
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
@@ -278,5 +352,8 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="net-ai-strike-handback", lane="net", args=[], driver=drive_strike_handback,
             uses=("server", "bot"), timeout=600,
+        ),
+        Scenario(
+            name="net-a2g-stores", lane="net", args=[], driver=drive_stores, uses=("server", "bot"), timeout=420,
         ),
     ]

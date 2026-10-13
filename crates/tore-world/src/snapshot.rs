@@ -165,14 +165,80 @@ pub fn tank_body(fuel_lbs: f64) -> [f64; 2] {
     [13. * scale, 2. * scale]
 }
 
+/// One drawn station's whole stores (B3): the part of an aircraft's stores
+/// that changes in flight, which the network (protocol 27, the Stores event)
+/// and mission recordings carry. Everything else a drawn store needs comes
+/// from the aircraft's loadout ([`store_poses_of`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct StationStores {
+    /// The loadout's station index (`Configuration::stations`).
+    pub station: u8,
+    /// Whole stores still on it (pods and single stores).
+    pub items: u16,
+}
+
+/// The stations `config` draws, in station order, with the whole stores
+/// each holds now: every external station that is not a gun and was loaded
+/// at the start (`loaded`), whatever it holds now. `rounds` gives a
+/// station's rounds left. Tanks are not listed: they come from the loadout
+/// alone.
+pub fn station_stores(
+    config: &tore_sim::combat::live::Configuration,
+    rounds: impl Fn(usize) -> u32,
+    loaded: impl Fn(usize) -> bool,
+) -> Vec<StationStores> {
+    use tore_sim::combat::live;
+    config
+        .stations
+        .iter()
+        .enumerate()
+        .filter(|(index, station)| {
+            station.rack.location().external() && !live::is_gun(&station.weapon) && loaded(*index)
+        })
+        .filter_map(|(index, station)| {
+            let per_item = live::pod_rounds(&station.weapon).max(1);
+            Some(StationStores {
+                station: u8::try_from(index).ok()?,
+                items: u16::try_from(rounds(index).div_ceil(per_item)).unwrap_or(u16::MAX),
+            })
+        })
+        .collect()
+}
+
+/// The stations `config` draws as the loadout built them: every station
+/// with a count full. A network client draws an aircraft the host has not
+/// told it about this way, and the host tells only an aircraft that differs.
+pub fn as_built_stores(config: &tore_sim::combat::live::Configuration) -> Vec<StationStores> {
+    station_stores(
+        config,
+        |index| {
+            config.stations.get(index).map_or(0, |s| {
+                u32::from(s.count) * tore_sim::combat::live::pod_rounds(&s.weapon)
+            })
+        },
+        |index| config.stations.get(index).is_some_and(|s| s.count > 0),
+    )
+}
+
 /// The stores `config` carries as drawn: every external station loaded at
 /// the mission's start, each with the whole stores it holds now. `rounds`
 /// gives a station's rounds left and `loaded` whether it was loaded at the
-/// start; `tanks` the tanks still carried at each tank station.
+/// start.
 pub fn store_poses(
     config: &tore_sim::combat::live::Configuration,
     rounds: impl Fn(usize) -> u32,
     loaded: impl Fn(usize) -> bool,
+) -> Vec<StorePose> {
+    store_poses_of(config, &station_stores(config, rounds, loaded))
+}
+
+/// The stores `config` carries as drawn with `loads`, each listed station's
+/// whole stores ([`station_stores`]), plus the loadout's tanks. A listed
+/// station the loadout does not draw (out of range, internal, a gun) is
+/// left out, so a load that does not fit the loadout draws nothing wrong.
+pub fn store_poses_of(
+    config: &tore_sim::combat::live::Configuration,
+    loads: &[StationStores],
 ) -> Vec<StorePose> {
     use tore_sim::combat::{hardpoints::Rack, live};
     let hardpoint = |station: usize| {
@@ -181,14 +247,14 @@ pub fn store_poses(
             .iter()
             .position(|slot| *slot == Some(station))
     };
-    let mut stores: Vec<StorePose> = config
-        .stations
+    let mut stores: Vec<StorePose> = loads
         .iter()
-        .enumerate()
-        .filter(|(index, station)| {
-            station.rack.location().external() && !live::is_gun(&station.weapon) && loaded(*index)
-        })
-        .filter_map(|(index, station)| {
+        .filter_map(|load| {
+            let index = usize::from(load.station);
+            let station = config.stations.get(index)?;
+            if !station.rack.location().external() || live::is_gun(&station.weapon) {
+                return None;
+            }
             let per_item = live::pod_rounds(&station.weapon).max(1);
             Some(StorePose {
                 hardpoint: u8::try_from(hardpoint(index)?).ok()?,
@@ -205,7 +271,7 @@ pub fn store_poses(
                 } else {
                     [0.; 2]
                 },
-                items: u16::try_from(rounds(index).div_ceil(per_item)).unwrap_or(u16::MAX),
+                items: load.items,
                 loaded: station.count,
             })
         })
