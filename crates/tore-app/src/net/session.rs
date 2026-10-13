@@ -108,7 +108,7 @@ pub fn build_id() -> BuildId {
 /// (stage L, slice L4): the import's source, set once at start-up, and the
 /// content computed from it, once for each import.
 static SOURCE: std::sync::Mutex<Option<tore_import::source::Source>> = std::sync::Mutex::new(None);
-static CONTENT: std::sync::Mutex<ContentSlot> = std::sync::Mutex::new(ContentSlot::Idle);
+static CONTENT: ContentCache = ContentCache::new();
 
 /// Where this game's content stands.
 enum ContentSlot {
@@ -150,43 +150,68 @@ fn compute_content(resources: &BTreeMap<String, Vec<u8>>) -> GameContent {
 /// seconds in a release build, about 3 in a debug one). Does nothing when it
 /// is under way or done for these resources.
 pub fn start_content(resources: &Arc<BTreeMap<String, Vec<u8>>>) {
-    let mut slot = CONTENT.lock().unwrap_or_else(|e| e.into_inner());
-    let current = match &*slot {
-        ContentSlot::Idle => None,
-        ContentSlot::Computing(have, _) | ContentSlot::Ready(have, _) => Some(have),
-    };
-    if current.is_some_and(|have| Arc::ptr_eq(have, resources)) {
-        return;
-    }
-    let work = Arc::clone(resources);
-    let handle = std::thread::Builder::new()
-        .name("content".into())
-        .spawn(move || Arc::new(compute_content(&work)));
-    *slot = match handle {
-        Ok(handle) => ContentSlot::Computing(Arc::clone(resources), handle),
-        // No thread: it is worked out when it is asked for.
-        Err(_) => ContentSlot::Idle,
-    };
+    CONTENT.start(resources);
 }
 
 /// This game's content over `resources`: the worker's, waiting for it when it
 /// is still at work, else worked out now.
 pub fn game_content(resources: &Arc<BTreeMap<String, Vec<u8>>>) -> Arc<GameContent> {
-    start_content(resources);
-    let mut slot = CONTENT.lock().unwrap_or_else(|e| e.into_inner());
-    match std::mem::replace(&mut *slot, ContentSlot::Idle) {
-        ContentSlot::Computing(have, handle) => {
-            let content = handle
-                .join()
-                .unwrap_or_else(|_| Arc::new(compute_content(&have)));
-            *slot = ContentSlot::Ready(have, Arc::clone(&content));
-            content
+    CONTENT.get(resources)
+}
+
+/// The content worked out for one import at a time. The game keeps one
+/// ([`CONTENT`]); a test keeps its own, so tests running side by side cannot
+/// swap each other's import out between two calls.
+struct ContentCache(std::sync::Mutex<ContentSlot>);
+
+impl ContentCache {
+    const fn new() -> Self {
+        Self(std::sync::Mutex::new(ContentSlot::Idle))
+    }
+
+    fn start(&self, resources: &Arc<BTreeMap<String, Vec<u8>>>) {
+        let mut slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        Self::start_in(&mut slot, resources);
+    }
+
+    fn start_in(slot: &mut ContentSlot, resources: &Arc<BTreeMap<String, Vec<u8>>>) {
+        let current = match &*slot {
+            ContentSlot::Idle => None,
+            ContentSlot::Computing(have, _) | ContentSlot::Ready(have, _) => Some(have),
+        };
+        if current.is_some_and(|have| Arc::ptr_eq(have, resources)) {
+            return;
         }
-        ContentSlot::Ready(have, content) => {
-            *slot = ContentSlot::Ready(have, Arc::clone(&content));
-            content
+        let work = Arc::clone(resources);
+        let handle = std::thread::Builder::new()
+            .name("content".into())
+            .spawn(move || Arc::new(compute_content(&work)));
+        *slot = match handle {
+            Ok(handle) => ContentSlot::Computing(Arc::clone(resources), handle),
+            // No thread: it is worked out when it is asked for.
+            Err(_) => ContentSlot::Idle,
+        };
+    }
+
+    /// Starts and collects under one lock, so the content handed back is
+    /// always the content of `resources`.
+    fn get(&self, resources: &Arc<BTreeMap<String, Vec<u8>>>) -> Arc<GameContent> {
+        let mut slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        Self::start_in(&mut slot, resources);
+        match std::mem::replace(&mut *slot, ContentSlot::Idle) {
+            ContentSlot::Computing(have, handle) => {
+                let content = handle
+                    .join()
+                    .unwrap_or_else(|_| Arc::new(compute_content(&have)));
+                *slot = ContentSlot::Ready(have, Arc::clone(&content));
+                content
+            }
+            ContentSlot::Ready(have, content) => {
+                *slot = ContentSlot::Ready(have, Arc::clone(&content));
+                content
+            }
+            ContentSlot::Idle => Arc::new(compute_content(resources)),
         }
-        ContentSlot::Idle => Arc::new(compute_content(resources)),
     }
 }
 
@@ -1967,21 +1992,23 @@ mod tests {
     /// same resources, and another import gets its own.
     #[test]
     fn the_games_content_is_worked_out_once_for_each_import() {
+        // Its own cache: other tests use the game's at the same time.
+        let cache = ContentCache::new();
         let one = Arc::new(resources());
-        start_content(&one);
+        cache.start(&one);
         // Asking again while it works, or after, starts nothing new.
-        start_content(&one);
-        let first = game_content(&one);
-        let again = game_content(&one);
+        cache.start(&one);
+        let first = cache.get(&one);
+        let again = cache.get(&one);
         assert!(Arc::ptr_eq(&first, &again));
         assert!(!first.digests().is_empty());
         // Another import is another computation, and the first stays right.
         let mut changed = resources();
         changed.insert("EXTRA.JT".into(), vec![1, 2, 3]);
         let two = Arc::new(changed);
-        let other = game_content(&two);
+        let other = cache.get(&two);
         assert!(!Arc::ptr_eq(&first, &other));
-        let back = game_content(&one);
+        let back = cache.get(&one);
         assert_eq!(back.digests(), first.digests());
     }
 
