@@ -1,3 +1,4 @@
+import os
 import sys
 import tempfile
 import unittest
@@ -312,18 +313,17 @@ class DriverTests(unittest.TestCase):
 
     def test_programs_of_another_commit_are_named_before_the_net_lane_runs(self):
         import argparse
-        import os
-        import tempfile
+        from unittest import mock
 
+        # The server's commit comes from running it (tested on its own below,
+        # where a shell script can stand in for it); here it is given, so the
+        # check runs the same on Windows, which cannot run a #!/bin/sh file.
         commit = "0123456789abcdef0123456789abcdef01234567"
-        with tempfile.TemporaryDirectory() as d:
-            server = Path(d) / "tore-server"
-            server.write_text(f"#!/bin/sh\necho 'T.O.R.E server v0.1.3 ({commit})'\n")
-            os.chmod(server, 0o755)
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(battery, "server_commit", return_value=commit):
             bot, app = Path(d) / "tore-bot", Path(d) / "tore-app"
             bot.write_bytes(b"\0junk" + commit.encode() + b"\0")
             app.write_bytes(b"\0junk" + b"f" * 40 + b"\0")
-            opts = argparse.Namespace(server_bin=str(server), bot_bin=str(bot), bin=str(app))
+            opts = argparse.Namespace(server_bin=str(Path(d) / "tore-server"), bot_bin=str(bot), bin=str(app))
             net = battery.Scenario(name="a", lane="net", args=[], driver=lambda d: None, uses=("server", "bot"))
             plain = battery.Scenario(name="b", lane="ai", args=[])
             problems = battery.mismatched_builds([net], opts)
@@ -334,6 +334,18 @@ class DriverTests(unittest.TestCase):
             self.assertEqual(battery.mismatched_builds([plain], opts), [])
             app.write_bytes(b"x" + commit.encode())
             self.assertEqual(battery.mismatched_builds([net], opts), [])
+
+    @unittest.skipIf(os.name == "nt", "a #!/bin/sh script stands in for the server")
+    def test_the_server_commit_is_read_from_its_version_line(self):
+        commit = "0123456789abcdef0123456789abcdef01234567"
+        with tempfile.TemporaryDirectory() as d:
+            server = Path(d) / "tore-server"
+            server.write_text(f"#!/bin/sh\necho 'T.O.R.E server v0.1.3 ({commit})'\n")
+            os.chmod(server, 0o755)
+            self.assertEqual(battery.server_commit(str(server)), commit)
+            server.write_text("#!/bin/sh\necho 'T.O.R.E server v0.1.3 (unknown)'\n")
+            self.assertIsNone(battery.server_commit(str(server)))
+            self.assertIsNone(battery.server_commit(str(Path(d) / "missing")))
 
     def assert_gone(self, popen):
         import time
