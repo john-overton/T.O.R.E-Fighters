@@ -78,7 +78,7 @@ pub const SPEED_HOLD_MARGIN_KT: f64 = 10.;
 pub const FORWARD_PITCH_DEG: f64 = 15.;
 /// The steepest bank the adapter flies, degrees, or the aircraft's own
 /// maximum bank if less.
-pub const MAXIMUM_BANK_DEG: f64 = 45.;
+pub const MAXIMUM_BANK_DEG: f64 = 60.;
 /// A heading error is closed over this many seconds by the bank (the
 /// fixed-wing adapter's one second).
 pub const BANK_LEAD_SECONDS: f64 = 1.;
