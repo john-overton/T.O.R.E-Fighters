@@ -893,6 +893,7 @@ impl Combat {
                         target: p.target,
                         incoming: p.incoming.is_some(),
                         speed_f8: p.speed_f8,
+                        powered: self.state.motor_powered(p),
                     }
                 })
                 .collect(),
@@ -905,6 +906,7 @@ impl Combat {
                     position: e.position,
                     ticks: e.ticks,
                     blast: e.blast,
+                    scale: e.scale,
                 })
                 .collect(),
             marks: self
@@ -1067,6 +1069,7 @@ impl Combat {
                 kind: live::EffectKind::Destroyed,
                 ticks: u16::from(row.seconds) * 60,
                 blast: Some(kind),
+                scale: tore_sim::combat::blast_scale::FULL,
             });
         }
         let site = at(4000., 0.);
@@ -2471,6 +2474,7 @@ pub mod fixtures {
             kind,
             ticks,
             blast: None,
+            scale: tore_sim::combat::blast_scale::FULL,
         };
         let effects = vec![
             effect(EffectKind::Flare, [10., 5050., 500.], 45),

@@ -185,6 +185,9 @@ pub struct ProjectilePose {
     /// Speed in 1/256 feet per second, as simulated.
     #[allow(dead_code)] // Read by mission recordings and exports.
     pub speed_f8: i32,
+    /// Its motor is burning: a missile or rocket draws its flame only then
+    /// (bug B7). Gun rounds and bombs never are.
+    pub powered: bool,
 }
 
 /// One flare, chaff cloud, launch flash, hit or explosion.
@@ -196,6 +199,10 @@ pub struct EffectPose {
     pub ticks: u16,
     /// The original explosion type it shows, when it has one.
     pub blast: Option<u8>,
+    /// How big it is drawn against its type's size, percent
+    /// ([`tore_sim::combat::blast_scale`]); 100 for anything that is not a
+    /// weapon's impact.
+    pub scale: u8,
 }
 
 /// One crater or crash-site fire.

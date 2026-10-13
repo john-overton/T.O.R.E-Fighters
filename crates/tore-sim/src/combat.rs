@@ -4,6 +4,7 @@
 use std::io::{Error, ErrorKind};
 pub mod ballistics;
 pub mod blast;
+pub mod blast_scale;
 pub mod countermeasures;
 pub mod debris;
 pub mod delivery;

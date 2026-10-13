@@ -176,7 +176,7 @@ pub(super) struct Outputs<'a> {
     pub events: &'a mut Vec<Event>,
     pub strikes: &'a mut Vec<Strike>,
     pub ownship_hits: &'a mut Vec<OwnshipHit>,
-    pub impacts: &'a mut Vec<(Vector, EffectKind, u8, u8)>,
+    pub impacts: &'a mut Vec<(Vector, EffectKind, u8, u8, u8)>,
     /// Score changes for ownship shooters: owner and whether it is a kill.
     pub scored: &'a mut Vec<(u32, bool)>,
 }
@@ -339,8 +339,13 @@ impl State {
                         _ if aircraft => (t.position, crate::combat::blast::AIRCRAFT, 0),
                         _ => (t.position, crate::combat::blast::GROUND_OBJECT, 0),
                     };
-                    out.impacts
-                        .push((position, EffectKind::Destroyed, explosion, crater));
+                    out.impacts.push((
+                        position,
+                        EffectKind::Destroyed,
+                        explosion,
+                        crater,
+                        crate::combat::blast_scale::FULL,
+                    ));
                 }
                 total = total.saturating_add(u32::try_from(applied).unwrap_or(0));
             }
