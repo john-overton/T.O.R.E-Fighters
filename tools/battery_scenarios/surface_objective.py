@@ -174,7 +174,9 @@ def runway_problems(output: str) -> list[str]:
     return problems
 
 
-WRECK = re.compile(r"^surface-objective: end wreck (0x[0-9a-f]+) (\S+) drawn (\d+) class (\w+) fire (yes|no)$", re.M)
+WRECK = re.compile(
+    r"^surface-objective: end wreck (0x[0-9a-f]+) (\S+) drawn (?:moving )?(\d+) class (\w+) fire (yes|no)$", re.M
+)
 WRECKS = re.compile(
     r"^surface-objective: end wrecks (\d+) hidden (\d+) should-burn (\d+) burning (\d+) runway-craters (\d+)$", re.M
 )
@@ -194,7 +196,7 @@ def wreck_problems(output: str) -> list[str]:
         if total < 5:
             problems.append(f"{name}: only {total} objects destroyed")
         if hidden:
-            gone = [m.group(1) + " " + m.group(2) for m in WRECK.finditer(run) if m.group(3) == "0"]
+            gone = [m.group(0) for m in WRECK.finditer(run) if m.group(3) == "0" and "moving" not in m.group(0)]
             problems.append(f"{name}: {hidden} destroyed objects vanished: {gone}")
         for m in WRECK.finditer(run):
             if m.group(4) in ("Building", "Hard") and m.group(5) != "yes":

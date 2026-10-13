@@ -52,7 +52,7 @@
 //! redrawn airports, as `TORE_REDRAWN_AIRPORTS=0` does elsewhere. With
 //! `--runway-art` an `end wreck` line follows for every destroyed scene
 //! object (its drawn vertex floats, fire class and whether it burns) and an
-//! `end wrecks` summary: how many, how many drawn nothing, how many should
+//! `end wrecks` summary: how many, how many drawn nothing (a unit on a route draws every frame and is not counted), how many should
 //! burn and do, and the craters on runway pavement (B16).
 use crate::{AppResult, replay, snapshot::RenderSnapshot, surface_dump};
 use tore_formats::{aircraft::AircraftId, weapons::Weapon};
@@ -116,12 +116,19 @@ fn wreck_lines(world: &tore_world::world::World, scenery: &mut crate::scenery::S
             continue;
         }
         total += 1;
+        // A unit that follows a route is drawn every frame (its wreck where
+        // it stopped), not by the static batch.
+        let moving = world
+            .terrain
+            .surface
+            .courses
+            .contains_key(&UnitId(object.id));
         let drawn = scenery.drawn_vertex_floats(
             object.id,
             &world.combat.state.targets,
             &world.combat.surface,
         );
-        if drawn == 0 {
+        if drawn == 0 && !moving {
             hidden += 1;
         }
         let class = classes
@@ -141,9 +148,10 @@ fn wreck_lines(world: &tore_world::world::World, scenery: &mut crate::scenery::S
             burning += 1;
         }
         println!(
-            "surface-objective: end wreck {:#010x} {} drawn {drawn} class {class:?} fire {}",
+            "surface-objective: end wreck {:#010x} {} drawn {}{drawn} class {class:?} fire {}",
             object.id,
             object.object_type,
+            if moving { "moving " } else { "" },
             if fire { "yes" } else { "no" }
         );
     }
