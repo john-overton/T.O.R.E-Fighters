@@ -62,7 +62,21 @@ pub struct StoreRecord {
     pub loaded: u16,
     /// A fitted body's length and diameter, feet; zero for a shaped store.
     pub body: [f64; 2],
+    /// The model's underside over its pylons (slice PY2): the heights, feet
+    /// up, at the record, the inboard and outboard pylons and 7 ft ahead and
+    /// behind; `None` where there is none or the recording predates them,
+    /// so its stores hang at the record's height.
+    pub over: [Option<f64>; 5],
 }
+
+/// The `stores.station` fields of [`StoreRecord::over`].
+const OVER: [&str; 5] = [
+    "over_ft",
+    "over_inboard_ft",
+    "over_outboard_ft",
+    "over_front_ft",
+    "over_rear_ft",
+];
 
 /// The events that record `aircraft`'s layout `stores`: a `stores.layout`
 /// with the count, then one `stores.station` for each, in order.
@@ -92,6 +106,11 @@ pub fn layout_events(aircraft: u32, stores: &[StoreRecord]) -> Vec<Event> {
             event = event
                 .with("length_ft", store.body[0])
                 .with("diameter_ft", store.body[1]);
+        }
+        for (name, over) in OVER.iter().zip(store.over) {
+            if let Some(height) = over {
+                event = event.with(name, height);
+            }
         }
         out.push(event);
     }
@@ -246,6 +265,7 @@ fn record(event: &Event) -> StoreRecord {
         items: count("items"),
         loaded: count("loaded"),
         body: [int("length_ft"), int("diameter_ft")],
+        over: OVER.map(|name| event.num(name)),
     }
 }
 
@@ -264,6 +284,7 @@ mod tests {
             items,
             loaded: 4,
             body: [0.; 2],
+            over: [Some(0.25), None, Some(-0.5), None, None],
         }
     }
 

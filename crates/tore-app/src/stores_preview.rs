@@ -24,7 +24,7 @@ use tore_sim::{
 const HEIGHT_FT: f64 = 4000.;
 
 /// The aircraft drawn, with a short file name each.
-const AIRCRAFT: [(AircraftId, &str); 8] = [
+const AIRCRAFT: [(AircraftId, &str); 12] = [
     (AircraftId::F18, "f18d"),
     (AircraftId::F16C, "f16c"),
     (AircraftId::F14, "f14"),
@@ -33,6 +33,10 @@ const AIRCRAFT: [(AircraftId, &str); 8] = [
     (AircraftId::Mig29, "mig29"),
     (AircraftId::Av8, "av8"),
     (AircraftId::A4E, "a4e"),
+    (AircraftId::F15, "f15"),
+    (AircraftId::F4J, "f4j"),
+    (AircraftId::F4E, "f4e"),
+    (AircraftId::Rafale, "rafale"),
 ];
 
 /// Camera eye and look point, feet right, up and forward of the aircraft,
@@ -63,7 +67,14 @@ pub fn run() -> AppResult<()> {
     let world = Terrain::for_mission(resources, "UKR", None, &overrides)?;
     let mut scenery = Scenery::build(resources, &world)?;
     let mut gpu = pollster::block_on(Gpu::new(&scenery))?;
-    for (id, short) in AIRCRAFT {
+    // `TORE_STORES_PREVIEW_AIRCRAFT=f14,f15` draws only those.
+    let only: Option<Vec<String>> = std::env::var("TORE_STORES_PREVIEW_AIRCRAFT")
+        .ok()
+        .map(|list| list.split(',').map(str::to_owned).collect());
+    for (id, short) in AIRCRAFT
+        .into_iter()
+        .filter(|(_, short)| only.as_ref().is_none_or(|o| o.iter().any(|s| s == short)))
+    {
         let airframe = crate::aircraft::Airframe::load(resources, id)?;
         let profile = Aircraft::parse(resources.get(id.pt()).ok_or("missing aircraft record")?)?;
         let config = live::Configuration::from_source(&profile, |name| {
@@ -77,6 +88,45 @@ pub fn run() -> AppResult<()> {
                 "Stores preview: {short} hardpoint {index} at {:?} pylon top {:?}",
                 h.position,
                 airframe.pylon_top(index)
+            );
+        }
+        // Each loaded external station: the record, where its stores hang
+        // and how deep the drawn model's underside is over each store's lugs.
+        for (index, s) in config.stations.iter().enumerate() {
+            if !s.rack.location().external() || live::is_gun(&s.weapon) || s.count == 0 {
+                continue;
+            }
+            let size = s.size();
+            let points: Vec<String> = (0..s.count)
+                .map(|n| {
+                    let p = s.release_point(u32::from(n));
+                    let lugs = p[1] + size.top;
+                    let depth = airframe
+                        .underside(p[0], p[2], lugs, 6)
+                        .map(|u| format!("{:.2}", u - lugs));
+                    format!(
+                        "[{:.2} {:.2} {:.2}] depth {}",
+                        p[0],
+                        p[1],
+                        p[2],
+                        depth.as_deref().unwrap_or("rail")
+                    )
+                })
+                .collect();
+            println!(
+                "Stores preview: {short} station {index} {} x{} {:?} record {:.2?} over {:?}: {}",
+                s.weapon.source,
+                s.count,
+                s.rack.location(),
+                s.mount,
+                s.rack.over,
+                points.join("; ")
+            );
+        }
+        for t in &config.tanks {
+            println!(
+                "Stores preview: {short} tank hardpoint {} x{} record {:.2?} over {:?}",
+                t.hardpoint, t.quantity, t.mount, t.rack.over
             );
         }
         let mut art = CombatArt::load(resources)?;
@@ -136,14 +186,25 @@ pub fn run() -> AppResult<()> {
             .collect();
         let tip = external
             .iter()
-            .map(|s| s.mount)
+            .map(|s| s.release_point(0))
             .max_by(|a, b| a[0].abs().total_cmp(&b[0].abs()));
         let wing = external
             .iter()
             .filter(|s| s.rack.location() == tore_sim::combat::hardpoints::Location::Wing)
             .max_by_key(|s| s.count)
-            .map(|s| s.mount);
-        let close = [("tip", tip), ("wing", wing)];
+            .map(|s| s.release_point(0));
+        let fuselage = external
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s.rack.location(),
+                    tore_sim::combat::hardpoints::Location::Fuselage
+                        | tore_sim::combat::hardpoints::Location::Centerline
+                )
+            })
+            .max_by_key(|s| s.count)
+            .map(|s| s.release_point(0));
+        let close = [("tip", tip), ("wing", wing), ("fuselage", fuselage)];
         for (name, target) in close {
             let Some(t) = target else { continue };
             let t = [t[0].abs(), t[1], t[2]];
@@ -151,6 +212,7 @@ pub fn run() -> AppResult<()> {
                 ("front", [t[0] + 7., t[1] - 6., t[2] + 22.]),
                 ("rear", [t[0] + 5., t[1] - 7., t[2] - 22.]),
                 ("ahead", [t[0] + 0.5, t[1] - 0.5, t[2] + 30.]),
+                ("side", [t[0] + 18., t[1] - 5., t[2]]),
             ] {
                 render(
                     &mut gpu,

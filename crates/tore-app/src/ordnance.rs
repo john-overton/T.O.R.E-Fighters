@@ -2588,6 +2588,7 @@ mod tests {
         ui.loadout.configuration.tanks = vec![TankStation {
             hardpoint: 5,
             mount: [0.; 3],
+            rack: Default::default(),
             store: Some(tank.clone()),
             quantity: 2,
         }];
@@ -2658,6 +2659,7 @@ mod tests {
             ui.loadout.configuration.tanks.push(TankStation {
                 hardpoint,
                 mount: [0.; 3],
+                rack: Default::default(),
                 store: Some(tank.clone()),
                 quantity: 0,
             });

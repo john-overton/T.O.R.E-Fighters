@@ -5,17 +5,18 @@
 //! asked for on 2026-10-12. What each station holds comes from the render
 //! snapshot ([`StorePose`]); this module only turns it into vertices:
 //!
-//! - **Where.** A station's stores hang at its source hardpoint position, a
-//!   paired station's split between that position and its mirror, as
-//!   [`Rack::sides`] counts them, which is also the side the next one leaves
-//!   from. A wing side with two stores, or four or more, has two pylons, an
-//!   inboard and an outboard one ([`Rack::pylon`], John 2026-10-12), and
-//!   each store leaves from its own pylon, so a released store appears in
-//!   flight where it hung.
+//! - **Where.** A station's stores hang where the simulation says they
+//!   do ([`hung`], [`tore_sim::combat::hardpoints::Rack::store_point`]):
+//!   a paired station's split between its position and its mirror, a wing
+//!   side with two stores (or four or more) on an inboard and an outboard
+//!   pylon, a fuselage side's in tandem, and every store's lugs 2 ft under
+//!   the model's underside over its pylon (John 2026-10-13). A released
+//!   store leaves from that same point, so it never jumps.
 //! - **Several on one pylon** sit on a fitted rack: two side by side, three
-//!   as a triple ejector rack (two shoulders, one below), more as such racks
-//!   one behind another. The slots keep the full load's layout, and the
-//!   highest-numbered slot empties first.
+//!   as a triple ejector rack (two shoulders, one below), four as two pairs
+//!   one behind another, more as triple racks one behind another. The
+//!   slots keep the full load's layout, and the highest-numbered slot
+//!   empties first.
 //! - **Stores** use the weapon's own shape, refitted to the real store's size
 //!   ([`crate::store_sizes`]). Retail has no rocket pod or fuel tank shape,
 //!   so those, and a store with no shape, are fitted bodies.
@@ -32,7 +33,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use tore_formats::shape::Shape;
 use tore_sim::attitude::{Basis, Vector};
-use tore_sim::combat::hardpoints::Rack;
+use tore_sim::combat::hardpoints::{PylonPlace, rack_group, slot_offset};
+use tore_sim::combat::store_sizes::StoreSize;
 use tore_world::snapshot::{StoreLook, StorePose};
 
 /// Pylon and rack grey, linear RGB (fitted).
@@ -41,7 +43,7 @@ const PYLON: [f32; 3] = [0.5, 0.52, 0.54];
 const TANK: [f32; 3] = [0.55, 0.57, 0.6];
 const POD: [f32; 3] = [0.4, 0.43, 0.4];
 /// A store with no shape: length and diameter, feet (fitted).
-const PLAIN: [f64; 2] = [8., 0.9];
+const PLAIN: [f64; 2] = tore_sim::combat::store_sizes::PLAIN;
 /// A pylon's height when nothing of the model is above or beside it (a
 /// rail), feet.
 const RAIL: f64 = 0.35;
@@ -52,7 +54,7 @@ const PYLON_WIDTH: f64 = 0.35;
 /// deeper sink would show through on top.
 const SINK: f64 = 0.02;
 /// A rack beam's depth under its pylon, feet.
-const RACK_DEPTH: f64 = 0.3;
+const RACK_DEPTH: f64 = tore_sim::combat::hardpoints::RACK_DEPTH;
 
 /// The model surfaces stores meet, looked up once per point
 /// ([`Airframe::underside`], [`Airframe::tip_edge`]).
@@ -133,56 +135,49 @@ impl Dims {
     }
 }
 
-/// Where slot `slot` of a pylon loaded with `loaded` stores of `size`
-/// (length, diameter) sits against the pylon's point: feet right, up
-/// and forward.
-pub fn slot_offset(slot: u16, loaded: u16, length: f64, diameter: f64) -> Vector {
-    if loaded <= 1 {
-        return [0.; 3];
-    }
-    let spread = 0.55 * diameter;
-    let groups = loaded.div_ceil(3);
-    let group = slot / 3;
-    let forward = (f64::from(group) - f64::from(groups - 1) / 2.) * 1.05 * length;
-    let [right, up] = match slot % 3 {
-        0 => [-spread, 0.],
-        1 => [spread, 0.],
-        _ => [0., -0.95 * diameter],
-    };
-    [right, up, forward]
-}
-
-/// One drawn pylon of a station's side: where it hangs (feet right, up and
-/// forward of the aircraft, already mirrored for the left side) and the
-/// side's slots on it, in loading order.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Pylon {
-    pub point: Vector,
-    pub slots: Vec<u16>,
-}
-
-/// The pylons of one side (0 right, 1 left) of a station with `rack` at
-/// `mount`, loaded with `per_side` stores on that side.
-pub fn pylons(rack: Rack, mount: Vector, side: usize, per_side: u16) -> Vec<Pylon> {
-    let mirror = if side == 1 { -1. } else { 1. };
-    let count = rack.pylons(per_side);
-    (0..count)
-        .map(|p| {
-            let slots: Vec<u16> = (0..per_side)
-                .filter(|s| rack.pylon(per_side, *s).0 == p)
-                .collect();
-            let outboard = slots.first().map_or(0., |s| rack.pylon(per_side, *s).1);
-            let right = if mount[0].abs() > 1e-9 {
-                (mount[0] + outboard * mount[0].signum()) * mirror
-            } else {
-                0.
-            };
-            Pylon {
-                point: [right, mount[1], mount[2]],
-                slots,
+/// Where each whole store of `store` hangs, feet right, up and forward of
+/// the aircraft: its side (0 right, 1 left) and slot, the pylon it hangs
+/// from, its place on that pylon's rack and how many the pylon carries, as
+/// the station was loaded. A store still held is drawn there; a released one
+/// left from there ([`Rack::store_point`], the point the release uses).
+pub fn hung(store: &StorePose) -> Vec<Hung> {
+    let size = store.size();
+    let loaded = store.rack.sides(store.mount, store.loaded.max(store.items));
+    let held = store.rack.sides(store.mount, store.items);
+    let mut out = Vec::new();
+    for side in 0..2 {
+        if loaded[side] == 0 {
+            continue;
+        }
+        for pylon in store
+            .rack
+            .side_pylons(store.mount, side, loaded[side], size)
+        {
+            let on = pylon.slots.len() as u16;
+            for (k, slot) in pylon.slots.iter().enumerate() {
+                let offset = slot_offset(k as u16, on, size.length, size.width);
+                out.push(Hung {
+                    side,
+                    slot: *slot,
+                    held: *slot < held[side],
+                    centre: std::array::from_fn(|i| pylon.point[i] + offset[i]),
+                    pylon: pylon.clone(),
+                });
             }
-        })
-        .collect()
+        }
+    }
+    out
+}
+
+/// One store's place on its station ([`hung`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Hung {
+    pub side: usize,
+    pub slot: u16,
+    /// Still on the pylon.
+    pub held: bool,
+    pub centre: Vector,
+    pub pylon: PylonPlace,
 }
 
 /// The vertices of `stores`, hung under an aircraft at `position` (relative
@@ -217,38 +212,39 @@ pub fn vertices(
             .and_then(|name| art.shape(name))
             .filter(|_| store.look == StoreLook::Store);
         let dims = dims(store, shape);
-        let loaded = store.rack.sides(store.mount, store.loaded.max(store.items));
-        let held = store.rack.sides(store.mount, store.items);
-        for side in 0..2 {
-            if loaded[side] == 0 {
-                continue;
+        let size = store.size();
+        let places = hung(store);
+        // Each pylon once, with what it carries.
+        let mut drawn: Vec<&PylonPlace> = Vec::new();
+        for place in &places {
+            if !drawn.contains(&&place.pylon) {
+                drawn.push(&place.pylon);
+                hanger(
+                    out,
+                    &at,
+                    airframe,
+                    &place.pylon,
+                    &dims,
+                    place.pylon.slots.len() as u16,
+                    size,
+                );
             }
-            for pylon in pylons(store.rack, store.mount, side, loaded[side]) {
-                let on = pylon.slots.len() as u16;
-                hanger(out, &at, airframe, &pylon, &dims, on);
-                for (k, slot) in pylon.slots.iter().enumerate() {
-                    if *slot >= held[side] {
-                        continue;
-                    }
-                    let offset = slot_offset(k as u16, on, dims.length, dims.diameter);
-                    let centre = at(std::array::from_fn(|i| pylon.point[i] + offset[i]));
-                    match (store.look, shape) {
-                        (StoreLook::Store, Some(shape)) => {
-                            mesh(out, shape, centre, &basis, palette)
-                        }
-                        (look, _) => body(
-                            out,
-                            &basis,
-                            centre,
-                            [dims.length, dims.diameter],
-                            match look {
-                                StoreLook::Tank => TANK,
-                                StoreLook::Pod => POD,
-                                StoreLook::Store => PYLON,
-                            },
-                        ),
-                    }
-                }
+        }
+        for place in places.iter().filter(|p| p.held) {
+            let centre = at(place.centre);
+            match (store.look, shape) {
+                (StoreLook::Store, Some(shape)) => mesh(out, shape, centre, &basis, palette),
+                (look, _) => body(
+                    out,
+                    &basis,
+                    centre,
+                    [dims.length, dims.diameter],
+                    match look {
+                        StoreLook::Tank => TANK,
+                        StoreLook::Pod => POD,
+                        StoreLook::Store => PYLON,
+                    },
+                ),
             }
         }
     }
@@ -273,9 +269,10 @@ fn hanger(
     out: &mut Vec<f32>,
     at: &impl Fn(Vector) -> Vector,
     airframe: Option<&Airframe>,
-    pylon: &Pylon,
+    pylon: &PylonPlace,
     dims: &Dims,
     on: u16,
+    size: StoreSize,
 ) {
     let p = pylon.point;
     let lugs = p[1] + dims.top;
@@ -294,9 +291,10 @@ fn hanger(
     // triple rack's lower store.
     let mut top_of_rack = lugs;
     if on >= 2 {
-        let groups = on.div_ceil(3);
-        let width = 2. * (0.55 * dims.diameter + dims.radius.max(0.15));
-        let long = f64::from(groups - 1) * 1.05 * dims.length + length;
+        let per = rack_group(on);
+        let groups = on.div_ceil(per);
+        let width = 2. * (0.55 * size.width + dims.radius.max(0.15));
+        let long = f64::from(groups - 1) * 1.05 * size.length + length;
         block(
             out,
             at,
@@ -305,9 +303,9 @@ fn hanger(
             PYLON,
         );
         for group in 0..groups {
-            let lower = group * 3 + 2;
-            if lower < on {
-                let offset = slot_offset(lower, on, dims.length, dims.diameter);
+            let lower = group * per + 2;
+            if per == 3 && lower < on {
+                let offset = slot_offset(lower, on, size.length, size.width);
                 let from = p[1] + offset[1] + dims.top;
                 block(
                     out,
@@ -641,24 +639,12 @@ mod tests {
     use super::*;
     use tore_sim::combat::hardpoints::Rack;
 
-    #[test]
-    fn rack_slots_spread_side_by_side_then_below_then_behind() {
-        let dims = |slot, loaded| slot_offset(slot, loaded, 8., 1.);
-        assert_eq!(dims(0, 1), [0.; 3]);
-        let two = [dims(0, 2), dims(1, 2)];
-        assert!(two[0][0] < 0. && two[1][0] > 0. && two[0][1] == 0.);
-        let third = dims(2, 3);
-        assert_eq!(third[0], 0.);
-        assert!(third[1] < -0.9);
-        // Six: two triple racks, one ahead of the other.
-        assert!(dims(0, 6)[2] < 0. && dims(3, 6)[2] > 0.);
-        assert!(
-            Rack {
-                location: 4,
-                paired: true
-            }
-            .two_sided([10., 0., 0.])
-        );
+    fn rack(location: u8) -> Rack {
+        Rack {
+            location,
+            paired: true,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -667,10 +653,7 @@ mod tests {
         let pair = StorePose {
             hardpoint: 6,
             mount: [10., -2., 0.],
-            rack: Rack {
-                location: 4,
-                paired: true,
-            },
+            rack: rack(4),
             shape: None,
             look: StoreLook::Store,
             items: 2,
@@ -744,10 +727,7 @@ mod tests {
         StorePose {
             hardpoint: 0,
             mount,
-            rack: Rack {
-                location,
-                paired: true,
-            },
+            rack: rack(location),
             shape: None,
             look: StoreLook::Store,
             items,
@@ -816,11 +796,11 @@ mod tests {
 
     #[test]
     fn four_stores_on_a_wing_row_hang_from_two_pylons_a_wing() {
-        let wing = Rack {
-            location: 4,
-            paired: true,
-        };
+        let wing = rack(4);
         let mount = [8., -2., 0.];
+        let size = StoreSize::body(PLAIN);
+        let pylons =
+            |rack: Rack, mount, side, per_side| rack.side_pylons(mount, side, per_side, size);
         let right = pylons(wing, mount, 0, 2);
         assert_eq!(right.len(), 2);
         assert_eq!(right[0].slots, [0]);
@@ -831,7 +811,7 @@ mod tests {
         let left = pylons(wing, mount, 1, 2);
         assert!((left[1].point[0] + 8. + spread).abs() < 1e-9, "mirrored");
         // One a side: one pylon. Three: one pylon's triple rack. Six: two
-        // pylons with three each. A fuselage pair keeps one pylon.
+        // pylons with three each. A fuselage pair hangs one behind another.
         assert_eq!(pylons(wing, mount, 0, 1).len(), 1);
         assert_eq!(pylons(wing, mount, 0, 3).len(), 1);
         let six = pylons(wing, mount, 0, 6);
@@ -839,11 +819,9 @@ mod tests {
             six.iter().map(|p| p.slots.len()).collect::<Vec<_>>(),
             [3, 3]
         );
-        let fuselage = Rack {
-            location: 1,
-            paired: true,
-        };
-        assert_eq!(pylons(fuselage, [3., -5., 0.], 0, 2).len(), 1);
+        let tandem = pylons(rack(1), [3., -5., 0.], 0, 2);
+        assert_eq!(tandem.len(), 2);
+        assert!(tandem[0].point[2] < 0. && tandem[1].point[2] > 0.);
         // Drawn: four grey slabs, one over each store, the empty ones stay.
         let airframe = flat_wing();
         for items in [4, 1, 0] {
@@ -879,5 +857,108 @@ mod tests {
         let high = rail.iter().map(|v| v[1]).fold(f32::MIN, f32::max);
         let lugs = 0.2 + PLAIN[1] / 2.;
         assert!(f64::from(low) <= 0. && f64::from(high) >= lugs - 1e-4);
+    }
+
+    /// [`flat_wing`]'s stores as a loadout reads them: the wing's underside
+    /// over each pylon (at the reference height).
+    fn on_flat_wing(mut store: StorePose) -> StorePose {
+        let model = tore_sim::combat::hardpoints::Underside::of(&flat_wing().poses[0], 1. / 3.);
+        let h = tore_formats::aircraft::Hardpoint {
+            location: store.rack.location,
+            flags: 0x4,
+            position: store.mount.map(|v| (v * 3.).round() as i32),
+            store: None,
+            count: i32::from(store.loaded),
+            weight_class: 0,
+        };
+        store.rack.over = tore_sim::combat::hardpoints::placed(&h, Some(&model))
+            .1
+            .over;
+        store
+    }
+
+    #[test]
+    fn a_pylon_is_two_feet_deep_from_the_wing_to_the_stores_top() {
+        let airframe = flat_wing();
+        // Recorded 5 ft below the wing: the store moves up to hang 2 ft under it.
+        for loaded in [2, 4] {
+            let store = on_flat_wing(plain([9., -5., 0.], 4, loaded));
+            let out = draw(std::slice::from_ref(&store), &airframe);
+            let tank_top = out
+                .chunks_exact(10)
+                .filter(|v| v[6] == TANK[0])
+                .map(|v| v[1])
+                .fold(f32::MIN, f32::max);
+            assert!(
+                (f64::from(tank_top) + tore_sim::combat::hardpoints::PYLON_DEPTH).abs() < 1e-4,
+                "store top {tank_top} with {loaded} loaded"
+            );
+            // The pylon fills the 2 ft with no gap at either end.
+            let ys: Vec<f32> = grey(&out).iter().map(|v| v[1]).collect();
+            let low = ys.iter().copied().fold(f32::MAX, f32::min);
+            let high = ys.iter().copied().fold(f32::MIN, f32::max);
+            assert!((f64::from(low) - f64::from(tank_top)).abs() < 1e-4);
+            assert!(f64::from(high) >= 0. && f64::from(high) <= SINK + 1e-4);
+        }
+    }
+
+    #[test]
+    fn every_store_leaves_from_where_it_is_drawn() {
+        use tore_sim::combat::hardpoints::units;
+        let station = |location: u8, mount: Vector, count: u16, weapon_shape: &str| {
+            let resources = tore_world::test_support::resources::resources();
+            let mut weapon =
+                tore_formats::weapons::Weapon::parse("AIM9M.JT", &resources["AIM9M.JT"]).unwrap();
+            weapon.shape = Some(weapon_shape.into());
+            weapon.burst.actual_rounds_per_game = 1;
+            let store = on_flat_wing(plain(mount, location, count));
+            tore_sim::combat::live::Station {
+                weapon,
+                mount,
+                count,
+                internal: false,
+                rack: store.rack,
+            }
+        };
+        for (location, mount, count, shape) in [
+            (4, [9., -5., -1.], 4, "SPAR.SH"),
+            (4, [6., -4., 0.], 6, "MK82.SH"),
+            (4, [6., -4., 0.], 2, "MAVRK.SH"),
+            (1, [3., -6., 0.], 4, "PHENX.SH"),
+            (0, [0., -6., 0.], 4, "MK82.SH"),
+            (5, [16.2, 0.2, 0.], 2, "SIDEM.SH"),
+        ] {
+            let s = station(location, mount, count, shape);
+            let pose = StorePose {
+                hardpoint: 0,
+                mount: s.mount,
+                rack: s.rack,
+                shape: s.weapon.shape.clone(),
+                look: StoreLook::Store,
+                items: count,
+                loaded: count,
+                body: [0.; 2],
+            };
+            for rounds in (1..=u32::from(count)).rev() {
+                // The store about to leave is drawn at its slot ...
+                let before = StorePose {
+                    items: rounds as u16,
+                    ..pose.clone()
+                };
+                let after = StorePose {
+                    items: rounds as u16 - 1,
+                    ..pose.clone()
+                };
+                let gone: Vec<Vector> = hung(&before)
+                    .into_iter()
+                    .filter(|h| h.held)
+                    .map(|h| h.centre)
+                    .filter(|c| !hung(&after).iter().any(|h| h.held && h.centre == *c))
+                    .collect();
+                // ... and released from that very point.
+                let release = s.release_point(units(rounds - 1, 1));
+                assert_eq!(gone, [release], "{shape} on {location}, {rounds} left");
+            }
+        }
     }
 }

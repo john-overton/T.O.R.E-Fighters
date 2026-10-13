@@ -934,36 +934,12 @@ fn streamer_world_points(
 
 /// The height above `from` (feet up) of the lowest face of `shape` straight
 /// above the point `right` and `forward` feet from the reference point, up
-/// to 12 ft above it. Shape positions are right, forward and up in source
-/// units; `scale` turns them into feet.
+/// to 12 ft above it ([`tore_sim::combat::hardpoints::Underside`], the same
+/// surface the simulation hangs stores from).
 fn underside(shape: &Shape, scale: f64, right: f64, forward: f64, from: f64) -> Option<f64> {
-    let mut lowest: Option<f64> = None;
-    for face in &shape.faces {
-        let p: Vec<[f64; 3]> = face
-            .positions
-            .iter()
-            .map(|q| [q[0], q[1], q[2]].map(|v| f64::from(v) * scale))
-            .collect();
-        for i in 1..p.len().saturating_sub(1) {
-            let [a, b, c] = [p[0], p[i], p[i + 1]];
-            // Barycentric weights of the point in the triangle's plan view.
-            let d = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
-            if d.abs() < 1e-9 {
-                continue;
-            }
-            let u = ((b[1] - c[1]) * (right - c[0]) + (c[0] - b[0]) * (forward - c[1])) / d;
-            let v = ((c[1] - a[1]) * (right - c[0]) + (a[0] - c[0]) * (forward - c[1])) / d;
-            let w = 1. - u - v;
-            if u < 0. || v < 0. || w < 0. {
-                continue;
-            }
-            let height = u * a[2] + v * b[2] + w * c[2] - from;
-            if (0. ..=12.).contains(&height) && lowest.is_none_or(|l| height < l) {
-                lowest = Some(height);
-            }
-        }
-    }
-    lowest
+    tore_sim::combat::hardpoints::Underside::of(shape, scale)
+        .over(right, forward, from)
+        .map(|h| h - from)
 }
 
 /// The outermost point of `shape` (scaled to feet by `scale`) on the right

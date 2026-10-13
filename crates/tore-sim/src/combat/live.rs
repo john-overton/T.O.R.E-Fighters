@@ -396,9 +396,12 @@ pub struct Station {
 impl Station {
     /// Where the store this station releases next leaves, feet right, up
     /// and forward of the aircraft, when `units_after` whole releases remain
-    /// once it has gone: its side of a paired record and, on a wing side with
-    /// two pylons, its own pylon ([`super::hardpoints::Rack::release_point`]).
-    /// A rocket leaves the pod that is firing (the outboard one first).
+    /// once it has gone: where that store hangs, on its side of a paired
+    /// record, on its own pylon of a two-pylon side and at its place on a
+    /// rack, 2 ft under the pylon's surface
+    /// ([`super::hardpoints::Rack::release_point`]), so it leaves from where
+    /// it is drawn. A rocket leaves the pod that is firing (the outboard one
+    /// first).
     pub fn release_point(&self, units_after: u32) -> Vector {
         let rack = self.rack;
         let left =
@@ -412,7 +415,32 @@ impl Station {
             self.count,
             units_after,
             u16::try_from(slot).unwrap_or(u16::MAX),
+            self.size(),
         )
+    }
+    /// How deep the pylon the store [`Self::release_point`] names hangs from
+    /// is, feet from the model's underside to the store's lugs
+    /// ([`super::hardpoints::Rack::store_depth`]); `None` for a wingtip rail
+    /// or an internal store.
+    pub fn release_depth(&self, units_after: u32) -> Option<f64> {
+        let rack = self.rack;
+        let left =
+            rack.release_mount(self.mount, units_after)[0] < 0. && rack.two_sided(self.mount);
+        let side_after = rack.sides(self.mount, u16::try_from(units_after).unwrap_or(u16::MAX))
+            [usize::from(left)];
+        let debit = u32::from(self.weapon.burst.actual_rounds_per_game).max(1);
+        let slot = u32::from(side_after) * debit / pod_rounds(&self.weapon).max(1);
+        rack.store_depth(
+            self.mount,
+            self.count,
+            usize::from(left),
+            u16::try_from(slot).unwrap_or(u16::MAX),
+            self.size(),
+        )
+    }
+    /// The size its store hangs by ([`super::store_sizes::StoreSize`]).
+    pub fn size(&self) -> super::store_sizes::StoreSize {
+        super::store_sizes::StoreSize::of_weapon(&self.weapon)
     }
     /// Where the store this station lets go next hangs now, while it holds
     /// `rounds` (before the release's debit): [`Self::release_point`] with
@@ -460,6 +488,9 @@ impl TankStore {
 pub struct TankStation {
     pub hardpoint: usize,
     pub mount: Vector,
+    /// The model's underside over its pylons (PY2); the location and
+    /// pairing the drawing uses are worked out from the tanks loaded.
+    pub rack: super::hardpoints::Rack,
     pub store: Option<TankStore>,
     pub quantity: u16,
 }
@@ -684,6 +715,15 @@ impl Configuration {
                     .ok_or_else(|| super::invalid("external mass overflow"))?;
             }
         }
+        // The clean model, for the underside each pylon hangs from (PY2). A
+        // missing or unreadable shape leaves stores at their records'
+        // heights.
+        let model = read(&a.shape)
+            .ok()
+            .and_then(|bytes| tore_formats::shape::Shape::parse(&bytes).ok())
+            .map(|shape| super::hardpoints::Underside::of(&shape, super::debris::scale(a.id)));
+        let place =
+            |h: &tore_formats::aircraft::Hardpoint| super::hardpoints::placed(h, model.as_ref());
         let mut tanks = Vec::new();
         for (index, h) in a.hardpoints.iter().enumerate().take(9) {
             let default = h.store.as_deref().filter(|name| name.ends_with(".GAS"));
@@ -695,9 +735,11 @@ impl Configuration {
                 && !retained_equipment
                 && (h.flags & 0x200 != 0 || default.is_some())
             {
+                let (mount, rack) = place(h);
                 tanks.push(TankStation {
                     hardpoint: index,
-                    mount: h.position.map(|v| f64::from(v) / 3.),
+                    mount,
+                    rack,
                     store: default
                         .map(|name| TankStore::parse(name, &read(name)?))
                         .transpose()?,
@@ -800,10 +842,11 @@ impl Configuration {
             {
                 return Err(super::invalid("unreviewed live-fire station"));
             }
+            let (mount, rack) = place(h);
             stations.push(Station {
                 weapon,
-                mount: h.position.map(|v| f64::from(v) / 3.),
-                rack: super::hardpoints::Rack::from_source(h),
+                mount,
+                rack,
                 count: h.count as u16,
                 // Source bit 8 fixes the loading slot; the reviewed SUU16 pod
                 // is still separate external hardware rather than an internal gun.
@@ -854,10 +897,11 @@ impl Configuration {
             }
             if let Some(weapon) = selected {
                 hardpoint_slots[hardpoint] = Some(stations.len());
+                let (mount, rack) = place(h);
                 stations.push(Station {
                     weapon,
-                    mount: h.position.map(|v| f64::from(v) / 3.),
-                    rack: super::hardpoints::Rack::from_source(h),
+                    mount,
+                    rack,
                     count: 0,
                     internal: false,
                 });
@@ -6470,6 +6514,7 @@ mod tests {
         config.tanks = vec![TankStation {
             hardpoint: 5,
             mount: [0.; 3],
+            rack: Default::default(),
             store: Some(tank.clone()),
             quantity: 2,
         }];
@@ -6628,12 +6673,14 @@ mod tests {
             TankStation {
                 hardpoint: 1,
                 mount: [0.; 3],
+                rack: Default::default(),
                 store: Some(store.clone()),
                 quantity: 2,
             },
             TankStation {
                 hardpoint: 2,
                 mount: [0.; 3],
+                rack: Default::default(),
                 store: None,
                 quantity: 0,
             },
@@ -6899,7 +6946,11 @@ mod tests {
                     mount: [0.; 3],
                     count: 11,
                     internal: !guided,
-                    rack: Default::default(),
+                    rack: crate::combat::hardpoints::Rack {
+                        // Released from the record's own point (a bay).
+                        location: 3,
+                        ..Default::default()
+                    },
                 }],
                 hit_points: 20,
                 target_category: 0x80,

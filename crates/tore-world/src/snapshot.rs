@@ -127,6 +127,22 @@ pub struct StorePose {
     pub body: [f64; 2],
 }
 
+impl StorePose {
+    /// The size it hangs by: the size its station's release uses
+    /// ([`tore_sim::combat::live::Station::size`]), so a drawn store and a
+    /// released one start at one point.
+    pub fn size(&self) -> tore_sim::combat::store_sizes::StoreSize {
+        use tore_sim::combat::store_sizes::{StoreSize, tank_body};
+        match self.look {
+            StoreLook::Store => StoreSize::of_shape(self.shape.as_deref()),
+            StoreLook::Pod if self.body[0] > 0. => StoreSize::body(self.body),
+            StoreLook::Pod => StoreSize::body(POD_BODY),
+            StoreLook::Tank if self.body[0] > 0. => StoreSize::body(self.body),
+            StoreLook::Tank => StoreSize::body(tank_body(2_000.)),
+        }
+    }
+}
+
 /// How a store is drawn.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum StoreLook {
@@ -139,31 +155,7 @@ pub enum StoreLook {
     Tank,
 }
 
-/// A fitted rocket pod's length and diameter, feet: LAU-61 size (retail
-/// has no pod shape).
-pub const POD_BODY: [f64; 2] = [8.5, 1.4];
-
-/// A rocket pod's length and diameter, feet, by weapon record: the real
-/// pod's size (slice BP2, docs/spec/stores-on-pylons.md#store-sizes);
-/// [`POD_BODY`] for one not listed. Opinionated (John 2026-10-12: real
-/// sizes), from public data.
-pub fn pod_body(source: &str) -> [f64; 2] {
-    match source.to_ascii_uppercase().as_str() {
-        "LAU61.JT" => [5.5, 1.38],
-        "LAU10.JT" => [8.3, 1.25],
-        "B8.JT" => [8.9, 1.71],
-        "B13.JT" => [11.7, 1.35],
-        _ => POD_BODY,
-    }
-}
-
-/// A fitted fuel tank's length and diameter, feet, from the fuel it holds:
-/// 13 by 2 ft for 2,000 lb (300 US gallons), scaled by the cube root of the
-/// fuel (retail has no tank shape).
-pub fn tank_body(fuel_lbs: f64) -> [f64; 2] {
-    let scale = (fuel_lbs.max(100.) / 2_000.).cbrt();
-    [13. * scale, 2. * scale]
-}
+pub use tore_sim::combat::store_sizes::{POD_BODY, pod_body, tank_body};
 
 /// One drawn station's whole stores (B3): the part of an aircraft's stores
 /// that changes in flight, which the network (protocol 27, the Stores event)
@@ -286,6 +278,7 @@ pub fn store_poses_of(
             rack: Rack {
                 location: if tank.mount[0].abs() > 1e-9 { 4 } else { 0 },
                 paired: tank.quantity > 1,
+                over: tank.rack.over,
             },
             shape: None,
             look: StoreLook::Tank,
