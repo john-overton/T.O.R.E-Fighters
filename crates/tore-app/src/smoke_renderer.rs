@@ -5,8 +5,8 @@ use tore_formats::Pic;
 use tore_sim::combat::countermeasures::{Devices, MAX_FLARE_PUFFS};
 use tore_sim::combat::smoke::{Kind, MAX_CONTRAIL_PUFFS, MAX_PUFFS, Smoke};
 const MAX_INSTANCES: usize = MAX_PUFFS + MAX_CONTRAIL_PUFFS + MAX_FLARE_PUFFS;
-/// Center, radius, art cell, opacity and flare glow.
-const INSTANCE_BYTES: usize = 9 * 4;
+/// Center, radius, art cell, opacity, flare glow and tint.
+const INSTANCE_BYTES: usize = 12 * 4;
 /// SMOKE.PIC cells: aircraft smoke, then the white missile puff.
 const AIRCRAFT_CELL: f32 = 0.;
 const MISSILE_CELL: f32 = 94.;
@@ -18,6 +18,8 @@ struct Sprite {
     radius: f64,
     cell: f32,
     opacity: f32,
+    /// Multiplies the art's colour (a blast's tan dust).
+    tint: [f32; 3],
 }
 
 struct Frustum {
@@ -103,7 +105,7 @@ impl SmokeRenderer {
             label: Some("Original smoke billboards"), layout: None,
             vertex: wgpu::VertexState { module: shader, entry_point: Some("smoke_vertex"), compilation_options: Default::default(), buffers: &[wgpu::VertexBufferLayout {
                 array_stride: INSTANCE_BYTES as u64, step_mode: wgpu::VertexStepMode::Instance,
-                attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32,2=>Float32,3=>Float32,4=>Float32x3],
+                attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32,2=>Float32,3=>Float32,4=>Float32x3,5=>Float32x3],
             }] },
             fragment: Some(wgpu::FragmentState {module:shader,entry_point:Some("smoke_fragment"),compilation_options:Default::default(),targets:&[Some(wgpu::ColorTargetState{format,blend:Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),write_mask:wgpu::ColorWrites::ALL})]}),
             primitive:wgpu::PrimitiveState { cull_mode:None,..Default::default() },
@@ -197,6 +199,7 @@ impl SmokeRenderer {
                         Kind::Missile | Kind::Contrail => MISSILE_CELL,
                     },
                     opacity: p.opacity(),
+                    tint: crate::gun_flash::PLAIN,
                 })
                 .take(MAX_INSTANCES),
         );
@@ -212,6 +215,7 @@ impl SmokeRenderer {
                     radius: p.radius(),
                     cell: MISSILE_CELL,
                     opacity: p.opacity(),
+                    tint: crate::gun_flash::PLAIN,
                 })
                 .take(room),
         );
@@ -230,6 +234,7 @@ impl SmokeRenderer {
                     radius: p.radius,
                     cell: if p.dark { AIRCRAFT_CELL } else { MISSILE_CELL },
                     opacity: p.opacity,
+                    tint: p.tint,
                 })
                 .take(room),
         );
@@ -259,6 +264,7 @@ impl SmokeRenderer {
                 .into_iter()
                 .chain([p.radius as f32, p.cell, p.opacity])
                 .chain(glow(flares, p.position))
+                .chain(p.tint)
             {
                 instances.extend(value.to_le_bytes());
             }
@@ -299,6 +305,7 @@ mod tests {
             radius: 14.,
             cell: MISSILE_CELL,
             opacity: 0.65,
+            tint: crate::gun_flash::PLAIN,
         };
         let view = Frustum::new(&camera, 1.);
         assert!(view.distance(&puff([0., 0., 100.])).is_some());

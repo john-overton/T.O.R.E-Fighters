@@ -10,10 +10,12 @@
 //! An impact is drawn at its weapon's size against its explosion type's
 //! (the effect's `scale`, docs/spec/explosions.md, "Size by weapon").
 //!
-//! A large ground explosion also throws out a shockwave: a ring of
-//! `SMOKE.PIC` dust (or white spray on water) that races outward from the
-//! blast and fades (docs/spec/explosions.md, "Shockwave"). It is drawn from
-//! the effect alone, so replays and every networked client show it too.
+//! A large ground explosion also throws out a shockwave: a low skirt of
+//! `SMOKE.PIC` dust, tan in dry air and pale in humid (or white spray on
+//! water), that races outward from the blast and fades
+//! (docs/spec/explosions.md, "Shockwave"). It is drawn from the effect and
+//! the mission's climate alone, so replays and every networked client show
+//! it too. The vapor and the lingering dust are `blast_climate`'s.
 pub mod cluster;
 
 use crate::camera::Camera;
@@ -36,9 +38,9 @@ pub const MAX_MARK_INSTANCES: usize = 3072;
 /// pixel across, a 500 lb bomb's crater to about 95 nmi (agent decision).
 pub const MARK_DRAW_WIDTHS: f64 = 4_000.;
 pub const MARK_DRAW_FT: f64 = 2_200_000.;
-/// Center relative to the eye, extent, mode, art cell, layer, opacity and
-/// emissive flag.
-const INSTANCE_BYTES: usize = 13 * 4;
+/// Center relative to the eye, extent, mode, art cell, layer, opacity,
+/// emissive flag and tint.
+const INSTANCE_BYTES: usize = 16 * 4;
 /// Every sheet is 256 wide; the tallest, GRNDMED3, is 386 rows.
 const SHEET_WIDTH: usize = 256;
 const SHEET_HEIGHT: usize = 386;
@@ -120,13 +122,14 @@ const CRATER_SHEET: usize = 24;
 const DEBRIS_SHEET: usize = 21;
 const SMOKE_SHEET: usize = 25;
 
-/// The shockwave of a large ground explosion (agent design, X1, 2026-10-10;
-/// the original draws none): `PUFFS` puffs on a ring that grows from the
-/// blast to `REACH` times the explosion's drawn width over `GROW_TICKS`,
-/// easing out as a blast wave slows, then drifts out a further `DRIFT`
-/// while it fades over the rest of the explosion's life. Each puff grows
-/// from `PUFF_START` to `PUFF_END` of the width across.
-mod shockwave {
+/// The white spray ring of a large water explosion (type 34; agent
+/// design, X1, 2026-10-10, kept as it was by John on 2026-10-12): `PUFFS`
+/// puffs on a ring that grows from the blast to `REACH` times the
+/// explosion's drawn width over `GROW_TICKS`, easing out as a blast wave
+/// slows, then drifts out a further `DRIFT` while it fades over the rest of
+/// the explosion's life. Each puff grows from `PUFF_START` to `PUFF_END` of
+/// the width across.
+mod spray {
     pub const PUFFS: usize = 32;
     pub const REACH: f64 = 1.6;
     pub const DRIFT: f64 = 0.15;
@@ -134,33 +137,130 @@ mod shockwave {
     pub const PUFF_START: f64 = 0.12;
     pub const PUFF_END: f64 = 0.5;
     pub const OPACITY: f64 = 0.85;
+    /// SMOKE.PIC's white puff.
+    pub const CELL: u16 = 2;
 }
 
-/// The `SMOKE.PIC` puff an explosion type's shockwave is made of: grey dust
-/// for the large land types (21 to 23, 35 to 37), white spray for the large
-/// water type (34); none for any other type.
-fn shockwave_puff(kind: u8) -> Option<u16> {
+/// The shockwave of a large land explosion (the shockwave overhaul, slice
+/// B12, agent design within John's request of 2026-10-12; first version X1,
+/// 2026-10-10): a low skirt of dust racing out from the blast, two
+/// staggered rows of `SMOKE.PIC`'s grey puff, `OUTER` on the leading edge
+/// and `INNER` behind it at `INNER_AT` of its radius, each puff squat
+/// (`SQUAT` as tall as wide) and of its own size and place within
+/// `SIZE_JITTER` and `RADIUS_JITTER`. The edge reaches `REACH` times the
+/// explosion's drawn width in `GROW_TICKS` (a cubic ease-out, as a blast
+/// wave slows), drifts a further `DRIFT` while it fades over the rest of the
+/// explosion's life, and the puffs grow from `PUFF_START` to `PUFF_END` of
+/// the width across. Coloured by the climate: tan in dry air, pale grey in
+/// humid ([`crate::blast_climate::Climate::ring_tint`]).
+mod shockwave {
+    pub const OUTER: usize = 24;
+    pub const INNER: usize = 12;
+    pub const INNER_AT: f64 = 0.62;
+    pub const REACH: f64 = 1.35;
+    pub const DRIFT: f64 = 0.2;
+    pub const GROW_TICKS: f64 = 60.;
+    pub const PUFF_START: f64 = 0.14;
+    pub const PUFF_END: f64 = 0.46;
+    pub const SQUAT: f64 = 0.55;
+    pub const SIZE_JITTER: f64 = 0.25;
+    pub const RADIUS_JITTER: f64 = 0.08;
+    pub const OPACITY: f64 = 0.8;
+    pub const INNER_OPACITY: f64 = 0.5;
+    pub const FADE_IN_TICKS: f64 = 4.;
+    /// SMOKE.PIC's grey puff.
+    pub const CELL: u16 = 1;
+}
+
+/// The ring an explosion type throws: dust for the large land types (21 to
+/// 23, 35 to 37), white spray for the large water type (34); none for any
+/// other type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Ring {
+    Dust,
+    Spray,
+}
+fn ring_of(kind: u8) -> Option<Ring> {
     match kind {
-        21..=23 | 35..=37 => Some(1),
-        34 => Some(2),
+        21..=23 | 35..=37 => Some(Ring::Dust),
+        34 => Some(Ring::Spray),
         _ => None,
     }
 }
 
 /// The shockwave ring of one explosion `elapsed` ticks into its `duration`,
-/// `width` feet across, standing on `position`.
+/// `width` feet across, standing on `position`, in `climate`.
 fn shockwave(
     kind: u8,
     position: [f64; 3],
     width: f64,
+    (elapsed, duration): (u16, u16),
+    climate: crate::blast_climate::Climate,
+    out: &mut Vec<Sprite>,
+) {
+    match ring_of(kind) {
+        Some(Ring::Dust) => dust_ring(position, width, elapsed, duration, climate, out),
+        Some(Ring::Spray) => spray_ring(position, width, elapsed, duration, out),
+        None => {}
+    }
+}
+
+fn dust_ring(
+    position: [f64; 3],
+    width: f64,
     elapsed: u16,
     duration: u16,
+    climate: crate::blast_climate::Climate,
     out: &mut Vec<Sprite>,
 ) {
     use shockwave::*;
-    let Some(puff) = shockwave_puff(kind) else {
+    let (_, layout) = SHEETS[SMOKE_SHEET];
+    let t = f64::from(elapsed);
+    let life = f64::from(duration.max(1));
+    let grow = (t / GROW_TICKS).min(1.);
+    let eased = 1. - (1. - grow).powi(3);
+    let drift = ((t - GROW_TICKS).max(0.) / (life - GROW_TICKS).max(1.)).min(1.);
+    let edge = width * (REACH * eased + DRIFT * drift);
+    let fade = (t / FADE_IN_TICKS).min(1.) * (1. - t / life).clamp(0., 1.).powf(1.5);
+    if fade <= 0. || edge <= 0. {
         return;
-    };
+    }
+    let tint = climate.ring_tint();
+    let turn = f64::from(blast::pick(position, 4, 360)).to_radians();
+    let puff = width * (PUFF_START + (PUFF_END - PUFF_START) * grow.sqrt()) / 2.;
+    let aspect = f64::from(layout.height) / f64::from(layout.width);
+    for (row, count, at, opacity, offset) in [
+        (0_u64, OUTER, 1., OPACITY, 0.),
+        (1, INNER, INNER_AT, INNER_OPACITY, 0.5),
+    ] {
+        for n in 0..count {
+            let salt = 40 + row * 100 + n as u64 * 2;
+            let jitter = |k: u64| f64::from(blast::pick(position, salt + k, 2001)) / 1000. - 1.;
+            let angle = turn + std::f64::consts::TAU * (n as f64 + offset) / count as f64;
+            let radius = edge * at * (1. + RADIUS_JITTER * jitter(0));
+            // The inner row's puffs are larger and fainter: the dust behind
+            // the edge.
+            let half = puff * (1. + SIZE_JITTER * jitter(1)) * if row == 0 { 1. } else { 1.3 };
+            out.push(Sprite {
+                position: [
+                    position[0] + radius * angle.cos(),
+                    position[1],
+                    position[2] + radius * angle.sin(),
+                ],
+                extent: [half, half * 2. * aspect * SQUAT],
+                mode: Mode::Standing,
+                cell: layout.cell(CELL),
+                layer: SMOKE_SHEET,
+                opacity: (opacity * fade) as f32,
+                emissive: false,
+                tint,
+            });
+        }
+    }
+}
+
+fn spray_ring(position: [f64; 3], width: f64, elapsed: u16, duration: u16, out: &mut Vec<Sprite>) {
+    use spray::*;
     let (_, layout) = SHEETS[SMOKE_SHEET];
     let t = f64::from(elapsed);
     let life = f64::from(duration.max(1));
@@ -187,10 +287,11 @@ fn shockwave(
                 half * 2. * f64::from(layout.height) / f64::from(layout.width),
             ],
             mode: Mode::Standing,
-            cell: layout.cell(puff),
+            cell: layout.cell(CELL),
             layer: SMOKE_SHEET,
             opacity: opacity as f32,
             emissive: false,
+            tint: PLAIN,
         });
     }
 }
@@ -270,7 +371,12 @@ struct Sprite {
     layer: usize,
     opacity: f32,
     emissive: bool,
+    /// Multiplies the art's colour: [`PLAIN`], or a shockwave's dust colour.
+    tint: [f32; 3],
 }
+
+/// Drawn in the art's own colours.
+const PLAIN: [f32; 3] = [1.; 3];
 impl Sprite {
     fn radius(&self) -> f64 {
         self.extent[0].max(self.extent[1]) * 2.
@@ -289,8 +395,14 @@ fn legacy(kind: EffectKind) -> Option<(u8, u16)> {
     }
 }
 
-/// Every explosion, crater and fire in one picture, craters first.
-fn sprites(art: &Art, effects: &[EffectPose], marks: &[MarkPose]) -> Vec<Sprite> {
+/// Every explosion, crater and fire in one picture, craters first, the
+/// shockwave rings coloured by `climate`.
+fn sprites(
+    art: &Art,
+    effects: &[EffectPose],
+    marks: &[MarkPose],
+    climate: crate::blast_climate::Climate,
+) -> Vec<Sprite> {
     let mut out = Vec::new();
     for mark in marks {
         let sprite = match mark.kind {
@@ -307,6 +419,7 @@ fn sprites(art: &Art, effects: &[EffectPose], marks: &[MarkPose]) -> Vec<Sprite>
                     layer: CRATER_SHEET,
                     opacity: 1.,
                     emissive: false,
+                    tint: PLAIN,
                 }
             }
             MarkKind::Fire => {
@@ -325,6 +438,7 @@ fn sprites(art: &Art, effects: &[EffectPose], marks: &[MarkPose]) -> Vec<Sprite>
                     layer: FIRE_SHEET,
                     opacity: mark.strength,
                     emissive: true,
+                    tint: PLAIN,
                 }
             }
         };
@@ -370,8 +484,8 @@ fn sprites(art: &Art, effects: &[EffectPose], marks: &[MarkPose]) -> Vec<Sprite>
                 kind,
                 effect.position,
                 width,
-                duration.saturating_sub(effect.ticks),
-                duration,
+                (duration.saturating_sub(effect.ticks), duration),
+                climate,
                 &mut out,
             );
         }
@@ -397,6 +511,7 @@ fn sprites(art: &Art, effects: &[EffectPose], marks: &[MarkPose]) -> Vec<Sprite>
             layer: sheet,
             opacity: 1.,
             emissive: true,
+            tint: PLAIN,
         });
         bomblets(art, effect, elapsed, &mut out);
     }
@@ -429,6 +544,7 @@ fn bomblets(art: &Art, effect: &EffectPose, elapsed: u16, out: &mut Vec<Sprite>)
             layer: sheet,
             opacity: 1.,
             emissive: true,
+            tint: PLAIN,
         });
     }
 }
@@ -567,7 +683,8 @@ impl EffectRenderer {
                         3 => Float32x4,
                         4 => Float32,
                         5 => Float32,
-                        6 => Float32
+                        6 => Float32,
+                        7 => Float32x3
                     ],
                 }],
             },
@@ -610,6 +727,7 @@ impl EffectRenderer {
         art: &Art,
         effects: &[EffectPose],
         marks: &[MarkPose],
+        climate: crate::blast_climate::Climate,
     ) {
         if self.bind.is_none() {
             let size = wgpu::Extent3d {
@@ -670,7 +788,7 @@ impl EffectRenderer {
                 ],
             }));
         }
-        self.sprites = sprites(art, effects, marks);
+        self.sprites = sprites(art, effects, marks, climate);
     }
     /// Sorts what the camera can see: craters first, then everything else
     /// far to near.
@@ -693,6 +811,9 @@ impl EffectRenderer {
                 s.layer as f32,
                 s.opacity,
                 if s.emissive { 1. } else { 0. },
+                s.tint[0],
+                s.tint[1],
+                s.tint[2],
             ]);
             for value in values {
                 instances.extend(value.to_le_bytes());
@@ -759,7 +880,12 @@ mod tests {
     fn flak_bursts_draw_the_small_sheet_for_85_mm_and_the_large_one_for_100_mm() {
         let art = Art::synthetic();
         let burst = |kind: u8, ticks: u16| {
-            sprites(&art, &[effect(EffectKind::Flak, Some(kind), ticks)], &[])
+            sprites(
+                &art,
+                &[effect(EffectKind::Flak, Some(kind), ticks)],
+                &[],
+                crate::blast_climate::Climate::default(),
+            )
         };
         // Type 27: FLAKA, 28 frames over two seconds, floating where it bursts.
         let small = burst(27, 120);
@@ -777,7 +903,12 @@ mod tests {
         assert!(width(28) > width(27));
         assert_eq!(large[0].extent[0], width(28) / 2.);
         // An old recording's flak (no type) draws as the small one.
-        let legacy = sprites(&art, &[effect(EffectKind::Flak, None, 240)], &[]);
+        let legacy = sprites(
+            &art,
+            &[effect(EffectKind::Flak, None, 240)],
+            &[],
+            crate::blast_climate::Climate::default(),
+        );
         assert_eq!(SHEETS[legacy[0].layer].0, "FLAKA.PIC");
     }
 
@@ -789,7 +920,7 @@ mod tests {
                 scale,
                 ..effect(EffectKind::Ground, Some(35), 200)
             };
-            sprites(&art, &[pose], &[])
+            sprites(&art, &[pose], &[], crate::blast_climate::Climate::default())
         };
         let full = at(100);
         let big = at(159);
@@ -816,6 +947,7 @@ mod tests {
                 ..effect(EffectKind::Hit, Some(18), 60)
             }],
             &[],
+            crate::blast_climate::Climate::default(),
         );
         let small = f64::from(blast::rolled_size(18, [100., 0., 200.]));
         assert_eq!(hit[0].extent[0], small / 4.);
@@ -825,15 +957,30 @@ mod tests {
     fn explosions_animate_over_their_life_and_sit_or_float_by_type() {
         let art = Art::synthetic();
         // Type 30: one second, twelve frames, floating in the air.
-        let start = sprites(&art, &[effect(EffectKind::Destroyed, Some(30), 120)], &[]);
-        let end = sprites(&art, &[effect(EffectKind::Destroyed, Some(30), 1)], &[]);
+        let start = sprites(
+            &art,
+            &[effect(EffectKind::Destroyed, Some(30), 120)],
+            &[],
+            crate::blast_climate::Climate::default(),
+        );
+        let end = sprites(
+            &art,
+            &[effect(EffectKind::Destroyed, Some(30), 1)],
+            &[],
+            crate::blast_climate::Climate::default(),
+        );
         assert_eq!(start[0].cell, SHEETS[4].1.cell(0));
         assert_eq!(end[0].cell, SHEETS[4].1.cell(11));
         assert_eq!(start[0].mode, Mode::Billboard);
         let width = f64::from(blast::rolled_size(30, [100., 0., 200.]));
         assert_eq!(start[0].extent[0], width / 2.);
         // Type 35 stands on the ground for two seconds.
-        let ground = sprites(&art, &[effect(EffectKind::Ground, Some(35), 120)], &[]);
+        let ground = sprites(
+            &art,
+            &[effect(EffectKind::Ground, Some(35), 120)],
+            &[],
+            crate::blast_climate::Climate::default(),
+        );
         let blast = ground.iter().find(|s| s.layer == 8).unwrap();
         assert_eq!(blast.mode, Mode::Standing);
         assert_eq!(blast.cell, SHEETS[8].1.cell(7));
@@ -845,65 +992,129 @@ mod tests {
                 effect(EffectKind::Launch, None, 45),
             ],
             &[],
+            crate::blast_climate::Climate::default(),
         );
         assert_eq!(old.len(), 1);
         assert_eq!(old[0].layer, 4);
-        let debris = sprites(&art, &[effect(EffectKind::DebrisImpact, None, 45)], &[]);
+        let debris = sprites(
+            &art,
+            &[effect(EffectKind::DebrisImpact, None, 45)],
+            &[],
+            crate::blast_climate::Climate::default(),
+        );
         assert_eq!((debris[0].layer, debris[0].extent[0]), (DEBRIS_SHEET, 7.5));
     }
 
     #[test]
     fn large_ground_explosions_throw_out_a_fading_shockwave_ring() {
+        use crate::blast_climate::Climate;
         let art = Art::synthetic();
-        let ring = |kind: u8, ticks: u16| -> Vec<Sprite> {
-            sprites(&art, &[effect(EffectKind::Ground, Some(kind), ticks)], &[])
-                .into_iter()
-                .filter(|s| s.layer == SMOKE_SHEET)
-                .collect()
+        let ring_in = |kind: u8, ticks: u16, climate: Climate| -> Vec<Sprite> {
+            sprites(
+                &art,
+                &[effect(EffectKind::Ground, Some(kind), ticks)],
+                &[],
+                climate,
+            )
+            .into_iter()
+            .filter(|s| s.layer == SMOKE_SHEET)
+            .collect()
         };
+        let ring = |kind, ticks| ring_in(kind, ticks, Climate::default());
         let center = [100., 0., 200.];
         let width = f64::from(blast::rolled_size(35, center));
-        let reach = |puffs: &[Sprite]| {
-            let p = puffs[0].position;
+        let reach = |s: &Sprite| {
+            let p = s.position;
             ((p[0] - center[0]).powi(2) + (p[2] - center[2]).powi(2)).sqrt()
         };
-        // Just after the blast: a tight, dense ring of dust on the ground.
-        let early = ring(35, 239);
-        assert_eq!(early.len(), shockwave::PUFFS);
+        let outer = |puffs: &[Sprite]| puffs[..shockwave::OUTER].to_vec();
+        let widest = |puffs: &[Sprite]| puffs.iter().map(reach).fold(0., f64::max);
+        // Just after the blast: a tight skirt of dust on the ground, two rows.
+        let early = ring(35, 236);
+        assert_eq!(early.len(), shockwave::OUTER + shockwave::INNER);
+        let aspect = {
+            let l = SHEETS[SMOKE_SHEET].1;
+            f64::from(l.height) / f64::from(l.width)
+        };
         assert!(early.iter().all(|s| s.mode == Mode::Standing
             && s.position[1] == 0.
             && s.cell == SHEETS[SMOKE_SHEET].1.cell(1)
-            && !s.emissive));
-        assert!(reach(&early) < 0.1 * width);
-        // Grown to its reach as the blast wave slows, then drifting on.
+            && !s.emissive
+            // Squat: wider than tall.
+            && s.extent[1] < s.extent[0] * 2. * aspect * 0.6));
+        assert!(widest(&early) < 0.3 * width);
+        // The leading edge reaches its full radius as the blast wave slows,
+        // each puff within its jitter; the inner row trails behind it.
         let grown = ring(35, 240 - shockwave::GROW_TICKS as u16);
-        assert!((reach(&grown) - shockwave::REACH * width).abs() < 1e-6);
+        let edge = shockwave::REACH * width;
+        for s in outer(&grown) {
+            let r = reach(&s) / edge;
+            assert!(
+                (1. - shockwave::RADIUS_JITTER - 1e-9..=1. + shockwave::RADIUS_JITTER + 1e-9)
+                    .contains(&r)
+            );
+        }
+        let inner_most = grown[shockwave::OUTER..]
+            .iter()
+            .map(reach)
+            .fold(f64::MAX, f64::min);
+        assert!(inner_most < 0.8 * edge);
+        // Then drifting on, the puffs grown, and fading out.
         let late = ring(35, 10);
-        assert!(reach(&late) > reach(&grown));
+        assert!(widest(&late) > widest(&grown));
         assert!(late[0].extent[0] > early[0].extent[0]);
-        // And fading out over the explosion's life.
         assert!(early[0].opacity > grown[0].opacity && grown[0].opacity > late[0].opacity);
         assert!(late[0].opacity < 0.01);
-        // Every large land type has one; on water it is white spray.
+        // Tan in a desert, pale in a jungle.
+        let arid = ring_in(35, 200, Climate { humidity: 0.1 });
+        let humid = ring_in(35, 200, Climate { humidity: 0.9 });
+        assert!(arid[0].tint[0] > arid[0].tint[2] + 0.3);
+        assert!(humid[0].tint[0] - humid[0].tint[2] < 0.1);
+        // Every large land type has one.
         for kind in [21, 22, 23, 36, 37] {
-            assert_eq!(ring(kind, 200).len(), shockwave::PUFFS, "{kind}");
+            assert_eq!(
+                ring(kind, 200).len(),
+                shockwave::OUTER + shockwave::INNER,
+                "{kind}"
+            );
         }
+        // On water it is the white spray as before, whatever the climate.
+        let spray_at = ring_in(
+            34,
+            240 - spray::GROW_TICKS as u16,
+            Climate { humidity: 0.1 },
+        );
+        assert_eq!(spray_at.len(), spray::PUFFS);
+        let water_width = f64::from(blast::rolled_size(34, center));
         assert!(
-            ring(34, 200)
+            spray_at
                 .iter()
-                .all(|s| s.cell == SHEETS[SMOKE_SHEET].1.cell(2))
+                .all(|s| s.cell == SHEETS[SMOKE_SHEET].1.cell(2)
+                    && s.tint == PLAIN
+                    && (reach(s) - spray::REACH * water_width).abs() < 1e-6)
         );
         // Gun puffs, air bursts, flak and debris landing have none.
         for kind in [15, 16, 17, 18, 27, 30, 38] {
             assert!(ring(kind, 40).is_empty(), "{kind}");
         }
-        let debris = sprites(&art, &[effect(EffectKind::DebrisImpact, Some(35), 40)], &[]);
+        let debris = sprites(
+            &art,
+            &[effect(EffectKind::DebrisImpact, Some(35), 40)],
+            &[],
+            Climate::default(),
+        );
         assert!(debris.iter().all(|s| s.layer != SMOKE_SHEET));
         // Without SMOKE.PIC the explosion still draws, alone.
         let mut missing = Art::synthetic();
         missing.present[SMOKE_SHEET] = false;
         assert_eq!(
-            sprites(&missing, &[effect(EffectKind::Ground, Some(35), 200)], &[]).len(),
+            sprites(
+                &missing,
+                &[effect(EffectKind::Ground, Some(35), 200)],
+                &[],
+                Climate::default()
+            )
+            .len(),
             1
         );
     }
@@ -918,7 +1129,12 @@ mod tests {
             strength: 1.,
             scale: 100,
         };
-        let drawn = sprites(&art, &[], &[fire(0.), fire(500.)]);
+        let drawn = sprites(
+            &art,
+            &[],
+            &[fire(0.), fire(500.)],
+            crate::blast_climate::Climate::default(),
+        );
         // Both are the crash site's 100 feet until one is fitted.
         assert!(drawn.iter().all(|s| s.extent[0] == 50.));
         let (_, layout) = SHEETS[FIRE_SHEET];
@@ -951,6 +1167,7 @@ mod tests {
                 mark(MarkKind::Crater(18), 0, 1.),
                 mark(MarkKind::Fire, 60, 0.25),
             ],
+            crate::blast_climate::Climate::default(),
         );
         assert_eq!(drawn[0].mode, Mode::Flat);
         assert_eq!(drawn[0].extent, [288., 288.]);
@@ -962,7 +1179,13 @@ mod tests {
         let mut missing = Art::synthetic();
         missing.present[CRATER_SHEET] = false;
         assert_eq!(
-            sprites(&missing, &[], &[mark(MarkKind::Crater(3), 0, 1.)]).len(),
+            sprites(
+                &missing,
+                &[],
+                &[mark(MarkKind::Crater(3), 0, 1.)],
+                crate::blast_climate::Climate::default()
+            )
+            .len(),
             0
         );
     }
@@ -971,7 +1194,14 @@ mod tests {
     fn a_cluster_burst_adds_small_ground_flashes_that_play_out_with_it() {
         let art = Art::synthetic();
         let burst = |kind, ticks| effect(kind, Some(18), ticks);
-        let drawn = |kind, ticks| sprites(&art, &[burst(kind, ticks)], &[]);
+        let drawn = |kind, ticks| {
+            sprites(
+                &art,
+                &[burst(kind, ticks)],
+                &[],
+                crate::blast_climate::Climate::default(),
+            )
+        };
         // The burst itself is the one AIRSML flash the original draws; the
         // flashes come after it.
         let all = drawn(EffectKind::Ground, 120);
@@ -1000,16 +1230,26 @@ mod tests {
         // aircraft, or a bomb's ground burst.
         assert_eq!(drawn(EffectKind::Hit, 60).len(), 1);
         assert_eq!(
-            sprites(&art, &[effect(EffectKind::Ground, Some(21), 60)], &[])
-                .iter()
-                .filter(|s| s.layer == 0)
-                .count(),
+            sprites(
+                &art,
+                &[effect(EffectKind::Ground, Some(21), 60)],
+                &[],
+                crate::blast_climate::Climate::default()
+            )
+            .iter()
+            .filter(|s| s.layer == 0)
+            .count(),
             0
         );
         // A missing flash sheet skips its flashes only.
         let mut missing = Art::synthetic();
         missing.present[19] = false;
-        let some = sprites(&missing, &[burst(EffectKind::Ground, 60)], &[]);
+        let some = sprites(
+            &missing,
+            &[burst(EffectKind::Ground, 60)],
+            &[],
+            crate::blast_climate::Climate::default(),
+        );
         assert!(some.iter().all(|s| s.layer != 19));
         assert!(some.len() > 1);
     }
@@ -1040,7 +1280,7 @@ mod tests {
         let start = std::time::Instant::now();
         let mut drawn = 0;
         for _ in 0..frames {
-            let all = sprites(&art, &[], &marks);
+            let all = sprites(&art, &[], &marks, crate::blast_climate::Climate::default());
             let fitted = fit_fires(&all, &[]);
             drawn = visible(&fitted, eye).len();
         }
