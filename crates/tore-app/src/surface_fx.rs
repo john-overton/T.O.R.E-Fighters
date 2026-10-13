@@ -20,6 +20,7 @@ use tore_sim::{
         live::EffectKind,
     },
 };
+use tore_world::surface::wreck::FireClass;
 
 /// Surface unit ids: the theater layout's at `0x4000_0000`, the template's
 /// at `0x5000_0000`, added trucks and radars above them. Rounds a surface
@@ -198,6 +199,9 @@ pub struct Tracker {
     /// it (a replay does): a wreck first seen already dead starts its smoke
     /// then, not as if it had just died ten seconds ago.
     deaths: BTreeMap<u32, u64>,
+    /// How wide each scene object's wreck fire is drawn (B16), when the
+    /// mission's scene is known ([`scene_fire_widths`]).
+    fire_widths: std::sync::Arc<BTreeMap<u32, f64>>,
     serial: u32,
 }
 
@@ -314,6 +318,12 @@ impl Tracker {
         self.wrecks_of(picture);
     }
 
+    /// How wide each scene object's wreck fire is drawn
+    /// ([`scene_fire_widths`]).
+    pub fn set_fire_widths(&mut self, widths: std::sync::Arc<BTreeMap<u32, f64>>) {
+        self.fire_widths = widths;
+    }
+
     /// A replay's record of when each destroyed unit died.
     pub fn set_deaths(&mut self, deaths: BTreeMap<u32, u64>) {
         self.deaths = deaths;
@@ -340,7 +350,12 @@ impl Tracker {
             if pose.crashed {
                 if let Some(fire) = fire_at(picture, pose.position) {
                     // Its fire is drawn as big as the unit.
-                    self.fires.push((fire, fire_width(pose.damage.initial_hp)));
+                    let width = self
+                        .fire_widths
+                        .get(&pose.id)
+                        .copied()
+                        .unwrap_or_else(|| fire_width(pose.damage.initial_hp));
+                    self.fires.push((fire, width));
                     continue;
                 }
                 if self.wrecks.contains_key(&pose.id) {
@@ -585,6 +600,43 @@ fn fire_at(picture: &RenderSnapshot, position: Vector) -> Option<Vector> {
 /// a crash site.
 pub fn fire_width(hit_points: i32) -> f64 {
     (30. * (f64::from(hit_points.max(1)) / 100.).sqrt()).clamp(24., 140.)
+}
+
+/// How a building's or fixed object's wreck fire is drawn (B16;
+/// opinionated, agent, 2026-10-12): as wide as `BUILDING_SHARE` of the
+/// object's smaller plan side, from `BUILDING_FT[0]` to `BUILDING_FT[1]`
+/// feet; fuel, ammunition and industry burn hard, `HARD_SHARE` of the larger
+/// side from `HARD_FT[0]` to `HARD_FT[1]`. A crash site's fire is 100 ft.
+pub mod object_fire {
+    pub const BUILDING_SHARE: f64 = 0.6;
+    pub const BUILDING_FT: [f64; 2] = [24., 90.];
+    pub const HARD_SHARE: f64 = 1.1;
+    pub const HARD_FT: [f64; 2] = [60., 160.];
+}
+
+/// The wreck fire width of every scene object whose fire class burns as a
+/// building or hard: by its contact box's plan size (`scene`) and class
+/// (`classes`). Units that burn as vehicles keep [`fire_width`].
+pub fn scene_fire_widths(
+    classes: &BTreeMap<u32, FireClass>,
+    scene: &tore_sim::airport::Scene,
+) -> BTreeMap<u32, f64> {
+    scene
+        .objects
+        .iter()
+        .filter_map(|object| {
+            let [x, _, z] = object.bounds.half;
+            let (small, large) = (2. * x.min(z), 2. * x.max(z));
+            let width = match classes.get(&object.id)? {
+                FireClass::Building => (small * object_fire::BUILDING_SHARE)
+                    .clamp(object_fire::BUILDING_FT[0], object_fire::BUILDING_FT[1]),
+                FireClass::Hard => (large * object_fire::HARD_SHARE)
+                    .clamp(object_fire::HARD_FT[0], object_fire::HARD_FT[1]),
+                FireClass::None | FireClass::Vehicle => return None,
+            };
+            Some((object.id, width))
+        })
+        .collect()
 }
 
 #[cfg(test)]

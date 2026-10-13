@@ -3046,6 +3046,8 @@ impl Viewer {
         // barrels, as live flight draws them.
         let flash_now = tick as f64 + self.clock.alpha();
         let mounts = crate::gun_flash::mounts(&picture, None);
+        self.gun_flash
+            .set_fire_widths(std::sync::Arc::clone(&self.scenery.fire_widths));
         Self::observe_surface(
             (&self.tracks, &self.recording),
             &mut self.gun_flash,

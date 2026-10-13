@@ -1617,6 +1617,10 @@ lowest and highest point about its origin, the share below it, its F2 ground
 offset and the lift that stands it on the ground, in world feet at its drawn
 size ([building grounding](formats/objects-and-shapes.md#building-grounding-2026-10-12),
 `surface-building-grounding`).
+`--damage [TYPE ...]` lists every OT (or the types named) with where retail
+keeps its destroyed look: its `~` variant, the damage branch inside its shape
+(intact and damaged face counts and heights) or neither
+([destroyed looks of buildings](formats/objects-and-shapes.md#destroyed-looks-of-buildings-and-bridges-2026-10-12)).
 `--surface-sheets` renders each template from above and closer, heavy
 defenses, at its retail spot (seed 1, no jitter or relocation); `--variants`
 adds the placed layout with seeds 1 and 2. A marker per unit: red Redfor, blue
@@ -1702,6 +1706,11 @@ in the game, stepped every tick; `--no-aim` draws them unturned.
 circling that far from the focus so the defenses lock on and fire, `--blue
 ORDINALS` hands template objects to Blue so units fight each other, and each
 focused unit prints its aim (`aim ... body ... turrets ... holds ...`).
+The scene's other static objects are named `object:TYPE` (`object:HANGR.OT`)
+in `--focus` and `--kill` (and `within:FEET` takes them), `near:ITEM` frames
+only the one ITEM nearest the template, `--bomb-runway N` drops N Mk 82s
+along the runway nearest the focus, and `--time HH:MM` sets the start time
+(night views); with no focus left the run lists every place by type (B16).
 `--surface-preview
 OUT_DIR destroyed` draws one unit of each class beside its destroyed look,
 read from the records, and the four carriers with their damaged islands.
@@ -1711,6 +1720,8 @@ TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/sc
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes PGU QPGSAM --focus 8 --distance 14 --look 30,-25 --rails 1
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes FRA QFFLT --focus CLEM.NT --distance 420 --kill CLEM.NT --burn 30
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes UKR QUCOL --seconds 30 --focus 10 --views close --distance 40 --intruder 5000,3000,2000
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes UKR QUSTRIP --kill within:600 --focus near:object:BRDMID.OT --distance 700 --time 23:00
+TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-scene .local/scenes UKR QUSTRIP --bomb-runway 8 --focus 0 --distance 1200
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-preview .local/destroyed destroyed
 ```
 

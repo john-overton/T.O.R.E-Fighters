@@ -49,7 +49,11 @@
 //! `--runway-art` also builds the scenery (no window) and adds how many vertex
 //! floats the runway draws now, which a destroyed runway keeps.
 //! `--retail-airfields` builds the retail airfield shapes instead of the
-//! redrawn airports, as `TORE_REDRAWN_AIRPORTS=0` does elsewhere.
+//! redrawn airports, as `TORE_REDRAWN_AIRPORTS=0` does elsewhere. With
+//! `--runway-art` an `end wreck` line follows for every destroyed scene
+//! object (its drawn vertex floats, fire class and whether it burns) and an
+//! `end wrecks` summary: how many, how many drawn nothing (a unit on a route draws every frame and is not counted), how many should
+//! burn and do, and the craters on runway pavement (B16).
 use crate::{AppResult, replay, snapshot::RenderSnapshot, surface_dump};
 use tore_formats::{aircraft::AircraftId, weapons::Weapon};
 use tore_sim::{
@@ -81,6 +85,90 @@ const FPS_PER_KNOT: f64 = 1.687_8;
 const BOMB_DIVE_DEG: f64 = 45.;
 const BOMB_SPEED_KT: f64 = 450.;
 const BOMB_HEIGHT_FT: f64 = 1_000.;
+
+/// `end wreck` lines (B16): each destroyed scene object, its type, the
+/// vertex floats it draws now, its fire class and whether a fire burns by
+/// it, then an `end wrecks` summary with the craters on runways.
+fn wreck_lines(world: &tore_world::world::World, scenery: &mut crate::scenery::Scenery) {
+    use tore_sim::combat::blast::MarkKind;
+    use tore_world::surface::{DestroyedLook, UnitId, wreck};
+    let scene = &world.terrain.airport_scene;
+    let classes = wreck::scene_fires(&world.terrain.surface, scene);
+    let marks = &world.combat.state.marks;
+    let (mut total, mut hidden, mut burning, mut should) = (0, 0, 0, 0);
+    for object in &scene.objects {
+        let Some(row) = world
+            .combat
+            .state
+            .targets
+            .iter()
+            .find(|row| row.id == object.id && row.hp <= 0)
+        else {
+            continue;
+        };
+        // Men and the barrage zones vanish by design.
+        if world
+            .terrain
+            .surface
+            .unit(UnitId(object.id))
+            .is_some_and(|unit| unit.look == DestroyedLook::Vanish)
+        {
+            continue;
+        }
+        total += 1;
+        // A unit that follows a route is drawn every frame (its wreck where
+        // it stopped), not by the static batch.
+        let moving = world
+            .terrain
+            .surface
+            .courses
+            .contains_key(&UnitId(object.id));
+        let drawn = scenery.drawn_vertex_floats(
+            object.id,
+            &world.combat.state.targets,
+            &world.combat.surface,
+        );
+        if drawn == 0 && !moving {
+            hidden += 1;
+        }
+        let class = classes
+            .get(&object.id)
+            .copied()
+            .unwrap_or(wreck::FireClass::None);
+        let fire = marks.iter().any(|m| {
+            m.kind == MarkKind::Fire
+                && (m.position[0] - row.position[0]).hypot(m.position[2] - row.position[2])
+                    <= crate::surface_fx::wreck::FIRE_NEAR_FT
+                        .max(object.bounds.half[0].max(object.bounds.half[2]))
+        });
+        if class.burns() {
+            should += 1;
+        }
+        if fire {
+            burning += 1;
+        }
+        println!(
+            "surface-objective: end wreck {:#010x} {} drawn {}{drawn} class {class:?} fire {}",
+            object.id,
+            object.object_type,
+            if moving { "moving " } else { "" },
+            if fire { "yes" } else { "no" }
+        );
+    }
+    let runway_craters = marks
+        .iter()
+        .filter(|m| {
+            matches!(m.kind, MarkKind::Crater(_))
+                && scene
+                    .runways
+                    .iter()
+                    .any(|r| r.surface.contains_horizontal(m.position[0], m.position[2]))
+        })
+        .count();
+    println!(
+        "surface-objective: end wrecks {total} hidden {hidden} should-burn {should} burning {burning} runway-craters {runway_craters}"
+    );
+}
 
 /// The release that puts a bomb's path on a target at `position` moving at
 /// `velocity`: aimed where the target will be when the bomb gets there.
@@ -587,6 +675,11 @@ pub fn run() -> AppResult<()> {
             row.hp,
             row.initial_hp
         );
+    }
+    // Every destroyed scene object with how it is drawn now and whether it
+    // burns (B16): none may vanish but men, and every building burns.
+    if let Some(scenery) = scenery.as_mut() {
+        wreck_lines(&world, scenery);
     }
     let last = capture(&world)?;
     print("end", &last);

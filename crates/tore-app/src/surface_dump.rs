@@ -157,6 +157,7 @@ pub fn run() -> AppResult<()> {
     let mut starts = false;
     let mut classes = false;
     let mut grounding = false;
+    let mut damage = false;
     let mut seeds = None;
     let mut variation = Variation::ON;
     let mut separation = DUMP_SEPARATION_NM;
@@ -177,6 +178,7 @@ pub fn run() -> AppResult<()> {
             "--starts" => starts = true,
             "--classes" => classes = true,
             "--grounding" => grounding = true,
+            "--damage" => damage = true,
             "--no-jitter" => variation.jitter = false,
             "--no-relocate" => variation.relocate = false,
             "--no-front" => variation.front = false,
@@ -201,6 +203,9 @@ pub fn run() -> AppResult<()> {
     }
     if grounding {
         return grounding_survey(&resources, &positional);
+    }
+    if damage {
+        return damage_survey(&resources, &positional);
     }
     let [theater, rest @ ..] = positional.as_slice() else {
         return Err("--surface-dump THEATER [STEM] [--defenses AAA SAM] [--surface-seed N] [--enemy-nationality N] [--night-stealth] [--no-jitter] [--no-relocate] | --all [--seeds N] | --sweep [--seeds N] [THEATER...] | --starts [THEATER...]".into());
@@ -294,6 +299,98 @@ fn grounding_survey(resources: &BTreeMap<String, Vec<u8>>, named: &[String]) -> 
         );
     }
     println!("grounding: {total} types, {lifted} lifted");
+    Ok(())
+}
+
+/// `--surface-dump --damage [TYPE ...]`: where retail keeps the destroyed
+/// look of every object type (or the named ones): its `~NAME.OT` variant,
+/// the damage branch inside its main shape (an `ac` record followed with
+/// `shape::DAMAGED_WORD` set), both or neither, with the intact and damaged
+/// face counts and heights (docs/formats/objects-and-shapes.md, "Destroyed
+/// looks of buildings and bridges").
+fn damage_survey(resources: &BTreeMap<String, Vec<u8>>, named: &[String]) -> AppResult<()> {
+    use tore_formats::shape::{DAMAGED_WORD, Shape};
+    let wanted: Vec<String> = named.iter().map(|n| n.to_ascii_uppercase()).collect();
+    let (mut total, mut branch, mut variant) = (0, 0, 0);
+    let summary = |shape: &Shape| {
+        let faces = shape.faces.len();
+        let range = tore_world::terrain::shape_height_range(shape).unwrap_or([0.; 2]);
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for face in &shape.faces {
+            for p in &face.positions {
+                for v in p {
+                    h = (h ^ u64::from(v.to_bits())).wrapping_mul(0x0100_0000_01b3);
+                }
+            }
+            h = (h ^ face.texture.len() as u64).wrapping_mul(0x0100_0000_01b3);
+        }
+        (faces, range, h)
+    };
+    for (name, bytes) in resources {
+        let upper = name.to_ascii_uppercase();
+        let chosen = if wanted.is_empty() {
+            upper.ends_with(".OT")
+        } else {
+            wanted
+                .iter()
+                .any(|w| *w == upper || format!("{w}.OT") == upper)
+        };
+        if !chosen {
+            continue;
+        }
+        let Ok(definition) = tore_formats::static_object::Definition::parse(bytes) else {
+            continue;
+        };
+        let Some(shape_name) = definition.main_shape.clone() else {
+            println!("damage: {name} no shape");
+            continue;
+        };
+        let Some(shape_bytes) = resources.get(&shape_name) else {
+            println!("damage: {name} shape {shape_name} missing");
+            continue;
+        };
+        total += 1;
+        let intact = Shape::with_export_state(shape_bytes, &BTreeMap::new());
+        let damaged = Shape::with_export_state(shape_bytes, &BTreeMap::from([(DAMAGED_WORD, 1)]));
+        let tilde = format!("~{upper}");
+        let has_variant = !upper.starts_with('~') && resources.contains_key(&tilde);
+        if has_variant {
+            variant += 1;
+        }
+        let (intact, damaged) = match (intact, damaged) {
+            (Ok(i), Ok(d)) => (i, d),
+            (i, d) => {
+                println!(
+                    "damage: {name} shape {shape_name} unreadable intact {:?} damaged {:?}",
+                    i.err().map(|e| e.to_string()),
+                    d.err().map(|e| e.to_string())
+                );
+                continue;
+            }
+        };
+        let (fi, ri, hi) = summary(&intact);
+        let (fd, rd, hd) = summary(&damaged);
+        let differs = hi != hd;
+        if differs {
+            branch += 1;
+        }
+        println!(
+            "damage: {name} shape {shape_name} cat {:#06x} hp {} exp {} crater {} intact {fi} faces {:.0}..{:.0} damaged {fd} faces {:.0}..{:.0} branch {} variant {}",
+            definition.category,
+            definition
+                .hit_points
+                .map_or("-".into(), |hp| hp.to_string()),
+            definition.explosion,
+            definition.crater,
+            ri[0],
+            ri[1],
+            rd[0],
+            rd[1],
+            if differs { "yes" } else { "no" },
+            if has_variant { tilde.as_str() } else { "-" },
+        );
+    }
+    println!("damage: {total} types, {branch} with a damage branch, {variant} with a ~ variant");
     Ok(())
 }
 

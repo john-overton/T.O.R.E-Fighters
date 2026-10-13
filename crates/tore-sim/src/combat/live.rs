@@ -5427,7 +5427,23 @@ impl State {
                     // kill, damaging its pilot, or changing the last attacker.
                     self.ledger.resolve(p.id, Resolution::Hit(0));
                     events.push(Event::Hit(wreck.id));
-                    impacts.push((position, EffectKind::Hit, w.effects.object_explosion, 0));
+                    // A destroyed runway still takes the weapon's crater (B16).
+                    let crater = if self
+                        .ground_looks
+                        .get(&wreck.id)
+                        .is_some_and(|look| look.pavement)
+                        && !water(position[0], position[2])
+                    {
+                        w.effects.crater_size
+                    } else {
+                        0
+                    };
+                    impacts.push((
+                        position,
+                        EffectKind::Hit,
+                        w.effects.object_explosion,
+                        crater,
+                    ));
                     if by_ownship {
                         scored.push((p.owner, false));
                     }
@@ -5620,7 +5636,24 @@ impl State {
                         self.ledger.kill(credit);
                         events.push(Event::Destroyed(t.id));
                     }
-                    impacts.push((position, EffectKind::Hit, w.effects.object_explosion, 0));
+                    // A weapon on pavement leaves its crater there, as on
+                    // open ground (B16): a bombed runway shows its craters.
+                    let crater = if self
+                        .ground_looks
+                        .get(&t.id)
+                        .is_some_and(|look| look.pavement)
+                        && !water(position[0], position[2])
+                    {
+                        w.effects.crater_size
+                    } else {
+                        0
+                    };
+                    impacts.push((
+                        position,
+                        EffectKind::Hit,
+                        w.effects.object_explosion,
+                        crater,
+                    ));
                     if t.hp == 0 {
                         // A ground object explodes as its unit record says,
                         // leaving its crater on land.
