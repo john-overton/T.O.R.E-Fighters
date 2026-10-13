@@ -77,6 +77,10 @@ pub struct GroundScene<'a> {
     /// In any order; ids unique.
     pub subjects: &'a [GroundSubject],
     pub weather: &'a crate::sensors::Weather,
+    /// The surface radars painting aircraft this tick, as (aircraft, unit)
+    /// pairs: the radar and the launchers it guides for (slice H4). A
+    /// helicopter learns where they stand.
+    pub painted: &'a [(u32, u32)],
 }
 
 /// Which of the AI's lists hold a contact.
@@ -472,6 +476,49 @@ impl GroundPicture {
         }
         defenses.sort_by_key(|d| d.id);
         self.threats = ThreatPicture { defenses, fighters };
+    }
+
+    /// A radar painting the aircraft, and the launchers it guides for, are
+    /// known from now on as if seen (slice H4, John's rule: a SAM or AAA
+    /// radar painting a helicopter makes it aware of the threat). Only
+    /// standing defences are taken.
+    pub(crate) fn reveal(&mut self, tick: u64, ids: &[u32], subjects: &Subjects<'_>) {
+        for id in ids {
+            let Some(subject) = subjects.get(*id) else {
+                continue;
+            };
+            let Some(facts) = subject.defense else {
+                continue;
+            };
+            if subject.object.destroyed {
+                continue;
+            }
+            let entry = SeenGround {
+                id: *id,
+                side: subject.side,
+                class: subject.object.class,
+                position: subject.object.position,
+                last_seen_tick: tick,
+                emitting: subject.object.emitting,
+                defense: Some(facts),
+            };
+            match self.seen.binary_search_by_key(id, |s| s.id) {
+                Ok(at) => self.seen[at] = entry,
+                Err(at) => self.seen.insert(at, entry),
+            }
+            if let Err(at) = self.threats.defenses.binary_search_by_key(id, |d| d.id) {
+                self.threats.defenses.insert(
+                    at,
+                    KnownDefense {
+                        id: *id,
+                        side: subject.side,
+                        position: subject.object.position,
+                        facts,
+                        briefed: false,
+                    },
+                );
+            }
+        }
     }
 
     /// Between rebuilds: each listed contact follows its object (a gone one

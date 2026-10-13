@@ -3458,7 +3458,14 @@ impl AiMission {
             .collect();
         actor.controller.set_gun_views(gun_views);
         // A striker's pass, flown below a B47 defence (slice ST-T).
-        let strike = actor.strike_step(tick, &own, strike_inputs, &strike_mates, strike_wing);
+        let strike = actor.strike_step(
+            tick,
+            &own,
+            strike_inputs,
+            &strike_mates,
+            strike_wing,
+            terrain,
+        );
         actor.controller.set_strike(strike);
         let stations = actor.station_views(&targets[..observed_len], &own);
         actor.trace.station_aim = actor

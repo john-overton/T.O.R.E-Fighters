@@ -724,6 +724,10 @@ pub struct AiWings {
     /// it before every step; `None` lets a striker use the height it was
     /// tasked at.
     mission_height_ft: Option<f64>,
+    /// The surface radars painting aircraft this tick, as (aircraft,
+    /// emitter) pairs (slice H4): a helicopter learns where they stand. The
+    /// host sets it before every step.
+    painting: Vec<(u32, u32)>,
 }
 
 struct PendingGun {
@@ -1321,6 +1325,7 @@ impl AiWings {
             decoy_rolls: Vec::new(),
             ground_ceiling: None,
             mission_height_ft: None,
+            painting: Vec::new(),
         })
     }
 

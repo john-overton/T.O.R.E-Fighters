@@ -131,7 +131,7 @@ impl Strike {
             Phase::Ingress | Phase::Regain | Phase::TurnBack | Phase::Wait => true,
             Phase::Attack => self.released == 0,
             // A hold on its own laser bomb (slice ST-L) has released.
-            Phase::Exit | Phase::Defend | Phase::Home | Phase::Lase => false,
+            Phase::Exit | Phase::Defend | Phase::Home | Phase::Lase | Phase::HoldOff => false,
         };
         if attacking {
             self.holds_off(cx);

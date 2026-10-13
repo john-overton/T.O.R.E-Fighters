@@ -1,0 +1,461 @@
+//! A helicopter's threat awareness on a strike (docs/spec/ai-strike.md,
+//! "Helicopter threat awareness"; John's rule, 2026-10-12; slice H4).
+//!
+//! - **Aware** of a defence (one in its ground picture, briefed, seen, or a
+//!   radar that painted it): the helicopter does not press an attack through
+//!   that defence's **ring** (its reach plus a margin). It looks for an
+//!   attack that stays outside every ring it knows: the pop-up when the
+//!   target and the run in are clear, else a stand-off shot from a firing
+//!   point outside the rings ([`plan_attack`]). With none, it **holds off**:
+//!   masked, low, outside the rings ([`hold_centre`]), for up to three
+//!   minutes while SEAD may kill the site; then it takes another target that
+//!   can be attacked from outside every ring, and with none it goes home.
+//! - **Not aware** (a MANPAD, a radar that was off, a radar busy with someone
+//!   else): when it is engaged it breaks (the helicopter defence), then
+//!   leaves the place it was engaged from (an **ambush ring**,
+//!   [`ambush_ring`]) and stays out until the threat has been quiet for a
+//!   minute; then it may resume.
+//!
+//! Everything is a fixed function of the threats, the positions, the store
+//! and the terrain: no dice (John, decision 13). The numbers are fitted
+//! (agent) unless marked.
+use crate::ai::awareness::ground::{GroundPicture, KnownDefense};
+use crate::ai::targeting::Side;
+use crate::attitude::Vector;
+use crate::sensors::FEET_PER_NAUTICAL_MILE;
+
+/// The margin a ring adds to a defence's reach (fitted, agent).
+pub const RING_MARGIN_FT: f64 = 2_000.;
+/// The longest the helicopter holds off for SEAD before it takes another
+/// target (John, 2026-10-12, "up to 3 minutes", the lead's number).
+pub const HOLD_WAIT_TICKS: u64 = 180 * 120;
+/// A hold-off is called on the radio once it has lasted this long (fitted,
+/// agent): a plan that comes clear a moment later is not worth two calls.
+pub const HOLD_CALL_TICKS: u64 = 5 * 120;
+/// The radius of the circle it flies while holding off (fitted, agent: a
+/// helicopter cannot hover on the AI's adapter, so it circles slowly).
+pub const HOLD_RADIUS_FT: f64 = 3_000.;
+/// Within this of its hold point it counts as there (fitted, agent).
+pub const HOLD_REACHED_FT: f64 = 2.0 * HOLD_RADIUS_FT;
+/// The stand-off's usual range: this share of the guided store's zone-1
+/// range (the ST-F stand-off, which flies straight at the target).
+pub const STANDOFF_SHARE: f64 = 0.6;
+/// The other firing range tried: this share of the AI's guided fire range
+/// (retail's 10,000 ft or half the zone, where the round may leave), so the
+/// shot leaves as soon as it unmasks (fitted, agent).
+pub const FIRE_RANGE_SHARE: f64 = 0.95;
+/// How far the helicopter carries on toward the target after it unmasks:
+/// the unmask and the guided hold (the AT-2's flight) at its speed (fitted,
+/// agent). This stretch must stay outside every ring too.
+pub const STANDOFF_ADVANCE_FT: f64 = 2_500.;
+/// Off the straight line, the helicopter first flies to a point this much
+/// farther out on the firing point's radial, then in along it, so it
+/// arrives nose on (fitted, agent).
+pub const LEAD_IN_FT: f64 = 3_000.;
+/// The firing point's bearing from the target is tried in steps of this,
+/// both ways from the helicopter's own bearing, all the way round
+/// (fitted, agent).
+pub const APPROACH_STEP_DEG: f64 = 15.;
+/// The ambush ring: centred this far from where the helicopter was engaged
+/// toward the threat's bearing (when it is known), with this radius
+/// (fitted, agent: about a MANPAD's or a light gun's reach plus the margin).
+pub const AMBUSH_OFFSET_FT: f64 = FEET_PER_NAUTICAL_MILE;
+pub const AMBUSH_RADIUS_FT: f64 = 3. * FEET_PER_NAUTICAL_MILE;
+/// The ambush ring is forgotten after this long without a warning or
+/// gunfire, once the helicopter is outside it (fitted, agent).
+pub const AMBUSH_QUIET_TICKS: u64 = 60 * 120;
+/// The ring id of an ambush (no site known).
+pub const AMBUSH_ID: u32 = 0;
+/// The hold point may slide round the site by these angles, degrees, to
+/// find terrain between them (fitted, agent).
+pub const MASK_TURNS_DEG: [f64; 5] = [0., 30., -30., 60., -60.];
+/// The height it holds at over the ground, feet (the masked height).
+pub const MASK_AGL_FT: f64 = crate::ai::helicopter_defense::MASK_AGL_FT;
+
+/// A threat's ring on the ground: inside it the threat reaches the
+/// helicopter (horizontal distance).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Ring {
+    /// The defence's id, or [`AMBUSH_ID`].
+    pub id: u32,
+    pub centre: Vector,
+    pub radius_ft: f64,
+}
+
+/// The rings of the known hostile defences: the reach of a missile site
+/// that can guide, or of a gun site, plus [`RING_MARGIN_FT`]. A defence
+/// that reaches nothing (a lone search radar, a launcher whose battery
+/// radar is dead) has none.
+pub fn rings<'a>(defenses: impl Iterator<Item = &'a KnownDefense>) -> Vec<Ring> {
+    defenses
+        .filter_map(|d| {
+            let missiles = if d.facts.working {
+                d.facts.missile_reach_ft
+            } else {
+                0.
+            };
+            let reach = missiles.max(d.facts.gun_reach_ft);
+            (reach > 0.).then_some(Ring {
+                id: d.id,
+                centre: d.position,
+                radius_ft: reach + RING_MARGIN_FT,
+            })
+        })
+        .collect()
+}
+
+/// The class words of a SAM and an AAA site.
+const CLASS_AIR_DEFENSE: u16 = 0x1000 | 0x800;
+
+/// The rings a helicopter of `side` knows from its ground picture: every
+/// known hostile defence whose missiles can guide, and the guns of the SAM
+/// and AAA sites and ships (a tank's gun does not ring the sky; fitted,
+/// agent).
+pub fn known_rings(picture: &GroundPicture, side: Side) -> Vec<Ring> {
+    let class = |id: u32| {
+        picture
+            .seen()
+            .iter()
+            .find(|s| s.id == id)
+            .map(|s| s.class)
+            .or_else(|| {
+                picture
+                    .briefed()
+                    .iter()
+                    .find(|b| b.id == id)
+                    .map(|b| b.class)
+            })
+            .unwrap_or(0)
+    };
+    let defenses: Vec<KnownDefense> = picture
+        .threats()
+        .hostile_defenses(side)
+        .map(|d| {
+            let mut d = *d;
+            if class(d.id) & CLASS_AIR_DEFENSE == 0 && !d.facts.ship {
+                d.facts.gun_reach_ft = 0.;
+            }
+            d
+        })
+        .collect();
+    rings(defenses.iter())
+}
+
+/// The ambush ring for a helicopter engaged at `own` by a threat on
+/// compass `bearing_deg` (when known).
+pub fn ambush_ring(own: Vector, bearing_deg: Option<f64>) -> Ring {
+    let centre = match bearing_deg {
+        Some(b) => {
+            let [x, z] = along(own, b, AMBUSH_OFFSET_FT);
+            [x, own[1], z]
+        }
+        None => own,
+    };
+    Ring {
+        id: AMBUSH_ID,
+        centre,
+        radius_ft: AMBUSH_RADIUS_FT,
+    }
+}
+
+fn horizontal(a: Vector, b: Vector) -> f64 {
+    (a[0] - b[0]).hypot(a[2] - b[2])
+}
+
+fn along(from: Vector, bearing_deg: f64, feet: f64) -> [f64; 2] {
+    let b = bearing_deg.to_radians();
+    [from[0] + b.sin() * feet, from[2] + b.cos() * feet]
+}
+
+fn bearing(from: Vector, to: Vector) -> f64 {
+    (to[0] - from[0])
+        .atan2(to[2] - from[2])
+        .to_degrees()
+        .rem_euclid(360.)
+}
+
+/// The ring `point` lies inside, if any (the first in the list).
+pub fn inside(rings: &[Ring], point: Vector) -> Option<&Ring> {
+    rings
+        .iter()
+        .find(|r| horizontal(r.centre, point) < r.radius_ft)
+}
+
+/// The horizontal distance from `c` to the segment `a`-`b`.
+fn segment_distance(c: Vector, a: Vector, b: Vector) -> f64 {
+    let (dx, dz) = (b[0] - a[0], b[2] - a[2]);
+    let length2 = dx * dx + dz * dz;
+    let t = if length2 > 0. {
+        (((c[0] - a[0]) * dx + (c[2] - a[2]) * dz) / length2).clamp(0., 1.)
+    } else {
+        0.
+    };
+    (a[0] + t * dx - c[0]).hypot(a[2] + t * dz - c[2])
+}
+
+/// Whether the straight line from `a` to `b` stays outside every ring. A
+/// ring `a` already lies in does not count when the line leads out of it
+/// (the helicopter may always leave).
+pub fn clear(rings: &[Ring], a: Vector, b: Vector) -> bool {
+    rings.iter().all(|r| {
+        let from_inside = horizontal(r.centre, a) < r.radius_ft;
+        if from_inside {
+            horizontal(r.centre, b) >= horizontal(r.centre, a)
+                && horizontal(r.centre, b) >= r.radius_ft
+        } else {
+            segment_distance(r.centre, a, b) >= r.radius_ft
+        }
+    })
+}
+
+/// How the attack is flown.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Plan {
+    /// The pop-up straight at the target.
+    PopUp,
+    /// A stand-off shot from `approach` (`None`: straight at the target, as
+    /// the ST-F stand-off), at `range_ft` from the target.
+    StandOff {
+        approach: Option<Vector>,
+        range_ft: f64,
+    },
+}
+
+/// An attack on `target` from `own` that stays outside every ring, if
+/// there is one. `standoff` is the guided store's zone-1 range and its
+/// AI fire range (none for rockets); `prefer_standoff` is the pass the threat level asks for
+/// (the stand-off under threat Missiles). The pop-up needs the target and
+/// the line to it clear; a stand-off needs its firing point, the line to
+/// it and the [`STANDOFF_ADVANCE_FT`] beyond it clear. The firing point's
+/// bearing from the target is tried from the helicopter's own outward, in
+/// [`APPROACH_STEP_DEG`] steps (the right first at each step), each at the
+/// usual range ([`STANDOFF_SHARE`] of the zone) and then just inside the
+/// fire range ([`FIRE_RANGE_SHARE`]).
+pub fn plan_attack(
+    own: Vector,
+    target: Vector,
+    standoff: Option<(f64, f64)>,
+    prefer_standoff: bool,
+    rings: &[Ring],
+) -> Option<Plan> {
+    let popup = inside(rings, target).is_none() && clear(rings, own, target);
+    if popup && (!prefer_standoff || standoff.is_none()) {
+        return Some(Plan::PopUp);
+    }
+    if let Some((reach, fire)) = standoff.filter(|(r, _)| *r > 0.) {
+        let ranges = [STANDOFF_SHARE * reach, FIRE_RANGE_SHARE * fire];
+        let base = bearing(target, own);
+        let steps = (180. / APPROACH_STEP_DEG).round() as i32;
+        for k in 0..=steps {
+            let sides: &[f64] = if k == 0 || k == steps {
+                &[1.]
+            } else {
+                &[1., -1.]
+            };
+            for side in sides {
+                let theta = base + side * f64::from(k) * APPROACH_STEP_DEG;
+                for (n, range) in ranges.into_iter().enumerate() {
+                    let [x, z] = along(target, theta, range);
+                    let point = [x, own[1], z];
+                    let [ex, ez] = along(target, theta, (range - STANDOFF_ADVANCE_FT).max(0.));
+                    let end = [ex, own[1], ez];
+                    let [lx, lz] = along(target, theta, range + LEAD_IN_FT);
+                    let lead = [lx, own[1], lz];
+                    // Straight in it flies the radial already; off it, it
+                    // joins the radial at the lead-in point first.
+                    let way_in = if k == 0 {
+                        clear(rings, own, point)
+                    } else {
+                        inside(rings, lead).is_none()
+                            && clear(rings, own, lead)
+                            && clear(rings, lead, point)
+                    };
+                    if inside(rings, point).is_none() && way_in && clear(rings, point, end) {
+                        // Straight in at the usual share: the ST-F stand-off.
+                        let straight = k == 0 && n == 0;
+                        return Some(Plan::StandOff {
+                            approach: (!straight).then_some(point),
+                            range_ft: range,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    popup.then_some(Plan::PopUp)
+}
+
+/// Where the helicopter holds off: the nearest point to it whose
+/// [`HOLD_RADIUS_FT`] circle lies outside every ring; of that point and the
+/// points slid round the nearest ring's centre by [`MASK_TURNS_DEG`], the
+/// first the terrain hides from that centre at the masked height, else that
+/// point. `ground` is the terrain height (none: no masking).
+pub fn hold_centre(
+    own: Vector,
+    rings: &[Ring],
+    ground: Option<&dyn Fn(f64, f64) -> f64>,
+) -> Vector {
+    let base = push_out(own, rings, own);
+    let (Some(ground), Some(site)) = (
+        ground,
+        rings
+            .iter()
+            .min_by(|a, b| {
+                (horizontal(a.centre, base) - a.radius_ft)
+                    .total_cmp(&(horizontal(b.centre, base) - b.radius_ft))
+            })
+            .copied(),
+    ) else {
+        return base;
+    };
+    let distance = horizontal(site.centre, base);
+    let from_site = bearing(site.centre, base);
+    for turn in MASK_TURNS_DEG {
+        let [x, z] = along(site.centre, from_site + turn, distance);
+        let candidate = push_out([x, own[1], z], rings, own);
+        let fits = rings
+            .iter()
+            .all(|r| horizontal(r.centre, candidate) >= r.radius_ft + HOLD_RADIUS_FT - 1.);
+        if fits && masked(site.centre, candidate, ground) {
+            return candidate;
+        }
+    }
+    base
+}
+
+/// Whether the terrain hides a point at the masked height from a site
+/// (seen from 40 ft over its ground, as the helicopter defence's).
+pub fn masked(site: Vector, point: Vector, ground: &dyn Fn(f64, f64) -> f64) -> bool {
+    let eye = [
+        site[0],
+        ground(site[0], site[2]) + crate::ai::helicopter_defense::SITE_HEIGHT_FT,
+        site[2],
+    ];
+    let at = [point[0], ground(point[0], point[2]) + MASK_AGL_FT, point[2]];
+    crate::combat::live::terrain_hit(eye, at, &|x, z| ground(x, z)).is_some()
+}
+
+/// Moves `point` out of every ring (plus the hold circle), radially from
+/// each ring's centre; `fallback` gives the direction when it sits on one.
+fn push_out(mut point: Vector, rings: &[Ring], fallback: Vector) -> Vector {
+    for _ in 0..8 {
+        let mut moved = false;
+        for r in rings {
+            let need = r.radius_ft + HOLD_RADIUS_FT;
+            let d = horizontal(r.centre, point);
+            if d < need {
+                let b = if d > 1. {
+                    bearing(r.centre, point)
+                } else if horizontal(r.centre, fallback) > 1. {
+                    bearing(r.centre, fallback)
+                } else {
+                    0.
+                };
+                let [x, z] = along(r.centre, b, need);
+                point = [x, point[1], z];
+                moved = true;
+            }
+        }
+        if !moved {
+            break;
+        }
+    }
+    point
+}
+
+/// What the helicopter decided about a threat, for the radio, the driver
+/// and the replay's `ai.strike` event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Decision {
+    /// A ring blocks every attack on its target: it holds off outside it.
+    HoldOff,
+    /// The ring is gone (SEAD killed the site, or the threat went quiet):
+    /// it resumes the attack.
+    Resume,
+    /// The wait ran out: it takes another target outside every ring.
+    Retarget,
+    /// The wait ran out and nothing is outside the rings: it goes home.
+    Home,
+    /// Engaged by a threat it did not know: after the break it leaves the
+    /// ring.
+    Leave,
+}
+
+impl Decision {
+    /// The fixed `reason` key of the replay's `ai.strike` event.
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::HoldOff => "threat_hold_off",
+            Self::Resume => "threat_resume",
+            Self::Retarget => "threat_retarget",
+            Self::Home => "threat_home",
+            Self::Leave => "threat_leave",
+        }
+    }
+    /// The words in the replay and the driver.
+    pub fn words(self) -> &'static str {
+        match self {
+            Self::HoldOff => "threat on target, holding off",
+            Self::Resume => "threat clear, resuming",
+            Self::Retarget => "target defended, switching targets",
+            Self::Home => "target defended, RTB",
+            Self::Leave => "engaged, leaving the threat ring",
+        }
+    }
+}
+
+/// A decision and when it was made, for the target it concerns.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Call {
+    pub decision: Decision,
+    pub tick: u64,
+    pub target: Option<u32>,
+    /// The ring that blocked (a defence's id, or [`AMBUSH_ID`]).
+    pub ring: Option<u32>,
+    /// The radio has said it.
+    pub told: bool,
+}
+
+/// The helicopter's threat state inside the strike.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct HeliThreat {
+    /// Holding off: the point it circles and the tick it began.
+    pub hold: Option<(Vector, u64)>,
+    /// The hold-off has been called (after [`HOLD_CALL_TICKS`]): a resume is
+    /// called too. A plan that comes clear at once is flown without a word.
+    pub announced: bool,
+    /// The three minutes ran out once: blocked targets are no longer waited
+    /// for.
+    pub waited: bool,
+    /// The ring of a threat it did not know, and the last tick it was
+    /// engaged.
+    pub ambush: Option<(Ring, u64)>,
+    /// The stand-off's firing point off the straight line, and its range.
+    pub approach: Option<Vector>,
+    pub standoff_ft: Option<f64>,
+    /// The last decision.
+    pub call: Option<Call>,
+}
+
+impl HeliThreat {
+    /// Records `decision` (the radio says it once).
+    pub fn decide(
+        &mut self,
+        decision: Decision,
+        tick: u64,
+        target: Option<u32>,
+        ring: Option<u32>,
+    ) {
+        self.call = Some(Call {
+            decision,
+            tick,
+            target,
+            ring,
+            told: false,
+        });
+    }
+}
+
+#[cfg(test)]
+#[path = "helicopter_threat_tests.rs"]
+mod tests;
