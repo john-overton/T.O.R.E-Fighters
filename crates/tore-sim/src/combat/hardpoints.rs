@@ -108,6 +108,15 @@ impl Rack {
             mount
         }
     }
+    /// Where the next store leaves a station of `mount` that holds `rounds`
+    /// now and debits `debit` rounds a release: [`Self::release_mount`]
+    /// with the whole releases left once it has gone. The bomb and rocket
+    /// sights predict from here, so the pipper shows where the store that
+    /// leaves next goes.
+    pub fn next_release_mount(self, mount: Vector, rounds: u32, debit: u32) -> Vector {
+        let debit = debit.max(1);
+        self.release_mount(mount, units(rounds.saturating_sub(debit), debit))
+    }
     /// How many of `items` stores hang on each side, [right, left]: the
     /// right side holds the odd one, because the left side empties first
     /// ([`Self::release_mount`]). An unpaired record holds them all at its

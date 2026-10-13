@@ -585,7 +585,12 @@ labelled; the full reading is in [bomb sight](../formats/weapons.md#bomb-sight).
 - **Impact point.** Where the selected bomb would hit the ground (or the sea) if
   released now, from the same release position and direction as a real release
   (the aircraft's **nose**, not its flight path) and the same motion (see
-  [bomb motion](#bomb-motion)), **at the point where the bomb's path first
+  [bomb motion](#bomb-motion)). The release position is the pylon the **next**
+  bomb leaves from: on a paired station the side the release rule picks, so
+  the pipper moves from the left bomb's fall to the right one's as the
+  station empties (opinionated, John 2026-10-12, slice BP3;
+  [stores on pylons](stores-on-pylons.md#rules)). The level T and the AI's
+  release gate read the same point. The impact is taken **at the point where the bomb's path first
   meets the terrain along its whole fall** (opinionated, John, 2026-10-11, after
   slice ST-LV: "CCIP pipper: realistic, predict where the bomb meets the
   terrain along its path, not the ground under the aircraft"). It is the
@@ -822,7 +827,8 @@ retail behaviour; the reach scale serves both.
 ### Rockets and guns
 
 - **Rockets** (ARM status, retail): a rocket pipper at the predicted ground
-  impact of the next rocket, flown through the rocket's motor, speed command and
+  impact of the next rocket, from the pod it leaves (the side of a paired pod
+  station the release rule picks; John 2026-10-12, slice BP3), flown through the rocket's motor, speed command and
   gravity (opinionated, agent, decision 12; without it rockets are unaimable).
   The prediction takes the very steps combat gives the round, on combat's own
   quarter-second clock, so a rocket fired on that tick lands on the pipper. The
@@ -1412,6 +1418,7 @@ records (ranges, weights, counts) are in the inventory above.
 | LVL auto-release | at 0 s with the cross-track miss inside the record's collateral radius, trigger held | opinionated (John, 2026-10-10); gate agent |
 | LVL impact | the mean path brought down to the target's ground; a moving object led by the fall | opinionated (agent, slice ST-LV) |
 | CCIP impact | where the mean path first meets the terrain along the fall (retail: the ground under the release point for the whole fall) | opinionated (John, 2026-10-11; retail rule kept as `predict_impact_flat`) |
+| Sight release point | the pylon the next store leaves (its side of a paired station), for CCIP, the level T, the rocket pipper and the AI's release gate | opinionated (John, 2026-10-12, slice BP3) |
 | Unguided fall of a laser bomb | a laser glide bomb let go with no spot falls on the bomb equation with a dumb bomb's scatter (up to 1.5 degrees in heading and pitch, each bomb its own) and waits for a spot | opinionated (John, 2026-10-12), scatter slice ST-G |
 | Release range scale | x=390, the missile scale | spec-derived |
 | Guided bomb glide | along the nose at 90 percent of the speed; 14 ft/s squared down to 278 ft/s; 6,370 units a second (about 35 degrees a second); no fall while guiding; 60 s life | retail data |

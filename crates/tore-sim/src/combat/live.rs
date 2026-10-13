@@ -4427,11 +4427,23 @@ impl State {
             if own.gunship.is_some() {
                 step_gunship(own, k, launcher, &self.targets, &rows, &ground, self.tick);
             }
+            // The sight predicts from the pylon the next store leaves (B3):
+            // with unlimited ammunition the release's first number picks it.
+            let mount = own.config.stations.get(own.selected).map_or([0.; 3], |s| {
+                let debit = u32::from(s.weapon.burst.actual_rounds_per_game);
+                if self.cheats.unlimited_ammo {
+                    s.rack.release_mount(s.mount, self.next_shot & 1)
+                } else {
+                    s.rack
+                        .next_release_mount(s.mount, u32::from(own.rounds(own.selected)), debit)
+                }
+            });
             own.delivery = self.delivery_of(
                 own.aircraft,
                 &own.cockpit,
                 &own.config,
                 &launcher,
+                mount,
                 &ground,
                 super::delivery::Clock {
                     tick: self.tick - 1,

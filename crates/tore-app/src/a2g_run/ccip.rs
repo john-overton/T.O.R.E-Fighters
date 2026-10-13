@@ -83,7 +83,7 @@ impl Pass {
                 if let Some((_, impact)) = tore_sim::combat::delivery::rocket_impact(
                     weapon,
                     &probe(from),
-                    scene.station(),
+                    scene.station().mount,
                     tore_sim::combat::delivery::Clock {
                         tick: 0,
                         service: 2,

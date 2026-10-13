@@ -58,6 +58,35 @@ impl AiWings {
         }
     }
 
+    /// Where the store AI `actor`'s next release from `station` lets go
+    /// hangs now, before the weapon service's debit: what its bomb or
+    /// rocket sight predicts from, so the release gate judges the pylon the
+    /// store will leave (B3 follow-up). The station's own position for an
+    /// aircraft or station with no configuration.
+    pub(super) fn next_release_mount(&self, actor: u32, station: usize) -> Option<Vector> {
+        let config = self.configs.get(&actor)?;
+        let s = config.stations.get(station)?;
+        let debit = u32::from(s.weapon.burst.actual_rounds_per_game);
+        let rounds = self.mission.actor(actor).and_then(|actor| {
+            actor
+                .stations()
+                .iter()
+                .find(|spec| usize::from(spec.station.0) == station)
+                .map(|spec| spec.rounds())
+        });
+        Some(match rounds {
+            Some(tore_sim::ai::weapon_service::Rounds::Finite(rounds)) => {
+                s.rack.next_release_mount(s.mount, rounds, debit)
+            }
+            // An unlimited store: the release's projectile number picks the
+            // side, as [`Self::rounds_after`] does.
+            _ => s.rack.release_mount(
+                s.mount,
+                tore_sim::combat::hardpoints::units(self.next_projectile_id & 1, debit),
+            ),
+        })
+    }
+
     /// Where AI `actor`'s next store from `station` leaves, feet right, up
     /// and forward of the aircraft: its side of a paired station (B3,
     /// [`tore_sim::combat::hardpoints::Rack::release_mount`]). `None` for an
