@@ -274,17 +274,24 @@ impl AircraftId {
         Self::A310,
     ];
     /// Whether the AI can fly this aircraft in a mission (`opinionated`, agent
-    /// decision, 2026-10-08, revised 2026-10-12). The AH-64 and the Mi-24 are
-    /// offered since slice ST-H (John, 2026-10-11): they fly on the powered-lift
-    /// physics a player uses, start trimmed in forward flight (or lift off from
-    /// a ground start), attack with the helicopter pop-up or stand-off pass and
-    /// defend with the helicopter break. The CH-47 (no weapons), the V-22, the
-    /// AV-8 and the Yak-141 are still kept from the AI: the transport and the
-    /// tiltrotor need a hover and transition controller, and on a ground start
-    /// the second AV-8 or Yak-141 wingman never leaves the taxiway. All of them
-    /// stay player-flyable.
+    /// decision 2026-10-08, revised 2026-10-12). Every selectable aircraft is
+    /// offered to the AI. The AH-64 and the Mi-24 came in with slice ST-H (John,
+    /// 2026-10-11); the CH-47 (unarmed, an AI wing choice only), the V-22, the
+    /// AV-8 and the Yak-141 with slice H3 (John, 2026-10-12), once the AI could
+    /// hover, climb and descend a rotorcraft (slice H1). The transport has no
+    /// weapons and never strikes; a ground start with AI wingmen of a vertical
+    /// lifter is slice H2's.
     pub fn ai_flyable(self) -> bool {
-        !matches!(self, Self::Ch47 | Self::V22 | Self::Av8 | Self::Yak141)
+        true
+    }
+    /// A helicopter, a tiltrotor or a vectored-thrust jet: an aircraft that
+    /// hovers and lifts off vertically, as the airfield sequences and the
+    /// Quick Mission creator's ground-start check read it.
+    pub fn is_powered_lift(self) -> bool {
+        matches!(
+            self,
+            Self::Av8 | Self::Yak141 | Self::V22 | Self::Ah64 | Self::Mi24 | Self::Ch47
+        )
     }
     /// The aircraft is a helicopter (the AH-64, Mi-24 or CH-47), as the
     /// strike class and the helicopter defence read it. The V-22 is a
@@ -1319,15 +1326,26 @@ pub fn dependency_report(
 #[cfg(test)]
 mod tests {
     #[test]
-    fn only_the_transport_the_tiltrotor_and_the_vtol_jets_are_kept_from_the_ai() {
+    fn every_selectable_aircraft_is_offered_to_the_ai() {
         use super::AircraftId::*;
         let kept: Vec<_> = super::AircraftId::SELECTABLE
             .into_iter()
             .filter(|id| !id.ai_flyable())
             .collect();
-        assert_eq!(kept, [Av8, Yak141, V22, Ch47]);
-        assert!(F18.ai_flyable() && Faxx.ai_flyable() && Mig17.ai_flyable());
-        assert!(Ah64.ai_flyable() && Mi24.ai_flyable());
+        assert!(kept.is_empty(), "{kept:?}");
+        // The four that slice H3 added, with the two helicopters before them.
+        for id in [Ch47, V22, Av8, Yak141, Ah64, Mi24, F18, Faxx, Mig17] {
+            assert!(id.ai_flyable(), "{id:?}");
+        }
+    }
+    #[test]
+    fn the_powered_lift_aircraft_are_the_six_that_hover() {
+        use super::AircraftId::*;
+        let hovering: Vec<_> = super::AircraftId::SELECTABLE
+            .into_iter()
+            .filter(|id| id.is_powered_lift())
+            .collect();
+        assert_eq!(hovering, [Av8, Yak141, V22, Ah64, Mi24, Ch47]);
     }
     #[test]
     fn concept_selection_is_distinct_from_its_retail_dependency() {

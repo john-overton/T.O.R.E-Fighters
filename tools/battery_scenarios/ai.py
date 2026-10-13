@@ -645,6 +645,50 @@ def fight(f: int, e: int, *extra: str) -> list[str]:
     return ["--probe-fight", f"{f}:{e}", *extra]
 
 
+# One AI aircraft's fuel judgement (`--probe-fuel-trace`, slice H3).
+FUEL_LINE = re.compile(
+    r"^AI fuel: tick=(\d+) actor=(\d+) aircraft=(\w+) fuel_lb=(\d+) endurance_s=(\d+) time_home_s=(\S+) "
+    r"state=(?:Some\()?(\w+)\)? activity=(\w+)$",
+    re.M,
+)
+
+
+def fuel_lines(output: str, aircraft: str) -> list[tuple[int, int, int, int, str, str, str]]:
+    """(tick, actor, fuel lb, endurance s, time home s or 'none', state, activity) of `aircraft`."""
+    return [
+        (int(t), int(a), int(f), int(e), home, state, activity)
+        for t, a, kind, f, e, home, state, activity in FUEL_LINE.findall(output)
+        if kind == aircraft
+    ]
+
+
+def rotorcraft_fuel_check(aircraft: str, *, bingo: bool) -> Callable[[str], list[str]]:
+    """Slice H3: the `aircraft` the AI flies (an AH-64, Mi-24, CH-47 or V-22) keeps a fuel schedule.
+    At the first line none of them is bingo or critical (with the probe's full tanks every one is
+    within reach of its home) and each has a time home at its own cruise; with `bingo` (a probe given
+    little fuel by `--probe-fuel`) the friendly ones start on caution, then turn bingo, head home
+    (`ReturningToBase`) and are not lost."""
+
+    def check(output: str) -> list[str]:
+        problems = probe_problems(output)
+        lines = fuel_lines(output, aircraft)
+        if not lines:
+            return problems + [f"no AI fuel line for {aircraft}"]
+        first = min(t for t, *_ in lines)
+        for tick, actor, fuel, endurance, home, state, activity in lines:
+            if tick == first and state in ("Bingo", "Critical") and not bingo:
+                problems.append(f"actor {actor} ({aircraft}) was {state} at the start with {fuel} lb, home {home} s")
+            if tick == first and home == "none":
+                problems.append(f"actor {actor} ({aircraft}) had no time home at the start")
+        if bingo:
+            homeward = [l for l in lines if l[5] == "Bingo" and l[6] == "ReturningToBase"]
+            if not homeward:
+                problems.append(f"no {aircraft} turned bingo and headed home: " + ", ".join(sorted({l[5] + "/" + l[6] for l in lines})))
+        return problems
+
+    return check
+
+
 # Failures that are understood and documented in docs/testing/lane-ai.md. Each
 # turns red when it starts to pass, so the entry gets removed with the fix.
 # (The 1,074 ft strip failures are gone: short strips are no ground start, John
@@ -824,6 +868,37 @@ def scenarios() -> list[Scenario]:
     out.append(probe("rtb-heli-land-order", ["--aircraft", "mi24", "--probe-wing-size", "3", "--separation", "100",
                                           "--probe-wing-order", "2000:land-selected"], ticks=14000,
                      notes="Told to land, AI helicopters do not enter the airfield sequence."))
+
+    # 9y. The CH-47, V-22, AV-8 and Yak-141 as the AI's aircraft (slice H3, John 2026-10-12): as the
+    # player's AI wingmen, as friendly wings 2 (with fuel lines: the rotorcraft keep a fuel schedule
+    # and are not bingo at the start), and as the enemy wing, airborne starts. The probes' own checks
+    # (no anomaly, no open hazard, no undamaged ground impact) are the test. The CH-47 is unarmed: it
+    # flies in formation and never strikes. Fuel lines come from `--probe-fuel-trace`.
+    rotor_names = {"ch47": "Ch47", "v22": "V22", "mi24": "Mi24", "ah64": "Ah64"}
+    for key in ["ch47", "v22", "av8", "yak141", "mi24", "ah64"]:
+        fuel = ["--probe-fuel-trace", "20"] if key in rotor_names else []
+        friendly_check = rotorcraft_fuel_check(rotor_names[key], bingo=False) if key in rotor_names else None
+        out.append(probe(f"fight-{key}-friendly-wings", fight(7, 2, "--aircraft", "f18", "--probe-friendly-aircraft", key,
+                                                         "--probe-enemy-aircraft", "su27", "--separation", "5", *attack, *fuel),
+                         ticks=9600, check=friendly_check,
+                         notes=f"The player's five F/A-18Ds and a friendly wing 2 of two {key} against two Su-27s."))
+        if key in ("mi24", "ah64"):
+            continue
+        out.append(probe(f"fight-{key}-enemy-wing", fight(2, 2, "--aircraft", "f18", "--probe-enemy-aircraft", key,
+                                                       "--separation", "5", *attack),
+                         ticks=9600, notes=f"Two {key} as the enemy wing against the player's F/A-18D pair."))
+        out.append(probe(f"fight-{key}-player-wing", ["--aircraft", key, "--probe-wing-size", "3", "--probe-enemy-aircraft", "su27",
+                                                   "--separation", "10"],
+                         ticks=9600, notes=f"A player in a {key} with two AI {key} wingmen on an airborne start."))
+    # Rotorcraft fuel (slice H3): little fuel in the tanks, so the friendly helicopters start on caution,
+    # turn bingo within the probe and head home (`ReturningToBase`). The enemy Su-27s have their own
+    # fuel and the aircraft counted are the friendly rotorcraft alone. (The V-22 is not probed here: it
+    # enters the aeroplane's airfield sequence when the fight ends, which is slice H2's to replace.)
+    out.append(probe("fight-heli-fuel-bingo-ah64", ["--aircraft", "ah64", "--probe-wing-size", "3", "--probe-enemy-aircraft", "su27",
+                                              "--separation", "10", "--probe-fuel", "450", "--probe-fuel-trace", "10"],
+                     ticks=16800, check=rotorcraft_fuel_check("Ah64", bingo=True),
+                     notes="The AI's AH-64 wingmen with 450 lb start on caution, turn bingo about a minute in "
+                           "and head home."))
 
     # 10. Ground starts: takeoff, formation, landing orders.
     for size in [1, 2, 3, 4, 5]:

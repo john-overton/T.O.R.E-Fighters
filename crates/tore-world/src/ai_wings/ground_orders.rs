@@ -465,6 +465,14 @@ impl AiWings {
     /// the target; everything else flies CAP, the player's own wing always
     /// (its wingmen strike on orders only) and every Redfor wing (Quick
     /// Mission gives Redfor no air-to-ground objectives).
+    ///
+    /// An aircraft with nothing to attack a ground target with never takes
+    /// the Strike role, whatever its class word or its wing's objective
+    /// (slice H3, agent decision, John 2026-10-12 for the CH-47: "unarmed AI
+    /// wing: flies its route, helicopter break, never strikes"): it would
+    /// have sent its whole wing home the moment the mission began. Armed
+    /// means a store `strike::has_usable_store` counts, a laser store
+    /// included (its spot is the strike tactics' business).
     pub fn apply_strike_roles(&mut self, objectives: &[GroupObjective; 6], ground_target: bool) {
         use tore_sim::ai::engagement::StrikeRole;
         let roles: Vec<(u32, StrikeRole)> = self
@@ -483,7 +491,7 @@ impl AiWings {
                     GroupObjective::Inherit => ground_target && bomber,
                     _ => false,
                 };
-                strike.then_some((slot.id, StrikeRole::Strike))
+                (strike && self.armed_for_ground(slot.id)).then_some((slot.id, StrikeRole::Strike))
             })
             .collect();
         for (id, role) in roles {

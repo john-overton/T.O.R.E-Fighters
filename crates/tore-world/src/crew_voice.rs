@@ -1022,8 +1022,21 @@ fn fuel_state(flight: &tore_sim::flight::State, home: Vector) -> FuelState {
     let flow = (propulsion.military_fuel_lbs_per_second * flight.throttle.max(0.1))
         .max(tore_sim::ai::mission::MINIMUM_FUEL_FLOW_LBS_PER_S);
     let endurance = (flight.fuel + flight.systems.external_lbs()) / flow;
-    let cruise = tore_sim::ai::route::cruise_speed(&speed_limits(flight)).0;
+    let limits = speed_limits(flight);
     let distance = (home[0] - flight.position[0]).hypot(home[2] - flight.position[2]);
+    // A helicopter or the V-22 has the rotorcraft schedule the AI's has
+    // (slice H3): home at 80 percent of its top speed, the shorter margins,
+    // and no home a full tank could not fly to and back from.
+    if tore_sim::ai::rotor_adapter::flies(flight) {
+        let cruise = tore_sim::ai::route::rotorcraft_cruise_speed(&limits).0;
+        let full = flight.model().configuration().mass.internal_fuel_lbs / flow;
+        let time_home = (cruise > 0.)
+            .then(|| distance / cruise)
+            .filter(|time| tore_sim::ai::route::rotorcraft_home_in_range(*time, full));
+        return tore_sim::ai::route::rotorcraft_fuel_state(endurance, time_home)
+            .unwrap_or(FuelState::NoManagement);
+    }
+    let cruise = tore_sim::ai::route::cruise_speed(&limits).0;
     let time_home = (cruise > 0.).then(|| distance / cruise);
     tore_sim::ai::route::fuel_state(endurance, time_home).unwrap_or(FuelState::NoManagement)
 }

@@ -277,8 +277,9 @@ Family binding and catalog counts remain in the experience spec.
 
 A helicopter does not fly the fighter reactions of B47 below: its break, its
 speed and height and its use of terrain are in
-[AI strike](ai-strike.md#helicopter-defence), and a helicopter keeps no fuel
-schedule and is never put through the airfield sequences (B48; see
+[AI strike](ai-strike.md#helicopter-defence), a helicopter has a fuel schedule of
+its own ([rotorcraft fuel](#rotorcraft-fuel-slice-h3)) and is not yet put through the
+airfield sequences (B48; see
 [AI helicopters in Quick Mission](ai-strike.md#ai-helicopters-in-quick-mission)).
 
 For the T.O.R.E strike behaviour of these families (heavies level-bomb from a
@@ -1233,6 +1234,65 @@ singletons and wingmen of a human leader land the same way (fitted).
 Damage-triggered disengagement is open. When no hostile aircraft remains, the
 same landing and return path end the mission
 ([return to base](#return-to-base-when-the-mission-is-over), opinionated).
+
+### Rotorcraft fuel (slice H3)
+
+Fitted (agent decisions, 2026-10-12, John's request that the AI helicopters get a
+real fuel schedule and bingo in place of ST-H's stopgap of none). B48 is written for
+fighters; a helicopter or the V-22 (the aircraft the [rotor
+adapter](#rotorcraft-and-jet-lift-control) flies) gets the same machinery with four
+differences. The AV-8 and the Yak-141 keep B48's fighter rules.
+
+**The AI burns fuel.** ST-H recorded that it did not; it does. The flight model debits
+the record's military fuel flow times the throttle every second the engine runs, and
+the rotor adapter holds the throttle at 1 (the engines are governed at full), so a
+rotorcraft burns the same pounds a second at any speed, hovering or flying at its top.
+The fuel an AI rotorcraft is lost to is real: with no fuel it is out of fuel and goes
+down. (The physics could burn by the power the rotor draws, which would lengthen a
+cruise; that is a flight-model change for players too and is not made here.)
+
+| | AH-64 | V-22 | CH-47 | Mi-24 |
+| --- | --- | --- | --- | --- |
+| Internal fuel, lb (record) | 2,000 | 2,000 | 3,307 | 3,307 |
+| Flow, lb/s (record) | 1 | 1 | 1 | 3 |
+| Full tank, minutes | 33 | 33 | 55 | 18 |
+| Top speed in the record's envelope, kt | 130 | 130 | 178 | 178 |
+| Cruise home (80 percent), kt | 104 | 104 | 142 | 142 |
+| Round-trip reach of a full tank with the reserve, nautical miles | 53 | 53 | 123 | 36 |
+
+- **Cruise.** The time home is the straight distance to the home field at 80 percent of
+  the envelope's top speed (`route::rotorcraft_cruise_speed`), and bingo flies the way
+  home at that speed. B48's cruise (the envelope's minimum plus a fifth) is 55 knots
+  for the AH-64 and 80 for the Mi-24, the figure that, with ST-H's 15 minute home,
+  made every Mi-24 bingo at the start. 80 percent is where a helicopter cruises in
+  practice; with a fuel flow that does not depend on speed, flying home faster is
+  strictly better. **Fitted.**
+- **Margins.** Bingo under the time home plus **3 minutes**, caution plus **7**,
+  critical under **2** (B48: 5, 10 and 4 minutes), because their tanks last 18 to 55
+  minutes, not a fighter's hour or more. **Fitted.** Out of fuel at zero and lost, as
+  B48.
+- **A home out of reach is no home.** The schedule has a home only when a full tank
+  could fly to it and back from there with the 3 minute reserve
+  (`route::rotorcraft_home_in_range`). A wing the Quick Mission puts farther from its
+  field than that (an enemy AH-64 wing 54 nm from the field with 33 minutes of fuel;
+  an enemy Mi-24 wing more than 36 nm out) would be bingo at the start and fly home
+  instead of the fight it was placed in. With no home it has no bingo, caution or
+  critical, as B48 has for an aircraft with no home airport, and flies its mission
+  until its field comes within reach. It is lost when the tanks run dry. **Fitted;**
+  the alternative (send it home at once) was weighed and left out because it would
+  neuter enemy helicopter wings.
+- **Not bingo at the start.** A friendly wing's field is normally a few minutes away
+  (3.5 minutes at the AH-64's cruise in the probes): the Mi-24 pair starts at 1,102 s
+  of fuel against a bingo line of 396 s, and flies the mission for about 12 minutes.
+- **What bingo does.** The same as for a fighter: the actor heads for its home runway
+  at the cruise speed and a wingman does not wait for its leader. The helicopter has
+  no airfield landing sequence yet (slice H2 builds it), so it holds over the field;
+  the 3 minute reserve burns, and it is out of fuel and lost there. The V-22 enters
+  the aeroplane's airfield sequence, which is also slice H2's to replace.
+
+Tests: `route::tests` (the cruise, the margins, the range), `ai_wings::tests::a_helicopter_has_a_fuel_schedule_at_its_own_cruise_and_goes_home_on_bingo`
+and the battery's `ai-fight-*-friendly-wings` (no helicopter bingo at the start, fuel
+lines from `--probe-fuel-trace`) and `ai-fight-heli-fuel-bingo-ah64` (`--probe-fuel`).
 
 ## Implementation status
 

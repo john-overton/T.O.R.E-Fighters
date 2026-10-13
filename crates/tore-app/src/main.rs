@@ -5844,6 +5844,12 @@ struct ProbeScript {
     /// offsets east and north of the player's start and an altitude in feet.
     /// Quick Mission has no mission route, so this stands in for one.
     wing_route: Vec<[f64; 3]>,
+    /// Ticks between `AI fuel:` lines (`--probe-fuel-trace`), 0 for none.
+    fuel_trace_ticks: u64,
+    /// `--probe-fuel POUNDS`: every AI aircraft starts with this much
+    /// internal fuel (slice H3), so a return on low fuel can be probed
+    /// without a half-hour mission.
+    fuel_lbs: Option<f64>,
     /// `--probe-lose-player TICK`: the player's aircraft crashes at this tick,
     /// so that a probe can test what the wing does without its human leader.
     /// Test harness only.
@@ -7580,17 +7586,17 @@ fn ai_probe_run(
         quick.draft.values[19] = 0;
     }
     if let Some(enemy) = script.enemy_aircraft {
-        let index = quick.ai_choice(enemy).ok_or(
-            "probe enemy aircraft is not imported, or the AI cannot fly it (no CH-47, V-22, AV-8 or Yak-141 wings)",
-        )?;
+        let index = quick
+            .ai_choice(enemy)
+            .ok_or("probe enemy aircraft is not imported, or the AI cannot fly it")?;
         for field in [23, 26, 29] {
             quick.draft.values[field] = index;
         }
     }
     if let Some(friend) = script.friendly_aircraft {
-        let index = quick.ai_choice(friend).ok_or(
-            "probe friendly aircraft is not imported, or the AI cannot fly it (no CH-47, V-22, AV-8 or Yak-141 wings)",
-        )?;
+        let index = quick
+            .ai_choice(friend)
+            .ok_or("probe friendly aircraft is not imported, or the AI cannot fly it")?;
         for field in [9, 12] {
             quick.draft.values[field] = index;
         }
@@ -7725,6 +7731,9 @@ fn ai_probe_run(
         ProbeGeometry::Rear => Some(flight.yaw),
         ProbeGeometry::Side => Some(flight.yaw + std::f64::consts::FRAC_PI_2),
     };
+    if let Some(pounds) = script.fuel_lbs {
+        bridge.set_internal_fuel_all(pounds);
+    }
     bridge.configure_probe(script.researched, enemy_heading, world.wind())?;
     bridge.set_flight_model(script.ai_flight_model)?;
     if script.blind_wing {
@@ -8335,6 +8344,25 @@ fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<
                                 actor.activity(),
                                 actor.incoming_fire_cue()
                             );
+                        }
+                    }
+                    if script.fuel_trace_ticks > 0 && tick % script.fuel_trace_ticks == 0 {
+                        // Every actor's fuel judgement (B48), for reading the
+                        // rotorcraft schedule (slice H3).
+                        for actor in bridge.mission().actors().iter() {
+                            if let Some(fuel) = actor.controller().trace().fuel {
+                                println!(
+                                    "AI fuel: tick={tick} actor={} aircraft={:?} fuel_lb={:.0} endurance_s={:.0} time_home_s={} state={:?} activity={:?}",
+                                    actor.id(),
+                                    actor.identity().aircraft,
+                                    fuel.internal_fuel_lbs,
+                                    fuel.endurance_s,
+                                    fuel.time_home_s
+                                        .map_or("none".to_owned(), |t| format!("{t:.0}")),
+                                    fuel.state,
+                                    actor.activity()
+                                );
+                            }
                         }
                     }
                     if let Some(attacker) = &mut attacker {
@@ -9826,6 +9854,24 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     return Err(usage.into());
                 }
                 probe_script.wing_route.push([east, north, altitude]);
+            }
+            "--probe-fuel-trace" => {
+                let seconds: f64 = args.next().ok_or("--probe-fuel-trace needs seconds")?.parse().map_err(|e| bad_number(&arg, &e))?;
+                if !(seconds > 0. && seconds <= 3600.) {
+                    return Err("--probe-fuel-trace needs 0..3600 seconds".into());
+                }
+                probe_script.fuel_trace_ticks = (seconds * 120.).round().max(1.) as u64;
+            }
+            "--probe-fuel" => {
+                let pounds: f64 = args
+                    .next()
+                    .ok_or("--probe-fuel needs pounds of internal fuel")?
+                    .parse()
+                    .map_err(|e| bad_number(&arg, &e))?;
+                if !(pounds.is_finite() && (0. ..=100_000.).contains(&pounds)) {
+                    return Err("--probe-fuel needs 0..100000 pounds".into());
+                }
+                probe_script.fuel_lbs = Some(pounds);
             }
             "--probe-lose-player" => {
                 let tick = args.next().ok_or("--probe-lose-player needs a tick")?;
@@ -12684,11 +12730,14 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 tore_formats::aircraft::AircraftId::Faxx,
             ] {
                 let airframe = aircraft::Airframe::load(&theater_resources, player)?;
-                // The AI cannot fly the helicopters, the V-22, the AV-8 or the
-                // Yak-141 yet, so they are not opponents.
+                // The matrix is fighters against fighters: the helicopters, the
+                // V-22, the AV-8 and the Yak-141 have been the AI's to fly
+                // since slice H3, but they stay out of it as before (their
+                // own probes are the `fight-heli-*` and `fight-vtol-*`
+                // scenarios).
                 for enemy in tore_formats::aircraft::AircraftId::SELECTABLE
                     .into_iter()
-                    .filter(|enemy| enemy.ai_flyable())
+                    .filter(|enemy| enemy.ai_flyable() && !enemy.is_powered_lift())
                 {
                     for skill in 0..4 {
                         for geometry in [

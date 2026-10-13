@@ -41,6 +41,7 @@ pub(super) fn own(position: Vector, speed: f64) -> OwnState {
         alive: true,
         fuel_endurance_s: 3_600.,
         time_home_s: Some(600.),
+        rotorcraft: false,
         internal_fuel_lbs: 8_000.,
         radar_emitting: true,
     }

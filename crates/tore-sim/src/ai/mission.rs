@@ -4566,19 +4566,13 @@ impl AiActor {
             },
             alive: self.alive(),
             fuel_endurance_s: self.endurance_s(),
-            // A helicopter keeps no fuel schedule (slice ST-H): its tanks
-            // last minutes at the flow its data gives, against the tens of
-            // minutes a cruise of 80 knots takes to reach a far field, so
-            // every Quick Mission helicopter would be bingo at the start.
-            // Fuel does not burn for the AI today in any case. Opinionated
-            // (agent).
-            time_home_s: if self.is_rotorcraft() {
-                None
-            } else {
-                self.time_home_s()
-            },
+            // A helicopter or the V-22 has its own fuel schedule (slice H3,
+            // see `route::rotorcraft_fuel_state`): its time home is at its
+            // own cruise, not the fighters' slow fifth of the envelope.
+            time_home_s: self.time_home_s(),
             internal_fuel_lbs: self.flight.fuel,
             radar_emitting: self.flight.radar,
+            rotorcraft: super::rotor_adapter::flies(&self.flight),
         }
     }
 
@@ -4793,16 +4787,36 @@ impl AiActor {
         self.flight.fuel / flow
     }
 
+    /// Seconds a full internal tank lasts at the flow `endurance_s` uses.
+    fn full_endurance_s(&self) -> f64 {
+        let c = self.flight.model().configuration();
+        let flow = (c.propulsion.military_fuel_lbs_per_second * self.flight.throttle.max(0.1))
+            .max(MINIMUM_FUEL_FLOW_LBS_PER_S);
+        c.mass.internal_fuel_lbs / flow
+    }
+
     fn time_home_s(&self) -> Option<f64> {
         let home = self.home()?;
         let dx = home.x - self.flight.position[0];
         let dz = home.z - self.flight.position[2];
         let distance = (dx * dx + dz * dz).sqrt();
-        let cruise = super::route::cruise_speed(&self.speed_limits());
+        let limits = self.speed_limits();
+        let rotorcraft = super::rotor_adapter::flies(&self.flight);
+        let cruise = if rotorcraft {
+            super::route::rotorcraft_cruise_speed(&limits)
+        } else {
+            super::route::cruise_speed(&limits)
+        };
         if cruise.0 <= 0.0 {
             return None;
         }
-        Some(distance / cruise.0)
+        let time = distance / cruise.0;
+        // A home a full tank could not fly to and back from, with the
+        // reserve, is none for a rotorcraft's fuel schedule (slice H3).
+        if rotorcraft && !super::route::rotorcraft_home_in_range(time, self.full_endurance_s()) {
+            return None;
+        }
+        Some(time)
     }
 
     /// Capture permitted classification/attitude metadata at the time of an
@@ -7341,6 +7355,7 @@ mod tests {
             alive: true,
             fuel_endurance_s: 3600.0,
             time_home_s: None,
+            rotorcraft: false,
             internal_fuel_lbs: 8000.0,
             radar_emitting: true,
         };

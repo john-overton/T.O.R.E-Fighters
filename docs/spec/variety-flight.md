@@ -142,28 +142,38 @@ The fits that predate it and still apply to the top speeds are below.
 ## AI wingmen
 
 Opinionated, agent decision 2026-10-08, revised 2026-10-12 (slice ST-H, John's
-decision of 2026-10-11): the AI flies the AH-64 and the Mi-24. It does not yet
-fly the CH-47, the V-22, the AV-8 or the Yak-141. On the legacy adapter the
-rotorcraft start at zero speed, drop about 400 feet and fly like airplanes (the
-CH-47 pitches to 69 degrees). A headless probe of the AV-8 and the Yak-141 shows
-they fly an airborne fight and land, but on a ground start the second wingman
-never leaves the taxiway (333 seconds checked, against a takeoff at 66 seconds
-for the F/A-18D and 54 seconds for the F-15). All six stay player-flyable.
+decision of 2026-10-11; slice H3, John's decisions of 2026-10-12): the AI flies
+every selectable aircraft, the six powered-lift aircraft (AH64, MI24, CH47, V22,
+AV8, YAK141) included. Slice ST-H brought in the AH-64 and the Mi-24; slice H3 the
+CH-47, the V-22, the AV-8 and the Yak-141, once the AI could hover, climb and
+descend a rotorcraft (slice H1). On the legacy adapter the rotorcraft start at
+zero speed, drop about 400 feet and fly like airplanes (the CH-47 pitches to 69
+degrees), which is why they were kept out. A headless probe of the AV-8 and the
+Yak-141 shows they fly an airborne fight and land, but on a ground start the
+second wingman never leaves the taxiway (333 seconds checked, against a takeoff at
+66 seconds for the F/A-18D and 54 seconds for the F-15): slice H2 builds the
+vertical and short takeoffs.
 
 - Quick Mission's five AI wing fields (friendly wings 2 and 3, enemy wings 1 to 3)
-  list the AH-64 and the Mi-24 and do not list the other four. Friendly wing 1
-  shares the player's list, so a player who picks one of the four flies with no
-  AI wingmen: the wing count drops to one, with a notice. A player in an AH-64 or
-  a Mi-24 has AI wingmen on an airborne start; on a ground start the wing is the
-  player alone, because the AI cannot lift a helicopter off the ground. The
-  multiplayer lobby's wing 1 is for people and keeps its size.
-- A mission file or lobby spec that puts one of the four in a wing other than
-  friendly wing 1 is refused (`AircraftId::ai_flyable`).
-- The probe options `--probe-enemy-aircraft` and `--probe-friendly-aircraft`
-  refuse the four, and `--probe-matrix` skips them as opponents.
-- How the AI flies the two helicopters (their start height, no landing, no fuel
-  schedule, the strike passes and the defence) is in
-  [AI strike](ai-strike.md#ai-helicopters-in-quick-mission).
+  list every aircraft the player's field lists. Friendly wing 1 shares the
+  player's list. A player in a helicopter, the V-22, the AV-8 or the Yak-141 has AI
+  wingmen on an airborne start; on a ground start the wing is the player alone
+  (notice "The AI cannot take a ... off the ground yet"), because the AI cannot
+  lift one off the ground yet. The multiplayer lobby's wing 1 is for people and
+  keeps its size; its other wings list and accept all six (the same check,
+  `AircraftId::ai_flyable`, guards a mission file).
+- **The CH-47 is an AI wing choice only** (John, 2026-10-12: Quick Mission has
+  escort missions already, no new escort objective). It has no weapons: it flies
+  its route or the mission's, defends with the helicopter break, and never
+  strikes. See [AI strike](ai-strike.md#ai-helicopters-in-quick-mission), "Who
+  strikes".
+- The probe options `--probe-enemy-aircraft` and `--probe-friendly-aircraft` take
+  all six; `--probe-matrix` (fighters against fighters) still leaves them out as
+  opponents.
+- How the AI flies the helicopters (their start height, the fuel schedule, the
+  strike passes and the defence) is in
+  [AI strike](ai-strike.md#ai-helicopters-in-quick-mission) and
+  [the AI's fuel](ai.md#b48-routes-fuel-and-recovery).
 - Since slice H1 (2026-10-12) every AI helicopter and the AI V-22 fly the
   powered-lift physics from the mission start, in single player too (before, an
   airborne AI rotorcraft in single player flew the legacy model, an aeroplane's),
