@@ -42,9 +42,17 @@ const KT: f64 = crate::runway_wind::FEET_PER_SECOND_PER_KNOT;
 const GRAVITY: f64 = 32.174;
 
 /// The climb and sink a steer request may command in forward flight, ft/s
-/// (fitted: 2,000 ft/min, twice the player A modes', so the helicopter
-/// defence's 10 degree path is flown at 120 kt).
-pub const FORWARD_CLIMB_FPS: f64 = 2_000. / 60.;
+/// (fitted: 3,000 ft/min, three times the player A modes', so the
+/// helicopter defence's 10 degree path is flown at 150 kt).
+pub const FORWARD_CLIMB_FPS: f64 = 3_000. / 60.;
+/// The B44 terrain floor's minimum height for an aircraft on this adapter,
+/// ft (the fighters' is 300): below the helicopter defence's and the
+/// stand-off attack's 200 ft masking height.
+pub const MINIMUM_ALTITUDE_FT: f64 = 100.;
+/// The speed the adapter holds may stand this far over the maximum while
+/// it settles, kt: the helicopter defence's "no descent past the maximum"
+/// allows for it.
+pub const SPEED_HOLD_MARGIN_KT: f64 = 10.;
 /// The pitch attitude the forward law may command, degrees (the player A
 /// modes' 15).
 pub const FORWARD_PITCH_DEG: f64 = 15.;

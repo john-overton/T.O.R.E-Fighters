@@ -4424,7 +4424,17 @@ impl AiActor {
                     heading_deg: own.heading_deg,
                     speed_ft_s: own.speed.0,
                     bank_deg: own.bank_deg,
-                    maximum_ft_s: own.limits.maximum.0,
+                    // The rotor adapter holds the speed on the cyclic
+                    // whatever the path, so a descent does not speed it
+                    // up: its few knots over the maximum are no reason to
+                    // stop coming down (slice H1).
+                    maximum_ft_s: own.limits.maximum.0
+                        + if super::rotor_adapter::flies(&self.flight) {
+                            super::rotor_adapter::SPEED_HOLD_MARGIN_KT
+                                * crate::runway_wind::FEET_PER_SECOND_PER_KNOT
+                        } else {
+                            0.0
+                        },
                 },
                 super::helicopter_defense::Threat {
                     bearing_deg: threat,
@@ -4494,11 +4504,18 @@ impl AiActor {
         // Terrain ahead of the aircraft, for the B44 floor: the highest
         // ground along the look-ahead (see [`terrain_lookahead_ft`]).
         let heading = self.flight.yaw;
+        // A rotorcraft on its own control keeps a lower floor than the
+        // fighters', so it can fly the 200 ft masking height (slice H1).
+        let minimum_altitude = if super::rotor_adapter::flies(&self.flight) {
+            super::rotor_adapter::MINIMUM_ALTITUDE_FT
+        } else {
+            MINIMUM_ALTITUDE_FT
+        };
         let (terrain_ahead, terrain_climb) = terrain_ahead_ft(
             self.flight.position,
             heading,
             terrain_lookahead_ft(self.flight.speed),
-            MINIMUM_ALTITUDE_FT,
+            minimum_altitude,
             ground,
         );
         let limits = self.speed_limits();
@@ -4515,7 +4532,7 @@ impl AiActor {
             agl_ft: agl,
             terrain_ahead_ft: terrain_ahead,
             terrain_climb_deg: terrain_climb,
-            minimum_altitude_ft: MINIMUM_ALTITUDE_FT,
+            minimum_altitude_ft: minimum_altitude,
             at_ceiling: false,
             on_ground: agl <= GROUND_CONTACT_FT,
             g_limit: positive_g.min(
