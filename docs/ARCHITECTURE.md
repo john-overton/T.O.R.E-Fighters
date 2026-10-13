@@ -904,6 +904,7 @@ flowchart LR
 | `tore-sim` `ai::surface` | The engagement controller (Idle, Search, Prepare, Track, Fire, Pause, Reload, Empty, Blind) and the experience table, renderer-free and checkpointed |
 | `tore-sim` `combat::surface_guns`, `combat/live/{surface, collateral, parked}` | The AAA tuning table; `State::fire_surface` and surface rounds (flak time fuze, capacity reserve); splash damage for every weapon; parked aircraft rows |
 | `tore-app` `scenery/surface_art.rs`, `scenery/rubble.rs`, `surface_fx.rs`, `city_fires.rs` | Wreck swaps (a destroyed parked aircraft's burnt hulk too), launcher rails, carrier parts and sprites; flak, gunfire and launch effects and wreck smoke; the burning city fill's fires and smoke (presentation from the fill's flattened set) |
+| `tore-app` `night_glow.rs`, `night_glow.wgsl` | The night glow points of explosions and fires and the fires' ground light (nr-fx3), built from the effect renderer's glowing sprites and the burning city's farther buildings, drawn in the world pass after the airfield lights |
 
 **One tick.** `World::step` moves routed units (`Combat::step_surface`) right
 before the combat step, so this tick's fire meets units where they are. After
