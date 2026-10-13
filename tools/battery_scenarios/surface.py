@@ -36,9 +36,14 @@ origin, is lifted 42.7 ft; the hangar 26.7 ft), and that point agrees with the
 shape's F2 ground offset within 3 ft; runways, bridges and roads are not
 lifted.
 
-`surface-small-arms-airfield` flies a 400 kt, 300 ft pass over an airfield target's squads (B17): one
-squad at each experience, then the squads around it. Their rounds carry tracers (every third round) and
-their hits on the jet stay within the fitted bounds (the visual-gun aim error hit half the rounds).
+`surface-small-arms-airfield` flies a 400 kt, 300 ft pass over an airfield target's squads (B17, BD2): one
+squad at each experience, the squads around it at average and at ace, and a 1,000 ft, a 600 kt and a 1,500 ft
+side pass. Their rounds carry tracers (every third round) and they only rarely hit a jet passing through
+(about one round in a hundred; the riflemen lead it poorly, John 2026-10-12).
+
+`surface-squad-killable` kills one airfield squad (BD2) with the A-4E's gun in a strafing pass, with an F/A-18's
+Mk 82 in a dive, and with the trace's own kill at 23 s: every one is a kill of the squad's id, and a squad
+killed in the middle of a pass fires no more.
 
 The engagement scenarios run `--surface-trace`, which flies the player on a
 scripted straight line past one surface unit and prints what its controller
@@ -361,51 +366,97 @@ def zsu23_problems(output: str) -> list[str]:
 
 
 SMALL_ARMS_PLAYER_HP = 232  # an F/A-18's hit points
-# Per experience (novice, average, veteran, ace), what one squad may do to a
-# jet on a pass straight over it (fitted bounds around the measured 5, 7, 11
-# and 13 hits of 35 to 40 rounds; the old visual-gun error hit 15, 21, 26 and 26).
-SMALL_ARMS_MAX_HIT_SHARE = (0.25, 0.30, 0.40, 0.45)
-SMALL_ARMS_MAX_HP_LOSS = (0.45, 0.50, 0.65, 0.70)
+# What small arms may do to a jet (fitted bounds around the measured 0.3 to 1.3
+# percent of rounds on a pass straight over a squad at 400 kt and 300 ft, John
+# 2026-10-12: "RARELY hit an aircraft passing through"; the visual-gun aim
+# error hit 15 to 26 of 40 rounds, the first nerf 5 to 13).
+SMALL_ARMS_MAX_HITS_PER_SQUAD = 3  # of about 40 rounds
+SMALL_ARMS_MAX_HIT_SHARE = 0.03  # of every round fired by the four single squads
+SMALL_ARMS_MAX_FIELD_HP_LOSS = 0.25  # of a jet, one low pass over a whole field
 
 
 def small_arms_problems(output: str) -> list[str]:
-    """Airfield small arms (B17, John, 2026-10-12): a squad's rounds carry a
-    tracer on every third round, a squad at each experience hits a jet on a
-    low pass within bounds (not half its rounds, as the visual-gun aim error
-    did), it still hits, and a whole field's squads together do not destroy an
-    average-experience jet in one pass."""
+    """Airfield small arms (B17 and BD2, John, 2026-10-12): a squad's rounds
+    carry a tracer on every third round; a squad at each experience rarely
+    hits a 400 kt jet at 300 ft (and never more than a few rounds of 40); a
+    whole field's squads together cost a jet a small part of its hit points
+    in a low pass; nothing to speak of at 1,000 ft, at 600 kt or 1,500 ft to
+    the side."""
     problems: list[str] = []
     found = runs(output)
-    if len(found) != 5:
-        return [f"expected 5 runs (4 experiences and a field), got {len(found)}"]
+    if len(found) != 9:
+        return [f"expected 9 runs (4 experiences, 2 fields, 3 passes), got {len(found)}"]
+    rounds_all = hits_all = 0
     for skill, run in enumerate(found[:4]):
         unit = subject(run)
         if "SMLARMS.JT" not in run:
             problems.append(f"skill {skill}: the subject {unit} does not fire SMLARMS")
         s = summary(run)
         rounds, hits = int(s.get("rounds", "0")), int(s.get("hits", "0"))
-        tracers, hp = int(s.get("tracers", "0")), int(s.get("player-hp", "0"))
+        tracers = int(s.get("tracers", "0"))
         if rounds < 20:
             problems.append(f"skill {skill}: only {rounds} rounds fired")
             continue
         if abs(tracers - rounds / 3) > 2:
             problems.append(f"skill {skill}: {tracers} tracers in {rounds} rounds, every third")
-        if hits / rounds > SMALL_ARMS_MAX_HIT_SHARE[skill]:
-            problems.append(f"skill {skill}: {hits} of {rounds} rounds hit, above {SMALL_ARMS_MAX_HIT_SHARE[skill]:.0%}")
+        if hits > SMALL_ARMS_MAX_HITS_PER_SQUAD:
+            problems.append(f"skill {skill}: {hits} of {rounds} rounds hit, above {SMALL_ARMS_MAX_HITS_PER_SQUAD}")
+        rounds_all += rounds
+        hits_all += hits
+    if rounds_all and hits_all / rounds_all > SMALL_ARMS_MAX_HIT_SHARE:
+        problems.append(f"the four squads hit {hits_all} of {rounds_all} rounds, above {SMALL_ARMS_MAX_HIT_SHARE:.0%}")
+    for name, run in (("average field", found[4]), ("ace field", found[5])):
+        field = summary(run)
+        rounds, tracers = int(field.get("rounds", "0")), int(field.get("tracers", "0"))
+        hp = int(field.get("player-hp", "0"))
+        if rounds < 80 or abs(tracers - rounds / 3) > 6:
+            problems.append(f"{name}: {tracers} tracers in {rounds} rounds")
         lost = 1 - hp / SMALL_ARMS_PLAYER_HP
-        if lost > SMALL_ARMS_MAX_HP_LOSS[skill]:
-            problems.append(f"skill {skill}: the jet lost {lost:.0%} of its hit points to one squad, above {SMALL_ARMS_MAX_HP_LOSS[skill]:.0%}")
-        if skill == 3 and hits < 3:
-            problems.append(f"an ace squad hit only {hits} times: small arms must still threaten")
-    field = summary(found[4])
-    rounds, tracers = int(field.get("rounds", "0")), int(field.get("tracers", "0"))
-    hp = int(field.get("player-hp", "0"))
-    if rounds < 80 or abs(tracers - rounds / 3) > 6:
-        problems.append(f"field: {tracers} tracers in {rounds} rounds")
-    if hp <= 0:
-        problems.append("the field's squads destroyed an average-experience jet in one pass")
-    if int(field.get("hits", "0")) == 0:
-        problems.append("the field's squads never hit")
+        if lost > SMALL_ARMS_MAX_FIELD_HP_LOSS:
+            problems.append(f"{name}: the jet lost {lost:.0%} of its hit points in one pass, above {SMALL_ARMS_MAX_FIELD_HP_LOSS:.0%}")
+        rounds_all += rounds
+        hits_all += int(field.get("hits", "0"))
+    if hits_all == 0:
+        problems.append("small arms never hit: they must still be a nuisance to a low jet")
+    for name, run in (("1,000 ft", found[6]), ("600 kt", found[7]), ("1,500 ft to the side", found[8])):
+        s = summary(run)
+        if int(s.get("hits", "0")) > 2:
+            problems.append(f"{name}: {s.get('hits')} hits of {s.get('rounds')} rounds, expected almost none")
+    return problems
+
+
+KILL_LINE = re.compile(r"^a2g-run: kill (0x[0-9a-f]+) class (0x[0-9a-f]+)$", re.M)
+SQUAD_ID = "0x50000021"
+
+
+def squad_killable_problems(output: str) -> list[str]:
+    """An airfield squad (TROOPS, 75 hit points) can be killed (BD2, John
+    2026-10-12): by the A-4E's gun in a strafing pass, by an F/A-18's Mk 82,
+    and (in the trace) it fires no more once it has been killed. Each kill is
+    reported with the squad's id and the men's class word 0x0040."""
+    problems: list[str] = []
+    found = runs(output)
+    if len(found) != 3:
+        return [f"expected 3 runs (gun, bomb, trace kill), got {len(found)}"]
+    for name, run in zip(("gun", "bomb"), found):
+        kills = [(m.group(1), m.group(2)) for m in KILL_LINE.finditer(run)]
+        if (SQUAD_ID, "0x0040") not in kills:
+            problems.append(f"{name}: the squad {SQUAD_ID} was not killed ({kills})")
+        if f"a2g-run: target {SQUAD_ID} hp 0/75" not in run:
+            problems.append(f"{name}: the squad's hit points did not reach 0 of 75")
+    run = found[2]
+    killed = first(run, rf"^killed {SQUAD_ID}$")
+    if not near(killed, 23.0, 0.05):
+        problems.append(f"the trace kill at {killed}, expected 23 s")
+        return problems
+    before = [t for t, text in events(run) if text.startswith(f"burst {SQUAD_ID} ") and t < killed]
+    after = [t for t, text in events(run) if text.startswith(f"burst {SQUAD_ID} ") and t > killed]
+    if len(before) < 2:
+        problems.append(f"the squad fired {len(before)} bursts before it was killed, expected two")
+    if after:
+        problems.append(f"the squad fired {len(after)} bursts after it was killed (first at {after[0]} s)")
+    if int(summary(run).get("rounds", "0")) != 5 * len(before):
+        problems.append(f"{summary(run).get('rounds')} rounds fired, expected {5 * len(before)} (all before the kill)")
     return problems
 
 
@@ -765,7 +816,7 @@ def scenarios() -> list[Scenario]:
             check=zsu23_problems, notes=TRACE_NOTES,
         ),
         Scenario(
-            name="surface-small-arms-airfield", lane="ai", timeout=600,
+            name="surface-small-arms-airfield", lane="ai", timeout=900,
             args=trace("APA", "QAPFAIR", "--over", "TROOPS", "--solo", "--skill", "0", "--rng", "11",
                        "--altitude", "300", "--speed", "400", "--from", "3", "--seconds", "40", "--quiet-shots"),
             then=[
@@ -774,13 +825,37 @@ def scenarios() -> list[Scenario]:
                            "--quiet-shots"), timeout=300)
                 for skill in (1, 2, 3)
             ] + [
-                Step(trace("APA", "QAPFAIR", "--over", "TROOPS", "--solo", "--near", "15000", "--skill", "1",
-                           "--rng", "11", "--altitude", "300", "--speed", "400", "--from", "3",
-                           "--seconds", "60", "--quiet-shots"), timeout=300),
+                Step(trace("APA", "QAPFAIR", "--over", "TROOPS", "--solo", "--near", "15000", "--skill",
+                           str(skill), "--rng", "11", "--altitude", "300", "--speed", "400", "--from", "3",
+                           "--seconds", "60", "--quiet-shots"), timeout=300)
+                for skill in (1, 3)
+            ] + [
+                Step(trace("APA", "QAPFAIR", "--over", "TROOPS", "--solo", "--skill", "3", "--rng", "11",
+                           "--altitude", altitude, "--speed", speed, "--pass", side, "--from", "3",
+                           "--seconds", "40", "--quiet-shots"), timeout=300)
+                for altitude, speed, side in (("1000", "400", "0"), ("300", "600", "0"), ("300", "400", "1500"))
             ],
             check=small_arms_problems,
             notes=TRACE_NOTES + " A low pass over Afghanistan's airfield target (~QAPFAIR): one squad at each "
-                  "experience, then every squad within 2.5 nm of it, the other units laid down (--solo).",
+                  "experience, then every squad within 2.5 nm of it at average and ace experience, the other "
+                  "units laid down (--solo); then ace passes at 1,000 ft, at 600 kt and 1,500 ft to the side.",
+        ),
+        Scenario(
+            name="surface-squad-killable", lane="ai", timeout=600,
+            args=["--a2g-run", "APA", "QAPFAIR", "--aircraft", "a4e", "--load", "LAU61", "--attack", "strafe",
+                  "--unit", SQUAD_ID, "--from", "0.1", "--altitude", "400", "--dive", "10", "--speed", "350",
+                  "--hold", "6", "--seconds", "60"],
+            then=[
+                Step(["--a2g-run", "APA", "QAPFAIR", "--aircraft", "f18", "--load", "MK82", "--attack", "ccip",
+                      "--unit", SQUAD_ID, "--from", "3", "--altitude", "3000", "--dive", "30", "--speed", "400",
+                      "--seconds", "60"], timeout=300),
+                Step(trace("APA", "QAPFAIR", "--over", "TROOPS", "--solo", "--skill", "1", "--rng", "11",
+                           "--altitude", "300", "--speed", "400", "--from", "3", "--seconds", "40",
+                           "--kill-at", "23", "--quiet-shots"), timeout=300),
+            ],
+            check=squad_killable_problems,
+            notes="An airfield squad (~QAPFAIR, 75 hit points, a 30 by 12 ft hit box) dies to a strafing pass "
+                  "and to a bomb, is counted as a kill of the men's class, and fires no more once killed.",
         ),
         Scenario(
             name="surface-resupply", lane="ai", timeout=900,
