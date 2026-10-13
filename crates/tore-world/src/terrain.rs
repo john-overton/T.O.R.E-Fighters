@@ -1578,7 +1578,74 @@ impl Terrain {
         let mut surface =
             tore_sim::research::Surface::terrain(f64::from(self.height(x as f32, z as f32)));
         surface.wind = self.wind();
+        surface.water = self.over_water(x, z);
+        surface.slope_deg = self.slope_degrees(x, z);
         surface
+    }
+
+    /// The surface under `(x, z)` for an aircraft whose lowest point is at
+    /// `bottom` (feet): [`Self::surface`], or, when a standing object's flat
+    /// top (`alive` ids: a building roof, a hangar, a bunker, a deck) or a
+    /// city fill building's roof lies at or below `bottom`, that top as a
+    /// level, non-landable, dry surface. Only aircraft that may touch down
+    /// away from an airfield ask this (docs/spec/touchdown.md); a fixed-wing
+    /// aircraft uses [`Self::surface`] and crashes into the object as ever.
+    pub fn surface_over(
+        &self,
+        x: f64,
+        z: f64,
+        bottom: f64,
+        alive: &BTreeSet<u32>,
+    ) -> tore_sim::research::Surface {
+        let mut surface = self.surface(x, z);
+        let object = self
+            .airport_scene
+            .flat_top_below(x, z, bottom, |id| alive.contains(&id));
+        let roof = self
+            .city_fill
+            .as_ref()
+            .and_then(|fill| fill.roof_below(x, z, bottom));
+        if let Some(top) = [object, roof]
+            .into_iter()
+            .flatten()
+            .max_by(f64::total_cmp)
+            // On an airfield only a real structure counts, so a low marking
+            // or pad object never turns the runway into limited ground.
+            .filter(|top| {
+                *top > surface.height
+                    + if surface.landable {
+                        AIRFIELD_ROOF_RISE_FT
+                    } else {
+                        0.
+                    }
+            })
+        {
+            surface.height = top;
+            surface.landable = false;
+            surface.water = false;
+            surface.slope_deg = 0.;
+        }
+        surface
+    }
+
+    /// How far the ground under `(x, z)` tilts from level, degrees: the
+    /// slope of the terrain triangle there ([`Self::height`] is planar over
+    /// each half of a cell).
+    pub fn slope_degrees(&self, x: f64, z: f64) -> f64 {
+        let cell = CELL_FEET;
+        let fx = (x as f32 / cell).clamp(0.0, (self.theater.cols - 1) as f32 - 0.001);
+        let fy = (z as f32 / cell).clamp(0.0, (self.theater.rows - 1) as f32 - 0.001);
+        let (ix, iy) = (fx as usize, fy as usize);
+        let (u, v) = (fx - ix as f32, fy - iy as f32);
+        let h = |dx, dy| self.theater.cell(ix + dx, iy + dy).elevation as f32 * HEIGHT_FEET;
+        let (dhx, dhz) = if u + v <= 1.0 {
+            (h(1, 0) - h(0, 0), h(0, 1) - h(0, 0))
+        } else {
+            (h(1, 1) - h(0, 1), h(1, 1) - h(1, 0))
+        };
+        (f64::from(dhx).hypot(f64::from(dhz)) / f64::from(cell))
+            .atan()
+            .to_degrees()
     }
 
     /// Earliest solid building contact. Runways remain a separate surface query.
@@ -1687,6 +1754,10 @@ pub fn edge_distance_nm(cols: usize, rows: usize, x: f64, z: f64) -> f64 {
     let beyond = |value: f64, extent: f64| (0. - value).max(value - extent).max(0.);
     beyond(x, extent(cols)).hypot(beyond(z, extent(rows))) / FEET_PER_NAUTICAL_MILE
 }
+
+/// A roof on an airfield's box must stand this high above the runway plane to
+/// be a landing surface of its own, feet. Fitted (agent decision).
+const AIRFIELD_ROOF_RISE_FT: f64 = 8.;
 
 /// Feet in a nautical mile.
 pub const FEET_PER_NAUTICAL_MILE: f64 = 6_076.115_49;
@@ -2012,6 +2083,75 @@ mod tests {
                 .is_none()
         );
         assert!(!world.surface(50.0, 50.0).landable);
+    }
+
+    #[test]
+    fn slope_water_and_roofs_reach_the_surface() {
+        let mut w = world();
+        // The fixture's four cells rise 1,024 and 2,048 ft across 8,192 ft in
+        // both triangles: atan(2290 / 8192), about 15.6 degrees.
+        let tilt = 1024f64.hypot(2048.) / f64::from(CELL_FEET);
+        let tilt = tilt.atan().to_degrees();
+        for (x, z) in [(100., 100.), (7_000., 7_000.), (3_000., 500.)] {
+            assert!((w.slope_degrees(x, z) - tilt).abs() < 1e-6, "{x} {z}");
+            assert!((w.surface(x, z).slope_deg - tilt).abs() < 1e-6);
+        }
+        for cell in &mut w.theater.cells {
+            cell.elevation = 4;
+        }
+        assert_eq!(w.slope_degrees(100., 100.), 0.);
+        // Water is the class-1 cell, and everything past the grid.
+        assert!(!w.surface(100., 100.).water);
+        w.theater.cells[0].class = 1;
+        assert!(w.surface(100., 100.).water);
+        assert!(w.surface(-5., 100.).water);
+        w.theater.cells[0].class = 2;
+        // A box roof is a level, dry, non-landable surface for an aircraft
+        // above it, and nothing for one beside or below it.
+        let ground = f64::from(w.height(2_000., 3_000.));
+        w.airport_scene
+            .objects
+            .push(tore_sim::airport::StaticObject {
+                id: 5,
+                source: tore_sim::airport::SourceKey {
+                    layout: "T.MM".into(),
+                    ordinal: 0,
+                },
+                name: "Hangar".into(),
+                object_type: "HANGR.OT".into(),
+                bounds: tore_sim::airport::OrientedBox {
+                    center: [2_000., ground + 20., 3_000.],
+                    half: [60., 20., 60.],
+                    heading: 0.,
+                    pitch: 0.,
+                    bank: 0.,
+                },
+                hit_points: 100,
+                runway: false,
+                category: 0x2000,
+                radar_signature: 1.,
+                infrared_signature: 0.,
+                type_flags: 0,
+                max_visible: 0,
+            });
+        let alive: BTreeSet<u32> = [5].into();
+        let roof = w.surface_over(2_030., 2_980., ground + 45., &alive);
+        assert_eq!(roof.height, ground + 40.);
+        assert!(!roof.landable && !roof.water && roof.slope_deg == 0.);
+        // Below the roof, off the box, or with the object destroyed: ground.
+        assert_eq!(
+            w.surface_over(2_030., 2_980., ground + 30., &alive).height,
+            ground
+        );
+        assert_eq!(
+            w.surface_over(2_100., 2_980., ground + 45., &alive).height,
+            ground
+        );
+        assert_eq!(
+            w.surface_over(2_030., 2_980., ground + 45., &BTreeSet::new())
+                .height,
+            ground
+        );
     }
 
     #[test]

@@ -111,6 +111,41 @@ impl OrientedBox {
         let local_z = dx * s + dz * c;
         local_x.abs() <= self.half[0] && local_z.abs() <= self.half[2]
     }
+    /// The height of this box's top face above the point `(x, z)`, when the
+    /// point is over the face, the face tilts no more than `max_slope_deg`
+    /// from level, and both its half-extents are at least `min_half` (so a
+    /// pole is not a landing surface). The box is the collision volume, so
+    /// its top is a flat plane, however the object is drawn.
+    pub fn flat_top_height(
+        &self,
+        x: f64,
+        z: f64,
+        max_slope_deg: f64,
+        min_half: f64,
+    ) -> Option<f64> {
+        if self.half[0] < min_half || self.half[2] < min_half {
+            return None;
+        }
+        let diagonal = self.half[0] * self.half[0] + self.half[2] * self.half[2];
+        let (dx, dz) = (x - self.center[0], z - self.center[2]);
+        // Tilted boxes reach a little past the half diagonal; the early
+        // answer only spares work for the many boxes nowhere near.
+        let slack = self.half[1] + 1.;
+        if dx * dx + dz * dz > (diagonal.sqrt() + slack).powi(2) {
+            return None;
+        }
+        let basis = crate::attitude::Basis::new(self.heading, self.pitch, self.bank);
+        let up = basis.up;
+        if up[1] < max_slope_deg.to_radians().cos() {
+            return None;
+        }
+        let top = std::array::from_fn::<f64, 3, _>(|i| self.center[i] + up[i] * self.half[1]);
+        let y = top[1] - (up[0] * (x - top[0]) + up[2] * (z - top[2])) / up[1];
+        let d = [x - self.center[0], y - self.center[1], z - self.center[2]];
+        (crate::attitude::dot(d, basis.right).abs() <= self.half[0]
+            && crate::attitude::dot(d, basis.forward).abs() <= self.half[2])
+            .then_some(y)
+    }
     pub fn segment_fraction(&self, from: [f64; 3], to: [f64; 3]) -> Option<f64> {
         let basis = crate::attitude::Basis::new(self.heading, self.pitch, self.bank);
         let local = |p: [f64; 3]| {
@@ -377,6 +412,31 @@ impl Scene {
             .filter(|r| r.surface.contains_horizontal(x, z))
             .filter_map(|r| r.support_height(x, z).map(|height| (r.object, height)))
             .min_by_key(|(object, _)| *object)
+    }
+    /// The highest flat top of a standing object (`alive`) over `(x, z)`
+    /// that lies no higher than `bottom` plus [`crate::touchdown::TOP_REACH_FT`]:
+    /// what an aircraft above that point can come down on. Runway objects
+    /// are the airfield's own surface and are not counted.
+    pub fn flat_top_below(
+        &self,
+        x: f64,
+        z: f64,
+        bottom: f64,
+        alive: impl Fn(ObjectId) -> bool,
+    ) -> Option<f64> {
+        self.objects
+            .iter()
+            .filter(|o| !o.runway && alive(o.id))
+            .filter_map(|o| {
+                o.bounds.flat_top_height(
+                    x,
+                    z,
+                    crate::touchdown::MAX_SLOPE_DEG,
+                    crate::touchdown::MIN_TOP_HALF_FT,
+                )
+            })
+            .filter(|top| *top <= bottom + crate::touchdown::TOP_REACH_FT)
+            .max_by(f64::total_cmp)
     }
     pub fn earliest_object_hit(&self, from: [f64; 3], to: [f64; 3]) -> Option<(ObjectId, f64)> {
         self.objects

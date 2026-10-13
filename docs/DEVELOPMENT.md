@@ -561,7 +561,7 @@ adapter. Use `--aircraft rafale` for the exact Rafale C identity.
 The powered-lift aircraft (`av8`, `yak141`, `v22`, `ah64`, `mi24`, `ch47`) start in
 trimmed forward flight. `--maneuver hover` starts one at rest in the air in its own
 hover trim (hands off it holds), and `--replay-input TAPE` flies a `tore-pilot 3`
-tape from there; the battery's `flight-powered-*` scenarios do exactly this
+tape from there. `--maneuver settle:SINK_FPS` starts a powered-lift aircraft 60 ft over flat open ground in its hover trim and holds that sink rate on the collective (the throttle on the jets) until it is down, then prints a `touchdown:` line, the probe of the [touchdown rule](spec/touchdown.md); the battery's `flight-powered-*` scenarios do exactly this
 ([flight lane](testing/lane-flight.md#powered-lift-scenarios-vtol-overhaul)).
 
 For an individual aircraft's actual surface geometry, before broad integration

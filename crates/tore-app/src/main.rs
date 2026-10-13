@@ -6094,6 +6094,35 @@ struct ProbeTerrain {
 /// The scripted gear-up for the `takeoff-gear-early` (at 80 knots with the
 /// wheels still down, too slow to fly) and `takeoff-gear-airborne` (once 50 ft
 /// above the runway) headless takeoffs. Returns the input for that tick.
+/// The pilot of `--maneuver settle:SINK`: the collective (the throttle on a
+/// vectoring jet) held to a steady sink of `sink` ft/s until the wheels are
+/// down, then lowered so it sits.
+fn settle_keys(state: &flight::State, sink: f64) -> flight::PilotInput {
+    let on_ground = state.research.as_ref().is_some_and(|r| r.on_ground);
+    let error = -sink - state.vertical_speed;
+    let mut keys = flight::PilotInput::default();
+    let jet = state
+        .model()
+        .powered_lift()
+        .is_some_and(|lift| lift.kind == tore_sim::models::variety::LiftKind::VectorJet);
+    if jet {
+        let throttle = if on_ground {
+            0.
+        } else {
+            state.throttle + flight::DT * 0.05 * error
+        };
+        keys.throttle = Some(throttle.clamp(0., 1.));
+    } else {
+        let collective = if on_ground {
+            0.
+        } else {
+            state.lift_controls.collective + flight::DT * 0.05 * error
+        };
+        keys.collective = Some(collective.clamp(0., 1.));
+    }
+    keys
+}
+
 fn gear_pull(
     maneuver: &str,
     state: &flight::State,
@@ -10252,6 +10281,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     "hover",
                 ]
                 .contains(&maneuver.as_str())
+                    && !maneuver.starts_with("settle:")
                 {
                     return Err("unsupported maneuver".into());
                 }
@@ -11381,6 +11411,29 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     .forward
                     .map(|v| v * state.speed);
             }
+            // `settle:SINK_FPS[:GROUND_KNOTS]`: the touchdown rule's probe
+            // (docs/spec/touchdown.md). A powered-lift aircraft trims into a
+            // hover 60 feet over flat open ground, with that ground speed at
+            // the start, and `settle_keys` holds SINK_FPS to the ground;
+            // anything else comes in gear down at 140 knots, hands off.
+            // Ground is at 0 feet.
+            other if other.starts_with("settle:") => {
+                let mut parts = other["settle:".len()..].split(':');
+                let sink: f64 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(5.);
+                let knots: f64 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0.);
+                state.gear_down = true;
+                state.gear = 1.;
+                let clearance = state.model().configuration().equipment.ground_clearance_ft;
+                if state.trim_hover() {
+                    state.position[1] = clearance + 60.;
+                    state.velocity = [0., -sink, knots * 1.68781];
+                } else {
+                    state.position[1] = clearance + 60.;
+                    state.speed = 140. * 1.68781;
+                    state.velocity = [0., -sink, state.speed];
+                }
+                state.speed = state.velocity[2].hypot(state.velocity[1]);
+            }
             _ => {}
         }
         keys
@@ -11643,6 +11696,13 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         let mut stall_recovery =
             (maneuver == "stall-recover").then(|| flight_probe::StallRecovery::new(&state));
         let mut gear_pulled = false;
+        // `--maneuver settle:SINK[:KNOTS]` holds that sink rate to the ground.
+        let settle_sink: Option<f64> = maneuver.strip_prefix("settle:").map(|rest| {
+            rest.split(':')
+                .next()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(5.)
+        });
         let mut takeoff_start: Option<attitude::Vector> = None;
         let mut rotation: Option<f64> = None;
         let mut liftoff: Option<(u64, f64, f64)> = None;
@@ -11686,6 +11746,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 let world = replay_world.as_ref().unwrap();
                 let surface = world.surface(state.position[0], state.position[2]);
                 scripted = probe.keys(&state, surface.height, surface.landable);
+                &scripted
+            } else if let Some(sink) = settle_sink
+                && state.model().powered_lift().is_some()
+            {
+                scripted = settle_keys(&state, sink);
                 &scripted
             } else if let Some(pull) =
                 gear_pull(&maneuver, &state, &mut gear_pulled, &keys, &replay_world)
@@ -11846,6 +11911,14 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             state.yaw.to_degrees().rem_euclid(360.)
         );
         println!("overspeed_ticks={}", state.overspeed_ticks);
+        if maneuver.starts_with("settle:") {
+            println!(
+                "touchdown: on_ground={} gear_damaged={} crashed={}",
+                state.research.as_ref().is_some_and(|r| r.on_ground),
+                state.systems.has(16),
+                state.crashed
+            );
+        }
         if matches!(maneuver.as_str(), "rudder" | "nosewheel") {
             println!(
                 "lateral: yaw_deg={:.3} bank_deg={:.3} velocity_x_fps={:.3} path_deg={:.3} wheel_deg={:.3}",

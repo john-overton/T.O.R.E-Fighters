@@ -20,6 +20,7 @@ pub mod runway_wind;
 pub mod sensors;
 pub mod stol;
 pub mod telemetry;
+pub mod touchdown;
 pub mod turbulence;
 pub mod vapor;
 pub mod wreck;
