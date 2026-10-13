@@ -538,6 +538,18 @@ impl AiWings {
         }
     }
 
+    /// Whether AI aircraft `id` carries a store that could attack a ground
+    /// target, assuming a laser spot is found for a laser store (slice H3):
+    /// the test of who may take the Strike role. All false for an aircraft
+    /// without a combat configuration. See [`strike::has_usable_store`].
+    pub fn armed_for_ground(&self, id: u32) -> bool {
+        let (Some(config), Some(actor)) = (self.configs.get(&id), self.mission.actor(id)) else {
+            return false;
+        };
+        let stores = strike_stores(config, actor.stations());
+        strike::has_usable_store(&stores, true, config.strike_class)
+    }
+
     /// AI aircraft `id` carries a laser designator (its own, or a pod) and
     /// flies the lasing hold, so it can lase for another's weapon (slice
     /// ST-L). Helicopters and the gunship do not: their families (slice
