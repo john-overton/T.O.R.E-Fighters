@@ -67,7 +67,7 @@ use tore_world::{
 };
 
 mod ai;
-mod ai_render;
+pub(crate) mod ai_render;
 mod ccip;
 mod cluster;
 mod guided;

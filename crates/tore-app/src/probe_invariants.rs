@@ -289,7 +289,10 @@ impl ProbeInvariants {
                         | P::AirTaxi
                 )
             });
-            if airborne && f.speed < SLOW_FPS && !hovering {
+            // A helicopter or the V-22 flies slowly on purpose; hanging in
+            // the air is a fixed-wing aircraft's stall.
+            let rotorcraft = tore_sim::ai::rotor_adapter::flies(f);
+            if airborne && f.speed < SLOW_FPS && !hovering && !rotorcraft {
                 let since = *track.slow_since.get_or_insert(tick);
                 if tick - since >= SLOW_TICKS {
                     flags.push((

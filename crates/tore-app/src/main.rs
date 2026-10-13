@@ -5805,6 +5805,13 @@ fn apply_probe_cheat(cheats: &mut tore_sim::cheats::Cheats, name: &str) {
 /// `--probe-player-lock`). Development harness only.
 #[derive(Clone, Debug, Default)]
 struct ProbeScript {
+    /// `--probe-render DIR` with `--probe-render-at TICK,...`,
+    /// `--probe-render-plane ID` and `--probe-render-view chase|wide|ground`
+    /// (slice H2): offscreen frames of the world around one AI plane.
+    render: Option<std::path::PathBuf>,
+    render_at: Vec<u64>,
+    render_plane: u32,
+    render_view: String,
     enemy_aircraft: Option<tore_formats::aircraft::AircraftId>,
     enemy_skill: Option<usize>,
     geometry: ProbeGeometry,
@@ -8233,6 +8240,57 @@ fn redfor_probe_run(
 /// What the AI probe's tick loop flies, set up by [`ai_probe_run`]: the
 /// single-player probe's own mission, or the Redfor seat's open one
 /// ([`redfor_probe_run`]).
+/// One offscreen frame of the probe's world around the AI plane
+/// `--probe-render-plane` (slice H2's renders): `chase` just behind and
+/// beside it, `wide` well back and to the side, `ground` from the ground
+/// beside it looking up.
+fn probe_render(
+    mission: &mut world::World,
+    script: &ProbeScript,
+    dir: &std::path::Path,
+    tick: u64,
+) -> AppResult<()> {
+    let flight = mission
+        .ai_wings
+        .as_ref()
+        .expect(PROBE_BRIDGE)
+        .mission()
+        .actor(script.render_plane)
+        .ok_or("--probe-render-plane is not an AI aircraft")?
+        .flight()
+        .clone();
+    let p = flight.position;
+    let (sin, cos) = flight.yaw.sin_cos();
+    let forward = [sin, 0., cos];
+    let right = [cos, 0., -sin];
+    let (back, side, up) = match script.render_view.as_str() {
+        "wide" => (420., 330., 90.),
+        "ground" => (500., 350., 0.),
+        _ => (260., 140., 40.),
+    };
+    let mut eye: tore_sim::attitude::Vector =
+        std::array::from_fn(|i| p[i] - forward[i] * back + right[i] * side);
+    let ground = mission.terrain.surface(eye[0], eye[2]).height;
+    eye[1] = if script.render_view == "ground" {
+        ground + 15.
+    } else {
+        (p[1] + up).max(ground + 15.)
+    };
+    let view = if script.render_view.is_empty() {
+        "chase"
+    } else {
+        script.render_view.as_str()
+    };
+    let path = dir.join(format!(
+        "t{tick:06}-plane{}-{view}.png",
+        script.render_plane
+    ));
+    let observer = mission.cockpits[OWN].plane;
+    a2g_run::ai_render::render_world(mission, observer, eye, p, &path)?;
+    println!("t={tick} probe: RENDER {}", path.display());
+    Ok(())
+}
+
 struct ProbeFlight {
     mission: world::World,
     /// The probe wing's parked start: the scripted takeoff's runway.
@@ -8536,6 +8594,11 @@ fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<
             &mission.cockpits[OWN].flight,
             &mission.terrain,
         );
+        if let Some(dir) = &script.render
+            && script.render_at.contains(&tick)
+        {
+            probe_render(&mut mission, script, dir, tick)?;
+        }
         invariants.observe(
             tick,
             mission.ai_wings.as_ref().expect(PROBE_BRIDGE),
@@ -9871,6 +9934,27 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 separation_nm = Some(nm);
             }
             "--probe-wing-only" => probe_script.wing_only = true,
+            "--probe-render" => {
+                probe_script.render = Some(args.next().ok_or("--probe-render needs DIR")?.into())
+            }
+            "--probe-render-at" => {
+                probe_script.render_at = args
+                    .next()
+                    .ok_or("--probe-render-at needs TICK,...")?
+                    .split(',')
+                    .map(str::parse)
+                    .collect::<Result<_, _>>()
+                    .map_err(|_| "--probe-render-at needs TICK,...")?
+            }
+            "--probe-render-plane" => {
+                probe_script.render_plane = args
+                    .next()
+                    .and_then(|v| v.parse().ok())
+                    .ok_or("--probe-render-plane needs an aircraft id")?
+            }
+            "--probe-render-view" => {
+                probe_script.render_view = args.next().ok_or("--probe-render-view needs a view")?
+            }
             "--probe-pavement" => probe_script.pavement = true,
             "--probe-track" => probe_script.track = Some(PathBuf::from(args.next().ok_or("--probe-track needs an output file")?)),
             "--probe-redfor" => probe_script.redfor = true,

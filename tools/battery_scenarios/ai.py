@@ -833,7 +833,8 @@ def rotorcraft_fuel_check(aircraft: str, *, bingo: bool) -> Callable[[str], list
     At the first line none of them is bingo or critical (with the probe's full tanks every one is
     within reach of its home) and each has a time home at its own cruise; with `bingo` (a probe given
     little fuel by `--probe-fuel`) the friendly ones start on caution, then turn bingo, head home
-    (`ReturningToBase`) and are not lost."""
+    (`ReturningToBase`, or since slice H2 the landing: `HoldingMarshal`, `Landing`, `Landed`) and are
+    not lost."""
 
     def check(output: str) -> list[str]:
         problems = probe_problems(output)
@@ -847,7 +848,10 @@ def rotorcraft_fuel_check(aircraft: str, *, bingo: bool) -> Callable[[str], list
             if tick == first and home == "none":
                 problems.append(f"actor {actor} ({aircraft}) had no time home at the start")
         if bingo:
-            homeward = [l for l in lines if l[5] == "Bingo" and l[6] == "ReturningToBase"]
+            # Home: the way home, or (slice H2) the landing there, which a wing close to home
+            # starts at once at its marshal.
+            landing = ("ReturningToBase", "HoldingMarshal", "Landing", "Landed")
+            homeward = [l for l in lines if l[5] == "Bingo" and l[6] in landing]
             if not homeward:
                 problems.append(f"no {aircraft} turned bingo and headed home: " + ", ".join(sorted({l[5] + "/" + l[6] for l in lines})))
         return problems

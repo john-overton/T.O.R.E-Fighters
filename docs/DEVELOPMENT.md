@@ -1606,6 +1606,13 @@ their shockwave ring, condensation cloud or dust and craters.
 TORE_CITY_FILL=0 TORE_PREVIEW_THEATER=EGY TORE_DATA_DIR=.local/tmp-me/profile target/debug/tore-app --impact-preview .local/tmp/shock-egy shockwave
 ```
 
+The AI probe's `--probe-render DIR --probe-render-at TICK,...` draws the
+world offscreen at 1080p (no window) at those ticks, framing AI plane
+`--probe-render-plane ID` from `--probe-render-view chase` (260 ft behind,
+140 ft right), `wide` (420 ft behind, 330 ft right) or `ground` (from the
+ground beside it, looking up), as `DIR/tTICK-planeID-VIEW.png` (slice H2: the
+vertical takeoff and landing renders).
+
 On a player's `--a2g-run`, `--render-scene DIR --scene-at S,...` draws the
 world offscreen S seconds after the first rocket, missile or bomb leaves,
 chasing the newest one from just behind and beside it (`DIR/scene-tS.png`),
