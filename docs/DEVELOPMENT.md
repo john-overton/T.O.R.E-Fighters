@@ -1658,7 +1658,7 @@ and reports where Blue and Red start (`surface-start-placement`).
 types named) stood on flat ground and drawn through the scenery's own code,
 with its shape's lowest and highest point about its origin, the share below
 it, its F2 ground offset, the lift that stands it on the ground, and the
-lowest drawn point of its faces, its hit box and its man sprites near and
+lowest drawn point of its faces, its hit box and its man sprites or cards near and
 far, in world feet at its drawn size; anything sunk or floating is listed as
 a problem ([grounding](formats/objects-and-shapes.md#grounding-every-object-stands-on-the-bottom-of-its-shape),
 `surface-grounding`).

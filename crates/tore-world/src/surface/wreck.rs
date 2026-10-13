@@ -116,7 +116,7 @@ pub fn unit_fire(unit: &Unit, mission: u64) -> FireClass {
         DestroyedLook::DamagedObject(_) | DestroyedLook::Removed => {
             object_fire(&unit.resource, false)
         }
-        DestroyedLook::Vanish => FireClass::None,
+        DestroyedLook::Bodies(_) | DestroyedLook::Vanish => FireClass::None,
     }
 }
 

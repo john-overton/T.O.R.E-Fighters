@@ -45,8 +45,9 @@ pub(super) const BUDGET: usize = 32 * 1024 * 1024 / 4;
 /// size; farther he is drawn larger in proportion, so he stays about as many
 /// pixels tall as at this range (opinionated, agent, 2026-10-12).
 const MAN_FULL_SIZE_RANGE_FT: f64 = 1_000.;
-/// The most a man is drawn larger than life: six times, from 6,000 ft out.
-const MAN_MAX_BOOST: f64 = 6.;
+/// The most a man is drawn larger than life: three times, from 3,000 ft out
+/// (John, 2026-10-13: six times was too large).
+const MAN_MAX_BOOST: f64 = 3.;
 /// How much larger than life a man is drawn `distance` ft from the viewer.
 fn man_boost(distance: f64) -> f64 {
     (distance / MAN_FULL_SIZE_RANGE_FT).clamp(1., MAN_MAX_BOOST)
@@ -55,12 +56,22 @@ fn man_boost(distance: f64) -> f64 {
 /// viewer at `eye`: [`man_boost`] times larger, growing up from his feet,
 /// which stay on the ground (`tore_world::grounding::scaled_origin`).
 pub(crate) fn man_stand(sprites: &[Billboard], stand: &Stand, eye: Vector) -> Stand {
+    boosted(
+        stand,
+        tore_world::grounding::sprites_bottom(sprites).unwrap_or(0.),
+        eye,
+    )
+}
+
+/// Where a man whose lowest point is `bottom` shape units about his origin,
+/// standing at `stand`, is drawn for a viewer at `eye`: [`man_boost`] times
+/// larger, growing up from his feet.
+fn boosted(stand: &Stand, bottom: f64, eye: Vector) -> Stand {
     let away = (0..3)
         .map(|i| (eye[i] - stand.origin[i]).powi(2))
         .sum::<f64>()
         .sqrt();
     let boost = man_boost(away);
-    let bottom = tore_world::grounding::sprites_bottom(sprites).unwrap_or(0.);
     Stand {
         scale: stand.scale * boost,
         origin: tore_world::grounding::scaled_origin(
@@ -82,6 +93,7 @@ pub(crate) fn drawn_bottoms(
     shape: &Shape,
     stand: &Stand,
     ranges: &[f64],
+    man: bool,
 ) -> (Option<f64>, Vec<Option<f64>>) {
     let low = |drawn: &Drawn| {
         drawn
@@ -97,10 +109,25 @@ pub(crate) fn drawn_bottoms(
     let sprites = ranges
         .iter()
         .map(|range| {
-            if shape.billboards.is_empty() {
-                return None;
-            }
             let eye = [stand.origin[0] + range, stand.origin[1], stand.origin[2]];
+            // A man drawn as cards (TROOPS): his faces, boosted.
+            let cards = (man && !shape.faces.is_empty())
+                .then(|| {
+                    let bottom = tore_world::grounding::bottom(shape)?;
+                    let mut drawn = Drawn::default();
+                    let _ = emit(
+                        shape,
+                        &boosted(stand, bottom, eye),
+                        &layers,
+                        &mut drawn,
+                        usize::MAX,
+                    );
+                    low(&drawn)
+                })
+                .flatten();
+            if shape.billboards.is_empty() {
+                return cards;
+            }
             let at = man_stand(&shape.billboards, stand, eye);
             let faces = shape
                 .billboards
@@ -108,14 +135,17 @@ pub(crate) fn drawn_bottoms(
                 .map(|one| facing(one, &at, [0., 0., 1.], [0., 1., 0.]))
                 .collect();
             let mut drawn = Drawn::default();
-            let man = Shape {
+            let sprites = Shape {
                 lines: Vec::new(),
                 faces,
                 billboards: Vec::new(),
                 state_words: BTreeSet::new(),
             };
-            let _ = emit(&man, &at, &layers, &mut drawn, usize::MAX);
-            low(&drawn)
+            let _ = emit(&sprites, &at, &layers, &mut drawn, usize::MAX);
+            match (low(&drawn), cards) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            }
         })
         .collect();
     (low(&drawn), sprites)
@@ -326,6 +356,25 @@ fn facing(
     sprite.face(local(right), local(up))
 }
 
+/// Whether `definition` is a man (an NT of class OTHER: SOLDIER, TROOPS,
+/// RUNNER), whom the far-man boost draws larger at range.
+pub(crate) fn is_man(definition: &Definition) -> bool {
+    definition
+        .resource_name
+        .to_ascii_uppercase()
+        .ends_with(".NT")
+        && definition.category & tore_formats::surface_unit::class::OTHER != 0
+}
+
+impl SurfaceArt {
+    /// Whether placement `id`'s intact look is drawn every frame by
+    /// [`Self::frame`] rather than by the static batch (a man drawn as
+    /// cards); its destroyed look stays in the static batch.
+    pub(super) fn draws_intact_every_frame(&self, id: u32) -> bool {
+        self.cards.contains_key(&id)
+    }
+}
+
 /// A shape with the scale it is drawn at.
 pub(super) struct Model {
     pub shape: Shape,
@@ -434,6 +483,14 @@ struct Launcher {
 
 /// A viewer-facing sprite standing in the scene: a man, or a carrier's
 /// deck crew (one sprite per signal frame, front and back sheets).
+/// A man drawn as cards: his shape where he stands, his lowest point in
+/// shape units.
+struct Cards {
+    stand: Stand,
+    shape: Shape,
+    bottom: f64,
+}
+
 struct Sprite {
     /// The object whose loss removes it: the man, or the crew's carrier.
     owner: u32,
@@ -464,6 +521,9 @@ pub struct SurfaceArt {
     rails: BTreeMap<(u32, Vec<u8>), Drawn>,
     movers: BTreeMap<u32, Mover>,
     sprites: Vec<Sprite>,
+    /// The men drawn as cards, faces rather than sprites (the airfield
+    /// squad TROOPS), by owner: drawn every frame, for the far-man boost.
+    cards: BTreeMap<u32, Cards>,
     /// A parked aircraft's pieces 0 and 1 (`{stem}_B`, `{stem}_D`).
     debris: BTreeMap<u32, [Option<Model>; 2]>,
     /// Units whose pictures aim, how each turns, and their aim.
@@ -604,6 +664,16 @@ impl SurfaceArt {
                     }
                     None => None,
                 },
+                // The fallen men: their own shape's damage branch, at the
+                // size the men are drawn.
+                DestroyedLook::Bodies(name) => Some(Model {
+                    shape: build.shape(
+                        &mut self.layers,
+                        name,
+                        Some(&BTreeMap::from([(DAMAGED_WORD, 1)])),
+                    )?,
+                    scale: stand.scale,
+                }),
                 DestroyedLook::Wreck(object) | DestroyedLook::DamagedObject(object) => {
                     Some(build.object(&mut self.layers, object)?)
                 }
@@ -635,6 +705,25 @@ impl SurfaceArt {
                 sprites: intact.billboards.clone(),
                 crew: None,
             });
+        }
+        // Men drawn as cards (TROOPS) are drawn every frame instead of in
+        // the static batch, so they can be boosted at range like the
+        // sprites (agent decision, slice GROUND, 2026-10-13).
+        if definition.is_some_and(is_man)
+            && !intact.faces.is_empty()
+            && !surface.courses.contains_key(&UnitId(id))
+            && let Some(name) = &main_shape
+            && let Some(bottom) = tore_world::grounding::bottom(intact)
+        {
+            let shape = build.scenery(&mut self.layers, name)?;
+            self.cards.insert(
+                id,
+                Cards {
+                    stand: *stand,
+                    shape,
+                    bottom,
+                },
+            );
         }
         // A land unit's wreck lies on its own lowest point too (the DEST
         // wreck reaches below its origin), and so does a building's damaged
@@ -752,18 +841,10 @@ impl SurfaceArt {
         let bytes = main_shape.and_then(|name| build.resources.get(name));
         // Retail's damage branch, when following it changes the shape.
         let branch = main_shape.zip(bytes).and_then(|(name, bytes)| {
-            let damaged = BTreeMap::from([(DAMAGED_WORD, 1)]);
-            let plain = Shape::with_export_state(bytes, &BTreeMap::new()).ok()?;
-            let after = Shape::with_export_state(bytes, &damaged).ok()?;
-            let same = plain.faces.len() == after.faces.len()
-                && plain
-                    .faces
-                    .iter()
-                    .zip(&after.faces)
-                    .all(|(a, b)| a.positions == b.positions && a.texture == b.texture);
-            if same {
+            if !tore_formats::shape::has_damage_branch(bytes) {
                 return None;
             }
+            let damaged = BTreeMap::from([(DAMAGED_WORD, 1)]);
             build.shape(&mut self.layers, name, Some(&damaged)).ok()
         });
         // What does not burn (pavement, a bridge end, a rock) stays as it
@@ -1293,11 +1374,15 @@ impl SurfaceArt {
             }
             let (shape, body) = self.aimed_shape(*id, aimer, seconds);
             let basis = yawed(aimer.stand.basis, body);
-            let stand = Stand {
+            let mut stand = Stand {
                 scale: aimer.stand.scale,
                 basis,
                 origin: local(aimer.stand.origin),
             };
+            // A squad turning to its target is boosted like any man.
+            if let Some(man) = self.cards.get(id) {
+                stand = boosted(&stand, man.bottom, eye);
+            }
             let shape = shape.as_ref().map_or(&aimer.intact, Projected::shape);
             let _ = emit(shape, &stand, &self.layers, &mut out, usize::MAX);
         }
@@ -1310,6 +1395,23 @@ impl SurfaceArt {
                 ..sprite.stand
             };
             self.draw_sprite(sprite, &stand, camera, eye, seconds, &mut out);
+        }
+        for (id, man) in &self.cards {
+            // An aiming squad is drawn turned, above.
+            if !standing(*id) || self.aiming(*id) {
+                continue;
+            }
+            let stand = Stand {
+                origin: local(man.stand.origin),
+                ..man.stand
+            };
+            let _ = emit(
+                &man.shape,
+                &boosted(&stand, man.bottom, eye),
+                &self.layers,
+                &mut out,
+                usize::MAX,
+            );
         }
         for piece in &picture.debris {
             let Some(pieces) = self.debris.get(&piece.owner) else {
@@ -1360,7 +1462,7 @@ impl SurfaceArt {
     ) {
         // A man stays a few pixels tall at the range a pilot sees a field:
         // beyond 1,000 ft he is drawn taller by the distance over 1,000 ft,
-        // up to six times (presentation only; the hit box is unchanged). He
+        // up to three times (presentation only; the hit box is unchanged). He
         // grows up from his feet, which stay on the ground.
         let stand = &if sprite.crew.is_none() {
             man_stand(&sprite.sprites, stand, eye)
@@ -1897,7 +1999,7 @@ mod tests {
 
     #[test]
     fn a_man_stays_visible_at_a_pilots_range() {
-        // Life size to 1,000 ft, then larger by the distance, to six times.
+        // Life size to 1,000 ft, then larger by the distance, to three times.
         assert_eq!(man_boost(300.), 1.);
         assert_eq!(man_boost(1_000.), 1.);
         assert_eq!(man_boost(3_000.), 3.);
@@ -1927,16 +2029,24 @@ mod tests {
             basis: Basis::new(0.4, 0., 0.),
             origin: [0., 2., 0.],
         };
-        // Near, at his own size, and far, six times larger: his feet stay
+        // Near, at his own size, and far, three times larger: his feet stay
         // on the ground and only his head rises.
-        let (faces, sprites) = drawn_bottoms(&man, &stand, &[300., 6_000., 50_000.]);
+        let (faces, sprites) = drawn_bottoms(&man, &stand, &[300., 6_000., 50_000.], true);
         assert_eq!(faces, None);
         for bottom in sprites {
             assert!(bottom.is_some_and(|y| y.abs() < 1e-4), "{bottom:?}");
         }
         let far = man_stand(&man.billboards, &stand, [6_000., 2., 0.]);
-        assert_eq!(far.scale, 2.);
-        assert!((far.origin[1] - 12.).abs() < 1e-9, "{:?}", far.origin);
+        assert!((far.scale - 1.).abs() < 1e-12);
+        assert!((far.origin[1] - 6.).abs() < 1e-9, "{:?}", far.origin);
+        // A man drawn as cards (faces) grows from his feet the same way.
+        let mut card = triangle(0.);
+        card.faces[0].positions = vec![[0., 0., -6.], [3., 0., -6.], [0., 0., 6.]];
+        let (faces, men) = drawn_bottoms(&card, &stand, &[300., 6_000.], true);
+        assert!(faces.is_some_and(|y| y.abs() < 1e-4), "{faces:?}");
+        for bottom in men {
+            assert!(bottom.is_some_and(|y| y.abs() < 1e-4), "{bottom:?}");
+        }
     }
 
     #[test]

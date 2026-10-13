@@ -274,8 +274,8 @@ const GROUNDING_TOLERANCE_FT: f64 = 0.05;
 /// the import and the retail media (OT and NT, or the types named) is stood
 /// on flat ground at 0 ft through the placement path
 /// (`Placements::stance`, which also sets the hit box) and drawn through the
-/// scenery's own code: its faces, and its sprites as a man is drawn at
-/// 300 ft and, boosted, at 6,000 ft. Every parked aircraft type (PT) is
+/// scenery's own code: its faces, and a man (sprites or cards) as he is
+/// drawn at 300 ft and, boosted, at 6,000 ft. Every parked aircraft type (PT) is
 /// stood through `surface::parked::place` and drawn gear down. Each row
 /// gives the shape's lowest and highest point about its origin (world feet
 /// at the size it is drawn), its F2 ground offset, the lift
@@ -346,8 +346,12 @@ fn grounding_survey(resources: &BTreeMap<String, Vec<u8>>, named: &[String]) -> 
             basis: stance.basis,
             origin: stance.origin,
         };
-        let (drawn, sprites) =
-            crate::scenery::surface_art::drawn_bottoms(shape, &stand, &GROUNDING_RANGES_FT);
+        let (drawn, sprites) = crate::scenery::surface_art::drawn_bottoms(
+            shape,
+            &stand,
+            &GROUNDING_RANGES_FT,
+            crate::scenery::surface_art::is_man(definition),
+        );
         let hit_box = stance.center[1] - stance.half[1];
         let foot = footing(definition);
         total += 1;
@@ -434,7 +438,7 @@ fn grounding_survey(resources: &BTreeMap<String, Vec<u8>>, named: &[String]) -> 
             basis: pose.basis,
             origin: pose.origin,
         };
-        let (drawn, _) = crate::scenery::surface_art::drawn_bottoms(&down, &stand, &[]);
+        let (drawn, _) = crate::scenery::surface_art::drawn_bottoms(&down, &stand, &[], false);
         let lift = pose.origin[1] - pose.ground[1];
         total += 1;
         if lift.abs() > GROUNDING_TOLERANCE_FT {

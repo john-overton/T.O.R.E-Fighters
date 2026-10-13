@@ -487,8 +487,8 @@ data).
 **The audit.** `tore-app --surface-dump --grounding [TYPE ...]` stands every
 OT, NT and PT of the import and the retail media on flat ground through the
 placement path (or `surface::parked::place`) and draws it through the
-scenery's own code: its faces, its hit box, and a man's sprites at 300 ft and
-boosted at 6,000 ft. A type that stands on its bottom and draws more than
+scenery's own code: its faces, its hit box, and a man (sprites or cards) at
+300 ft and boosted (three times, the cap) at 6,000 ft. A type that stands on its bottom and draws more than
 0.05 ft below the ground or above it is listed as a problem; the battery
 scenario `surface-grounding` fails on any. On the retail data: 392 types,
 0 problems (on the base before this slice, 11: the five types above).
@@ -705,6 +705,9 @@ scenery draws men's sprites every frame (`scenery::surface_art`). TROOPS.SH,
 the airfield squad, is not a sprite: it is flat textured soldier cards
 centred on its origin, so it stands 3.3 ft up
 ([grounding](#grounding-every-object-stands-on-the-bottom-of-its-shape)).
+Its damage branch (`shape::DAMAGED_WORD`) is the squad fallen: 8 flat faces
+lying on the ground (heights -1 to 0 units), drawn when the squad is killed.
+SOLDIER, RUNNER and EJECT have no damage branch and no `~` variant.
 
 ### Size of surface units
 

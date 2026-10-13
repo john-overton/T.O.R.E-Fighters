@@ -39,7 +39,7 @@ mission (heavy, seed 1, an SA-14) at 4,000 ft and expects it to launch.
 `surface-grounding` (B13, 2026-10-12; slice GROUND, 2026-10-13) runs `--surface-dump
 --grounding`, the grounding audit: every OT, NT and PT the import and the retail media hold, stood on flat
 ground through the placement path and drawn through the scenery's own code (faces, the hit box, and a man's
-sprites at 300 ft and boosted at 6,000 ft). Everything but runways, bridges, roads and ships stands on the
+sprites or cards at 300 ft and boosted at 6,000 ft). Everything but runways, bridges, roads and ships stands on the
 bottom of its shape within 0.05 ft (the factory hall FACTD lifted 42.7 ft, the hangar 26.7 ft, the airfield
 squad TROOPS 3.3 ft), that bottom agrees with the shape's F2 ground offset within 3 ft, and bridges, roads
 and ships are not lifted.
@@ -807,9 +807,10 @@ def grounding_problems(output: str) -> list[str]:
         m = rows.get(name)
         if m is None or abs(float(m.group(7)) - want) > 0.11:
             problems.append(f"{name}: lift {m and m.group(7)}, want {want} ft")
-    soldier = rows.get("SOLDIER.NT")
-    if soldier is None or "-" in (soldier.group(10), soldier.group(11)):
-        problems.append("SOLDIER.NT: no man sprites drawn near and far")
+    for man in ("SOLDIER.NT", "TROOPS.NT"):
+        m = rows.get(man)
+        if m is None or "-" in (m.group(10), m.group(11)):
+            problems.append(f"{man}: no man drawn near and far")
     return problems
 
 
