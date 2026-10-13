@@ -33,10 +33,17 @@ use super::{
 };
 use crate::ai::rotor_adapter::HoverGuidance;
 
-/// Fitted: a helicopter flies the hover approach on its forward law until
-/// it is this close to the landing point, then on the hover law, which
-/// slows it the rest of the way (the rotor adapter's own slowing).
-pub const HOVER_HANDOVER_FT: f64 = 1_500.0;
+/// Fitted (agent decision, slice H2): a helicopter or the V-22 flies the
+/// hover approach on its forward law, slowing at
+/// [`ROTOR_APPROACH_DECELERATION_FPS2`] as it closes, until it is slower
+/// than [`HOVER_HANDOVER_FPS`] (35 kt, under the rotor adapter's 40 kt
+/// hover entry) or within [`HOVER_HANDOVER_FT`]; then the hover law holds
+/// it over the point. Handing over faster let the adapter's own, later
+/// slowing overshoot: a V-22 overshot by 1,000 ft, its nacelles came down
+/// and it flew round at 150 kt.
+pub const ROTOR_APPROACH_DECELERATION_FPS2: f64 = 2.0;
+pub const HOVER_HANDOVER_FPS: f64 = 35.0 * 1.687_81;
+pub const HOVER_HANDOVER_FT: f64 = 200.0;
 /// Fitted: an air-taxiing or parking helicopter counts as stopped below
 /// this ground speed, ft/s.
 pub const HOVER_STOPPED_FPS: f64 = 5.0;
@@ -276,14 +283,14 @@ impl Sequence {
                 let distance = horizontal_distance(s.position, point);
                 let slowing = (2.0 * HOVER_DECELERATION_FPS2 * distance).sqrt();
                 let height = self.hover_height_ft();
-                if rotor && distance > HOVER_HANDOVER_FT {
-                    // Still far: the forward law, slowing as it closes.
+                let ground_speed = horizontal(s.velocity);
+                if rotor && distance > HOVER_HANDOVER_FT && ground_speed > HOVER_HANDOVER_FPS {
+                    // Still fast: the forward law, slowing as it closes.
                     let altitude = point[1] + height + s.ground_clearance_ft;
-                    let mut guidance = fly_to(
-                        s,
-                        [point[0], altitude, point[2]],
-                        slowing.min(VERTICAL_GATE_SPEED_FPS),
-                    );
+                    let speed = (2.0 * ROTOR_APPROACH_DECELERATION_FPS2 * distance)
+                        .sqrt()
+                        .min(VERTICAL_GATE_SPEED_FPS);
+                    let mut guidance = fly_to(s, [point[0], altitude, point[2]], speed);
                     guidance.terrain_floor = false;
                     command.control = Control::Air(guidance);
                 } else {
@@ -294,6 +301,9 @@ impl Sequence {
                             slowing
                         }
                         .max(OVER_POINT_FPS),
+                        // Arriving high (the gates are judged across the
+                        // ground only), it comes down as it closes.
+                        max_descent_fps: JET_DESCENT_FPS,
                         ..hover(point, height, self.hover_heading)
                     });
                 }

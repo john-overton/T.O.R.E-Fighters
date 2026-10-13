@@ -274,7 +274,22 @@ impl ProbeInvariants {
                     format!("{} -> {decoys}", previous_decoys.unwrap_or(0)),
                 ));
             }
-            if airborne && f.speed < SLOW_FPS {
+            // A helicopter, the V-22 or a hovering jet in a vertical airfield
+            // phase hovers and creeps on purpose (slice H2).
+            let hovering = actor.airfield().is_some_and(|s| {
+                use tore_sim::ai::airfield::Phase as P;
+                matches!(
+                    s.phase(),
+                    P::VerticalHold
+                        | P::VerticalClimb
+                        | P::Transition
+                        | P::HoverApproach
+                        | P::VerticalDescent
+                        | P::Settle
+                        | P::AirTaxi
+                )
+            });
+            if airborne && f.speed < SLOW_FPS && !hovering {
                 let since = *track.slow_since.get_or_insert(tick);
                 if tick - since >= SLOW_TICKS {
                     flags.push((
@@ -285,7 +300,7 @@ impl ProbeInvariants {
             } else {
                 track.slow_since = None;
             }
-            if airborne {
+            if airborne && !hovering {
                 match track.frozen_since {
                     Some((since, at))
                         if (0..3)

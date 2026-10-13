@@ -120,6 +120,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         (
             "ai-takeoff-*", "ai-theater-*", "ai-ground-*", "ai-rtb-*", "ai-ils-*",
             "ai-long-ground-land", "ai-lost-lead-*", "ai-airfield-taxi-*", "ai-enemy-ground-start-*",
+            "ai-heli-*", "ai-stovl-*", "ai-v22-*",
         ),
     ),
     "ai-lead": (

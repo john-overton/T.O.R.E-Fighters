@@ -6736,15 +6736,27 @@ impl ProbeWatch {
                     -f.velocity[1],
                     f.velocity[0].hypot(f.velocity[2]) / 1.68781,
                 );
+                if !self.wheels.contains_key(&slot.id) && !sequence.is_departure() {
+                    println!(
+                        "t={tick} ({seconds:.1}s) VERTICAL LANDING {} lift={:?} phase={:?} kt={:.0} nacelle={:.0} nozzle={:.0}",
+                        slot.label(),
+                        sequence.lift(),
+                        sequence.phase(),
+                        f.speed / 1.68781,
+                        f.nacelle_degrees(),
+                        f.nozzle_degrees()
+                    );
+                }
                 if let Some((false, sink, knots)) = self.wheels.get(&slot.id).copied()
                     && wheels
                     && !sequence.is_departure()
                 {
                     println!(
-                        "t={tick} ({seconds:.1}s) TOUCHDOWN {} sink_fps={sink:.1} ground_kt={knots:.1} phase={:?} lift={:?} gear_damaged={} crashed={}",
+                        "t={tick} ({seconds:.1}s) TOUCHDOWN {} sink_fps={sink:.1} ground_kt={knots:.1} phase={:?} lift={:?} nacelle={:.0} gear_damaged={} crashed={}",
                         slot.label(),
                         sequence.phase(),
                         sequence.lift(),
+                        f.nacelle_degrees(),
                         f.systems.has(16),
                         f.crashed
                     );
