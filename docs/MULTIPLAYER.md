@@ -827,6 +827,12 @@ defenses](spec/surface-defenses.md)). What a player sees:
   seed on every machine and fought by the host like the rest. It adds no wire
   field; it is part of the surface a game builds, so a build without it
   disagrees on the surface digest and is refused in the words above.
+- **Area defenses.** Since B23 (2026-10-12) a lobby mission with no ground
+  target but an AAA or SAM strength above none flies with [the enemy's area
+  defenses](spec/surface-defenses.md#area-defenses), SAM sites and guns on
+  Red's side of the front. The host draws their seed as for a target; every
+  game builds the same sites, with no wire field added, and a build without
+  them is refused in the words above.
 - **What moves and fires.** A column of tanks or a convoy of ships drives on
   every screen where the host has it. SAMs launch from their rails, which
   empty and refill when a supply truck rearms them; AAA tracers leave the guns

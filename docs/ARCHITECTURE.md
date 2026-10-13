@@ -1025,7 +1025,8 @@ format 3 (`tore_replay::FORMAT_VERSION`), and every other flight is the format
 stay comparable and an older build still opens a plain recording. Format 3 adds
 the ground target to the header (`world.ground_target`, which
 `Terrain::for_recorded` passes back so the viewer resolves the same template,
-defenses, trucks, radars, parked aircraft and starts), per-frame poses of
+defenses, trucks, radars, parked aircraft and starts; `world.area_defense` the
+same for the area defenses of a mission with no target), per-frame poses of
 moving units, rail and spare-magazine changes, the piece index of a surface
 owner's debris, a registry naming every surface unit, the `surface.*` events
 and a flak effect code. `replay/recorder/surface.rs` registers the units;

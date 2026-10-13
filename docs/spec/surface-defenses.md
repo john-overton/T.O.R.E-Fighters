@@ -46,11 +46,14 @@ armoured cars, troops and the Sarancha's anti-ship missile, by what their
 weapon records may aim at, and land gun AAA by John's ruling ([surface against
 surface](#surface-against-surface)), and a Quick Mission with a ground target
 stands a few Blue and Red ground units in contact so the battle is seen ([the
-front line](#the-front-line)).
+front line](#the-front-line)). Since 2026-10-12 a Quick Mission with no ground
+target but an AAA or SAM strength above none scatters the enemy's SAM sites
+and guns over Red's side of the front ([area defenses](#area-defenses)).
 
 - [Provenance and how to read this](#provenance-and-how-to-read-this)
 - [Data model](#data-model): unit records, templates and rolls, ownership, ids,
-  jitter, relocation, starts, the [front line](#the-front-line), the units of
+  jitter, relocation, starts, the [front line](#the-front-line), the
+  [area defenses](#area-defenses), the units of
   the movement words, mission settings.
 - [Surface AI](#surface-ai): engagement, SAM missiles, AAA and flak, ships,
   movement, experience, RWR emitters, countermeasures, and [surface against
@@ -256,7 +259,9 @@ Further rules, all retail data unless noted:
 3. A placeholder carrying the destroy-target flag (0x80) that fails its roll is
    not a target. `~QUCITY` flags eleven `<AAA>` and twelve `<SAM>` slots as
    targets; with defenses at none it has 16 tank targets only.
-4. Selecting ground target none clears both defense fields (retail).
+4. Selecting ground target none clears both defense fields (retail). Here
+   they stay, as the strengths of the enemy's
+   [area defenses](#area-defenses) (agent decision, 2026-10-12, B23).
 5. A target is any template object flagged 0x80 that exists after resolution.
 
 ### Ownership and sides
@@ -321,6 +326,7 @@ every machine.
 | `0x5800_0000` plus n | Added supply trucks | n in the order of the unit each serves (ascending unit id) |
 | `0x5C00_0000` plus n | Added battery radars | n in battery order (ascending lowest launcher id); an adopted radar keeps its own id |
 | `0x5E00_0000` plus n | The [front line](#the-front-line)'s units | n in placement order: Blue's line, then Red's |
+| `0x5F00_0000` plus n | The [area defenses](#area-defenses) of a mission with no ground target | n in placement order: SAM sites, then gun sites, two units each |
 | `0x0200_0000` upward | Surface projectiles (SAMs, shells) | Own counter; AI aircraft shots start at `0x0100_0000` and would need 16.7 million shots to reach it |
 | `0xE000_0000`, `0xF000_0000` | Client cosmetic rounds | Unchanged |
 
@@ -480,7 +486,8 @@ from the seed and is inside the digest.
 - The target point is the targets' placed centroid. A theater with no front
   (no owned placements on one side) starts Blue toward the middle of the map
   (fitted).
-- No ground target: unchanged.
+- No ground target: unchanged (the [area defenses](#area-defenses) add no
+  start).
 
 ```mermaid
 flowchart LR
@@ -571,6 +578,110 @@ flowchart LR
     T -.->|at least 4 nm from every template unit and start| C
 ```
 
+### Area defenses
+
+John, 2026-10-12 (B23): "Allow enemy AAA and SAMs with no objective set;
+scatter them across the Redfor area of operations", with his answers to the
+round's questions 11 to 16: Red's side of the front, 10 to 60 nm deep, extra
+cover near Red airfields; counts from the creator's AAA and SAM strengths; the
+usual unit sets (SAM sites with their radars, plus guns) of the enemy nation;
+standing still, no tanks; hidden from the map; Quick Mission only. Retail has
+no such thing (with no ground target its Quick Mission has no surface units
+beyond the theater layout's), so this is **opinionated, John**; every number
+below is fitted (agent).
+
+- **When.** A Quick Mission with no ground target whose AAA or SAM strength
+  is above none (the creator's fields 31 and 32, which stay live without a
+  target; [the creator](quick-mission-menu.md#ground-target-and-defenses)).
+  The mission text writes `defenses aaa LEVEL sam LEVEL` with no
+  `ground-target` line. With a ground target the strengths man the target's
+  slots as before and no area defenses stand (never both). Free flight has no
+  creator and so never has them.
+- **How many.**
+
+  | Strength | SAM sites | Gun sites |
+  | --- | ---: | ---: |
+  | none | 0 | 0 |
+  | light | 2 | 4 |
+  | moderate | 4 | 8 |
+  | heavy | 6 | 12 |
+
+  Each site is two units of one type, so heavy is 12 launchers and 24 guns
+  plus the SAM sites' radars. The template rolls (25, 60 and 100 percent of
+  ten slots each) give about the same numbers of units around a target; here
+  the counts are fixed, as a scattered site rolled away would leave a hole in
+  a map-wide layer.
+- **Which.** Each site's type is a uniform pick from the enemy nationality's
+  equipment group for `<sam>` or `<aaa>`, the lists the target's slots draw
+  from ([templates](#templates-and-defended-slots)); with the night rule's
+  condition a gun site is ZSU-23s at novice, as the template's are. The
+  battery rules ([SAM batteries](#sam-batteries)) then group each SA-2, SA-3,
+  SA-6 or HAWK site into a battery with its radar vehicle, added beside it;
+  area batteries never take a base-layout radar or launcher, nor the other
+  way round. Skill average (1). No supply trucks, no route, no front line, no
+  destroy flag: they are not objectives, and destroying one scores as any
+  enemy ground unit does.
+- **Where.** The front axis runs from the centroid of the theater layout's
+  Blue placements to that of its Red ones ([relocation](#relocation)); its
+  midpoint splits the sides. Every theater's layout has both, so every
+  theater has a front.
+  - A **band site** stands at a seeded depth of 10 to 60 nm past the
+    midpoint toward Red, at a seeded lateral offset anywhere across the map.
+  - **Airfield cover.** The first SAM site and every third after it, and the
+    same for gun sites, guard a Red airfield instead: a seeded point 2 to 5 nm
+    from a runway's origin. Red airfields are the runways of Red's side (an
+    unowned one by its side of the front) lying 0 to 100 nm past the
+    midpoint; they are taken in turn from a seeded first one. A theater with
+    none puts every site in the band.
+  - **Fallback.** A site that finds no place by its airfield tries the band;
+    one that finds none in the band tries 10 to 120 nm deep (island theaters,
+    whose band is mostly sea). A site that still finds none is left out and
+    the layout notes say so.
+  - Up to 96 candidate centres per pass, the first that holds both units
+    wins. A centre must be on the map two cells inside its edge, on Red's
+    side, and 3 nm from every site already placed. Each unit stands 150 to
+    600 ft from the centre, 150 ft clear of the other beyond their
+    footprints, where a ground unit may (land, level, as the template rule
+    under [Jitter](#jitter)), 2,000 ft clear of every theater layout object
+    (towns, buildings, airfield objects) and 1 nm clear of every runway (past
+    the aprons and taxiways the redrawn airports add). The city fill also
+    hides any filler building a unit stands on.
+  - Measured with `--surface-dump --area-sweep --seeds 2` (16 theaters,
+    light to heavy, 96 builds): every unit keeps every rule, and every theater
+    but the Kurils stands every site. The Kurils (a chain of small islands)
+    stand 8 to 26 of their 12 to 36 units.
+- **Facing and sight.** Each unit faces away from its site's centre. They
+  fight by the ordinary [Surface AI](#surface-ai) rules: a site engages an
+  aircraft of the other side in its reach, so a Blue pilot flying over Red's
+  side is shot at.
+- **Hidden.** No map lists them, the creator's map nor the in-flight map's
+  mission markup (John: hidden from the map). Like any unit, a site the
+  aircraft's sensors detect shows as a contact.
+- **Determinism.** Each site draws from its own stream, keyed by the mission's
+  surface seed, the layout and the site's number, in integer arithmetic, so
+  every machine and every replay of the same seed places the same sites. The
+  settings (strengths, seed, enemy nationality, night rule) are in the
+  surface digest only when set, so every other mission's digest is unchanged;
+  the replay header keeps them as `world.area_defense`
+  ([Replays](#replays)). Online no wire byte changes: the mission text carries
+  the strengths and the host draws the seed, as for a ground target
+  ([Multiplayer](#multiplayer)); a build with the area defenses and one
+  without disagree on the digest and refuse each other.
+
+```mermaid
+flowchart LR
+    S[Strengths, no target] --> N[2 to 6 SAM sites, 4 to 12 gun sites]
+    N --> F{Every third site of a kind}
+    F -->|yes| A[2 to 5 nm from a Red airfield]
+    F -->|no| B[Band: 10 to 60 nm past the midpoint toward Red]
+    A -->|no place| B
+    B -->|no place| D[10 to 120 nm deep]
+    A --> U[Two units, level land, clear of towns and runways]
+    B --> U
+    D --> U
+    U --> R[SA-6 and the like: a battery with its radar]
+```
+
 ### The units of the movement and range words
 
 **Waypoint speed `w_speed` is feet per second** (retail data, strong inference;
@@ -621,7 +732,7 @@ unchanged. All defined (agent).
 | Field | Text line | Notes |
 | --- | --- | --- |
 | Ground target | `ground-target QUCOL` | The template stem, not a menu index, so a server file reads clearly |
-| AAA and SAM levels | `defenses aaa heavy sam moderate` | `none / light / moderate / heavy`; written only with a target |
+| AAA and SAM levels | `defenses aaa heavy sam moderate` | `none / light / moderate / heavy`; written when either is above none. With no target they are the [area defenses](#area-defenses)' strengths |
 | Surface seed | `surface-seed 1234567` | See [Jitter](#jitter) |
 | Enemy nationality | `enemy-nationality 10` | Field 20; default per theater; drives the equipment group |
 
@@ -1781,8 +1892,9 @@ and the player's view in [the multiplayer guide](../MULTIPLAYER.md#ground-target
   firing, resupply and damage. Every client builds the same surface world from
   the mission text and the seed the host draws, and checks the digest
   ([Jitter](#jitter)) at seating and at a resume: placement, relocation,
-  batteries, trucks, parked aircraft and both sides' starts all come from the
-  seed, so none of it crosses the wire. A game whose surface differs is refused
+  batteries, trucks, parked aircraft, both sides' starts and the
+  [area defenses](#area-defenses) all come from the seed, so none of it
+  crosses the wire. A game whose surface differs is refused
   in plain words. Standing, untouched units never send state.
 - **Entity kind.** A fifth network entity kind, "surface" (defined, John), for
   units that drive or sail: position, ground-relative velocity, heading, pitch,
@@ -1834,7 +1946,7 @@ surface the flight had.
 
 | What | How it is kept |
 | --- | --- |
-| The surface itself | The ground target (template stem, defense levels, seed, enemy nationality, night rule, jitter and relocation switches, enemy distance) is in the header, so the viewer resolves the same template, defenses, trucks, radars, parked aircraft and starts again. The airfield scene number is reserved there (0 is the retail airfields) |
+| The surface itself | The ground target (template stem, defense levels, seed, enemy nationality, night rule, jitter and relocation switches, enemy distance) is in the header, so the viewer resolves the same template, defenses, trucks, radars, parked aircraft and starts again. With no target, the [area defenses](#area-defenses)' settings (`world.area_defense`: strengths, seed, enemy nationality, night rule) rebuild the same sites. The airfield scene number is reserved there (0 is the retail airfields) |
 | Units that drive or sail | A pose each tick (position and attitude to the recording's precision of 1/32 ft, the wrecked flag), keyed by the unit's fixed id. Standing units are the rebuilt scenery |
 | Wrecks | The unit's hit points (as for any ground object), so the wreck look, the crater, the fire mark and the smoke column come back; the registry's hit points size the fire. The smoke starts on the tick the unit died, however the playhead got there |
 | Launchers and guns | A launcher's rails, every rail of the unit when one changes, and a gun's spare magazines when they change; a unit not listed holds its full load. Gun rounds and missiles are the usual projectiles owned by the unit's id |
@@ -1987,6 +2099,8 @@ Settled during the round:
 | B42 phases, missile guidance classes, decoy rules, RWR states | spec-derived |
 | Having a gun rate, magazine and reload (values fitted); splash damage for every weapon; the 60 and 120 s gun swaps; the 300 to 600 s SAM rearm range; base-layout defenses active; Redfor defends in PvP; jitter; relocation and starts; batteries; supply trucks; simulated parked aircraft; one combined objective; friendly-fire failure; a fifth network entity kind | defined (John, 2026-10-10) |
 | Surface units of opposing sides in range shoot at each other, whatever their `react` masks | opinionated (John, 2026-10-11) |
+| Area defenses with no ground target: Red's side, 10 to 60 nm deep, airfield cover, counts from the strengths, the enemy group's units with radars, standing, hidden, Quick Mission only | opinionated (John, 2026-10-12, B23) |
+| Area defense site counts per strength, two units a site, one site in three by a Red airfield 2 to 5 nm out (fields 0 to 100 nm deep), 10 to 120 nm fallback, 3 nm spacing, 150 to 600 ft unit ring, 2,000 ft object and 1 nm runway clearance, no supply trucks, strengths kept when the target goes | fitted or defined (agent, 2026-10-12) |
 | Weapon target flags (0x10000 air, 0x20000 surface) deciding what a surface weapon aims at; surface damage by class | retail |
 | Preference by unit class, nearest-first choice, units only (no buildings or parked aircraft), the SS-N-9 at ships only and its surface radar search, sides a surface round strikes, the quarter surface aim error, the column's halt | fitted or defined (agent, 2026-10-11) |
 | Relocation site rules and counts, battery caps and radar placement, truck counts and placement, the per-system SAM rearm timers within John's range, gun reserve, jitter numbers, emitter rule, radar on and off, HARM shutdown, experience effects, target choice, time fuze, surface splash reaching aircraft and the other side's ground objects only, barrage rule, movement rates, launch pitch, flak and gun-light looks | fitted or defined (agent) |
