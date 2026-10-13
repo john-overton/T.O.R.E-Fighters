@@ -47,6 +47,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [The redrawn airports (protocol 24)](#the-redrawn-airports-protocol-24) (built under protocol 24)
 - [The city fill (protocol 25)](#the-city-fill-protocol-25) (built under protocol 25)
 - [Protocol 26: explosions sized by weapon](#protocol-26-explosions-sized-by-weapon) (built under protocol 26)
+- [Protocol 27 (stores)](#protocol-27-stores) (built under protocol 27)
 - [Limits](#limits)
 - [Captures](#captures)
 - [Versions](#versions)
@@ -288,7 +289,18 @@ Nine bytes, smaller than the empty Payload (19 bytes) it stands in for.
   after its last keepalive. The thread only sends this one packet; it never
   reads the socket or touches the client's state, and it stops when the
   connection closes or the session ends. The hosting game's own connection
-  has none: it is exempt from the timeout (EF4).
+  has none: it is exempt from the timeout (EF4). `tore-bot` runs the same
+  thread for each bot joined over UDP or through the Internet Lobby (slice
+  NET, 2026-10-12).
+- **A long mission build.** *Slice NET, agent decision; no wire change.* A
+  client builds the mission's world in the turn that reads the last of the
+  host's Mission message (or a flight's loadouts), which on a slow machine
+  takes longer than the 5-second timeout. The keepalive covers the build on
+  the host's side, within the same 60-second bound; no separate loading
+  grace exists. On the client's side the turn stops reading after that
+  datagram: what the host sent during the build is read on the next turn,
+  at that turn's time, so the client does not judge the host silent for the
+  length of the build ([details](../ARCHITECTURE.md#a-long-mission-build-slice-net)).
 - **What the host does.** A Keepalive from the connection's own address with
   its own id counts as hearing from the connection: no acknowledgement, no
   round trip, no rate statistic, no answer. The first since the game's last
@@ -901,6 +913,7 @@ snapshot's tick.
 | Surface burst end | everyone | That burst stopped after this many rounds, short of its schedule (protocol 22) |
 | Surface unit | everyone | A surface unit's hit points, radar, launcher rails and spare magazines, when they change and at a seat (protocol 22) |
 | City flattened | everyone | City fill buildings a ground burst knocked flat, by index, when they fall and at a seat (protocol 25, [the city fill](#the-city-fill-protocol-25)) |
+| Stores | everyone | An aircraft's drawn stations and the whole stores still on each, when they change and at a seat (protocol 27, [stores](#protocol-27-stores)) |
 
 Recording stems, weapon and sound names are sent by their index in the
 connection's name table (the Names message), which the host fills before the
@@ -1448,8 +1461,9 @@ reads codes to the host's own numbers on every snapshot.
 The section is the count (varint, 1 to 1,024), the first event's number (16
 bits), then each event: its number after the first as the difference from the
 one before less 1 (bucketed as the ids), its ticks before the snapshot
-(varint), a 5-bit code in the table's order (Message 0 to Sound 16, and Link
-17 since protocol 15) and its fields. Stem lists are a 6-bit count (at most 32) and 12-bit name indexes. A
+(varint), a 5-bit code in the table's order (Message 0 to Sound 16, Link
+17 since protocol 15, the surface events 18 to 20 since 22, City flattened 21
+since 25 and Stores 22 since 27) and its fields. Stem lists are a 6-bit count (at most 32) and 12-bit name indexes. A
 rumble's turbulence is 1/255; a gun burst starts at the event's tick and
 carries its length as a varint, 0 while still firing; a countermeasure
 carries its release position, velocity and attitude, the device's number
@@ -2688,6 +2702,69 @@ knows which weapon made an effect, so the size travels with it.
   `EffectPose` gain the scale, and the picture's `ProjectilePose` its
   motor state ([checkpoint](checkpoint.md)); the Check hash and a
   standby's restore carry them, and a 25 build would read them wrongly.
+## Protocol 27 (stores)
+
+*Built (slice BP3 of the bug-fix round, 2026-10-12); agent decisions unless
+credited.* John asked for other aircraft's stores on a network client
+(2026-10-12): before it, a client drew pylons and stores on its own aircraft
+only ([stores on pylons](../spec/stores-on-pylons.md)). What a client needs
+to draw them is the aircraft's loadout, which every game of a session builds
+the same from the mission text and the flight's loadouts, and the whole
+stores still on each station, which changes only when a whole store leaves.
+Only the second travels, and only when it changes.
+
+```mermaid
+flowchart LR
+    tick["Host tick: every aircraft's<br/>drawn stations and stores"] --> same{"Same as last told<br/>(as built if never)?"}
+    same -->|"yes"| nothing["Nothing sent"]
+    same -->|"no"| event["Stores event<br/>to everyone"]
+    seat["A seat, a resume,<br/>an observer's start"] --> standing["Stores event for every<br/>aircraft not as built"]
+    event --> client["Client: newest state at or<br/>before the drawn tick,<br/>else as built from its loadout"]
+    standing --> client
+```
+
+- **Stores** (event 22, everyone): the aircraft (varint), a count (varint, at
+  most 64), then for each drawn station, in ascending station order, its
+  index in the loadout (6 bits) and the whole stores still on it (varint).
+  A drawn station is an external one (centreline, fuselage, wing, wingtip)
+  that is not a gun and was loaded at the start; a rocket pod counts as one
+  store while it has a rocket left. Fuel tanks are not listed: the loadout
+  alone draws them. A decoder refuses stations out of order or past 63.
+- **When.** The host compares every aircraft's drawn stations each tick with
+  what it last told, and with the loadout as built for an aircraft it never
+  told, and sends a Stores event for each that differs, at the tick it
+  changed: a release that empties a whole store, a jettison, a rearm or a
+  respawn. A human-flown plane's come from its cockpit's rounds, an AI
+  aircraft's from its weapon service. A player seated later, every seat of a
+  resumed flight after a migration and an observer starting to watch get a
+  Stores event for every aircraft not as built (the observer's delayed
+  stream keeps each aircraft's newest one, as it keeps the craters).
+- **The client** keeps each aircraft's told states in tick order and draws
+  the newest at or before the tick its picture shows, so a station empties
+  when the picture reaches the release, the tick the weapon appears. An
+  aircraft never told is drawn as its loadout built it. The loadout is the
+  session's copy of the mission's (an AI aircraft's or a plane's flight
+  loadout); an aircraft with none there draws no stores. The seat's own
+  aircraft is drawn from its cockpit readout, which is newer. A capture's
+  conversion and an observer's live recording keep the stores the same way
+  ([replays](../REPLAYS.md#stores)).
+- **Bandwidth** (measured by the `a_stores_event_is_small_and_checked` test
+  and the bots' `stores:` line): the event's code and fields take 14 bytes
+  for a fighter's six drawn stations with fewer than 128 stores each, plus
+  the events section's 2 to 4 bytes of number and tick. One is sent for each
+  whole store that leaves; nothing is sent while nothing changes. The worst
+  case, a 64-station loadout with 65,535 on each, is 243 bytes; a real
+  loadout has at most a dozen drawn stations and under 128 on each, at most
+  about 25 bytes. The oldest event may use the packet's message room, so a
+  long one is never starved.
+- **Why a bump.** A 26 game reads event code 22 as invalid and drops the
+  packet's events. The wire golden changes in the version line, the events
+  sample (one Stores event added) and the transport packets sealed with the
+  version. No checkpoint changes: the host's record of what it told is
+  rebuilt by every new host, which then tells every seat what is not as
+  built.
+- **Numbering.** Built as 26 on its own branch; slice BF's explosion scale
+  took 26 first, so the stores take 27 (lead, 2026-10-12).
 
 ## Limits
 
@@ -2705,6 +2782,7 @@ Decoders check every count and length against these before reading on.
 | Ejected pilots | 64 |
 | Moving surface units (protocol 22) | 128 |
 | Hardpoints in a Surface unit event (protocol 22) | 64 |
+| Stations in a Stores event (protocol 27) | 64 |
 | Ground contacts in a readout (protocol 23) | 50 |
 | Emitters of the HARM cue, guided weapons in flight in a readout (protocol 23) | 8, 4 |
 | Name table | 4,096 entries |
@@ -2846,6 +2924,10 @@ again with an observer; the capture format did not change for it.
   [explosions sized by weapon](#protocol-26-explosions-sized-by-weapon)):
   the Effect event's scale, and the effect's scale and the round's motor
   state in the checkpoints.
+  27 since the stores slice (BP3, [stores](#protocol-27-stores)): the
+  Stores event (code 22), every aircraft's drawn stations and the whole
+  stores on each, sent when they change and at a seat, so a client draws
+  every aircraft's pylons and stores.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

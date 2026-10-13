@@ -362,6 +362,11 @@ impl Clock {
 pub struct Situation<'a> {
     pub index: usize,
     pub station: &'a Station,
+    /// Where the store that leaves next hangs, feet right, up and forward
+    /// of the aircraft: its side of a paired station
+    /// ([`super::live::Station::next_release_point`]). The sight predicts
+    /// from it (B3 follow-up, John 2026-10-12).
+    pub mount: Vector,
     pub launcher: &'a Launcher,
     pub mode: DeliveryMode,
     /// The designated ground target's position, if any.
@@ -392,7 +397,7 @@ pub fn solve(s: Situation<'_>, ground: impl Fn(f64, f64) -> f64) -> Option<Deliv
         return None;
     }
     let ccip = if bomb {
-        let release = ReleaseState::from_station(s.launcher, s.station, 0);
+        let release = ReleaseState::from_mount(s.launcher, s.station, s.mount, 0);
         predict_impact(release, &ground).map(|impact| Ccip::new(s.launcher, release, impact, w))
     } else {
         let fly = if s.beyond_life {
@@ -400,7 +405,7 @@ pub fn solve(s: Situation<'_>, ground: impl Fn(f64, f64) -> f64) -> Option<Deliv
         } else {
             rocket_impact
         };
-        fly(w, s.launcher, s.station, s.clock, &ground)
+        fly(w, s.launcher, s.mount, s.clock, &ground)
             .map(|(release, impact)| Ccip::new(s.launcher, release, impact, w))
     };
     let mode = if bomb { s.mode } else { DeliveryMode::Ccip };
@@ -535,7 +540,7 @@ fn level_release(
     })
 }
 
-/// Where a rocket fired from `station` now meets the ground, and the state it
+/// Where a rocket fired from `mount` (feet right, up and forward) now meets the ground, and the state it
 /// leaves in: the unguided round's own steps, tick by tick (the speed command
 /// of flag 0x40, travel along the launch direction by the service units, the
 /// gravity flag's sink), from the clock of this step, against the terrain
@@ -544,11 +549,11 @@ fn level_release(
 pub fn rocket_impact(
     weapon: &Weapon,
     launcher: &Launcher,
-    station: &Station,
+    mount: Vector,
     clock: Clock,
     ground: &impl Fn(f64, f64) -> f64,
 ) -> Option<(ReleaseState, Impact)> {
-    fly_rocket(weapon, launcher, station, clock, ground, false)
+    fly_rocket(weapon, launcher, mount, clock, ground, false)
 }
 
 /// The rocket pipper's point for a human's HUD: [`rocket_impact`] when the
@@ -564,11 +569,11 @@ pub fn rocket_impact(
 pub fn rocket_impact_beyond(
     weapon: &Weapon,
     launcher: &Launcher,
-    station: &Station,
+    mount: Vector,
     clock: Clock,
     ground: &impl Fn(f64, f64) -> f64,
 ) -> Option<(ReleaseState, Impact)> {
-    fly_rocket(weapon, launcher, station, clock, ground, true)
+    fly_rocket(weapon, launcher, mount, clock, ground, true)
 }
 
 /// How long the pipper's continuation flies on, seconds (fitted).
@@ -580,7 +585,7 @@ const BEYOND_STEP_TICKS: u64 = 12;
 fn fly_rocket(
     weapon: &Weapon,
     launcher: &Launcher,
-    station: &Station,
+    mount: Vector,
     clock: Clock,
     ground: &impl Fn(f64, f64) -> f64,
     beyond: bool,
@@ -589,9 +594,9 @@ fn fly_rocket(
     let basis = launcher.basis;
     let mut position: Vector = std::array::from_fn(|i| {
         launcher.position[i]
-            + basis.right[i] * station.mount[0]
-            + basis.up[i] * station.mount[1]
-            + basis.forward[i] * station.mount[2]
+            + basis.right[i] * mount[0]
+            + basis.up[i] * mount[1]
+            + basis.forward[i] * mount[2]
     });
     let direction = basis.forward;
     let mut speed_f8 = launch_speed(m, (launcher.speed_fps * 256.) as i32).ok()? * 256;

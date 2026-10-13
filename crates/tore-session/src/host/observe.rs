@@ -197,6 +197,15 @@ impl Ring {
                 Wide::Event(WireEvent::Mark { .. } | WireEvent::CityFlattened { .. }) => {
                     self.marks.push(event.timed)
                 }
+                // An aircraft's stores stand as their newest state (protocol
+                // 26): a later observer is told that one.
+                Wide::Event(WireEvent::Stores { aircraft, .. }) => {
+                    let aircraft = *aircraft;
+                    self.marks.retain(|t| {
+                        !matches!(t.event, Wide::Event(WireEvent::Stores { aircraft: a, .. }) if a == aircraft)
+                    });
+                    self.marks.push(event.timed)
+                }
                 _ => {}
             }
         }
@@ -544,7 +553,11 @@ impl Host {
                     // knocks nothing more down.
                     matches!(
                         t.event,
-                        Wide::Event(WireEvent::Mark { .. } | WireEvent::CityFlattened { .. })
+                        Wide::Event(
+                            WireEvent::Mark { .. }
+                                | WireEvent::CityFlattened { .. }
+                                | WireEvent::Stores { .. }
+                        )
                     ) && !new_marks.contains(&&t.event)
                 })
                 .collect();

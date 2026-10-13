@@ -767,11 +767,79 @@ impl SurfaceSeen {
     }
 }
 
+/// What a bot's frames showed of the other aircraft's stores (protocol 27,
+/// B3), for `tore-bot` to print and the net lane's `net-stores` scenario to
+/// read.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StoresSeen {
+    /// Stores events told, their coded size in bytes (the event's code and
+    /// fields) summed, and the largest.
+    pub told: u64,
+    pub bytes: u64,
+    pub largest: usize,
+    /// The most other aircraft one frame drew with stores.
+    pub drawn: usize,
+    /// Other aircraft drawn with a station holding fewer stores than when
+    /// the bot first drew it.
+    pub emptied: std::collections::BTreeSet<u32>,
+    /// Each other aircraft's stations as first drawn: whole stores, by
+    /// aircraft and the station's place in its list.
+    first: std::collections::BTreeMap<(u32, usize), u16>,
+}
+
+impl StoresSeen {
+    fn see(&mut self, frame: &ClientFrame) {
+        let others = frame
+            .picture
+            .targets
+            .iter()
+            .filter(|pose| pose.id != frame.plane.0 && !pose.stores.is_empty());
+        self.drawn = self.drawn.max(others.clone().count());
+        for pose in others {
+            let mut fewer = false;
+            for (slot, store) in pose.stores.iter().enumerate() {
+                let first = *self.first.entry((pose.id, slot)).or_insert(store.items);
+                fewer |= store.items < first;
+            }
+            if fewer {
+                self.emptied.insert(pose.id);
+            }
+        }
+        for event in &frame.events {
+            if let WireEvent::Stores { .. } = &event.event {
+                let mut w = tore_codec::BitWriter::new();
+                if event.event.write(&mut w).is_ok() {
+                    let bytes = w.bit_len().div_ceil(8);
+                    self.told += 1;
+                    self.bytes += bytes as u64;
+                    self.largest = self.largest.max(bytes);
+                }
+            }
+        }
+    }
+
+    /// The line `tore-bot` prints.
+    pub fn line(&self) -> String {
+        let emptied: Vec<String> = self.emptied.iter().map(u32::to_string).collect();
+        format!(
+            "told {}, bytes {}, largest {}, drawn {}, emptied [{}]",
+            self.told,
+            self.bytes,
+            self.largest,
+            self.drawn,
+            emptied.join(" ")
+        )
+    }
+}
+
 pub struct Bot {
     pub client: Client,
     pub pilot: ScriptedPilot,
     /// What its frames have shown of a ground target (protocol 22).
     pub surface: SurfaceSeen,
+    /// What its frames have shown of the other aircraft's stores
+    /// (protocol 27).
+    pub stores: StoresSeen,
     last_frame: Option<Duration>,
     picture: Option<RenderSnapshot>,
     /// Frames drawn.
@@ -899,6 +967,7 @@ impl Bot {
             client,
             pilot: ScriptedPilot::new(),
             surface: SurfaceSeen::default(),
+            stores: StoresSeen::default(),
             last_frame: None,
             picture: None,
             frames: 0,
@@ -1361,6 +1430,7 @@ impl Bot {
                 self.picture = Some(frame.picture.clone());
                 self.hear(&frame);
                 self.surface.see(&frame);
+                self.stores.see(&frame);
                 drawn = Some(frame);
             } else if let Some(frame) = self.client.observer_frame(now) {
                 self.watched += 1;

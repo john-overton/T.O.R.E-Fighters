@@ -196,6 +196,15 @@ The viewer uses the selected base or variant MM, its referenced terrain and DAY2
 
 Signed out-of-grid border placements remain preserved; the mesh only queries patches intersecting actual fine-grid quads. Camera starts and fixed triangles are authored investigation behavior. All 16 passed Metal startup/render checks; native landmark/shoreline/atmosphere parity remains open. See [runtime validation](../baselines/all-theaters.md#runtime-and-typography-follow-up).
 
+## Climate (not in the retail data)
+
+The retail theater files carry no humidity or climate. TORE gives each of the
+16 base theaters a fixed, fitted humidity for the look of a large blast
+(condensation cloud when humid, lingering tan dust when arid), pushed toward
+humid by a fog or overcast weather choice; the table and rules live in the
+explosions spec's [climate](../spec/explosions.md#climate) section and in
+`tore_world::climate`. It is presentation only.
+
 ## Diagnostic native contact geometry, 2026-09-15
 
 The vertical cell diagnostic now preserves the native diagonal, word normals,

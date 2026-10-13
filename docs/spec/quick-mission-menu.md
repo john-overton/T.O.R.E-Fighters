@@ -102,12 +102,15 @@ writes the strengths `none`, `light`, `moderate` and `heavy`
   theater's template missions, in menu order
   ([the list per theater](../formats/quick-templates.md#recorded-facts-from-faexe-102f)).
   Clicking the field steps through the list; Shift opens it.
-- **Strengths.** Each strength steps through its four words. With the target
-  at "none" both strengths read "not" and cannot be changed: touching one says
-  "Choose a ground target first: the defenses are the target's." Setting the
-  target to none, or changing the theater, puts both back to "not" at once
-  (retail clears them when the target is none; the theater case it leaves to
-  the next change, which is not copied).
+- **Strengths.** Each strength steps through its four words, with or
+  without a target. With a target they man the target's defenses. With the
+  target at "none" they set the enemy's **area defenses**: SAM sites and AAA
+  guns scattered over Red's side of the front (John, 2026-10-12, B23; see
+  [area defenses](surface-defenses.md#area-defenses)). Both "not" (the
+  default) gives a mission with no target what it always had. Retail clears
+  both strengths when the target is set to none; here they stay, and a
+  theater change keeps them too (agent decision, 2026-10-12: the strengths
+  now mean something without a target, and they are not tied to a theater).
 - **Enemy nationality.** Field 20 is part of the mission. It picks the
   equipment group the target's units are drawn from, so the mission file
   carries it (`enemy-nationality`), and the lobby's read-only creator shows it
@@ -123,8 +126,8 @@ writes the strengths `none`, `light`, `moderate` and `heavy`
   Blue airport whose runway holds the wing, then the first neutral one
   (fitted), and never an enemy field (slice AL1): with none the start is
   refused.
-- **Seed.** Pressing OK on a mission with a target draws a new number that
-  the target's layout is rolled from, so each flight can differ and a restart
+- **Seed.** Pressing OK on a mission with a target, or with area defenses,
+  draws a new number that the layout is rolled from, so each flight can differ and a restart
   of the same flight repeats it. The lobby sends none; the host draws it when
   the flight starts.
 - **Lobby.** The King edits the fields like any other; everyone else sees the
@@ -142,6 +145,14 @@ writes the strengths `none`, `light`, `moderate` and `heavy`
   with AAA on), so a surface battle is visible on the way in. They are
   not objectives and add nothing to the creator: no field, no setting, drawn
   from the same seed ([the front line](surface-defenses.md#the-front-line)).
+- **Area defenses** (John, 2026-10-12; B23). With no target and a strength
+  above "not", the enemy's SAM sites (with their radar vehicles) and guns
+  stand still on Red's side of the theater's front, 10 to 60 nm deep, with
+  one site in three guarding a Red airfield. Light, moderate and heavy give
+  2, 4 and 6 SAM sites and 4, 8 and 12 gun sites, two units each (fitted).
+  They are not objectives and are not on the map. Quick Mission only: free
+  flight has no creator, so it never has them. Same on every machine and in
+  replays ([area defenses](surface-defenses.md#area-defenses)).
 
 The old notice popup (sentence hit region (334,294), 278 by 49; popup (166,202),
 308 by 88) is gone, and so is the launch refusal "Ground targets and defenses
@@ -262,17 +273,22 @@ own aircraft, experience, side and leader. Friendly Wing 1 follows the human;
 the other wings have their own AI leaders. No command-line option is required.
 `--ai-wings` remains a shortcut to open the creator.
 
-AI helicopters (slice ST-H, John's decision of 2026-10-11): the AH-64 and the
-Mi-24 are offered in the five AI wing fields, and in friendly wing 1 when the
-player flies one on an airborne start. The CH-47, the V-22, the AV-8 and the
-Yak-141 are not offered to the AI. A helicopter of the AI's own wings starts
-1,500 ft over the ground under it rather than at the chosen altitude, in forward
-flight (**opinionated**, agent: the AI cannot yet make a helicopter climb or
-descend by much). A player in a helicopter who chooses a ground start leads
-friendly wing 1 alone, with a notice, because the AI cannot take a helicopter off
-the ground; the other wings start airborne at any start. With a ground target set,
-a friendly wing 2 or 3 of helicopters strikes by the bomber-class default. See
-[AI strike](ai-strike.md#ai-helicopters-in-quick-mission).
+AI helicopters and VTOL aircraft (slice ST-H, John's decision of 2026-10-11;
+slice H3, John's decisions of 2026-10-12): every aircraft is offered in the five AI
+wing fields, the AH-64, Mi-24, CH-47, V-22, AV-8 and Yak-141 included, and in
+friendly wing 1 when the player flies one of them on an airborne start. The CH-47
+is an AI wing choice only (no escort objective: the creator's escort missions
+already protect a chosen wing) and carries no weapons, so it never takes the Strike
+role, whatever the wing's objective or the bomber-class default. A helicopter of
+the AI's own wings starts 1,500 ft over the ground under it rather than at the
+chosen altitude, in forward flight (**opinionated**, agent, kept by John,
+2026-10-12). A player in a helicopter, the V-22, the AV-8 or the Yak-141 who
+chooses a ground start leads friendly wing 1 alone, with a notice, because the AI
+cannot take them off the ground yet (slice H2); the other wings start airborne at
+any start. With a ground target set, a friendly wing 2 or 3 of armed helicopters
+strikes by the bomber-class default. See
+[AI strike](ai-strike.md#ai-helicopters-in-quick-mission) and, for their fuel,
+[the AI's fuel](ai.md#b48-routes-fuel-and-recovery).
 
 John requested separate delta formations on 2026-09-17. The host uses the B43
 alternating trailing slots with level stacking: slots 1 and 2 are 512 ft right
@@ -621,7 +637,10 @@ positions)". An addition: retail's creator has no map.
   in radius. No ground target, no area.
 - The map lists no units, so the [front line](surface-defenses.md#the-front-line)
   does not appear on it (it would give the objective's neighbourhood away);
-  it is seen in flight and in the replay.
+  it is seen in flight and in the replay. Nor do the
+  [area defenses](surface-defenses.md#area-defenses) (John, 2026-10-12:
+  hidden from the map), here or on the in-flight map's mission markup; like
+  any unit, a site the aircraft's sensors detect shows as a contact.
 - **The route** (opinionated, John 2026-10-12, with the in-flight map's mission
   markup): a thin line from the Blue start to the edge of the objective area,
   in the map's one line style (a one-pixel ink line over a dark edge, as the

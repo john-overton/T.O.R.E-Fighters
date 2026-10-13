@@ -133,6 +133,10 @@
 //! without joining. `--expect-unable` makes a bot succeed only if its import
 //! cannot play the mission: it is told why, takes no plane and leaves
 //! cleanly (agent decision, for the battery's `net-content-missing`).
+//! `--slow-build SECONDS` (a test aid, slice NET) makes every mission build
+//! sleep that long first, as a slow machine's debug build does: the bot's
+//! keepalive thread (the game's, slice EF-K) must keep it connected, and
+//! "mission loaded (built in N ms)" says how long each first build took.
 //!
 //! Host migration (stage K, slice K9; docs/ARCHITECTURE.md, "Host migration
 //! and rejoin"). `--host MISSION` makes the bot a game that hosts, as the
@@ -157,20 +161,26 @@
 //! Hawk...", "The game moved to Hawk.") print as the bot's other notices do.
 //!
 //! A bot also prints the snapshot rate of each flight as it is seated
-//! ("Bot: snapshots: 30 a second", slice R1).
+//! ("Bot: snapshots: 30 a second", slice R1), and with its statistics what
+//! its frames showed of the other aircraft's stores (protocol 27, slice
+//! BP3): "NAME: stores: told T, bytes B, largest L, drawn D, emptied [IDS]",
+//! the Stores events told, their coded bytes summed and the largest, the
+//! most other aircraft one frame drew with stores, and the aircraft it drew
+//! with a station holding fewer stores than when it first drew it.
 //!
 //! `--load STORE[,STORE]...` (protocol 23, slice NA) makes every bot hang
 //! each store on its aircraft before it readies, a Cheat loading the host's
 //! `loadouts any` allows: the first station after the others that takes the
 //! store gets up to two. The bot takes its slot, sends the loadout and
-//! readies once the host accepts it. `--a2g lase|buddy|strike|watch` flies the plane by
+//! readies once the host accepts it. `--a2g lase|buddy|strike|bomb|watch` flies the plane by
 //! the air-to-ground script (`tore_session::bot::a2g`): `lase` turns the A-G
 //! radar on, designates the nearest enemy ground object by Ctrl+X (the Easy
 //! targeting cheat) and lases it by hand while circling it; `buddy` drops a
 //! GBU-10 on another plane's spot when its guided sight says IN RNG, then
 //! fires an AGM-88 in BORE at the HARM cue's candidate; `strike` (slice
 //! ST-K) sets up a Mk 82 pass in LVL at the nearest enemy ground object and
-//! flies it without releasing; `watch` presses nothing and reports its
+//! flies it without releasing; `bomb` (slice BP3) selects its Mk 82s and
+//! drops one in CCIP every four seconds; `watch` presses nothing and reports its
 //! cockpit. All print what their screens show, "NAME: a2g: ..." lines. `--players N` on a joined
 //! bot that wears the crown makes its start wait until N players hold
 //! slots, all ready.
@@ -182,6 +192,8 @@
 
 #[path = "tore-bot/hosting.rs"]
 mod hosting;
+#[path = "tore-bot/kept.rs"]
+mod kept;
 
 use hosting::{Mig, Sock};
 use std::net::SocketAddr;
@@ -220,7 +232,7 @@ const USAGE: &str = "usage: tore-bot (--connect HOST[:PORT] | --master ADDRESS -
 [--capture FILE] [--token-file FILE] [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]... [--observe PLANE|none] \
 [--king NAME=VALUE[,NAME=VALUE]...] [--revive SECONDS] [--away SECONDS,FOR] [--objectives] \
 [--order SECONDS,NAME]... [--reply SECONDS,KIND]... \
-[--drop-resource NAME]... [--expect-unable] [--load STORE[,STORE]...] [--a2g lase|buddy|strike|watch]\n       \
+[--drop-resource NAME]... [--expect-unable] [--slow-build SECONDS] [--load STORE[,STORE]...] [--a2g lase|buddy|strike|bomb|watch]\n       \
 tore-bot --content-report [--data-dir DIR] \
 [--drop-resource NAME]...";
 
@@ -293,6 +305,10 @@ struct Options {
     /// `--expect-unable`: succeed only as a player who cannot fly the
     /// mission.
     expect_unable: bool,
+    /// `--slow-build SECONDS` (a test aid, slice NET): every mission build
+    /// first sleeps this long, holding the bot's loop up as a slow
+    /// machine's build does.
+    slow_build: Option<Duration>,
     /// `--host`: the mission file the bot hosts.
     host: Option<PathBuf>,
     /// `--port`: the game port of a hosting bot.
@@ -483,6 +499,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         drop: Vec::new(),
         content_report: false,
         expect_unable: false,
+        slow_build: None,
         host: None,
         port: tore_net::DEFAULT_PORT,
         game_name: "T.O.R.E bot game".into(),
@@ -563,6 +580,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
             "--drop-resource" => options.drop.push(value()?),
             "--content-report" => options.content_report = true,
             "--expect-unable" => options.expect_unable = true,
+            "--slow-build" => options.slow_build = Some(seconds(&value()?)?),
             "--host" => options.host = Some(PathBuf::from(value()?)),
             "--port" => {
                 options.port = value()?
@@ -607,7 +625,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 let word = value()?;
                 options.a2g =
                     Some(tore_session::bot::a2g::Role::parse(&word).ok_or_else(|| {
-                        format!("--a2g is lase, buddy, strike or watch, not {word:?}")
+                        format!("--a2g is lase, buddy, strike, bomb or watch, not {word:?}")
                     })?);
             }
             "-h" | "--help" => return Err(USAGE.into()),
@@ -902,6 +920,9 @@ struct Running {
     unable: bool,
     /// `--side`'s progress.
     side: SideAsk,
+    /// The keepalive thread that speaks for the bot while its loop is held
+    /// up (a mission build on a loaded machine; slice NET).
+    kept: kept::Kept,
 }
 
 /// `--side`'s progress: the mission is loaded, the side was asked for, and
@@ -946,6 +967,12 @@ impl Running {
                     return Err(ExitCode::from(2));
                 }
             }
+        }
+        if let Some(delay) = options.slow_build {
+            client.set_mission_builder(Box::new(move |spec, resources| {
+                std::thread::sleep(delay);
+                tore_world::world::World::new(spec, resources, tore_world::world::Seating::Open)
+            }));
         }
         let mut bot = Bot::new(client);
         for (at, to, text) in &options.say {
@@ -1383,6 +1410,7 @@ fn main() -> ExitCode {
             told: std::collections::BTreeSet::new(),
             unable: false,
             side: SideAsk::default(),
+            kept: kept::Kept::default(),
         };
         match (&options.target, &found) {
             (JoinBy::Host, _) => {
@@ -1625,6 +1653,24 @@ fn main() -> ExitCode {
                 r.back_told = true;
                 println!("{}: back at the controls", r.name);
             }
+            // The keepalive thread learns of the turn before its packets
+            // go out, so it runs before the host's answer to them (the
+            // mission, whose build holds the loop up) can come.
+            let source = if r.mig.as_ref().is_some_and(Mig::hosts) {
+                kept::Source::None
+            } else {
+                kept::Source::of(
+                    r.socket.as_ref(),
+                    r.through.as_ref().map(|t| (&t.socket, &t.joiner)),
+                )
+            };
+            let held = r.kept.turned(&bot.client, source);
+            if held > 0 {
+                println!(
+                    "{}: held up; the keepalive thread kept the connection ({held} keepalives)",
+                    r.name
+                );
+            }
             match (&mut r.through, &mut r.socket) {
                 (Some(t), _) => {
                     let _ = bot.client.transmit(&mut t.joiner.over(&mut t.socket, now));
@@ -1676,7 +1722,11 @@ fn main() -> ExitCode {
                     ClientEvent::Connected { .. } => println!("{}: joined", r.name),
                     ClientEvent::MissionLoaded => {
                         r.side.loaded = true;
-                        println!("{}: mission loaded", r.name);
+                        println!(
+                            "{}: mission loaded (built in {} ms)",
+                            r.name,
+                            bot.client.last_build_time().unwrap_or_default().as_millis()
+                        );
                     }
                     ClientEvent::ContentRefused { names, reason } => {
                         r.unable = true;
@@ -1904,12 +1954,13 @@ fn main() -> ExitCode {
                         r.name, bot.watched, bot.watched_aircraft
                     );
                 }
-                // A ground target (protocol 22): what the frames showed.
-                if let Some(world) = bot
-                    .client
-                    .mission()
-                    .filter(|w| w.terrain.surface.template.is_some())
-                {
+                // The other aircraft's stores (protocol 27).
+                println!("{}: stores: {}", r.name, bot.stores.line());
+                // A ground target (protocol 22), or the enemy's area
+                // defenses (B23): what the frames showed.
+                if let Some(world) = bot.client.mission().filter(|w| {
+                    w.terrain.surface.template.is_some() || w.terrain.surface.area.is_some()
+                }) {
                     println!(
                         "{}: surface: digest {:016x}, {}",
                         r.name,

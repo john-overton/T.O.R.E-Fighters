@@ -7,7 +7,11 @@ use crate::{
 };
 use std::collections::BTreeMap;
 use tore_formats::theater::CELL_FEET;
-use tore_world::surface::{UnitKind, layout::Variation, resolve::GroundTarget};
+use tore_world::surface::{
+    UnitKind,
+    layout::Variation,
+    resolve::{AreaDefense, GroundTarget},
+};
 
 /// The header's airfield scene for the retail airfields: what every
 /// recording before the redraw holds (docs/REPLAYS.md, "The airfield scene").
@@ -92,7 +96,39 @@ pub fn recorded(identity: &tore_replay::World) -> AppResult<Recorded> {
             .as_ref()
             .map(ground_target)
             .transpose()?,
+        area: identity
+            .area_defense
+            .as_ref()
+            .map(area_defense)
+            .transpose()?,
     })
+}
+
+/// The area defenses a header holds, as the surface layout takes them.
+fn area_defense(recorded: &tore_replay::AreaDefense) -> AppResult<AreaDefense> {
+    let level = |what: &str, value: u8| {
+        (value <= 3)
+            .then_some(usize::from(value))
+            .ok_or_else(|| format!("the recording's {what} strength {value} does not exist"))
+    };
+    Ok(AreaDefense {
+        aaa: level("AAA", recorded.aaa)?,
+        sam: level("SAM", recorded.sam)?,
+        seed: recorded.seed,
+        enemy_nationality: usize::from(recorded.enemy_nationality),
+        night_stealth: recorded.night_stealth,
+    })
+}
+
+/// The area defenses as a header keeps them.
+fn recorded_area(area: &AreaDefense) -> tore_replay::AreaDefense {
+    tore_replay::AreaDefense {
+        aaa: u8::try_from(area.aaa).unwrap_or(u8::MAX),
+        sam: u8::try_from(area.sam).unwrap_or(u8::MAX),
+        seed: area.seed,
+        enemy_nationality: u8::try_from(area.enemy_nationality).unwrap_or(u8::MAX),
+        night_stealth: area.night_stealth,
+    }
 }
 
 /// The ground target a header holds, as the surface resolution takes it.
@@ -184,6 +220,7 @@ pub fn of(terrain: &Terrain) -> tore_replay::World {
             .template
             .as_ref()
             .map(|site| recorded_target(&site.settings)),
+        area_defense: terrain.surface.area.as_ref().map(recorded_area),
         airfield_scene: if terrain.redrawn_templates {
             REDRAWN_TEMPLATES_AIRFIELD_SCENE
         } else if terrain.redrawn_airports {
@@ -320,6 +357,7 @@ mod tests {
                     redrawn_templates: false,
                     city_fill: false,
                     target: None,
+                    area: None,
                 }
             );
             let rebuilt = Configuration::new(module(), 7, 21, 3, recorded.wind).unwrap();
@@ -467,5 +505,25 @@ mod tests {
         let mut unknown = filled;
         unknown.city_fill_scene = 7;
         assert!(!recorded(&unknown).unwrap().city_fill);
+    }
+
+    #[test]
+    fn the_area_defenses_are_recorded_and_rebuilt() {
+        let area = AreaDefense {
+            aaa: 2,
+            sam: 3,
+            seed: 4_000_000_001,
+            enemy_nationality: 33,
+            night_stealth: true,
+        };
+        let header = recorded_area(&area);
+        assert_eq!(area_defense(&header).unwrap(), area);
+        assert!(
+            of(&tore_world::test_support::terrain())
+                .area_defense
+                .is_none()
+        );
+        // A strength past heavy is no launch's.
+        assert!(area_defense(&tore_replay::AreaDefense { sam: 4, ..header }).is_err());
     }
 }

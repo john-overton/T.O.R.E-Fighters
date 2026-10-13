@@ -972,8 +972,8 @@ fn cloud_lighting(color:vec3<f32>,direction:vec3<f32>,altitude:f32)->vec3<f32> {
 }
 
 // glow: light from nearby burning flares, evaluated per puff on the CPU.
-struct SmokeOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, @location(1) opacity:f32, @location(2) distance:f32, @location(3) direction:vec3<f32>, @location(4) altitude:f32, @location(5) glow:vec3<f32> }
-@vertex fn smoke_vertex(@builtin(vertex_index) vertex:u32,@location(0) center:vec3<f32>,@location(1) radius:f32,@location(2) cell:f32,@location(3) opacity:f32,@location(4) glow:vec3<f32>)->SmokeOut {
+struct SmokeOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, @location(1) opacity:f32, @location(2) distance:f32, @location(3) direction:vec3<f32>, @location(4) altitude:f32, @location(5) glow:vec3<f32>, @location(6) tint:vec3<f32>, @location(7) local:vec2<f32> }
+@vertex fn smoke_vertex(@builtin(vertex_index) vertex:u32,@location(0) center:vec3<f32>,@location(1) radius:f32,@location(2) cell:f32,@location(3) opacity:f32,@location(4) glow:vec3<f32>,@location(5) tint:vec3<f32>)->SmokeOut {
  let corners=array<vec2<f32>,6>(vec2(0.0,0.0),vec2(1.0,0.0),vec2(1.0,1.0),vec2(0.0,0.0),vec2(1.0,1.0),vec2(0.0,1.0));
  let corner=corners[vertex];
  let offset=vec2<f32>(corner.x*2.0-1.0,1.0-corner.y*2.0)*radius;
@@ -983,14 +983,23 @@ struct SmokeOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, 
  let f=1.7320508*scene.up.w;
  var out:SmokeOut;
  out.clip=vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,world_depth_clip(z),z);
- out.uv=uv;out.opacity=opacity;out.distance=length(p);out.direction=p;out.altitude=position.y;out.glow=glow;return out;
+ out.uv=uv;out.opacity=opacity;out.distance=length(p);out.direction=p;out.altitude=position.y;out.glow=glow;out.tint=tint;out.local=vec2<f32>(corner.x*2.0-1.0,1.0-corner.y*2.0);return out;
 }
 @fragment fn smoke_fragment(in:SmokeOut)->@location(0) vec4<f32> {
- let color=sample_tile(in.uv,0,0,-1,-1,ray_rows(in.distance,in.altitude));
+ // A blast's dust multiplies the white puff by its tint (tan when dry),
+ // and dims after dark to 35 percent, so it does not glow over the night
+ // ground (blast_climate.rs).
+ let art=sample_tile(in.uv,0,0,-1,-1,ray_rows(in.distance,in.altitude));
+ var dim=1.0;
+ if any(in.tint<vec3<f32>(1.0)) {dim=mix(0.35,1.0,smoothstep(-0.10,0.10,scene.sun.y));}
+ // A dust puff is drawn large, so its square's edge is feathered away.
+ var edge=1.0;
+ if any(in.tint<vec3<f32>(1.0)) {edge=1.0-smoothstep(0.6,1.0,length(in.local));}
+ let color=vec4<f32>(art.rgb*in.tint*dim,art.a*edge);
  let alpha=color.a*in.opacity*(1.0-clamp(haze(in.distance),0.0,1.0));
  // Glow lights the puff's own undarkened art, as flare light does elsewhere.
  var bare=color.rgb;
- if any(in.glow>vec3<f32>(0.0)) {bare=sample_tile(in.uv,0,base_row(),-1,-1,vec2<f32>(-1.0)).rgb;}
+ if any(in.glow>vec3<f32>(0.0)) {bare=sample_tile(in.uv,0,base_row(),-1,-1,vec2<f32>(-1.0)).rgb*in.tint;}
  let lit=cloud_lighting(color.rgb,in.direction,in.altitude)+bare*in.glow*(1.0-clamp(haze(in.distance),0.0,1.0));
  return vec4<f32>(lit*alpha,alpha);
 }
@@ -1001,8 +1010,8 @@ struct SmokeOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, 
 // the scene's light. Craters are drawn pulled a little toward the eye along
 // the view ray, which keeps them on screen where they lie but above uneven
 // terrain.
-struct EffectOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, @location(1) opacity:f32, @location(2) distance:f32, @location(3) direction:vec3<f32>, @location(4) altitude:f32, @location(5) @interpolate(flat) layer:i32, @location(6) emissive:f32 }
-@vertex fn effect_vertex(@builtin(vertex_index) vertex:u32,@location(0) offset:vec3<f32>,@location(1) extent:vec2<f32>,@location(2) mode:f32,@location(3) cell:vec4<f32>,@location(4) layer:f32,@location(5) opacity:f32,@location(6) emissive:f32)->EffectOut {
+struct EffectOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, @location(1) opacity:f32, @location(2) distance:f32, @location(3) direction:vec3<f32>, @location(4) altitude:f32, @location(5) @interpolate(flat) layer:i32, @location(6) emissive:f32, @location(7) tint:vec3<f32> }
+@vertex fn effect_vertex(@builtin(vertex_index) vertex:u32,@location(0) offset:vec3<f32>,@location(1) extent:vec2<f32>,@location(2) mode:f32,@location(3) cell:vec4<f32>,@location(4) layer:f32,@location(5) opacity:f32,@location(6) emissive:f32,@location(7) tint:vec3<f32>)->EffectOut {
  let corners=array<vec2<f32>,6>(vec2(0.0,0.0),vec2(1.0,0.0),vec2(1.0,1.0),vec2(0.0,0.0),vec2(1.0,1.0),vec2(0.0,1.0));
  let corner=corners[vertex];
  let across=(corner.x*2.0-1.0)*extent.x;
@@ -1022,7 +1031,7 @@ struct EffectOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>,
  let f=1.7320508*scene.up.w;
  var out:EffectOut;
  out.clip=vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,world_depth_clip(z),z);
- out.uv=uv;out.opacity=opacity;out.distance=length(p);out.direction=p;out.altitude=p.y+scene.eye.y;out.layer=i32(layer);out.emissive=emissive;return out;
+ out.uv=uv;out.opacity=opacity;out.distance=length(p);out.direction=p;out.altitude=p.y+scene.eye.y;out.layer=i32(layer);out.emissive=emissive;out.tint=tint;return out;
 }
 @fragment fn effect_fragment(in:EffectOut)->@location(0) vec4<f32> {
  let clear=1.0-clamp(haze(in.distance),0.0,1.0);
@@ -1033,7 +1042,8 @@ struct EffectOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>,
  }
  let color=sample_tile(in.uv,in.layer,0,-1,-1,ray_rows(in.distance,in.altitude));
  let alpha=color.a*in.opacity*clear;
- return vec4<f32>(aerial_perspective(color.rgb,in.direction,in.altitude)*alpha,alpha);
+ // A shockwave's dust is its puff art times the climate's colour.
+ return vec4<f32>(aerial_perspective(color.rgb*in.tint,in.direction,in.altitude)*alpha,alpha);
 }
 
 // Source scenery lines are one-pixel strokes with the shared live palette/haze.

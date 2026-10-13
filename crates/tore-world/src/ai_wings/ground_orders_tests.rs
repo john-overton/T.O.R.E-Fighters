@@ -798,10 +798,31 @@ fn set_class(world: &mut World, class: u16) {
     }
 }
 
+/// A Mk 82 pack on station 0 of every AI aircraft's configuration (the
+/// fixture F/A-18 carries nothing that attacks the ground): the role rule
+/// gives the Strike role only to an aircraft with a store to strike with.
+fn arm_everyone(world: &mut World) {
+    let wings = world.ai_wings.as_mut().unwrap();
+    for config in wings.configs.values_mut() {
+        let mut weapon = config.stations[0].weapon.clone();
+        weapon.source = "MK82.JT".into();
+        weapon.flags = 0x22012;
+        weapon.movement.minimum_speed = 0;
+        weapon.movement.maximum_speed = 1466;
+        weapon.movement.initial_speed = 0;
+        weapon.burst.actual_rounds_per_game = 1;
+        weapon.burst.game_rounds_in_burst = 6;
+        weapon.burst.projectiles_in_pod = 1;
+        weapon.seeker.signature = 0;
+        config.stations[0].weapon = weapon;
+    }
+}
+
 #[test]
 fn bomber_class_wings_strike_by_default_when_a_ground_target_is_set() {
     let mut world = world_with_second_wing();
     set_class(&mut world, 0x4000);
+    arm_everyone(&mut world);
     let inherit = [GroupObjective::Inherit; 6];
     world
         .ai_wings
@@ -816,6 +837,7 @@ fn bomber_class_wings_strike_by_default_when_a_ground_target_is_set() {
     // The same wing with no ground target, or of fighters, flies CAP.
     let mut world = world_with_second_wing();
     set_class(&mut world, 0x4000);
+    arm_everyone(&mut world);
     world
         .ai_wings
         .as_mut()
@@ -824,6 +846,7 @@ fn bomber_class_wings_strike_by_default_when_a_ground_target_is_set() {
     assert!(roles(&world).iter().all(|(_, _, r)| *r == StrikeRole::Cap));
     let mut world = world_with_second_wing();
     set_class(&mut world, 0x8000);
+    arm_everyone(&mut world);
     world
         .ai_wings
         .as_mut()
@@ -836,6 +859,7 @@ fn bomber_class_wings_strike_by_default_when_a_ground_target_is_set() {
 fn an_explicit_objective_overrides_the_class_default() {
     let mut world = world_with_second_wing();
     set_class(&mut world, 0x8000);
+    arm_everyone(&mut world);
     let mut objectives = [GroupObjective::Inherit; 6];
     objectives[1] = GroupObjective::Strike;
     // Even for the player's wing the objective is ignored (index 0), and a
@@ -857,6 +881,7 @@ fn an_explicit_objective_overrides_the_class_default() {
     // A bomber wing told to patrol keeps CAP.
     let mut world = world_with_second_wing();
     set_class(&mut world, 0x4000);
+    arm_everyone(&mut world);
     let mut objectives = [GroupObjective::Inherit; 6];
     objectives[1] = GroupObjective::Cap;
     world
@@ -865,6 +890,62 @@ fn an_explicit_objective_overrides_the_class_default() {
         .unwrap()
         .apply_strike_roles(&objectives, true);
     assert!(roles(&world).iter().all(|(_, _, r)| *r == StrikeRole::Cap));
+}
+
+#[test]
+fn an_unarmed_wing_never_takes_the_strike_role() {
+    // The CH-47 case (John, 2026-10-12): a bomber-class record with nothing
+    // to attack the ground with stays on CAP whatever the wing's objective,
+    // where the same wing armed strikes.
+    for objective in [GroupObjective::Inherit, GroupObjective::Strike] {
+        let mut objectives = [GroupObjective::Inherit; 6];
+        objectives[1] = objective;
+        let mut world = world_with_second_wing();
+        set_class(&mut world, 0x4000);
+        world
+            .ai_wings
+            .as_mut()
+            .unwrap()
+            .apply_strike_roles(&objectives, true);
+        assert!(
+            roles(&world).iter().all(|(_, _, r)| *r == StrikeRole::Cap),
+            "unarmed, {objective:?}"
+        );
+        assert!(!world.ai_wings.as_ref().unwrap().armed_for_ground(2));
+        arm_everyone(&mut world);
+        assert!(world.ai_wings.as_ref().unwrap().armed_for_ground(2));
+        world
+            .ai_wings
+            .as_mut()
+            .unwrap()
+            .apply_strike_roles(&objectives, true);
+        let strikers = roles(&world)
+            .iter()
+            .filter(|(side, wing, r)| {
+                *side == Wing::Friendly && *wing == 2 && *r == StrikeRole::Strike
+            })
+            .count();
+        assert_eq!(strikers, 2, "armed, {objective:?}");
+    }
+}
+
+#[test]
+fn an_unarmed_aircraft_refuses_a_ground_order_and_its_wing_does_not_go_home() {
+    // The orders already answer "no usable surface store"; the role rule is
+    // the other half: an unarmed wing given a ground target keeps flying CAP
+    // (so it is not sent home as a striker with nothing left to strike with).
+    let mut world = world_with_second_wing();
+    set_class(&mut world, 0x4000);
+    world
+        .ai_wings
+        .as_mut()
+        .unwrap()
+        .apply_strike_roles(&[GroupObjective::Inherit; 6], true);
+    let wings = world.ai_wings.as_ref().unwrap();
+    for slot in wings.slots().iter().filter(|s| s.side == Wing::Friendly) {
+        assert!(!wings.mission().actor(slot.id).unwrap().strikes());
+        assert!(!wings.capability(slot.id, false).strike);
+    }
 }
 
 /// A GBU-10-like laser bomb on station 0 of the wingman's configuration, and

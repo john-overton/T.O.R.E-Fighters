@@ -374,11 +374,25 @@ fn an_ai_with_no_laze_support_drops_a_laser_bomb_by_hand_like_a_dumb_bomb() {
     // hand gets the bomb equation's CCIP.
     assert!(
         robot
-            .strike_delivery(0, &config, &launcher(), false, &ground)
+            .strike_delivery(
+                0,
+                &config,
+                &launcher(),
+                next(&robot, &config),
+                false,
+                &ground
+            )
             .is_none()
     );
     let solution = robot
-        .strike_delivery(0, &config, &launcher(), true, &ground)
+        .strike_delivery(
+            0,
+            &config,
+            &launcher(),
+            next(&robot, &config),
+            true,
+            &ground,
+        )
         .expect("a bomb solution");
     let ccip = solution.ccip.expect("a CCIP");
     let release =
@@ -401,12 +415,26 @@ fn an_ai_with_no_laze_support_drops_a_laser_bomb_by_hand_like_a_dumb_bomb() {
         gate_ft: 20.,
         ballistic: true,
     };
-    assert!(robot.strike_release_due(0, &config, &launcher(), onto, &ground));
+    assert!(robot.strike_release_due(
+        0,
+        &config,
+        &launcher(),
+        next(&robot, &config),
+        onto,
+        &ground
+    ));
     let short = ReleaseAim {
         offset_ft: [onto.offset_ft[0], onto.offset_ft[1] + 500.],
         ..onto
     };
-    assert!(!robot.strike_release_due(0, &config, &launcher(), short, &ground));
+    assert!(!robot.strike_release_due(
+        0,
+        &config,
+        &launcher(),
+        next(&robot, &config),
+        short,
+        &ground
+    ));
     // Let go with no spot, it waits for one and falls on the bomb equation
     // from the release velocity turned by the dumb bomb's scatter, each
     // bomb its own.
@@ -493,7 +521,7 @@ fn the_ai_judges_a_bomb_where_its_path_meets_the_terrain_not_the_ground_under_it
     let mut robot = ai(mk82(), false);
     tick(&mut robot, false);
     let solution = robot
-        .strike_delivery(0, &bombs, &launcher(), false, &ground)
+        .strike_delivery(0, &bombs, &launcher(), next(&robot, &bombs), false, &ground)
         .expect("a bomb solution");
     let ccip = solution.ccip.unwrap();
     assert!((ccip.impact[1] - 600.).abs() < 1e-9);
@@ -517,10 +545,24 @@ fn the_ai_judges_a_bomb_where_its_path_meets_the_terrain_not_the_ground_under_it
         ballistic: false,
     };
     // Aimed where the bomb really lands (on the plateau): due.
-    assert!(robot.strike_release_due(0, &bombs, &launcher(), aim_at(plateau.position), &ground));
+    assert!(robot.strike_release_due(
+        0,
+        &bombs,
+        &launcher(),
+        next(&robot, &bombs),
+        aim_at(plateau.position),
+        &ground
+    ));
     // Aimed at retail's point, beyond where the bomb lands: not due, the
     // bomb would land short of it.
-    assert!(!robot.strike_release_due(0, &bombs, &launcher(), aim_at(flat.position), &ground));
+    assert!(!robot.strike_release_due(
+        0,
+        &bombs,
+        &launcher(),
+        next(&robot, &bombs),
+        aim_at(flat.position),
+        &ground
+    ));
 }
 
 #[test]
@@ -533,7 +575,7 @@ fn the_ai_reads_the_same_solutions_and_releases_on_them() {
     tick(&mut person, false);
     tick(&mut robot, false);
     let solution = robot
-        .strike_delivery(0, &bombs, &launcher(), false, &ground)
+        .strike_delivery(0, &bombs, &launcher(), next(&robot, &bombs), false, &ground)
         .expect("a bomb solution");
     let human = person.own().delivery.clone().expect("the human's solution");
     assert_eq!(solution.ccip, human.ccip);
@@ -546,6 +588,7 @@ fn the_ai_reads_the_same_solutions_and_releases_on_them() {
         0,
         &bombs,
         &launcher(),
+        next(&robot, &bombs),
         ReleaseAim::on_target(gate),
         &ground
     ));
@@ -561,13 +604,13 @@ fn the_ai_reads_the_same_solutions_and_releases_on_them() {
         gate_ft: gate,
         ballistic: false,
     };
-    assert!(robot.strike_release_due(0, &bombs, &launcher(), onto, &ground));
+    assert!(robot.strike_release_due(0, &bombs, &launcher(), next(&robot, &bombs), onto, &ground));
     let near = ReleaseAim {
         offset_ft: [onto.offset_ft[0], onto.offset_ft[1] + gate + 10.],
         gate_ft: gate,
         ballistic: false,
     };
-    assert!(!robot.strike_release_due(0, &bombs, &launcher(), near, &ground));
+    assert!(!robot.strike_release_due(0, &bombs, &launcher(), next(&robot, &bombs), near, &ground));
     assert_eq!(onto.point(tank)[1], tank[1]);
     // A guided bomb reads the human's guided sight.
     let jdams = config(gbu29(), false);
@@ -594,8 +637,15 @@ fn the_ai_reads_the_same_solutions_and_releases_on_them() {
         ballistic: false,
     };
     assert_eq!(
-        robot.strike_release_due(0, &jdams, &launcher(), wide, &ground),
-        robot.strike_release_due(0, &jdams, &launcher(), ReleaseAim::on_target(328.), &ground)
+        robot.strike_release_due(0, &jdams, &launcher(), next(&robot, &jdams), wide, &ground),
+        robot.strike_release_due(
+            0,
+            &jdams,
+            &launcher(),
+            next(&robot, &jdams),
+            ReleaseAim::on_target(328.),
+            &ground
+        )
     );
 }
 
@@ -705,4 +755,66 @@ fn a_paired_station_alternates_sides_for_a_human_and_the_ai() {
         machine.push(origin_x(&robot, ids[0]));
     }
     assert_eq!(machine, human);
+}
+
+/// The bomb sight predicts from the pylon the next bomb leaves (B3
+/// follow-up, John 2026-10-12): before each press the CCIP's release point
+/// is on the pylon the press's bomb then leaves from, left first.
+#[test]
+fn the_bomb_sight_predicts_from_the_pylon_the_next_bomb_leaves() {
+    let mut config = config(mk82(), false);
+    config.stations[0].rack = crate::combat::hardpoints::Rack {
+        location: 4,
+        paired: true,
+    };
+    let mut person = with_tank(State::new(config.clone(), true).unwrap());
+    person.own_mut().armed = true;
+    person.own_mut().selected = 0;
+    designate(&mut person, &config);
+    tick(&mut person, false);
+    tick(&mut person, false);
+    let mut sight = Vec::new();
+    let mut dropped = Vec::new();
+    for _ in 0..4 {
+        let release = person
+            .own()
+            .delivery
+            .as_ref()
+            .unwrap()
+            .ccip
+            .unwrap()
+            .release;
+        let launcher = launcher().position;
+        sight.push(release.position[0] - launcher[0]);
+        let before: Vec<u32> = person.projectiles.iter().map(|p| p.id).collect();
+        tick(&mut person, true);
+        let fresh = person
+            .projectiles
+            .iter()
+            .map(|p| p.id)
+            .find(|id| !before.contains(id))
+            .expect("a bomb");
+        dropped.push(person.bomb_motion(fresh).unwrap().origin[0] - launcher[0]);
+        for _ in 0..60 {
+            tick(&mut person, false);
+        }
+    }
+    let rounded = |v: &[f64]| {
+        v.iter()
+            .map(|x| (x * 1e6).round() / 1e6)
+            .collect::<Vec<_>>()
+    };
+    // Four on a wing row hang from two pylons a wing, 1.4 ft either side
+    // of the record's 2 ft: outboard left, outboard right, then inboard.
+    assert_eq!(rounded(&sight), [-3.4, 3.4, -0.6, 0.6]);
+    assert_eq!(rounded(&sight), rounded(&dropped));
+}
+
+/// Where the AI's next store leaves: the selected station's own position
+/// (these stations are unpaired).
+fn next(robot: &State, config: &Configuration) -> crate::attitude::Vector {
+    robot
+        .strike_cockpit(0)
+        .and_then(|c| config.stations.get(c.selected))
+        .map_or([0.; 3], |s| s.mount)
 }

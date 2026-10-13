@@ -16,7 +16,7 @@ use crate::FORMAT_VERSION;
 use crate::codec::{FNV_OFFSET, In, fnv1a, put_text, put_u16, put_u32, put_u64, put_uv};
 use crate::error::{Error, Result, corrupt, invalid};
 use crate::limits::{MAX_HEADER_BYTES, MAX_KEY_VALUES, MAX_STRING_BYTES};
-use crate::model::{Clouds, Footer, GroundTarget, Header, MissionKind, World};
+use crate::model::{AreaDefense, Clouds, Footer, GroundTarget, Header, MissionKind, World};
 
 pub(crate) const MAGIC: &[u8; 8] = b"TOREREPL";
 pub(crate) const PRELUDE_BYTES: usize = 12;
@@ -258,6 +258,9 @@ pub(crate) fn encode_header(header: &Header) -> Result<Vec<u8>> {
     if let Some(target) = &w.ground_target {
         lines.push(("world.ground_target".into(), ground_target_text(target)?));
     }
+    if let Some(area) = &w.area_defense {
+        lines.push(("world.area_defense".into(), area_defense_text(area)));
+    }
     if w.airfield_scene != 0 {
         lines.push(("world.airfield_scene".into(), w.airfield_scene.to_string()));
     }
@@ -374,6 +377,39 @@ fn parse_ground_target(text: &str) -> Result<GroundTarget> {
     })
 }
 
+/// The area defenses as one header value:
+/// `aaa,sam,seed,nationality,night_stealth`, the flag as 0 or 1.
+fn area_defense_text(area: &AreaDefense) -> String {
+    format!(
+        "{},{},{},{},{}",
+        area.aaa,
+        area.sam,
+        area.seed,
+        area.enemy_nationality,
+        u8::from(area.night_stealth)
+    )
+}
+
+fn parse_area_defense(text: &str) -> Result<AreaDefense> {
+    let bad = || corrupt("header entry world.area_defense is not an area defense");
+    let parts: Vec<&str> = text.split(',').collect();
+    let [aaa, sam, seed, nationality, night] = parts[..] else {
+        return Err(bad());
+    };
+    let small = |text: &str| text.parse::<u8>().map_err(|_| bad());
+    Ok(AreaDefense {
+        aaa: small(aaa)?,
+        sam: small(sam)?,
+        seed: seed.parse().map_err(|_| bad())?,
+        enemy_nationality: small(nationality)?,
+        night_stealth: match night {
+            "0" => false,
+            "1" => true,
+            _ => return Err(bad()),
+        },
+    })
+}
+
 fn parse_number(key: &str, text: &str) -> Result<f64> {
     text.parse()
         .map_err(|_| corrupt(format!("header entry {key} is not a number")))
@@ -444,6 +480,7 @@ pub(crate) fn decode_header(bytes: &[u8], version: u16) -> Result<Header> {
             "world.clouds.deck_ft" => w.clouds.deck_ft = Some(parse_number(&key, &value)?),
             "world.extent_ft" => w.extent_ft = Some(parse_numbers(&key, &value)?),
             "world.ground_target" => w.ground_target = Some(parse_ground_target(&value)?),
+            "world.area_defense" => w.area_defense = Some(parse_area_defense(&value)?),
             "world.airfield_scene" => {
                 w.airfield_scene = value
                     .parse()
@@ -618,6 +655,13 @@ mod tests {
                     relocate: false,
                     front: true,
                     separation_nm: 60,
+                }),
+                area_defense: Some(AreaDefense {
+                    aaa: 2,
+                    sam: 3,
+                    seed: 4_000_000_009,
+                    enemy_nationality: 33,
+                    night_stealth: false,
                 }),
                 airfield_scene: 2,
                 city_fill_scene: 3,

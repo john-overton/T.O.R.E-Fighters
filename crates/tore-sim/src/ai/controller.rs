@@ -179,6 +179,11 @@ pub struct OwnState {
     pub time_home_s: Option<f64>,
     pub internal_fuel_lbs: f64,
     pub radar_emitting: bool,
+    /// The aircraft is a helicopter or the V-22 flown through the rotor
+    /// adapter (slice H3): its flight home is planned and flown at
+    /// [`route::rotorcraft_cruise_speed`], and its fuel states use
+    /// [`route::rotorcraft_fuel_state`], not B48's fighter rules.
+    pub rotorcraft: bool,
 }
 
 impl OwnState {
@@ -1851,7 +1856,12 @@ impl Controller {
             self.trace.0.fuel = Some(trace);
             return Some(FuelState::OutOfFuel);
         }
-        let state = route::fuel_state(frame.own.fuel_endurance_s, frame.own.time_home_s).ok();
+        let state = if frame.own.rotorcraft {
+            route::rotorcraft_fuel_state(frame.own.fuel_endurance_s, frame.own.time_home_s)
+        } else {
+            route::fuel_state(frame.own.fuel_endurance_s, frame.own.time_home_s)
+        }
+        .ok();
         trace.state = state;
         self.trace.0.fuel = Some(trace);
         let state = state?;
@@ -2822,7 +2832,11 @@ impl Controller {
                 self.note(Fallback::LeaderReturnToBase, batch);
             }
             batch.activity = Some(Activity::ReturningToBase);
-            let speed = route::cruise_speed(&frame.own.limits);
+            let speed = if frame.own.rotorcraft {
+                route::rotorcraft_cruise_speed(&frame.own.limits)
+            } else {
+                route::cruise_speed(&frame.own.limits)
+            };
             let home_heading_deg = self.home_heading(frame, heading);
             let request = MotionRequest::new(
                 home_heading_deg,
@@ -3703,6 +3717,7 @@ mod tests {
             alive: true,
             fuel_endurance_s: 3600.0,
             time_home_s: Some(600.0),
+            rotorcraft: false,
             internal_fuel_lbs: 8000.0,
             radar_emitting: true,
         }

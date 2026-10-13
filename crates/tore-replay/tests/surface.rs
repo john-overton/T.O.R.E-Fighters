@@ -441,7 +441,7 @@ fn a_recording_without_surface_content_is_byte_for_byte_what_format_2_wrote() {
     let bytes = std::fs::read(writer.finish(&scenario.footer).unwrap()).unwrap();
     assert_eq!(
         (fnv(&bytes), bytes.len()),
-        (17_311_645_078_411_106_792, 57_181)
+        (598_758_410_289_482_032, 57_181)
     );
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -33,6 +33,7 @@ use tore_world::world::World;
 
 pub(crate) mod events;
 pub(crate) mod smooth;
+pub mod stores;
 
 /// A data link journal entry as a replay's `datalink.*` event: the one
 /// mapping both the single-player recorder and the capture conversion use.
@@ -614,6 +615,22 @@ impl Conversion {
         let mut events = events::Events::new(seen, flight.plane, &weapon_ids, first, last);
         let net = self.net_events(flight);
         let mut net = net.into_iter().peekable();
+        // Each aircraft's drawn stores as the host told them (protocol 27),
+        // by aircraft, in tick order; one never told is as its loadout
+        // built it.
+        let mut told: BTreeMap<u32, Vec<(u64, Vec<crate::wire::events::StationStores>)>> =
+            BTreeMap::new();
+        for received in &seen.events {
+            if let crate::wire::events::WireEvent::Stores { aircraft, loads } =
+                &received.event.event
+            {
+                let states = told.entry(*aircraft).or_default();
+                let tick = u64::from(received.event.tick);
+                let at = states.partition_point(|(t, _)| *t <= tick);
+                states.insert(at, (tick, loads.clone()));
+            }
+        }
+        let mut stores_watch = stores::StoresWatch::default();
         // The tick each aircraft's pilot was first seen out of it.
         let pilot_from: BTreeMap<u32, u32> = seen
             .states
@@ -705,6 +722,26 @@ impl Conversion {
             frame.projectiles.truncate(replay::limits::MAX_PROJECTILES);
             frame.debris.truncate(replay::limits::MAX_DEBRIS);
             frame.escapees.truncate(replay::limits::MAX_ESCAPEES);
+            // The stores each aircraft carries (B3), as the game drew them.
+            if let Some(world) = self.client.mission() {
+                for id in frame.aircraft.iter().map(|a| a.id).collect::<Vec<_>>() {
+                    let Some(config) = world.aircraft_configuration(id) else {
+                        continue;
+                    };
+                    let loads = told
+                        .get(&id)
+                        .and_then(|states| {
+                            let after = states.partition_point(|(t, _)| *t <= tick);
+                            states.get(after.checked_sub(1)?)
+                        })
+                        .map_or_else(
+                            || tore_world::snapshot::as_built_stores(config),
+                            |(_, loads)| loads.clone(),
+                        );
+                    let poses = tore_world::snapshot::store_poses_of(config, &loads);
+                    frame.events.extend(stores_watch.events(id, &poses));
+                }
+            }
             events.fill(tick, &mut frame);
             while let Some((_, event)) = net.next_if(|(t, _)| *t <= tick) {
                 frame.events.push(event);
@@ -850,13 +887,13 @@ fn is_surface_id(id: u32) -> bool {
 /// The registry label of surface object `id` named `name`: `SA-6 #18` for a
 /// template object (its ordinal in the template), `ZSU-23 L4` for a
 /// base-layout unit, and `MISTRK +2` for a unit the mission added (a supply
-/// truck, a battery radar or a front line unit, numbered from 0 within its
-/// own id range). The single-player recorder uses this too, so a recorded and
+/// truck, a battery radar, a front line unit or an area defense, numbered
+/// from 0 within its own id range). The single-player recorder uses this too, so a recorded and
 /// a converted flight label alike.
 pub fn surface_label(name: &str, id: u32) -> String {
     use tore_world::surface::{
-        BATTERY_RADAR_BASE, FRONT_LINE_BASE, IdRange, LAYOUT_OBJECT_BASE, SUPPLY_TRUCK_BASE,
-        SURFACE_UNIT_BASE, UnitId,
+        AREA_DEFENSE_BASE, BATTERY_RADAR_BASE, FRONT_LINE_BASE, IdRange, LAYOUT_OBJECT_BASE,
+        SUPPLY_TRUCK_BASE, SURFACE_UNIT_BASE, UnitId,
     };
     match UnitId(id).range() {
         IdRange::Template => format!("{name} #{}", id - SURFACE_UNIT_BASE),
@@ -864,6 +901,7 @@ pub fn surface_label(name: &str, id: u32) -> String {
         IdRange::SupplyTruck => format!("{name} +{}", id - SUPPLY_TRUCK_BASE),
         IdRange::BatteryRadar => format!("{name} +{}", id - BATTERY_RADAR_BASE),
         IdRange::FrontLine => format!("{name} +{}", id - FRONT_LINE_BASE),
+        IdRange::AreaDefense => format!("{name} +{}", id - AREA_DEFENSE_BASE),
         IdRange::Other => format!("{name} {id:#x}"),
     }
 }
@@ -890,7 +928,8 @@ pub fn surface_infos(world: &World) -> Vec<replay::SurfaceInfo> {
                 IdRange::Template
                 | IdRange::SupplyTruck
                 | IdRange::BatteryRadar
-                | IdRange::FrontLine => true,
+                | IdRange::FrontLine
+                | IdRange::AreaDefense => true,
                 _ => false,
             }
         })

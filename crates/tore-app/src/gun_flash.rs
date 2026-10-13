@@ -276,7 +276,15 @@ pub struct Puff {
     /// Drawn with the dark smoke puff rather than the white one: flak and
     /// the smoke of a wreck.
     pub dark: bool,
+    /// What the puff's art is multiplied by: [`PLAIN`] for smoke, tan for
+    /// a blast's dust (docs/spec/explosions.md, "Climate"). A tinted puff
+    /// is also dimmed after dark, so dust does not glow over the night
+    /// ground.
+    pub tint: [f32; 3],
 }
+
+/// A puff drawn in its art's own colours.
+pub const PLAIN: [f32; 3] = [1.; 3];
 
 /// Everything a frame draws for the guns.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -287,6 +295,9 @@ pub struct Drawn {
     /// The crash-site fires of destroyed surface units, each with the width
     /// in feet it is drawn at (the fire sprite fits to its unit).
     pub fires: Vec<(Vector, f64)>,
+    /// The impacts whose vapor and dust are still up, which the renderer
+    /// draws by the mission's climate ([`crate::blast_climate`]).
+    pub raised: Vec<crate::blast_climate::Raised>,
 }
 
 /// The shots seen so far and the rounds the last picture held.
@@ -507,6 +518,7 @@ pub(crate) fn puff(shot: &Shot, look: &Look, age: f64, k: usize) -> Option<Puff>
         radius,
         opacity: look.puff_opacity * (1. - t as f32).powi(2),
         dark: false,
+        tint: PLAIN,
     })
 }
 

@@ -28,8 +28,21 @@ struct Launcher {
 struct Draft {
     system: BatterySystem,
     side: Side,
+    /// Which pool it formed in ([`pool`]).
+    pool: u8,
     template: bool,
     launchers: Vec<Launcher>,
+}
+
+/// The pool a launcher or radar forms batteries in: the base layout's (0),
+/// the template's (1) or the area defenses' (2). Pools never share a
+/// battery or a radar.
+fn pool(id: UnitId) -> u8 {
+    match id.range() {
+        IdRange::Template => 1,
+        IdRange::AreaDefense => 2,
+        _ => 0,
+    }
 }
 
 /// Single-linkage clusters of `launchers` (ascending id) within
@@ -116,9 +129,9 @@ pub(super) fn form(
     added: &mut Vec<Added>,
     notes: &mut Vec<String>,
 ) -> Vec<Battery> {
-    // Launchers by (origin, system, side): templates and base layouts never
-    // share a battery.
-    let mut pools: BTreeMap<(bool, BatterySystem, u32), Vec<Launcher>> = BTreeMap::new();
+    // Launchers by (origin, system, side): templates, base layouts and area
+    // defenses never share a battery.
+    let mut pools: BTreeMap<(u8, BatterySystem, u32), Vec<Launcher>> = BTreeMap::new();
     for unit in &surface.units {
         let Some(system) = BatterySystem::of_launcher(&unit.resource) else {
             continue;
@@ -126,9 +139,8 @@ pub(super) fn form(
         if unit.side == NO_SIDE {
             continue;
         }
-        let template = unit.id.range() == IdRange::Template;
         pools
-            .entry((template, system, unit.side.0))
+            .entry((pool(unit.id), system, unit.side.0))
             .or_default()
             .push(Launcher {
                 id: unit.id,
@@ -136,14 +148,15 @@ pub(super) fn form(
             });
     }
     let mut drafts: Vec<Draft> = Vec::new();
-    for ((template, system, side), mut launchers) in pools {
+    for ((pool, system, side), mut launchers) in pools {
         launchers.sort_by_key(|l| l.id);
         for cluster in clusters(&launchers) {
             for launchers in split(cluster, system.cap()) {
                 drafts.push(Draft {
                     system,
                     side: Side(side),
-                    template,
+                    pool,
+                    template: pool == 1,
                     launchers,
                 });
             }
@@ -168,7 +181,7 @@ pub(super) fn form(
                 .filter(|u| {
                     u.resource.eq_ignore_ascii_case(radar)
                         && u.side == draft.side
-                        && (u.id.range() == IdRange::Template) == draft.template
+                        && pool(u.id) == draft.pool
                         && !adopted.contains(&u.id)
                 })
                 .map(|u| {

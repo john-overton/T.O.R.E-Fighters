@@ -79,6 +79,37 @@ impl GroundTarget {
     }
 }
 
+/// The Quick Mission's enemy area defenses: a mission with no ground target
+/// whose creator AAA or SAM strength is above none (John, 2026-10-12,
+/// B23). The layout scatters the enemy's SAM sites and guns over Red's side
+/// of the front ([`super::layout::area`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AreaDefense {
+    /// Strength levels 0 (none) to 3 (heavy), field 31 and field 32.
+    pub aaa: usize,
+    pub sam: usize,
+    pub seed: u32,
+    /// Creator nationality index of the enemy, field 20.
+    pub enemy_nationality: usize,
+    /// Night, and a friendly wing flies an F-117 or a B-2 (the template
+    /// rule's guns, dormant while neither is imported).
+    pub night_stealth: bool,
+}
+
+impl AreaDefense {
+    /// The area defenses `spec` carries: `None` with a ground target (its
+    /// defenses are the target's) or with both strengths at none.
+    pub fn from_spec(spec: &MissionSpec) -> Option<Self> {
+        spec.area_defenses().then(|| Self {
+            aaa: spec.aaa.level(),
+            sam: spec.sam.level(),
+            seed: spec.surface_seed,
+            enemy_nationality: usize::from(spec.enemy_nationality),
+            night_stealth: night_stealth(spec),
+        })
+    }
+}
+
 /// The night and stealth rule's condition: night, with an F-117 or a B-2 in
 /// any friendly wing (retail data; dormant while neither is imported).
 pub fn night_stealth(spec: &MissionSpec) -> bool {

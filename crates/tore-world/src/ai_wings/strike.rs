@@ -155,7 +155,13 @@ pub(super) fn step(
                 // A laser bomb the tactics let go by hand is solved on the
                 // bomb equation (slice ST-G).
                 let ballistic = sel.kind == StoreKind::Bomb && guided_kind(w);
-                let delivery = state.strike_delivery(id, config, &launcher, ballistic, &ground);
+                // The sight predicts from the pylon the next store leaves
+                // (B3 follow-up), as the release will put it.
+                let mount = wings
+                    .next_release_point(id, station)
+                    .unwrap_or(config.stations[station].mount);
+                let delivery =
+                    state.strike_delivery(id, config, &launcher, mount, ballistic, &ground);
                 // The sight's cue as the release test judges it: the pipper
                 // where the path meets the terrain, or in LVL the path at the
                 // target's ground (slices ST-LV and ST-G).
@@ -181,7 +187,7 @@ pub(super) fn step(
                     // too high or too slow).
                     Some(sight) => (live::guided_due(sight), sight.reach.is_some()),
                     None => (
-                        state.strike_release_due(id, config, &launcher, aim, &ground),
+                        state.strike_release_due(id, config, &launcher, mount, aim, &ground),
                         true,
                     ),
                 };
@@ -536,6 +542,18 @@ impl AiWings {
             strike: strike::has_usable_store(&stores, spot_assured, config.strike_class),
             designator: self.can_lase(id),
         }
+    }
+
+    /// Whether AI aircraft `id` carries a store that could attack a ground
+    /// target, assuming a laser spot is found for a laser store (slice H3):
+    /// the test of who may take the Strike role. All false for an aircraft
+    /// without a combat configuration. See [`strike::has_usable_store`].
+    pub fn armed_for_ground(&self, id: u32) -> bool {
+        let (Some(config), Some(actor)) = (self.configs.get(&id), self.mission.actor(id)) else {
+            return false;
+        };
+        let stores = strike_stores(config, actor.stations());
+        strike::has_usable_store(&stores, true, config.strike_class)
     }
 
     /// AI aircraft `id` carries a laser designator (its own, or a pod) and

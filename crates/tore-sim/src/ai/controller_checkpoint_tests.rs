@@ -113,6 +113,7 @@ impl PointMass {
             alive: true,
             fuel_endurance_s: endurance_s,
             time_home_s: Some(self.position[0].hypot(self.position[2]) / 700.),
+            rotorcraft: false,
             internal_fuel_lbs: endurance_s * 2.,
             radar_emitting: radar,
         }

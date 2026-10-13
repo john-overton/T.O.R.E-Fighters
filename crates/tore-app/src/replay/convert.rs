@@ -1072,6 +1072,9 @@ pub fn difference(live: &RenderSnapshot, replayed: &RenderSnapshot) -> Option<St
     if let Some(d) = aircraft_difference(&live.player, &replayed.player) {
         return Some(d);
     }
+    if live.player.stores != replayed.player.stores {
+        return Some(format!("aircraft {}'s stores differ", live.player.id));
+    }
     let aircraft: Vec<&AircraftPose> = live
         .targets
         .iter()
@@ -1090,6 +1093,9 @@ pub fn difference(live: &RenderSnapshot, replayed: &RenderSnapshot) -> Option<St
         }
         if let Some(d) = aircraft_difference(a, b) {
             return Some(d);
+        }
+        if a.stores != b.stores {
+            return Some(format!("aircraft {}'s stores differ", a.id));
         }
     }
     if live.projectiles.len() != replayed.projectiles.len() {

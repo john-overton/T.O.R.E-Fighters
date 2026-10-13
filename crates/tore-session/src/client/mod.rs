@@ -58,6 +58,8 @@ pub mod diagnostics;
 mod gun_key_tests;
 pub mod interpolation;
 #[cfg(test)]
+mod load_tests;
+#[cfg(test)]
 mod lobby_tests;
 #[cfg(test)]
 mod matrix_tests;
@@ -91,6 +93,8 @@ mod sight_tests;
 #[cfg(test)]
 mod stall_tests;
 #[cfg(test)]
+mod stores_tests;
+#[cfg(test)]
 mod surface_tests;
 #[cfg(test)]
 mod tests;
@@ -100,7 +104,7 @@ use crate::wire::chat::{ChatLine, ChatSend, Receiver, Refusal};
 use crate::wire::connection::ClientConnection;
 use crate::wire::connection::FlightOrder;
 use crate::wire::entity::EntityKey;
-use crate::wire::events::{ReceivedEvent, SurfaceUnitView, WireEvent};
+use crate::wire::events::{ReceivedEvent, StationStores, SurfaceUnitView, WireEvent};
 use crate::wire::inputs::{Command, InputFrame, InputsSection, NumberedCommand, quantize_command};
 use crate::wire::messages::{
     ContentRefused, Debrief, Goodbye, Kick, LobbyPhase, LobbyState, Lock, Message, Mission,
@@ -171,6 +175,67 @@ pub const CORRECTION_HOLD_TICKS: u64 = 15;
 const MAX_EVENTS: usize = 4096;
 /// States kept per surface unit ahead of the drawn tick (protocol 22).
 const MAX_SURFACE_STATES: usize = 64;
+
+/// Puts a told state from host tick `tick` among `states`, in tick order; a
+/// later state of the same tick replaces it. Keeps the newest
+/// [`MAX_SURFACE_STATES`].
+fn told_in_order<T>(states: &mut VecDeque<(u32, T)>, tick: u32, state: T) {
+    let at = states
+        .iter()
+        .rposition(|(t, _)| *t <= tick)
+        .map_or(0, |i| i + 1);
+    if at > 0 && states[at - 1].0 == tick {
+        states[at - 1].1 = state;
+    } else {
+        states.insert(at, (tick, state));
+    }
+    while states.len() > MAX_SURFACE_STATES {
+        states.pop_front();
+    }
+}
+
+/// Each key's newest told state at or before drawn tick `render`, dropping
+/// the older ones it no longer needs. A key whose first state is still
+/// ahead of `render` is left out.
+fn newest_at<T: Clone>(
+    told: &mut BTreeMap<u32, VecDeque<(u32, T)>>,
+    render: f64,
+) -> BTreeMap<u32, T> {
+    for states in told.values_mut() {
+        while states.len() > 1 && states.get(1).is_some_and(|(t, _)| f64::from(*t) <= render) {
+            states.pop_front();
+        }
+    }
+    told.iter()
+        .filter_map(|(key, states)| {
+            let (tick, state) = states.front()?;
+            (f64::from(*tick) <= render).then(|| (*key, state.clone()))
+        })
+        .collect()
+}
+
+/// Draws `pose`'s pylons and stores (B3, protocol 27): its loadout from the
+/// session's copy of the mission, with the stores the host last told, or as
+/// built when it told none. An aircraft with no loadout there draws none.
+pub(crate) fn put_stores(
+    pose: &mut tore_world::snapshot::AircraftPose,
+    mission: &tore_world::world::World,
+    told: &BTreeMap<u32, Vec<StationStores>>,
+) {
+    if pose.aircraft.is_none() {
+        return;
+    }
+    let Some(config) = mission.aircraft_configuration(pose.id) else {
+        return;
+    };
+    pose.stores = match told.get(&pose.id) {
+        Some(loads) => tore_world::snapshot::store_poses_of(config, loads),
+        None => tore_world::snapshot::store_poses_of(
+            config,
+            &tore_world::snapshot::as_built_stores(config),
+        ),
+    };
+}
 
 /// What a join needs.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -718,6 +783,11 @@ pub struct Client {
     /// unit, oldest first, each from its tick; the picture takes the newest
     /// at or before the drawn tick.
     surface_units: BTreeMap<u32, VecDeque<(u32, SurfaceUnitView)>>,
+    /// Each aircraft's drawn stores the host has told (protocol 27), by
+    /// aircraft, oldest first, each from its tick; the picture takes the
+    /// newest at or before the drawn tick, and an aircraft never told is
+    /// drawn as its loadout built it.
+    stores: BTreeMap<u32, VecDeque<(u32, Vec<StationStores>)>>,
     pending: Vec<Command>,
     view_subject: Option<EntityKey>,
     unacked: VecDeque<NumberedCommand>,
@@ -759,6 +829,12 @@ pub struct Client {
     /// whether only a flight's build (its loadouts) failed.
     unable: Option<String>,
     unable_flight: bool,
+    /// How long the last mission build held the loop up (wall clock): the
+    /// figure a keepalive thread covers on a slow machine (slice NET).
+    last_build: Option<Duration>,
+    /// Mission builds so far: [`Client::receive_from`] ends its batch after
+    /// one (slice NET).
+    builds: u64,
     /// Why the host said it disconnects the player.
     goodbye: Option<Goodbye>,
     /// The automatic ready ([`ClientConfig::auto_ready`]): a Take plane is
@@ -885,6 +961,7 @@ impl Client {
             marks: Vec::new(),
             destroyed: BTreeMap::new(),
             surface_units: BTreeMap::new(),
+            stores: BTreeMap::new(),
             pending: Vec::new(),
             view_subject: None,
             unacked: VecDeque::new(),
@@ -908,6 +985,8 @@ impl Client {
             loaded: None,
             unable: None,
             unable_flight: false,
+            last_build: None,
+            builds: 0,
             goodbye: None,
             auto_pending: false,
             auto_plane: None,
@@ -1018,6 +1097,15 @@ impl Client {
 
     /// Reads every datagram waiting on `socket` (at most 1,024) and takes
     /// each, at `now`.
+    ///
+    /// A datagram that completes the host's Mission (or a flight's
+    /// loadouts) builds the mission's world, which can hold this call up
+    /// for seconds on a slow machine. The batch stops there (slice NET):
+    /// what arrived meanwhile waits for the caller's next turn, which
+    /// stamps it with that turn's time. Read now with the stale `now`, the
+    /// host's packets of the whole build would count as heard before it,
+    /// and the next update would close the connection for 5 seconds of
+    /// silence the moment the build was over.
     pub fn receive_from<D: Datagrams + ?Sized>(
         &mut self,
         now: Duration,
@@ -1028,7 +1116,11 @@ impl Client {
             let Some((len, from)) = socket.recv_datagram(&mut buf)? else {
                 break;
             };
+            let builds = self.builds;
             self.receive(now, from, &buf[..len]);
+            if self.builds != builds {
+                break;
+            }
         }
         Ok(())
     }
@@ -1091,6 +1183,13 @@ impl Client {
     /// once the connection has closed.
     pub fn keepalive_datagram(&self) -> Option<Vec<u8>> {
         self.net.keepalive_datagram()
+    }
+
+    /// How long the last mission build took, wall clock (`None` before
+    /// the first): the client builds inside [`Client::receive`], so this is
+    /// how long that call held the game's loop up (slice NET).
+    pub fn last_build_time(&self) -> Option<Duration> {
+        self.last_build
     }
 
     /// The host's address: the one the race chose, for a join through the
@@ -1648,6 +1747,7 @@ impl Client {
         self.stats.far_frames += drawn.far as u64;
         self.stats.far_extrapolated += drawn.far_extrapolated as u64;
         let surface_units = self.surface_at(render);
+        let stores = self.stores_at(render);
 
         let seat = self.seat.as_ref()?;
         let own = seat.predictor.plane();
@@ -1660,6 +1760,10 @@ impl Client {
         let mission = self.mission.as_ref()?;
         let mut targets = drawn.aircraft;
         targets.extend(self.ground_at(&mission.ground, &drawn.surface, &surface_units, render));
+        let mut player = player;
+        for pose in std::iter::once(&mut player).chain(targets.iter_mut()) {
+            put_stores(pose, &mission.world, &stores);
+        }
         self.effects
             .retain(|e| f64::from(e.tick) + f64::from(e.ticks) > render);
         let effects = self
@@ -1770,23 +1874,20 @@ impl Client {
         })
     }
 
+    // ----- Stores at the drawn tick (protocol 27) ------------------------
+
+    /// Each told aircraft's drawn stores at drawn tick `render`; the older
+    /// ones are no longer needed.
+    pub(crate) fn stores_at(&mut self, render: f64) -> BTreeMap<u32, Vec<StationStores>> {
+        newest_at(&mut self.stores, render)
+    }
+
     // ----- The surface at the drawn tick (protocol 22) --------------------
 
     /// Each surface unit's newest told state at drawn tick `render`; the
     /// older ones are no longer needed.
     pub(crate) fn surface_at(&mut self, render: f64) -> BTreeMap<u32, SurfaceUnitView> {
-        for states in self.surface_units.values_mut() {
-            while states.len() > 1 && states.get(1).is_some_and(|(t, _)| f64::from(*t) <= render) {
-                states.pop_front();
-            }
-        }
-        self.surface_units
-            .iter()
-            .filter_map(|(unit, states)| {
-                let (tick, view) = states.front()?;
-                (f64::from(*tick) <= render).then(|| (*unit, view.clone()))
-            })
-            .collect()
+        newest_at(&mut self.surface_units, render)
     }
 
     /// The mission's ground objects at drawn tick `render`: a told unit's
@@ -2200,10 +2301,13 @@ impl Client {
     /// host's as `check` says.
     fn build_mission(&mut self, spec: MissionSpec, number: u32, check: Check<'_>) {
         let reads = ResourceReads::new(&self.resources);
+        let started = std::time::Instant::now();
         let built = match &mut self.builder {
             Some(builder) => builder(&spec, &reads),
             None => World::new(&spec, &reads, Seating::Open),
         };
+        self.last_build = Some(started.elapsed());
+        self.builds += 1;
         let ours = reads.manifest();
         let differences = match check {
             Check::Whole(manifest) => ours.differences(manifest),
@@ -2513,6 +2617,7 @@ impl Client {
         self.marks.clear();
         self.destroyed.clear();
         self.surface_units.clear();
+        self.stores.clear();
         // A new flight's city stands whole until the host says otherwise
         // (its seat sends every building already flat).
         if let Some(fill) = self
@@ -2814,20 +2919,18 @@ impl Client {
                 }
             }
             WireEvent::SurfaceUnit(view) => {
-                let states = self.surface_units.entry(view.unit).or_default();
-                // In tick order; a later state of the same tick replaces it.
-                let at = states
-                    .iter()
-                    .rposition(|(t, _)| *t <= event.tick)
-                    .map_or(0, |i| i + 1);
-                if at > 0 && states[at - 1].0 == event.tick {
-                    states[at - 1].1 = view.clone();
-                } else {
-                    states.insert(at, (event.tick, view.clone()));
-                }
-                while states.len() > MAX_SURFACE_STATES {
-                    states.pop_front();
-                }
+                told_in_order(
+                    self.surface_units.entry(view.unit).or_default(),
+                    event.tick,
+                    view.clone(),
+                );
+            }
+            WireEvent::Stores { aircraft, loads } => {
+                told_in_order(
+                    self.stores.entry(*aircraft).or_default(),
+                    event.tick,
+                    loads.clone(),
+                );
             }
             // City fill buildings the host's ground bursts knocked flat
             // (protocol 25) fall in the client's copy of the mission at

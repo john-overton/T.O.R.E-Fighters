@@ -20,6 +20,7 @@ mod predict;
 mod reader;
 mod rotors;
 mod spawns;
+pub mod stores;
 mod strings;
 mod tilts;
 mod trees;

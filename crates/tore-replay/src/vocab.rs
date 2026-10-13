@@ -389,6 +389,25 @@ pub mod kind {
     /// one), `target_ft` (how far from the designated target), `reason`.
     pub const WEAPON_IMPACT: &str = "weapon.impact";
 
+    /// An aircraft's drawn stations, recorded the first time it is recorded
+    /// with any and whenever the layout changes (B3, 2026-10-12): the
+    /// `stores.station` entries that follow on the same tick are its
+    /// stations in order. Subject: the aircraft. Fields: `count` (Int).
+    pub const STORES_LAYOUT: &str = "stores.layout";
+    /// One drawn station of the layout before it. Subject: the aircraft.
+    /// Fields: `slot` (Int: its place in the layout), `hardpoint` (Int: the
+    /// source record), `x_ft`, `y_ft`, `z_ft` (Num: the record's position,
+    /// right, up and forward of the reference point), `location` (Int: the
+    /// source location byte), `paired` (Bool), `look` (Text: store, pod or
+    /// tank), `items` (Int: whole stores on it), `loaded` (Int: whole stores
+    /// it started with), `shape` (Text, when the store has one),
+    /// `length_ft` and `diameter_ft` (Num, a fitted pod or tank body).
+    pub const STORES_STATION: &str = "stores.station";
+    /// The whole stores now on each station of the aircraft's layout, when
+    /// any changed (a release, a jettison, a rearm). Subject: the aircraft.
+    /// Fields: `items` (Ids: one count a station, in layout order).
+    pub const STORES_ITEMS: &str = "stores.items";
+
     /// Every kind above, in the order listed.
     pub const ALL: &[&str] = &[
         WEAPON_LAUNCH,
@@ -475,6 +494,9 @@ pub mod kind {
         PLAYER_LASER_SPOT,
         WEAPON_AIM,
         WEAPON_IMPACT,
+        STORES_LAYOUT,
+        STORES_STATION,
+        STORES_ITEMS,
     ];
 }
 

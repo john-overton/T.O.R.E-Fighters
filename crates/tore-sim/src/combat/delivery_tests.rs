@@ -82,6 +82,7 @@ fn solved(
         Situation {
             index: 3,
             station,
+            mount: station.mount,
             launcher,
             mode,
             target,
@@ -184,6 +185,7 @@ fn solved_over(
         Situation {
             index: 3,
             station,
+            mount: station.mount,
             launcher,
             mode: DeliveryMode::Level,
             target: Some(target),
@@ -422,6 +424,7 @@ fn rockets_get_a_pipper_and_never_the_level_release() {
         Situation {
             index: 0,
             station: &station(guided),
+            mount: [0.; 3],
             launcher: &launcher,
             mode: DeliveryMode::Ccip,
             target: None,
@@ -442,6 +445,7 @@ fn solved_beyond(station: &Station, launcher: &Launcher) -> Option<Delivery> {
         Situation {
             index: 0,
             station,
+            mount: station.mount,
             launcher,
             mode: DeliveryMode::Ccip,
             target: None,
@@ -474,7 +478,7 @@ fn a_human_rockets_pipper_is_on_the_ground_past_the_lifetime() {
     // Level at 3,000 ft: the rocket sinks 1,500 ft in its 20 s, so the AI's
     // fly-out has no impact; the continuation brings it down on the ground.
     let level = pass(3_000., 400., 0.);
-    assert!(rocket_impact(&s.weapon, &level, &s, CLOCK, &|_, _| 0.).is_none());
+    assert!(rocket_impact(&s.weapon, &level, s.mount, CLOCK, &|_, _| 0.).is_none());
     let c = solved_beyond(&s, &level).unwrap().ccip.unwrap();
     assert!(c.impact[1].abs() < 5., "{}", c.impact[1]);
     assert!(c.seconds > 20., "{}", c.seconds);
@@ -482,8 +486,8 @@ fn a_human_rockets_pipper_is_on_the_ground_past_the_lifetime() {
     // A steeper pass reaches the same ground inside the life, and the
     // continuation agrees with the in-life solution exactly there.
     let dive = pass(1_500., 400., -10.);
-    let inside = rocket_impact(&s.weapon, &dive, &s, CLOCK, &|_, _| 0.).unwrap();
-    let beyond = rocket_impact_beyond(&s.weapon, &dive, &s, CLOCK, &|_, _| 0.).unwrap();
+    let inside = rocket_impact(&s.weapon, &dive, s.mount, CLOCK, &|_, _| 0.).unwrap();
+    let beyond = rocket_impact_beyond(&s.weapon, &dive, s.mount, CLOCK, &|_, _| 0.).unwrap();
     assert_eq!(inside.1, beyond.1);
     // Nose above the horizon: no ground, so the pipper marks where the round
     // stands when its life ends, 20 s out and above the aircraft.
@@ -501,8 +505,8 @@ fn the_continuation_follows_rising_ground() {
     let s = station(lau61());
     let level = pass(3_000., 400., 0.);
     let ridge = |_: f64, z: f64| if z > 20_000. { 2_000. } else { 0. };
-    let flat = rocket_impact_beyond(&s.weapon, &level, &s, CLOCK, &|_, _| 0.).unwrap();
-    let hit = rocket_impact_beyond(&s.weapon, &level, &s, CLOCK, &ridge).unwrap();
+    let flat = rocket_impact_beyond(&s.weapon, &level, s.mount, CLOCK, &|_, _| 0.).unwrap();
+    let hit = rocket_impact_beyond(&s.weapon, &level, s.mount, CLOCK, &ridge).unwrap();
     assert!(
         hit.1.seconds < flat.1.seconds,
         "{} {}",
@@ -589,6 +593,7 @@ fn the_ccip_pipper_lays_on_a_target_on_a_rise_or_in_a_hollow() {
             Situation {
                 index: 3,
                 station: &s,
+                mount: s.mount,
                 launcher: &launcher,
                 mode: DeliveryMode::Ccip,
                 target: None,

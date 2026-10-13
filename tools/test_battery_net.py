@@ -915,3 +915,34 @@ class StrikeHandbackTests(unittest.TestCase):
         self.assertEqual((scenario.lane, scenario.window), ("net", False))
         self.assertNotIn("wing enemy", net_a2g.STRIKE_MISSION)
         self.assertIn("easy-targeting", net_a2g.STRIKE_MISSION)
+
+
+class StoresTests(unittest.TestCase):
+    """`net-a2g-stores` (protocol 27, slice BP3): the other aircraft's stores drawn and seen emptying."""
+
+    LINES = (
+        "Bomber: stores: told 6, bytes 66, largest 12, drawn 3, emptied [3]\n"
+        "Watch: stores: told 9, bytes 101, largest 12, drawn 3, emptied [0 2]\n"
+    )
+
+    def test_a_good_run_passes(self):
+        self.assertEqual(net_a2g.stores_problems(self.LINES, (0, 1)), [])
+
+    def test_each_failure_is_named(self):
+        for old, new, words in (
+            ("emptied [0 2]", "emptied [2]", "plane 0"),
+            ("emptied [0 2]", "emptied [0]", "Watch never drew an AI"),
+            ("emptied [3]", "emptied []", "Bomber never drew an AI"),
+            ("told 9, bytes 101, largest 12, drawn 3", "told 9, bytes 101, largest 12, drawn 1", "other aircraft"),
+            ("told 9,", "told 0,", "no Stores event"),
+            ("largest 12, drawn 3, emptied [0 2]", "largest 90, drawn 3, emptied [0 2]", "bytes"),
+        ):
+            problems = net_a2g.stores_problems(self.LINES.replace(old, new), (0, 1))
+            self.assertTrue(any(words in p for p in problems), (words, problems))
+        self.assertTrue(any("Watch printed" in p for p in net_a2g.stores_problems(self.LINES.split("\n")[0], (0, 1))))
+
+    def test_the_scenario_is_listed_in_the_net_lane(self):
+        (scenario,) = [s for s in net_a2g.scenarios() if s.name == "net-a2g-stores"]
+        self.assertEqual((scenario.lane, scenario.window), ("net", False))
+        self.assertIn("wing enemy 1 MIG29.PT 2 average", net_a2g.STORES_MISSION)
+        self.assertIn("damage=invulnerable", net_a2g.STORES_MISSION)

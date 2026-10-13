@@ -135,3 +135,26 @@ class CatalogTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReplayStoresTests(unittest.TestCase):
+    """`replay-a2g`'s stores check (slice BP3): a layout loaded, then the released station empty."""
+
+    def rows(self, start: int, after: list[int]) -> list[dict]:
+        return [
+            {"kind": "stores.layout", "fields": {"count": 1}},
+            {"kind": "stores.station", "fields": {"items": start}},
+            {"kind": "stores.items", "fields": {"items": after}},
+        ]
+
+    def test_a_pack_that_empties_passes(self):
+        from battery_scenarios import _replay_a2g
+
+        self.assertEqual(_replay_a2g.stores_problems(self.rows(1, [0]), "pack"), [])
+
+    def test_each_failure_is_named(self):
+        from battery_scenarios import _replay_a2g
+
+        self.assertIn("no stores layout", _replay_a2g.stores_problems([], "pack")[0])
+        self.assertIn("starts loaded", _replay_a2g.stores_problems(self.rows(0, [0]), "pack")[0])
+        self.assertIn("empty", _replay_a2g.stores_problems(self.rows(1, [1]), "pack")[0])

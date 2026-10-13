@@ -508,7 +508,8 @@ impl State {
 
     /// The bomb or rocket sight's solution for a cockpit's selected station:
     /// against its target on the ground, with the time to impact of the
-    /// aircraft's last bomb. The same for a human and the AI.
+    /// aircraft's last bomb, predicted from `mount`, where the store that
+    /// leaves next hangs. The same for a human and the AI.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn delivery_of(
         &self,
@@ -516,6 +517,7 @@ impl State {
         cockpit: &StrikeCockpit,
         config: &Configuration,
         launcher: &Launcher,
+        mount: crate::attitude::Vector,
         ground: &impl Fn(f64, f64) -> f64,
         clock: delivery::Clock,
         ballistic: bool,
@@ -550,6 +552,7 @@ impl State {
             delivery::Situation {
                 index: cockpit.selected,
                 station,
+                mount,
                 launcher,
                 mode: cockpit.delivery_mode,
                 target,
@@ -577,12 +580,15 @@ impl State {
     /// The bomb or rocket solution for the AI flying `aircraft`: what a
     /// human's HUD would show for the same cockpit and launcher. With
     /// `ballistic` a laser glide bomb is solved on the bomb equation, as an
-    /// AI that drops it by hand sees it (slice ST-G).
+    /// AI that drops it by hand sees it (slice ST-G). `mount` is where the
+    /// AI's next store from the selected station leaves (its side of a
+    /// paired station), as the release will put it.
     pub fn strike_delivery(
         &self,
         aircraft: u32,
         config: &Configuration,
         launcher: &Launcher,
+        mount: crate::attitude::Vector,
         ballistic: bool,
         ground: &impl Fn(f64, f64) -> f64,
     ) -> Option<Delivery> {
@@ -592,6 +598,7 @@ impl State {
             cockpit,
             config,
             launcher,
+            mount,
             ground,
             self.next_clock(),
             ballistic,
@@ -645,6 +652,7 @@ impl State {
         aircraft: u32,
         config: &Configuration,
         launcher: &Launcher,
+        mount: crate::attitude::Vector,
         aim: ReleaseAim,
         ground: &impl Fn(f64, f64) -> f64,
     ) -> bool {
@@ -660,7 +668,7 @@ impl State {
                 .is_some_and(|sight| guided_due(&sight));
         }
         let Some(solution) =
-            self.strike_delivery(aircraft, config, launcher, aim.ballistic, ground)
+            self.strike_delivery(aircraft, config, launcher, mount, aim.ballistic, ground)
         else {
             return false;
         };

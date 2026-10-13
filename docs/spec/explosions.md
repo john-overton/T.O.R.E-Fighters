@@ -26,9 +26,13 @@ bomb's (see [size by weapon](#size-by-weapon)). Every impact also throws a
 brief flash of light that lights the ground around it at night and a spray
 of glowing sparks ([impact light and sparks](#impact-light-and-sparks)).
 
-Every large ground or sea explosion also throws out a shockwave: a ring of
-dust (white spray on water) that races out from the blast, slows and fades
-while the fireball burns.
+Every large ground or sea explosion also throws out a shockwave: a low skirt
+of dust (white spray on water) that races out from the blast, slows and fades
+while the fireball burns. What the blast throws into the air depends on the
+theater's climate ([climate](#climate)): in a humid theater a bomb or a big
+warhead is wrapped in a brief white condensation cloud, in an arid one it
+kicks up wide tan dust that hangs over the spot for 30 to 60 seconds; a
+smaller missile throws a smaller version and a gun hit none.
 
 A weapon that strikes land with a crater size leaves one of three crater
 pictures lying flat on the ground, sized with the explosion by weapon, and
@@ -85,15 +89,117 @@ bombs 9; SAMs 12; guided 2,000 lb bombs 15; the Mk 84 18 (576 feet across).
 Since 2026-10-12 the drawn crater follows the weapon's scale instead
 ([craters by weapon](#craters-by-weapon)).
 
-Shockwave (agent design, 2026-10-10): explosion types 21 to 23 and 35 to 37
-throw out a ring of 32 grey `SMOKE.PIC` dust puffs, type 34 a ring of white
-spray puffs; no other type has one. The ring grows from the blast to 1.6
-times the explosion's drawn width (about 410 feet across for the big types,
-whose drawn width is 255 feet) in 0.7 seconds, easing out as a blast wave
-slows, then drifts out another 0.15 widths while it fades to nothing over the
-rest of the explosion's two seconds. Each puff stands on the ground, growing
-from 0.12 to 0.5 of the width across, and is lit by the scene like the
-craters, not self-lit like the fireball.
+Shockwave (agent design, 2026-10-10, overhauled in slice B12 on
+2026-10-12): explosion types 21 to 23 and 35 to 37 throw out a low skirt of
+`SMOKE.PIC`'s grey dust puff in two staggered rows, 24 on the leading edge
+and 12 larger, fainter ones behind it at 62 percent of its radius; each puff
+is squat (55 percent as tall as a round puff), stands on the ground, and has
+its own size (within 25 percent) and place (within 8 percent of the radius),
+drawn from the blast's position. The edge reaches 1.35 times the explosion's
+drawn width in half a second (a cubic ease-out, as a blast wave slows: about
+690 feet across for a 500 lb bomb, 1,090 feet for a 2,000 lb bomb), then
+drifts out another 0.2 widths while it fades over the rest of the
+explosion's two seconds; it fades in over four ticks, the leading row at 80
+percent and the trailing row at 50 percent opacity, and the puffs grow from
+0.14 to 0.46 of the width across. Everything is in widths, so a missile's
+ring and a heavy bomb's look alike at their own sizes. The ring is coloured
+by the climate: tan in dry air, the puff's own pale grey in humid. Type 34
+in the water keeps the earlier white spray ring unchanged (John,
+2026-10-12): 32 white puffs out to 1.6 widths in 0.7 seconds, drifting a
+further 0.15 widths, each growing from 0.12 to 0.5 of the width. No other
+type has a ring. The puffs are lit by the scene like the craters, not
+self-lit like the fireball, and count against the effect sprites' budget (the
+1,024 of the 4,096 not kept for craters, the nearest first): 36 a large
+blast for its two seconds.
+
+### Climate
+
+Opinionated, John, 2026-10-12 (slice B12, the shockwave overhaul): each
+theater has a fixed humidity, and a large blast throws vapor or dust by it.
+The original has no such setting; the look is custom, not retail.
+
+Humidity, 0 (desert) to 1 (jungle), fitted (John named the arid and humid
+ends; the rest are the agent's estimates from each region's climate):
+
+| Theater | Humidity | Reads as |
+| --- | ---: | --- |
+| Egypt (EGY) | 0.10 | arid |
+| Iraq (IRA) | 0.15 | arid |
+| Persian Gulf (PGU) | 0.20 | arid |
+| Pakistan (SPA) | 0.30 | dry |
+| Greece (GRE) | 0.40 | dry summer |
+| Ukraine (UKR) | 0.50 | temperate |
+| France (FRA), Falklands (LFA), Vladivostok (VLA) | 0.60 | temperate |
+| Baltics (BAL), South Korea (NSK) | 0.65 | temperate, damp |
+| Kuril Islands (KURILE) | 0.80 | foggy maritime |
+| Taiwan (WTA), Cuba (CUB) | 0.85 | humid |
+| North Vietnam (TVIET) | 0.90 | humid |
+| Panama (APA) | 0.95 | humid |
+
+The mission's weather pushes it toward humid: fog (or rain, which the
+retail weather choices do not have) adds 0.35, an overcast deck 0.15, at
+most 1. A Ukraine mission in fog therefore throws the humid look.
+
+Which blasts: only a weapon's own hit or ground strike drawn as one of the
+large land types (21 to 23, 35 to 37). A kill's or crash's own blast, a
+dud's puff, an air burst and a water strike raise nothing (water keeps its
+spray). The effect carries the weapon's scale but not its kind, so the class
+is read from the scale (agent decision):
+
+| Class | Scale | Weapons |
+| --- | --- | --- |
+| Full | 79 % or more (a 250 lb bomb's) | every bomb, the AC-130's 105 mm (drawn like a 500 lb bomb), and warheads of about 250 lb or more: AGM-65G, Harpoon, AS-14, SS-N-9 |
+| Small | under 79 % | smaller missiles and rockets: AGM-65A, Sidewinders, 2.75 in rockets |
+| None | | gun hits (types 15, 16, 18 to 20), small splashes (17) |
+
+- **Condensation cloud** (humid). Vapor strength rises smoothly from 0 at
+  humidity 0.45 to full at 0.85 (a smoothstep: none in the arid and dry
+  theaters, a trace in Ukraine, a third in France, half in the Baltics and
+  South Korea, nearly full in the Kurils, full in Taiwan, Cuba, Vietnam and
+  Panama). 16 white puffs
+  (the small version 8, at 70 % of the size) in two staggered rings round
+  the blast, two in three low (12 degrees up from the blast's middle) and
+  the rest higher (40 degrees), none over the fireball, which shows through.
+  The rings swell to 0.75 of the drawn width in 0.35 s times the square root
+  of the scale, the puffs growing from 0.2 to 0.38 of the width across, at 35
+  % opacity times the vapor strength, fading in over 6 ticks and out
+  quadratically, gone after 2.5 s times the square root of the scale (2.5 s
+  for a 500 lb bomb, 3.2 s for a 2,000 lb).
+- **Dust.** 10 plus 8 per unit of scale puffs (at most 24: 18 for a 500 lb
+  bomb, 23 for a 2,000 lb); the small version 3 plus 4 per unit (at most 8)
+  at 70 % of the size. They lie out to the drawn width from the blast (15 to
+  100 % of it), roll out a further 35 % over 6 s, rise 1.2 ft/s times the
+  square root of the scale, stand on the ground, and grow as they thin.
+  Each is the white smoke puff tinted from tan (0.88, 0.72, 0.50) in the
+  driest air to grey-brown (0.56, 0.52, 0.46) in the wettest, 0.34 of the
+  width across at first, wider in dry air (75 % of that width in the wettest,
+  100 % in the driest). Opacity 40 % times 0.35 plus 0.65 times the
+  dryness, fading in over 0.4 s behind the fireball, held for the first 40 %
+  of its life, then thinning out. The puffs' edges are feathered and they
+  dim to 35 % after dark, so they do not glow over the night ground.
+- **How long dust hangs** (John: 30 to 60 s by blast size): in the driest air
+  30 s at a 250 lb bomb's scale, growing in a straight line with the scale to
+  60 s at a 2,000 lb bomb's and beyond (a 500 lb bomb about 38 s, 1,000 lb
+  about 48 s); the small version 15 s at the 50 % floor to 30 s at 79 %. Damp
+  air settles it sooner, down to half in the most humid air (agent decision):
+  a 2,000 lb bomb's dust hangs 57 s in Egypt and 33 s in Vietnam.
+- **Budget** (agent decision): the newest 32 impacts that raise dust are kept
+  up; a 33rd retires the oldest, which fades out over 3 s instead of
+  vanishing, at most 8 fading at once. At most 960 dust and vapor puffs are
+  drawn in a picture, the newest impacts first (40 impacts at the full 24).
+  They are drawn with the smoke puffs, not the effect sprites, so they never
+  take room from the craters' or the explosions' 4,096 sprites, and they are
+  remembered apart from the 96 impacts kept for flashes and smoke, so a long
+  gun burst cannot push a bomb's dust out.
+- Presentation only: everything comes from the effect (where, which type,
+  its scale and how long ago) and the mission's humidity, which is fixed by
+  its theater and weather, with each puff's place and size drawn from the
+  blast's exact position. A networked client and a replay show the same; no
+  simulation state, wire field or recording changes (protocol stays 26). As
+  with the impact smoke, dust from before a replay seek or before a player
+  joins is not shown.
+- Dust does not drift with the mission wind (the picture does not know the
+  wind); it rises and rolls out in place.
 
 ### Size by weapon
 
@@ -266,6 +372,10 @@ Opinionated:
   [size by weapon](#size-by-weapon) and
   [impact light and sparks](#impact-light-and-sparks) for the rules, which
   numbers are fitted and which are agent decisions.
+- The climate look, the per-theater humidity table and the shockwave ring's
+  overhaul (John, 2026-10-12, slice B12; the humidity values are fitted, the
+  shapes, counts, timings, colours and budget agent decisions): see
+  [climate](#climate).
 - The shockwave ring (agent, X1, 2026-10-10; John asked on 2026-10-10 that
   ground explosions show a shockwave). The original has no shockwave art or
   effect: neither `EXP.SH` nor any picture in the archives is a ring or wave

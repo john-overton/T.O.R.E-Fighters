@@ -101,6 +101,8 @@ pub struct SimRenderer {
     lens_flare: crate::lens_flare::LensFlare,
     smoke: crate::smoke_renderer::SmokeRenderer,
     effects: crate::effect_renderer::EffectRenderer,
+    /// The mission's climate, from its scenery (slice B12).
+    climate: crate::blast_climate::Climate,
     countermeasures: crate::countermeasure_renderer::Instances,
     /// Experiment AP1: the redrawn airports' lights.
     airfield_lights: crate::airfield_lights::Lights,
@@ -813,6 +815,7 @@ impl SimRenderer {
             lens_flare: crate::lens_flare::LensFlare::new(device, format),
             smoke: crate::smoke_renderer::SmokeRenderer::new(device, format, &shader, samples),
             effects: crate::effect_renderer::EffectRenderer::new(device, format, &shader, samples),
+            climate: scenery.climate,
             countermeasures: crate::countermeasure_renderer::Instances::new(device),
             airfield_lights: crate::airfield_lights::Lights::new(),
             battle: None,
@@ -881,6 +884,7 @@ impl SimRenderer {
             art,
             effects,
             marks,
+            self.climate,
         );
     }
     /// This frame's light and glare sources: burning flares, chaff, lit
@@ -896,6 +900,9 @@ impl SimRenderer {
         self.countermeasures
             .upload(queue, devices, afterburners, guns);
         self.smoke.gun_smoke(&guns.puffs);
+        // The blasts' vapor and lingering dust, by the mission's climate.
+        self.smoke
+            .gun_smoke(&crate::blast_climate::puffs(&guns.raised, self.climate));
         self.effects.fit_fires(&guns.fires);
     }
     pub fn combat(

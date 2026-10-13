@@ -723,6 +723,7 @@ fn own_state(position: [f64; 3], heading: f64, pitch: f64, bank: f64, speed: f64
         alive: true,
         fuel_endurance_s: 3_000.,
         time_home_s: Some(600.),
+        rotorcraft: false,
         internal_fuel_lbs: 6_000.,
         radar_emitting: true,
     }

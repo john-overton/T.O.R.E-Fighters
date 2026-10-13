@@ -375,7 +375,7 @@ pub fn rich_scenario(start: u64, ticks: u64, seed: u64) -> Scenario {
         // A missile flies from aircraft 0 for three seconds every ten.
         if local % 1_200 == 60 {
             let shooter = &frame.aircraft[0];
-            let direction = shooter.forward();
+            let direction = forward(shooter.attitude);
             missile = Some(ProjectileState {
                 id: 1 << 24 | (local / 1_200) as u32,
                 owner: 0,
@@ -457,7 +457,7 @@ pub fn rich_scenario(start: u64, ticks: u64, seed: u64) -> Scenario {
                 target: None,
                 position: shooter.position,
                 previous: shooter.position,
-                direction: shooter.forward(),
+                direction: forward(shooter.attitude),
                 speed: 3_400.,
                 tracer: next_round.is_multiple_of(5),
                 incoming: false,

@@ -414,6 +414,18 @@ impl Station {
             u16::try_from(slot).unwrap_or(u16::MAX),
         )
     }
+    /// Where the store this station lets go next hangs now, while it holds
+    /// `rounds` (before the release's debit): [`Self::release_point`] with
+    /// the whole releases left once that store has gone. The bomb and rocket
+    /// sights predict from here, for a human and the AI alike (B3 follow-up,
+    /// John 2026-10-12), so the pipper shows where the next store goes.
+    pub fn next_release_point(&self, rounds: u32) -> Vector {
+        let debit = u32::from(self.weapon.burst.actual_rounds_per_game).max(1);
+        self.release_point(super::hardpoints::units(
+            rounds.saturating_sub(debit),
+            debit,
+        ))
+    }
 }
 /// One selected external tank type, kept separate from weapon ammunition.
 #[derive(Clone, Debug)]
@@ -4474,11 +4486,21 @@ impl State {
             if own.gunship.is_some() {
                 step_gunship(own, k, launcher, &self.targets, &rows, &ground, self.tick);
             }
+            // The sight predicts from the pylon the next store leaves (B3):
+            // with unlimited ammunition the release's first number picks it.
+            let mount = own.config.stations.get(own.selected).map_or([0.; 3], |s| {
+                if self.cheats.unlimited_ammo {
+                    s.release_point(self.next_shot & 1)
+                } else {
+                    s.next_release_point(u32::from(own.rounds(own.selected)))
+                }
+            });
             own.delivery = self.delivery_of(
                 own.aircraft,
                 &own.cockpit,
                 &own.config,
                 &launcher,
+                mount,
                 &ground,
                 super::delivery::Clock {
                     tick: self.tick - 1,

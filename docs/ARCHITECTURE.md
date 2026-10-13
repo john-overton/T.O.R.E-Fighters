@@ -144,7 +144,7 @@ flight adapter runs. The HUD reads this state. See the
 
 ### Flight presentation and measurement
 
-`flight::State` remains authoritative at 120 Hz. `main` retains the preceding tick for render-only pose interpolation (shortest-path wrapped angles); pause/crash show authoritative state and restart resets history. Camera, exterior geometry and HUD consume the same presented pose. Everything else combat draws is captured once per tick, after the AI step, as a plain-data `RenderSnapshot` (`snapshot.rs`, which holds the pose types, the devices, `interpolate` and `blend`, and no drawing code): other aircraft with their devices, damage and wreck state, fixtures, weapons, effects, debris and ejected pilots, plus the player's own pose. Combat keeps the last two snapshots (`previous_snapshot`, `render_snapshot`), and the app's `CombatView` (`combat_view.rs`) holds the frame's tick fraction and blends them; the main view, mirrors and camera panels draw that blend through the shared `aircraft_batches` and `combat_geometry` helpers of `render_snapshot.rs` (the vertex building, with `CombatArt` and the afterburner light helpers), with the art and the other aircraft's models from the view, which a mission replay uses to draw a recording, so both show the same picture. Each aircraft pose also carries the pylons and stores it still has (`StorePose`, built by `tore_world::snapshot::store_poses` from the combat configuration and each station's rounds left; empty in a replay and, on a network client, for every aircraft but the seat's own, which the client fills from its loadout and cockpit readout); `pylons.rs` turns them into solid-colour vertices appended to that aircraft's own batch (the flown aircraft's through `Renderer::aircraft`, so they hide with it in the cockpit), and the release rule they share with the simulation, where a paired station's next store leaves from, is `tore_sim::combat::hardpoints` ([stores on pylons](spec/stores-on-pylons.md)). Each pose also carries whether its afterburner flame lights the scene; the shared `afterburner_glow`, `target_glows` and `engine_outlets` helpers turn those into lights at the presented poses. Chaff and flares are not part of the snapshot: live flight hands the countermeasure renderer the combat state's devices, and a replay the same devices flown again from their recorded releases (`replay/devices.rs`). `replay/convert.rs` turns each snapshot, plus flight data it does not carry, into a `tore-replay` frame and a decoded frame back into a snapshot; a synthetic round-trip test draws both through the shared helpers and requires every vertex within the format's 1/64 ft position precision. Reset clears that history. AI gear, flap, hook, brake, bay, exhaust and control-surface samples use that
+`flight::State` remains authoritative at 120 Hz. `main` retains the preceding tick for render-only pose interpolation (shortest-path wrapped angles); pause/crash show authoritative state and restart resets history. Camera, exterior geometry and HUD consume the same presented pose. Everything else combat draws is captured once per tick, after the AI step, as a plain-data `RenderSnapshot` (`snapshot.rs`, which holds the pose types, the devices, `interpolate` and `blend`, and no drawing code): other aircraft with their devices, damage and wreck state, fixtures, weapons, effects, debris and ejected pilots, plus the player's own pose. Combat keeps the last two snapshots (`previous_snapshot`, `render_snapshot`), and the app's `CombatView` (`combat_view.rs`) holds the frame's tick fraction and blends them; the main view, mirrors and camera panels draw that blend through the shared `aircraft_batches` and `combat_geometry` helpers of `render_snapshot.rs` (the vertex building, with `CombatArt` and the afterburner light helpers), with the art and the other aircraft's models from the view, which a mission replay uses to draw a recording, so both show the same picture. Each aircraft pose also carries the pylons and stores it still has (`StorePose`, built by `tore_world::snapshot::store_poses` from the combat configuration and each station's rounds left; on a network client from each aircraft's loadout in the session's copy of the mission and the host's Stores events, protocol 26, the seat's own from its cockpit readout; in a replay from the recording's `stores.*` events through `tore_replay::stores` and `tore_session::client::convert::stores`); `pylons.rs` turns them into solid-colour vertices appended to that aircraft's own batch (the flown aircraft's through `Renderer::aircraft`, so they hide with it in the cockpit), and the release rule they share with the simulation, where a paired station's next store leaves from, is `tore_sim::combat::hardpoints` ([stores on pylons](spec/stores-on-pylons.md)). Each pose also carries whether its afterburner flame lights the scene; the shared `afterburner_glow`, `target_glows` and `engine_outlets` helpers turn those into lights at the presented poses. Chaff and flares are not part of the snapshot: live flight hands the countermeasure renderer the combat state's devices, and a replay the same devices flown again from their recorded releases (`replay/devices.rs`). `replay/convert.rs` turns each snapshot, plus flight data it does not carry, into a `tore-replay` frame and a decoded frame back into a snapshot; a synthetic round-trip test draws both through the shared helpers and requires every vertex within the format's 1/64 ft position precision. Reset clears that history. AI gear, flap, hook, brake, bay, exhaust and control-surface samples use that
 same render fraction; an aircraft whose AI stopped flying holds its last
 devices, and fixtures retain their fixed devices. Audio consumes
 authoritative state. No renderer smoothing feeds back into physics.
@@ -1029,7 +1029,8 @@ format 3 (`tore_replay::FORMAT_VERSION`), and every other flight is the format
 stay comparable and an older build still opens a plain recording. Format 3 adds
 the ground target to the header (`world.ground_target`, which
 `Terrain::for_recorded` passes back so the viewer resolves the same template,
-defenses, trucks, radars, parked aircraft and starts), per-frame poses of
+defenses, trucks, radars, parked aircraft and starts; `world.area_defense` the
+same for the area defenses of a mission with no target), per-frame poses of
 moving units, rail and spare-magazine changes, the piece index of a surface
 owner's debris, a registry naming every surface unit, the `surface.*` events
 and a flak effect code. `replay/recorder/surface.rs` registers the units;
@@ -4544,6 +4545,96 @@ and the player was never dropped and left by its own Leave. The transport's own 
 `tests/keepalive.rs`, on the simulator) keep a stall of 15 seconds, refuse a
 keepalive from another address, with another id or of another version, and
 check that the host answers none.
+
+### A long mission build (slice NET)
+
+*Built 2026-10-12 (slice NET); agent decisions; no wire change.* A joining
+client builds the mission's world (`World::new`) in the turn that reads the
+last datagram of the host's Mission message, inside
+`Client::receive_from`; a flight's loadouts build it again when the flight
+starts. That turn takes as long as the build. On 2026-10-12, with about ten
+agents building and testing at once (load average 40 to 65 on 24 threads),
+about 20 of the battery's net scenarios failed the same way, on the base
+too: the server accepted the bots, each bot built the mission, and the
+server dropped each "no packet for 5 seconds" while it was still building.
+
+```mermaid
+sequenceDiagram
+  participant H as Host
+  participant C as Client turn
+  participant K as Keepalive thread
+  H->>C: Mission (last fragment)
+  Note over C: the build: seconds on a slow machine
+  H-->>C: snapshots and resends wait in the socket
+  K->>H: Keepalive, once a second after 1 s
+  Note over C: the batch stops after the build
+  C->>C: next turn, a fresh time, reads what waited
+```
+
+Two things went wrong, one on each side.
+
+- **The host's side.** `tore-bot` had no keepalive thread (the game has had
+  one since EF-K), so the host heard nothing for the length of the build.
+  The bot now runs the same thread (`tore_net::Keepalive`, the bot's
+  `kept.rs`) for each bot joined over UDP or through the Internet Lobby,
+  started on the first turn after the join is accepted and before that
+  turn's packets go out, so it runs before the host's Mission can arrive;
+  it follows a rejoin or a move to a new host, and a bot that hosts has none.
+  Every bot of one `tore-bot --count N` process shares one loop, so one
+  bot's build holds them all up; each has its own thread. The thread's
+  60-second bound is the loading grace: a client that takes longer than
+  that to build is dropped, 5 seconds after its last keepalive. No separate
+  loading state was added on the host: the keepalive already says exactly
+  "this game is alive and held up", it needs no protocol change, and the
+  same bound covers every stall.
+- **The client's side.** After the build the same `receive_from` call went
+  on reading: everything the host sent during the build, stamped with the
+  turn's time from before it. The connection took all of it as heard
+  seconds ago, and the turn after closed it for 5 seconds of silence
+  ("The connection ended: no packets for 5 seconds.") although the host was
+  sending all along. This hit the game too, not only the bot: the game's
+  keepalive kept the host's side, and its own client then closed itself. Now
+  `receive_from` stops its batch after a datagram whose handling built a
+  mission; the rest waits for the next turn and its time. The simulator
+  test `client::load_tests` holds a 7-second build on fake time with the
+  host running on: the client is still connected after it, and it fails
+  without the stop.
+
+**Measured.** `Client::last_build_time` is the wall-clock length of the last
+build; `tore-bot` prints it with "mission loaded (built in N ms)". On this
+machine (Ryzen 9 7900X, 24 threads) on 2026-10-12, with other agents'
+builds and tests running:
+
+| Build | Load average | Builds | Median | 90th percentile | Longest | Over 5 s |
+| --- | --- | --- | --- | --- | --- | --- |
+| Debug, the whole net lane | 30 to 47 | 186 | 0.73 s | 4.5 s | 7.5 s | 16 |
+| Release, four net scenarios | 19 to 30 | 21 | 0.07 s | 1.9 s | 2.4 s | 0 |
+
+In the release runs the first build in a process took 1.7 to 2.4 seconds and
+every later one 65 to 225 ms: the first loads what later builds reuse. In the
+debug lane 49 of the 62 scenario logs, `net-server-slow-load` aside, show a
+bot's keepalives covering a hold-up, each of the 16 builds over 5 seconds one that used to drop it. The
+game builds the mission with the same `Client` code (its first build in a
+process too), and its keepalive thread has covered the host's side since
+EF-K; the batch stop above covers its own side.
+
+**Not covered: a host's own build.** A host builds the mission on its own
+loop too: when the King changes the mission or a setting that rebuilds it,
+when a flight with loadouts starts, and when the next mission is built
+after an end. A host sends no keepalives, so a host's build longer than 5
+seconds drops its players ("The connection ended: no packets for 5
+seconds."), and one longer than 1.5 seconds starts a migration race where
+standbys wait. None of the failing scenarios showed it: a host's first build
+comes before anyone joins, and later builds reuse what the first loaded (65
+to 225 ms in release above). Covering it would take the host's build off its
+loop, or a keepalive from the host that clients accept, a wire change; it is
+left open.
+
+**Tests.** `client::load_tests` (above) and the battery's
+`net-server-slow-load`: a bot whose every build first sleeps 8 seconds
+(`tore-bot --slow-build 8`) joins the guide's mission, builds it in the
+lobby and again as the flight starts, and flies; the server logs its stall
+and its return, and nothing is silent.
 
 ### Recordings and diagnostics
 

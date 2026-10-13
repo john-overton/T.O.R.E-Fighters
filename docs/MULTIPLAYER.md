@@ -827,6 +827,12 @@ defenses](spec/surface-defenses.md)). What a player sees:
   seed on every machine and fought by the host like the rest. It adds no wire
   field; it is part of the surface a game builds, so a build without it
   disagrees on the surface digest and is refused in the words above.
+- **Area defenses.** Since B23 (2026-10-12) a lobby mission with no ground
+  target but an AAA or SAM strength above none flies with [the enemy's area
+  defenses](spec/surface-defenses.md#area-defenses), SAM sites and guns on
+  Red's side of the front. The host draws their seed as for a target; every
+  game builds the same sites, with no wire field added, and a build without
+  them is refused in the words above.
 - **What moves and fires.** A column of tanks or a convoy of ships drives on
   every screen where the host has it. SAMs launch from their rails, which
   empty and refill when a supply truck rearms them; AAA tracers leave the guns
@@ -1339,7 +1345,7 @@ target window come from the host's own readout, not from the drawn aircraft.
 | Item | Value |
 | --- | --- |
 | Connecting | The client repeats each handshake step every 250 ms and gives up after 10 seconds |
-| Dropped player | 5 seconds without a valid packet; the AI takes the plane at once. A game whose loop is stalled (a window dragged, a long frame) keeps its plane for up to 60 seconds through its [keepalive](ARCHITECTURE.md#a-stalled-game-stays-connected-ef-k) (EF-K, agent decision), flown neutral meanwhile |
+| Dropped player | 5 seconds without a valid packet; the AI takes the plane at once. A game whose loop is stalled (a window dragged, a long frame) keeps its plane for up to 60 seconds through its [keepalive](ARCHITECTURE.md#a-stalled-game-stays-connected-ef-k) (EF-K, agent decision), flown neutral meanwhile. The same 60 seconds cover a game building the mission as it joins or as a flight starts, which a slow machine can take longer than 5 seconds over ([a long mission build](ARCHITECTURE.md#a-long-mission-build-slice-net), slice NET, agent decision) |
 | Players per server | A setting, default 30 (John, 2026-09-28); a co-op mission seats at most its 15 friendly planes |
 | Default port | UDP 26900, a setting |
 
