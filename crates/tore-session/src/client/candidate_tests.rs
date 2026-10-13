@@ -86,12 +86,20 @@ fn the_cpu_measure_steps_the_lobbys_mission_on_a_thread_of_its_own() {
         measure_cpu: true,
         ..CandidateSettings::default()
     });
-    assert!(
-        rig.run_until(Duration::from_secs(120), |r| {
-            r.players[player].client.candidate_report().cpu_micros > 0
-        }),
-        "the measure arrives"
-    );
+    // The measure runs on a real thread, in wall-clock time, while the rig's
+    // clock is simulated: a millisecond step takes far less than a
+    // millisecond, so a simulated limit ran out before a debug build on a
+    // loaded CI runner finished the measure. Wait on the wall clock instead,
+    // stepping the rig (which takes the result) between short sleeps.
+    let deadline = std::time::Instant::now() + Duration::from_secs(300);
+    while rig.players[player].client.candidate_report().cpu_micros == 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the measure arrives within five minutes of wall-clock time"
+        );
+        rig.run(10 * MS);
+        std::thread::sleep(2 * MS);
+    }
     let report = rig.players[player].client.candidate_report();
     assert_eq!(report.cpu_mission, rig.host.mission_number());
 }
