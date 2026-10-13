@@ -800,6 +800,12 @@ beyond them.
     rebuilds the same [area defenses](spec/surface-defenses.md#area-defenses)
     from it. A build from before it keeps the unknown entry aside and
     replays without the sites; `--recording-info` prints an `Area` line.
+    Since 2026-10-13 (nr-b23b) the counts are rolled per slot and each SAM
+    unit has a supply truck, and the header adds `world.area_rolled=1`. The
+    five-field value does not change shape: a recording without the mark was
+    made by the first build and rebuilds that build's fixed counts (2, 4 and
+    6 SAM sites, 4, 8 and 12 gun sites, no trucks), so it replays as made. A
+    build from before the mark keeps it as an unknown entry.
   - **The airfield scene**, `world.airfield_scene=N`, written only when N is
     not 0. 0 is the retail airfields, which every recording before the field
     has; 1 is the [redrawn airports](formats/redrawn-airports.md), the

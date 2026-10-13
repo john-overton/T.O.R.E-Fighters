@@ -597,20 +597,36 @@ below is fitted (agent).
   `ground-target` line. With a ground target the strengths man the target's
   slots as before and no area defenses stand (never both). Free flight has no
   creator and so never has them.
-- **How many.**
+- **How many.** Rolled like the target templates' defense slots (John,
+  2026-10-13, nr-b23b; the first build of 2026-10-12 had fixed counts of 2, 4
+  and 6 SAM sites and 4, 8 and 12 gun sites). A mission has **ten SAM site
+  slots and ten gun site slots** (agent decision, 2026-10-13: the ten
+  `<sam>` and ten `<aaa>` slots of 79 of the 95 templates). Each slot is
+  manned with the template chance for its strength, the
+  [roll](#templates-and-defended-slots) of the creator's field 31 (guns) or
+  32 (SAMs):
 
-  | Strength | SAM sites | Gun sites |
-  | --- | ---: | ---: |
-  | none | 0 | 0 |
-  | light | 2 | 4 |
-  | moderate | 4 | 8 |
-  | heavy | 6 | 12 |
+  | Strength | Chance a slot is manned | Sites of a kind (ten slots) | Mean |
+  | --- | ---: | ---: | ---: |
+  | none | 0 percent | 0 | 0 |
+  | light | 25 percent | 0 to 10 | 2.5 |
+  | moderate | 60 percent | 0 to 10 | 6 |
+  | heavy | 100 percent | exactly 10 | 10 |
 
-  Each site is two units of one type, so heavy is 12 launchers and 24 guns
-  plus the SAM sites' radars. The template rolls (25, 60 and 100 percent of
-  ten slots each) give about the same numbers of units around a target; here
-  the counts are fixed, as a scattered site rolled away would leave a hole in
-  a map-wide layer.
+  Each slot draws once from its own stream (the surface seed, the layout and
+  the slot's number, the Roll purpose), exactly as a template's slot does,
+  against 100: manned when the draw is under the percent. SAM slots and gun
+  slots roll apart. The draw does not depend on the other slots or on how
+  the sites later fall, so a site keeps its type and place whatever its
+  neighbours rolled, and a slot manned at light is manned at moderate and
+  heavy for the same seed. A manned slot is a **site of two units of one
+  type**, so heavy is 20 launchers and 20 guns, light about 5 and 5, with
+  the SAM sites' radars and trucks on top. A light mission can roll no site
+  of a kind (one seed in about 18 for ten slots at 25 percent), as a lightly
+  defended template can; the rule is the same. Every machine and every
+  replay rolls the same slots, since the seed is the mission's (below).
+  `site_counts` (the sweep's expected count) is the rolls alone; a site that
+  finds no place is left out, as below.
 - **Which.** Each site's type is a uniform pick from the enemy nationality's
   equipment group for `<sam>` or `<aaa>`, the lists the target's slots draw
   from ([templates](#templates-and-defended-slots)); with the night rule's
@@ -618,9 +634,24 @@ below is fitted (agent).
   battery rules ([SAM batteries](#sam-batteries)) then group each SA-2, SA-3,
   SA-6 or HAWK site into a battery with its radar vehicle, added beside it;
   area batteries never take a base-layout radar or launcher, nor the other
-  way round. Skill average (1). No supply trucks, no route, no front line, no
-  destroy flag: they are not objectives, and destroying one scores as any
-  enemy ground unit does.
+  way round. Skill average (1). No route, no front line, no destroy flag:
+  they are not objectives, and destroying one scores as any enemy ground unit
+  does.
+- **Supply trucks** (John, 2026-10-13: "supply trucks for area SAMs: yes").
+  The [template rule](#resupply) applies to the SAM sites: every SAM unit
+  gets a MISTRK 200 to 400 ft from it (the slot truck) and every area SAM
+  battery one more (SA-2, SA-3, SA-6, HAWK sites), served to the battery's
+  first launcher, all added after the sites are placed with the template's
+  placement rule and the resupply reach of 528 ft, from their own stream of
+  the surface seed (Supply purpose). They are ordinary supply trucks in
+  `Surface::trucks` (ids from `0x5800_0000`), so the whole
+  [resupply](#resupply) applies unchanged: a live truck of the same side
+  within 528 ft rearms all of a launcher's empty rails after the system's
+  time (300, 420 or 600 s), a destroyed truck stops it at once, and a site
+  whose truck is dead stays empty. Guns get none (John asked for the SAM
+  sites only; agent decision, 2026-10-13: a gun site still uses its two spare
+  magazines). A truck is a targetable passive vehicle that is never a
+  target of the mission. The first build had none.
 - **Where.** The front axis runs from the centroid of the theater layout's
   Blue placements to that of its Red ones ([relocation](#relocation)); its
   midpoint splits the sides. Every theater's layout has both, so every
@@ -649,7 +680,11 @@ below is fitted (agent).
   - Measured with `--surface-dump --area-sweep --seeds 2` (16 theaters,
     light to heavy, 96 builds): every unit keeps every rule, and every theater
     but the Kurils stands every site. The Kurils (a chain of small islands)
-    stand 8 to 26 of their 12 to 36 units.
+    stand what the islands hold and leave the rest out: with the rolled counts
+    8 of 8, 22 of 24 and 30 of 40 units (seed 1) and 8 of 10, 16 of 22 and
+    26 of 40 (seed 2) at light, moderate and heavy, about two thirds of a
+    heavy mission. John, 2026-10-13: fine, no looser rule for the small
+    islands.
 - **Facing and sight.** Each unit faces away from its site's centre. They
   fight by the ordinary [Surface AI](#surface-ai) rules: a site engages an
   aircraft of the other side in its reach, so a Blue pilot flying over Red's
@@ -666,11 +701,22 @@ below is fitted (agent).
   ([Replays](#replays)). Online no wire byte changes: the mission text carries
   the strengths and the host draws the seed, as for a ground target
   ([Multiplayer](#multiplayer)); a build with the area defenses and one
-  without disagree on the digest and refuse each other.
+  without disagree on the digest and refuse each other. So do a build with
+  the rolled counts and one with the first build's fixed counts: the surface
+  digest of a rolled mission carries a "rolled" mark, the first build's
+  digest does not.
+- **Older recordings.** The rolled counts are marked in the replay header by
+  `world.area_rolled=1`. A recording from the first build (2026-10-12) has
+  the five-field `world.area_defense` and no mark, so it rebuilds its fixed
+  counts of sites (2, 4 and 6 SAM sites, 4, 8 and 12 gun sites) with no trucks
+  and replays as it was made; the header keeps its shape and a build from
+  before the mark keeps the key as an unknown extra
+  ([Replays](#replays)). The online path has no old mode: every machine of a
+  game rolls.
 
 ```mermaid
 flowchart LR
-    S[Strengths, no target] --> N[2 to 6 SAM sites, 4 to 12 gun sites]
+    S[Strengths, no target] --> N[Ten SAM slots and ten gun slots, each rolled 25, 60 or 100 percent]
     N --> F{Every third site of a kind}
     F -->|yes| A[2 to 5 nm from a Red airfield]
     F -->|no| B[Band: 10 to 60 nm past the midpoint toward Red]
@@ -680,6 +726,7 @@ flowchart LR
     B --> U
     D --> U
     U --> R[SA-6 and the like: a battery with its radar]
+    U --> T[Every SAM unit and battery: a supply truck]
 ```
 
 ### The units of the movement and range words
@@ -1528,6 +1575,9 @@ SAM rails and AAA magazines, within 0.1 mile (defined, John).
   Trucks are passive units, targetable, Vehicle class (0x0200), and move with the
   defended group's relocation. Never targets. Number and placement: fitted,
   agreed by John (2026-10-10).
+- **Area defenses** (a Quick Mission with no ground target) get trucks for
+  their SAM units and SAM batteries by the same rule, none for guns
+  ([area defenses](#area-defenses), John, 2026-10-13).
 - **Base layouts get no added trucks** (including no truck for their batteries);
   their units are resupplied only by trucks already standing in them (agreed by
   John, 2026-10-10).
@@ -2272,7 +2322,8 @@ Settled during the round:
 | Having a gun rate, magazine and reload (values fitted); splash damage for every weapon; the 60 and 120 s gun swaps; the 300 to 600 s SAM rearm range; base-layout defenses active; Redfor defends in PvP; jitter; relocation and starts; batteries; supply trucks; simulated parked aircraft; one combined objective; friendly-fire failure; a fifth network entity kind | defined (John, 2026-10-10) |
 | Surface units of opposing sides in range shoot at each other, whatever their `react` masks | opinionated (John, 2026-10-11) |
 | Area defenses with no ground target: Red's side, 10 to 60 nm deep, airfield cover, counts from the strengths, the enemy group's units with radars, standing, hidden, Quick Mission only | opinionated (John, 2026-10-12, B23) |
-| Area defense site counts per strength, two units a site, one site in three by a Red airfield 2 to 5 nm out (fields 0 to 100 nm deep), 10 to 120 nm fallback, 3 nm spacing, 150 to 600 ft unit ring, 2,000 ft object and 1 nm runway clearance, no supply trucks, strengths kept when the target goes | fitted or defined (agent, 2026-10-12) |
+| Area defense site counts: ten slots a kind rolled at the template percentages (John, 2026-10-13; the ten is agent), supply trucks for the SAM units and batteries (John, 2026-10-13), one site in three by a Red airfield, the Kurils as they fall (John, 2026-10-13) | opinionated (John, 2026-10-13); slot count fitted (agent) |
+| Area defense two units a site, airfield sites 2 to 5 nm out (fields 0 to 100 nm deep), 10 to 120 nm fallback, 3 nm spacing, 150 to 600 ft unit ring, 2,000 ft object and 1 nm runway clearance, strengths kept when the target goes, no trucks for guns | fitted or defined (agent, 2026-10-12 and 2026-10-13) |
 | Weapon target flags (0x10000 air, 0x20000 surface) deciding what a surface weapon aims at; surface damage by class | retail |
 | Preference by unit class, nearest-first choice, units only (no buildings or parked aircraft), the SS-N-9 at ships only and its surface radar search, sides a surface round strikes, the quarter surface aim error, the column's halt | fitted or defined (agent, 2026-10-11) |
 | Relocation site rules and counts, battery caps and radar placement, truck counts and placement, the per-system SAM rearm timers within John's range, gun reserve, jitter numbers, emitter rule, radar on and off, HARM shutdown, experience effects, target choice, time fuze, surface splash reaching aircraft and the other side's ground objects only, barrage rule, movement rates, launch pitch, flak and gun-light looks | fitted or defined (agent) |
