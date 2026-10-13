@@ -641,6 +641,7 @@ length and the bytes, so a reader skips sections it does not know:
 | Checksums | The once-per-second state checksums |
 | Rotors | Each rotorcraft's rotor speed, a share of its governed 100 percent: an entry names a frame and the aircraft whose speed changed on it. The chunk's first value of an aircraft is exact, later changes are quantized to a thousandth. Aircraft without a rotor read zero, and files from before it have no such section. Playback turns the drawn blades by this speed summed frame by frame from the recording's start, so a tick shows the same blade angle however the playhead reached it ([rotor presentation](spec/rotor-presentation.md#rotor-speed-and-blade-angle)) |
 | Disk tilt | Each rotorcraft's rotor disk tilts from its shaft, in radians: longitudinal then lateral for the first rotor, then for the second (the CH-47's rear rotor, the V-22's right proprotor). An entry names a frame and the aircraft whose tilt changed on it. The chunk's first nonzero value of an aircraft is exact, later changes are quantized to 1/256 rad (the network entity record's step) and stored as absolute step counts, so nothing accumulates. Aircraft without a rotor read level, and files from before it have no such section, so their rotorcraft are drawn with level disks. Playback draws the disk tilt as recorded and blends it between ticks as live flight does |
+| City | The city fill's background buildings knocked down on a frame (nr-fx3, 2026-10-13): an entry names a frame, whether every building stood again first (a restarted flight), and where each building that fell stands, its base centre in whole feet east and north, the first as it is and each later one as its step from the one before. Only changes are stored. Files from before it have no such section and replay with the city whole ([below](#versions-and-damage)) |
 
 Spawns, events and trees sit in their own sections so the viewer can
 rebuild smoke, and a reader can list every event, without decoding the
@@ -872,8 +873,7 @@ beyond them.
     every fire for good (the client was never told when one ends). A parked
     aircraft's fire lasts 15 minutes on a scorch, with no crater. The fires
     of knocked-down city fill buildings are drawn from the fill's own
-    flattened set, which a recording does not keep, so a replay shows the
-    city whole.
+    flattened set, which the city section keeps since nr-fx3 (below).
   - **Events**: `surface.burst`, `surface.phase`, `surface.rearm`,
     `surface.refill`, `surface.radar` and `surface.wreck` (see
     [the vocabulary](../crates/tore-replay/src/vocab.rs)). Unknown event kinds
@@ -899,6 +899,29 @@ beyond them.
   the viewer dates each round's motor from its recorded age and the
   weapon's record in the import, so a recording of any age draws the flame
   only while the motor burns.
+- **City** (nr-fx3, John 2026-10-13: replays track destroyed city fill
+  buildings; no format number change): the city fill buildings a ground
+  burst knocked down, in a new chunk section, id 11, written only for the
+  frames on which the set changed: each building by **where it stands**
+  (base centre, whole feet), not by its index in the fill, so a viewer whose
+  rebuilt fill numbers its buildings differently (other import resources, a
+  later build) still finds them; a place where the rebuilt fill has no
+  building is skipped. The viewer reads every entry when it opens the file,
+  and sets the fill to the set at the tick it shows, whether it got there by
+  playing, seeking or playing backwards, so the flattened blocks, their
+  rubble and their [fires](spec/surface-defenses.md#city-fill-buildings)
+  show as in flight (agent decisions: places, not indices; changes only, not
+  a set per chunk). A restarted flight's city stands again, marked on the
+  entry. A recording converted from a network capture carries them too:
+  the host's City flattened events (protocol 25) are written by place from
+  the client's own fill, and buildings already flat when the seat joined
+  stand flat from the replay's first tick. An older build skips the unknown
+  section and shows the city whole; a recording made before it has none and
+  shows the city whole here too. `--recording-info` prints a `City` line
+  (how many were knocked down, in how many changes, from which tick). A
+  raid that flattens 500 buildings costs about 4 KB. `TORE_REPLAY_CITY=0`
+  replays a recording as an older build would, without them (a developer
+  aid).
 - The air-to-ground round (slice RA) adds events and a weapon class and **no
   format change**: a recording is still format 3 with surface content and
   format 2 without, and both versions open unchanged. See
@@ -1487,6 +1510,11 @@ under the playhead:
   simulation's lifetimes, rise and caps; effects from their start ticks.
   Craters and crash-site fires, which can last the whole mission, are read
   once when the recording opens and kept to the simulation's caps.
+- The city fill as the recording left it at the tick shown (nr-fx3): its
+  knocked-down buildings flat and burning, read once from the city section
+  when the recording opens; seeking or playing backwards stands them up
+  again. At night every explosion and fire also glows, to the limit of the
+  night scene, as in flight ([night glow](spec/explosions.md#night-glow)).
 - Chaff clouds and burning flares with their smoke trails and glare,
   flown again from their recorded releases
   ([chaff and flares](#chaff-and-flares)), and the light that flares and
@@ -1770,6 +1798,11 @@ about 1,200 ticks a frame, frames take about 2 ms more.
   recording never named (one that never fired and was not destroyed) is not
   in the registry, and a recording of a world from before format 3 has none
   of this: its columns stay where the scenery put them.
+- A burning city fill building's smoke column runs on the viewer's own
+  clock, as in flight (nr-fx2): after a seek the buildings knocked down at
+  that point burn at once, but their columns start again from the ground
+  and take about 44 seconds to stand. Their fires and glow are there at
+  once.
 
 ## Debug panels
 

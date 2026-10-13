@@ -1938,6 +1938,14 @@ B16 (John, 2026-10-12): destroyed objects stay on fire.
   them and 500 smoke 7,000, with every column standing and thinner, instead
   of the oldest puffs of all of them being thrown away
   (`combat/smoke.rs`, `FULL_COLUMNS`). Up to 16 fires change nothing.
+- **At night** (nr-fx3, John 2026-10-13). Every fire glows as a point of
+  light that stays visible to the limit of the night scene, brighter and
+  larger the wider the fire (a 24 ft city building fire 0.36 flares, a
+  90 ft building 2.6, a 160 ft fuel or ammunition fire 6.2), and the
+  nearest 8 within 3 nm light the ground around them as a flare does, the
+  bigger farther ([night glow](explosions.md#night-glow)). Of a burning
+  city, the nearest 2,048 buildings past the 1,024 fire sprites glow too, so
+  a city on fire shows from afar.
 - **Simulation data.** The fire and scorch are ordinary combat marks, so
   they are deterministic, travel online as the crash sites' do and are
   recorded and replayed with no format change; a ground object's look
@@ -1961,9 +1969,11 @@ rest of the mission, however many fall.
   tells every player and the world checkpoint carries, so every machine of a
   networked game and every restart shows the same fires with no new message.
   There are no simulation marks for them (the fill is scenery, never a
-  combat target) and nothing reaches the wire or a recording. A replay does
-  not record the fill's flattened set (it never did), so it shows its city
-  whole and unburnt.
+  combat target) and nothing new reaches the wire. Since nr-fx3 (John,
+  2026-10-13) a recording keeps the flattened set in its city section, each
+  building by where it stands, so a replay shows the flattened blocks
+  burning, seeking and playing backwards included; a recording from before
+  it shows its city whole and unburnt ([replays](../REPLAYS.md#versions-and-damage)).
 - **How it looks.** A fire on each knocked-down building's base, a building
   fire's width (0.6 of the smaller plan side, 24 to 90 ft; the fill's piece
   sizes), its flames looping once a second, each out of step with its
