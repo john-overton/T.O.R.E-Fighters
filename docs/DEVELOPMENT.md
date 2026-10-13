@@ -1599,8 +1599,13 @@ glow](spec/explosions.md#night-glow) set (nr-fx3): a 250 lb, a 500 lb and a
 2,000 lb bomb 1,200 ft apart with a 24 ft, a 90 ft and a 160 ft fire behind
 them, at night, seen from 0.3, 2, 5, 10, 20 and 30 nm (3,000 ft up, 800 ft a
 mile farther out) 0.15 s and 1 s after the bombs (`night-RR.Rnm-tS.SSs.png`);
-each picture also prints the night haze ramp. `TORE_NIGHT_GLOW=0` draws them
-without the glow points and fire light, the before picture.
+each picture also prints the night haze ramp. The set also writes
+`fire-compare-024ft.png`, `fire-compare-090ft.png` and `fire-compare-160ft.png`:
+a close fire on the left and a single burning flare on the right at a fixed
+camera distance. The battery's `render-night-effect-lights` scenario captures
+these in Egypt, plus the range set, for visual inspection. `TORE_NIGHT_GLOW=0`
+draws them without the glow points and sustained fire/fireball light, for
+comparison.
 
 Add `shockwave` after the folder for the [climate](spec/explosions.md#climate)
 set: a 500 lb bomb, a 2,000 lb bomb and an AGM-65G 1,300 ft apart on open

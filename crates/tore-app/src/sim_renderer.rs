@@ -1627,7 +1627,7 @@ impl SimRenderer {
         self.glow_points
             .update(queue, self.effects.glows(), camera.position);
         let mut lights = self.countermeasures.lights.clone();
-        lights.extend(self.effects.fire_lights(camera.position));
+        lights.extend(self.effects.sustained_lights(camera.position));
         self.smoke.update(
             queue,
             camera,

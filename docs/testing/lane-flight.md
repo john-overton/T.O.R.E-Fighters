@@ -740,3 +740,9 @@ The full lane, 3,089 scenarios with `--jobs 6 --windows 2`, took 1,804 seconds (
 failure, the jettison check of the Su-35's internal slot 5, which was the check's mistake and is
 fixed; that family passes 38 of 38, and the rest passed. The missile acceptance
 runs (about five minutes each in a debug build) and the windowed frames set the length.
+
+The `render-night-effect-lights` scenario renders fires of 24, 90 and 160 feet
+beside a burning flare and bomb fireballs before and after their initial flash.
+It checks capture completion; inspect the PNGs for lighting appearance.
+`tore-app` tests assert fire size, linear fade, fixed source height and sustained
+fireball light lifetime. See [capture commands](../DEVELOPMENT.md#explosion-inspection).

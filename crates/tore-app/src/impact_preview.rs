@@ -230,6 +230,26 @@ fn night_range_shots(
             });
         }
     }
+    // Close views compare one fire with one burning flare on the same ground.
+    for (at, width) in &fires {
+        shots.push(Shot {
+            name: format!("fire-compare-{width:03.0}ft"),
+            effects: Vec::new(),
+            births: Vec::new(),
+            marks: vec![crate::snapshot::MarkPose {
+                kind: blast::MarkKind::Fire,
+                position: *at,
+                age: 10_120,
+                strength: 1.,
+                scale: 100,
+            }],
+            fires: vec![(*at, *width)],
+            eye: [at[0] + 80., at[1] + 240., at[2] - 480.],
+            look: [at[0] + 80., at[1], at[2]],
+            fov: 55.,
+            tick: 10_120,
+        });
+    }
     Ok(shots)
 }
 
@@ -554,7 +574,21 @@ pub fn run() -> AppResult<()> {
             drawn.fires.extend_from_slice(&shot.fires);
             let device = &gpu.device;
             let queue = &gpu.queue;
-            let devices = tore_sim::combat::countermeasures::Devices::default();
+            let mut devices = tore_sim::combat::countermeasures::Devices::default();
+            if shot.name.starts_with("fire-compare-") {
+                use tore_sim::combat::countermeasures::Release;
+                devices.release_flare(Release {
+                    position: shot.look,
+                    velocity: [0.; 3],
+                    basis: tore_sim::attitude::Basis::new(0., 0., 0.),
+                });
+                devices.flares.truncate(1);
+                let flare = &mut devices.flares[0];
+                let x = shot.look[0] + 80.;
+                flare.position = [x, ground(x, shot.look[2]) + 3., shot.look[2]];
+                flare.motion = [0.; 3];
+                flare.age = 120;
+            }
             let empty = tore_sim::combat::smoke::Smoke::default();
             gpu.sim.vapor(device, queue, &[]);
             gpu.sim

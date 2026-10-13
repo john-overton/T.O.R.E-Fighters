@@ -256,6 +256,7 @@ fn dust_ring(
                 tint,
                 glow: 0.,
                 heat: 0.,
+                ember: 0.,
             });
         }
     }
@@ -296,6 +297,7 @@ fn spray_ring(position: [f64; 3], width: f64, elapsed: u16, duration: u16, out: 
             tint: PLAIN,
             glow: 0.,
             heat: 0.,
+            ember: 0.,
         });
     }
 }
@@ -381,6 +383,8 @@ struct Sprite {
     /// ([`crate::night_glow`]).
     glow: f32,
     heat: f32,
+    /// Sustained fireball light, in flares, excluding the initial flash.
+    ember: f32,
 }
 
 /// Drawn in the art's own colours.
@@ -430,6 +434,7 @@ fn sprites(
                     tint: PLAIN,
                     glow: 0.,
                     heat: 0.,
+                    ember: 0.,
                 }
             }
             MarkKind::Fire => {
@@ -452,6 +457,7 @@ fn sprites(
                     // Refit to the unit's width in `update`.
                     glow: (crate::night_glow::fire_light(width) * f64::from(mark.strength)) as f32,
                     heat: 0.,
+                    ember: 0.,
                 }
             }
         };
@@ -543,6 +549,18 @@ fn sprites(
             tint: PLAIN,
             glow,
             heat,
+            ember: if crate::impact_fx::detonation(effect).is_some()
+                || matches!(effect.kind, EffectKind::Flak)
+            {
+                crate::night_glow::explosion_ember(
+                    width,
+                    tore_sim::combat::blast_scale::factor(effect.scale),
+                    elapsed,
+                    duration,
+                ) as f32
+            } else {
+                0.
+            },
         });
         bomblets(art, effect, elapsed, &mut out);
     }
@@ -582,6 +600,7 @@ fn bomblets(art: &Art, effect: &EffectPose, elapsed: u16, out: &mut Vec<Sprite>)
                 * (1. - f64::from(played) / f64::from(cluster::FLASH_TICKS)).powi(2))
                 as f32,
             heat: 0.5,
+            ember: 0.,
         });
     }
 }
@@ -603,10 +622,9 @@ pub struct EffectRenderer {
     /// Burning city buildings past the fire sprites' reach or budget, drawn
     /// as glow points only ([`crate::city_fires::Frame::glows`]).
     far_city: Vec<crate::night_glow::Glow>,
-    /// This frame's glow points and the fires that light the ground (their
-    /// base and width), built by `update` ([`crate::night_glow`]).
+    /// This frame's glow points and sustained surface lights, built by `update` ([`crate::night_glow`]).
     glows: Vec<crate::night_glow::Glow>,
-    fire_spots: Vec<([f64; 3], f64)>,
+    sustained_lights: Vec<crate::countermeasure_renderer::FlareLight>,
     glow_on: bool,
 }
 
@@ -647,8 +665,13 @@ fn visible(sprites: &[Sprite], eye: [f64; 3]) -> Vec<&Sprite> {
 }
 
 /// The glow points of the glowing sprites, at the middle of their art, and
-/// the fires among them (base and width) that light the ground.
-fn glows_of(sprites: &[Sprite]) -> (Vec<crate::night_glow::Glow>, Vec<([f64; 3], f64)>) {
+/// the sustained fire and fireball light that reaches nearby surfaces.
+fn glows_of(
+    sprites: &[Sprite],
+) -> (
+    Vec<crate::night_glow::Glow>,
+    Vec<crate::countermeasure_renderer::FlareLight>,
+) {
     let mut glows = Vec::new();
     let mut fires = Vec::new();
     for s in sprites.iter().filter(|s| s.glow > 0.) {
@@ -664,7 +687,19 @@ fn glows_of(sprites: &[Sprite]) -> (Vec<crate::night_glow::Glow>, Vec<([f64; 3],
             heat: s.heat,
         });
         if s.layer == FIRE_SHEET {
-            fires.push((s.position, width * f64::from(s.opacity)));
+            fires.push(crate::countermeasure_renderer::FlareLight {
+                position: [
+                    s.position[0],
+                    s.position[1] + width * crate::night_glow::FIRE_LIGHT_RISE,
+                    s.position[2],
+                ],
+                strength: f64::from(s.glow) * crate::countermeasure_renderer::FLARE_STRENGTH,
+            });
+        } else if s.ember > 0. {
+            fires.push(crate::countermeasure_renderer::FlareLight {
+                position: [s.position[0], s.position[1] + lift, s.position[2]],
+                strength: f64::from(s.ember) * crate::countermeasure_renderer::FLARE_STRENGTH,
+            });
         }
     }
     (glows, fires)
@@ -725,6 +760,7 @@ fn city_sprites(fires: &[crate::city_fires::CityFire], tick: u64) -> Vec<Sprite>
                 tint: PLAIN,
                 glow: crate::night_glow::fire_light(fire.width) as f32,
                 heat: 0.,
+                ember: 0.,
             }
         })
         .collect()
@@ -752,7 +788,7 @@ impl EffectRenderer {
             count: 0,
             far_city: Vec::new(),
             glows: Vec::new(),
-            fire_spots: Vec::new(),
+            sustained_lights: Vec::new(),
             glow_on: crate::night_glow::enabled(),
         }
     }
@@ -780,9 +816,12 @@ impl EffectRenderer {
     pub fn glows(&self) -> &[crate::night_glow::Glow] {
         &self.glows
     }
-    /// The ground light of the fires nearest `eye`, after `update`.
-    pub fn fire_lights(&self, eye: [f64; 3]) -> Vec<crate::countermeasure_renderer::FlareLight> {
-        crate::night_glow::fire_lights(&self.fire_spots, eye)
+    /// Sustained fire and fireball lights nearest `eye`, after `update`.
+    pub fn sustained_lights(
+        &self,
+        eye: [f64; 3],
+    ) -> Vec<crate::countermeasure_renderer::FlareLight> {
+        crate::night_glow::nearby_lights(&self.sustained_lights, eye)
     }
     /// Rebuild for a new anti-aliasing sample count; the next `prepare`
     /// recreates the bindings.
@@ -934,9 +973,9 @@ impl EffectRenderer {
         let mut fitted = fit_fires(&self.sprites, &self.fires);
         fitted.extend_from_slice(&self.city);
         self.glows.clear();
-        self.fire_spots.clear();
+        self.sustained_lights.clear();
         if self.glow_on {
-            (self.glows, self.fire_spots) = glows_of(&fitted);
+            (self.glows, self.sustained_lights) = glows_of(&fitted);
             self.glows.extend_from_slice(&self.far_city);
         }
         let visible = visible(&fitted, eye);
@@ -994,6 +1033,54 @@ mod tests {
             blast,
             scale: tore_sim::combat::blast_scale::FULL,
         }
+    }
+
+    #[test]
+    fn night_effect_lights_follow_fire_size_fade_and_fireball_lifetime() {
+        let art = Art::synthetic();
+        let climate = crate::blast_climate::Climate::default();
+        let fire = |strength| {
+            let drawn = sprites(
+                &art,
+                &[],
+                &[MarkPose {
+                    kind: MarkKind::Fire,
+                    position: [100., 0., 200.],
+                    age: 120,
+                    strength,
+                    scale: 100,
+                }],
+                climate,
+            );
+            glows_of(&fit_fires(&drawn, &[([100., 0., 200.], 90.)])).1
+        };
+        let full = fire(1.);
+        let half = fire(0.5);
+        assert_eq!(full.len(), 1);
+        assert!((full[0].position[1] - 31.5).abs() < 1e-9);
+        assert_eq!(half[0].position, full[0].position);
+        assert!(
+            (full[0].strength - 9. * crate::countermeasure_renderer::FLARE_STRENGTH).abs() < 0.1
+        );
+        assert!((half[0].strength / full[0].strength - 0.5).abs() < 1e-6);
+        assert!(fire(0.).is_empty());
+
+        let burst = |ticks| {
+            let e = effect(EffectKind::Ground, Some(35), ticks);
+            glows_of(&sprites(&art, &[e], &[], climate)).1
+        };
+        // At one second the initial flash has ended, but the fireball still lights surfaces.
+        assert!(crate::impact_fx::light([100., 0., 200.], 35, 100, 120.).is_none());
+        let middle = burst(120);
+        assert_eq!(middle.len(), 1);
+        assert!(middle[0].strength > 0.);
+        assert!((burst(60)[0].strength / middle[0].strength - 0.25).abs() < 1e-6);
+        assert!(burst(0).is_empty());
+        let dud = EffectPose {
+            scale: 0,
+            ..effect(EffectKind::Ground, Some(35), 120)
+        };
+        assert!(glows_of(&sprites(&art, &[dud], &[], climate)).1.is_empty());
     }
 
     #[test]

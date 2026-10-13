@@ -11,7 +11,7 @@ const GLOW_BASE:f32=0.8;
 const GLOW_LEVEL:vec2<f32>=vec2<f32>(0.4,2.4);
 const GLOW_SPRITE_PX:vec2<f32>=vec2<f32>(3.0,16.0);
 const GLOW_HALO:f32=0.8;
-const GLOW_NEAR:f32=0.12;
+const GLOW_NEAR:f32=0.18;
 const GLOW_HAZE_SHARE:f32=0.1;
 // How much of a glow reaches the eye through cloud, haze and air: a light
 // at night is seen through the haze about ten times as far as the ground
@@ -51,13 +51,15 @@ struct GlowOut {
  let q=p+scene.right.xyz*local.x+scene.up.xyz*local.y;
  out.clip=device_clip(q,dot(q,scene.forward.xyz));
  out.local=corners[vertex]*2.0;
- out.radiance=vec4<f32>(rgb*glow_clear(p,scene.eye.y+p.y)*level,1.0);
+ out.radiance=vec4<f32>(rgb*glow_clear(p,scene.eye.y+p.y)*level,far);
  return out;
 }
 @fragment fn glow_fragment(in:GlowOut)->@location(0) vec4<f32> {
  let r2=dot(in.local,in.local);
  // Windowed to nothing at the quad's inscribed circle, so no edge shows.
  let window=clamp(1.0-r2*0.25,0.0,1.0);
- let core=(exp(-r2*2.5)*2.0+exp(-r2*0.6)*0.35)*window*window;
+ // Resolved art supplies its own core. Only distant, unresolved lights
+ // need the bright point, otherwise it bleaches the fire's animation.
+ let core=(exp(-r2*2.5)*2.0*in.radiance.a+exp(-r2*0.6)*0.35)*window*window;
  return vec4<f32>(in.radiance.rgb*core,0.0);
 }
