@@ -486,8 +486,8 @@ impl ReplaySound {
         self.player_down = down;
         let mut emissions = Vec::new();
         let mut releases = Vec::new();
-        // Other aircraft's launches: who, the weapon's record.
-        let mut launched: Vec<(u32, u32)> = Vec::new();
+        // Other shooters' launches: who, the weapon's record, the round.
+        let mut launched: Vec<(u32, u32, Option<u32>)> = Vec::new();
         for TimedEvent { event, .. } in events {
             if let Some(cue) = cue(event) {
                 cues.push((tick, cue));
@@ -502,9 +502,8 @@ impl ReplaySound {
                     if let (Some(shooter), Some(weapon)) =
                         (event.subject, event.id(vocab::field::WEAPON))
                         && shooter != player
-                        && !crate::surface_fx::is_unit(shooter)
                     {
-                        launched.push((shooter, weapon));
+                        launched.push((shooter, weapon, event.id(vocab::field::PROJECTILE)));
                     }
                 }
                 _ => {}
@@ -520,17 +519,33 @@ impl ReplaySound {
             &self.playback.identities,
         );
         snapshot.marks = self.playback.marks_at(tick);
-        // Where each fired: its aircraft at this tick, else the round.
+        // Where each fired: its aircraft at this tick, else the round (a
+        // surface unit's launch sounds from its round, the mount).
         let others: Vec<OtherLaunch> = launched
             .into_iter()
-            .filter_map(|(shooter, weapon)| {
+            .filter_map(|(shooter, weapon, round)| {
                 let record = &self.playback.identities.weapons.get(&weapon)?.source;
                 let (sound, feet) = self.launches.get(record)?;
-                let position = frame
-                    .aircraft
-                    .iter()
-                    .find(|a| a.id == shooter)
-                    .map(|a| a.position)?;
+                let aircraft = || {
+                    frame
+                        .aircraft
+                        .iter()
+                        .find(|a| a.id == shooter)
+                        .map(|a| a.position)
+                };
+                let projectile = || {
+                    let round = round?;
+                    frame
+                        .projectiles
+                        .iter()
+                        .find(|p| p.id == round)
+                        .map(|p| p.position)
+                };
+                let position = if crate::surface_fx::is_unit(shooter) {
+                    projectile().or_else(aircraft)?
+                } else {
+                    aircraft().or_else(projectile)?
+                };
                 Some(OtherLaunch {
                     shooter,
                     position,
@@ -950,7 +965,7 @@ mod tests {
                     .with(field::WEAPON, Value::Id(1)),
             ],
             // The enemy MiG fires a missile; the player's own launch is its
-            // release above, and a surface unit's is not an aircraft's.
+            // release above, and a surface unit's is heard from its round.
             250 => vec![
                 Event::new(kind::WEAPON_LAUNCH)
                     .with_subject(1)
@@ -1016,7 +1031,17 @@ mod tests {
         Frame {
             tick,
             aircraft: (0..3).map(|id| aircraft(id, tick)).collect(),
-            projectiles: missile.into_iter().collect(),
+            projectiles: missile
+                .into_iter()
+                .chain((tick == 250).then(|| ProjectileState {
+                    // The surface unit's missile, at its mount.
+                    id: 10,
+                    owner: 0x4000_0001,
+                    weapon: 1,
+                    position: [4_000., 20., 5_000.],
+                    ..Default::default()
+                }))
+                .collect(),
             events: events(tick),
             ..Default::default()
         }
@@ -1523,10 +1548,15 @@ mod tests {
         let cues = host.play_to(LAST, FINE);
         let ticks: BTreeMap<u64, &SpatialTick> = spatial(&cues).into_iter().collect();
         let launch = |tick: u64| ticks[&tick].others.clone();
-        // The MiG's two rounds are two events; the player's own and the
-        // surface unit's make none.
+        // The MiG's two rounds are two events and the surface unit's missile
+        // a third, from its round's position; the player's own makes none.
         let at = position(1, 250);
-        let rounds = launch(250);
+        let all = launch(250);
+        assert_eq!(all.len(), 3);
+        let unit = all.iter().find(|l| l.shooter == 0x4000_0001).unwrap();
+        assert_eq!(unit.sound, "&MSLFIRE.5K");
+        assert_eq!(unit.position, [4_000., 20., 5_000.]);
+        let rounds: Vec<OtherLaunch> = all.iter().filter(|l| l.shooter == 1).cloned().collect();
         assert_eq!(rounds.len(), 2);
         for round in &rounds {
             assert_eq!(round.shooter, 1);
@@ -1538,12 +1568,13 @@ mod tests {
         assert_eq!(ticks[&MISSILE.0].releases, ["&MSLFIRE.5K"]);
         assert!(ticks[&MISSILE.0].others.is_empty());
         assert_eq!(ticks.values().filter(|t| !t.others.is_empty()).count(), 1);
-        // The device gets the two rounds as one sound of the MiG's.
-        let played: Vec<audio::Launch> = rounds
+        // The device gets the MiG's two rounds as one sound, and the unit's
+        // as another.
+        let played: Vec<audio::Launch> = all
             .iter()
             .map(|l| audio::Launch::by(l.shooter, l.position, &l.sound, l.max_distance_ft))
             .collect();
-        assert_eq!(audio::one_sound_per_release(&played).len(), 1);
+        assert_eq!(audio::one_sound_per_release(&played).len(), 2);
     }
 
     #[test]

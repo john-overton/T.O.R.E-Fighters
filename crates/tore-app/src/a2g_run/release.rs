@@ -161,13 +161,10 @@ pub(super) fn run(scene: &mut Scene, o: &Options) -> AppResult<()> {
             // The side of its station the bomb left from (B3): the
             // station's whole releases left after this one pick it.
             let station = scene.station();
-            let mount = station.rack.release_mount(
-                station.mount,
-                tore_sim::combat::hardpoints::units(
-                    u32::from(scene.rounds()),
-                    u32::from(station.weapon.burst.actual_rounds_per_game),
-                ),
-            );
+            let mount = station.release_point(tore_sim::combat::hardpoints::units(
+                u32::from(scene.rounds()),
+                u32::from(station.weapon.burst.actual_rounds_per_game),
+            ));
             let mean = ReleaseState::from_mount(&launcher, station, mount, n);
             let first = ReleaseState::from_mount(&launcher, station, mount, 0);
             if n == 0 {

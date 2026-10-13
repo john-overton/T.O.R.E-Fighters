@@ -393,6 +393,40 @@ pub struct Station {
     /// Its source location and pairing (B3).
     pub rack: super::hardpoints::Rack,
 }
+impl Station {
+    /// Where the store this station releases next leaves, feet right, up
+    /// and forward of the aircraft, when `units_after` whole releases remain
+    /// once it has gone: its side of a paired record and, on a wing side with
+    /// two pylons, its own pylon ([`super::hardpoints::Rack::release_point`]).
+    /// A rocket leaves the pod that is firing (the outboard one first).
+    pub fn release_point(&self, units_after: u32) -> Vector {
+        let rack = self.rack;
+        let left =
+            rack.release_mount(self.mount, units_after)[0] < 0. && rack.two_sided(self.mount);
+        let side_after = rack.sides(self.mount, u16::try_from(units_after).unwrap_or(u16::MAX))
+            [usize::from(left)];
+        let debit = u32::from(self.weapon.burst.actual_rounds_per_game).max(1);
+        let slot = u32::from(side_after) * debit / pod_rounds(&self.weapon).max(1);
+        rack.release_point(
+            self.mount,
+            self.count,
+            units_after,
+            u16::try_from(slot).unwrap_or(u16::MAX),
+        )
+    }
+    /// Where the store this station lets go next hangs now, while it holds
+    /// `rounds` (before the release's debit): [`Self::release_point`] with
+    /// the whole releases left once that store has gone. The bomb and rocket
+    /// sights predict from here, for a human and the AI alike (B3 follow-up,
+    /// John 2026-10-12), so the pipper shows where the next store goes.
+    pub fn next_release_point(&self, rounds: u32) -> Vector {
+        let debit = u32::from(self.weapon.burst.actual_rounds_per_game).max(1);
+        self.release_point(super::hardpoints::units(
+            rounds.saturating_sub(debit),
+            debit,
+        ))
+    }
+}
 /// One selected external tank type, kept separate from weapon ammunition.
 #[derive(Clone, Debug)]
 pub struct TankStore {
@@ -4430,12 +4464,10 @@ impl State {
             // The sight predicts from the pylon the next store leaves (B3):
             // with unlimited ammunition the release's first number picks it.
             let mount = own.config.stations.get(own.selected).map_or([0.; 3], |s| {
-                let debit = u32::from(s.weapon.burst.actual_rounds_per_game);
                 if self.cheats.unlimited_ammo {
-                    s.rack.release_mount(s.mount, self.next_shot & 1)
+                    s.release_point(self.next_shot & 1)
                 } else {
-                    s.rack
-                        .next_release_mount(s.mount, u32::from(own.rounds(own.selected)), debit)
+                    s.next_release_point(u32::from(own.rounds(own.selected)))
                 }
             });
             own.delivery = self.delivery_of(

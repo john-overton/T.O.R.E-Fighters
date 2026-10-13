@@ -100,8 +100,17 @@ bomb release and another player's Maverick online are heard.
 - **One sound per aircraft per release.** A seven-bomb pack from one AI
   aircraft is one thump. Two aircraft releasing in the same tick are two
   sounds, even for the same recording.
-- **Guns and surface units.** Gun fire keeps its own audio. Surface units'
-  missile launches are not part of this and stay as they were.
+- **Surface units.** A surface unit's missile launch (a SAM site, a ship's
+  SAM or SSM, any surface launcher) plays its weapon record's recording the
+  same way, from where the missile leaves the launcher: full within 100 ft,
+  fading to the record's `maxSndDist` (6,000 ft on the SA-3, SA-6 and most
+  others, 12,000 ft on the SA-2A), silent beyond. One sound per launcher per
+  release: a battery firing two missiles at once from one unit is one sound,
+  two units are two. Switched on by John on 2026-10-12 (item 4); BA2 had left
+  them silent. Every surface missile record names a recording (`&SALTMIS.11K`,
+  `&SAHVMIS.11K`, `&LTMISS.11K`, `&HVYMISS.11K`), so none needs a fitted
+  default.
+- **Guns.** Gun fire, surface guns included, keeps its own audio.
 - **Voices.** At most the four nearest launches sound in a tick (agent
   decision); the placed-sound pool still drops the quietest when it is full.
 - **Online and replays.** The wire and a recording name the weapon (and the
@@ -109,6 +118,14 @@ bomb release and another player's Maverick online are heard.
   its own weapon catalog by name: the same `fireSound` and `maxSndDist` the
   host used. Where a weapon is not in the catalog it is silent. Position is the
   firing aircraft's at that tick. No protocol change.
+
+Retail evidence for surface launches: `PROJFire` (`0x4c2170`) and
+`PROJFireSound` (`0x4c26f0`) test no object class before the sound request,
+and every surface missile record carries the same `fireSound` and
+`maxSndDist` fields
+([evidence](../formats/sound.md#surface-launches)). Whether the original's
+ground units reach `PROJFire` through the same NPC weapon service as aircraft
+was not traced, so that a SAM site sounds in retail is expected, not seen.
 
 Agent decisions: the four-voice limit, the canopy muffling inside a cockpit
 (consistent with the other outside sounds) and starting at once with no travel

@@ -685,6 +685,7 @@ fn ai_cockpits_survive_a_checkpoint_and_go_with_a_lost_aircraft() {
 /// B3 (docs/spec/stores-on-pylons.md): a paired station's stores leave from
 /// the record's position and its mirror in turn, left first, a human's
 /// presses and the AI's releases alike; the pack stagger and the height stay.
+/// Four on a wing row hang from two pylons a wing (BP2): outboard first.
 #[test]
 fn a_paired_station_alternates_sides_for_a_human_and_the_ai() {
     let paired = |mut c: Configuration| {
@@ -720,7 +721,12 @@ fn a_paired_station_alternates_sides_for_a_human_and_the_ai() {
         human.push(origin_x(&person, fresh[0]));
         assert!((person.bomb_motion(fresh[0]).unwrap().origin[1] - (8_000. - 3.)).abs() < 1e-9);
     }
-    assert_eq!(human, [-2., 2., -2., 2.]);
+    let s = crate::combat::hardpoints::DUAL_PYLON_SPREAD;
+    let want = [-(2. + s), 2. + s, -(2. - s), 2. - s];
+    assert!(
+        human.iter().zip(want).all(|(x, w)| (x - w).abs() < 1e-9),
+        "{human:?}"
+    );
 
     let mut robot = ai(mk82(), false);
     designate(&mut robot, &config);
@@ -753,7 +759,7 @@ fn a_paired_station_alternates_sides_for_a_human_and_the_ai() {
 
 /// The bomb sight predicts from the pylon the next bomb leaves (B3
 /// follow-up, John 2026-10-12): before each press the CCIP's release point
-/// is on the side the press's bomb then leaves from, left first.
+/// is on the pylon the press's bomb then leaves from, left first.
 #[test]
 fn the_bomb_sight_predicts_from_the_pylon_the_next_bomb_leaves() {
     let mut config = config(mk82(), false);
@@ -798,7 +804,9 @@ fn the_bomb_sight_predicts_from_the_pylon_the_next_bomb_leaves() {
             .map(|x| (x * 1e6).round() / 1e6)
             .collect::<Vec<_>>()
     };
-    assert_eq!(rounded(&sight), [-2., 2., -2., 2.]);
+    // Four on a wing row hang from two pylons a wing, 1.4 ft either side
+    // of the record's 2 ft: outboard left, outboard right, then inboard.
+    assert_eq!(rounded(&sight), [-3.4, 3.4, -0.6, 0.6]);
     assert_eq!(rounded(&sight), rounded(&dropped));
 }
 

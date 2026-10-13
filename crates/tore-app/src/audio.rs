@@ -267,7 +267,9 @@ impl LaunchSounds {
     }
 }
 /// Where `shooter` is in `snapshot`, for a launch that names only who fired
-/// it: its aircraft, else the projectile it just made.
+/// it: its aircraft, else the projectile it just made. A surface unit's
+/// launch sounds from the projectile (the launcher's mount, not the unit's
+/// centre) when the picture still holds it.
 pub fn shooter_position(
     snapshot: &crate::snapshot::RenderSnapshot,
     shooter: u32,
@@ -276,21 +278,24 @@ pub fn shooter_position(
     if snapshot.player.id == shooter {
         return Some(snapshot.player.position);
     }
-    snapshot
-        .target(shooter)
-        .map(|pose| pose.position)
-        .or_else(|| {
-            let id = projectile?;
-            snapshot
-                .projectiles
-                .iter()
-                .find(|p| p.id == id)
-                .map(|p| p.position)
-        })
+    let round = || {
+        let id = projectile?;
+        snapshot
+            .projectiles
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| p.position)
+    };
+    let pose = || snapshot.target(shooter).map(|pose| pose.position);
+    if crate::surface_fx::is_unit(shooter) {
+        round().or_else(pose)
+    } else {
+        pose().or_else(round)
+    }
 }
 /// Tells the launches new in a tick's combat state, for the sound of every
-/// aircraft but the listener's own. Gun rounds and surface units' rounds are
-/// not aircraft launches.
+/// shooter but the listener's own: aircraft and surface units alike (John
+/// 2026-10-12). Gun rounds, surface guns' included, keep their own audio.
 #[derive(Clone, Debug, Default)]
 pub struct LaunchWatch {
     known: std::collections::BTreeSet<u32>,
@@ -318,7 +323,7 @@ impl LaunchWatch {
         self.known = state.projectiles.iter().map(|p| p.id).collect();
         fresh
             .into_iter()
-            .filter(|p| p.owner != own && state.surface_round(p.id).is_none())
+            .filter(|p| p.owner != own)
             .filter_map(|p| {
                 let weapon = state.weapon(p);
                 if live::is_gun(weapon) {
@@ -2023,11 +2028,14 @@ mod tests {
         let mut gun = weapon.clone();
         gun.source = "M61.JT".into();
         gun.fire_sound = Some("&GUN.11K".into());
+        // A surface unit's missile sounds like any launch; its gun does not.
         state.projectiles = vec![
             round(1, 40, &weapon),
             round(2, 40, &weapon),
             round(3, 7, &weapon),
             round(4, 41, &gun),
+            round(6, 0x4000_0002, &weapon),
+            round(8, 0x4000_0002, &gun),
         ];
         let mut watch = LaunchWatch::default();
         let heard = watch.fresh(&state, 7);
@@ -2036,6 +2044,14 @@ mod tests {
             .map(|h| (h.shooter, h.sound.as_str()))
             .collect();
         assert!(heard_by.contains(&(40, "&ASHVMIS.11K")));
+        assert!(
+            heard_by.contains(&(0x4000_0002, "&ASHVMIS.11K")),
+            "a unit's"
+        );
+        assert!(
+            heard.iter().all(|h| h.position != [8., 0., 0.]),
+            "no unit gun"
+        );
         assert!(heard.iter().all(|h| h.shooter != 7), "not the listener's");
         assert!(heard.iter().all(|h| h.sound != "&GUN.11K"), "no gun");
         assert_eq!(heard.iter().filter(|h| h.shooter == 40).count(), 2);
@@ -2061,6 +2077,35 @@ mod tests {
         assert_eq!(shooter_position(&snapshot, 5, None), Some([1., 2., 3.]));
         assert_eq!(shooter_position(&snapshot, 9, None), Some([10., 20., 30.]));
         assert_eq!(shooter_position(&snapshot, 77, Some(1)), None);
+        // A surface unit's launch is placed at its round, the mount.
+        snapshot
+            .projectiles
+            .push(tore_world::snapshot::ProjectilePose {
+                id: 3,
+                owner: 0x4000_0004,
+                weapon: "SA2A.JT".into(),
+                shape: None,
+                gun: false,
+                tracer: false,
+                position: [100., 5., 200.],
+                previous: [100., 5., 200.],
+                direction: [0., 1., 0.],
+                target: None,
+                incoming: false,
+                speed_f8: 0,
+            });
+        let mut unit = snapshot.player.clone();
+        unit.id = 0x4000_0004;
+        unit.position = [90., 0., 190.];
+        snapshot.targets.push(unit);
+        assert_eq!(
+            shooter_position(&snapshot, 0x4000_0004, Some(3)),
+            Some([100., 5., 200.])
+        );
+        assert_eq!(
+            shooter_position(&snapshot, 0x4000_0004, None),
+            Some([90., 0., 190.])
+        );
     }
 
     #[test]

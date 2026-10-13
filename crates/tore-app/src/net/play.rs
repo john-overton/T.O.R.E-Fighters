@@ -1114,16 +1114,15 @@ impl TickPresenter<'_> {
                     }
                 }
                 // The player's own launch is its Release; any other
-                // aircraft's is heard from where it fired, at the reach
-                // of the weapon's record (surface units' and guns' are not
-                // aircraft launches and have no entry).
+                // shooter's (aircraft or surface unit) is heard from where
+                // it fired, at the reach of the weapon's record (guns have
+                // no entry).
                 WireEvent::Launch {
                     shooter,
                     projectile,
                     weapon,
                 } => {
                     if *shooter != plane
-                        && !crate::surface_fx::is_unit(*shooter)
                         && let Some(record) = name(*weapon)
                         && let Some((sound, feet)) = launches.get(&record)
                         && let Some(position) = crate::audio::shooter_position(

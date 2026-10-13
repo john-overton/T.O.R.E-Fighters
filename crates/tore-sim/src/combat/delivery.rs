@@ -364,7 +364,7 @@ pub struct Situation<'a> {
     pub station: &'a Station,
     /// Where the store that leaves next hangs, feet right, up and forward
     /// of the aircraft: its side of a paired station
-    /// ([`super::hardpoints::Rack::next_release_mount`]). The sight predicts
+    /// ([`super::live::Station::next_release_point`]). The sight predicts
     /// from it (B3 follow-up, John 2026-10-12).
     pub mount: Vector,
     pub launcher: &'a Launcher,

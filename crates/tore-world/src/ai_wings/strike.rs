@@ -158,7 +158,7 @@ pub(super) fn step(
                 // The sight predicts from the pylon the next store leaves
                 // (B3 follow-up), as the release will put it.
                 let mount = wings
-                    .next_release_mount(id, station)
+                    .next_release_point(id, station)
                     .unwrap_or(config.stations[station].mount);
                 let delivery =
                     state.strike_delivery(id, config, &launcher, mount, ballistic, &ground);

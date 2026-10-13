@@ -16,6 +16,12 @@ use tore_formats::aircraft::Hardpoint;
 /// Retail hardpoint type flag 0x4: the record is a left and right pair.
 pub const PAIRED_FLAG: i32 = 0x4;
 
+/// How far either side of a wing record's position its two pylons stand,
+/// feet, when a wing carries two or more of its stores (John 2026-10-12:
+/// four stores on one wing row hang from two pylons on each wing). 2.8 ft
+/// apart clears a Maverick's 2.4 ft fins; fitted (agent decision).
+pub const DUAL_PYLON_SPREAD: f64 = 1.4;
+
 /// The source location byte of a hardpoint record
 /// (docs/formats/aircraft-ordnance.md).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -108,14 +114,55 @@ impl Rack {
             mount
         }
     }
-    /// Where the next store leaves a station of `mount` that holds `rounds`
-    /// now and debits `debit` rounds a release: [`Self::release_mount`]
-    /// with the whole releases left once it has gone. The bomb and rocket
-    /// sights predict from here, so the pipper shows where the store that
-    /// leaves next goes.
-    pub fn next_release_mount(self, mount: Vector, rounds: u32, debit: u32) -> Vector {
-        let debit = debit.max(1);
-        self.release_mount(mount, units(rounds.saturating_sub(debit), debit))
+    /// How many pylons one side of the station has when that side was
+    /// loaded with `per_side` stores: a wing side with two stores, or four
+    /// or more, has two pylons (an inboard and an outboard one); three hang
+    /// on one pylon's triple ejector rack, as do several stores at a
+    /// fuselage, centreline or wingtip station (agent decision, 2026-10-12).
+    pub fn pylons(self, per_side: u16) -> u16 {
+        if self.location() == Location::Wing && (per_side == 2 || per_side >= 4) {
+            2
+        } else {
+            1
+        }
+    }
+    /// The pylon of store `slot` (0 first loaded, the highest empties first)
+    /// on a side loaded with `per_side`, and how far outboard of the
+    /// record's position that pylon is, feet: on a two-pylon side slot 0
+    /// is inboard, 1 outboard, and further slots alternate (so the outboard
+    /// pylon's stores leave first).
+    pub fn pylon(self, per_side: u16, slot: u16) -> (u16, f64) {
+        if self.pylons(per_side) < 2 {
+            return (0, 0.);
+        }
+        let pylon = slot % 2;
+        (
+            pylon,
+            if pylon == 0 {
+                -DUAL_PYLON_SPREAD
+            } else {
+                DUAL_PYLON_SPREAD
+            },
+        )
+    }
+    /// Where the next store leaves, with its own pylon on a two-pylon wing
+    /// side: [`Self::release_mount`], moved out or in by the pylon of the
+    /// store that leaves. `loaded` is the stores the station was loaded with
+    /// and `slot_after` how many its leaving side still holds once this one
+    /// has gone (which is that store's slot).
+    pub fn release_point(
+        self,
+        mount: Vector,
+        loaded: u16,
+        units_after: u32,
+        slot_after: u16,
+    ) -> Vector {
+        let mut point = self.release_mount(mount, units_after);
+        let side = usize::from(point[0] < 0. && self.two_sided(mount));
+        let per_side = self.sides(mount, loaded)[side];
+        let (_, outboard) = self.pylon(per_side, slot_after.min(per_side.saturating_sub(1)));
+        point[0] += outboard * point[0].signum();
+        point
     }
     /// How many of `items` stores hang on each side, [right, left]: the
     /// right side holds the odd one, because the left side empties first
@@ -205,5 +252,34 @@ mod tests {
         assert_eq!(units(38, 1), 38);
         assert_eq!(units(4, 2), 2);
         assert_eq!(units(4, 0), 4);
+    }
+
+    #[test]
+    fn a_two_pylon_wing_releases_outboard_then_inboard_from_each_pylon() {
+        let wing = Rack {
+            location: 4,
+            paired: true,
+        };
+        let mount = [10., -2., -1.];
+        let s = DUAL_PYLON_SPREAD;
+        // Four loaded, two a wing: left out, right out, left in, right in.
+        let order: Vec<f64> = (0..4u32)
+            .rev()
+            .map(|after| {
+                let side = usize::from(wing.release_mount(mount, after)[0] < 0.);
+                let slot = wing.sides(mount, after as u16)[side];
+                wing.release_point(mount, 4, after, slot)[0]
+            })
+            .collect();
+        assert_eq!(order, [-(10. + s), 10. + s, -(10. - s), 10. - s]);
+        // Two loaded (one a wing) and fuselage pairs keep the record's point.
+        assert_eq!(wing.release_point(mount, 2, 1, 0)[0], -10.);
+        let fuselage = Rack {
+            location: 1,
+            paired: true,
+        };
+        assert_eq!(fuselage.release_point(mount, 4, 3, 1)[0], -10.);
+        assert_eq!(wing.pylons(3), 1);
+        assert_eq!(wing.pylon(6, 5), (1, s));
     }
 }

@@ -63,7 +63,7 @@ impl AiWings {
     /// rocket sight predicts from, so the release gate judges the pylon the
     /// store will leave (B3 follow-up). The station's own position for an
     /// aircraft or station with no configuration.
-    pub(super) fn next_release_mount(&self, actor: u32, station: usize) -> Option<Vector> {
+    pub(super) fn next_release_point(&self, actor: u32, station: usize) -> Option<Vector> {
         let config = self.configs.get(&actor)?;
         let s = config.stations.get(station)?;
         let debit = u32::from(s.weapon.burst.actual_rounds_per_game);
@@ -76,14 +76,14 @@ impl AiWings {
         });
         Some(match rounds {
             Some(tore_sim::ai::weapon_service::Rounds::Finite(rounds)) => {
-                s.rack.next_release_mount(s.mount, rounds, debit)
+                s.next_release_point(rounds)
             }
             // An unlimited store: the release's projectile number picks the
             // side, as [`Self::rounds_after`] does.
-            _ => s.rack.release_mount(
-                s.mount,
-                tore_sim::combat::hardpoints::units(self.next_projectile_id & 1, debit),
-            ),
+            _ => s.release_point(tore_sim::combat::hardpoints::units(
+                self.next_projectile_id & 1,
+                debit,
+            )),
         })
     }
 
@@ -98,7 +98,7 @@ impl AiWings {
             self.rounds_after(actor, station),
             u32::from(s.weapon.burst.actual_rounds_per_game),
         );
-        Some(s.rack.release_mount(s.mount, units))
+        Some(s.release_point(units))
     }
 
     /// A ground store's release through the shared release, from the

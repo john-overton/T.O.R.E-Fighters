@@ -442,6 +442,9 @@ pub fn combat_geometry(
 pub struct CombatArt {
     pub smoke: Pic,
     shapes: BTreeMap<String, Shape>,
+    /// The same shapes as carried on a pylon, where that differs from in
+    /// flight (a retarded bomb's fins are closed until release).
+    stores: BTreeMap<String, Shape>,
     pub effects: crate::effect_renderer::Art,
     pub escape: Option<crate::ejection_art::Art>,
 }
@@ -456,6 +459,7 @@ impl CombatArt {
         Ok(Self {
             smoke,
             shapes: BTreeMap::new(),
+            stores: BTreeMap::new(),
             effects: crate::effect_renderer::Art::load(data),
             escape: match crate::ejection_art::Art::load(data) {
                 Ok(art) => Some(art),
@@ -480,9 +484,10 @@ impl CombatArt {
             data,
         );
     }
-    /// A loaded weapon shape by name (the stores on pylons draw with it).
+    /// A loaded weapon shape by name as carried on a pylon (the stores on
+    /// pylons draw with it).
     pub(crate) fn shape(&self, name: &str) -> Option<&Shape> {
-        self.shapes.get(name)
+        self.stores.get(name).or_else(|| self.shapes.get(name))
     }
     /// Loads named weapon shapes; a missing or empty one draws as a strip.
     pub fn add_shapes<'a>(
@@ -497,7 +502,13 @@ impl CombatArt {
                 .filter(|shape| !shape.faces.is_empty());
             match shape {
                 Some(shape) => {
-                    self.shapes.insert(name.to_owned(), shape);
+                    // Refitted to the real store's size where it is known
+                    // (crate::store_sizes, BP2), in flight and on a pylon.
+                    let (store, flight) = crate::store_sizes::variants(name, shape);
+                    if let Some(store) = store {
+                        self.stores.insert(name.to_owned(), store);
+                    }
+                    self.shapes.insert(name.to_owned(), flight);
                 }
                 None => log::warn!(
                     "Combat: {name} uses a tracer marker; line/point drawing remains open"
@@ -518,6 +529,7 @@ impl CombatArt {
                 glyphs: Vec::new(),
             },
             shapes,
+            stores: BTreeMap::new(),
             effects: crate::effect_renderer::Art::empty(),
             escape: None,
         }

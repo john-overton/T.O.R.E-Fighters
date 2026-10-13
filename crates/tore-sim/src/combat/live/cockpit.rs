@@ -850,7 +850,7 @@ impl State {
         let mount = if super::is_gun(w) {
             station.mount
         } else {
-            station.rack.release_mount(station.mount, r.units_after)
+            station.release_point(r.units_after)
         };
         let position = if let Some((slot, heading, elevation)) = r.gun_pose {
             crate::combat::gunship::muzzle(slot, launcher, heading, elevation)
