@@ -1678,6 +1678,22 @@ tank guns keep the retail damage per round (defined, John). M163 fires the
 Phalanx record but is an M168 Vulcan, so it has its own row; the Butler keeps the
 retail 30 mm row, with no Bofors row (defined, John).
 
+**The M163's reach (research, 2026-10-13).** The M163 fires the Phalanx record,
+so it sees a target out to 50,000 ft (8.2 nm) and may fire out to 20,000 ft
+(3.3 nm), up to 15,000 ft above itself. Both numbers are the retail record's,
+read in feet as written; nothing is scaled or fitted
+([the zones of every armed unit](../formats/surface-units.md#weapon-zones-of-the-armed-units)).
+The long sight is the normal shape of retail's gun data: every radar gun
+acquires at 2 to 8 times the range it fires at (ZSU-23: sees 60,000 ft, fires
+to 7,500 ft). A radar gun paints a target on the RWR from the moment it holds
+the target in Track, so an aircraft inside the M163's 8 nm and its 25 s first
+engagement delay is painted. What is out of step is the gun's fire range, 2.7
+times the ZSU-23's, because the M163 shares the ship record. An unused
+`M163.JT` in the archive (a ZSU23 copy: sees 60,000 ft, fires to 7,500 ft)
+matches the real M168 Vulcan's effective range of about 1.2 nm. TORE keeps the
+retail record (retail). Changing the M163's ranges is a decision for John, in
+[Decisions pending](#decisions-pending).
+
 The table below is generated from the table in code by a documentation test, as
 the controls tables are; do not edit it by hand. The columns are: gun type,
 record and units, TORE rate in rounds per minute, burst rounds, pause, opening
@@ -2267,6 +2283,7 @@ so). Each row has a fitted stand-in above.
 | --- | --- | --- | --- |
 | Units of `_maxSpeed`, `_turnRate`, `_acc`, `_dacc` | `w_speed` is feet per second with strong evidence ([units](#the-units-of-the-movement-and-range-words)); the object words are assumed to share it | feet per second; turn rate 182 per degree; acceleration fitted | Trace the waypoint consumer `GVDoCurrentWaypoint` (0x473de0) and the `_acc` readers |
 | `maxVisDist`, `zoneDist`, `searchDist` units | 78, 195 and 391 match 20,000, 50,000 and 100,000 ft at 256 ft per unit; `searchDist` is 0, 1 or 25 | 256 ft per unit; 25 read as 6,400 ft | Trace the consumers of `NPC +zoneDist` and the mission `searchDist` |
+| Why `M163.NT` mounts `PHALANX.JT` | The archive also holds `M163.JT`, a ZSU23 copy that no NT uses; the NT names PHALANX | PHALANX, as the NT says | Look for any mission or script that selects `M163.JT`, or for a retail value that overrides the mount at run time |
 | Which engagement uses `unreadyAttackT` | B42 says the producer of the unready flag is unknown | first engagement of a unit | Trace the unready flag's producer |
 | Hit chance and experience | The record's `chances[0..3]`, `taaHitChange`, `gHitChange`, `speedHitChange`, `bigPlaneChange` exist; `_PROJHitChance` (0x4c3380) is untraced; manual: skill sets "how accurately a tank or AAA site aims" | Physical shells with a fitted aim error by skill | Trace `_PROJHitChance` and the surface skill consumer |
 | Surface target ranking and `retargetT` | B41 says surface actors have extra ranking terms and "special zone behavior" | Nearest eligible; flak re-evaluates every 10 s | Trace the B41 surface terms |
@@ -2297,6 +2314,7 @@ ones follow in their own table.
 | Decision | Default | Why |
 | --- | --- | --- |
 | Relocation and start numbers | John found the target variance fine (2026-10-10); the numbers stay fitted: unanchored templates move 3 to 30 nm from their retail spot, keep within 15 nm of their retail depth along the front and may rotate freely; Blue starts plus or minus 30 degrees off the line from Red toward its own side (the distances are John's: Red within 5 nm of the target, Blue the enemy distance setting from Red) | Far enough that a template is not where you remember it, near enough to stay on the side of the map retail's designers put it |
+| M163 ranges | Retail: sees 50,000 ft, fires to 20,000 ft (the Phalanx record the M163 mounts). Options if John wants realism (opinionated, not built): (a) fire to 7,500 ft only, the unused retail `M163.JT`'s and the ZSU-23's zone 1 (about 1.2 nm); (b) also cut the sight to about 3 nm (18,000 ft) so the RWR painting starts near the gun's real radar range; (c) keep the sight and cut only the fire range. Any option changes the M163's lethality and when its painting starts, and the surface battery and guard would move | John asked on 2026-10-13 for the gun range to be looked into; the retail data does not misstate it, so changing it is a design choice, not a fix |
 | SA-19 and SA-N-11 as supported radar; ASROC held | As in [SAM missiles](#sam-missiles) | HAWK, Roland and the 2S6 carry SA-19 and would otherwise be unarmed |
 | Ground-start runway with a target | With no runway picked, the nearest friendly airfield at least 15 nm from the target, for Blue and for Enemy Wing 1's ground start (slice CL-R) | A ground start across the map from a relocated target would mean a long flight |
 | Battery size and clustering | Up to 1 SA-2 site, 4 SA-3, 4 SA-6 and 6 HAWK launchers, clustered within 1 nm; existing radars adopted within 3.5 nm (confirmed by John, 2026-10-10; the lead's change from 2 nm, 2026-10-10, so North Vietnam's GCIs pair with their SA-2 sites); Crotale self-contained; base layouts get added radars where none can be adopted | Matches real battery sizes and retail's spacing |

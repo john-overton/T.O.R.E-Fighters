@@ -6,17 +6,19 @@
 //! surface_inspect FA_2.LIB nt SA6.NT
 //! surface_inspect FA_2.LIB template QUCOL
 //! surface_inspect FA_2.LIB summary
+//! surface_inspect FA_2.LIB zones
 //! ```
 use std::path::PathBuf;
 use tore_formats::{
     Archive,
     quick_template::{ObjectKind, Template, tables},
     surface_unit::{Ammo, MountKind, SurfaceUnit},
+    weapons::Weapon,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let usage = "usage: surface_inspect FA_2.LIB (nt NAME | template STEM | summary)";
+    let usage = "usage: surface_inspect FA_2.LIB (nt NAME | template STEM | summary | zones)";
     let lib = Archive::open(PathBuf::from(args.first().ok_or(usage)?))?;
     match (args.get(1).map(String::as_str), args.get(2)) {
         (Some("nt"), Some(name)) => {
@@ -43,7 +45,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             print_template(&Template::parse(&name, &lib.read(&name)?)?);
         }
         (Some("summary"), None) => summary(&lib)?,
+        (Some("zones"), None) => zones(&lib)?,
         _ => return Err(usage.into()),
+    }
+    Ok(())
+}
+
+/// One line per weapon record each unit mounts: the seeker's detection zone
+/// (zone 0) and the launch zone (zone 1), in feet, as the record states them.
+fn zones(lib: &Archive) -> Result<(), Box<dyn std::error::Error>> {
+    println!("unit | weapon | signature | zone 0 max | zone 1 min..max | zone 1 altitude max");
+    for name in lib.entries.keys().filter(|n| n.ends_with(".NT")) {
+        let unit = SurfaceUnit::parse(&lib.read(name)?)?;
+        let mut seen: Vec<&str> = Vec::new();
+        for store in unit
+            .mounts
+            .iter()
+            .filter(|m| m.kind == MountKind::Weapon)
+            .filter_map(|m| m.store.as_deref())
+        {
+            if seen.contains(&store) {
+                continue;
+            }
+            seen.push(store);
+            let seeker = Weapon::parse(store, &lib.read(store)?)?.seeker;
+            let (z0, z1) = (seeker.zones[0], seeker.zones[1]);
+            println!(
+                "{name} | {store} | {} | {} | {}..{} | {}",
+                seeker.signature,
+                z0.maximum_range,
+                z1.minimum_range,
+                z1.maximum_range,
+                z1.maximum_altitude
+            );
+        }
     }
     Ok(())
 }
