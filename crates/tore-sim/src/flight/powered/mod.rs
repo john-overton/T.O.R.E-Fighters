@@ -48,6 +48,8 @@ pub mod tiltrotor;
 pub mod trim;
 
 #[cfg(test)]
+mod ai_lift_tests;
+#[cfg(test)]
 mod easy_physics_tests;
 #[cfg(test)]
 mod hover_hold_tests;
