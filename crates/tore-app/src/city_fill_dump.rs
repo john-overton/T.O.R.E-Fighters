@@ -572,7 +572,10 @@ pub fn run() -> AppResult<()> {
             .effects(&gpu.device, &gpu.queue, &art.effects, &[], &[]);
         let mut timings = Vec::new();
         for fires in [true, false] {
-            gpu.sim.set_city_fires(fires);
+            // `TORE_NO_CITY_FIRES` keeps the first, drawn pass without them
+            // too (the before picture).
+            gpu.sim
+                .set_city_fires(fires && std::env::var_os("TORE_NO_CITY_FIRES").is_none());
             let pixels = gpu.pixels(&camera, &world, &scenery)?;
             if fires {
                 let path = out.join(format!("{name}-burn.png"));
