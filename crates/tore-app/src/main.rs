@@ -344,6 +344,10 @@ struct App {
     /// B22); `None` for diagnostic runs, scripted runs and a file this build
     /// cannot read.
     quick_memory: Option<quick_mission::remember::Memory>,
+    /// The custom loadouts flown, kept in the profile with the mission each
+    /// was made for (slice BQ2, item 19); `None` where `quick_memory` is not
+    /// opened, and with `--loadout`.
+    quick_loadouts: Option<quick_mission::loadout_memory::LoadoutMemory>,
     launch_creator: bool,
     /// `--loadout none|guns`: the stores the Load Ordnance page would leave, applied
     /// to the Quick Mission's loadout before launch.
@@ -2656,25 +2660,50 @@ impl App {
                     return;
                 }
                 let result = (|| -> AppResult<()> {
-                    if self.quick.draft.values[18] == 0
-                        || self
-                            .quick
-                            .ordnance
-                            .as_ref()
-                            .is_none_or(|o| o.loadout.aircraft != id)
-                    {
-                        let load = tore_sim::combat::loadout::Loadout::new(
-                            &self.hornet.profile,
-                            |name| {
-                                self.theater_resources.get(name).cloned().ok_or_else(|| {
-                                    std::io::Error::other(format!(
-                                        "missing loadout resource {name}"
-                                    ))
-                                })
-                            },
-                        )?;
+                    // Standard load rebuilds the standard load. A custom one
+                    // opens on the player's earlier edits, a load flown for
+                    // this very mission before, or the standard load.
+                    let fingerprint = self.quick.mission_fingerprint();
+                    let custom = self.quick.draft.values[18] != 0;
+                    let session_has_one = self
+                        .quick
+                        .ordnance
+                        .as_ref()
+                        .is_some_and(|o| o.loadout.aircraft == id);
+                    let choice = match (&self.quick_loadouts, custom) {
+                        (_, false) => quick_mission::loadout_memory::Choice::Standard,
+                        (Some(memory), true) => memory.choose(&fingerprint, session_has_one),
+                        (None, true) if session_has_one => {
+                            quick_mission::loadout_memory::Choice::Session
+                        }
+                        (None, true) => quick_mission::loadout_memory::Choice::Standard,
+                    };
+                    if choice != quick_mission::loadout_memory::Choice::Session {
+                        let read = |name: &str| {
+                            self.theater_resources.get(name).cloned().ok_or_else(|| {
+                                std::io::Error::other(format!("missing loadout resource {name}"))
+                            })
+                        };
+                        let mut load =
+                            tore_sim::combat::loadout::Loadout::new(&self.hornet.profile, read)?;
+                        if let quick_mission::loadout_memory::Choice::Remembered(spec) = &choice {
+                            // A saved load the aircraft or the import no
+                            // longer fits falls back to the standard load.
+                            match spec
+                                .apply(load.clone(), &*self.theater_resources, None)
+                                .and_then(|kept| kept.validate().map_err(Into::into).map(|()| kept))
+                            {
+                                Ok(kept) => load = kept,
+                                Err(error) => log::warn!(
+                                    "Quick Mission: the saved loadout no longer fits: {error}"
+                                ),
+                            }
+                        }
                         self.quick.ordnance =
                             Some(ordnance::Ordnance::new(load, &self.theater_resources)?);
+                    }
+                    if custom && let Some(memory) = &mut self.quick_loadouts {
+                        memory.opened_for(&fingerprint);
                     }
                     if let Some(choice) = self.quick_loadout.clone()
                         && let Some(o) = self.quick.ordnance.as_mut()
@@ -2720,7 +2749,19 @@ impl App {
                     return;
                 }
                 match self.build_mission() {
-                    Ok(built) => self.begin_flight(event_loop, Some(built)),
+                    Ok(built) => {
+                        // The load that flew is kept for this mission.
+                        if self.quick.draft.values[18] != 0
+                            && let Some(memory) = &mut self.quick_loadouts
+                            && let Some(o) = &self.quick.ordnance
+                        {
+                            memory.flown(
+                                &self.quick.mission_fingerprint(),
+                                mission::LoadoutSpec::of(&o.loadout),
+                            );
+                        }
+                        self.begin_flight(event_loop, Some(built))
+                    }
                     Err(message) => self.quick.ordnance.as_mut().unwrap().message = Some(message),
                 }
             }
@@ -13231,7 +13272,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     // first time (slice BQ, B22). Only an ordinary interactive start: the
     // diagnostic, scripted and flag-driven runs keep the creator they asked
     // for, so their missions stay the same every time.
-    let quick_memory = if preferences_enabled
+    let ordinary_start = preferences_enabled
         && input_script_steps.is_none()
         && !launch_creator
         && matches!(initial_screen, Screen::Main | Screen::Quick)
@@ -13241,8 +13282,16 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && separation_nm.is_none()
         && probe_script.wing_size.is_none()
         && !probe_script.wing_only
-        && !probe_script.redfor
-    {
+        && !probe_script.redfor;
+    // The custom loadouts flown come back for the same mission (item 19).
+    let quick_loadouts = if ordinary_start && stripped_loadout.is_none() {
+        Some(quick_mission::loadout_memory::LoadoutMemory::open(
+            assets::data_directory()?.join("quick-loadouts-v1.conf"),
+        ))
+    } else {
+        None
+    };
+    let quick_memory = if ordinary_start {
         let memory = quick_mission::remember::Memory::open(
             &mut quick,
             assets::data_directory()?.join("quick-mission-v1.conf"),
@@ -13355,6 +13404,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         camera,
         quick,
         quick_memory,
+        quick_loadouts,
         screen: initial_screen,
         frame_time: Instant::now(),
         instrument_time: Instant::now(),
