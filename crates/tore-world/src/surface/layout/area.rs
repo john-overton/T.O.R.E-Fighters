@@ -309,7 +309,7 @@ fn members(
                 .all(|p| distance2(p.at, at) >= (2 * radius + AREA_MEMBER_GAP_FT).pow(2));
             if apart
                 && stands(ground, obstacles, at, radius, false)
-                && !ground.near_object(at, AREA_OBJECT_CLEARANCE_FT + radius)
+                && !ground.near_object(at, AREA_OBJECT_CLEARANCE_FT)
                 && !ground.near_runway(at, AREA_RUNWAY_CLEARANCE_FT + radius)
             {
                 // Facing out from the site's middle.
@@ -360,7 +360,7 @@ pub fn audit(
         if !stands(ground, &obstacles, at, radius, false) {
             broken.push("where no ground unit stands");
         }
-        if ground.near_object(at, AREA_OBJECT_CLEARANCE_FT + radius) {
+        if ground.near_object(at, AREA_OBJECT_CLEARANCE_FT) {
             broken.push("near a layout object");
         }
         if ground.near_runway(at, AREA_RUNWAY_CLEARANCE_FT + radius) {

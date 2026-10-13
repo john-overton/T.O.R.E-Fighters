@@ -204,8 +204,9 @@ pub const AREA_CANDIDATES: usize = 96;
 /// [`AREA_MEMBER_GAP_FT`] apart beyond their footprints.
 pub const AREA_MEMBER_FT: [i64; 2] = [150, 600];
 pub const AREA_MEMBER_GAP_FT: i64 = 150;
-/// Every area unit keeps this far, plus its own radius, from every layout
-/// object (towns, buildings, airfield objects), feet.
+/// Every area unit's centre keeps this far from every layout object
+/// (towns, buildings, airfield objects), feet. At most the ground index's
+/// reach, so the test stays a lookup.
 pub const AREA_OBJECT_CLEARANCE_FT: i64 = 2_000;
 /// And this far from every runway, feet (1 nm: past the aprons and
 /// taxiways the redrawn airports add).

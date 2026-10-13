@@ -642,7 +642,7 @@ below is fitted (agent).
     side, and 3 nm from every site already placed. Each unit stands 150 to
     600 ft from the centre, 150 ft clear of the other beyond their
     footprints, where a ground unit may (land, level, as the template rule
-    under [Jitter](#jitter)), 2,000 ft clear of every theater layout object
+    under [Jitter](#jitter)), its centre 2,000 ft clear of every theater layout object
     (towns, buildings, airfield objects) and 1 nm clear of every runway (past
     the aprons and taxiways the redrawn airports add). The city fill also
     hides any filler building a unit stands on.
