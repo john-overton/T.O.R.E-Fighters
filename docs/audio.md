@@ -87,7 +87,7 @@ decay.
 | Missile pass | `&MPASS.5K` | 80 | 1,500 | 0.5 |
 | Sonic boom | `&SNCBOOM.11K` | 500 | 13,000 | 0.8 |
 | Player weapon release | Weapon's imported fire sound | 100 | The record's `maxSndDist` (6,000 or 7,000 ft), straight-line fade | 0.4 |
-| Other aircraft's weapon release | The firing weapon record's fire sound | 100 | The record's `maxSndDist`, straight-line fade, from the firing aircraft | 0.4 |
+| Other shooters' weapon release (aircraft and surface units) | The firing weapon record's fire sound | 100 | The record's `maxSndDist`, straight-line fade, from the firing aircraft | 0.4 |
 | Chaff or flare release, player or AI | `&CHAFF.5K` or `&FLARE.5K` | 100 | 4,000 | 0.31 |
 
 Impact/explosion positions come from the actual combat effect producer, never
@@ -105,7 +105,9 @@ wait for travel. Another aircraft's launch (AI wingmen and enemies, other
 players online, AI in replays) is heard from where that aircraft fired, in a
 cockpit through the canopy like any outside sound; one sound plays per aircraft
 per release, and when more than four aircraft launch in one tick the four
-nearest sound. A multiplayer client and a replay find the record's reach by the
+nearest sound. Surface units' missile launches (SAM sites, ships, any
+surface launcher) are heard the same way from the launcher's mount, one sound
+per launcher per release; surface guns keep their own audio. A multiplayer client and a replay find the record's reach by the
 weapon's name in the local weapon catalog
 ([spec](spec/sound.md#other-aircrafts-launches)).
 Cockpit avionics, radio and controls stay local; engine loops follow the view

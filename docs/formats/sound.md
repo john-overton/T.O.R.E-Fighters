@@ -178,6 +178,27 @@ Read with `tools/catalog_fa.py` from the 135 shipped JT records
   jettison, priority 43, level 255, silent at 7,000 ft, full within 100 ft)
   are a separate path and not a weapon release.
 
+### Surface launches
+
+Checked 2026-10-12 for the surface-unit launch sound (John, item 4), same
+FA.EXE 1.02F and FA_2.LIB. Static only.
+
+- `PROJFire` (`0x4c2170`) tests the hardpoint kind, the station and the
+  ammunition debit, and nothing about the launching object's class, before it
+  calls `PROJFireSound` (`0x4c2296`, `0x4c227c`). Its two callers are the
+  player service (`0x417027`) and the weapon service `PROJServiceWeapon`
+  (`0x4c4e34`), which `_NPCWeaponsProc` calls (`0x4737d5`, `0x473983`).
+- Of the 135 shipped records, 21 guided missiles are named by a surface
+  unit type (ASROC, FIM92, MIS, R440, SA13, SA14, SA15, SA16, SA19, SA2A, SA3,
+  SA6, SA7, SA9, SAN11, SAN3, SAN4, SAN7, SAN9, SEA_SPAR, SSN9; the count is
+  from [`fa-weapons.csv`](fa-weapons.csv) `surface_type_references`). Each
+  names a `fireSound` (`&SALTMIS.11K` on 12, `&SAHVMIS.11K` on 4, `&LTMISS.11K`
+  on 3, `&HVYMISS.11K` on 2) and a `maxSndDist` of 6,000 ft, except SA2A at
+  12,000 ft. `freqAdj` is 0 on all of them. All four recordings are in FA_2.LIB.
+- Unknown: whether the original's ground units run `_NPCWeaponsProc`. The
+  records say a surface missile has a sound and a reach; nothing found says it
+  is skipped.
+
 ### Recordings
 
 | Resource | Decoded bytes | Length | SHA-256 |
