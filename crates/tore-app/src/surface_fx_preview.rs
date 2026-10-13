@@ -15,8 +15,9 @@
 //!
 //! Scenes: `flak` (the KS-19 and KS-12 flak of North Vietnam), `zsu23` and
 //! `zsu57` (the Ukraine city's guns), `troops` (an airfield's small arms,
-//! B17), `sam` (its SA-6 launching), `wreck` (a destroyed ZSU-23 smoking) and
-//! `map` (the flight map over it). With none named, all of them.
+//! B17), `squadkill` (the same squad killed as it opens fire, BD2), `sam` (its
+//! SA-6 launching), `wreck` (a destroyed ZSU-23 smoking) and `map` (the flight
+//! map over it). With none named, all of them.
 use crate::{
     AppResult,
     aircraft::Airframe,
@@ -76,6 +77,11 @@ enum View {
     /// Low beside an airfield's squads, looking out along their fire toward
     /// the aircraft.
     Field,
+    /// Close in front of an airfield squad, looking at its soldiers (alive,
+    /// or the ground where they stood) with their fire going away behind.
+    Squad,
+    /// The squad from 1,500 ft out, 60 ft up: the range of a low pass.
+    Far,
     /// Beside the launcher, looking up at it.
     Launch,
     /// Farther off, looking up the missile's path.
@@ -92,6 +98,8 @@ impl View {
             View::Jet => "jet",
             View::Gun => "gun",
             View::Field => "field",
+            View::Squad => "squad",
+            View::Far => "far",
             View::Launch => "pad",
             View::Trail => "trail",
             View::Wreck => "wreck",
@@ -126,7 +134,7 @@ struct Scene {
     kill: bool,
 }
 
-const SCENES: [Scene; 7] = [
+const SCENES: [Scene; 8] = [
     Scene {
         name: "flak",
         theater: "TVIET",
@@ -198,10 +206,29 @@ const SCENES: [Scene; 7] = [
         seconds: 120.,
         trigger: Trigger::Gun("SMLARMS.JT"),
         frames: &[2, 20, 50],
-        views: &[View::Gun, View::Field],
+        views: &[View::Gun, View::Field, View::Squad, View::Far],
         fov: 18.,
         muzzle_class: 3,
         kill: false,
+    },
+    Scene {
+        name: "squadkill",
+        theater: "APA",
+        stem: "QAPFAIR",
+        defenses: (3, 3),
+        over: "TROOPS",
+        index: 0,
+        altitude: 400.,
+        speed_kt: 350.,
+        pass: 600.,
+        from_nm: 2.,
+        seconds: 200.,
+        trigger: Trigger::Gun("SMLARMS.JT"),
+        frames: &[2, 60, 600],
+        views: &[View::Squad],
+        fov: 18.,
+        muzzle_class: 3,
+        kill: true,
     },
     Scene {
         name: "sam",
@@ -273,7 +300,8 @@ pub fn run() -> AppResult<()> {
     let args: Vec<String> = std::env::args().skip(2).collect();
     let Some((out, names)) = args.split_first() else {
         return Err(
-            "--surface-fx-preview OUTPUT_DIRECTORY [flak|zsu23|zsu57|troops|sam|map ...]".into(),
+            "--surface-fx-preview OUTPUT_DIRECTORY [flak|zsu23|zsu57|troops|squadkill|sam|map ...]"
+                .into(),
         );
     };
     let out = Path::new(out);
@@ -636,6 +664,16 @@ fn render(
                     ];
                     look_at(eye, aim, 32.)
                 }
+                View::Squad => {
+                    // From 55 ft out on the squad's far side from the jet's
+                    // line (west and north), 5 ft up, looking at the men.
+                    let eye = [center[0] - 30., center[1] + 5., center[2] + 50.];
+                    look_at(eye, [center[0], center[1] + 3., center[2]], 38.)
+                }
+                View::Far => {
+                    let eye = [center[0] - 1_500., center[1] + 60., center[2]];
+                    look_at(eye, [center[0], center[1] + 20., center[2]], 24.)
+                }
                 View::Launch | View::Trail => {
                     if matches!(view, View::Trail) {
                         let eye = [pad[0] + 1_300., pad[1] + 60., pad[2] - 900.];
@@ -677,9 +715,18 @@ fn render(
             p_seen.extend(new.into_iter().map(str::to_owned));
             scenery.resolve_palette(&world.terrain, camera.position[1]);
             scenery.set_origin(camera.position);
-            let hidden = std::collections::BTreeSet::new();
-            let geometry = std::sync::Arc::clone(scenery.static_geometry_where(&hidden));
+            let geometry = std::sync::Arc::clone(
+                scenery.static_geometry(&world.combat.state.targets, &world.combat.surface),
+            );
             gpu.sim.airports(&gpu.device, &gpu.queue, &geometry);
+            // The men and the units that turn, drawn every frame as the game
+            // draws them.
+            let standing = crate::render_snapshot::standing(&world.combat.state.targets);
+            gpu.sim.surface_units(
+                &gpu.device,
+                &gpu.queue,
+                &scenery.surface_vertices(&picture, &|id| standing.contains(&id), &camera),
+            );
             let device = &gpu.device;
             let queue = &gpu.queue;
             let devices = Devices::default();

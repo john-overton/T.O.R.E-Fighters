@@ -347,6 +347,12 @@ impl Scene {
             row.position[2],
             row.hp
         );
+        if let Some(b) = scene.world.combat.state.ground_bounds(target) {
+            println!(
+                "a2g-run: target box center {:.0} {:.0} {:.0} half {:.1} {:.1} {:.1}",
+                b.center[0], b.center[1], b.center[2], b.half[0], b.half[1], b.half[2]
+            );
+        }
         Ok(scene)
     }
 

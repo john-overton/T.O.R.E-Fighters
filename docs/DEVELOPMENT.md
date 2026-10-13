@@ -1769,7 +1769,9 @@ TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --a2g-run UKR QUCOL --air
 `--surface-fx-preview OUT_DIR [SCENE ...]` renders what the surface defenses
 look like, offscreen, by day, at dusk and at night: `flak` (the KS-12 and
 KS-19 bursts over North Vietnam, wide and close to the jet), `zsu23` and
-`zsu57` (muzzle flash, firing light and tracers beside a gun), `sam` (an SA-6
+`zsu57` (muzzle flash, firing light and tracers beside a gun), `troops` (an
+airfield squad's soldiers and tracers) and `squadkill` (the same squad killed
+as it opens fire), `sam` (an SA-6
 leaving its rail, at the pad and up its path), `wreck` (a destroyed ZSU-23
 smoking) and `map` (the flight map over the same target). Each scene is the
 real game: it builds the mission, flies the player past the unit, steps the

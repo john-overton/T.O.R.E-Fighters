@@ -40,6 +40,16 @@ use tore_world::surface::{
 const FLOATS: usize = 10;
 /// The static scene's geometry budget, in floats (32 MiB).
 pub(super) const BUDGET: usize = 32 * 1024 * 1024 / 4;
+/// The range, feet, out to which a man (SOLDIER, TROOPS) is drawn at his own
+/// size; farther he is drawn larger in proportion, so he stays about as many
+/// pixels tall as at this range (opinionated, agent, 2026-10-12).
+const MAN_FULL_SIZE_RANGE_FT: f64 = 1_000.;
+/// The most a man is drawn larger than life: six times, from 6,000 ft out.
+const MAN_MAX_BOOST: f64 = 6.;
+/// How much larger than life a man is drawn `distance` ft from the viewer.
+fn man_boost(distance: f64) -> f64 {
+    (distance / MAN_FULL_SIZE_RANGE_FT).clamp(1., MAN_MAX_BOOST)
+}
 /// The deck crew sprite's frames (`shape::SPRITE_FRAME_WORD`, 0 to 10).
 const CREW_FRAMES: i32 = 11;
 /// Frames per second of the deck crew's signal cycle (fitted: the native
@@ -1293,6 +1303,21 @@ impl SurfaceArt {
         seconds: f64,
         out: &mut Drawn,
     ) {
+        // A man stays a few pixels tall at the range a pilot sees a field:
+        // beyond 1,000 ft he is drawn taller by the distance over 1,000 ft,
+        // up to six times (presentation only; the hit box is unchanged).
+        let stand = &if sprite.crew.is_none() {
+            let away = (0..3)
+                .map(|i| (eye[i] - stand.origin[i]).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            Stand {
+                scale: stand.scale * man_boost(away),
+                ..*stand
+            }
+        } else {
+            *stand
+        };
         let view = camera.uniform(1., [0.; 4], [0; 3]);
         let right: Vector = std::array::from_fn(|i| f64::from(view[4 + i]));
         let up: Vector = std::array::from_fn(|i| f64::from(view[8 + i]));
@@ -1819,6 +1844,15 @@ mod tests {
             art.frame(&picture, &|id| id != 9, &camera, [0.; 3], 0.)
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn a_man_stays_visible_at_a_pilots_range() {
+        // Life size to 1,000 ft, then larger by the distance, to six times.
+        assert_eq!(man_boost(300.), 1.);
+        assert_eq!(man_boost(1_000.), 1.);
+        assert_eq!(man_boost(3_000.), 3.);
+        assert_eq!(man_boost(50_000.), MAN_MAX_BOOST);
     }
 
     #[test]

@@ -62,7 +62,10 @@
 //!   locks and painting feed aircraft only: a ground unit has no RWR.
 //! - A squad's small arms aim at an aircraft with four times the visual guns'
 //!   error ([`tore_sim::ai::surface::small_arms_aim_error_deg`], fitted,
-//!   agent, 2026-10-12): riflemen have no sight on a jet.
+//!   agent, 2026-10-12) and lead it by 30 percent of its speed
+//!   ([`observation`], [`tore_sim::ai::surface::SMALL_ARMS_LEAD`], fitted,
+//!   agent, 2026-10-12): riflemen have no sight on a jet, and a squad rarely
+//!   hits a fast one.
 use super::{
     BatterySystem, Surface, SurfaceState, UnitId, UnitKind,
     catalog::Catalog,
@@ -1723,6 +1726,32 @@ fn fire_missiles(
     }
 }
 
+/// What a gun of `weapon` takes its aim from: a target seen at `position`
+/// moving at `velocity`, `age` seconds ago. A radar or visual gun carries the
+/// target on at its velocity for the age; a squad's small arms firing at an
+/// aircraft ([`control::SMALL_ARMS_LEAD`]) carry it on and lead it only by
+/// that share (riflemen aim by eye with no lead computer, so a fast jet is
+/// shot at where it was; fitted, agent, 2026-10-12, John's rule that small
+/// arms rarely hit an aircraft passing through). A networked client remakes a
+/// burst's rounds with the same observation.
+pub fn observation(
+    weapon: &WeaponArms,
+    target_is_surface: bool,
+    position: Vector,
+    velocity: Vector,
+    age: f64,
+) -> TargetObservation {
+    let lead = if !target_is_surface && surface_guns::is_small_arms(&weapon.record.source) {
+        control::SMALL_ARMS_LEAD
+    } else {
+        1.
+    };
+    TargetObservation {
+        position: std::array::from_fn(|i| position[i] + velocity[i] * age * lead),
+        velocity: std::array::from_fn(|i| velocity[i] * lead),
+    }
+}
+
 /// The point a gun of `weapon` standing as `place` aims at from `muzzle` for
 /// a target observed as `observed`: the lead point of the shared gunsight
 /// solution (time of flight and drop), clamped into a barrage zone's fire
@@ -1817,10 +1846,7 @@ fn fire_gun(
         });
         engager.seen = Some(seen);
         let age = (scene.tick - seen.tick) as f64 / 120.;
-        TargetObservation {
-            position: std::array::from_fn(|i| seen.position[i] + seen.velocity[i] * age),
-            velocity: seen.velocity,
-        }
+        observation(weapon, aircraft.surface, seen.position, seen.velocity, age)
     };
     if fire.burst_start {
         // The burst's aim error, by skill (a quarter of it at a ground unit
