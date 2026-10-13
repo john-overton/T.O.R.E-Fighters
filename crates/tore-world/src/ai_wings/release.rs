@@ -69,7 +69,7 @@ impl AiWings {
             self.rounds_after(actor, station),
             u32::from(s.weapon.burst.actual_rounds_per_game),
         );
-        Some(s.rack.release_mount(s.mount, units))
+        Some(s.release_point(units))
     }
 
     /// A ground store's release through the shared release, from the

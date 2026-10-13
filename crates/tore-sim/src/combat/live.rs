@@ -393,6 +393,28 @@ pub struct Station {
     /// Its source location and pairing (B3).
     pub rack: super::hardpoints::Rack,
 }
+impl Station {
+    /// Where the store this station releases next leaves, feet right, up
+    /// and forward of the aircraft, when `units_after` whole releases remain
+    /// once it has gone: its side of a paired record and, on a wing side with
+    /// two pylons, its own pylon ([`super::hardpoints::Rack::release_point`]).
+    /// A rocket leaves the pod that is firing (the outboard one first).
+    pub fn release_point(&self, units_after: u32) -> Vector {
+        let rack = self.rack;
+        let left =
+            rack.release_mount(self.mount, units_after)[0] < 0. && rack.two_sided(self.mount);
+        let side_after = rack.sides(self.mount, u16::try_from(units_after).unwrap_or(u16::MAX))
+            [usize::from(left)];
+        let debit = u32::from(self.weapon.burst.actual_rounds_per_game).max(1);
+        let slot = u32::from(side_after) * debit / pod_rounds(&self.weapon).max(1);
+        rack.release_point(
+            self.mount,
+            self.count,
+            units_after,
+            u16::try_from(slot).unwrap_or(u16::MAX),
+        )
+    }
+}
 /// One selected external tank type, kept separate from weapon ammunition.
 #[derive(Clone, Debug)]
 pub struct TankStore {

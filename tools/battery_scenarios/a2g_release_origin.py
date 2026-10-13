@@ -14,7 +14,9 @@ sight holds the fourth Mk 82 past the target, so three of those count):
 
 A paired row's stores leave from its mirror first, then its own position, in turn
 (left, right, left, right); the centreline row's from the centreline every time. Every
-store starts at its row's height, and no store starts at the old single point.
+store starts at its row's height, and no store starts at the old single point. A wing row
+with four stores has two pylons a wing (slice BP2, John 2026-10-12), 1.4 ft either side
+of the row's position: the outboard pair leaves first, then the inboard pair.
 """
 import re
 
@@ -25,14 +27,26 @@ ORIGIN = re.compile(
     re.M,
 )
 
-# (label, station right ft, station up ft, presses, alternates)
+# How far either side of a wing row's position its two pylons stand, feet
+# (tore_sim::combat::hardpoints::DUAL_PYLON_SPREAD).
+DUAL = 1.4
+
+# (label, station right ft, station up ft, presses, alternates, two pylons a wing)
 CASES = [
-    ("A-4E inner wing Mk 82", 8 / 3, -16 / 3, 4, True),
-    ("A-4E LAU-61", 26 / 3, -16 / 3, 4, True),
-    ("F-4B fuselage Mk 82", 13 / 3, -19 / 3, 4, True),
-    ("F-16C inner wing Mk 82", 32 / 3, -10 / 3, 4, True),
-    ("F-4B centreline Mk 82", 0.0, -19 / 3, 2, False),
+    ("A-4E inner wing Mk 82", 8 / 3, -16 / 3, 4, True, True),
+    ("A-4E LAU-61", 26 / 3, -16 / 3, 4, True, False),
+    ("F-4B fuselage Mk 82", 13 / 3, -19 / 3, 4, True, False),
+    ("F-16C inner wing Mk 82", 32 / 3, -10 / 3, 4, True, True),
+    ("F-4B centreline Mk 82", 0.0, -19 / 3, 2, False, False),
 ]
+
+
+def pylon_right(right: float, dual: bool, n: int) -> float:
+    """How far out release `n` of a row at `right` leaves: its own pylon, the
+    outboard pair first on a two-pylon wing."""
+    if not dual:
+        return right
+    return right + DUAL if n < 2 else right - DUAL
 
 
 def runs(output: str) -> list[str]:
@@ -45,7 +59,7 @@ def origin_problems(output: str) -> list[str]:
     if len(parts) != len(CASES):
         return [f"{len(parts)} runs finished, want {len(CASES)}"]
     problems: list[str] = []
-    for part, (label, right, up, presses, alternates) in zip(parts, CASES):
+    for part, (label, right, up, presses, alternates, dual) in zip(parts, CASES):
         # The first round of each release (a rocket or a single bomb).
         firsts = [o for o in ORIGIN.findall(part) if o[0] == "0"]
         # The bomb sight lets the last press go past the target on some
@@ -58,8 +72,9 @@ def origin_problems(output: str) -> list[str]:
             r, u, station = float(r), float(u), float(station)
             if abs(station - right) > 0.01:
                 problems.append(f"{label}: station at {station:.2f} ft right, want {right:.2f}")
-            if abs(abs(r) - right) > 0.05:
-                problems.append(f"{label}: release {n} left from {r:.2f} ft right, want {right:.2f} either side")
+            want_r = pylon_right(right, dual, n)
+            if abs(abs(r) - want_r) > 0.05:
+                problems.append(f"{label}: release {n} left from {r:.2f} ft right, want {want_r:.2f} either side")
             if abs(u - up) > 0.05:
                 problems.append(f"{label}: release {n} left from {u:.2f} ft up, want {up:.2f}")
             sides.append("C" if right == 0 else ("L" if r < 0 else "R"))
