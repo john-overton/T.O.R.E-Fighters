@@ -187,6 +187,7 @@ mod tests {
             target: None,
             incoming: false,
             speed_f8: 1000 * 256,
+            powered: true,
         }
     }
 

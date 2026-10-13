@@ -46,6 +46,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [The air-to-ground round (protocol 23)](#the-air-to-ground-round-protocol-23) (built under protocol 23)
 - [The redrawn airports (protocol 24)](#the-redrawn-airports-protocol-24) (built under protocol 24)
 - [The city fill (protocol 25)](#the-city-fill-protocol-25) (built under protocol 25)
+- [Protocol 26: explosions sized by weapon](#protocol-26-explosions-sized-by-weapon) (built under protocol 26)
 - [Limits](#limits)
 - [Captures](#captures)
 - [Versions](#versions)
@@ -889,7 +890,7 @@ snapshot's tick.
 | Feedback | the seat | A rumble event |
 | Your aircraft exploded | the seat | Which wording ("exploded", "exploded on impact") |
 | Wing ejection | everyone | Aircraft, HUD line, friendly |
-| Effect | everyone | Kind, position, ticks it shows, explosion type |
+| Effect | everyone | Kind, position, ticks it shows, explosion type, and (protocol 26) the size it is drawn at |
 | Mark | everyone | Crater or crash-site fire, position |
 | Ground destroyed | everyone | Ground object id |
 | Countermeasure | everyone | Aircraft, chaff or flare, the release geometry the replay viewer flies it from, number left |
@@ -2649,6 +2650,45 @@ stands.
   fill, so a game whose city art or kit differed is told which theater
   differs.
 
+## Protocol 26: explosions sized by weapon
+
+*Built (slice BF of the bug-fix round, 2026-10-12); the size rule is
+John's (opinionated, 2026-10-12), the coding an agent decision.* An impact
+is drawn at its weapon's size against its explosion type's: guns up to
+40 mm at half size, the AC-130's 105 mm like a 500 lb bomb, bombs and warheads by the
+cube root of their weight against 500 lb
+([explosions](../spec/explosions.md#size-by-weapon)). Only the host's combat
+knows which weapon made an effect, so the size travels with it.
+
+- **The Effect event (code 11)** gains, after the explosion type, a 1-bit
+  flag and, when it is set, 8 bits: the percent of its type's size the
+  explosion is drawn at (1 to 255), or 0 for a dud's inert puff (drawn full
+  size, no flash and no sparks). The flag is clear for 100, so a kill, a
+  crash, a launch or a flak burst costs one bit more than under 25. A 25
+  reader would read the flag as the next event's first bit, so the version
+  keeps such games apart.
+- **The wire golden** changes in the version line, the transport packets
+  sealed with it, and four new Effect events in the sampled events section
+  (a 20 mm hit at 50, a large ground strike at 200, a 2,000 lb bomb at 159 and a
+  dud at 0), and two new Mark events (a crater at 159 and a pock mark at 50).
+- **The Mark event (code 12)** gains, after the position, the same 1-bit
+  flag and byte: a crater's drawn scale (craters follow the weapon's yield,
+  John, 2026-10-12). A crater of size 0 is a gun round's pock mark. A newly
+  seated player's backlog holds every crater and fire but only the newest
+  1,000 pock marks (`host::sorting::SEAT_POCK_MARKS`, agent decision): at
+  13.5 bytes a mark, a long mission's 20,000 would hold the snapshots' event
+  share for a minute ([craters by weapon](../spec/explosions.md#craters-by-weapon)).
+- **Not on the wire:** a missile or rocket's motor state. A client dates
+  each round from the client tick it first drew it, by the weapon's motor,
+  as it does the motor's smoke (`regen::Effects`), and draws the motor's
+  flame only while it burns. The light and sparks of an impact
+  ([impact light and sparks](../spec/explosions.md#impact-light-and-sparks))
+  come from the effect alone.
+- **Checkpoints.** The combat effect (`live::Effect`) and the picture's
+  `EffectPose` gain the scale, and the picture's `ProjectilePose` its
+  motor state ([checkpoint](checkpoint.md)); the Check hash and a
+  standby's restore carry them, and a 25 build would read them wrongly.
+
 ## Limits
 
 Decoders check every count and length against these before reading on.
@@ -2801,7 +2841,11 @@ again with an observer; the capture format did not change for it.
   game refuses; `ground_trim` in the AI airfield sequence's checkpoint
   (CL-AP); the front line in the surface digest (CL-FL); and the City
   flattened event (code 21) with the world checkpoint's city fill section
-  (section 12), which carry the buildings ground bursts knocked flat.
+  (section 12), which carry the buildings ground bursts knocked flat. 26
+  since the bug-fix round (slice BF,
+  [explosions sized by weapon](#protocol-26-explosions-sized-by-weapon)):
+  the Effect event's scale, and the effect's scale and the round's motor
+  state in the checkpoints.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

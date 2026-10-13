@@ -391,6 +391,7 @@ impl Guns {
             target: None,
             incoming: false,
             speed_f8: round.speed_f8,
+            powered: false,
         };
         // A round keeps its number for its whole flight, so whatever reads
         // the picture (the muzzle flashes) sees a new number only for a new

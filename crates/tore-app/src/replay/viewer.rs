@@ -909,6 +909,7 @@ impl Viewer {
             options,
             growth,
         )?;
+        viewer.playback.add_motors(resources);
         // Other aircraft's launches name their weapon record.
         viewer
             .sound
@@ -1144,6 +1145,9 @@ impl Viewer {
             return;
         }
         self.playback.extend(Arc::clone(&recording));
+        if let Some(growth) = &self.growth {
+            self.playback.add_motors(&growth.resources);
+        }
         self.sound.extend(Arc::clone(&recording));
         self.scanner.feed(Arc::clone(&recording));
         self.weather.set_end(last);

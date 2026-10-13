@@ -246,6 +246,7 @@ crate::checkpoint_struct!(Effect {
     kind,
     ticks,
     blast,
+    scale,
 });
 
 crate::checkpoint_struct!(ActorSupport {
@@ -977,6 +978,7 @@ mod tests {
             kind: EffectKind::DebrisImpact,
             ticks: 240,
             blast: Some(34),
+            scale: 159,
         };
         assert_eq!(round_trip(&effect, &models).unwrap(), effect);
         let none = Effect {

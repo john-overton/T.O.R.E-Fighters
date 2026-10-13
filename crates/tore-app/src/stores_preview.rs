@@ -204,6 +204,7 @@ pub fn run() -> AppResult<()> {
                     target: None,
                     incoming: false,
                     speed_f8: 0,
+                    powered: false,
                 }];
                 let stores = store_poses(&config, |i| rounds[i], loaded);
                 let (_, eye, look, fov) = VIEWS[0];

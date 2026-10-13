@@ -1581,6 +1581,29 @@ picks the theater (default UKR):
 TORE_DATA_DIR=.local/surface-data target/debug/tore-app --blast-preview .local/tmp/blast
 ```
 
+`--impact-preview OUT_DIR` (first argument) renders weapon impacts side by
+side offscreen, each with its own record's land explosion, its
+[size by weapon](spec/explosions.md#size-by-weapon) and its
+[light and sparks](spec/explosions.md#impact-light-and-sparks): a row of a
+20 mm, a 105 mm, a 250 lb, a 500 lb and a 2,000 lb impact 900 ft apart at
+0.1, 0.3, 0.6 and 1 second, close views of the 20 mm and 105 mm, and an
+eight-round 20 mm burst, by day and at night. `TORE_CITY_FILL=0` keeps the
+city fill out of the row:
+
+```sh
+TORE_CITY_FILL=0 TORE_DATA_DIR=.local/tmp-me/profile target/debug/tore-app --impact-preview .local/tmp/impacts
+```
+
+On a player's `--a2g-run`, `--render-scene DIR --scene-at S,...` draws the
+world offscreen S seconds after the first rocket, missile or bomb leaves,
+chasing the newest one from just behind and beside it (`DIR/scene-tS.png`),
+and `--condition night` flies the run at night: the way to look at motor
+smoke, the motor flame ending at burnout and impacts in a real run:
+
+```sh
+TORE_CITY_FILL=0 TORE_DATA_DIR=.local/tmp-me/profile target/debug/tore-app --a2g-run UKR QUCOL --attack release --from 1 --aircraft a4e --load LAU61 --altitude 1500 --dive 10 --speed 400 --hold 1.5 --render-scene .local/tmp/rockets --scene-at 0.6,1.5,3
+```
+
 `--cockpit-sheet OUT_DIR [ID,ID,...]` (first argument) renders every flyable
 aircraft's cockpit with live mirrors, its cockpit art with the mirror masks
 tinted (centre red, left green, right blue) and two contact sheets, offscreen;

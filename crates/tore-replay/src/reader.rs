@@ -12,9 +12,10 @@ use crate::error::{Error, Result, corrupt};
 use crate::events::{get_checksums, get_events};
 use crate::format::{
     CHUNK_HEADER_BYTES, ChunkHeader, IndexEntry, KIND_DATA, KIND_FOOTER, KIND_HEADER, KIND_INDEX,
-    PRELUDE_BYTES, SECTION_CHECKSUMS, SECTION_ENTITIES, SECTION_EVENTS, SECTION_SPAWNS,
-    SECTION_STRINGS, SECTION_TREES, TRAILER_BYTES, chunk_checksum, decode_footer, decode_header,
-    decode_index, read_chunk_header, read_prelude, read_sections, read_trailer, section,
+    PRELUDE_BYTES, SECTION_CHECKSUMS, SECTION_EFFECT_SCALES, SECTION_ENTITIES, SECTION_EVENTS,
+    SECTION_SPAWNS, SECTION_STRINGS, SECTION_TREES, TRAILER_BYTES, chunk_checksum, decode_footer,
+    decode_header, decode_index, read_chunk_header, read_prelude, read_sections, read_trailer,
+    section,
 };
 use crate::limits::{
     MAX_CHUNK_BYTES, MAX_CHUNK_FRAMES, MAX_CHUNKS, MAX_EVENTS_TOTAL, MAX_FILE_BYTES,
@@ -24,7 +25,7 @@ use crate::model::{
     AircraftInfo, EffectKind, EffectSpawn, Event, Footer, Frame, Header, LAYER_CONTRAILS, PuffKind,
     PuffSpawn, SurfaceInfo, TreeSample, WeaponInfo,
 };
-use crate::spawns::{FrameSpawns, get_spawns};
+use crate::spawns::{FrameSpawns, apply_scales, get_spawns};
 use crate::strings::StringTable;
 use crate::trees::{get_tree_directory, get_trees};
 use std::collections::{BTreeMap, HashMap};
@@ -114,6 +115,8 @@ pub struct LiveEffect {
     pub kind: EffectKind,
     pub position: [f64; 3],
     pub duration_ticks: u32,
+    /// Percent of its type's size it is drawn at ([`EffectSpawn::scale`]).
+    pub scale: u8,
 }
 
 enum Source {
@@ -750,7 +753,13 @@ impl Recording {
         let (info, body) = self.chunk_body(index)?;
         let sections = read_sections(&body)?;
         let spawns = Arc::new(match section(&sections, SECTION_SPAWNS) {
-            Some(payload) => get_spawns(payload, info.frames)?,
+            Some(payload) => {
+                let mut spawns = get_spawns(payload, info.frames)?;
+                if let Some(scales) = section(&sections, SECTION_EFFECT_SCALES) {
+                    apply_scales(scales, info.frames, &mut spawns)?;
+                }
+                spawns
+            }
             None => Vec::new(),
         });
         let mut cache = lock(&self.spawn_cache);
@@ -841,6 +850,7 @@ impl Recording {
                 kind: e.kind,
                 position: e.position,
                 duration_ticks: e.duration_ticks,
+                scale: e.scale,
             })
             .collect())
     }

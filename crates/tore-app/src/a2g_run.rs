@@ -77,6 +77,7 @@ mod missile;
 pub mod preview;
 mod release;
 mod rocket;
+mod scene_render;
 mod strafe;
 
 const SEAT: SeatId = SeatId(0);
@@ -110,11 +111,16 @@ pub(crate) struct Options {
     pub render: Option<std::path::PathBuf>,
     record: Option<std::path::PathBuf>,
     verify: bool,
+    /// `--scene-at S,...`: frames for `--render-scene DIR` on a player run
+    /// ([`scene_render`]).
+    scene_at: Vec<f64>,
+    /// `--condition`: the mission's weather on a player run.
+    condition: Option<tore_world::mission::Condition>,
     /// `--pilot ai` and its options ([`ai`]).
     ai: ai::Config,
 }
 
-const USAGE: &str = "--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND [--from NM] [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S] [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S] [--defenses AAA SAM] [--surface-seed N] [--unit ID] [--designate ag|ir|harm|visual|none] [--break-at S] [--skill N] [--render OUT.png] [--record PATH [--verify-render]] [--laser-off S] [--buddy ID [--buddy-ai]] [--turn-away S] [--condition clear|cloudy|foggy|night] | --a2g-run THEATER STEM --pilot ai [--aircraft ID] [--load REC] [--target N] [--skill 0..3] [--profile straight|popup|fasthigh|dive|level|orbit|standoff|laydown|strafe] [--handback S [--mode ccip|lvl] [--trigger] [--laser] [--take-back S]] [--order KIND [--order-at S]] [--quick-wing] [--choose-store] [--buddy ID] [--render OUT.png --render-at S] [--mission-altitude FT] [--render-scene DIR] [--offset FT] [--sead-at S] [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG] [--seconds S]";
+const USAGE: &str = "--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND [--from NM] [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S] [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S] [--defenses AAA SAM] [--surface-seed N] [--unit ID] [--designate ag|ir|harm|visual|none] [--break-at S] [--skill N] [--render OUT.png] [--record PATH [--verify-render]] [--laser-off S] [--buddy ID [--buddy-ai]] [--turn-away S] [--condition clear|cloudy|foggy|night] | --a2g-run THEATER STEM --pilot ai [--aircraft ID] [--load REC] [--target N] [--skill 0..3] [--profile straight|popup|fasthigh|dive|level|orbit|standoff|laydown|strafe] [--handback S [--mode ccip|lvl] [--trigger] [--laser] [--take-back S]] [--order KIND [--order-at S]] [--quick-wing] [--choose-store] [--buddy ID] [--render OUT.png --render-at S] [--mission-altitude FT] [--render-scene DIR] [--offset FT] [--sead-at S]; player kinds also take [--render-scene DIR --scene-at S,...] [--condition clear|cloudy|foggy|night] [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG] [--seconds S]";
 
 fn options() -> AppResult<Options> {
     let args: Vec<String> = std::env::args().skip(2).collect();
@@ -145,6 +151,8 @@ fn options() -> AppResult<Options> {
         render: None,
         record: None,
         verify: false,
+        scene_at: Vec::new(),
+        condition: None,
         ai: ai::Config::new(),
     };
     let mut positional = Vec::new();
@@ -175,6 +183,21 @@ fn options() -> AppResult<Options> {
             "--surface-seed" => o.seed = next()?.parse()?,
             // The guided kinds' own options, read by `guided`.
             "--buddy-ai" => {}
+            "--condition" => {
+                o.condition = Some(match next()?.to_ascii_lowercase().as_str() {
+                    "clear" => tore_world::mission::Condition::Clear,
+                    "cloudy" => tore_world::mission::Condition::Cloudy,
+                    "foggy" => tore_world::mission::Condition::Foggy,
+                    "night" => tore_world::mission::Condition::Night,
+                    other => return Err(format!("unknown --condition {other}").into()),
+                })
+            }
+            "--scene-at" => {
+                o.scene_at = next()?
+                    .split(',')
+                    .map(str::parse)
+                    .collect::<Result<_, _>>()?
+            }
             other if guided::OPTIONS.contains(&other) => {
                 next()?;
             }
@@ -292,6 +315,10 @@ pub(crate) struct Scene {
     pub owner: u32,
     /// The run as a mission recording, when `--record` asks.
     record: Option<crate::surface_objective::Record>,
+    /// The frames `--render-scene` and `--scene-at` ask for.
+    scenes: scene_render::Plan,
+    /// What the run's motors did, for the `motors` line.
+    motors: scene_render::Motors,
 }
 
 impl Scene {
@@ -305,6 +332,9 @@ impl Scene {
         spec.sam = Defense::from_level(o.defenses.1).ok_or("defense levels are 0 to 3")?;
         spec.surface_seed = o.seed;
         spec.cheats.damage = tore_sim::cheats::Damage::Invulnerable;
+        if let Some(condition) = o.condition {
+            spec.condition = condition;
+        }
         spec.validate()?;
         let mut world =
             crate::surface_dump::world_without_front(&spec, resources, Seating::SinglePlayer)?;
@@ -331,6 +361,11 @@ impl Scene {
             target,
             owner,
             record: None,
+            scenes: scene_render::Plan::new(
+                o.ai.render_scene.clone().filter(|_| !o.ai.active),
+                &o.scene_at,
+            ),
+            motors: Default::default(),
         };
         let scene = scene.recording(o)?;
         let row = scene.target_row().ok_or("the target has no row")?;
@@ -446,7 +481,8 @@ impl Scene {
             commands: std::mem::take(&mut self.commands),
             ..SeatInput::default()
         };
-        self.recorded(|world, out| world.step(std::slice::from_ref(&input), out))
+        self.recorded(|world, out| world.step(std::slice::from_ref(&input), out))?;
+        scene_render::after_step(self)
     }
 
     /// Queues a seat command for the next step.
@@ -493,6 +529,7 @@ impl Scene {
 
     /// Prints the kills and the target, and finishes the recording.
     fn finish(&mut self) -> AppResult<()> {
+        println!("{}", self.motors.line());
         let state = &self.world.combat.state;
         for kill in state
             .ledger

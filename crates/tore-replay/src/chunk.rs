@@ -7,15 +7,15 @@ use crate::codec::{In, put_iv, put_uv, put_xf64};
 use crate::error::{Result, corrupt};
 use crate::events::{ChecksumCoder, EventCoder, get_checksums, get_events};
 use crate::format::{
-    KIND_DATA, SECTION_CHECKSUMS, SECTION_DISK_TILT, SECTION_ENTITIES, SECTION_EVENTS,
-    SECTION_FRAMES, SECTION_ROTORS, SECTION_SPAWNS, SECTION_STRINGS, SECTION_TREES, chunk,
-    put_section, section,
+    KIND_DATA, SECTION_CHECKSUMS, SECTION_DISK_TILT, SECTION_EFFECT_SCALES, SECTION_ENTITIES,
+    SECTION_EVENTS, SECTION_FRAMES, SECTION_ROTORS, SECTION_SPAWNS, SECTION_STRINGS, SECTION_TREES,
+    chunk, put_section, section,
 };
 use crate::frames::FrameCoder;
 use crate::limits::{MAX_REGISTERED, MAX_REGISTERED_SURFACE};
 use crate::model::{AircraftInfo, Frame, Side, SurfaceInfo, WeaponClass, WeaponInfo};
 use crate::rotors::{RotorCoder, apply_rotors, get_rotors};
-use crate::spawns::{SpawnCoder, get_spawns};
+use crate::spawns::{ScaleCoder, SpawnCoder, apply_scales, get_spawns};
 use crate::strings::{Interner, StringTable};
 use crate::tilts::{TiltCoder, apply_tilts, get_tilts};
 use crate::trees::{TreeCoder, get_trees};
@@ -28,6 +28,7 @@ pub(crate) struct ChunkEncoder {
     frame_coder: FrameCoder,
     frames_buf: Vec<u8>,
     spawns: SpawnCoder,
+    scales: ScaleCoder,
     events: EventCoder,
     trees: TreeCoder,
     checksums: ChecksumCoder,
@@ -49,6 +50,7 @@ impl ChunkEncoder {
         let index = self.frames;
         self.frame_coder.put(&mut self.frames_buf, frame);
         self.spawns.put(index, &frame.new_effects, &frame.new_puffs);
+        self.scales.put(index, &frame.new_effects);
         self.events.put(index, &frame.events, strings);
         self.trees.put(index, &frame.trees, strings);
         self.checksums.put(index, frame.checksum);
@@ -112,6 +114,7 @@ impl ChunkEncoder {
     pub fn size(&self) -> usize {
         self.frames_buf.len()
             + self.spawns.len()
+            + self.scales.len()
             + self.events.len()
             + self.trees.len()
             + self.rotors.len()
@@ -151,6 +154,9 @@ impl ChunkEncoder {
         }
         if let Some(payload) = self.spawns.section() {
             put_section(&mut body, SECTION_SPAWNS, &payload);
+        }
+        if let Some(payload) = self.scales.section() {
+            put_section(&mut body, SECTION_EFFECT_SCALES, &payload);
         }
         if let Some(payload) = self.events.section() {
             put_section(&mut body, SECTION_EVENTS, &payload);
@@ -281,7 +287,11 @@ pub(crate) fn decode_frames(
         return Err(corrupt("the frames section has trailing bytes"));
     }
     if let Some(payload) = section(sections, SECTION_SPAWNS) {
-        for (i, effects, puffs) in get_spawns(payload, frames)? {
+        let mut spawns = get_spawns(payload, frames)?;
+        if let Some(scales) = section(sections, SECTION_EFFECT_SCALES) {
+            apply_scales(scales, frames, &mut spawns)?;
+        }
+        for (i, effects, puffs) in spawns {
             let frame = &mut out[i as usize];
             frame.new_effects = effects;
             frame.new_puffs = puffs;

@@ -1887,6 +1887,17 @@ impl NetSession {
     /// since the last call (at most [`MAX_EFFECT_TICKS`]), each over
     /// `picture`, the newest the screen has; the releases the frames brought
     /// go with the first step.
+    /// Marks the rounds of `picture` whose motor burns now (bug B7), by the
+    /// regenerated effects' dating; call after [`Self::step_effects`].
+    pub fn mark_powered(
+        &self,
+        picture: &mut RenderSnapshot,
+        resources: &BTreeMap<String, Vec<u8>>,
+    ) {
+        self.effects
+            .mark_powered(picture, &|name| motor_of(&self.motors, name, resources));
+    }
+
     pub fn step_effects(&mut self, to: u64, picture: &RenderSnapshot, around: &EffectContext<'_>) {
         let behind = to.saturating_sub(self.effects_tick);
         // A long gap (a stall, or the first frame) is not caught up on.
@@ -1899,16 +1910,8 @@ impl NetSession {
                 .find(|model| model.profile.id == id)
                 .map_or(&[][..], |model| &model.kind.contrail_offsets)
         };
-        let motor = |name: &str| -> Option<Motor> {
-            self.motors
-                .borrow_mut()
-                .entry(name.to_owned())
-                .or_insert_with(|| {
-                    let bytes = around.resources.get(name)?;
-                    Motor::of(&tore_formats::weapons::Weapon::parse(name, bytes).ok()?)
-                })
-                .to_owned()
-        };
+        let motors = &self.motors;
+        let motor = |name: &str| motor_of(motors, name, around.resources);
         let surroundings = regen::Surroundings {
             terrain: around.terrain,
             outlets: &outlets,
@@ -1924,6 +1927,23 @@ impl NetSession {
             self.effects.step(picture, &surroundings, &releases);
         }
     }
+}
+
+/// The motor of weapon record `name`, read once from `resources` into
+/// `motors`.
+fn motor_of(
+    motors: &RefCell<BTreeMap<String, Option<Motor>>>,
+    name: &str,
+    resources: &BTreeMap<String, Vec<u8>>,
+) -> Option<Motor> {
+    motors
+        .borrow_mut()
+        .entry(name.to_owned())
+        .or_insert_with(|| {
+            let bytes = resources.get(name)?;
+            Motor::of(&tore_formats::weapons::Weapon::parse(name, bytes).ok()?)
+        })
+        .to_owned()
 }
 
 /// The port a socket is bound on, 0 when it cannot say.

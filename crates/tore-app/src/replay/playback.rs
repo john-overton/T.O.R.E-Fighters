@@ -91,9 +91,26 @@ pub struct Playback {
     /// (slice P7b). A cache of the recording alone, so the blade angle at a
     /// tick does not depend on how the playhead got there.
     rotor_starts: Vec<BTreeMap<u32, f64>>,
+    /// The motor of each weapon record the recording registers, read from
+    /// the import ([`Playback::add_motors`]): a round draws its flame only
+    /// while its motor burns (bug B7). Without them no flame is drawn.
+    motors: BTreeMap<String, Option<crate::regen::Motor>>,
 }
 
 impl Playback {
+    /// Reads the motor of every weapon the recording registers that has
+    /// none yet, from the import `resources`.
+    pub fn add_motors(&mut self, resources: &BTreeMap<String, Vec<u8>>) {
+        for weapon in self.recording.weapons() {
+            self.motors.entry(weapon.source.clone()).or_insert_with(|| {
+                let bytes = resources.get(&weapon.source)?;
+                crate::regen::Motor::of(
+                    &tore_formats::weapons::Weapon::parse(&weapon.source, bytes).ok()?,
+                )
+            });
+        }
+    }
+
     pub fn new(recording: Arc<Recording>) -> Self {
         let first = recording.first_tick().unwrap_or(0);
         let last = recording.last_tick().unwrap_or(first);
@@ -110,6 +127,7 @@ impl Playback {
             smoke: None,
             vapor: None,
             rotor_starts: Vec::new(),
+            motors: BTreeMap::new(),
         }
     }
 
@@ -201,6 +219,16 @@ impl Playback {
         };
         let mut snapshot = convert::snapshot(frame, &playing, &self.presentation, &self.identities);
         snapshot.marks = convert::marks_at(&self.marks, frame.tick);
+        // The recorded age of each round dates its motor.
+        for (pose, state) in snapshot.projectiles.iter_mut().zip(&frame.projectiles) {
+            pose.powered = !pose.gun
+                && self
+                    .motors
+                    .get(&pose.weapon)
+                    .copied()
+                    .flatten()
+                    .is_some_and(|motor| motor.powered(u64::from(state.age)));
+        }
         if let Some(turns) = self.rotor_turns(tick) {
             for pose in std::iter::once(&mut snapshot.player).chain(&mut snapshot.targets) {
                 if pose.engine.rotor > 0.

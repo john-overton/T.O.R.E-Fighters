@@ -489,6 +489,7 @@ fn demo() {
             kind,
             position,
             duration_ticks,
+            scale: tore_replay::EffectSpawn::FULL_SCALE,
         };
         match tick {
             240 => frame.events.push(

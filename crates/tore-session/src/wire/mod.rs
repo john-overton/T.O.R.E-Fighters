@@ -168,8 +168,11 @@ pub fn path_words(path: Path) -> &'static str {
 /// (slice CL-AP); the front line in the surface digest (slice CL-FL); and
 /// the City flattened event (code 21) with the world checkpoint's city fill
 /// section (section 12), which carry the buildings ground bursts knocked
-/// flat (review fixes).
-pub const PROTOCOL_VERSION: u16 = 25;
+/// flat (review fixes). 26 since the bug-fix round's slice BF: the Effect
+/// event (code 11) carries the size it is drawn at, percent of its
+/// explosion type's (`tore_sim::combat::blast_scale`), as a one-bit flag and
+/// a byte when it is not 100, which a 25 game cannot read.
+pub const PROTOCOL_VERSION: u16 = 26;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

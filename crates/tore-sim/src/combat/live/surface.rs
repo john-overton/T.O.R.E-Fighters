@@ -420,7 +420,12 @@ impl State {
             {
                 self.marks.remove(oldest);
             }
-            self.mark(at, MarkKind::Fire, blast::CRASH_TICKS);
+            self.mark(
+                at,
+                MarkKind::Fire,
+                blast::CRASH_TICKS,
+                crate::combat::blast_scale::FULL,
+            );
         }
     }
 }

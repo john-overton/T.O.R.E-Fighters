@@ -657,7 +657,7 @@ is positive right wing down.
 | Aircraft | Position, attitude, velocity, airspeed, G, the 22 animated devices (including actual nozzle pitch/yaw, nacelle conversion, collective, gun mount poses and linked gun membership), engine heat, flags (engine, afterburner, airborne, on the ground, crashed, wreck gone, alive, ejected, and animated: whether anything moves the devices, since straight-flight fixtures keep the model's neutral pose), wreck phase, fuel (internal and external tanks, see [Versions and damage](#versions-and-damage)), pilot controls, the auxiliary body rates that thrust-vectoring paddles and plumes follow, hit points, regional damage and the failed structural section |
 | Projectiles | Owner, weapon, target, position, previous position, direction, speed, tracer, inbound on the player, age, and the seeker's state |
 | Debris and ejected pilots | Position and attitude or heading |
-| Effects and puffs | Only those released this tick; the viewer ages them itself. A hit, kill or ground strike stores its [explosion type](spec/explosions.md) in its effect code (64 to 87 hit, 96 to 119 kill, 128 to 151 ground, the type less 15 added); a crater is 160 plus its size and lasts for good; a crash-site fire is code 7; the crash-site column is puff kind 3, stored in its own byte; the viewer drifts every puff with the recorded wind, and each column puff also by the cone its release point gives it; replayed flare smoke drifts with the wind as in flight. Older builds read these codes as unknown kinds and skip them; recordings made before explosion types draw and sound their plain hit, kill or ground effect |
+| Effects and puffs | Only those released this tick; the viewer ages them itself. A hit, kill or ground strike stores its [explosion type](spec/explosions.md) in its effect code (64 to 87 hit, 96 to 119 kill, 128 to 151 ground, the type less 15 added); a crater is 160 plus its size and lasts for good; a crash-site fire is code 7; the crash-site column is puff kind 3, stored in its own byte; the viewer drifts every puff with the recorded wind, and each column puff also by the cone its release point gives it; replayed flare smoke drifts with the wind as in flight. Older builds read these codes as unknown kinds and skip them; recordings made before explosion types draw and sound their plain hit, kill or ground effect. An effect not drawn at its type's size keeps its scale in the effect scales section (id 10, [below](#versions-and-damage)) |
 | Surface objects | Hit points, when they change |
 | Surface units (format 3) | Each unit that follows a route: position and attitude every tick, and whether it is a wreck. A launcher's rails (every rail of the unit, when any changes) and a gun's spare magazines, when they change. The piece a parked aircraft's debris is. Standing units are in the rebuilt scenery and cost nothing |
 | Events and display trees | See [the vocabulary](../crates/tore-replay/src/vocab.rs) |
@@ -830,6 +830,22 @@ beyond them.
     `surface` field true; the unit joins the registry when first named, and
     its `surface.wreck` names the unit that destroyed it. Older recordings
     have none, as no unit fired at the ground before.
+- **Effect scales** (slice BF, 2026-10-12, no format number change): the
+  size each spawned effect is drawn at, percent of its explosion type's
+  ([size by weapon](spec/explosions.md#size-by-weapon)), in a new chunk
+  section, id 10, written only for the frames that spawn an effect not drawn
+  at 100: for each such frame its gap from the last, how many, and for each
+  its index among the frame's spawned effects and its scale byte (0 a dud's
+  inert puff). Both formats carry it. An older build skips the unknown
+  section, as it always has, and draws every explosion full size; a
+  recording made before it has none, and this build draws its explosions
+  full size too. A crater spawn's scale is its crater's drawn size, and a
+  crater of size 0 (code 160) is a gun round's pock mark, which an older
+  build draws as nothing. Craters and pock marks have no cap (John,
+  2026-10-12); a recording costs about 24 bytes a mark. The motor flame of a missile or rocket is not recorded:
+  the viewer dates each round's motor from its recorded age and the
+  weapon's record in the import, so a recording of any age draws the flame
+  only while the motor burns.
 - The air-to-ground round (slice RA) adds events and a weapon class and **no
   format change**: a recording is still format 3 with surface content and
   format 2 without, and both versions open unchanged. See

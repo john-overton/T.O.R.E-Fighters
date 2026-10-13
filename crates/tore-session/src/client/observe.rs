@@ -261,17 +261,19 @@ impl Client {
                 position: e.position,
                 ticks: (f64::from(e.ticks) - (render - f64::from(e.tick))).max(0.) as u16,
                 blast: e.blast,
+                scale: e.scale,
             })
             .collect();
         let marks = self
             .marks
             .iter()
             .filter(|(tick, ..)| f64::from(*tick) <= render)
-            .map(|(tick, kind, position)| MarkPose {
+            .map(|(tick, kind, position, scale)| MarkPose {
                 kind: *kind,
                 position: *position,
                 age: (render - f64::from(*tick)).max(0.) as u64,
                 strength: 1.,
+                scale: *scale,
             })
             .collect();
         let picture = RenderSnapshot {

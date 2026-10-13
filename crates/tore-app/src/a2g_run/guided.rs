@@ -196,6 +196,8 @@ pub(super) fn scene(
         target,
         owner,
         record: None,
+        scenes: super::scene_render::Plan::new(o.ai.render_scene.clone(), &o.scene_at),
+        motors: Default::default(),
     };
     let scene = scene.recording(o)?;
     let row = scene.target_row().ok_or("the target has no row")?;
@@ -288,7 +290,8 @@ impl Scene {
                 ..SeatInput::default()
             });
         }
-        self.recorded(|world, out| world.step(&inputs, out))
+        self.recorded(|world, out| world.step(&inputs, out))?;
+        super::scene_render::after_step(self)
     }
 
     fn sight(&self) -> Option<GuidedSight> {

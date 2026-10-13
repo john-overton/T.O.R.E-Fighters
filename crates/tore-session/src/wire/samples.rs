@@ -485,14 +485,29 @@ pub fn events() -> EventsSection {
             position: [1, -2, 3_000_000],
             ticks: 480,
             blast: Some(12),
+            scale: 100,
         },
         WireEvent::Mark {
             kind: MarkKind::Crater(2),
             position: [-5, 6, 7],
+            scale: 100,
         },
         WireEvent::Mark {
             kind: MarkKind::Fire,
             position: [0, 0, 0],
+            scale: 100,
+        },
+        // Protocol 26: a 2,000 lb bomb's crater at 159 percent and a 20 mm
+        // round's pock mark (size 0) at 50.
+        WireEvent::Mark {
+            kind: MarkKind::Crater(9),
+            position: [-50, 60, 70],
+            scale: 159,
+        },
+        WireEvent::Mark {
+            kind: MarkKind::Crater(0),
+            position: [5, 6, -7],
+            scale: 50,
         },
         WireEvent::GroundDestroyed { object: 1_000_123 },
         WireEvent::Countermeasure {
@@ -609,16 +624,49 @@ pub fn events() -> EventsSection {
             position: [4_096, 640_000, -96],
             ticks: 240,
             blast: Some(27),
+            scale: 100,
         },
         WireEvent::Effect {
             kind: EffectKind::Flak,
             position: [-4_096, 960_000, 96],
             ticks: 120,
             blast: Some(28),
+            scale: 100,
         },
         // Protocol 25: city fill buildings a ground burst knocked flat.
         WireEvent::CityFlattened {
             buildings: vec![7, 8, 9, 130, 499_999],
+        },
+        // Protocol 26: impacts drawn by weapon (bugs B8 to B10): a 20 mm
+        // hit at half size, a large strike at twice, a 2,000 lb bomb at 159
+        // percent and a dud's inert puff.
+        WireEvent::Effect {
+            kind: EffectKind::Hit,
+            position: [512, 32_000, -512],
+            ticks: 120,
+            blast: Some(18),
+            scale: 50,
+        },
+        WireEvent::Effect {
+            kind: EffectKind::Ground,
+            position: [-512, 0, 512],
+            ticks: 240,
+            blast: Some(22),
+            scale: 200,
+        },
+        WireEvent::Effect {
+            kind: EffectKind::Ground,
+            position: [1_024, 0, 1_024],
+            ticks: 240,
+            blast: Some(35),
+            scale: 159,
+        },
+        WireEvent::Effect {
+            kind: EffectKind::Ground,
+            position: [2_048, 0, 2_048],
+            ticks: 120,
+            blast: Some(15),
+            scale: 0,
         },
     ];
     EventsSection {
