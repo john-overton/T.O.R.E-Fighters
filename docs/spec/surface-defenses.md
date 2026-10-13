@@ -1087,13 +1087,13 @@ changed.
 
 | Question | Answer |
 | --- | --- |
-| Drawn? | Yes: each TROOPS unit draws a group of soldier sprites (six in the renders, the SOLDIER sprite sheet), standing on the ground, always facing the viewer; never absent. |
-| Visible at a pilot's range? | A man is 4 ft tall, a few pixels at 1,000 ft. Beyond 1,000 ft he is drawn larger by the distance over 1,000 ft, up to six times (24 ft) from 6,000 ft out, so a squad stays a few pixels tall as a dark group on a field (opinionated, agent, 2026-10-12; presentation only, the hit box is unchanged). Deck crew are not scaled. |
-| Hit box | The shape's contact volume: 30 ft wide, 6.6 ft tall, 12 ft deep, centred on the squad; 75 hit points. |
+| Drawn? | Yes: each TROOPS unit draws its shape, a group of flat textured soldier cards (the SOLDIER art) in fixed directions, so a card seen edge-on is a thin line; never absent. The shape is centred on the unit's origin, so the squad stands on its bottom, 3.3 ft up, like every ground object (slice GROUND, 2026-10-13; until then the soldiers stood waist deep; [grounding](../formats/objects-and-shapes.md#grounding-every-object-stands-on-the-bottom-of-its-shape)). |
+| Visible at a pilot's range? | A man is 4 ft tall, a few pixels at 1,000 ft. Beyond 1,000 ft a man (the SOLDIER sprite and the TROOPS cards alike) is drawn larger by the distance over 1,000 ft, up to three times from 3,000 ft out, growing up from his feet, which stay on the ground (opinionated: the boost agent, 2026-10-12; the 3x cap John, 2026-10-13, was 6x; presentation only, the hit box is unchanged). The squad's cards are drawn every frame for it, not in the standing scenery (agent decision, slice GROUND, 2026-10-13: until then the boost reached only sprites, so squads were never enlarged). Deck crew are not scaled. |
+| Hit box | The shape's contact volume: 30 ft wide, 6.6 ft tall, 12 ft deep, standing on the ground with the soldiers; 75 hit points. |
 | Killed by | Guns (the A-4E's Mk 12 kills a squad in a strafing pass; 155 rounds fired), bombs (an Mk 82 within its splash kills it), rockets and splash (an LAU-61 rocket 26 ft away took 2 hit points, so a pod's salvo is what kills), AAA and tank shells of the other side. Splash needs no hit: the collateral radius of the weapon applies to the squad as to any ground unit. |
-| After death | The unit's hit points are 0: it stops firing at once (no burst after the kill tick), the sprites vanish with their unit (the destroyed look of men, [Destroyed looks](#destroyed-looks): removed, no wreck), and its record's explosion plays. |
+| After death | The unit's hit points are 0: it stops firing at once (no burst after the kill tick), its record's explosion plays, and the squad's bodies lie where it stood: TROOPS.SH carries a damaged model (its `shape::DAMAGED_WORD` branch, 8 flat faces of fallen men, 0.3 ft high), which is drawn as its destroyed look, without fire ([Destroyed looks](#destroyed-looks); John, 2026-10-13: bodies only where retail has them). |
 | Counted | As a kill of a ground unit like every other (any destroyed combat target is recorded as a `Kill` for its shooter, and a flagged destroy target counts toward the objective). Online, retail scores no ground kills, so no score. |
-| Synced online | Like every surface unit: ids `0x5000_0000` and up, the host's destroyed events, the same hit points and vanish look on every client; no new wire field. |
+| Synced online | Like every surface unit: ids `0x5000_0000` and up, the host's destroyed events, the same hit points and destroyed look on every client; no new wire field. |
 
 The battery scenario `surface-squad-killable` kills one squad of `~QAPFAIR`
 with the A-4E's gun, with an F/A-18's Mk 82, and in the trace by `--kill-at`,
@@ -1809,14 +1809,14 @@ shape's F2 ground offset, which the records give in retail feet, take the same
 factor. Runways, bridges and roads keep the retail scale. The rule and its
 evidence: [placed object scale](../formats/objects-and-shapes.md#placed-object-scale-2026-10-10).
 
-A land unit (an NT that is not a ship, a structure or a man) stands on the
-lowest point of its shape, standing or moving, and its contact and hit box
-stand with it (fitted: a vehicle's shape origin is at its turret or rails,
-and for every land unit the lowest point equals the F2 ground offset within a
-unit; a T-80 drawn on its origin hid its hull in the ground). Since slice BG
-(B13, 2026-10-12) buildings do too, bunkers included: their lowest point also
-equals their F2 offset within 3 ft ([building
-grounding](../formats/objects-and-shapes.md#building-grounding-2026-10-12)).
+Every land unit stands on the lowest point of its shape, standing or moving,
+intact or wrecked, and its contact and hit box stand with it (fitted: a
+vehicle's shape origin is at its turret or rails, and for every land unit the
+lowest point equals the F2 ground offset within a unit; a T-80 drawn on its
+origin hid its hull in the ground). Since slice BG (B13, 2026-10-12)
+buildings do too, bunkers included, and since slice GROUND (2026-10-13) men,
+the GCI radar and every other structure: one rule for every ground object
+([grounding](../formats/objects-and-shapes.md#grounding-every-object-stands-on-the-bottom-of-its-shape)).
 Ships keep their waterline (Krivak F2 -100 against its geometry's -26).
 
 ### Shapes the reader learned
@@ -1845,7 +1845,8 @@ John accepted the recommended looks (12.4).
 | Other buildings (city and town blocks, houses, apartments, industry without a branch, sites, tents, crates) | A ruin generated from the intact shape: split, sunk to 6 to 30 percent of its height, its fallen roof partly charred; burns | fitted, agent decision (B16, 2026-10-12) |
 | Runways, roads, lots, crops, bridge ends, rocks | Stay as they stood; a runway keeps the craters of every weapon that hit it | runway B15; the rest agent decision (B16) |
 | Parked aircraft | The aircraft look: type 30 explosion, the crash crater (none on a deck), fire and smoke for 15 minutes, one fragment drawn with the type's own `_B` or `_D` shape | existing aircraft path |
-| Men, barrage zones | Removed | |
+| Men whose shape holds a damaged model (TROOPS) | The shape's own damaged copy, the men lying on the ground, on its own lowest point; no fire | retail shape (John, 2026-10-13) |
+| Other men (SOLDIER, RUNNER, EJECT: no damaged model in retail), barrage zones | Removed | retail has no body art for them |
 
 The explosion uses the unit's own type (21 ground, 35 ship, 15 men) and crater
 size on land, rather than one fitted value for all ground objects.
@@ -1921,7 +1922,9 @@ scorch). Craters last the mission; past 256 the oldest goes.
   target ([Aiming](#aiming)); no launcher elevates (no shape has a pitch
   part).
 - **Men** (SOLDIER) are viewer-facing sprites, 4 ft tall, upright on the
-  screen; they vanish with their unit.
+  screen; they vanish with their unit. The airfield squad (TROOPS) is flat
+  soldier cards that leave their bodies when killed. Both grow up to three
+  times larger at range, from their feet.
 - **Carriers** carry their island and deck parts from the FA.EXE carrier table
   (the catapult officer, the three deck tractors and the island; Wasp: one
   tractor and the island). Each part stands on the flight deck by its F2 ground

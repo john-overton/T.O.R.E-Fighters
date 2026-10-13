@@ -453,7 +453,47 @@ come from map-tied runways and stay as they were (validated: `--validate-ils`
 and ground-start, landing and parking probes give identical output before and
 after). Positions of every placed object are unchanged.
 
-## Building grounding (2026-10-12)
+## Grounding: every object stands on the bottom of its shape
+
+**The rule.** Every ground object, surface unit, man, wreck, ruin and parked
+aircraft stands with the lowest point of its drawn shape (faces and sprites,
+at the size it is drawn) on the ground. Only runways and pavement (their
+pavement plane), bridges and roads (the map's height at their origin) and
+ships (their waterline, the origin) keep their authored rule. A presentation
+scale-up, such as the far-man boost, grows from the feet and never sinks into
+the ground. One module decides and applies it, `tore_world::grounding`
+(`footing`, `bottom`, `lift_ft`, `placement_lift_ft`, `scaled_origin`), and
+every path that places or draws something on the ground goes through it: the
+layout and ground target placements (`terrain::Placements::stance`, which
+also sets the contact, collision and hit box), moving units, wrecks and
+ruins, the men's sprites and parked aircraft. Never ground an object any
+other way. (The city fill cuts its kit pieces base-centred, at the lowest
+point of their faces, the same rule.)
+
+**Why it kept coming back.** Until slice GROUND (2026-10-13) each path did
+its own grounding: the placement path stood land units and buildings on
+their lowest point but exempted men; wrecks and ruins used a faces-only
+helper; parked aircraft computed their own; and the far-man boost scaled a
+man about his origin rather than his feet. Each new kind of shape (B13's
+buildings, BD2's airfield squads) met a path that did not ground it. The
+airfield squad TROOPS (record SMLARMS gun) is a set of flat soldier cards
+centred on its origin, 3.3 ft below and 3.3 ft above it, so drawn on its
+origin every soldier stood waist deep; RUNNER (4.3 ft), EJECT (3.3 ft), the
+deck crew CATGUY placed on land (2 ft) and the GCI radar (17.3 ft) were sunk
+the same way. They now stand on their feet, and their hit boxes rise with
+them (deterministic on every machine, both ends build them from the same
+data).
+
+**The audit.** `tore-app --surface-dump --grounding [TYPE ...]` stands every
+OT, NT and PT of the import and the retail media on flat ground through the
+placement path (or `surface::parked::place`) and draws it through the
+scenery's own code: its faces, its hit box, and a man (sprites or cards) at
+300 ft and boosted (three times, the cap) at 6,000 ft. A type that stands on its bottom and draws more than
+0.05 ft below the ground or above it is listed as a problem; the battery
+scenario `surface-grounding` fails on any. On the retail data: 392 types,
+0 problems (on the base before this slice, 11: the five types above).
+
+### Building grounding (2026-10-12)
 
 Implementation, slice BG of the bug-fix round (John's report B13, "factory
 objects sit halfway in the ground").
@@ -462,7 +502,7 @@ objects sit halfway in the ground").
 base. `--surface-dump --grounding` lists every OT of the import and the
 retail media with its drawn shape's lowest and highest point about the
 origin (world feet at the drawn size), its F2 ground offset at that size and
-the lift below. On the retail data (167 OT types):
+the lift below. On the retail data (167 OT types; the audit now covers NT and PT too):
 
 | Shape | Lowest | Highest | Below the origin | F2 offset |
 | --- | --- | --- | --- | --- |
@@ -487,7 +527,8 @@ FACTD down to its roof, towns invisible.
 on the lowest point of its shape: the land surface units since the surface
 round, and now every OT that is not a runway (`_STRIPProc`, which keeps its
 pavement rule) and not map-tied (bridges and roads keep the map's height). One
-function, `tore_world::terrain::stands_on_lowest_point`, decides it, and
+function decides it (since slice GROUND, `tore_world::grounding::footing`; see
+[grounding](#grounding-every-object-stands-on-the-bottom-of-its-shape)), and
 `Placements::stance` applies it, so the drawn mesh, the contact box, the
 collision box and the hit box move together; a building's damaged variant
 (`~BNK5` and the others) stands on its own lowest point the same way. 126 of
@@ -658,8 +699,15 @@ are zero. Slice S2 reads that envelope; see
 [carriers, islands and deck crew](#carriers-islands-and-deck-crew-2026-10-10).
 
 SOLDIER.SH is one 7 by 12 unit sprite centred 6 units up, cut from rows 150
-to 199 of SOLDIER.PIC. `Billboard::face` turns it to a viewer; the static
-scenery build does not draw sprites yet.
+to 199 of SOLDIER.PIC. `Billboard::face` turns it to a viewer, its height
+spanning half either side of its centre, so his feet are on his origin. The
+scenery draws men's sprites every frame (`scenery::surface_art`). TROOPS.SH,
+the airfield squad, is not a sprite: it is flat textured soldier cards
+centred on its origin, so it stands 3.3 ft up
+([grounding](#grounding-every-object-stands-on-the-bottom-of-its-shape)).
+Its damage branch (`shape::DAMAGED_WORD`) is the squad fallen: 8 flat faces
+lying on the ground (heights -1 to 0 units), drawn when the squad is killed.
+SOLDIER, RUNNER and EJECT have no damage branch and no `~` variant.
 
 ### Size of surface units
 
@@ -875,8 +923,9 @@ lowest point, -57 units at 4 ft a unit; a T-80's -16 matches its lowest point
 at 1 ft a unit), so in game it takes the hull's real-size factor, a third,
 like the table offsets and the deck. Ships and the bunkers record offsets
 well below their geometry (Krivak -100 against a lowest point of -26 units,
-BNK5 -176 against -88), so land units alone stand on their lowest point in
-game ([drawing](../spec/surface-defenses.md#drawing)).
+BNK5 -176 against -88). In game everything but ships, runways, bridges and
+roads stands on its lowest point
+([grounding](#grounding-every-object-stands-on-the-bottom-of-its-shape)).
 
 ### Flight decks
 

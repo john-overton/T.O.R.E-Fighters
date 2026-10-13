@@ -36,13 +36,13 @@ Kurils (islands, mostly sea) stands every site, and a second run repeats the
 digests. `surface-area-engage` flies past the first area site of a Ukraine
 mission (heavy, seed 1, an SA-14) at 4,000 ft and expects it to launch.
 
-`surface-building-grounding` (B13, 2026-10-12) runs `--surface-dump
---grounding`: every OT the import and the retail media hold, with its shape's
-lowest and highest point and the lift that stands it on the ground. Buildings
-stand on their lowest point (the factory hall FACTD, 89 percent below its
-origin, is lifted 42.7 ft; the hangar 26.7 ft), and that point agrees with the
-shape's F2 ground offset within 3 ft; runways, bridges and roads are not
-lifted.
+`surface-grounding` (B13, 2026-10-12; slice GROUND, 2026-10-13) runs `--surface-dump
+--grounding`, the grounding audit: every OT, NT and PT the import and the retail media hold, stood on flat
+ground through the placement path and drawn through the scenery's own code (faces, the hit box, and a man's
+sprites or cards at 300 ft and boosted at 6,000 ft). Everything but runways, bridges, roads and ships stands on the
+bottom of its shape within 0.05 ft (the factory hall FACTD lifted 42.7 ft, the hangar 26.7 ft, the airfield
+squad TROOPS 3.3 ft), that bottom agrees with the shape's F2 ground offset within 3 ft, and bridges, roads
+and ships are not lifted.
 
 `surface-small-arms-airfield` flies a 400 kt, 300 ft pass over an airfield target's squads (B17, BD2): one
 squad at each experience, the squads around it at average and at ace, and a 1,000 ft, a 600 kt and a 1,500 ft
@@ -787,42 +787,59 @@ def area_engage_problems(output: str) -> list[str]:
 
 
 GROUNDING = re.compile(
-    r"^grounding: (\S+) shape \S+ size (\w+) low (-?[\d.]+) high (-?[\d.]+) below \d+% f2 (\S+) "
-    r"lift (-?[\d.]+) hp \S+$",
+    r"^grounding: (\S+) shape \S+ size (\w+) class \S+ footing (\w+) low (-?[\d.]+) high (-?[\d.]+) "
+    r"below \d+% f2 (\S+) lift (-?[\d.]+) drawn (\S+) box (\S+) near (\S+) far (\S+) hp \S+$",
     re.M,
 )
 
 
 def grounding_problems(output: str) -> list[str]:
+    """Every object stands on the bottom of its shape (docs/formats/objects-and-shapes.md, "Grounding")."""
     rows = {m.group(1): m for m in GROUNDING.finditer(output)}
     problems: list[str] = []
-    if len(rows) < 150:
-        problems.append(f"{len(rows)} OT types surveyed, want the retail data's 167")
+    for ext, want in [(".OT", 150), (".NT", 60), (".PT", 20)]:
+        n = sum(1 for name in rows if name.upper().endswith(ext))
+        if n < want:
+            problems.append(f"{n} {ext} types surveyed, want at least {want}")
     for name, m in rows.items():
-        low, lift, size, f2 = float(m.group(3)), float(m.group(6)), m.group(2), m.group(5)
-        tied = size == "MapTied"
-        if tied and lift != 0:
-            problems.append(f"{name}: a runway, bridge or road lifted {lift} ft")
-        if not tied and abs(lift - max(-low, 0.0)) > 0.11:
+        foot, low, high, f2, lift = m.group(3), float(m.group(4)), float(m.group(5)), m.group(6), float(m.group(7))
+        drawn, box, near, far = m.group(8), m.group(9), m.group(10), m.group(11)
+        if foot in ("MapHeight", "Waterline") and lift != 0:
+            problems.append(f"{name}: a {foot} type lifted {lift} ft")
+        if foot != "Bottom":
+            continue
+        if abs(lift + low) > 0.11:
             problems.append(f"{name}: lifted {lift} ft, its lowest point is {low} ft")
-        if not tied and f2 != "-" and low < 0 and abs(float(f2) - low) > 3.0:
+        checks = [("faces", drawn), ("man near", near), ("man far", far)]
+        if high - low >= 2:
+            checks.append(("hit box", box))
+        for what, value in checks:
+            if value != "-" and abs(float(value)) > 0.05:
+                problems.append(f"{name}: {what} bottom {value} ft above the ground")
+        if f2 != "-" and low < 0 and abs(float(f2) - low) > 3.0:
             problems.append(f"{name}: lowest point {low} ft is {abs(float(f2) - low):.1f} ft from its F2 offset {f2}")
-    for name, want in [("FACTD.OT", 42.7), ("HANGR.OT", 26.7), ("FACT1.OT", 162.7)]:
+    for name, want in [("FACTD.OT", 42.7), ("HANGR.OT", 26.7), ("FACT1.OT", 162.7), ("TROOPS.NT", 3.3),
+                       ("GCI.NT", 17.3)]:
         m = rows.get(name)
-        if m is None or abs(float(m.group(6)) - want) > 0.11:
-            problems.append(f"{name}: lift {m and m.group(6)}, want {want} ft")
+        if m is None or abs(float(m.group(7)) - want) > 0.11:
+            problems.append(f"{name}: lift {m and m.group(7)}, want {want} ft")
+    for man in ("SOLDIER.NT", "TROOPS.NT"):
+        m = rows.get(man)
+        if m is None or "-" in (m.group(10), m.group(11)):
+            problems.append(f"{man}: no man drawn near and far")
     return problems
 
 
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
-            name="surface-building-grounding", lane="ai",
+            name="surface-grounding", lane="ai",
             args=["--surface-dump", "--grounding"], timeout=300,
-            expect=[r"^grounding: \d+ types, \d+ lifted$"],
+            expect=[r"^grounding: \d+ types, \d+ lifted, 0 problems$"],
+            forbid=[r"^grounding: problem "],
             check=grounding_problems,
-            notes="B13: buildings stand on their lowest point. Reads the OT records the import lacks from the "
-                  "retail media.",
+            notes="B13 and GROUND: every object, unit, man and parked aircraft stands on the bottom of its shape, "
+                  "drawn and hit box alike. Reads the records the import lacks from the retail media.",
         ),
         Scenario(
             name="surface-resolve-all", lane="ai",

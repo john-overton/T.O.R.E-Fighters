@@ -16,8 +16,11 @@
 //! Scenes: `flak` (the KS-19 and KS-12 flak of North Vietnam), `zsu23` and
 //! `zsu57` (the Ukraine city's guns), `troops` (an airfield's small arms,
 //! B17), `squadkill` (the same squad killed as it opens fire, BD2), `sam` (its
-//! SA-6 launching), `wreck` (a destroyed ZSU-23 smoking) and `map` (the flight
-//! map over it). With none named, all of them.
+//! SA-6 launching), `wreck` (a destroyed ZSU-23 smoking), `map` (the flight
+//! map over it), and `ground`, `groundtank` and `groundwreck` (units, the
+//! airfield squad, a parked aircraft and a wreck seen from the ground beside
+//! them, by day: do they stand on it? Slice GROUND). With none named, all of
+//! them.
 use crate::{
     AppResult,
     aircraft::Airframe,
@@ -90,9 +93,25 @@ enum View {
     Wreck,
     /// The flight map.
     Map,
+    /// Standing on the ground this many feet from the scene's unit, looking
+    /// at where it stands (alive or its wreck): is it on the ground?
+    Close(f64),
+    /// The same beside the first unit of this type (any side).
+    Unit(&'static str, f64),
+    /// The same beside the first parked aircraft.
+    Parked(f64),
 }
 impl View {
-    fn name(self) -> &'static str {
+    fn name(self) -> String {
+        match self {
+            View::Close(range) => format!("close{range:.0}"),
+            View::Unit(stem, range) => format!("{}{range:.0}", stem.to_ascii_lowercase()),
+            View::Parked(range) => format!("parked{range:.0}"),
+            other => other.fixed_name().into(),
+        }
+    }
+
+    fn fixed_name(self) -> &'static str {
         match self {
             View::Flak => "wide",
             View::Jet => "jet",
@@ -104,6 +123,7 @@ impl View {
             View::Trail => "trail",
             View::Wreck => "wreck",
             View::Map => "map",
+            View::Close(_) | View::Unit(..) | View::Parked(_) => "stand",
         }
     }
 }
@@ -134,7 +154,7 @@ struct Scene {
     kill: bool,
 }
 
-const SCENES: [Scene; 8] = [
+const SCENES: [Scene; 11] = [
     Scene {
         name: "flak",
         theater: "TVIET",
@@ -287,7 +307,106 @@ const SCENES: [Scene; 8] = [
         muzzle_class: 0,
         kill: false,
     },
+    // Grounding (slice GROUND, 2026-10-13): the airfield squad close and
+    // far, and the airfield's other units and a parked aircraft, each seen
+    // from the ground beside it.
+    Scene {
+        name: "ground",
+        theater: "APA",
+        stem: "QAPFAIR",
+        defenses: (3, 3),
+        over: "TROOPS",
+        index: 0,
+        altitude: 400.,
+        speed_kt: 350.,
+        pass: 600.,
+        from_nm: 2.,
+        seconds: 30.,
+        trigger: Trigger::Time(3.),
+        frames: &[0],
+        views: &[
+            View::Close(30.),
+            View::Far,
+            View::Unit("TRUCK", 90.),
+            View::Unit("SA6", 110.),
+            View::Unit("ZSU23", 80.),
+            View::Unit("M163", 80.),
+            View::Parked(110.),
+        ],
+        fov: 30.,
+        muzzle_class: 3,
+        kill: false,
+    },
+    Scene {
+        name: "groundtank",
+        theater: "UKR",
+        stem: "QUCITY",
+        defenses: (3, 3),
+        over: "T72",
+        index: 0,
+        altitude: 3_000.,
+        speed_kt: 420.,
+        pass: 1_500.,
+        from_nm: 3.,
+        seconds: 30.,
+        trigger: Trigger::Time(3.),
+        frames: &[0],
+        views: &[
+            View::Close(90.),
+            View::Unit("T80", 90.),
+            View::Unit("2S6", 90.),
+        ],
+        fov: 30.,
+        muzzle_class: 0,
+        kill: false,
+    },
+    Scene {
+        name: "groundwreck",
+        theater: "UKR",
+        stem: "QUCITY",
+        defenses: (3, 3),
+        over: "ZSU23",
+        index: 0,
+        altitude: 3_000.,
+        speed_kt: 420.,
+        pass: 1_500.,
+        from_nm: 3.,
+        seconds: 60.,
+        trigger: Trigger::Time(3.),
+        frames: &[1_200],
+        views: &[View::Close(70.)],
+        fov: 30.,
+        muzzle_class: 0,
+        kill: true,
+    },
 ];
+
+/// The camera standing `range` feet from a ground spot `at`, a little above
+/// it, looking at it: whether what stands there meets the ground.
+fn standing_view(at: Vector, range: f64, fov: f64) -> Camera {
+    let eye = [
+        at[0] - range * 0.6,
+        at[1] + (range * 0.08).max(3.),
+        at[2] + range * 0.8,
+    ];
+    look_at(eye, [at[0], at[1] + range * 0.06, at[2]], fov)
+}
+
+/// The ground under the first unit of type `stem` (any side).
+fn unit_spot(world: &World, stem: &str) -> Option<Vector> {
+    let unit = world.terrain.surface.units.iter().find(|u| {
+        u.resource
+            .split('.')
+            .next()
+            .is_some_and(|s| s.eq_ignore_ascii_case(stem))
+    })?;
+    let [x, y, z] = unit.position.map(f64::from);
+    Some([
+        x,
+        f64::from(world.terrain.height(x as f32, z as f32)) + y,
+        z,
+    ])
+}
 
 /// The light a sheet is drawn in: a name, the weather condition and the clock.
 const LIGHTS: [(&str, Condition, Option<[i32; 2]>); 3] = [
@@ -300,7 +419,7 @@ pub fn run() -> AppResult<()> {
     let args: Vec<String> = std::env::args().skip(2).collect();
     let Some((out, names)) = args.split_first() else {
         return Err(
-            "--surface-fx-preview OUTPUT_DIRECTORY [flak|zsu23|zsu57|troops|squadkill|sam|map ...]"
+            "--surface-fx-preview OUTPUT_DIRECTORY [flak|zsu23|zsu57|troops|squadkill|sam|wreck|map|ground|groundtank|groundwreck ...]"
                 .into(),
         );
     };
@@ -313,8 +432,11 @@ pub fn run() -> AppResult<()> {
         .filter(|s| names.is_empty() || names.iter().any(|n| n == s.name))
     {
         for (light, condition, time) in LIGHTS {
-            // The map has no light of its own: one sheet.
-            if matches!(scene.views, [View::Map]) && light != "day" {
+            // The map has no light of its own: one sheet; the grounding
+            // scenes are drawn by day.
+            if (matches!(scene.views, [View::Map]) || scene.name.starts_with("ground"))
+                && light != "day"
+            {
                 continue;
             }
             render(scene, light, condition, time, &resources, &assets, out)?;
@@ -701,6 +823,26 @@ fn render(
                         state.position[2] - 80.,
                     ];
                     look_at(eye, state.position, 42.)
+                }
+                View::Close(range) => {
+                    // The unit's own ground, not its weapons' height.
+                    let [x, _, z] = center;
+                    let at = [x, f64::from(world.terrain.height(x as f32, z as f32)), z];
+                    standing_view(at, range, scene.fov)
+                }
+                View::Unit(stem, range) => {
+                    standing_view(unit_spot(&world, stem).unwrap_or(center), range, scene.fov)
+                }
+                View::Parked(range) => {
+                    let height =
+                        |x: f64, z: f64| f64::from(world.terrain.height(x as f32, z as f32));
+                    let (poses, _) = tore_world::surface::parked::place(
+                        resources,
+                        &world.terrain.surface,
+                        &height,
+                    );
+                    let at = poses.first().map_or(center, |pose| pose.ground);
+                    standing_view(at, range, scene.fov)
                 }
                 View::Map => unreachable!(),
             };

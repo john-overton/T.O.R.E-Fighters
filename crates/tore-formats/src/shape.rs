@@ -272,6 +272,26 @@ pub const fn loaded_count_word(hardpoint: u8) -> usize {
 /// module address and is not listed in `state_words`.
 pub const DAMAGED_WORD: usize = 0xfffe_0000;
 
+/// Whether the shape `data` carries a damaged model inside itself: drawn
+/// with [`DAMAGED_WORD`] set, its faces differ from the intact ones (a
+/// hangar's broken roof, the airfield squad's fallen men). `false` when it
+/// does not project.
+pub fn has_damage_branch(data: &[u8]) -> bool {
+    let damaged = BTreeMap::from([(DAMAGED_WORD, 1)]);
+    let (Ok(plain), Ok(after)) = (
+        Shape::with_export_state(data, &BTreeMap::new()),
+        Shape::with_export_state(data, &damaged),
+    ) else {
+        return false;
+    };
+    plain.faces.len() != after.faces.len()
+        || plain
+            .faces
+            .iter()
+            .zip(&after.faces)
+            .any(|(a, b)| a.positions != b.positions || a.texture != b.texture)
+}
+
 /// Synthetic state key for the deck crew sprite frame (CATGUY.SH): the value
 /// `_CATGUYDraw@4` would return, the frame index (0 to 10) in the high 16
 /// bits and the sprite row (0 to 5) in the low 16. Absent means frame 0,

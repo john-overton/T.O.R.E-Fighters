@@ -20,6 +20,7 @@ pub mod crew_voice;
 pub mod datalink;
 pub mod debrief;
 pub mod frame;
+pub mod grounding;
 pub mod mission;
 pub mod mission_layout;
 pub mod radio_calls;

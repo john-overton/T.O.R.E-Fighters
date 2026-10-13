@@ -234,12 +234,21 @@ impl<'a> Catalog<'a> {
         Ok(entry)
     }
 
-    /// Ships swap to their `_A` shape; men and invisible units vanish; the
-    /// GCI radar (a structure) is removed like a building; every other
-    /// vehicle, SAM launcher and gun leaves the `DEST.OT` wreck.
+    /// Ships swap to their `_A` shape; men whose shape holds a damaged
+    /// model leave it (the squad's bodies), other men and invisible units
+    /// vanish; the GCI radar (a structure) is removed like a building; every
+    /// other vehicle, SAM launcher and gun leaves the `DEST.OT` wreck.
     fn unit_look(&self, unit: &SurfaceUnit) -> DestroyedLook {
-        if unit.shape.is_none() || unit.class & class::OTHER != 0 {
+        let Some(shape) = &unit.shape else {
             return DestroyedLook::Vanish;
+        };
+        if unit.class & class::OTHER != 0 {
+            return match self.resources.get(shape) {
+                Some(bytes) if tore_formats::shape::has_damage_branch(bytes) => {
+                    DestroyedLook::Bodies(shape.clone())
+                }
+                _ => DestroyedLook::Vanish,
+            };
         }
         if unit.class & class::SHIP != 0 {
             return unit
