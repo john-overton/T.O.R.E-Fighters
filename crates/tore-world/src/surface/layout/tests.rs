@@ -1439,3 +1439,229 @@ fn a_front_line_keeps_its_lines_in_sight_of_each_other() {
         }
     }
 }
+
+// Area defenses (B23): a mission with no ground target and a strength above
+// none scatters the enemy's SAM sites and guns over Red's side.
+
+/// Blue at the south edge, Red at the north, the midpoint at the middle of
+/// the 128-cell grid; Red's side runs north from `MID`.
+fn area_front() -> Front {
+    Front {
+        blue: [i64::from(MID), 8 * 8192],
+        red: [i64::from(MID), 120 * 8192],
+    }
+}
+
+fn area(aaa: usize, sam: usize, seed: u32) -> crate::surface::resolve::AreaDefense {
+    crate::surface::resolve::AreaDefense {
+        aaa,
+        sam,
+        seed,
+        enemy_nationality: 10,
+        night_stealth: false,
+    }
+}
+
+/// A Red runway north of the band's middle, as layout object 900.
+fn red_runway() -> Placed {
+    Placed {
+        id: l(900).0,
+        at: [i64::from(MID) + 200_000, i64::from(MID) + 400_000],
+        heading: 0,
+        footprint: Footprint {
+            min: [-200, 0],
+            max: [200, 6_000],
+        },
+    }
+}
+
+fn area_surface(settings: crate::surface::resolve::AreaDefense) -> Surface {
+    let mut s = surface(Vec::new(), None);
+    s.object_sides.insert(l(900).0, ENEMY_SIDE);
+    s.area = Some(settings);
+    s
+}
+
+fn area_units(s: &Surface) -> Vec<&Unit> {
+    area::units(s).collect()
+}
+
+/// Feet past the midpoint toward Red (north).
+fn north_of_mid(at: [i64; 2]) -> i64 {
+    at[1] - i64::from(MID)
+}
+
+#[test]
+fn area_defenses_are_seeded_and_the_same_for_the_same_seed() {
+    let grid = Grid::land(128);
+    let ground = Ground::new(&grid, Vec::new(), vec![red_runway()], Some(area_front()));
+    let build = |seed| {
+        let mut s = area_surface(area(3, 3, seed));
+        lay(&mut s, &ground, &[]);
+        s
+    };
+    let (a, b, c) = (build(11), build(11), build(12));
+    assert!(!area_units(&a).is_empty());
+    assert_eq!(positions(&a), positions(&b));
+    assert_eq!(a.digest(), b.digest());
+    assert_ne!(positions(&a), positions(&c));
+    assert_ne!(a.digest(), c.digest());
+    // The settings are in the digest even where they place the same units.
+    let mut d = build(11);
+    d.area.as_mut().unwrap().night_stealth = true;
+    assert_ne!(a.digest(), d.digest());
+}
+
+#[test]
+fn area_counts_follow_the_strengths() {
+    let grid = Grid::land(128);
+    let ground = Ground::new(&grid, Vec::new(), vec![red_runway()], Some(area_front()));
+    for (aaa, &aaa_sites) in AREA_AAA_SITES.iter().enumerate() {
+        for (sam, &sam_sites) in AREA_SAM_SITES.iter().enumerate() {
+            let mut s = area_surface(area(aaa, sam, 5));
+            lay(&mut s, &ground, &[]);
+            let units = area_units(&s);
+            let count = |c: &[&str]| {
+                units
+                    .iter()
+                    .filter(|u| c.contains(&u.resource.as_str()))
+                    .count()
+            };
+            let sams = count(&[
+                "SA6.NT", "SA7.NT", "SA9.NT", "SA13.NT", "SA14.NT", "SA15.NT", "2S6.NT",
+            ]);
+            let guns = count(&["ZSU23.NT", "ZSU57.NT"]);
+            assert_eq!(sams, sam_sites * AREA_SITE_UNITS, "{aaa} {sam}");
+            assert_eq!(guns, aaa_sites * AREA_SITE_UNITS, "{aaa} {sam}");
+            assert_eq!(units.len(), sams + guns);
+            for unit in &units {
+                assert_eq!(unit.id.range(), IdRange::AreaDefense);
+                assert_eq!((unit.side, unit.nationality), (ENEMY_SIDE, Some(10 | 0x80)));
+                assert!(!unit.is_target() && unit.route.is_none());
+                assert_eq!(s.side_of(unit.id.0), ENEMY_SIDE);
+            }
+            // No supply truck, no front line, no starts: just the sites.
+            assert!(s.trucks.is_empty() && s.starts.is_none());
+        }
+    }
+}
+
+#[test]
+fn area_sites_stand_in_the_band_or_by_a_red_airfield() {
+    let grid = Grid::land(128);
+    let runway = red_runway();
+    let ground = Ground::new(&grid, Vec::new(), vec![runway], Some(area_front()));
+    let [near, far] = AREA_DEPTH_NM.map(|nm| nm * NM_FT);
+    let slack = AREA_MEMBER_FT[1] + 1;
+    for seed in 1..=8 {
+        let mut s = area_surface(area(3, 3, seed));
+        lay(&mut s, &ground, &[]);
+        let mut by_field = 0;
+        for unit in area_units(&s) {
+            let p = at(unit);
+            let depth = north_of_mid(p);
+            assert!(depth > 0, "seed {seed}: {p:?} is on Blue's side");
+            let in_band = depth >= near - slack && depth <= far + slack;
+            let d = distance2(p, runway.at);
+            let by_airfield = in_band_of(d, AREA_AIRFIELD_NM.map(|nm| nm * NM_FT), slack);
+            assert!(in_band || by_airfield, "seed {seed}: {p:?} depth {depth}");
+            by_field += usize::from(by_airfield && !in_band);
+            assert!(!runway.within(p, AREA_RUNWAY_CLEARANCE_FT));
+        }
+        // One site in three of each kind guards the airfield (two of six
+        // SAM sites, four of twelve gun sites), two units each.
+        assert_eq!(by_field, 12, "seed {seed}");
+    }
+}
+
+fn in_band_of(d2: i64, [lo, hi]: [i64; 2], slack: i64) -> bool {
+    d2 >= (lo - slack).max(0).pow(2) && d2 <= (hi + slack).pow(2)
+}
+
+#[test]
+fn area_units_keep_off_water_slopes_towns_and_runways() {
+    // A sea across the band's lower half, a hill to the east, a town.
+    let mut grid = Grid::land(128);
+    for col in 0..128 {
+        for row in 66..80 {
+            grid.set(col, row, ground::WATER_CLASS);
+        }
+    }
+    for row in 0..128 {
+        for col in 90..100 {
+            let at = row * 128 + col;
+            grid.cells[at].elevation = if col % 2 == 0 { 1 } else { 9 };
+        }
+    }
+    let town = Placed {
+        id: l(5).0,
+        at: [i64::from(MID) - 100_000, i64::from(MID) + 200_000],
+        heading: 0,
+        footprint: Footprint {
+            min: [-3_000, -3_000],
+            max: [3_000, 3_000],
+        },
+    };
+    let ground = Ground::new(&grid, vec![town], vec![red_runway()], Some(area_front()));
+    for seed in 1..=6 {
+        let mut s = area_surface(area(3, 3, seed));
+        lay(&mut s, &ground, &[]);
+        assert!(!area_units(&s).is_empty());
+        for unit in area_units(&s) {
+            let p = at(unit);
+            assert!(!ground.water(p), "seed {seed}: {p:?} on water");
+            assert!(
+                ground.level(p, LEVEL_UNITS),
+                "seed {seed}: {p:?} on a slope"
+            );
+            assert!(!town.within(p, AREA_OBJECT_CLEARANCE_FT), "{p:?} in town");
+            assert!(!red_runway().within(p, AREA_RUNWAY_CLEARANCE_FT));
+        }
+    }
+}
+
+#[test]
+fn an_area_sa6_site_gets_its_radar_and_its_own_battery() {
+    let grid = Grid::land(128);
+    let ground = Ground::new(&grid, Vec::new(), Vec::new(), Some(area_front()));
+    // Only the SA-6 can be placed, so every SAM site is one.
+    let missing = [
+        "SA7.NT", "SA9.NT", "SA13.NT", "SA14.NT", "SA15.NT", "2S6.NT",
+    ];
+    let mut s = area_surface(area(0, 1, 3));
+    lay(&mut s, &ground, &missing);
+    let launchers: Vec<UnitId> = area_units(&s)
+        .iter()
+        .filter(|u| u.resource == "SA6.NT")
+        .map(|u| u.id)
+        .collect();
+    assert_eq!(launchers.len(), 4);
+    assert_eq!(s.batteries.len(), 2);
+    for battery in &s.batteries {
+        assert_eq!(battery.system, BatterySystem::Sa6);
+        assert!(battery.radar_added && battery.truck.is_none());
+        assert_eq!(battery.launchers.len(), 2);
+        assert!(battery.launchers.iter().all(|id| launchers.contains(id)));
+        let radar = s.unit(battery.radar).unwrap();
+        assert_eq!(radar.side, ENEMY_SIDE);
+    }
+}
+
+#[test]
+fn no_area_defenses_without_a_front_with_a_target_or_at_none() {
+    let grid = Grid::land(128);
+    let no_front = Ground::new(&grid, Vec::new(), Vec::new(), None);
+    let mut s = area_surface(area(3, 3, 1));
+    lay(&mut s, &no_front, &[]);
+    assert!(area_units(&s).is_empty());
+    assert!(s.layout_notes.iter().any(|n| n.contains("no front")));
+    let ground = Ground::new(&grid, Vec::new(), Vec::new(), Some(area_front()));
+    let mut none = area_surface(area(0, 0, 1));
+    lay(&mut none, &ground, &[]);
+    assert!(area_units(&none).is_empty());
+    // With a ground target the defenses are its own: never both.
+    let mut both = surface(site_units(), Some(target(1, JITTER_ONLY)));
+    both.area = Some(area(3, 3, 1));
+    lay(&mut both, &ground, &[]);
+    assert!(area_units(&both).is_empty());
+}

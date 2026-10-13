@@ -55,6 +55,9 @@ pub const BATTERY_RADAR_BASE: u32 = 0x5C00_0000;
 /// First id of the front line's units (`0x5E00_0000 + n`, `n` in the order
 /// the layout adds them: Blue's, then Red's).
 pub const FRONT_LINE_BASE: u32 = 0x5E00_0000;
+/// First id of the enemy area defenses of a mission with no ground target
+/// (`0x5F00_0000 + n`, `n` in placement order: SAM sites, then guns; B23).
+pub const AREA_DEFENSE_BASE: u32 = 0x5F00_0000;
 /// One past the last surface unit id.
 pub const SURFACE_UNIT_END: u32 = 0x6000_0000;
 /// First id of the shots surface units fire (SAMs and shells), a counter of
@@ -84,6 +87,9 @@ pub enum IdRange {
     /// A unit of the Quick Mission front line, where Blue and Red ground
     /// forces stand in contact.
     FrontLine,
+    /// An enemy area defense of a mission with no ground target: a SAM
+    /// launcher or a gun standing on Red's side of the front.
+    AreaDefense,
     /// Not a surface id.
     Other,
 }
@@ -107,7 +113,11 @@ impl UnitId {
     }
     /// The id of the `n`th front line unit.
     pub fn front_line(n: u32) -> Option<Self> {
-        Self::within(FRONT_LINE_BASE, SURFACE_UNIT_END, n)
+        Self::within(FRONT_LINE_BASE, AREA_DEFENSE_BASE, n)
+    }
+    /// The id of the `n`th area defense unit.
+    pub fn area_defense(n: u32) -> Option<Self> {
+        Self::within(AREA_DEFENSE_BASE, SURFACE_UNIT_END, n)
     }
     fn within(base: u32, end: u32, n: u32) -> Option<Self> {
         base.checked_add(n).filter(|id| *id < end).map(Self)
@@ -118,7 +128,8 @@ impl UnitId {
             SURFACE_UNIT_BASE..SUPPLY_TRUCK_BASE => IdRange::Template,
             SUPPLY_TRUCK_BASE..BATTERY_RADAR_BASE => IdRange::SupplyTruck,
             BATTERY_RADAR_BASE..FRONT_LINE_BASE => IdRange::BatteryRadar,
-            FRONT_LINE_BASE..SURFACE_UNIT_END => IdRange::FrontLine,
+            FRONT_LINE_BASE..AREA_DEFENSE_BASE => IdRange::FrontLine,
+            AREA_DEFENSE_BASE..SURFACE_UNIT_END => IdRange::AreaDefense,
             _ => IdRange::Other,
         }
     }
@@ -317,6 +328,9 @@ pub struct Surface {
     /// are in the same frame as the units.
     pub courses: BTreeMap<UnitId, movement::Course>,
     pub template: Option<TemplateSite>,
+    /// The enemy area defenses' settings, for a Quick Mission with no ground
+    /// target and a strength above none (B23); the layout places them.
+    pub area: Option<resolve::AreaDefense>,
     /// The side of every scene object by id: units and owned layout
     /// placements alike. Absent ids are neutral.
     pub object_sides: BTreeMap<u32, Side>,
@@ -476,6 +490,16 @@ impl Surface {
                 }
             }
             None => h.u8(0),
+        }
+        // Fed only when set, so every digest without area defenses is the
+        // one it always was.
+        if let Some(area) = &self.area {
+            h.bytes(b"area");
+            h.u32(area.aaa as u32);
+            h.u32(area.sam as u32);
+            h.u32(area.seed);
+            h.u32(area.enemy_nationality as u32);
+            h.u8(u8::from(area.night_stealth));
         }
         h.finish()
     }

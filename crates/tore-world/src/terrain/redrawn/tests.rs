@@ -257,7 +257,7 @@ fn redrawn_terrain(
 ) -> WorldResult<Terrain> {
     let mut terrain = Terrain::for_mission(map, "UKR", Some(0), &Overrides::default())?;
     terrain.static_manifest.clear();
-    terrain.build_airport_scene(map, "UKR", None, plans)?;
+    terrain.build_airport_scene(map, "UKR", None, None, plans)?;
     Ok(terrain)
 }
 

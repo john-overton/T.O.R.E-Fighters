@@ -146,6 +146,11 @@ pub struct World {
     /// separation (and so the starts). `None` for a flight with no ground
     /// target, and for every recording before format 3.
     pub ground_target: Option<GroundTarget>,
+    /// The enemy area defenses the flight had: a Quick Mission with no
+    /// ground target and an AAA or SAM strength above none (format 3), so a
+    /// replay rebuilds the same SAM sites and guns. `None` for every other
+    /// flight, and for every recording made before them.
+    pub area_defense: Option<AreaDefense>,
     /// Which airfield scene the flight was flown on (format 3). 0 is the
     /// retail airfields, and is what every recording before this field has.
     /// A build that redraws the airports gives the redrawn scene a number
@@ -191,12 +196,28 @@ pub struct GroundTarget {
     pub separation_nm: u32,
 }
 
+/// The enemy area defenses of a flight with no ground target, as the world
+/// needs them to rebuild the same sites.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct AreaDefense {
+    /// AAA and SAM strengths, 0 (none) to 3 (heavy).
+    pub aaa: u8,
+    pub sam: u8,
+    /// The mission's surface seed.
+    pub seed: u32,
+    /// The enemy nationality's index in the creator's list.
+    pub enemy_nationality: u8,
+    /// The night rule with a stealth aircraft in a friendly wing.
+    pub night_stealth: bool,
+}
+
 impl World {
     /// Whether the recording needs format 3 to be written: it carries the
     /// ground target, a redrawn airfield scene, a city fill scene or
     /// surface tracks.
     pub fn needs_surface_format(&self) -> bool {
         self.ground_target.is_some()
+            || self.area_defense.is_some()
             || self.airfield_scene != 0
             || self.city_fill_scene != 0
             || self.surface

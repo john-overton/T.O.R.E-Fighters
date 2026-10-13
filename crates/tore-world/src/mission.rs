@@ -647,8 +647,10 @@ pub struct MissionSpec {
     /// `ground-target QUCOL`, absent when `None`.
     pub ground_target: Option<String>,
     /// How heavily the target's AAA guns (field 31) and SAM sites (field 32)
-    /// are manned. Only with a ground target. Text form `defenses aaa heavy
-    /// sam moderate`, written only with a target and a level above none.
+    /// are manned. With no ground target they set how many enemy SAM sites
+    /// and guns stand on Red's side of the front ([`Self::area_defenses`]).
+    /// Text form `defenses aaa heavy sam moderate`, written only with a
+    /// level above none.
     pub aaa: Defense,
     pub sam: Defense,
     /// The seed of everything the surface layout rolls (which slots are
@@ -710,6 +712,19 @@ impl MissionSpec {
             surface_seed: 0,
             enemy_nationality: default_enemy_nationality(theater),
         }
+    }
+
+    /// Enemy area defenses (B23, John 2026-10-12): no ground target, and an
+    /// AAA or SAM strength above none. The layout scatters the enemy's SAM
+    /// sites and guns over Red's side of the front.
+    pub fn area_defenses(&self) -> bool {
+        self.ground_target.is_none() && (self.aaa != Defense::None || self.sam != Defense::None)
+    }
+
+    /// The surface layout rolls something from the seed: a ground target,
+    /// or area defenses. Only then is a `surface-seed` drawn.
+    pub fn lays_out_surface(&self) -> bool {
+        self.ground_target.is_some() || self.area_defenses()
     }
 
     /// The player's aircraft: friendly wing 1's.
@@ -921,8 +936,6 @@ impl MissionSpec {
                     )
                 });
             }
-        } else if self.aaa != Defense::None || self.sam != Defense::None {
-            return refuse("the AAA and SAM defenses need a `ground-target`".into());
         }
         if self.enemy_nationality >= NATIONALITIES {
             return refuse(format!(
@@ -1137,16 +1150,17 @@ impl MissionSpec {
             }
         }
         // The surface layout's settings, written only when set so a mission
-        // without a ground target reads as it always did.
+        // without a ground target or defenses reads as it always did. With
+        // no target the defenses are the enemy's area defenses (B23).
         if let Some(target) = &self.ground_target {
             line(format!("ground-target {target}"));
-            if self.aaa != Defense::None || self.sam != Defense::None {
-                line(format!(
-                    "defenses aaa {} sam {}",
-                    self.aaa.name(),
-                    self.sam.name()
-                ));
-            }
+        }
+        if self.aaa != Defense::None || self.sam != Defense::None {
+            line(format!(
+                "defenses aaa {} sam {}",
+                self.aaa.name(),
+                self.sam.name()
+            ));
         }
         if self.surface_seed != 0 {
             line(format!("surface-seed {}", self.surface_seed));
@@ -2959,10 +2973,10 @@ mod tests {
         assert!(target("ground-target QCSCUD\n").contains("not a ground target of UKR"));
         assert!(target("ground-target QUNOTH\n").contains("not a ground target"));
         assert!(target("ground-target\n").contains("expected `ground-target TEMPLATE`"));
-        assert!(
-            target("defenses aaa heavy sam none\n").contains("need a `ground-target`"),
-            "defenses need a target"
-        );
+        // Defenses without a target are the enemy's area defenses (B23).
+        let area = MissionSpec::from_text(&format!("{BASE}defenses aaa heavy sam none\n")).unwrap();
+        assert!(area.area_defenses() && area.lays_out_surface());
+        assert_eq!(MissionSpec::from_text(&area.to_text()).unwrap(), area);
         let with = |text: &str| refused(&format!("{BASE}ground-target QUCOL\n{text}"));
         assert!(with("defenses aaa heavily sam none\n").contains("not a defense level"));
         assert!(with("defenses sam heavy aaa none\n").contains("expected `defenses aaa"));
@@ -2976,8 +2990,9 @@ mod tests {
         // Built in code, the same rules hold.
         let mut spec = MissionSpec::new("UKR", AircraftId::F18);
         spec.sam = Defense::Light;
-        assert!(spec.validate().is_err());
+        assert!(spec.validate().is_ok() && spec.area_defenses());
         spec.sam = Defense::None;
+        assert!(!spec.area_defenses() && !spec.lays_out_surface());
         spec.enemy_nationality = 60;
         assert!(spec.validate().is_err());
     }

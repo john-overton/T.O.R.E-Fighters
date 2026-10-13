@@ -734,3 +734,62 @@ fn the_hawk_radar_draws_srdr2_with_the_straight_flush_record() {
     assert!(hawk_radar_definition(&without).is_none());
     assert!(Catalog::new(&without).entry(HAWK_RADAR).is_err());
 }
+
+/// A Quick Mission with no ground target and heavy AAA and SAM strengths
+/// (B23): the enemy's area defenses stand on Red's side, the same on a
+/// single-player build and an open (networked) one, as combat targets.
+#[test]
+fn a_mission_with_no_target_gets_the_enemys_area_defenses() {
+    let r = surface_resources();
+    let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
+    spec.aaa = crate::mission::Defense::Heavy;
+    spec.sam = crate::mission::Defense::Heavy;
+    spec.surface_seed = 7;
+    assert!(spec.area_defenses());
+    let single = World::new(&spec, &r, Seating::SinglePlayer).unwrap();
+    let open = World::new(&spec, &r, Seating::Open).unwrap();
+    let surface = &single.terrain.surface;
+    assert!(surface.template.is_none() && surface.starts.is_none());
+    assert_eq!(
+        surface.area,
+        Some(resolve::AreaDefense {
+            aaa: 3,
+            sam: 3,
+            seed: 7,
+            enemy_nationality: usize::from(spec.enemy_nationality),
+            night_stealth: false,
+        })
+    );
+    let area: Vec<&Unit> = layout::area::units(surface).collect();
+    let wanted = (layout::AREA_SAM_SITES[3] + layout::AREA_AAA_SITES[3]) * layout::AREA_SITE_UNITS;
+    assert_eq!(area.len(), wanted, "{:?}", surface.layout_notes);
+    for unit in &area {
+        assert_eq!(unit.side, ENEMY_SIDE);
+        assert!(!unit.is_target());
+        assert!(
+            single
+                .combat
+                .state
+                .targets
+                .iter()
+                .any(|t| t.id == unit.id.0),
+            "{:#x} is no combat target",
+            unit.id.0
+        );
+    }
+    assert_eq!(surface.digest(), open.terrain.surface.digest());
+    // Another seed, other places.
+    spec.surface_seed = 8;
+    let other = World::new(&spec, &r, Seating::SinglePlayer).unwrap();
+    assert_ne!(surface.digest(), other.terrain.surface.digest());
+    // At none, or with a ground target, there are none.
+    spec.aaa = crate::mission::Defense::None;
+    spec.sam = crate::mission::Defense::None;
+    let none = World::new(&spec, &r, Seating::SinglePlayer).unwrap();
+    assert!(none.terrain.surface.area.is_none());
+    assert_eq!(layout::area::units(&none.terrain.surface).count(), 0);
+    let with_target = crate::test_support::surface::spec_with_target(&target("QUCITY", 3, 3, 7));
+    let targeted = World::new(&with_target, &r, Seating::SinglePlayer).unwrap();
+    assert!(targeted.terrain.surface.area.is_none());
+    assert_eq!(layout::area::units(&targeted.terrain.surface).count(), 0);
+}

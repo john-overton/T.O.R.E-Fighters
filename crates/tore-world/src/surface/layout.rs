@@ -19,6 +19,9 @@
 //!   the target.
 //! - **Front line.** A few Blue and Red ground units stand in contact a
 //!   few miles from the targets, so a surface battle is visible.
+//! - **Area defenses.** With no ground target, the creator's AAA and SAM
+//!   strengths scatter enemy SAM sites and guns over Red's side of the
+//!   front ([`area`]).
 //!
 //! Everything comes from the mission's surface seed through
 //! [`super::resolve::Stream`] (one stream per template, object and purpose)
@@ -26,6 +29,7 @@
 //! so every machine places every unit on the same foot. Object sizes come
 //! from the placed scale (`terrain::placed_shape_scale`) through
 //! [`TypeInfo`]; nothing here assumes one.
+pub mod area;
 mod batteries;
 mod front;
 pub mod ground;
@@ -171,6 +175,44 @@ pub const FRONT_EYE_FT: i64 = 10;
 /// The equipment group Blue's front draws from: the Western list (group 0).
 pub const FRONT_BLUE_GROUP: usize = 0;
 
+// Area defenses (docs/spec/surface-defenses.md, "Area defenses"): John,
+// 2026-10-12 (B23) asked for enemy AAA and SAMs with no objective, on Red's
+// side of the front 10 to 60 nm deep with extra cover near Red airfields,
+// counted from the creator's strengths; the numbers are fitted, agent.
+/// Depth of a band site past the front's midpoint toward Red, nm.
+pub const AREA_DEPTH_NM: [i64; 2] = [10, 60];
+/// When the band holds no place for a site (an island theater's band is
+/// mostly sea), it stands this deep instead, nm.
+pub const AREA_FALLBACK_DEPTH_NM: [i64; 2] = [10, 120];
+/// Red airfields this deep or less, nm, get the airfield cover.
+pub const AREA_AIRFIELD_DEPTH_NM: i64 = 100;
+/// SAM sites and AAA sites by strength (none, light, moderate, heavy).
+pub const AREA_SAM_SITES: [usize; 4] = [0, 2, 4, 6];
+pub const AREA_AAA_SITES: [usize; 4] = [0, 4, 8, 12];
+/// Launchers or guns per site, all of one type.
+pub const AREA_SITE_UNITS: usize = 2;
+/// Every this many sites of a kind, the first included, one guards a Red
+/// airfield instead of standing in the band.
+pub const AREA_AIRFIELD_EVERY: usize = 3;
+/// An airfield site stands this far from its runway's origin, nm.
+pub const AREA_AIRFIELD_NM: [i64; 2] = [2, 5];
+/// Sites keep this far apart, nm.
+pub const AREA_SITE_SPACING_NM: i64 = 3;
+/// Candidate centres per site; the first that holds every unit wins.
+pub const AREA_CANDIDATES: usize = 96;
+/// A site's units stand in this ring around its centre, feet, at least
+/// [`AREA_MEMBER_GAP_FT`] apart beyond their footprints.
+pub const AREA_MEMBER_FT: [i64; 2] = [150, 600];
+pub const AREA_MEMBER_GAP_FT: i64 = 150;
+/// Every area unit keeps this far, plus its own radius, from every layout
+/// object (towns, buildings, airfield objects), feet.
+pub const AREA_OBJECT_CLEARANCE_FT: i64 = 2_000;
+/// And this far from every runway, feet (1 nm: past the aprons and
+/// taxiways the redrawn airports add).
+pub const AREA_RUNWAY_CLEARANCE_FT: i64 = NM_FT;
+/// Every site stays this many grid cells inside the map.
+pub const AREA_EDGE_CELLS: i64 = 2;
+
 /// Which of the seeded variations a layout applies. All are on for every
 /// mission; the preview tools turn them off to show the retail spot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -282,6 +324,10 @@ pub fn place(surface: &mut Surface, inputs: &mut Inputs<'_, '_>) {
     };
     let mut added = Vec::new();
     let mut notes = Vec::new();
+    // Area defenses join the surface before the batteries form, so a SAM
+    // site gets its radar.
+    let area = area::add(surface, inputs, &obstacles, &mut notes);
+    commit(surface, area);
     let mut batteries =
         batteries::form(surface, inputs, &frames, &obstacles, &mut added, &mut notes);
     let trucks = supply_trucks::add(
@@ -486,6 +532,24 @@ fn finish(surface: &mut Surface, added: Vec<Added>, trucks: Vec<super::SupplyTru
             placement.angles = unit.angles;
         }
     }
+    commit(surface, added);
+    let mut all: Vec<super::SupplyTruck> = surface
+        .trucks
+        .iter()
+        .filter(|t| !t.added)
+        .cloned()
+        .chain(trucks)
+        .collect();
+    all.sort_by_key(|t| t.id);
+    surface.trucks = all;
+}
+
+/// The added units join the units, the placements and the sides, all kept
+/// in id order.
+fn commit(surface: &mut Surface, added: Vec<Added>) {
+    if added.is_empty() {
+        return;
+    }
     for Added { unit, source } in added {
         if unit.side != tore_sim::combat::live::NO_SIDE {
             surface.object_sides.insert(unit.id.0, unit.side);
@@ -517,15 +581,6 @@ fn finish(surface: &mut Surface, added: Vec<Added>, trucks: Vec<super::SupplyTru
     }
     surface.units.sort_by_key(|unit| unit.id);
     surface.placements.sort_by_key(|(id, _)| *id);
-    let mut all: Vec<super::SupplyTruck> = surface
-        .trucks
-        .iter()
-        .filter(|t| !t.added)
-        .cloned()
-        .chain(trucks)
-        .collect();
-    all.sort_by_key(|t| t.id);
-    surface.trucks = all;
 }
 
 #[cfg(test)]

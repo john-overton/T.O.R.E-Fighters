@@ -230,6 +230,9 @@ pub struct Recorded {
     /// (template, defenses, seed, nationality, separation and so the starts)
     /// rebuilds exactly.
     pub target: Option<crate::surface::resolve::GroundTarget>,
+    /// The enemy area defenses the flight had (no ground target, B23), so
+    /// the same sites rebuild.
+    pub area: Option<crate::surface::resolve::AreaDefense>,
 }
 
 /// The imported layout of one theater with the definitions and shapes its
@@ -443,11 +446,23 @@ impl SurfaceSite {
         theater: &Theater,
         target: Option<&crate::surface::resolve::GroundTarget>,
     ) -> WorldResult<crate::surface::Surface> {
+        self.place_with(resources, theater, target, None)
+    }
+
+    /// [`Self::place`] with the enemy area defenses of a mission with no
+    /// ground target.
+    pub fn place_with(
+        &self,
+        resources: &dyn ResourceSource,
+        theater: &Theater,
+        target: Option<&crate::surface::resolve::GroundTarget>,
+        area: Option<&crate::surface::resolve::AreaDefense>,
+    ) -> WorldResult<crate::surface::Surface> {
         use crate::surface::{
             catalog::Catalog,
             layout::{self, Inputs},
         };
-        let mut surface = Terrain::resolve_surface(resources, &self.sources.layout, target)?;
+        let mut surface = Terrain::resolve_surface(resources, &self.sources.layout, target, area)?;
         let mut types = type_infos(resources, &self.sources);
         let ground = surface_ground(theater, &self.sources, &mut types);
         let mut catalog = Catalog::new(resources);
@@ -484,6 +499,19 @@ impl SurfaceSite {
         let mut types = type_infos(resources, &self.sources);
         let ground = surface_ground(theater, &self.sources, &mut types);
         crate::surface::layout::audit(surface, &ground, &mut types)
+    }
+
+    /// [`crate::surface::layout::area::audit`] for a surface this site
+    /// placed: the area defenses' own rules.
+    pub fn audit_area(
+        &self,
+        resources: &dyn ResourceSource,
+        theater: &Theater,
+        surface: &crate::surface::Surface,
+    ) -> Vec<String> {
+        let mut types = type_infos(resources, &self.sources);
+        let ground = surface_ground(theater, &self.sources, &mut types);
+        crate::surface::layout::area::audit(surface, &ground, &mut types)
     }
 
     /// [`crate::surface::layout::class_audit`] for a surface this site
@@ -928,7 +956,7 @@ impl Terrain {
         condition: Option<usize>,
         overrides: &Overrides,
     ) -> WorldResult<Self> {
-        Self::build(resources, code, condition, None, overrides, None)
+        Self::build(resources, code, condition, None, overrides, None, None)
     }
 
     /// [`Self::for_mission`] with the Quick Mission ground target, whose
@@ -940,7 +968,20 @@ impl Terrain {
         overrides: &Overrides,
         target: Option<&crate::surface::resolve::GroundTarget>,
     ) -> WorldResult<Self> {
-        Self::build(resources, code, condition, None, overrides, target)
+        Self::build(resources, code, condition, None, overrides, target, None)
+    }
+
+    /// [`Self::for_mission_with`] with the enemy area defenses of a Quick
+    /// Mission with no ground target (B23).
+    pub fn for_mission_surface(
+        resources: &dyn ResourceSource,
+        code: &str,
+        condition: Option<usize>,
+        overrides: &Overrides,
+        target: Option<&crate::surface::resolve::GroundTarget>,
+        area: Option<&crate::surface::resolve::AreaDefense>,
+    ) -> WorldResult<Self> {
+        Self::build(resources, code, condition, None, overrides, target, area)
     }
 
     /// Rebuilds the world a mission recording was flown in from its recorded,
@@ -956,6 +997,7 @@ impl Terrain {
             Some(recorded),
             &Overrides::default(),
             recorded.target.as_ref(),
+            recorded.area.as_ref(),
         )
     }
 
@@ -966,6 +1008,7 @@ impl Terrain {
         recorded: Option<&Recorded>,
         overrides: &Overrides,
         target: Option<&crate::surface::resolve::GroundTarget>,
+        area: Option<&crate::surface::resolve::AreaDefense>,
     ) -> WorldResult<Self> {
         let required = |n: &str| {
             resources
@@ -1077,7 +1120,13 @@ impl Terrain {
         };
         out.redrawn_airports = recorded.map_or(overrides.redrawn_airports, |r| r.redrawn_airports);
         let plans = redrawn::Plans::new(out.redrawn_airports)?;
-        out.build_airport_scene(resources, code.trim_end_matches(".MM"), target, &plans)?;
+        out.build_airport_scene(
+            resources,
+            code.trim_end_matches(".MM"),
+            target,
+            area,
+            &plans,
+        )?;
         if recorded.map_or(overrides.city_fill, |r| r.city_fill) {
             let cap = match recorded {
                 Some(_) => None,
@@ -1101,13 +1150,14 @@ impl Terrain {
         resources: &dyn ResourceSource,
         code: &str,
         target: Option<&crate::surface::resolve::GroundTarget>,
+        area: Option<&crate::surface::resolve::AreaDefense>,
         plans: &redrawn::Plans,
     ) -> WorldResult<()> {
         use tore_sim::airport::{
             Airport, Allegiance, OrientedBox, Runway, SourceKey, StaticObject,
         };
         let mut sources = Placements::load(resources, code)?;
-        self.surface = Self::resolve_surface(resources, &sources.layout, target)?;
+        self.surface = Self::resolve_surface(resources, &sources.layout, target, area)?;
         self.place_surface(resources, &sources, code);
         // Experiment AP1: redrawn airports move and add their buildings
         // after the surface has placed, so its layout is the retail one.
@@ -1373,6 +1423,7 @@ impl Terrain {
         resources: &dyn ResourceSource,
         layout: &tore_formats::mission::Layout,
         target: Option<&crate::surface::resolve::GroundTarget>,
+        area: Option<&crate::surface::resolve::AreaDefense>,
     ) -> WorldResult<crate::surface::Surface> {
         use crate::surface::{catalog::Catalog, resolve};
         let mut catalog = Catalog::new(resources);
@@ -1405,6 +1456,10 @@ impl Terrain {
         };
         let mut surface = resolve::surface(base, template)?;
         surface.unresolved = unresolved;
+        // Area defenses only without a ground target (never both).
+        if surface.template.is_none() && surface.unresolved.is_none() {
+            surface.area = area.cloned();
+        }
         // The units that follow a route (Quick Mission columns and ships).
         for unit in surface.units.iter().filter(|unit| unit.route.is_some()) {
             if let Ok(entry) = catalog.entry(&unit.resource)
