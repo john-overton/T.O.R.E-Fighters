@@ -37,7 +37,9 @@
 //! along the runway nearest the focus, then steps `--burn` seconds (at
 //! least 12), to show the craters a bombed runway keeps. `--focus near:ITEM` frames only
 //! the one ITEM nearest the template (`near:object:BR1MID.OT`). `--time 22:00` starts the mission
-//! at night.
+//! at night. `--flatten FEET` knocks the city fill's buildings within FEET of
+//! the focus flat so they burn (nr-fx2), and `--frames N` times N more frames
+//! of each view.
 use crate::{AppResult, camera::Camera, reel::Gpu, scenery::Scenery, surface_dump};
 use std::path::Path;
 use tore_formats::aircraft::AircraftId;
@@ -73,6 +75,11 @@ struct Options {
     time: Option<[i32; 2]>,
     /// Mk 82s dropped along the runway nearest the focus (B16 craters).
     bomb_runway: usize,
+    /// Knock every city fill building within this many feet of the focus
+    /// flat, so it burns (nr-fx2).
+    flatten: Option<f64>,
+    /// Extra frames drawn per view to time them (nr-fx2).
+    frames: usize,
 }
 
 fn options() -> AppResult<Options> {
@@ -99,6 +106,8 @@ fn options() -> AppResult<Options> {
         no_aim: false,
         time: None,
         bomb_runway: 0,
+        flatten: None,
+        frames: 0,
     };
     let list = |text: String| -> Vec<String> {
         text.split(',')
@@ -113,6 +122,8 @@ fn options() -> AppResult<Options> {
             "--surface-seed" => o.seed = next()?.parse()?,
             "--seconds" => o.seconds = next()?.parse()?,
             "--surface-only" => o.surface_only = true,
+            "--flatten" => o.flatten = Some(next()?.parse()?),
+            "--frames" => o.frames = next()?.parse()?,
             "--kill" => o.kill = list(next()?),
             "--burn" => o.burn = next()?.parse()?,
             "--rails" => o.rails = Some(next()?.parse()?),
@@ -516,6 +527,16 @@ pub fn run() -> AppResult<()> {
             false,
         )?;
     }
+    if let Some(feet) = o.flatten {
+        match &world.terrain.city_fill {
+            Some(fill) => println!(
+                "surface-scene: flattened {} of {} city fill buildings within {feet:.0} ft",
+                fill.flatten(center, feet),
+                fill.len()
+            ),
+            None => println!("surface-scene: this theater has no city fill"),
+        }
+    }
     if o.bomb_runway > 0 {
         bomb_runway(&mut world, &resources, center, o.bomb_runway)?;
         step(
@@ -634,6 +655,19 @@ pub fn run() -> AppResult<()> {
         gpu.sim
             .emitters(&gpu.queue, &world.combat.state.devices, &[], &guns);
         let pixels = gpu.pixels(&camera, &world.terrain, &scenery)?;
+        if o.frames > 0 {
+            // Frame cost with the scene as drawn: the average of more frames
+            // of the same view, readback included.
+            let start = std::time::Instant::now();
+            for _ in 0..o.frames {
+                gpu.pixels(&camera, &world.terrain, &scenery)?;
+            }
+            println!(
+                "surface-scene: {view} frame {:.2} ms over {} frames",
+                start.elapsed().as_secs_f64() * 1e3 / o.frames as f64,
+                o.frames
+            );
+        }
         let path = out.join(format!("{tag}-{view}.png"));
         std::fs::write(
             &path,

@@ -488,7 +488,8 @@ impl Scenery {
         }
         // The parked aircraft, gear down at the aircraft convention, where
         // the terrain placed them (docs/spec/surface-defenses.md, "Parked
-        // aircraft"). Like every placement they hide when destroyed.
+        // aircraft"). When destroyed they become a burnt hulk of their own
+        // shape ([`surface_art::SurfaceArt::add_parked`]).
         let parked = parked_shapes(resources, terrain);
         drawn.extend(parked.iter().map(|(pose, shape)| {
             (
@@ -566,8 +567,8 @@ impl Scenery {
                     geometry.lines.extend(parts.lines);
                 }
                 None => {
-                    if let Some((pose, _)) = parked.iter().find(|(pose, _)| pose.id.0 == id) {
-                        art.add_parked(&mut build, id, &pose.shape, pose.scale);
+                    if let Some((_, shape)) = parked.iter().find(|(pose, _)| pose.id.0 == id) {
+                        art.add_parked(id, shape, &stand);
                     }
                 }
             }

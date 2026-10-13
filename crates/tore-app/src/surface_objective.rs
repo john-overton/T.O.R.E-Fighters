@@ -135,12 +135,13 @@ fn wreck_lines(world: &tore_world::world::World, scenery: &mut crate::scenery::S
             .get(&object.id)
             .copied()
             .unwrap_or(wreck::FireClass::None);
-        let fire = marks.iter().any(|m| {
+        let fire_mark = marks.iter().find(|m| {
             m.kind == MarkKind::Fire
                 && (m.position[0] - row.position[0]).hypot(m.position[2] - row.position[2])
                     <= crate::surface_fx::wreck::FIRE_NEAR_FT
                         .max(object.bounds.half[0].max(object.bounds.half[2]))
         });
+        let fire = fire_mark.is_some();
         if class.burns() {
             should += 1;
         }
@@ -148,11 +149,18 @@ fn wreck_lines(world: &tore_world::world::World, scenery: &mut crate::scenery::S
             burning += 1;
         }
         println!(
-            "surface-objective: end wreck {:#010x} {} drawn {}{drawn} class {class:?} fire {}",
+            "surface-objective: end wreck {:#010x} {} drawn {}{drawn} class {class:?} fire {}{}",
             object.id,
             object.object_type,
             if moving { "moving " } else { "" },
-            if fire { "yes" } else { "no" }
+            if fire { "yes" } else { "no" },
+            // A building's or fixed object's fire burns for the whole
+            // mission, a vehicle's for 15 minutes (nr-fx2).
+            match fire_mark {
+                Some(m) if m.ticks == tore_sim::combat::blast::FOREVER => " forever",
+                Some(_) => " timed",
+                None => "",
+            }
         );
     }
     let runway_craters = marks

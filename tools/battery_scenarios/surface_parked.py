@@ -7,7 +7,8 @@ Super Etendard targets and four other fighters stand gear down on the ground
 as surface-role targets on the ground (radar cannot see them); a Mk 82, an
 AGM-65G (whose seeker locks the aircraft first) and a gun burst destroy three
 Super Etendards, each with damage by section, a type-30 family explosion, a
-crash crater and a fire, a thrown fragment and a kill in the Fighter row. No
+scorch and a 15 minute fire, no thrown fragment (the aircraft stays as a burnt hulk,
+which `--art` shows the picture drawing, nr-fx2) and a kill in the Fighter row. No
 parked aircraft stands inside another object's weapon contact: the airfield
 meets weapons at its pavement. Bombs splash what stands near, so a strike that
 destroys a building beside an aircraft is allowed its other explosion. On the
@@ -26,6 +27,7 @@ AIRCRAFT = re.compile(
     r"ground (\S+) (\S+) (\S+) terrain (\S+) origin-up (\S+) heading (\S+) deck (\S+) target (\d) side (\d+)$",
     re.M,
 )
+HULK = re.compile(r"^surface-parked: hulk (0x[0-9a-f]+) hp (\d+) drawn (\d+)$", re.M)
 OUTCOME = re.compile(
     r"^surface-parked: outcome (0x[0-9a-f]+) (\S+) hp (\d+)/(\d+) sections (\S+) structural (\S+) "
     r"craters (\d+) fires (\d+) fragment (\d)$",
@@ -55,8 +57,8 @@ def _killed(output: str, ids: list[str], problems: list[str]) -> None:
         sections = [int(v) for v in o.group(5).split(",")]
         if sum(1 for v in sections if v > 0) == 0 or o.group(6) == "None":
             problems.append(f"{id} took no damage by section: {o.group(5)} {o.group(6)}")
-        if (o.group(7), o.group(8), o.group(9)) != ("1", "1", "1"):
-            problems.append(f"{id} left craters {o.group(7)} fires {o.group(8)} fragment {o.group(9)}, want 1 1 1")
+        if (o.group(7), o.group(8), o.group(9)) != ("1", "1", "0"):
+            problems.append(f"{id} left craters {o.group(7)} fires {o.group(8)} fragment {o.group(9)}, want 1 1 0 (a scorch, a fire, no piece)")
         k = kills.get(id)
         if k is None:
             problems.append(f"no kill for {id}")
@@ -93,6 +95,13 @@ def lffair_problems(output: str) -> list[str]:
     if "maverick 0x50000009 accepts 1 seeker-lock 1" not in output:
         problems.append("the Maverick's seeker did not lock the parked Super Etendard")
     _killed(output, ["0x50000008", "0x50000009", "0x5000000a"], problems)
+    # nr-fx2: a destroyed aircraft is drawn as a burnt hulk, never hidden; a
+    # standing one is drawn by the static batch (its own look, not counted here).
+    hulks = {m.group(1): (int(m.group(2)), int(m.group(3))) for m in HULK.finditer(output)}
+    for id in ["0x50000008", "0x50000009", "0x5000000a"]:
+        hp, drawn = hulks.get(id, (None, 0))
+        if hp != 0 or drawn <= 0:
+            problems.append(f"{id}: destroyed hp {hp} draws {drawn} floats, want a hulk")
     return problems
 
 
@@ -154,7 +163,7 @@ def scenarios() -> list[Scenario]:
     return [
         Scenario(
             name="surface-parked-aircraft", lane="ai",
-            args=["--surface-parked", "LFA", "QLFFAIR",
+            args=["--surface-parked", "LFA", "QLFFAIR", "--art",
                   "--strike", "8:bomb", "--strike", "9:maverick", "--strike", "10:gun"],
             timeout=300,
             then=[

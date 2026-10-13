@@ -166,6 +166,7 @@ pub fn run() -> AppResult<()> {
     let mut classes = false;
     let mut grounding = false;
     let mut damage = false;
+    let mut faces = false;
     let mut seeds = None;
     let mut variation = Variation::ON;
     let mut separation = DUMP_SEPARATION_NM;
@@ -190,6 +191,7 @@ pub fn run() -> AppResult<()> {
             "--classes" => classes = true,
             "--grounding" => grounding = true,
             "--damage" => damage = true,
+            "--faces" => faces = true,
             "--no-jitter" => variation.jitter = false,
             "--no-relocate" => variation.relocate = false,
             "--no-front" => variation.front = false,
@@ -223,6 +225,9 @@ pub fn run() -> AppResult<()> {
     }
     if damage {
         return damage_survey(&resources, &positional);
+    }
+    if faces {
+        return face_survey(&resources, &positional);
     }
     let [theater, rest @ ..] = positional.as_slice() else {
         return Err("--surface-dump THEATER [STEM] [--defenses AAA SAM] [--surface-seed N] [--enemy-nationality N] [--night-stealth] [--no-jitter] [--no-relocate] | --all [--seeds N] | --sweep [--seeds N] [THEATER...] | --starts [THEATER...]".into());
@@ -329,6 +334,76 @@ fn grounding_survey(resources: &BTreeMap<String, Vec<u8>>, named: &[String]) -> 
         );
     }
     println!("grounding: {total} types, {lifted} lifted");
+    Ok(())
+}
+
+/// `--surface-dump --faces TYPE [...]`: every face of each named object
+/// type's main shape, intact and damaged, with its texture, whether the
+/// texture exists in the pack, its colour slots and its extent, so a
+/// missing texture shows (the bridge's magenta patch, nr-fx2).
+fn face_survey(resources: &BTreeMap<String, Vec<u8>>, named: &[String]) -> AppResult<()> {
+    use tore_formats::shape::{DAMAGED_WORD, Shape};
+    for name in named {
+        let upper = name.to_ascii_uppercase();
+        let upper = if upper.contains('.') {
+            upper
+        } else {
+            format!("{upper}.OT")
+        };
+        let Some(bytes) = resources.get(&upper) else {
+            println!("faces: {upper} not in the pack");
+            continue;
+        };
+        let Some(shape_name) = tore_formats::static_object::Definition::parse(bytes)?.main_shape
+        else {
+            println!("faces: {upper} no shape");
+            continue;
+        };
+        let Some(shape_bytes) = resources.get(&shape_name) else {
+            println!("faces: {upper} shape {shape_name} missing");
+            continue;
+        };
+        for (label, state) in [
+            ("intact", BTreeMap::new()),
+            ("damaged", BTreeMap::from([(DAMAGED_WORD, 1)])),
+        ] {
+            let shape = Shape::with_export_state(shape_bytes, &state)?;
+            println!(
+                "faces: {upper} {shape_name} {label}: {} faces",
+                shape.faces.len()
+            );
+            for (n, face) in shape.faces.iter().enumerate() {
+                let mut low = [f32::MAX; 3];
+                let mut high = [f32::MIN; 3];
+                for p in &face.positions {
+                    for i in 0..3 {
+                        low[i] = low[i].min(p[i]);
+                        high[i] = high[i].max(p[i]);
+                    }
+                }
+                let texture = if face.texture.is_empty() {
+                    "-".to_owned()
+                } else {
+                    let found = resources.contains_key(&face.texture.to_ascii_uppercase());
+                    format!("{}{}", face.texture, if found { "" } else { " MISSING" })
+                };
+                println!(
+                    "faces:   {n:3} points {} texture {texture} uv {} colors {:?} fog {:?} subtype {} from ({:.0} {:.0} {:.0}) to ({:.0} {:.0} {:.0})",
+                    face.positions.len(),
+                    face.uv.len(),
+                    face.colors,
+                    face.fog,
+                    face.subtype,
+                    low[0],
+                    low[1],
+                    low[2],
+                    high[0],
+                    high[1],
+                    high[2]
+                );
+            }
+        }
+    }
     Ok(())
 }
 

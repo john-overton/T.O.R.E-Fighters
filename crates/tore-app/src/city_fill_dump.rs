@@ -33,6 +33,11 @@
 //!   so the change between frames is the transition alone: it prints, per
 //!   step, how many pixels changed by more than 40 of 255 (a pop) and the
 //!   mean change, and writes `NAME-0000.png` on.
+//! - `--burn NAME@X,Z,HEIGHT,PITCH,YAW,RADIUS,FRAMES` (nr-fx2) knocks every
+//!   fill building within RADIUS ft of X, Z flat, draws the spot as
+//!   `NAME-burn.png` (the buildings burn, [`crate::city_fires`]) and times
+//!   FRAMES frames at `--size` with the fires drawn and with them off, the
+//!   stress case for the burning city's frame cost.
 //! - `--bench` flies the offscreen camera FRAMES frames along HEADING from
 //!   X, Z at HEIGHT ft above the ground, FEET_PER_FRAME apart, at `--size`
 //!   (3840 by 2160 by default), fill off then on, and prints each pass's
@@ -129,6 +134,77 @@ fn use_gpu(scenery: &Scenery, gpu: &mut Option<Gpu>) -> AppResult<()> {
         }
         None => *gpu = Some(pollster::block_on(Gpu::new(scenery))?),
     }
+    Ok(())
+}
+
+/// `--city-fires THEATER X,Z,RADIUS [--repeat N]` (nr-fx2): builds the
+/// theater with its city fill, knocks every building within RADIUS ft of
+/// X, Z flat, and prints what the burning city draws ([`crate::city_fires`]):
+/// how many burn, how many fire sprites and smoke puffs a frame holds from a
+/// camera over the spot and from ones far off, and the CPU time of a frame
+/// (averaged over `--repeat` frames, 200 by default). No window, no GPU.
+pub fn fires() -> AppResult<()> {
+    let args: Vec<String> = std::env::args().skip(2).collect();
+    let usage = "--city-fires THEATER X,Z,RADIUS [--repeat N]";
+    let theater = args.first().ok_or(usage)?.clone();
+    let [x, z, radius] = numbers(args.get(1).ok_or(usage)?)?[..] else {
+        return Err(usage.into());
+    };
+    let mut repeat = 200usize;
+    if let Some(at) = args.iter().position(|a| a == "--repeat") {
+        repeat = args.get(at + 1).ok_or(usage)?.parse()?;
+    }
+    let assets = crate::reel::load_assets()?;
+    let world = Terrain::for_mission(
+        &assets.theater_resources,
+        &theater,
+        Some(0),
+        &overrides(true)?,
+    )?;
+    let Some(fill) = world.city_fill.clone() else {
+        println!("city-fires: {theater} has no city fill");
+        return Ok(());
+    };
+    println!("city-fires: {theater} fill {} buildings", fill.len());
+    let fell = fill.flatten([x, f64::from(world.height(x as f32, z as f32)), z], radius);
+    println!("city-fires: flattened {fell} within {radius:.0} ft of {x:.0},{z:.0}");
+    let mut fires = crate::city_fires::CityFires::new();
+    let started = Instant::now();
+    fires.observe(&fill, 0.);
+    println!(
+        "city-fires: observed {} burning in {:.3} ms",
+        fires.blazes().len(),
+        started.elapsed().as_secs_f64() * 1e3
+    );
+    // A second look at the same fill costs nothing and changes nothing.
+    let before = fires.blazes().len();
+    fires.observe(&fill, 5_000.);
+    println!("city-fires: again {} burning (same)", fires.blazes().len());
+    assert_eq!(before, fires.blazes().len());
+    let ground = f64::from(world.height(x as f32, z as f32));
+    for (label, eye) in [
+        ("over", [x, ground + 800., z]),
+        ("near", [x + 4_000., ground + 3_000., z]),
+        ("far", [x + 40_000., ground + 10_000., z]),
+    ] {
+        let started = Instant::now();
+        let mut frame = crate::city_fires::Frame::default();
+        for n in 0..repeat {
+            frame = fires.frame(eye, 100_000. + n as f64);
+        }
+        println!(
+            "city-fires: {label}: {} sprites {} smoke puffs, {:.3} ms a frame over {repeat} frames",
+            frame.fires.len(),
+            frame.puffs.len(),
+            started.elapsed().as_secs_f64() * 1e3 / repeat as f64
+        );
+    }
+    println!(
+        "city-fires: budget {} sprites, {} columns of {} puffs",
+        crate::city_fires::MAX_SPRITES,
+        crate::city_fires::MAX_COLUMNS,
+        crate::city_fires::PUFFS_PER_COLUMN
+    );
     Ok(())
 }
 
@@ -242,7 +318,7 @@ pub fn survey() -> AppResult<()> {
 
 pub fn run() -> AppResult<()> {
     let args: Vec<String> = std::env::args().skip(2).collect();
-    let usage = "--city-fill-dump OUT [THEATER] [--render NAME@X,Z,H,PITCH,YAW ...] [--sequence NAME@X,Z,H,HEADING,STEP,FRAMES[,PITCH[,ZOOM]] ...] [--sweep NAME@X,Z,H,PITCH,YAW,KIND,FROM,TO,STEPS ...] [--bench X,Z,H,HEADING,STEP,FRAMES] [--size W,H]";
+    let usage = "--city-fill-dump OUT [THEATER] [--render NAME@X,Z,H,PITCH,YAW ...] [--sequence NAME@X,Z,H,HEADING,STEP,FRAMES[,PITCH[,ZOOM]] ...] [--sweep NAME@X,Z,H,PITCH,YAW,KIND,FROM,TO,STEPS ...] [--burn NAME@X,Z,H,PITCH,YAW,RADIUS,FRAMES ...] [--bench X,Z,H,HEADING,STEP,FRAMES] [--size W,H]";
     let out = Path::new(args.first().ok_or(usage)?);
     let mut theater = "UKR".to_owned();
     let mut renders = Vec::new();
@@ -251,6 +327,7 @@ pub fn run() -> AppResult<()> {
     let mut bench = None;
     let mut sequences = Vec::new();
     let mut sweeps = Vec::new();
+    let mut burns = Vec::new();
     let mut size = [3840u32, 2160u32];
     let mut it = args.iter().skip(1);
     while let Some(arg) = it.next() {
@@ -261,6 +338,7 @@ pub fn run() -> AppResult<()> {
             "--bench" => bench = Some(numbers(it.next().ok_or(usage)?)?),
             "--sequence" => sequences.push(it.next().ok_or(usage)?.clone()),
             "--sweep" => sweeps.push(it.next().ok_or(usage)?.clone()),
+            "--burn" => burns.push(it.next().ok_or(usage)?.clone()),
             "--size" => {
                 let v = numbers(it.next().ok_or(usage)?)?;
                 size = [v[0] as u32, v[1] as u32];
@@ -451,6 +529,76 @@ pub fn run() -> AppResult<()> {
                 stats.boxes,
             );
         }
+    }
+    for item in &burns {
+        let (name, spot) = item.split_once('@').ok_or(usage)?;
+        let v = numbers(spot)?;
+        let [_, _, _, _, _, radius, frames] = v[..] else {
+            return Err(usage.into());
+        };
+        let (world, mut scenery) = world(&resources, &theater, true)?;
+        let fell = world.city_fill.as_ref().map_or(0, |fill| {
+            fill.flatten(
+                [
+                    v[0],
+                    f64::from(world.height(v[0] as f32, v[1] as f32)),
+                    v[1],
+                ],
+                radius,
+            )
+        });
+        use_gpu(&scenery, &mut gpu)?;
+        let gpu = gpu.as_mut().expect("gpu");
+        let camera = camera_at(&world, &v);
+        scenery.resolve_palette(&world, camera.position[1]);
+        scenery.set_origin(camera.position);
+        let geometry = std::sync::Arc::clone(scenery.static_geometry_where(&hidden_none));
+        gpu.sim.airports(&gpu.device, &gpu.queue, &geometry);
+        // The explosion and smoke art the fires and their smoke draw with.
+        let art = crate::render_snapshot::CombatArt::load(&resources)?;
+        let (quiet, contrails) = (
+            tore_sim::combat::smoke::Smoke::default(),
+            tore_sim::combat::smoke::Smoke::default(),
+        );
+        let devices = tore_sim::combat::countermeasures::Devices::default();
+        gpu.sim.smoke(
+            &gpu.device,
+            &gpu.queue,
+            &art.smoke,
+            [&quiet, &contrails],
+            &devices,
+        );
+        gpu.sim
+            .effects(&gpu.device, &gpu.queue, &art.effects, &[], &[]);
+        let mut timings = Vec::new();
+        for fires in [true, false] {
+            gpu.sim.set_city_fires(fires);
+            let pixels = gpu.pixels(&camera, &world, &scenery)?;
+            if fires {
+                let path = out.join(format!("{name}-burn.png"));
+                std::fs::write(
+                    &path,
+                    crate::replay::png::encode_rgba(
+                        crate::reel::WIDTH,
+                        crate::reel::HEIGHT,
+                        &pixels,
+                    )?,
+                )?;
+                println!("burn: {}", path.display());
+            }
+            let started = Instant::now();
+            for _ in 0..frames as usize {
+                gpu.pixels(&camera, &world, &scenery)?;
+            }
+            timings.push(started.elapsed().as_secs_f64() * 1e3 / frames);
+        }
+        println!(
+            "burn: {name}: {fell} buildings burning, frame {:.2} ms with the fires, {:.2} ms with them off ({:+.2} ms), {} frames",
+            timings[0],
+            timings[1],
+            timings[0] - timings[1],
+            frames as usize
+        );
     }
     for item in &targets {
         let (name, spot) = item.split_once('@').ok_or(usage)?;

@@ -637,40 +637,15 @@ impl Tracker {
                 continue;
             }
             let overall = ((wreck::LIFE_TICKS as f64 - t) / wreck::FADE_TICKS as f64).clamp(0., 1.);
-            let angle = std::f64::consts::TAU * unit_noise(u64::from(*id));
-            let breeze = wreck::BREEZE_FPS * (0.75 + 0.5 * unit_noise(u64::from(*id) ^ 0x55));
-            let (dx, dz) = (angle.cos() * breeze, angle.sin() * breeze);
-            let mut n = (t / wreck::STEP_TICKS as f64).floor() as u64;
-            loop {
-                let age = t - (n * wreck::STEP_TICKS) as f64;
-                if age >= wreck::PUFF_TICKS as f64 {
-                    break;
-                }
-                let s = age / 120.;
-                let fade_in = (age / 360.).min(1.);
-                let life = 1. - (age / wreck::PUFF_TICKS as f64).powf(1.5);
-                // Each puff wanders a little more the higher it has risen.
-                let jitter = |axis: u64| {
-                    (unit_noise((u64::from(*id) << 20) ^ (n << 3) ^ axis) - 0.5)
-                        * (3. + 0.9 * s)
-                        * w.scale
-                };
-                out.puffs.push(Puff {
-                    position: [
-                        w.position[0] + dx * s + jitter(1),
-                        w.position[1] + wreck::SOURCE_FT * w.scale + wreck::RISE_FPS * s,
-                        w.position[2] + dz * s + jitter(2),
-                    ],
-                    radius: w.scale * (wreck::START_FT + wreck::GROWTH_FPS * s),
-                    opacity: wreck::OPACITY * (fade_in * life * overall) as f32,
-                    dark: true,
-                    tint: crate::gun_flash::PLAIN,
-                });
-                if n == 0 {
-                    break;
-                }
-                n -= 1;
-            }
+            column(
+                u64::from(*id),
+                w.position,
+                w.scale,
+                t,
+                wreck::STEP_TICKS,
+                overall,
+                &mut out.puffs,
+            );
         }
     }
 
@@ -691,6 +666,54 @@ impl Tracker {
     #[cfg(test)]
     fn shots(&self) -> impl Iterator<Item = &Shot> {
         self.shots.values()
+    }
+}
+
+/// The smoke column of a wreck born `t` ticks ago: one dark puff every
+/// `step` ticks, each rising, carried by a fixed breeze and growing
+/// ([`wreck`]), `scale` times the base size, all at `overall` opacity.
+/// `seed` fixes the breeze's direction and each puff's wander, so a column
+/// stands the same every frame. Shared by the wrecks of destroyed units and
+/// the burning city buildings ([`crate::city_fires`]).
+pub(crate) fn column(
+    seed: u64,
+    position: Vector,
+    scale: f64,
+    t: f64,
+    step: u64,
+    overall: f64,
+    out: &mut Vec<Puff>,
+) {
+    let angle = std::f64::consts::TAU * unit_noise(seed);
+    let breeze = wreck::BREEZE_FPS * (0.75 + 0.5 * unit_noise(seed ^ 0x55));
+    let (dx, dz) = (angle.cos() * breeze, angle.sin() * breeze);
+    let mut n = (t / step as f64).floor() as u64;
+    loop {
+        let age = t - (n * step) as f64;
+        if age >= wreck::PUFF_TICKS as f64 {
+            break;
+        }
+        let s = age / 120.;
+        let fade_in = (age / 360.).min(1.);
+        let life = 1. - (age / wreck::PUFF_TICKS as f64).powf(1.5);
+        // Each puff wanders a little more the higher it has risen.
+        let jitter =
+            |axis: u64| (unit_noise((seed << 20) ^ (n << 3) ^ axis) - 0.5) * (3. + 0.9 * s) * scale;
+        out.push(Puff {
+            position: [
+                position[0] + dx * s + jitter(1),
+                position[1] + wreck::SOURCE_FT * scale + wreck::RISE_FPS * s,
+                position[2] + dz * s + jitter(2),
+            ],
+            radius: scale * (wreck::START_FT + wreck::GROWTH_FPS * s),
+            opacity: wreck::OPACITY * (fade_in * life * overall) as f32,
+            dark: true,
+            tint: crate::gun_flash::PLAIN,
+        });
+        if n == 0 {
+            break;
+        }
+        n -= 1;
     }
 }
 

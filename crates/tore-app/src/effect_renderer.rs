@@ -557,6 +557,11 @@ pub struct EffectRenderer {
     /// The fires that fit their unit: where each burns and how wide it is
     /// drawn, in feet.
     fires: Vec<([f64; 3], f64)>,
+    /// The burning city buildings' fire sprites this frame
+    /// ([`crate::city_fires`]), replaced by every [`Self::set_city_fires`].
+    city: Vec<Sprite>,
+    /// Whether the fire sheet is in the art.
+    fire_present: bool,
     count: u32,
 }
 
@@ -622,6 +627,31 @@ fn fit_fires(sprites: &[Sprite], fires: &[([f64; 3], f64)]) -> Vec<Sprite> {
         })
         .collect()
 }
+/// The burning city buildings' fire sprites ([`crate::city_fires`]): each a
+/// standing fire of its width, its flames' frame turned by `tick` and its own
+/// phase so neighbours do not flicker in step.
+fn city_sprites(fires: &[crate::city_fires::CityFire], tick: u64) -> Vec<Sprite> {
+    let (_, layout) = SHEETS[FIRE_SHEET];
+    fires
+        .iter()
+        .map(|fire| {
+            let frame = ((tick + fire.phase) % 120) * u64::from(layout.frames) / 120;
+            Sprite {
+                position: fire.position,
+                extent: [
+                    fire.width / 2.,
+                    fire.width * f64::from(layout.height) / f64::from(layout.width),
+                ],
+                mode: Mode::Standing,
+                cell: layout.cell(frame as u16),
+                layer: FIRE_SHEET,
+                opacity: 1.,
+                emissive: true,
+                tint: PLAIN,
+            }
+        })
+        .collect()
+}
 impl EffectRenderer {
     pub fn new(
         device: &wgpu::Device,
@@ -640,6 +670,8 @@ impl EffectRenderer {
             }),
             sprites: Vec::new(),
             fires: Vec::new(),
+            city: Vec::new(),
+            fire_present: false,
             count: 0,
         }
     }
@@ -647,6 +679,17 @@ impl EffectRenderer {
     /// next `update`.
     pub fn fit_fires(&mut self, fires: &[([f64; 3], f64)]) {
         self.fires = fires.to_vec();
+    }
+    /// The burning city buildings' fires for this frame, `tick` the
+    /// presentation tick that turns their flames' frames. Replaces the last
+    /// frame's, so drawing a frame twice (a mirror, a second view) does not
+    /// double them.
+    pub fn set_city_fires(&mut self, fires: &[crate::city_fires::CityFire], tick: u64) {
+        self.city = if self.fire_present {
+            city_sprites(fires, tick)
+        } else {
+            Vec::new()
+        };
     }
     /// Rebuild for a new anti-aliasing sample count; the next `prepare`
     /// recreates the bindings.
@@ -788,13 +831,15 @@ impl EffectRenderer {
                 ],
             }));
         }
+        self.fire_present = art.present[FIRE_SHEET];
         self.sprites = sprites(art, effects, marks, climate);
     }
     /// Sorts what the camera can see: craters first, then everything else
     /// far to near.
     pub fn update(&mut self, queue: &wgpu::Queue, camera: &Camera) {
         let eye = camera.position;
-        let fitted = fit_fires(&self.sprites, &self.fires);
+        let mut fitted = fit_fires(&self.sprites, &self.fires);
+        fitted.extend_from_slice(&self.city);
         let visible = visible(&fitted, eye);
         let mut instances = Vec::with_capacity(visible.len().min(MAX_INSTANCES) * INSTANCE_BYTES);
         for s in visible {
@@ -1148,6 +1193,31 @@ mod tests {
             fitted[1].extent, drawn[1].extent,
             "the other keeps its size"
         );
+    }
+
+    #[test]
+    fn city_fires_are_standing_fire_sprites_of_their_width_that_loop() {
+        let (_, layout) = SHEETS[FIRE_SHEET];
+        let fire = |phase| crate::city_fires::CityFire {
+            position: [10., 5., 20.],
+            width: 24.,
+            phase,
+        };
+        let at = |tick, phase| city_sprites(&[fire(phase)], tick)[0];
+        let first = at(0, 0);
+        assert_eq!(first.mode, Mode::Standing);
+        assert_eq!(first.layer, FIRE_SHEET);
+        assert_eq!(first.extent[0], 12.);
+        assert_eq!(
+            first.extent[1],
+            24. * f64::from(layout.height) / f64::from(layout.width)
+        );
+        assert_eq!((first.opacity, first.emissive), (1., true));
+        // The flames loop once a second, a neighbour's offset by its phase.
+        assert_eq!(at(120, 0).cell, first.cell);
+        assert_ne!(at(60, 0).cell, first.cell);
+        assert_eq!(at(60, 60).cell, first.cell);
+        assert!(city_sprites(&[], 7).is_empty());
     }
 
     #[test]

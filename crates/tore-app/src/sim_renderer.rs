@@ -145,6 +145,13 @@ pub struct SimRenderer {
     samples: u32,
     /// CF0 city fill buildings, when the scenery has them.
     pub fill: Option<crate::fill_renderer::FillRenderer>,
+    /// The fires of the fill's knocked-down buildings
+    /// ([`crate::city_fires`]).
+    city_fires: crate::city_fires::CityFires,
+    /// Whether they are drawn (`TORE_NO_CITY_FIRES=1` turns them off, a
+    /// developer aid like `TORE_CITY_FILL=0`; the stress measurement flips
+    /// it).
+    city_fires_on: bool,
 }
 /// World-pass attachments for one output size. The main view, mirrors and
 /// instrument previews alternate sizes within a frame, so a few are cached.
@@ -847,7 +854,13 @@ impl SimRenderer {
             options,
             samples,
             fill,
+            city_fires: crate::city_fires::CityFires::new(),
+            city_fires_on: std::env::var_os("TORE_NO_CITY_FIRES").is_none(),
         }
+    }
+    /// Draws (or stops drawing) the burning city fill buildings.
+    pub fn set_city_fires(&mut self, on: bool) {
+        self.city_fires_on = on;
     }
     pub fn smoke(
         &mut self,
@@ -1583,6 +1596,21 @@ impl SimRenderer {
         uniform.extend([x, y, z, 0., ex, ey, ez, 0.]);
         debug_assert_eq!(uniform.len() * 4, UNIFORM_BYTES as usize);
         queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
+        // The burning city fill buildings: the nearest fires and columns of
+        // the camera, replaced every draw (`crate::city_fires`).
+        match world.city_fill.as_ref().filter(|_| self.city_fires_on) {
+            Some(fill) => {
+                let now = self.city_fires.now();
+                self.city_fires.observe(fill, now);
+                let frame = self.city_fires.frame(camera.position, now);
+                self.effects.set_city_fires(&frame.fires, now as u64);
+                self.smoke.set_city_smoke(&frame.puffs);
+            }
+            None => {
+                self.effects.set_city_fires(&[], 0);
+                self.smoke.set_city_smoke(&[]);
+            }
+        }
         self.effects.update(queue, camera);
         self.smoke.update(
             queue,

@@ -59,6 +59,10 @@ pub struct SmokeRenderer {
     bind: Option<wgpu::BindGroup>,
     buffer: wgpu::Buffer,
     puffs: Vec<Sprite>,
+    /// The burning city buildings' smoke this frame ([`crate::city_fires`]),
+    /// a budget of its own beside `puffs`, replaced by every
+    /// [`Self::set_city_smoke`] so a second view does not double it.
+    city: Vec<Sprite>,
     count: u32,
 }
 impl SmokeRenderer {
@@ -80,8 +84,21 @@ impl SmokeRenderer {
             bind: None,
             buffer,
             puffs: Vec::new(),
+            city: Vec::new(),
             count: 0,
         }
+    }
+    /// The burning city buildings' smoke columns for this frame: dark puffs
+    /// drawn after the simulation's, within the instance room it leaves.
+    pub fn set_city_smoke(&mut self, puffs: &[crate::gun_flash::Puff]) {
+        self.city.clear();
+        self.city.extend(puffs.iter().map(|p| Sprite {
+            position: p.position,
+            radius: p.radius,
+            cell: AIRCRAFT_CELL,
+            opacity: p.opacity,
+            tint: p.tint,
+        }));
     }
     /// Rebuild for a new anti-aliasing sample count. The bindings follow the
     /// pipeline's derived layout, so the next `prepare` recreates them.
@@ -250,9 +267,11 @@ impl SmokeRenderer {
         let frustum = Frustum::new(camera, aspect);
         // Retain the whole history for other views and for later camera turns.
         // Only the visible instances are sorted and uploaded for this draw.
+        let room = MAX_INSTANCES.saturating_sub(self.puffs.len());
         let mut visible: Vec<_> = self
             .puffs
             .iter()
+            .chain(self.city.iter().take(room))
             .filter_map(|p| frustum.distance(p).map(|distance| (distance, p)))
             .collect();
         visible.sort_by(|a, b| b.0.total_cmp(&a.0));

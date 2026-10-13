@@ -129,6 +129,43 @@ fn vertex(position: Vector, uv: [f32; 2], index: f32) -> [f32; FLOATS] {
     ]
 }
 
+/// The palette colour retail paints a ground shadow decal with: a solid
+/// quad flat on the shape's lowest plane (the suspension bridge's span on the
+/// water, the crane's footprint). The weather palette holds a magenta there,
+/// so drawn as a colour it was a magenta patch (nr-fx2); it is a shadow
+/// polygon, which this renderer does not draw (shadows come from the
+/// lighting pass), so it is skipped. `docs/formats/objects-and-shapes.md`,
+/// "Ground shadow decals".
+pub(super) const SHADOW_DECAL_COLOR: u8 = 6;
+/// The solid-colour face record the decals use (`subtype` 0x41).
+const SOLID_FACE: u8 = 0x41;
+/// How far above the lowest point a decal's plane may lie, shape units: the
+/// bridge's decals sit within a unit of their tower bases' lowest points.
+const DECAL_REACH: f32 = 1.5;
+
+/// Whether `face` is a ground shadow decal of a shape whose lowest point is
+/// `low` ([`SHADOW_DECAL_COLOR`]): solid, one colour, flat and on that
+/// lowest plane ([`DECAL_REACH`]).
+pub(super) fn is_shadow_decal(face: &tore_formats::shape::Face, low: f32) -> bool {
+    face.subtype == SOLID_FACE
+        && !face.colors.is_empty()
+        && face.colors.iter().all(|c| *c == SHADOW_DECAL_COLOR)
+        && face.positions.iter().all(|p| p[2] <= low + DECAL_REACH)
+        && face
+            .positions
+            .iter()
+            .all(|p| (p[2] - face.positions[0][2]).abs() < 0.5)
+}
+
+/// The lowest point of `shape`, in shape units.
+fn lowest_point(shape: &Shape) -> f32 {
+    shape
+        .faces
+        .iter()
+        .flat_map(|face| face.positions.iter().map(|p| p[2]))
+        .fold(f32::INFINITY, f32::min)
+}
+
 /// Appends `shape`'s faces and lines standing at `stand` to `out`, as the
 /// static scene draws a placement: shape axes right, forward, up; textures
 /// from `layers` (a face whose texture is not there draws in its colour).
@@ -157,8 +194,9 @@ pub(super) fn emit(
                 + basis.forward[axis] * forward
         })
     };
+    let low = lowest_point(shape);
     for face in &shape.faces {
-        if face.positions.len() < 3 {
+        if face.positions.len() < 3 || is_shadow_decal(face, low) {
             continue;
         }
         let image = if face.texture.is_empty() || face.uv.is_empty() {
@@ -409,8 +447,6 @@ pub struct SurfaceArt {
     rails: BTreeMap<(u32, Vec<u8>), Drawn>,
     movers: BTreeMap<u32, Mover>,
     sprites: Vec<Sprite>,
-    /// A parked aircraft's pieces 0 and 1 (`{stem}_B`, `{stem}_D`).
-    debris: BTreeMap<u32, [Option<Model>; 2]>,
     /// Units whose pictures aim, how each turns, and their aim.
     aimers: BTreeMap<u32, Aimer>,
     rules: BTreeMap<UnitId, Rule>,
@@ -1086,21 +1122,24 @@ impl SurfaceArt {
         Ok((intact, damaged))
     }
 
-    /// Prepares parked aircraft `id`'s pieces, the `_B` and `_D` shapes of
-    /// its type (`shape`, `MIG21F.SH`), drawn at `scale`. A piece the import
-    /// lacks is not drawn.
-    pub(super) fn add_parked(&mut self, build: &mut Build, id: u32, shape: &str, scale: f64) {
-        let stem = shape.trim_end_matches(".SH");
-        let pieces = ["B", "D"].map(|suffix| {
-            let name = format!("{stem}_{suffix}.SH");
-            build
-                .resources
-                .contains_key(&name)
-                .then(|| build.scenery(&mut self.layers, &name).ok())
-                .flatten()
-                .map(|shape| Model { shape, scale })
-        });
-        self.debris.insert(id, pieces);
+    /// Prepares parked aircraft `id`'s destroyed look: its own `shape` (drawn
+    /// gear down at `stand`) as a burnt hulk, charred, broken and settled
+    /// onto its belly ([`super::rubble::hulk`]). The batch swaps it for the
+    /// standing aircraft when combat destroys it, and a replay does the same
+    /// from the recorded destruction, so every machine shows the same hulk.
+    /// A shape with no faces leaves the aircraft hidden.
+    pub(super) fn add_parked(&mut self, id: u32, shape: &Shape, stand: &Stand) {
+        let Some(ruin) = super::rubble::hulk(shape) else {
+            return;
+        };
+        let mut drawn = Drawn::default();
+        if emit(&ruin.walls, stand, &self.layers, &mut drawn, BUDGET).is_err() {
+            return;
+        }
+        for (face, color) in &ruin.charred {
+            emit_tinted(face, stand, *color, &mut drawn);
+        }
+        self.wrecks.insert(id, drawn);
     }
 
     /// Keeps placement `id` drawn when it is destroyed: a runway.
@@ -1255,25 +1294,6 @@ impl SurfaceArt {
                 ..sprite.stand
             };
             self.draw_sprite(sprite, &stand, camera, eye, seconds, &mut out);
-        }
-        for piece in &picture.debris {
-            let Some(pieces) = self.debris.get(&piece.owner) else {
-                continue;
-            };
-            let Some(model) = piece
-                .variant
-                .and_then(|variant| pieces.get(variant))
-                .and_then(Option::as_ref)
-            else {
-                continue;
-            };
-            let [yaw, pitch, bank] = piece.attitude;
-            let stand = Stand {
-                scale: model.scale,
-                basis: Basis::new(yaw, pitch, bank),
-                origin: local(piece.position),
-            };
-            let _ = emit(&model.shape, &stand, &self.layers, &mut out, usize::MAX);
         }
         out.vertices
     }
@@ -1438,6 +1458,45 @@ mod tests {
             .chunks_exact(FLOATS)
             .map(|v| [v[0], v[1], v[2]])
             .collect()
+    }
+
+    #[test]
+    fn a_ground_shadow_decal_is_not_drawn_but_a_painted_floor_is() {
+        // The suspension bridge's span on the water and the crane's
+        // footprint are solid colour 6 quads on the lowest plane: a magenta
+        // patch when drawn as a colour (nr-fx2).
+        let quad = |z: f32, color: u8, subtype: u8| {
+            let mut face = triangle(0.).faces[0].clone();
+            face.positions = vec![[0., 0., z], [4., 0., z], [4., 9., z], [0., 9., z]];
+            face.colors = vec![color; 4];
+            face.subtype = subtype;
+            face
+        };
+        let shape = |faces: Vec<Face>| Shape {
+            faces,
+            ..triangle(0.)
+        };
+        let drawn = |shape: &Shape| {
+            let mut out = Drawn::default();
+            emit(shape, &level([0.; 3]), &Layers::new(), &mut out, usize::MAX).unwrap();
+            out.vertices.len() / FLOATS
+        };
+        // A deck at 10 over a floor at -60 (both ordinary faces).
+        let base = vec![quad(10., 124, 0), quad(-60., 124, 0)];
+        let with = |extra: Face| {
+            let mut faces = base.clone();
+            faces.push(extra);
+            drawn(&shape(faces))
+        };
+        assert_eq!(drawn(&shape(base.clone())), 12);
+        // The decal (colour 6, solid, flat on the lowest plane) is skipped.
+        assert_eq!(with(quad(-60., 6, 0x41)), 12);
+        assert_eq!(with(quad(-60.5, 6, 0x41)), 12);
+        // The same colour elsewhere, another colour, or another record kind,
+        // is an ordinary face.
+        assert_eq!(with(quad(0., 6, 0x41)), 18);
+        assert_eq!(with(quad(-60., 7, 0x41)), 18);
+        assert_eq!(with(quad(-60., 6, 0x44)), 18);
     }
 
     #[test]
@@ -1856,31 +1915,37 @@ mod tests {
     }
 
     #[test]
-    fn a_parked_aircraft_piece_draws_with_its_own_shape() {
+    fn a_destroyed_parked_aircraft_draws_its_own_shape_as_a_hulk() {
         let mut art = SurfaceArt::default();
-        let model = |at| Model {
-            shape: triangle(at),
+        let stand = Stand {
             scale: 1.,
+            basis: Basis::new(0., 0., 0.),
+            origin: [100., 0., 200.],
         };
-        art.debris
-            .insert(0x5000_0008, [Some(model(0.)), Some(model(20.))]);
-        let piece = |variant| crate::snapshot::DebrisPose {
-            owner: 0x5000_0008,
-            draw: crate::snapshot::Draw::Hidden,
-            position: [10., 5., 10.],
-            attitude: [0.; 3],
-            variant,
-        };
-        let draw = |pieces: Vec<crate::snapshot::DebrisPose>| {
-            let picture = crate::snapshot::RenderSnapshot {
-                debris: pieces,
-                ..Default::default()
-            };
-            positions(&art.frame(&picture, &|_| true, &Camera::new(), [0.; 3], 0.))
-        };
-        // Piece 0 is the `_B` shape, piece 1 the `_D`; no piece, nothing.
-        assert_eq!(draw(vec![piece(Some(0))])[0], [10., 5., 10.]);
-        assert_eq!(draw(vec![piece(Some(1))])[0], [30., 5., 10.]);
-        assert!(draw(vec![piece(None)]).is_empty());
+        // A broad low shape: some faces, 12 ft tall.
+        let mut plane = triangle(0.);
+        plane.faces = (0..40)
+            .map(|n| {
+                let at = n as f32 * 2.;
+                let mut face = plane.faces[0].clone();
+                face.positions = vec![[at, 0., 0.], [at + 2., 8., 0.], [at + 1., 4., 12.]];
+                face.colors = vec![3; 3];
+                face
+            })
+            .collect();
+        art.add_parked(0x5000_0008, &plane, &stand);
+        // Alive it is its standing look (none here: the placement itself);
+        // destroyed it shows the hulk, never nothing.
+        assert_eq!(art.look(0x5000_0008, true, true, None), None);
+        assert_eq!(art.look(0x5000_0008, false, true, None), Some(Look::Wreck));
+        let hulk = art.drawn(0x5000_0008, &Look::Wreck).unwrap();
+        assert!(!hulk.vertices.is_empty());
+        // Low, and standing where the aircraft stood: its lowest point stays
+        // at the placement's, nothing above 60 percent of 12 ft.
+        let ys: Vec<f32> = positions(&hulk.vertices).iter().map(|p| p[1]).collect();
+        assert!(
+            ys.iter().all(|y| *y >= -1e-3 && *y <= 12. * 0.6 + 1e-3),
+            "{ys:?}"
+        );
     }
 }

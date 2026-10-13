@@ -175,7 +175,7 @@ def runway_problems(output: str) -> list[str]:
 
 
 WRECK = re.compile(
-    r"^surface-objective: end wreck (0x[0-9a-f]+) (\S+) drawn (?:moving )?(\d+) class (\w+) fire (yes|no)$", re.M
+    r"^surface-objective: end wreck (0x[0-9a-f]+) (\S+) drawn (?:moving )?(\d+) class (\w+) fire (yes|no)(?: (forever|timed))?$", re.M
 )
 WRECKS = re.compile(
     r"^surface-objective: end wrecks (\d+) hidden (\d+) should-burn (\d+) burning (\d+) runway-craters (\d+)$", re.M
@@ -201,6 +201,11 @@ def wreck_problems(output: str) -> list[str]:
         for m in WRECK.finditer(run):
             if m.group(4) in ("Building", "Hard") and m.group(5) != "yes":
                 problems.append(f"{name}: {m.group(1)} {m.group(2)} ({m.group(4)}) does not burn")
+            # nr-fx2: a building's or fixed object's fire burns for the whole mission.
+            if m.group(4) in ("Building", "Hard") and m.group(5) == "yes" and m.group(6) != "forever":
+                problems.append(f"{name}: {m.group(1)} {m.group(2)} ({m.group(4)}) fire is {m.group(6)}, want forever")
+            if m.group(4) == "Vehicle" and m.group(5) == "yes" and m.group(6) != "timed":
+                problems.append(f"{name}: {m.group(1)} {m.group(2)} (Vehicle) fire is {m.group(6)}, want timed (15 minutes)")
     picks = [
         sorted((m.group(1), m.group(5)) for m in WRECK.finditer(run) if m.group(4) in ("Vehicle", "None"))
         for run in runs[2:]
@@ -262,7 +267,8 @@ def scenarios() -> list[Scenario]:
             ],
             expect=[r"^surface-objective: end wrecks \d+ hidden 0 "],
             check=wreck_problems,
-            notes="B16: destroyed buildings never vanish and burn; a vehicle's fire is a fixed pick. Builds "
+            notes="B16: destroyed buildings never vanish and burn; a vehicle's fire is a fixed pick. nr-fx2: a "
+                  "building's fire burns for the whole mission, a vehicle's for 15 minutes. Builds "
                   "the scenery on the CPU, no window.",
         ),
     ]
