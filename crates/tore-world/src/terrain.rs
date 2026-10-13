@@ -53,6 +53,10 @@ pub struct Terrain {
     /// recording can say which airfields it was flown on (a layout with
     /// no airport has an empty [`Self::redrawn`] either way).
     pub redrawn_airports: bool,
+    /// Whether the redraw took in the runway pieces of the ground target's
+    /// template too (B14, airfield scene 2): always with the redrawn
+    /// airports, except in a replay of a recording flown on scene 1.
+    pub redrawn_templates: bool,
 }
 
 /// Launch settings that replace the mission's own weather start time, wind
@@ -223,6 +227,9 @@ pub struct Recorded {
     /// Rebuild with the redrawn airports: the recording's airfield scene
     /// (a recording from before the redraw has the retail airfields).
     pub redrawn_airports: bool,
+    /// Rebuild with the template's runway piece redrawn too (airfield scene
+    /// 2, B14); a scene 1 recording keeps it retail.
+    pub redrawn_templates: bool,
     /// Rebuild with the city fill: the recording's city fill scene (a
     /// recording from before the fill was the default has none).
     pub city_fill: bool,
@@ -404,6 +411,64 @@ pub fn stands_on_wheels(definition: &tore_formats::static_object::Definition) ->
         .to_ascii_uppercase()
         .ends_with(".NT")
         && definition.category & (class::SHIP | class::STRUCTURE | class::OTHER) == 0
+}
+
+/// The lowest and highest point of a drawn shape along its up axis, in shape
+/// units about its origin (faces and sprites), or `None` for an empty shape.
+pub fn shape_height_range(shape: &tore_formats::shape::Shape) -> Option<[f64; 2]> {
+    let mut range = [f64::INFINITY, f64::NEG_INFINITY];
+    let faces = shape
+        .faces
+        .iter()
+        .flat_map(|face| face.positions.iter().map(|p| f64::from(p[2])));
+    let sprites = shape.billboards.iter().flat_map(|sprite| {
+        let h = f64::from(sprite.size[1]) * 0.5;
+        let c = f64::from(sprite.center[2]);
+        [c - h, c + h]
+    });
+    for v in faces.chain(sprites) {
+        range = [range[0].min(v), range[1].max(v)];
+    }
+    range.iter().all(|v| v.is_finite()).then_some(range)
+}
+
+/// Whether a placed type stands on the lowest point of its shape rather than
+/// on its origin: a land surface unit ([`stands_on_wheels`]) or a real-size
+/// building (an OT that is not a runway, bridge or road). Retail shapes
+/// put their origin well above their base (a hangar 41 percent of its
+/// height, a factory hall 89 percent, a town block wholly), and the F2
+/// ground offset that FA 0x42e0c0 reads to stand an object on the ground
+/// equals that lowest point within 3 ft for every OT of the retail data
+/// (`--surface-dump --grounding`; B13, 2026-10-12, fitted). Ships keep their
+/// waterline, men their sprite centre, and runways, bridges and roads the
+/// map's height.
+pub fn stands_on_lowest_point(definition: &tore_formats::static_object::Definition) -> bool {
+    stands_on_wheels(definition) || is_building(definition)
+}
+
+/// A real-size OT placement that is not a runway: a building or other
+/// theater object.
+fn is_building(definition: &tore_formats::static_object::Definition) -> bool {
+    definition
+        .resource_name
+        .to_ascii_uppercase()
+        .ends_with(".OT")
+        && !definition.callbacks.iter().any(|name| name == "_STRIPProc")
+        && PlacedSize::of(definition) == PlacedSize::RealSize
+}
+
+/// How far a placed object is lifted to stand on the ground, world feet:
+/// its shape's lowest point at `scale` when it [stands on it](stands_on_lowest_point),
+/// else 0. Runways have their own pavement rule in [`Placements::stance`].
+pub fn building_lift_ft(
+    definition: &tore_formats::static_object::Definition,
+    shape: &tore_formats::shape::Shape,
+    scale: f64,
+) -> f64 {
+    match shape_height_range(shape) {
+        Some([low, _]) if stands_on_lowest_point(definition) => (-low * scale).max(0.),
+        _ => 0.,
+    }
 }
 
 /// Feet per shape unit of a placed object: the reviewed SH header exponent
@@ -879,10 +944,11 @@ impl Placements {
         ];
         let grounding_offset = if runway {
             -pavement_height(shape) * scale
-        } else if stands_on_wheels(definition) {
+        } else if stands_on_lowest_point(definition) {
             // A vehicle, launcher or gun stands on its lowest point (its
-            // shape's origin is at its turret or rails); ships keep their
-            // waterline and buildings their authored depth.
+            // shape's origin is at its turret or rails), and so does a
+            // building (its origin is above its base, B13); ships keep
+            // their waterline.
             (-min[1]).max(0.)
         } else {
             0.
@@ -1074,9 +1140,13 @@ impl Terrain {
             city_fill: None,
             redrawn: Vec::new(),
             redrawn_airports: false,
+            redrawn_templates: false,
         };
         out.redrawn_airports = recorded.map_or(overrides.redrawn_airports, |r| r.redrawn_airports);
-        let plans = redrawn::Plans::new(out.redrawn_airports)?;
+        out.redrawn_templates =
+            out.redrawn_airports && recorded.is_none_or(|r| r.redrawn_templates);
+        let mut plans = redrawn::Plans::new(out.redrawn_airports)?;
+        plans.retail_templates = !out.redrawn_templates;
         out.build_airport_scene(resources, code.trim_end_matches(".MM"), target, &plans)?;
         if recorded.map_or(overrides.city_fill, |r| r.city_fill) {
             let cap = match recorded {
@@ -1109,6 +1179,9 @@ impl Terrain {
         let mut sources = Placements::load(resources, code)?;
         self.surface = Self::resolve_surface(resources, &sources.layout, target)?;
         self.place_surface(resources, &sources, code);
+        // The template's placements join before the redraw, which redraws
+        // a template's own runway piece too (B14).
+        sources.add_surface(resources, &self.surface)?;
         // Experiment AP1: redrawn airports move and add their buildings
         // after the surface has placed, so its layout is the retail one.
         let mut parked = std::mem::take(&mut self.surface.parked);
@@ -1117,7 +1190,6 @@ impl Terrain {
         });
         self.surface.parked = parked;
         self.redrawn = built?;
-        sources.add_surface(resources, &self.surface)?;
         let mut objects = Vec::new();
         let mut runways = Vec::new();
         let mut airports = Vec::new();
@@ -1663,6 +1735,50 @@ mod tests {
             flags: 0,
             max_visible: 0,
         }
+    }
+
+    /// A shape of one triangle spanning `low` to `high` along its up axis.
+    fn upright(low: f32, high: f32) -> tore_formats::shape::Shape {
+        tore_formats::shape::Shape {
+            lines: Vec::new(),
+            faces: vec![tore_formats::shape::Face {
+                positions: vec![[0., 0., low], [10., 0., low], [0., 0., high]],
+                colors: vec![0],
+                fog: Default::default(),
+                uv: Vec::new(),
+                texture: String::new(),
+                subtype: 0,
+                normal: None,
+                address: 0,
+            }],
+            billboards: Vec::new(),
+            state_words: Default::default(),
+        }
+    }
+
+    #[test]
+    fn buildings_and_land_units_stand_on_their_lowest_point() {
+        // B13: a factory hall whose origin is 89 percent of the way up
+        // stands on its base, at the third the real-size rule draws it.
+        let hall = upright(-128., 16.);
+        assert_eq!(shape_height_range(&hall), Some([-128., 16.]));
+        let factory = definition("FACTD.OT", "_OBJProc");
+        assert!(stands_on_lowest_point(&factory));
+        assert!((building_lift_ft(&factory, &hall, 1. / 3.) - 128. / 3.).abs() < 1e-9);
+        // A shape already standing on its origin is not lifted, nor sunk.
+        assert_eq!(building_lift_ft(&factory, &upright(4., 20.), 1.), 0.);
+        // Runways (their pavement rule), bridges and roads keep the map's
+        // height.
+        for (name, callback) in [("STRIP.OT", "_STRIPProc"), ("BRDMID.OT", "_OBJProc")] {
+            let fixed = definition(name, callback);
+            assert!(!stands_on_lowest_point(&fixed), "{name}");
+            assert_eq!(building_lift_ft(&fixed, &hall, 1.), 0., "{name}");
+        }
+        // A land unit stands on its wheels; a ship keeps its waterline.
+        let mut tank = definition("T80.NT", "_NTProc");
+        assert!(stands_on_lowest_point(&tank));
+        tank.category = tore_formats::surface_unit::class::SHIP;
+        assert!(!stands_on_lowest_point(&tank));
     }
 
     /// A data module whose CODE section is a shape header with exponent `e`.

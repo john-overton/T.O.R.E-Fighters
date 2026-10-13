@@ -171,6 +171,7 @@ pub fn relay(
     lines: &[LineSpec],
     extras: &Extras,
     parking: Option<([[f64; 3]; 9], f64)>,
+    strip: &Placement,
     taken: &mut std::collections::BTreeSet<usize>,
     added_count: &mut u32,
 ) -> Relaid {
@@ -261,9 +262,7 @@ pub fn relay(
         }
     }
     let template = out.moved.first().map(|(_, p)| p.clone());
-    let base = template
-        .clone()
-        .unwrap_or_else(|| sources.layout.placements[own[0]].clone());
+    let base = template.clone().unwrap_or_else(|| strip.clone());
     let mut place_new =
         |sources: &mut Placements, object_type: &str, position: [f64; 3], heading: i32| -> bool {
             if resources.get(object_type).is_none()

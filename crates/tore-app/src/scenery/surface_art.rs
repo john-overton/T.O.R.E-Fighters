@@ -381,6 +381,12 @@ pub struct SurfaceArt {
     /// its loads in `aimer_loads`, made when the loads change rather than
     /// every frame. `None`: the projection failed, so the intact look draws.
     rail_shapes: BTreeMap<u32, Option<Shape>>,
+    /// Placements that stay drawn when destroyed: the runways (B15). A
+    /// runway's shape, retail or redrawn, is the whole airfield's pavement
+    /// (and a retail one its towers and hangars too), so hiding it at zero
+    /// hit points took the airport away; the bomb craters on it show the
+    /// damage instead.
+    kept: BTreeSet<u32>,
 }
 
 /// What [`SurfaceArt::add`] needs from the scenery build.
@@ -500,9 +506,9 @@ impl SurfaceArt {
             });
         }
         // A land unit's wreck lies on its own lowest point too (the DEST
-        // wreck reaches below its origin); a ship's `_A` hull keeps the
-        // waterline and a building's variant its depth.
-        let land = definition.is_some_and(tore_world::terrain::stands_on_wheels);
+        // wreck reaches below its origin), and so does a building's damaged
+        // variant; a ship's `_A` hull keeps the waterline.
+        let land = definition.is_some_and(tore_world::terrain::stands_on_lowest_point);
         let wreck_lift = match &wreck {
             Some(model) if land => ground_lift(&model.shape, model.scale),
             _ => 0.,
@@ -936,6 +942,11 @@ impl SurfaceArt {
         self.debris.insert(id, pieces);
     }
 
+    /// Keeps placement `id` drawn when it is destroyed: a runway.
+    pub(super) fn keep(&mut self, id: u32) {
+        self.kept.insert(id);
+    }
+
     /// Placement `id`'s look given whether it stands (`alive`), whether
     /// combat holds it at all (`known`), and its launcher loads in `surface`
     /// (none: a replay, which records no loads yet). `None` is its intact
@@ -948,6 +959,9 @@ impl SurfaceArt {
         surface: Option<&SurfaceState>,
     ) -> Option<Look> {
         if !alive {
+            if self.kept.contains(&id) {
+                return (known && self.wrecks.contains_key(&id)).then_some(Look::Wreck);
+            }
             return Some(if known && self.wrecks.contains_key(&id) {
                 Look::Wreck
             } else {
@@ -1283,6 +1297,23 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn a_destroyed_runway_stays_drawn() {
+        // B15: a runway at zero hit points keeps its pavement (its intact
+        // look), whether or not combat registered it; any other placement
+        // with no wreck hides.
+        let mut art = SurfaceArt::default();
+        art.keep(7);
+        assert_eq!(art.look(7, false, true, None), None);
+        assert_eq!(art.look(7, false, false, None), None);
+        assert_eq!(art.look(7, true, true, None), None);
+        assert_eq!(art.look(8, false, true, None), Some(Look::Hidden));
+        // A runway with a wreck of its own would show it.
+        let mut art = SurfaceArt::default().with_wreck(7, Drawn::default());
+        art.keep(7);
+        assert_eq!(art.look(7, false, true, None), Some(Look::Wreck));
     }
 
     #[test]

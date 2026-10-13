@@ -1612,6 +1612,11 @@ every base layout and every template placement and lists each moved unit on
 the wrong class (`surface-class-sweep`).
 `--starts [THEATER ...]` builds one mission per theater with a ground target
 and reports where Blue and Red start (`surface-start-placement`).
+`--grounding [TYPE ...]` lists every OT (or the types named) with its shape's
+lowest and highest point about its origin, the share below it, its F2 ground
+offset and the lift that stands it on the ground, in world feet at its drawn
+size ([building grounding](formats/objects-and-shapes.md#building-grounding-2026-10-12),
+`surface-building-grounding`).
 `--surface-sheets` renders each template from above and closer, heavy
 defenses, at its retail spot (seed 1, no jitter or relocation); `--variants`
 adds the placed layout with seeds 1 and 2. A marker per unit: red Redfor, blue
@@ -1684,8 +1689,9 @@ The `surface-*` engagement battery scenarios run it.
 draws it, offscreen at 1080p (no window): it steps the whole world
 `--seconds S` (`--surface-only` steps just the moving units, for long
 marches), optionally destroys units (`--kill all`, or a comma list of
-template ordinals, unit types such as `SA3.NT`, and `within:FEET` of the
-framed units) and lets them burn for `--burn S` seconds, sets every
+template ordinals, unit types such as `SA3.NT`, `within:FEET` of the
+framed units and `runways`, every runway object within the framed distance,
+the layout's too) and lets them burn for `--burn S` seconds, sets every
 launcher's rails to at most `--rails N` rounds, then writes one PNG per view
 (`--views oblique,close,low,top,deck`, or `--look YAW,PITCH` in degrees)
 framing `--focus` (`routed`, `parked`, ordinals or types) within
@@ -1778,7 +1784,13 @@ SAM and AAA hits and launches, the kill rows, friendly fire and who shot the
 player down. `--redfor` builds the multiplayer mission and seats the human in
 the first enemy plane, so the targets are a Protect objective and a Blue plane
 drops the bombs; `--defenses AAA SAM` and `--surface-seed N` as above. The
-`surface-objective-*` battery scenarios run it.
+`surface-objective-*` battery scenarios run it. An `end runway` line gives each
+runway within 20,000 ft of a target with its hit points and whether it is
+redrawn (`redrawn PLAN`) or `retail`; `--runway-art` also builds the scenery on
+the CPU and adds the vertex floats the runway draws now (`drawn N`), and
+`--retail-airfields` builds the retail airfield shapes instead of the redraw.
+The `surface-runway-stays` scenario uses them (B15: bombs on `~QUSTRIP`'s
+buildings bring its 750 hit point runway down, and it stays drawn).
 
 `--record PATH` records the run as a mission recording (a format 3 file, see
 [Mission replays](REPLAYS.md#versions-and-damage)); `--verify-render` then reads

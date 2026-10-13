@@ -10,8 +10,9 @@
 //! tick, no window, no audio; `--surface-only` steps just the surface
 //! movement, for long marches), then optionally destroys units (`--kill`:
 //! `all` the template's units and parked aircraft, or a comma list of
-//! template ordinals, unit types such as `SA3.NT` and `within:FEET` of the
-//! focus) and lets them burn
+//! template ordinals, unit types such as `SA3.NT`, `within:FEET` of the
+//! focus and `runways`, every runway object, the layout's too, within the
+//! framed distance) and lets them burn
 //! for `--burn` seconds of whole-world ticks, and sets every launcher's
 //! rails to at most `--rails` rounds. Each view (`oblique`, `close`, `low`,
 //! `top`, `deck`) frames the focus (`--focus`: `routed`, `parked`, `all`, or
@@ -234,6 +235,7 @@ pub fn run() -> AppResult<()> {
     let mut spec = MissionSpec::new(&o.theater, AircraftId::F18);
     spec.ground_target = Some(o.stem.clone());
     spec.surface_seed = o.seed;
+    spec.weather.redrawn_airports = crate::scenery::redrawn_airports()?;
     (spec.aaa, spec.sam) = o.defenses;
     if o.intruder.is_some() {
         spec.cheats.damage = tore_sim::cheats::Damage::Invulnerable;
@@ -323,7 +325,7 @@ pub fn run() -> AppResult<()> {
             + 40.
     });
     if !o.kill.is_empty() {
-        let doomed: Vec<u32> = places(&world)
+        let mut doomed: Vec<u32> = places(&world)
             .into_iter()
             .filter(|(id, resource, at, _)| {
                 named(&o.kill, *id, resource.trim_start_matches("parked "))
@@ -337,6 +339,21 @@ pub fn run() -> AppResult<()> {
             })
             .map(|(id, ..)| id)
             .collect();
+        if o.kill.iter().any(|item| item == "runways") {
+            doomed.extend(
+                world
+                    .terrain
+                    .airport_scene
+                    .runways
+                    .iter()
+                    .filter(|runway| {
+                        (runway.approach_center[0] - center[0])
+                            .hypot(runway.approach_center[2] - center[2])
+                            <= radius
+                    })
+                    .map(|runway| runway.object),
+            );
+        }
         for target in world
             .combat
             .state

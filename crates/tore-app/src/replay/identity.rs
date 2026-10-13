@@ -18,6 +18,11 @@ pub const RETAIL_AIRFIELD_SCENE: u32 = 0;
 /// touches takes a new number, so an old recording is never replayed on
 /// airfields it was not flown on.
 pub const REDRAWN_AIRFIELD_SCENE: u32 = 1;
+/// The redrawn airports with the runway piece a Quick Mission ground target
+/// template brings redrawn too (B14, 2026-10-12): a template airfield
+/// target's pavement, landable box and AI points moved, so it takes its own
+/// number and a scene 1 recording keeps the template's retail strip.
+pub const REDRAWN_TEMPLATES_AIRFIELD_SCENE: u32 = 2;
 /// The header's city fill scene for a world without the city fill: what
 /// every recording before the fill became the default holds (docs/REPLAYS.md,
 /// "The city fill scene").
@@ -78,7 +83,9 @@ pub fn recorded(identity: &tore_replay::World) -> AppResult<Recorded> {
         wind: wind_setting(identity.wind_fps)?,
         cloud_altitude,
         weather_seed,
-        redrawn_airports: identity.airfield_scene == REDRAWN_AIRFIELD_SCENE,
+        redrawn_airports: [REDRAWN_AIRFIELD_SCENE, REDRAWN_TEMPLATES_AIRFIELD_SCENE]
+            .contains(&identity.airfield_scene),
+        redrawn_templates: identity.airfield_scene == REDRAWN_TEMPLATES_AIRFIELD_SCENE,
         city_fill: identity.city_fill_scene == CITY_FILL_SCENE,
         target: identity
             .ground_target
@@ -177,7 +184,9 @@ pub fn of(terrain: &Terrain) -> tore_replay::World {
             .template
             .as_ref()
             .map(|site| recorded_target(&site.settings)),
-        airfield_scene: if terrain.redrawn_airports {
+        airfield_scene: if terrain.redrawn_templates {
+            REDRAWN_TEMPLATES_AIRFIELD_SCENE
+        } else if terrain.redrawn_airports {
             REDRAWN_AIRFIELD_SCENE
         } else {
             RETAIL_AIRFIELD_SCENE
@@ -206,7 +215,13 @@ pub fn terrain(
     resources: &BTreeMap<String, Vec<u8>>,
     identity: &tore_replay::World,
 ) -> AppResult<Terrain> {
-    if ![RETAIL_AIRFIELD_SCENE, REDRAWN_AIRFIELD_SCENE].contains(&identity.airfield_scene) {
+    if ![
+        RETAIL_AIRFIELD_SCENE,
+        REDRAWN_AIRFIELD_SCENE,
+        REDRAWN_TEMPLATES_AIRFIELD_SCENE,
+    ]
+    .contains(&identity.airfield_scene)
+    {
         log::warn!(
             "Replay: the recording's airfield scene {} is not one this build draws; showing the retail airfields",
             identity.airfield_scene
@@ -302,6 +317,7 @@ mod tests {
                     cloud_altitude: 12_345,
                     weather_seed: 1,
                     redrawn_airports: false,
+                    redrawn_templates: false,
                     city_fill: false,
                     target: None,
                 }
@@ -352,10 +368,12 @@ mod tests {
         assert!(recorded(&bad).is_err());
     }
 
-    /// The airfields travel in the header: a redrawn world records scene 1
-    /// (a format 3 file) and replays redrawn; a recording from before the
-    /// redraw, with no scene, replays on the retail airfields whatever the
-    /// viewer's switch says, and so does a scene this build does not know.
+    /// The airfields travel in the header: a redrawn world records scene 2
+    /// (a format 3 file) and replays redrawn with the template's strip; a
+    /// scene 1 recording replays redrawn with the template's strip retail; a
+    /// recording from before the redraw, with no scene, replays on the
+    /// retail airfields whatever the viewer's switch says, and so does a
+    /// scene this build does not know.
     #[test]
     fn the_airfield_scene_is_recorded_and_rebuilt() {
         let dir = crate::replay::tests::TempDir::new("airfield-scene");
@@ -374,16 +392,25 @@ mod tests {
         let mut w = tore_world::test_support::terrain();
         w.layout = "UKR.MM".into();
         w.redrawn_airports = true;
+        w.redrawn_templates = true;
         let (format, redrawn) = through_a_file("redrawn", of(&w));
-        assert_eq!(redrawn.airfield_scene, REDRAWN_AIRFIELD_SCENE);
+        assert_eq!(redrawn.airfield_scene, REDRAWN_TEMPLATES_AIRFIELD_SCENE);
         assert_eq!(format, 3);
-        assert!(recorded(&redrawn).unwrap().redrawn_airports);
+        let rebuilt = recorded(&redrawn).unwrap();
+        assert!(rebuilt.redrawn_airports && rebuilt.redrawn_templates);
+
+        w.redrawn_templates = false;
+        let (_, scene_1) = through_a_file("scene-1", of(&w));
+        assert_eq!(scene_1.airfield_scene, REDRAWN_AIRFIELD_SCENE);
+        let rebuilt = recorded(&scene_1).unwrap();
+        assert!(rebuilt.redrawn_airports && !rebuilt.redrawn_templates);
 
         w.redrawn_airports = false;
         let (format, retail) = through_a_file("retail", of(&w));
         assert_eq!(retail.airfield_scene, RETAIL_AIRFIELD_SCENE);
         assert_eq!(format, 2, "a retail world without surface stays format 2");
         assert!(!recorded(&retail).unwrap().redrawn_airports);
+        assert!(!recorded(&retail).unwrap().redrawn_templates);
 
         let mut unknown = redrawn;
         unknown.airfield_scene = 7;

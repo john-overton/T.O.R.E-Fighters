@@ -43,6 +43,17 @@ size.
 | Airport buildings | Moved by rule onto the plan's building lines; extra hangars and vehicles added by rule | retail shapes, rules |
 | Terrain recess under the airport | Follows the landable box | plan |
 
+A Quick Mission ground target template that brings its own runway piece
+(`~QBFAIR`, `~QGRSAIR`, `~QTBUNK` a DTSTRP dirt strip, `~QUSTRIP` a STRIP,
+`~QFFACT` a STRIP1) is redrawn like a layout runway since slice BG (B14,
+2026-10-12): the template's strip gets its plan's pavement, landable box, AI
+points, lights, extra hangars and vehicles, keyed by the template object's
+id, and the template's parked aircraft snap to its aprons. The template's own
+buildings and units stay where the template stands them (they are surface
+units and objectives; on the retail data none of them stands on the redrawn
+pavement). Before, only the layout's placements were scanned, so those five
+targets kept the retail strip shape while the rest of the world was redrawn.
+
 A plan applies only to the runway shape it was drawn for: a placement whose
 runway length differs from the plan's by more than a foot keeps its retail
 airfield (and so does its second tile). Being the default, the redraw never
@@ -317,6 +328,7 @@ size the same art covers about 1.5 to 4 ft per texel.
 | Marking bands, cut-away order, fillet size, apron variation, building rule distances | fitted (agent) |
 | The redraw as the default everywhere, online included | opinionated (John, 2026-10-10 and 2026-10-11) |
 | Fixed on online rather than a mission text line; the plan mismatch fallback; a second tile's runway on its main runway; the recording's airfield scene | opinionated (agent, FX-A, 2026-10-11) |
+| A template's own runway piece redrawn too (B14, John's bug report 2026-10-12); its buildings left where the template stands them; airfield scene 2 | opinionated (agent, BG, 2026-10-12) |
 | AI taxi on the pavement; STOL labels and starts; lone grass or dirt fields unlit | opinionated (John, 2026-10-11) |
 | The tiles' AI points, a tile lined up with the runway it continues, the STRIP5A and STRIP6A joined runway, lone tiles marked at both ends, lone paved tiles lit without approach lights, the dirt hardstand, the audit's wheel track and run-out | fitted or opinionated (agent, CL-AP, 2026-10-11) |
 | Airfield lights exist | opinionated (John, 2026-10-10) |
@@ -339,8 +351,9 @@ rebuilds it from its own import and build.
    is never read online. A text line that let a session choose was the
    alternative, left out as more surface than a developer aid needs.
 3. **Recordings.** The header's airfield scene says which airfields a
-   flight had: 0 (absent) the retail ones, 1 the redraw
-   ([replays](../REPLAYS.md)). The viewer rebuilds what the header names,
+   flight had: 0 (absent) the retail ones, 1 the redraw with a ground target
+   template's own runway piece retail, 2 (since slice BG, 2026-10-12) the
+   redraw with that piece redrawn too ([replays](../REPLAYS.md)). The viewer rebuilds what the header names,
    whatever the switch says, so a recording from before the redraw replays
    on the retail airfields and a new one on the redraw. A redrawn recording
    is a format 3 file.
