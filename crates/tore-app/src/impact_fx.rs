@@ -21,12 +21,12 @@ use tore_sim::{
 /// as an 85 mm flak burst does.
 pub const LIGHT_PER_FT: f64 = 2.5 * FLARE_STRENGTH / 150.;
 /// The weakest and strongest impact light: a fifth of a flare (a rifle
-/// round's dust) to twelve flares (the 105 mm and the heaviest bombs).
+/// round's dust) to twelve flares (the heaviest bombs).
 pub const LIGHT_MIN: f64 = 0.2 * FLARE_STRENGTH;
 pub const LIGHT_MAX: f64 = 12. * FLARE_STRENGTH;
 /// The flash holds full for two ticks, then fades over `LIGHT_TICKS` plus
 /// `LIGHT_TICKS_PER_SCALE` times its weapon's size factor: about 17 ticks
-/// for a cannon shell, 24 for a 500 lb bomb, 38 for the 105 mm.
+/// for a cannon shell, 24 for a 500 lb bomb or the 105 mm, 32 for 2,000 lb.
 pub const LIGHT_HOLD: f64 = 2.;
 pub const LIGHT_TICKS: f64 = 10.;
 pub const LIGHT_TICKS_PER_SCALE: f64 = 14.;
@@ -36,7 +36,7 @@ pub const LIGHT_RISE: f64 = 0.15;
 
 /// Sparks thrown by one impact: `SPARKS` plus `SPARKS_PER_SCALE` times its
 /// size factor, at most `SPARKS_MAX` (11 for a cannon shell, 16 for a 500 lb
-/// bomb, 26 for the 105 mm).
+/// bomb or the 105 mm, 22 for a 2,000 lb).
 pub const SPARKS: f64 = 6.;
 pub const SPARKS_PER_SCALE: f64 = 10.;
 pub const SPARKS_MAX: usize = 30;
@@ -60,7 +60,7 @@ pub const SPARK_WIDTH: f64 = 0.5;
 /// smoke grows and lingers with the weapon's size; the numbers are agent
 /// choices): `SMOKE_PUFFS` plus `SMOKE_PUFFS_PER_SCALE` times the size
 /// factor dark dust puffs (3 for a cannon shell, 5 for a 500 lb bomb, 7 for
-/// a 2,000 lb, 9 for the 105 mm), each from `SMOKE_START` to `SMOKE_END` of
+/// a 2,000 lb; the 105 mm as a 500 lb bomb), each from `SMOKE_START` to `SMOKE_END` of
 /// the explosion's drawn width across, rising `SMOKE_RISE_FPS` times the
 /// square root of the factor, fading in over `SMOKE_FADE_IN_TICKS` (the
 /// fireball hides it first) and out by `SMOKE_TICKS` times the factor (6 s
@@ -377,9 +377,9 @@ mod tests {
         let brightest = |s: &[Spark]| s.iter().map(|s| s.brightness).fold(0., f64::max);
         assert!(brightest(&later) < brightest(&early));
         assert!(at(119).is_empty());
-        // A cannon shell throws fewer than a 105 mm round.
+        // A cannon shell throws fewer than a 2,000 lb bomb.
         let shell = sparks(&[impact(EffectKind::Ground, 15, 50, 2)], ground);
-        let howitzer = sparks(&[impact(EffectKind::Ground, 22, 200, 2)], ground);
+        let howitzer = sparks(&[impact(EffectKind::Ground, 35, 159, 2)], ground);
         assert!(shell.len() < howitzer.len());
         // The same impact throws the same sparks on every machine.
         assert_eq!(at(10), at(10));

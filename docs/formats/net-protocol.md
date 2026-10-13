@@ -2655,7 +2655,7 @@ stands.
 *Built (slice BF of the bug-fix round, 2026-10-12); the size rule is
 John's (opinionated, 2026-10-12), the coding an agent decision.* An impact
 is drawn at its weapon's size against its explosion type's: guns up to
-40 mm at half size, the AC-130's 105 mm at twice, bombs and warheads by the
+40 mm at half size, the AC-130's 105 mm like a 500 lb bomb, bombs and warheads by the
 cube root of their weight against 500 lb
 ([explosions](../spec/explosions.md#size-by-weapon)). Only the host's combat
 knows which weapon made an effect, so the size travels with it.
@@ -2669,7 +2669,7 @@ knows which weapon made an effect, so the size travels with it.
   keeps such games apart.
 - **The wire golden** changes in the version line, the transport packets
   sealed with it, and four new Effect events in the sampled events section
-  (a 20 mm hit at 50, a 105 mm strike at 200, a 2,000 lb bomb at 159 and a
+  (a 20 mm hit at 50, a large ground strike at 200, a 2,000 lb bomb at 159 and a
   dud at 0).
 - **Not on the wire:** a missile or rocket's motor state. A client dates
   each round from the client tick it first drew it, by the weapon's motor,

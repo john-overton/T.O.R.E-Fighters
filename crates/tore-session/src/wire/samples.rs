@@ -624,7 +624,7 @@ pub fn events() -> EventsSection {
             buildings: vec![7, 8, 9, 130, 499_999],
         },
         // Protocol 26: impacts drawn by weapon (bugs B8 to B10): a 20 mm
-        // hit at half size, a 105 mm at twice, a 2,000 lb bomb at 159
+        // hit at half size, a large strike at twice, a 2,000 lb bomb at 159
         // percent and a dud's inert puff.
         WireEvent::Effect {
             kind: EffectKind::Hit,

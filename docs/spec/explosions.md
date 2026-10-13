@@ -20,7 +20,7 @@ A destroyed aircraft adds its own type 30 blast; a destroyed ground object adds
 its unit's own blast (a large ground blast when it has none).
 
 Each impact is drawn at its weapon's size: a cannon shell's burst is half
-its type's size, the AC-130's 105 mm twice, and a bomb or warhead grows
+its type's size, the AC-130's 105 mm like a 500 lb bomb, and a bomb or warhead grows
 with its weight, so a 2,000 lb bomb's blast is clearly bigger than a 500 lb
 bomb's (see [size by weapon](#size-by-weapon)). Every impact also throws a
 brief flash of light that lights the ground around it at night and a spray
@@ -101,7 +101,7 @@ shockwave ring both grow with it:
 | Weapon | Scale | Example |
 | --- | --- | --- |
 | Guns up to 40 mm: every aircraft gun, the AC-130's 25 mm and 40 mm, AAA (ZSU-23, 2S6, M163, Phalanx, AK-630 and AK-230, 37 mm M1939), vehicle guns and small arms | 50 % on the ground and on aircraft | a 20 mm dirt puff about 37 ft wide instead of 75 |
-| The AC-130's 105 mm | 200 % | its type 22 ground blast 510 ft wide (the type's rolled width is always capped at 255) |
+| The AC-130's 105 mm | 100 %, like a 500 lb bomb (John retuned it from 200 % on 2026-10-12: kinetic plus explosive) | its type 22 ground blast 255 ft wide, as a Mk 82's (the type's rolled width is always capped at 255) |
 | 57 mm (ZSU-57), the 85 mm and 100 mm flak guns, the 120 mm and 125 mm tank guns | 100 % | unchanged |
 | Bombs | cube root of the bomb's weight over 500 lb (a pack's weight is shared by its bombs) | 250 lb 79 % (about 200 ft wide), 500 lb 100 % (255 ft), 1,000 lb 126 %, 2,000 lb 159 % (405 ft), GBU-28 (4,500 lb) 208 % |
 | Missiles and rockets | cube root of the warhead's weight over 500 lb, at least 50 % | AGM-65G (300 lb) 84 %, Harpoon (488 lb) 99 %, SS-N-9 (1,100 lb) 130 %; a Sidewinder or a 2.75 in rocket 50 % |
@@ -136,16 +136,16 @@ splash in the water:
   explosion's drawn width above the ground for a surface blast, at 2.5
   flares per 150 ft of drawn width (a fifth of a flare to twelve flares; a
   20 mm hit about 0.6 of a flare, a 500 lb bomb about 4, a 2,000 lb bomb
-  about 7 and the 105 mm about 8.5). It holds two ticks and fades over 10 ticks plus
+  about 7, the 105 mm about 4 like a 500 lb bomb). It holds two ticks and fades over 10 ticks plus
   14 per unit of the weapon's scale (about 0.15 s for a cannon shell, 0.2 s
-  for a 500 lb bomb, 0.3 s for the 105 mm), the quadratic fade of a flak
+  for a 500 lb bomb and the 105 mm, 0.27 s for a 2,000 lb bomb), the quadratic fade of a flak
   burst's flash. It rides the flare light path, so like every flare light
   it counts up to four times as much against the night scene and hardly
   shows by day. A picture lights at most its 24 newest impacts, so a long
   gun burst cannot crowd out the flares (the scene lights its 16 strongest
   lights).
 - **Sparks.** 6 plus 10 per unit of scale glowing streaks (at most 30): 11
-  for a cannon shell, 16 for a 500 lb bomb, 26 for the 105 mm. Each leaves
+  for a cannon shell, 16 for a 500 lb bomb or the 105 mm, 22 for a 2,000 lb bomb. Each leaves
   at 60 to 160 ft/s times the square root of the scale, upward and outward
   from a ground burst (15 to 75 degrees up) and every way from an air burst,
   falls under gravity, and lives 0.2 to 0.4 s plus 0.1 s per unit of scale,
@@ -158,11 +158,11 @@ splash in the water:
   (opinionated, John, 2026-10-12: the whole effect, light, fireball and
   smoke, scales by the same rule; the numbers are agent choices): 1 plus 4
   per unit of scale puffs, at most 10 (3 for a cannon shell, 5 for a 500 lb
-  bomb, 7 for a 2,000 lb, 9 for the 105 mm), each growing from 0.15 to 0.45
+  bomb or the 105 mm, 7 for a 2,000 lb), each growing from 0.15 to 0.45
   of the explosion's drawn width across and rising 6 ft/s times the square
   root of the scale, fading in over a quarter second behind the fireball and
   gone after 6 seconds times the scale (3 s for a cannon shell, 4.7 s for a
-  250 lb bomb, 6 s for a 500 lb, 9.5 s for a 2,000 lb, 12 s for the 105 mm).
+  250 lb bomb, 6 s for a 500 lb or the 105 mm, 9.5 s for a 2,000 lb).
   Up to 96 recent impacts are remembered for it.
 - The flash's strength grows with the drawn width, so a bigger weapon's
   light is both brighter and reaches farther before it fades into the

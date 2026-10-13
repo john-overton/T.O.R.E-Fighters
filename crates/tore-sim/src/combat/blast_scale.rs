@@ -8,7 +8,8 @@
 //! - guns up to 40 mm, aircraft and surface alike (the AC-130's 25 mm and
 //!   40 mm included), draw their hits at half size, on the ground and in the
 //!   air;
-//! - the AC-130's 105 mm draws twice its size;
+//! - the AC-130's 105 mm draws like a 500 lb bomb, its type's own size
+//!   (John retuned it from twice its size the same day);
 //! - the 57 mm, the flak guns and the tank guns are unchanged;
 //! - a bomb scales by the cube root of its weight against a 500 lb bomb
 //!   (2,000 lb about 1.6 times, 250 lb about 0.8 times);
@@ -30,8 +31,9 @@ pub const FULL: u8 = 100;
 pub const INERT: u8 = 0;
 /// Guns up to 40 mm: half size.
 pub const SMALL_GUN: u8 = 50;
-/// The AC-130's 105 mm: twice the size.
-pub const HOWITZER: u8 = 200;
+/// The AC-130's 105 mm: like a 500 lb bomb, kinetic and explosive (John,
+/// 2026-10-12, down from twice the size).
+pub const HOWITZER: u8 = 100;
 /// The bomb (or warhead) weight that draws at its type's own size, pounds.
 pub const REFERENCE_LB: f64 = 500.;
 /// The least a missile or rocket's impact is drawn at.
@@ -188,7 +190,7 @@ mod tests {
     }
 
     #[test]
-    fn guns_up_to_40_mm_draw_half_size_and_the_105_twice() {
+    fn guns_up_to_40_mm_draw_half_size_and_the_105_as_a_500_lb_bomb() {
         for small in [
             "M61.JT",
             "GAU8.JT",
@@ -202,6 +204,7 @@ mod tests {
         }
         assert_eq!(of(&gun("C_105.JT")), HOWITZER);
         assert_eq!(of(&gun("c_105.jt")), HOWITZER);
+        assert_eq!(HOWITZER, of(&bomb("MK82.JT", 500)));
         for full in FULL_SIZE_GUNS {
             assert_eq!(of(&gun(full)), FULL, "{full}");
         }
@@ -238,7 +241,8 @@ mod tests {
         assert_eq!(factor(INERT), 1.);
         assert!(!detonates(INERT));
         assert_eq!(factor(FULL), 1.);
-        assert_eq!(factor(HOWITZER), 2.);
+        assert_eq!(factor(HOWITZER), 1.);
+        assert_eq!(factor(200), 2.);
         assert!(detonates(SMALL_GUN));
     }
 }
