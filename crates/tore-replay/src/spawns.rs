@@ -371,3 +371,36 @@ pub(crate) fn apply_scales(section: &[u8], frames: u32, spawns: &mut [FrameSpawn
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod stress_tests {
+    use super::*;
+
+    /// What a long mission's marks cost a recording (slice BF, 2026-10-12):
+    /// 20,000 gun pock marks and 1,000 craters, one a frame, with their
+    /// scales. Run with `--ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn a_long_missions_marks_cost_a_recording() {
+        let (mut spawns, mut scales) = (SpawnCoder::default(), ScaleCoder::default());
+        for n in 0..21_000_u32 {
+            let effect = EffectSpawn {
+                kind: EffectKind::Crater(if n < 20_000 { 0 } else { 9 }),
+                position: [
+                    f64::from(n * 37 % 120_000),
+                    f64::from(n % 97) * 8.,
+                    f64::from(n * 91 % 120_000),
+                ],
+                duration_ticks: u32::MAX,
+                scale: if n < 20_000 { 50 } else { 159 },
+            };
+            spawns.put(n, std::slice::from_ref(&effect), &[]);
+            scales.put(n, std::slice::from_ref(&effect));
+        }
+        let bytes = spawns.section().unwrap().len() + scales.section().unwrap().len();
+        println!(
+            "mark stress: recording {bytes} bytes for 21000 marks ({:.1} each)",
+            bytes as f64 / 21_000.
+        );
+    }
+}

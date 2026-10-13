@@ -597,7 +597,7 @@ pub fn mark_spawn(mark: &blast::Mark) -> replay::EffectSpawn {
         },
         position: mark.position,
         duration_ticks: mark.ticks,
-        scale: tore_replay::EffectSpawn::FULL_SCALE,
+        scale: mark.scale,
     }
 }
 
@@ -621,8 +621,8 @@ pub fn recorded_marks(recording: &replay::Recording) -> Vec<(u64, replay::Effect
         .unwrap_or_default()
 }
 
-/// The craters and fires alive at `tick`, keeping only the newest up to the
-/// simulation's caps.
+/// The craters and fires alive at `tick`, keeping only the newest fires up
+/// to the simulation's cap (craters have none since 2026-10-12).
 pub fn marks_at(marks: &[(u64, replay::EffectSpawn)], tick: u64) -> Vec<MarkPose> {
     let mut alive: Vec<MarkPose> = marks
         .iter()
@@ -642,25 +642,24 @@ pub fn marks_at(marks: &[(u64, replay::EffectSpawn)], tick: u64) -> Vec<MarkPose
                 ticks,
                 born: *start,
                 serial: 0,
+                scale: e.scale,
             };
             MarkPose::of(&mark, tick)
         })
         .collect();
-    for (fire, cap) in [(false, blast::MAX_CRATERS), (true, blast::MAX_FIRES)] {
-        let count = alive
-            .iter()
-            .filter(|m| (m.kind == blast::MarkKind::Fire) == fire)
-            .count();
-        let mut drop = count.saturating_sub(cap);
-        alive.retain(|m| {
-            if drop > 0 && (m.kind == blast::MarkKind::Fire) == fire {
-                drop -= 1;
-                false
-            } else {
-                true
-            }
-        });
-    }
+    let fires = alive
+        .iter()
+        .filter(|m| m.kind == blast::MarkKind::Fire)
+        .count();
+    let mut drop = fires.saturating_sub(blast::MAX_FIRES);
+    alive.retain(|m| {
+        if drop > 0 && m.kind == blast::MarkKind::Fire {
+            drop -= 1;
+            false
+        } else {
+            true
+        }
+    });
     alive
 }
 
@@ -1519,15 +1518,17 @@ mod tests {
             ticks: 1000,
             born: 10,
             serial: 0,
+            scale: 100,
         };
         let mut marks = vec![(11, mark_spawn(&fire))];
-        for i in 0..=blast::MAX_CRATERS as u64 {
+        for i in 0..=300_u64 {
             let crater = blast::Mark {
                 position: [i as f64, 0., 0.],
                 kind: blast::MarkKind::Crater(9),
                 ticks: blast::FOREVER,
                 born: i,
                 serial: i,
+                scale: 159,
             };
             marks.push((i, mark_spawn(&crater)));
         }
@@ -1538,11 +1539,12 @@ mod tests {
             .collect();
         assert_eq!(fires.len(), 1);
         assert_eq!(fires[0].age, 489);
-        assert_eq!(at.len(), blast::MAX_CRATERS + 1);
-        // The oldest crater went when the 257th was dug.
+        // Every crater stays, at its recorded scale (no cap since
+        // 2026-10-12).
+        assert_eq!(at.len(), 301 + 1);
         assert!(
             at.iter()
-                .all(|m| m.position[0] != 0. || m.kind == blast::MarkKind::Fire)
+                .all(|m| m.kind == blast::MarkKind::Fire || m.scale == 159)
         );
         // The fire is out 1,000 ticks after it was recorded.
         assert!(

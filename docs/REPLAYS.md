@@ -833,7 +833,10 @@ beyond them.
   inert puff). Both formats carry it. An older build skips the unknown
   section, as it always has, and draws every explosion full size; a
   recording made before it has none, and this build draws its explosions
-  full size too. The motor flame of a missile or rocket is not recorded:
+  full size too. A crater spawn's scale is its crater's drawn size, and a
+  crater of size 0 (code 160) is a gun round's pock mark, which an older
+  build draws as nothing. Craters and pock marks have no cap (John,
+  2026-10-12); a recording costs about 24 bytes a mark. The motor flame of a missile or rocket is not recorded:
   the viewer dates each round's motor from its recorded age and the
   weapon's record in the import, so a recording of any age draws the flame
   only while the motor burns.

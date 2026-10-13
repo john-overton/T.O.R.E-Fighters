@@ -1019,6 +1019,7 @@ mod tests {
                 position: [5010., 0., 5020.],
                 age: 10,
                 strength: 1.,
+                scale: 100,
             }],
             ..picture(3000)
         };
@@ -1043,6 +1044,7 @@ mod tests {
                 position: [9000., 0., 9000.],
                 age: 1,
                 strength: 1.,
+                scale: 100,
             }],
             ..bare
         };

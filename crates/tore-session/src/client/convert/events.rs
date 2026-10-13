@@ -177,6 +177,7 @@ impl Events {
                 WireEvent::Mark {
                     kind: mark,
                     position,
+                    scale,
                 } => vec![Put::Effect(replay::EffectSpawn {
                     kind: match mark {
                         MarkKind::Crater(size) => replay::EffectKind::Crater(*size),
@@ -184,7 +185,7 @@ impl Events {
                     },
                     position: feet(position),
                     duration_ticks: blast::FOREVER,
-                    scale: replay::EffectSpawn::FULL_SCALE,
+                    scale: *scale,
                 })],
                 WireEvent::GroundDestroyed { object } => vec![
                     Put::Surface(*object),

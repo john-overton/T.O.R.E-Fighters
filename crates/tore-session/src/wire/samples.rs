@@ -490,10 +490,24 @@ pub fn events() -> EventsSection {
         WireEvent::Mark {
             kind: MarkKind::Crater(2),
             position: [-5, 6, 7],
+            scale: 100,
         },
         WireEvent::Mark {
             kind: MarkKind::Fire,
             position: [0, 0, 0],
+            scale: 100,
+        },
+        // Protocol 26: a 2,000 lb bomb's crater at 159 percent and a 20 mm
+        // round's pock mark (size 0) at 50.
+        WireEvent::Mark {
+            kind: MarkKind::Crater(9),
+            position: [-50, 60, 70],
+            scale: 159,
+        },
+        WireEvent::Mark {
+            kind: MarkKind::Crater(0),
+            position: [5, 6, -7],
+            scale: 50,
         },
         WireEvent::GroundDestroyed { object: 1_000_123 },
         WireEvent::Countermeasure {

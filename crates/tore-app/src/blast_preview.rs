@@ -178,6 +178,7 @@ pub fn run() -> AppResult<()> {
                     position: point,
                     age: u64::from(elapsed),
                     strength: 1.,
+                    scale: 100,
                 }]
             } else {
                 Vec::new()

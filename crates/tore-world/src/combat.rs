@@ -1112,6 +1112,7 @@ impl Combat {
                 kind: blast::MarkKind::Crater(size),
                 ticks: blast::FOREVER,
                 born: 0,
+                scale: tore_sim::combat::blast_scale::FULL,
                 serial: u64::MAX - size as u64,
             });
         }

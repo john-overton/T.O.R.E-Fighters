@@ -2670,7 +2670,14 @@ knows which weapon made an effect, so the size travels with it.
 - **The wire golden** changes in the version line, the transport packets
   sealed with it, and four new Effect events in the sampled events section
   (a 20 mm hit at 50, a large ground strike at 200, a 2,000 lb bomb at 159 and a
-  dud at 0).
+  dud at 0), and two new Mark events (a crater at 159 and a pock mark at 50).
+- **The Mark event (code 12)** gains, after the position, the same 1-bit
+  flag and byte: a crater's drawn scale (craters follow the weapon's yield,
+  John, 2026-10-12). A crater of size 0 is a gun round's pock mark. A newly
+  seated player's backlog holds every crater and fire but only the newest
+  1,000 pock marks (`host::sorting::SEAT_POCK_MARKS`, agent decision): at
+  13.5 bytes a mark, a long mission's 20,000 would hold the snapshots' event
+  share for a minute ([craters by weapon](../spec/explosions.md#craters-by-weapon)).
 - **Not on the wire:** a missile or rocket's motor state. A client dates
   each round from the client tick it first drew it, by the weapon's motor,
   as it does the motor's smoke (`regen::Effects`), and draws the motor's

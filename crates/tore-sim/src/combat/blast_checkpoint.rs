@@ -36,6 +36,7 @@ crate::checkpoint_struct!(Mark {
     ticks,
     born,
     serial,
+    scale,
 });
 
 // The xorshift state of the explosion variety rolls.
@@ -57,6 +58,7 @@ mod tests {
                 ticks: FOREVER,
                 born: 77,
                 serial: 3,
+                scale: 159,
             },
             Mark {
                 position: [-0.0, f64::NAN, f64::INFINITY],
@@ -64,6 +66,7 @@ mod tests {
                 ticks: 15 * 60 * 120 - 5,
                 born: u64::MAX,
                 serial: u64::MAX - 1,
+                scale: 100,
             },
             Mark {
                 position: [0.; 3],
@@ -71,6 +74,7 @@ mod tests {
                 ticks: 0,
                 born: 0,
                 serial: 0,
+                scale: 50,
             },
         ];
         for mark in &marks {
@@ -115,5 +119,41 @@ mod tests {
             records: Vec::new(),
         };
         assert!(from_bytes::<MarkKind>(&coded, &models).is_err());
+    }
+}
+
+#[cfg(test)]
+mod stress_tests {
+    use super::super::{FOREVER, Mark, MarkKind, POCK};
+    use crate::checkpoint::{Models, to_bytes};
+
+    /// What a long mission's marks cost the checkpoint and memory (slice
+    /// BF, 2026-10-12): 20,000 gun pock marks and 1,000 craters. Run with
+    /// `--ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn a_long_missions_marks_cost_the_checkpoint() {
+        let marks: Vec<Mark> = (0..21_000_u64)
+            .map(|n| Mark {
+                position: [
+                    (n * 37_301 % 120_000) as f64 + 0.37,
+                    (n % 97) as f64 * 8.1,
+                    (n * 91_127 % 120_000) as f64 - 0.81,
+                ],
+                kind: MarkKind::Crater(if n < 20_000 { POCK } else { 9 }),
+                ticks: FOREVER,
+                born: n * 12,
+                serial: n,
+                scale: if n < 20_000 { 50 } else { 159 },
+            })
+            .collect();
+        let coded = to_bytes(&marks, &Models::default()).unwrap();
+        let bytes = coded.body.len() + coded.records.iter().map(Vec::len).sum::<usize>();
+        println!(
+            "mark stress: checkpoint {bytes} bytes for 21000 marks ({:.1} each); memory {} bytes ({} each)",
+            bytes as f64 / 21_000.,
+            marks.capacity() * std::mem::size_of::<Mark>(),
+            std::mem::size_of::<Mark>()
+        );
     }
 }

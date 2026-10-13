@@ -31,7 +31,10 @@ dust (white spray on water) that races out from the blast, slows and fades
 while the fireball burns.
 
 A weapon that strikes land with a crater size leaves one of three crater
-pictures lying flat on the ground. It stays for the rest of the mission.
+pictures lying flat on the ground, sized with the explosion by weapon, and
+a gun round leaves a small pock mark. Every crater and pock mark stays for
+the rest of the mission, however many there are
+([craters by weapon](#craters-by-weapon)).
 
 As John requested on 2026-09-28, every aircraft that crashes on land, the
 player's or any AI's, leaves a crash site for 15 minutes: a large ground blast,
@@ -76,9 +79,11 @@ fitted. Each burst throws a flash of light and leaves a dark puff that hangs for
 about four seconds ([surface defenses](surface-defenses.md#flak-bursts-gunfire-launches-and-light)).
 
 Craters: half width 16 feet per unit of the weapon's crater size, at most 333
-feet. Guns have no crater; air-to-air missiles 3 (96 feet across); rockets 1
+feet. In the records guns have no crater; air-to-air missiles 3 (96 feet across); rockets 1
 or 2; anti-ship missiles 6; air-to-ground missiles and 500 and 1,000 lb class
 bombs 9; SAMs 12; guided 2,000 lb bombs 15; the Mk 84 18 (576 feet across).
+Since 2026-10-12 the drawn crater follows the weapon's scale instead
+([craters by weapon](#craters-by-weapon)).
 
 Shockwave (agent design, 2026-10-10): explosion types 21 to 23 and 35 to 37
 throw out a ring of 32 grey `SMOKE.PIC` dust puffs, type 34 a ring of white
@@ -166,14 +171,54 @@ splash in the water:
   Up to 96 recent impacts are remembered for it.
 - The flash's strength grows with the drawn width, so a bigger weapon's
   light is both brighter and reaches farther before it fades into the
-  night; the fireball and the shockwave ring scale with the width too. A
-  weapon's impact leaves no fire of its own today (fires belong to crash
-  sites and destroyed units, sized by the unit), so there is no impact fire
-  to scale.
+  night; the fireball and the shockwave ring scale with the width too.
+- **No fires.** An impact starts no fire (John, 2026-10-12): fires stay with
+  crash sites and destroyed units and buildings.
 - All of it comes from the effect alone (where, which type, its scale and how far
   into its life), with each spark's direction, speed and life drawn from the
   burst's exact position, so a networked client and a replay show the same
   and nothing reaches the simulation, the wire or a recording.
+
+### Craters by weapon
+
+Opinionated, John, 2026-10-12. Bombs and guns leave craters that follow the
+same yield scale as the explosion, on land only (a water strike keeps its
+spray and leaves nothing; a hit on an aircraft or object leaves nothing):
+
+| Weapon | Crater | Drawn across |
+| --- | --- | --- |
+| Bombs with a crater in their record (not cluster bombs) | a 500 lb bomb's (size 9) at the bomb's scale | 250 lb about 230 ft, 500 lb 288 ft, 2,000 lb about 458 ft, GBU-28 about 600 ft |
+| The AC-130's 105 mm | a 500 lb bomb's | 288 ft |
+| Missiles and rockets | their record's size at their scale | AGM-65G (9) about 242 ft |
+| Tank guns (120 mm, 125 mm) | their record's size (6) | 192 ft |
+| Every other gun round (aircraft guns, AAA, 57 mm, small arms) | a pock mark: crater size 0, 5 ft across at the 50 % gun scale (10 ft at 100 %) | 5 ft |
+
+- Every crater's drawn half width is at most 333 ft. The retail sizes for
+  bombs (9 for both the Mk 82 and the FAB-1000, 18 for the Mk 84) do not
+  follow weight, so every bomb now takes the 500 lb bomb's size at its own
+  scale (agent decision within John's rule): the Mk 84's drawn crater
+  shrinks from 576 to about 458 ft.
+- **No cap** (John, 2026-10-12): every weapon crater and gun pock mark
+  stays for the whole mission; the old 256-crater cap is gone. Crash fires
+  keep their 64 cap.
+- **Drawing** (agent decisions): a mark is drawn out to 4,000 times its
+  half width (a pock mark to 10,000 ft, where it is half a pixel; a 500 lb
+  bomb's crater to about 95 nmi), at most 3,072 marks at once, the nearest,
+  so a long mission's marks never crowd out the explosions. Measured on
+  2026-10-12 with 20,000 pock marks and 1,000 craters: about 0.4 ms of a
+  frame's CPU time (release build), 1.5 MB of sprites, 1 MB of simulation
+  state, 0.9 MB of checkpoint (a standby's first full state; later states
+  code only what changed), about 0.5 MB of recording, and 13.5 bytes of
+  network event each.
+- **Online**: a new mark reaches every client as it is made. A player
+  seated later is told of every crater and fire but only the newest 1,000
+  gun pock marks (about 13.5 KB; agent decision), since 20,000 would hold
+  every other event back for a minute in the snapshots' event share; older
+  pock marks are missing only on that late joiner's screen.
+- A pock mark is a crater of size 0, which an older build or replay viewer
+  draws as nothing. The crater code is shared: `blast::mark_half_width`
+  sizes any crater by its scale and the effect renderer's `visible` budget
+  culls flat marks, for the runway craters slice B16 adds.
 
 Cluster bombs (agent design, 2026-10-10): the five cluster records explode as type 18 on land and water with no crater, and a ground burst of that family also draws 28 small bomblet flashes over 1,200 feet, derived from the burst's position alone; see [ordnance presentation](ordnance-presentation.md#cluster-bomb-flashes).
 
@@ -189,7 +234,8 @@ over the last minute.
 ## Edge cases
 
 - A weapon strike on water never leaves a crater.
-- At most 256 craters and 64 crash fires are kept; the oldest goes first.
+- Every crater and pock mark is kept for the mission (no cap since
+  2026-10-12); at most 64 crash fires burn at once, the oldest going first.
 - An aircraft is given one crash site, however its crash is detected.
 - A missing sheet or recording skips that picture or sound; the rest play.
 
@@ -211,7 +257,7 @@ Fitted, by the agent:
 - Explosions and fire face the camera; surface types stand on their point.
   Craters lie flat, drawn slightly toward the eye so they stay above uneven
   ground.
-- Crater and fire caps (256, 64).
+- The fire cap (64).
 - A debris piece landing keeps its 15-foot `GRDLRGA` puff and stays silent.
 
 Opinionated:

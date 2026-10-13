@@ -94,6 +94,48 @@ pub fn of(w: &Weapon) -> u8 {
     }
 }
 
+/// The crater a 500 lb bomb leaves, in the original's crater units (the
+/// Mk 82's, 288 ft across): every bomb's crater is this at its scale.
+pub const BOMB_CRATER: u8 = 9;
+
+/// What a strike of `w` on land leaves (John, 2026-10-12): a crater size and
+/// the scale it is drawn at, or none. Every crater follows the explosion's
+/// scale:
+///
+/// - a bomb that leaves a crater at all leaves a 500 lb bomb's
+///   ([`BOMB_CRATER`]) at its own scale, so a 2,000 lb bomb's is about 1.6
+///   times as wide and a 250 lb bomb's 0.8 (the retail sizes, 9 for a Mk 82
+///   and an FAB-1000 alike, 18 for a Mk 84, do not follow the weight);
+/// - a missile or rocket leaves its record's crater at its scale;
+/// - the AC-130's 105 mm, which has no crater in its record, leaves a 500 lb
+///   bomb's;
+/// - a tank gun keeps its record's crater; every other gun round leaves a
+///   pock mark ([`super::blast::POCK`]) at its scale.
+///
+/// A cluster bomb leaves none, as its record says.
+pub fn crater_of(w: &Weapon) -> Option<(u8, u8)> {
+    let scale = of(w);
+    let retail = w.effects.crater_size;
+    if is_gun_round(w) {
+        let source = w.source.to_ascii_uppercase();
+        return Some(if source == super::gunship::GUNS[2] {
+            (BOMB_CRATER, scale)
+        } else if retail > 0 {
+            (retail, FULL)
+        } else {
+            (super::blast::POCK, scale)
+        });
+    }
+    if retail == 0 {
+        return None;
+    }
+    Some(if w.movement.fuel_t == 0 {
+        (BOMB_CRATER, scale)
+    } else {
+        (retail, scale)
+    })
+}
+
 /// The real weapon's warhead, pounds, by retail record (fitted, published
 /// figures rounded; fictional records an agent's estimate). A rocket pod's
 /// is one rocket's.
@@ -234,6 +276,35 @@ mod tests {
         assert_eq!(of(&missile("LAU61.JT")), 50);
         // A record the table does not name keeps its size.
         assert_eq!(of(&missile("UNKNOWN.JT")), FULL);
+    }
+
+    #[test]
+    fn craters_follow_the_explosions_scale_and_guns_leave_pock_marks() {
+        use super::super::blast::{POCK, mark_half_width};
+        let with_crater = |mut w: Weapon, crater: u8| {
+            w.effects.crater_size = crater;
+            w
+        };
+        let mk82 = crater_of(&with_crater(bomb("MK82.JT", 500), 9)).unwrap();
+        let mk84 = crater_of(&with_crater(bomb("MK84.JT", 2_000), 18)).unwrap();
+        let small = crater_of(&with_crater(bomb("SMALL.JT", 250), 9)).unwrap();
+        assert_eq!(mk82, (BOMB_CRATER, 100));
+        assert_eq!(mk84, (BOMB_CRATER, 159));
+        let width = |(size, scale): (u8, u8)| mark_half_width(size, scale);
+        assert!(width(small) < width(mk82) && width(mk82) < width(mk84));
+        assert!((width(mk84) / width(mk82) - 1.59).abs() < 1e-9);
+        // The 105 mm leaves a 500 lb bomb's crater.
+        assert_eq!(crater_of(&gun("C_105.JT")), Some(mk82));
+        // Small guns leave pock marks; a tank gun keeps its record's crater.
+        assert_eq!(crater_of(&gun("M61.JT")), Some((POCK, SMALL_GUN)));
+        assert_eq!(width((POCK, SMALL_GUN)), 2.5);
+        assert_eq!(crater_of(&with_crater(gun("T72.JT"), 6)), Some((6, FULL)));
+        // A cluster bomb leaves none; a missile its record's at its scale.
+        assert_eq!(crater_of(&bomb("CBU87.JT", 500)), None);
+        assert_eq!(
+            crater_of(&with_crater(missile("AGM65G.JT"), 9)),
+            Some((9, 84))
+        );
     }
 
     #[test]

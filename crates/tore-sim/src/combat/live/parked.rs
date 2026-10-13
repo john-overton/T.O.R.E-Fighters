@@ -155,7 +155,12 @@ impl State {
             return;
         }
         if !site.water {
-            self.crater(site.ground, blast::CRASH_CRATER, blast::CRASH_TICKS);
+            self.crater(
+                site.ground,
+                blast::CRASH_CRATER,
+                crate::combat::blast_scale::FULL,
+                blast::CRASH_TICKS,
+            );
         }
         if self
             .marks
@@ -167,7 +172,12 @@ impl State {
         {
             self.marks.remove(oldest);
         }
-        self.mark(site.ground, MarkKind::Fire, blast::CRASH_TICKS);
+        self.mark(
+            site.ground,
+            MarkKind::Fire,
+            blast::CRASH_TICKS,
+            crate::combat::blast_scale::FULL,
+        );
         let Some(t) = self.targets.iter_mut().find(|t| t.id == id) else {
             return;
         };

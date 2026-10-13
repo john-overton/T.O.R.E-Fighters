@@ -712,7 +712,7 @@ pub struct Client {
     released: Vec<ReceivedEvent>,
     held: VecDeque<ReceivedEvent>,
     effects: Vec<Shown>,
-    marks: Vec<(u32, MarkKind, [f64; 3])>,
+    marks: Vec<(u32, MarkKind, [f64; 3], u8)>,
     destroyed: BTreeMap<u32, u32>,
     /// Each surface unit's states the host has told (protocol 22), by
     /// unit, oldest first, each from its tick; the picture takes the newest
@@ -1678,11 +1678,12 @@ impl Client {
             .marks
             .iter()
             .filter(|(tick, ..)| f64::from(*tick) <= render)
-            .map(|(tick, kind, position)| MarkPose {
+            .map(|(tick, kind, position, scale)| MarkPose {
                 kind: *kind,
                 position: *position,
                 age: (render - f64::from(*tick)).max(0.) as u64,
                 strength: 1.,
+                scale: *scale,
             })
             .collect();
         let pilots = presented
@@ -2799,8 +2800,12 @@ impl Client {
                 blast: *blast,
                 scale: *scale,
             }),
-            WireEvent::Mark { kind, position: at } => {
-                self.marks.push((event.tick, *kind, position(at)));
+            WireEvent::Mark {
+                kind,
+                position: at,
+                scale,
+            } => {
+                self.marks.push((event.tick, *kind, position(at), *scale));
             }
             WireEvent::GroundDestroyed { object } => {
                 self.destroyed.entry(*object).or_insert(event.tick);

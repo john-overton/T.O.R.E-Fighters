@@ -176,7 +176,7 @@ pub(super) struct Outputs<'a> {
     pub events: &'a mut Vec<Event>,
     pub strikes: &'a mut Vec<Strike>,
     pub ownship_hits: &'a mut Vec<OwnshipHit>,
-    pub impacts: &'a mut Vec<(Vector, EffectKind, u8, u8, u8)>,
+    pub impacts: &'a mut Vec<(Vector, EffectKind, u8, Option<u8>, u8)>,
     /// Score changes for ownship shooters: owner and whether it is a kill.
     pub scored: &'a mut Vec<(u32, bool)>,
 }
@@ -343,7 +343,7 @@ impl State {
                         position,
                         EffectKind::Destroyed,
                         explosion,
-                        crater,
+                        (crater > 0).then_some(crater),
                         crate::combat::blast_scale::FULL,
                     ));
                 }

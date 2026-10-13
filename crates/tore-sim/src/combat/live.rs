@@ -3813,7 +3813,12 @@ impl State {
             blast::CRASH_LAND,
             super::blast_scale::FULL,
         );
-        self.crater(position, blast::CRASH_CRATER, blast::CRASH_TICKS);
+        self.crater(
+            position,
+            blast::CRASH_CRATER,
+            super::blast_scale::FULL,
+            blast::CRASH_TICKS,
+        );
         if self
             .marks
             .iter()
@@ -3824,35 +3829,29 @@ impl State {
             let oldest = self.marks.iter().position(|m| m.kind == MarkKind::Fire);
             self.marks.remove(oldest.unwrap());
         }
-        self.mark(position, MarkKind::Fire, blast::CRASH_TICKS);
+        self.mark(
+            position,
+            MarkKind::Fire,
+            blast::CRASH_TICKS,
+            super::blast_scale::FULL,
+        );
     }
-    fn mark(&mut self, position: Vector, kind: super::blast::MarkKind, ticks: u32) {
+    fn mark(&mut self, position: Vector, kind: super::blast::MarkKind, ticks: u32, scale: u8) {
         self.marks.push(super::blast::Mark {
             position,
             kind,
             ticks,
             born: self.tick,
             serial: self.marks_made,
+            scale,
         });
         self.marks_made += 1;
     }
-    fn crater(&mut self, position: Vector, size: u8, ticks: u32) {
-        use super::blast::{MAX_CRATERS, MarkKind};
-        if size == 0 {
-            return;
-        }
-        let craters = self
-            .marks
-            .iter()
-            .filter(|m| matches!(m.kind, MarkKind::Crater(_)));
-        if craters.count() == MAX_CRATERS {
-            let oldest = self
-                .marks
-                .iter()
-                .position(|m| matches!(m.kind, MarkKind::Crater(_)));
-            self.marks.remove(oldest.unwrap());
-        }
-        self.mark(position, MarkKind::Crater(size), ticks);
+    /// A crater (or, size [`super::blast::POCK`], a gun round's pock mark)
+    /// drawn at `scale`. Every one stays for good: no cap (John,
+    /// 2026-10-12).
+    pub(crate) fn crater(&mut self, position: Vector, size: u8, scale: u8, ticks: u32) {
+        self.mark(position, super::blast::MarkKind::Crater(size), ticks, scale);
     }
     /// An explicit, non-AI range target of the selected ported aircraft. No
     /// targets are inserted into ordinary free flight or fabricated on scopes.
@@ -5005,7 +5004,7 @@ impl State {
                         p.position,
                         EffectKind::Flak,
                         flak_explosion(w),
-                        0,
+                        None,
                         super::blast_scale::of(w),
                     ));
                     bursts.push(collateral::Burst::new(
@@ -5402,7 +5401,7 @@ impl State {
                             position,
                             EffectKind::Flak,
                             flak_explosion(w),
-                            0,
+                            None,
                             super::blast_scale::of(w),
                         ));
                         bursts.push(collateral::Burst::new(
@@ -5425,7 +5424,7 @@ impl State {
                             p.position,
                             EffectKind::Flak,
                             flak_explosion(w),
-                            0,
+                            None,
                             super::blast_scale::of(w),
                         ));
                         bursts.push(collateral::Burst::new(
@@ -5461,7 +5460,7 @@ impl State {
                         position,
                         EffectKind::Hit,
                         w.effects.object_explosion,
-                        0,
+                        None,
                         super::blast_scale::of(w),
                     ));
                     if by_ownship {
@@ -5533,7 +5532,7 @@ impl State {
                             position,
                             EffectKind::Hit,
                             w.effects.object_explosion,
-                            0,
+                            None,
                             super::blast_scale::of(w),
                         ));
                         if !is_gun(w) {
@@ -5666,7 +5665,7 @@ impl State {
                         position,
                         EffectKind::Hit,
                         w.effects.object_explosion,
-                        0,
+                        None,
                         super::blast_scale::of(w),
                     ));
                     if t.hp == 0 {
@@ -5694,7 +5693,7 @@ impl State {
                             position,
                             EffectKind::Destroyed,
                             explosion,
-                            crater,
+                            (crater > 0).then_some(crater),
                             super::blast_scale::FULL,
                         ));
                     }
@@ -5728,7 +5727,7 @@ impl State {
                             position,
                             EffectKind::Ground,
                             DUD_PUFF,
-                            0,
+                            None,
                             super::blast_scale::INERT,
                         ));
                     }
@@ -5752,7 +5751,7 @@ impl State {
                             position,
                             EffectKind::Ground,
                             w.effects.water_explosion,
-                            0,
+                            None,
                             super::blast_scale::of(w),
                         ));
                     } else {
@@ -5760,7 +5759,9 @@ impl State {
                             position,
                             EffectKind::Ground,
                             w.effects.land_explosion,
-                            w.effects.crater_size,
+                            // The crater follows the explosion's scale; a
+                            // gun round leaves a pock mark (John, 2026-10-12).
+                            super::blast_scale::crater_of(w).map(|(size, _)| size),
                             super::blast_scale::of(w),
                         ));
                     }
@@ -5886,7 +5887,9 @@ impl State {
         }
         for (p, kind, explosion, crater, scale) in impacts {
             self.blast(p, kind, explosion, scale);
-            self.crater(p, crater, super::blast::FOREVER);
+            if let Some(size) = crater {
+                self.crater(p, size, scale, super::blast::FOREVER);
+            }
         }
         self.burn_wrecks();
         use super::smoke::Kind;
@@ -7167,16 +7170,14 @@ mod tests {
         assert!(s.marks.is_empty());
     }
     #[test]
-    fn weapon_craters_stay_for_the_mission_and_the_oldest_goes_past_256() {
-        use super::super::blast::{FOREVER, MAX_CRATERS, MarkKind};
+    fn weapon_craters_and_pock_marks_stay_for_the_mission_without_a_cap() {
+        use super::super::blast::{FOREVER, MarkKind, POCK};
         let mut s = fixture(false);
-        s.crater([0.; 3], 0, FOREVER);
-        assert!(s.marks.is_empty());
-        for i in 0..=MAX_CRATERS {
-            s.crater([i as f64, 0., 0.], 9, FOREVER);
+        for i in 0..1_000 {
+            s.crater([i as f64, 0., 0.], 9, 159, FOREVER);
+            s.crater([i as f64, 0., 10.], POCK, 50, FOREVER);
         }
-        assert_eq!(s.marks.len(), MAX_CRATERS);
-        assert_eq!(s.marks[0].position[0], 1.);
+        assert_eq!(s.marks.len(), 2_000);
         for _ in 0..1000 {
             s.step(
                 &[OwnshipInput {
@@ -7187,8 +7188,14 @@ mod tests {
                 |_, _| 0.,
             );
         }
-        assert_eq!(s.marks.len(), MAX_CRATERS);
-        assert!(s.marks.iter().all(|m| m.kind == MarkKind::Crater(9)));
+        assert_eq!(s.marks.len(), 2_000);
+        assert!(
+            s.marks
+                .iter()
+                .all(|m| matches!(m.kind, MarkKind::Crater(9 | POCK)))
+        );
+        assert_eq!(s.marks[0].scale, 159);
+        assert_eq!(s.marks[1].scale, 50);
     }
 
     /// A gun round fired into the player's cockpit, stepped until it lands

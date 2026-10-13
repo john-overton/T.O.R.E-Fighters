@@ -692,6 +692,7 @@ pub fn mark_event(mark: &MarkPose) -> WireEvent {
     WireEvent::Mark {
         kind: mark.kind,
         position: position(mark.position),
+        scale: mark.scale,
     }
 }
 

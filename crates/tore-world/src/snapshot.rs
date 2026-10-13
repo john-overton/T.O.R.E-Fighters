@@ -328,6 +328,8 @@ pub struct MarkPose {
     pub age: u64,
     /// A fire's strength, 1 until it fades in its last minute.
     pub strength: f32,
+    /// A crater's drawn scale, percent (`Mark::scale`).
+    pub scale: u8,
 }
 impl MarkPose {
     pub fn of(mark: &tore_sim::combat::blast::Mark, tick: u64) -> Self {
@@ -336,6 +338,7 @@ impl MarkPose {
             position: mark.position,
             age: tick.saturating_sub(mark.born),
             strength: mark.strength(),
+            scale: mark.scale,
         }
     }
 }

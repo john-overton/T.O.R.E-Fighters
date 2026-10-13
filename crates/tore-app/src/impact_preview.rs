@@ -103,6 +103,8 @@ struct Shot {
     /// Each impact as it went off and the picture tick it did: the flash
     /// and smoke follow it from there.
     births: Vec<(u64, EffectPose)>,
+    /// Craters and pock marks on the ground.
+    marks: Vec<crate::snapshot::MarkPose>,
     eye: [f64; 3],
     look: [f64; 3],
     fov: f64,
@@ -162,6 +164,7 @@ pub fn run() -> AppResult<()> {
             shots.push(Shot {
                 name: format!("row-t{seconds:.2}s-{light}"),
                 effects,
+                marks: Vec::new(),
                 births: row_births.clone(),
                 eye: [middle[0], middle[1] + 300., middle[2] - 2_500.],
                 look: [middle[0], middle[1] + 60., middle[2]],
@@ -177,6 +180,7 @@ pub fn run() -> AppResult<()> {
                 shots.push(Shot {
                     name: format!("close-{}-t{seconds:.2}s-{light}", impact.label),
                     effects: ground_hit(weapon, at, elapsed).into_iter().collect(),
+                    marks: Vec::new(),
                     births: ground_hit(weapon, at, 0)
                         .map(|e| (10_000, e))
                         .into_iter()
@@ -207,6 +211,7 @@ pub fn run() -> AppResult<()> {
             shots.push(Shot {
                 name: format!("burst-20mm-t{seconds:.2}s-{light}"),
                 effects,
+                marks: Vec::new(),
                 births: (0..8_u16)
                     .filter_map(|k| {
                         ground_hit(cannon, place(k), 0).map(|e| (10_000 + u64::from(k) * 2, e))
@@ -217,6 +222,75 @@ pub fn run() -> AppResult<()> {
                 fov: 30.,
                 tick: 10_000 + u64::from(elapsed),
             });
+        }
+        // Craters (slice BF, John 2026-10-12): the row's craters and a
+        // strafing line of 40 20 mm rounds in front of it, as the base game
+        // left them (each record's own crater size, guns none) and as now
+        // (the explosion's scale, guns a pock mark), seen from above.
+        let crater = |at: [f64; 3], (size, scale): (u8, u8)| crate::snapshot::MarkPose {
+            kind: blast::MarkKind::Crater(size),
+            position: at,
+            age: 0,
+            strength: 1.,
+            scale,
+        };
+        for (label, now) in [("before", false), ("after", true)] {
+            let mut marks: Vec<_> = row
+                .iter()
+                .enumerate()
+                .filter_map(|(n, (_, weapon))| {
+                    let made = if now {
+                        tore_sim::combat::blast_scale::crater_of(weapon)
+                    } else {
+                        (weapon.effects.crater_size > 0)
+                            .then_some((weapon.effects.crater_size, 100))
+                    };
+                    made.map(|m| crater(spot(n as f64), m))
+                })
+                .collect();
+            if now {
+                let (_, cannon) = &row[0];
+                if let Some(pock) = tore_sim::combat::blast_scale::crater_of(cannon) {
+                    for k in 0..40 {
+                        let x = base[0] - 400. + f64::from(k) * 12.;
+                        let z = base[2] - 500. + f64::from(k % 3) * 3.;
+                        marks.push(crater([x, ground(x, z), z], pock));
+                    }
+                }
+            }
+            for (view, eye, look, fov) in [
+                (
+                    "row",
+                    [middle[0], middle[1] + 2_200., middle[2] - 2_600.],
+                    [middle[0], middle[1], middle[2]],
+                    40.,
+                ),
+                (
+                    "strafe",
+                    [
+                        base[0] - 220.,
+                        ground(base[0] - 160., base[2] - 500.) + 140.,
+                        base[2] - 760.,
+                    ],
+                    [
+                        base[0] - 160.,
+                        ground(base[0] - 160., base[2] - 500.),
+                        base[2] - 500.,
+                    ],
+                    40.,
+                ),
+            ] {
+                shots.push(Shot {
+                    name: format!("craters-{view}-{label}-{light}"),
+                    effects: Vec::new(),
+                    births: Vec::new(),
+                    marks: marks.clone(),
+                    eye,
+                    look,
+                    fov,
+                    tick: 20_000,
+                });
+            }
         }
         for shot in &shots {
             let mut camera = Camera::new();
@@ -263,7 +337,7 @@ pub fn run() -> AppResult<()> {
             gpu.sim
                 .smoke(device, queue, &art.smoke, [&empty, &empty], &devices);
             gpu.sim
-                .effects(device, queue, &art.effects, &picture.effects, &[]);
+                .effects(device, queue, &art.effects, &picture.effects, &shot.marks);
             gpu.sim.emitters(queue, &devices, &[], &drawn);
             gpu.sim.combat(
                 device,

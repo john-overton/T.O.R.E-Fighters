@@ -428,7 +428,7 @@ impl Feeder {
                     },
                     position: mark.position,
                     duration_ticks: blast::FOREVER,
-                    scale: replay::EffectSpawn::FULL_SCALE,
+                    scale: mark.scale,
                 });
             }
         }
@@ -1153,6 +1153,7 @@ mod tests {
             position: [4., 0., 4.],
             age: 7,
             strength: 1.,
+            scale: 100,
         };
         let mut first = frame(10.0, vec![plane(0, 0.), plane(3, 100.), ground(900, 50)]);
         let out = feed(&mut feeder, &first, &roster);

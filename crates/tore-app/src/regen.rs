@@ -476,12 +476,14 @@ mod tests {
                     position: [10., 100., 10.],
                     age: 0,
                     strength: 1.,
+                    scale: 100,
                 },
                 MarkPose {
                     kind: MarkKind::Crater(0),
                     position: [500., 100., 10.],
                     age: 0,
                     strength: 1.,
+                    scale: 100,
                 },
             ],
             ..RenderSnapshot::default()

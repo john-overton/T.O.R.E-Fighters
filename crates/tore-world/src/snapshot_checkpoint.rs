@@ -206,6 +206,7 @@ tore_sim::checkpoint_struct!(MarkPose {
     position,
     age,
     strength,
+    scale,
 });
 
 tore_sim::checkpoint_struct!(DebrisPose {
@@ -321,12 +322,14 @@ mod tests {
                     position: [5., 6., 7.],
                     age: tick,
                     strength: 1.,
+                    scale: 159,
                 },
                 MarkPose {
                     kind: MarkKind::Fire,
                     position: [8., 9., 10.],
                     age: tick + 3,
                     strength: 0.123_456_79,
+                    scale: 100,
                 },
             ],
             debris: vec![

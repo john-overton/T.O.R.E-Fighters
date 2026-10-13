@@ -414,6 +414,11 @@ pub(crate) fn event(rng: &mut SplitMix64) -> WireEvent {
                 MarkKind::Crater(rng.below(256) as u8)
             },
             position: position(rng),
+            scale: if chance(rng) {
+                100
+            } else {
+                rng.below(256) as u8
+            },
         },
         13 => WireEvent::GroundDestroyed {
             object: rng.below(1 << 32) as u32,
