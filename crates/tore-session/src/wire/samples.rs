@@ -7,7 +7,8 @@ use super::entity::{
     EntityState, Motion, MoverState, PilotState, ProjectileState, RotorState, Status,
 };
 use super::events::{
-    EventsSection, LinkEvent, MountView, Rumble, SectionEvent, SurfaceUnitView, WireEvent,
+    EventsSection, LinkEvent, MountView, Rumble, SectionEvent, StationStores, SurfaceUnitView,
+    WireEvent,
 };
 use super::inputs::{Command, InputFrame, InputsSection, NumberedCommand};
 use super::messages::{
@@ -619,6 +620,24 @@ pub fn events() -> EventsSection {
         // Protocol 25: city fill buildings a ground burst knocked flat.
         WireEvent::CityFlattened {
             buildings: vec![7, 8, 9, 130, 499_999],
+        },
+        // Protocol 26: an aircraft's drawn stores after a release.
+        WireEvent::Stores {
+            aircraft: 0x4000_0003,
+            loads: vec![
+                StationStores {
+                    station: 1,
+                    items: 1,
+                },
+                StationStores {
+                    station: 2,
+                    items: 19,
+                },
+                StationStores {
+                    station: 63,
+                    items: 300,
+                },
+            ],
         },
     ];
     EventsSection {

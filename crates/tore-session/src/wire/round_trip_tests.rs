@@ -6,7 +6,7 @@ use super::entity::{
     EntityState, Motion, MoverState, PilotState, ProjectileState, ROTOR_SPEED_MAX, RotorState,
     Status,
 };
-use super::events::{EventsSection, LinkEvent, Rumble, SectionEvent, WireEvent};
+use super::events::{EventsSection, LinkEvent, Rumble, SectionEvent, StationStores, WireEvent};
 use super::inputs::{Command, InputFrame, InputsSection, NumberedCommand, quantize_command};
 use super::messages::Message;
 use super::names::NameIndex;
@@ -346,7 +346,7 @@ pub(crate) fn event(rng: &mut SplitMix64) -> WireEvent {
             .map(|_| NameIndex(rng.below(4096) as u16))
             .collect()
     };
-    match rng.below(18) {
+    match rng.below(19) {
         0 => WireEvent::Message { text: text(rng) },
         1 => WireEvent::Radio {
             route: pick(rng, &[Route::Radio, Route::Airport, Route::Direct]),
@@ -428,6 +428,21 @@ pub(crate) fn event(rng: &mut SplitMix64) -> WireEvent {
             length: chance(rng).then(|| rng.below(1 << 31) as u32),
         },
         16 => WireEvent::Link(link_event(rng)),
+        17 => {
+            let mut loads = Vec::new();
+            for station in 0..64u8 {
+                if rng.below(4) == 0 {
+                    loads.push(StationStores {
+                        station,
+                        items: rng.below(1 << 16) as u16,
+                    });
+                }
+            }
+            WireEvent::Stores {
+                aircraft: rng.below(1 << 32) as u32,
+                loads,
+            }
+        }
         _ => WireEvent::Sound {
             kind: pick(
                 rng,
@@ -954,4 +969,48 @@ fn records_code_against_baselines_up_to_127_snapshots_back() {
             }
         }
     }
+}
+
+/// A Stores event (protocol 26) costs a few bytes for a release: an
+/// aircraft's six drawn stations are 14 bytes with the code; a full
+/// loadout's 64 stations, each with 65,535, at most 243. Stations out of order or past the
+/// loadout's 64 are refused.
+#[test]
+fn a_stores_event_is_small_and_checked() {
+    let bytes = |loads: Vec<StationStores>| {
+        let mut w = tore_codec::BitWriter::new();
+        WireEvent::Stores {
+            aircraft: 12,
+            loads,
+        }
+        .write(&mut w)
+        .map(|()| w.bit_len().div_ceil(8))
+    };
+    let six = (0..6)
+        .map(|station| StationStores { station, items: 2 })
+        .collect();
+    assert_eq!(bytes(six), Ok(14));
+    let worst = (0..64)
+        .map(|station| StationStores {
+            station,
+            items: u16::MAX,
+        })
+        .collect();
+    assert_eq!(bytes(worst), Ok(243));
+    let unordered = vec![
+        StationStores {
+            station: 3,
+            items: 1,
+        },
+        StationStores {
+            station: 2,
+            items: 1,
+        },
+    ];
+    assert!(bytes(unordered).is_err());
+    let past = vec![StationStores {
+        station: 64,
+        items: 1,
+    }];
+    assert!(bytes(past).is_err());
 }

@@ -275,6 +275,8 @@ impl Events {
                 | WireEvent::SurfaceBurstEnd { .. }
                 // Recordings do not yet show knocked-down fill buildings.
                 | WireEvent::CityFlattened { .. } => Vec::new(),
+                // Stores (protocol 26) are kept by the conversion's frames.
+                WireEvent::Stores { .. } => Vec::new(),
             };
             out.extend(events.into_iter().map(|put| (tick, put)));
         }

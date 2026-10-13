@@ -157,20 +157,26 @@
 //! Hawk...", "The game moved to Hawk.") print as the bot's other notices do.
 //!
 //! A bot also prints the snapshot rate of each flight as it is seated
-//! ("Bot: snapshots: 30 a second", slice R1).
+//! ("Bot: snapshots: 30 a second", slice R1), and with its statistics what
+//! its frames showed of the other aircraft's stores (protocol 26, slice
+//! BP3): "NAME: stores: told T, bytes B, largest L, drawn D, emptied [IDS]",
+//! the Stores events told, their coded bytes summed and the largest, the
+//! most other aircraft one frame drew with stores, and the aircraft it drew
+//! with a station short of its load.
 //!
 //! `--load STORE[,STORE]...` (protocol 23, slice NA) makes every bot hang
 //! each store on its aircraft before it readies, a Cheat loading the host's
 //! `loadouts any` allows: the first station after the others that takes the
 //! store gets up to two. The bot takes its slot, sends the loadout and
-//! readies once the host accepts it. `--a2g lase|buddy|strike|watch` flies the plane by
+//! readies once the host accepts it. `--a2g lase|buddy|strike|bomb|watch` flies the plane by
 //! the air-to-ground script (`tore_session::bot::a2g`): `lase` turns the A-G
 //! radar on, designates the nearest enemy ground object by Ctrl+X (the Easy
 //! targeting cheat) and lases it by hand while circling it; `buddy` drops a
 //! GBU-10 on another plane's spot when its guided sight says IN RNG, then
 //! fires an AGM-88 in BORE at the HARM cue's candidate; `strike` (slice
 //! ST-K) sets up a Mk 82 pass in LVL at the nearest enemy ground object and
-//! flies it without releasing; `watch` presses nothing and reports its
+//! flies it without releasing; `bomb` (slice BP3) selects its Mk 82s and
+//! drops one in CCIP every four seconds; `watch` presses nothing and reports its
 //! cockpit. All print what their screens show, "NAME: a2g: ..." lines. `--players N` on a joined
 //! bot that wears the crown makes its start wait until N players hold
 //! slots, all ready.
@@ -220,7 +226,7 @@ const USAGE: &str = "usage: tore-bot (--connect HOST[:PORT] | --master ADDRESS -
 [--capture FILE] [--token-file FILE] [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]... [--observe PLANE|none] \
 [--king NAME=VALUE[,NAME=VALUE]...] [--revive SECONDS] [--away SECONDS,FOR] [--objectives] \
 [--order SECONDS,NAME]... [--reply SECONDS,KIND]... \
-[--drop-resource NAME]... [--expect-unable] [--load STORE[,STORE]...] [--a2g lase|buddy|strike|watch]\n       \
+[--drop-resource NAME]... [--expect-unable] [--load STORE[,STORE]...] [--a2g lase|buddy|strike|bomb|watch]\n       \
 tore-bot --content-report [--data-dir DIR] \
 [--drop-resource NAME]...";
 
@@ -607,7 +613,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 let word = value()?;
                 options.a2g =
                     Some(tore_session::bot::a2g::Role::parse(&word).ok_or_else(|| {
-                        format!("--a2g is lase, buddy, strike or watch, not {word:?}")
+                        format!("--a2g is lase, buddy, strike, bomb or watch, not {word:?}")
                     })?);
             }
             "-h" | "--help" => return Err(USAGE.into()),
@@ -1904,6 +1910,8 @@ fn main() -> ExitCode {
                         r.name, bot.watched, bot.watched_aircraft
                     );
                 }
+                // The other aircraft's stores (protocol 26).
+                println!("{}: stores: {}", r.name, bot.stores.line());
                 // A ground target (protocol 22): what the frames showed.
                 if let Some(world) = bot
                     .client

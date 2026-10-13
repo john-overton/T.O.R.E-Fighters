@@ -730,8 +730,9 @@ impl App {
             ours.copy_flattened(told);
         }
         // The seat's own pylons and stores (B3): its loadout from the
-        // session's copy of the mission, the rounds left from its readout.
-        // The wire carries neither for the other aircraft, so they draw none.
+        // session's copy of the mission, the rounds left from its readout,
+        // which is newer than the drawn tick the session puts every other
+        // aircraft's stores at (protocol 26).
         let mut picture = frame.picture.clone();
         if let Some(readout) = &frame.readout
             && let Some(own) = self.world.combat.state.ownship(readout.plane)
@@ -1176,7 +1177,8 @@ impl TickPresenter<'_> {
                 | WireEvent::SurfaceBurst { .. }
                 | WireEvent::SurfaceBurstEnd { .. }
                 | WireEvent::SurfaceUnit(_)
-                | WireEvent::CityFlattened { .. } => {}
+                | WireEvent::CityFlattened { .. }
+                | WireEvent::Stores { .. } => {}
             }
         }
         if weapon_cycled {

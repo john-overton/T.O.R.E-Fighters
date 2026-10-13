@@ -53,6 +53,9 @@ pub enum Role {
     /// Set up a level bomb pass at the nearest enemy ground object and fly
     /// it without releasing (slice ST-K).
     Strike,
+    /// Select the Mk 82s and drop one in CCIP every four seconds, wherever
+    /// it is (slice BP3, `net-a2g-stores`: other games see the stores go).
+    Bomb,
     /// Press nothing; report the cockpit (slice ST-K).
     Watch,
 }
@@ -63,6 +66,7 @@ impl Role {
             "lase" => Some(Self::Lase),
             "buddy" => Some(Self::Buddy),
             "strike" => Some(Self::Strike),
+            "bomb" => Some(Self::Bomb),
             "watch" => Some(Self::Watch),
             _ => None,
         }
@@ -206,7 +210,9 @@ impl Script {
                 match self.role {
                     Role::Lase => self.lase(now, since, readout, &mut controls),
                     Role::Buddy => self.buddy(now, readout, frame, enemies, &mut controls),
-                    Role::Strike => self.strike(now, since, readout, frame, &mut controls),
+                    Role::Strike | Role::Bomb => {
+                        self.strike(now, since, readout, frame, &mut controls)
+                    }
                     Role::Watch => {}
                 }
                 if self
@@ -448,6 +454,12 @@ impl Script {
             }
             return;
         }
+        // The bomb role drops in CCIP: a press a second long every four
+        // seconds releases one Mk 82 a press.
+        if self.role == Role::Bomb {
+            controls.trigger = since.as_secs().is_multiple_of(4);
+            return;
+        }
         let mode = readout.bomb_sight.as_ref().map(|b| b.mode);
         if mode != Some(DeliveryMode::Level) {
             if mode.is_some() && ready(self.mode_at) {
@@ -578,7 +590,9 @@ impl Script {
                         altitude,
                         position[2] + away[2] * 20_000.,
                     ]
-                } else if matches!(self.role, Role::Buddy | Role::Strike) && range < OVERHEAD_FT {
+                } else if matches!(self.role, Role::Buddy | Role::Strike | Role::Bomb)
+                    && range < OVERHEAD_FT
+                {
                     ahead
                 } else if self.role == Role::Lase && range < ORBIT_FT * 1.5 {
                     // A point on the circle a quarter turn on: a left orbit.

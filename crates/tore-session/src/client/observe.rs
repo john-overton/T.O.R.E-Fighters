@@ -247,9 +247,13 @@ impl Client {
         self.stats.far_extrapolated += drawn.far_extrapolated as u64;
 
         let surface_units = self.surface_at(render);
+        let stores = self.stores_at(render);
         let mission = self.mission.as_ref()?;
         let mut targets = drawn.aircraft;
         targets.extend(self.ground_at(&mission.ground, &drawn.surface, &surface_units, render));
+        for pose in &mut targets {
+            super::put_stores(pose, &mission.world, &stores);
+        }
         self.effects
             .retain(|e| f64::from(e.tick) + f64::from(e.ticks) > render);
         let effects = self

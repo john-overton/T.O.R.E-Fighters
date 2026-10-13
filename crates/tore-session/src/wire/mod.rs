@@ -168,8 +168,11 @@ pub fn path_words(path: Path) -> &'static str {
 /// (slice CL-AP); the front line in the surface digest (slice CL-FL); and
 /// the City flattened event (code 21) with the world checkpoint's city fill
 /// section (section 12), which carry the buildings ground bursts knocked
-/// flat (review fixes).
-pub const PROTOCOL_VERSION: u16 = 25;
+/// flat (review fixes). 26 since the stores slice (BP3): the Stores event
+/// (code 22), every aircraft's drawn stations and the whole stores on each,
+/// sent when they change and at a seat, so a client draws every aircraft's
+/// pylons and stores (docs/spec/stores-on-pylons.md).
+pub const PROTOCOL_VERSION: u16 = 26;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
@@ -287,4 +290,6 @@ pub mod limits {
     /// Buildings in one City flattened event (protocol 25); more go in
     /// several.
     pub const FLATTENED: usize = 256;
+    /// Stations in one Stores event (protocol 26): a loadout's stations.
+    pub const STORE_STATIONS: usize = 64;
 }

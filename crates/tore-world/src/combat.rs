@@ -734,33 +734,11 @@ impl Combat {
             .map(|actor| actor.id())
             .collect();
         // The AI aircraft's stores as drawn: what each station holds now
-        // (B3). An unlimited store shows its loaded quantity.
+        // (B3).
         let ai_stores: BTreeMap<u32, Vec<crate::snapshot::StorePose>> = wings
             .into_iter()
-            .flat_map(|wings| {
-                wings.mission().actors().iter().filter_map(move |actor| {
-                    let config = wings.configuration(actor.id())?;
-                    let rounds = |index: usize| {
-                        let loaded = config.stations.get(index).map_or(0, |s| {
-                            u32::from(s.count) * tore_sim::combat::live::pod_rounds(&s.weapon)
-                        });
-                        actor
-                            .stations()
-                            .iter()
-                            .find(|spec| usize::from(spec.station.0) == index)
-                            .map_or(loaded, |spec| match spec.rounds() {
-                                tore_sim::ai::weapon_service::Rounds::Finite(rounds) => rounds,
-                                tore_sim::ai::weapon_service::Rounds::Unlimited => loaded,
-                            })
-                    };
-                    let loaded =
-                        |index: usize| config.stations.get(index).is_some_and(|s| s.count > 0);
-                    Some((
-                        actor.id(),
-                        crate::snapshot::store_poses(config, rounds, loaded),
-                    ))
-                })
-            })
+            .flat_map(ai_station_stores)
+            .map(|(id, config, loads)| (id, crate::snapshot::store_poses_of(config, &loads)))
             .collect();
         // The last devices drawn hold once an aircraft stops flying.
         let simulated = |id: u32| {
@@ -1806,11 +1784,72 @@ pub fn feedback(
 /// A flown aircraft's stores as drawn: each station's rounds left, and the
 /// stations its mission started with (B3).
 fn own_stores(own: &live::Ownship) -> Vec<crate::snapshot::StorePose> {
-    crate::snapshot::store_poses(
+    crate::snapshot::store_poses_of(own.configuration(), &own_station_stores(own))
+}
+
+/// A flown aircraft's drawn stations and the whole stores on each (B3).
+pub fn own_station_stores(own: &live::Ownship) -> Vec<crate::snapshot::StationStores> {
+    crate::snapshot::station_stores(
         own.configuration(),
         |index| u32::from(own.rounds(index)),
         |index| own.was_loaded(index),
     )
+}
+
+/// Each AI aircraft's loadout, drawn stations and whole stores on each, in
+/// actor order (B3). An unlimited store shows its loaded quantity.
+pub fn ai_station_stores(
+    wings: &crate::ai_wings::AiWings,
+) -> impl Iterator<
+    Item = (
+        u32,
+        &live::Configuration,
+        Vec<crate::snapshot::StationStores>,
+    ),
+> + '_ {
+    wings.mission().actors().iter().filter_map(move |actor| {
+        let config = wings.configuration(actor.id())?;
+        let rounds = |index: usize| {
+            let loaded = config.stations.get(index).map_or(0, |s| {
+                u32::from(s.count) * tore_sim::combat::live::pod_rounds(&s.weapon)
+            });
+            actor
+                .stations()
+                .iter()
+                .find(|spec| usize::from(spec.station.0) == index)
+                .map_or(loaded, |spec| match spec.rounds() {
+                    tore_sim::ai::weapon_service::Rounds::Finite(rounds) => rounds,
+                    tore_sim::ai::weapon_service::Rounds::Unlimited => loaded,
+                })
+        };
+        let loaded = |index: usize| config.stations.get(index).is_some_and(|s| s.count > 0);
+        Some((
+            actor.id(),
+            config,
+            crate::snapshot::station_stores(config, rounds, loaded),
+        ))
+    })
+}
+
+impl Combat {
+    /// Every aircraft's drawn stations and the whole stores on each, by
+    /// aircraft id (B3): the human-flown planes from their cockpits, the
+    /// AI's from its weapon service. What the host tells clients (protocol
+    /// 26) and what a recording keeps.
+    pub fn station_stores(
+        &self,
+        wings: Option<&crate::ai_wings::AiWings>,
+    ) -> BTreeMap<u32, Vec<crate::snapshot::StationStores>> {
+        let mut out: BTreeMap<u32, Vec<crate::snapshot::StationStores>> = wings
+            .into_iter()
+            .flat_map(ai_station_stores)
+            .map(|(id, _, loads)| (id, loads))
+            .collect();
+        for own in self.state.ownships() {
+            out.insert(own.aircraft, own_station_stores(own));
+        }
+        out
+    }
 }
 
 #[cfg(test)]
