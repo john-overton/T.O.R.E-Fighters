@@ -723,13 +723,19 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
         }
         quick.apply(id, saved);
     }
-    // The defenses belong to a target: with none they stay at "not".
+    // With no target the strengths stay: they are the enemy's area
+    // defenses (B23), and the mission says so.
     quick.apply(31, 2);
     quick.apply(32, 2);
-    if quick.draft.values[31] != 0 || quick.draft.values[32] != 0 {
+    let area = quick
+        .mission_spec()
+        .is_ok_and(|spec| spec.ground_target.is_none() && spec.area_defenses());
+    if (quick.draft.values[31], quick.draft.values[32]) != (2, 2) || !area {
         m.problems
-            .push("defenses survive with no ground target".into());
+            .push("the strengths with no ground target are not the area defenses".into());
     }
+    quick.apply(31, 0);
+    quick.apply(32, 0);
 
     println!(
         "creator matrix: {} setups started, {} refused with a message, {} problems",
