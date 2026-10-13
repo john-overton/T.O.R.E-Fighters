@@ -31,6 +31,7 @@ use tore_formats::{
     static_object::Definition,
 };
 use tore_sim::attitude::{Basis, Vector};
+use tore_world::grounding::{Footing, footing, lift_ft};
 use tore_world::surface::{
     DestroyedLook, Surface, SurfaceState, UnitId,
     aim::{self, Aims, Rule, Track},
@@ -50,6 +51,76 @@ const MAN_MAX_BOOST: f64 = 6.;
 fn man_boost(distance: f64) -> f64 {
     (distance / MAN_FULL_SIZE_RANGE_FT).clamp(1., MAN_MAX_BOOST)
 }
+/// Where a man's sprites (`sprites`, standing at `stand`) are drawn for a
+/// viewer at `eye`: [`man_boost`] times larger, growing up from his feet,
+/// which stay on the ground (`tore_world::grounding::scaled_origin`).
+pub(crate) fn man_stand(sprites: &[Billboard], stand: &Stand, eye: Vector) -> Stand {
+    let away = (0..3)
+        .map(|i| (eye[i] - stand.origin[i]).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    let boost = man_boost(away);
+    let bottom = tore_world::grounding::sprites_bottom(sprites).unwrap_or(0.);
+    Stand {
+        scale: stand.scale * boost,
+        origin: tore_world::grounding::scaled_origin(
+            stand.origin,
+            stand.basis.up,
+            bottom,
+            stand.scale,
+            boost,
+        ),
+        ..*stand
+    }
+}
+
+/// The lowest drawn point, world feet, of `shape` standing at `stand`, as
+/// the scenery draws it (`--surface-dump --grounding`): its faces, and its
+/// sprites as a man is drawn to a level viewer at each of `ranges` feet
+/// (the far-man boost), each `None` when there is nothing of that kind.
+pub(crate) fn drawn_bottoms(
+    shape: &Shape,
+    stand: &Stand,
+    ranges: &[f64],
+) -> (Option<f64>, Vec<Option<f64>>) {
+    let low = |drawn: &Drawn| {
+        drawn
+            .vertices
+            .chunks_exact(FLOATS)
+            .map(|v| f64::from(v[1]))
+            .reduce(f64::min)
+    };
+    let layers = Layers::new();
+    // The faces (`emit` draws no sprites).
+    let mut drawn = Drawn::default();
+    let _ = emit(shape, stand, &layers, &mut drawn, usize::MAX);
+    let sprites = ranges
+        .iter()
+        .map(|range| {
+            if shape.billboards.is_empty() {
+                return None;
+            }
+            let eye = [stand.origin[0] + range, stand.origin[1], stand.origin[2]];
+            let at = man_stand(&shape.billboards, stand, eye);
+            let faces = shape
+                .billboards
+                .iter()
+                .map(|one| facing(one, &at, [0., 0., 1.], [0., 1., 0.]))
+                .collect();
+            let mut drawn = Drawn::default();
+            let man = Shape {
+                lines: Vec::new(),
+                faces,
+                billboards: Vec::new(),
+                state_words: BTreeSet::new(),
+            };
+            let _ = emit(&man, &at, &layers, &mut drawn, usize::MAX);
+            low(&drawn)
+        })
+        .collect();
+    (low(&drawn), sprites)
+}
+
 /// The deck crew sprite's frames (`shape::SPRITE_FRAME_WORD`, 0 to 10).
 const CREW_FRAMES: i32 = 11;
 /// Frames per second of the deck crew's signal cycle (fitted: the native
@@ -61,7 +132,7 @@ pub(super) type Layers = BTreeMap<String, Image>;
 
 /// Where a shape stands: feet per unit, orientation and origin.
 #[derive(Clone, Copy, Debug)]
-pub(super) struct Stand {
+pub(crate) struct Stand {
     pub scale: f64,
     pub basis: Basis,
     pub origin: Vector,
@@ -270,22 +341,6 @@ struct Mover {
     lift: f64,
     /// The same for its wreck, on the wreck's own lowest point.
     wreck_lift: f64,
-}
-
-/// Feet a land unit's shape stands above its placement point so its lowest
-/// vertex (track or wheel bottom) meets the ground: the shape's lowest point
-/// at `scale`, never negative.
-pub(super) fn ground_lift(shape: &Shape, scale: f64) -> f64 {
-    let low = shape
-        .faces
-        .iter()
-        .flat_map(|face| face.positions.iter().map(|p| f64::from(p[2])))
-        .fold(f64::INFINITY, f64::min);
-    if low.is_finite() {
-        (-low * scale).max(0.)
-    } else {
-        0.
-    }
 }
 
 /// A unit whose picture aims (docs/spec/surface-defenses.md, "Aiming"):
@@ -584,9 +639,9 @@ impl SurfaceArt {
         // A land unit's wreck lies on its own lowest point too (the DEST
         // wreck reaches below its origin), and so does a building's damaged
         // variant; a ship's `_A` hull keeps the waterline.
-        let land = definition.is_some_and(tore_world::terrain::stands_on_lowest_point);
+        let land = definition.is_some_and(|d| footing(d) == Footing::Bottom);
         let wreck_lift = match &wreck {
-            Some(model) if land => ground_lift(&model.shape, model.scale),
+            Some(model) if land => lift_ft(&model.shape, model.scale),
             _ => 0.,
         };
         if let Some(name) = &main_shape
@@ -741,7 +796,7 @@ impl SurfaceArt {
             match ruin {
                 // The generated ruin keeps the intact shape's lowest point.
                 Ruined::Generated(..) => lift,
-                _ => ground_lift(shape, stand.scale),
+                _ => lift_ft(shape, stand.scale),
             }
         } else {
             lift
@@ -1305,16 +1360,10 @@ impl SurfaceArt {
     ) {
         // A man stays a few pixels tall at the range a pilot sees a field:
         // beyond 1,000 ft he is drawn taller by the distance over 1,000 ft,
-        // up to six times (presentation only; the hit box is unchanged).
+        // up to six times (presentation only; the hit box is unchanged). He
+        // grows up from his feet, which stay on the ground.
         let stand = &if sprite.crew.is_none() {
-            let away = (0..3)
-                .map(|i| (eye[i] - stand.origin[i]).powi(2))
-                .sum::<f64>()
-                .sqrt();
-            Stand {
-                scale: stand.scale * man_boost(away),
-                ..*stand
-            }
+            man_stand(&sprite.sprites, stand, eye)
         } else {
             *stand
         };
@@ -1853,6 +1902,41 @@ mod tests {
         assert_eq!(man_boost(1_000.), 1.);
         assert_eq!(man_boost(3_000.), 3.);
         assert_eq!(man_boost(50_000.), MAN_MAX_BOOST);
+    }
+
+    #[test]
+    fn a_far_man_grows_up_from_his_feet() {
+        // A man sprite 12 units tall centred on his origin, stood on his
+        // feet: his origin 2 ft above the ground at 0.
+        let sprite = Billboard {
+            center: [0., 0., 0.],
+            size: [7., 12.],
+            texture: String::new(),
+            uv: None,
+            fog: FogMode::Enabled,
+            address: 0,
+        };
+        let man = Shape {
+            lines: Vec::new(),
+            faces: Vec::new(),
+            billboards: vec![sprite],
+            state_words: BTreeSet::new(),
+        };
+        let stand = Stand {
+            scale: 1. / 3.,
+            basis: Basis::new(0.4, 0., 0.),
+            origin: [0., 2., 0.],
+        };
+        // Near, at his own size, and far, six times larger: his feet stay
+        // on the ground and only his head rises.
+        let (faces, sprites) = drawn_bottoms(&man, &stand, &[300., 6_000., 50_000.]);
+        assert_eq!(faces, None);
+        for bottom in sprites {
+            assert!(bottom.is_some_and(|y| y.abs() < 1e-4), "{bottom:?}");
+        }
+        let far = man_stand(&man.billboards, &stand, [6_000., 2., 0.]);
+        assert_eq!(far.scale, 2.);
+        assert!((far.origin[1] - 12.).abs() < 1e-9, "{:?}", far.origin);
     }
 
     #[test]

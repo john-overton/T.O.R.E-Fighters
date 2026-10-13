@@ -17,8 +17,9 @@
 //!   per unit), so it matches the same type in flight
 //!   ([`aircraft_shape_scale`]).
 //! - **Height**: it stands on its wheels: the lowest point of its gear-down
-//!   shape meets the ground or the deck (fitted; the shape's recorded ground
-//!   offset agrees within two units for every parked type).
+//!   shape meets the ground or the deck ([`crate::grounding`]; fitted; the
+//!   shape's recorded ground offset agrees within two units for every
+//!   parked type).
 //! - **Deck**: a fleet template's aircraft stands on a carrier when its spot,
 //!   in the hull's own units, lies on the hull's flight deck
 //!   (`tore_formats::carrier::flight_deck`); it keeps that spot in hull units,
@@ -226,15 +227,10 @@ pub fn place(
             let shape_bytes = get(&record.shape)?;
             let gear = gear(shape_bytes).map_err(|e| format!("{}: {e}", record.shape))?;
             let scale = aircraft_shape_scale(shape_bytes).map_err(|e| e.to_string())?;
-            let low = gear
-                .down
-                .faces
-                .iter()
-                .flat_map(|face| face.positions.iter().map(|p| f64::from(p[2])))
-                .fold(f64::INFINITY, f64::min);
-            if !low.is_finite() {
+            // It stands on its wheels, the bottom of its gear-down shape.
+            let Some(low) = crate::grounding::bottom(&gear.down) else {
                 return Err(format!("{}: no geometry", record.shape));
-            }
+            };
             let x = f64::from(parked.position[0]);
             let z = f64::from(parked.position[2]);
             let (ground, water) = match parked.deck {

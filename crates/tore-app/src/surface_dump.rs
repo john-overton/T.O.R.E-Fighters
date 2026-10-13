@@ -261,74 +261,214 @@ pub fn run() -> AppResult<()> {
     Ok(())
 }
 
-/// `--surface-dump --grounding [TYPE ...]`: every placed structure type (or
-/// the types named) with its drawn shape's lowest and highest point about
-/// its origin, world feet at the size it is drawn, its F2 ground offset at
-/// that size, and the lift [`tore_world::terrain::building_lift_ft`] gives
-/// it (docs/formats/objects-and-shapes.md, "Building grounding").
+/// The viewer ranges, feet, at which `--surface-dump --grounding` draws a
+/// man's sprites: at his own size, and at the far-man boost's most.
+const GROUNDING_RANGES_FT: [f64; 2] = [300., 6_000.];
+
+/// How far a drawn bottom may sit from the ground, feet, before the audit
+/// calls it sunk or floating (float rounding of the drawn vertices).
+const GROUNDING_TOLERANCE_FT: f64 = 0.05;
+
+/// `--surface-dump --grounding [TYPE ...]`: the grounding audit
+/// (docs/formats/objects-and-shapes.md, "Grounding"). Every placed type of
+/// the import and the retail media (OT and NT, or the types named) is stood
+/// on flat ground at 0 ft through the placement path
+/// (`Placements::stance`, which also sets the hit box) and drawn through the
+/// scenery's own code: its faces, and its sprites as a man is drawn at
+/// 300 ft and, boosted, at 6,000 ft. Every parked aircraft type (PT) is
+/// stood through `surface::parked::place` and drawn gear down. Each row
+/// gives the shape's lowest and highest point about its origin (world feet
+/// at the size it is drawn), its F2 ground offset, the lift
+/// (`tore_world::grounding`), and the lowest drawn point of the faces, the
+/// hit box and the sprites above the ground. A type that stands on its
+/// bottom and draws below the ground or floats above it is a problem.
 fn grounding_survey(resources: &BTreeMap<String, Vec<u8>>, named: &[String]) -> AppResult<()> {
+    use tore_world::grounding::{Footing, footing, height_range};
     let wanted: Vec<String> = named.iter().map(|n| n.to_ascii_uppercase()).collect();
-    let mut lifted = 0;
-    let mut total = 0;
-    for (name, bytes) in resources {
-        let upper = name.to_ascii_uppercase();
-        let chosen = if wanted.is_empty() {
-            upper.ends_with(".OT")
+    let chosen = |upper: &str, extensions: &[&str]| {
+        if wanted.is_empty() {
+            extensions.iter().any(|e| upper.ends_with(e))
         } else {
             wanted
                 .iter()
-                .any(|w| *w == upper || format!("{w}.OT") == upper)
-        };
-        if !chosen {
-            continue;
+                .any(|w| *w == upper || extensions.iter().any(|e| format!("{w}{e}") == upper))
         }
-        let Ok(definition) = tore_formats::static_object::Definition::parse(bytes) else {
+    };
+    let types: Vec<&str> = resources
+        .keys()
+        .filter(|name| chosen(&name.to_ascii_uppercase(), &[".OT", ".NT"]))
+        .map(String::as_str)
+        .collect();
+    let placements = tore_world::terrain::Placements::of_types(resources, types.iter().copied());
+    let feet = |v: Option<f64>| v.map_or("-".to_owned(), |v| format!("{v:.2}"));
+    let (mut total, mut lifted, mut problems) = (0, 0, Vec::new());
+    for name in &types {
+        let (Some(definition), Some(shape)) = (
+            placements.definitions.get(*name),
+            placements.shapes.get(*name),
+        ) else {
             continue;
         };
-        let Some(shape_bytes) = definition
-            .main_shape
-            .as_ref()
-            .and_then(|s| resources.get(s))
+        let placement = tore_formats::mission::Placement {
+            key: tore_formats::mission::SourceKey {
+                layout: "AUDIT".into(),
+                ordinal: 0,
+            },
+            section: None,
+            object_type: (*name).to_owned(),
+            position: [0; 3],
+            angles: [0; 3],
+            source_nationality: None,
+            nationality2: false,
+            nationality3: false,
+            nationality: None,
+            flags: None,
+            speed: None,
+            name: None,
+            alias: None,
+            unknown: Vec::new(),
+        };
+        let (Some(stance), Some([low, high])) =
+            (placements.stance(&placement, 0.), height_range(shape))
         else {
             continue;
         };
-        let Ok(shape) = tore_formats::shape::Shape::scenery(shape_bytes) else {
-            continue;
+        let main_shape = definition.main_shape.as_deref().unwrap_or("-");
+        let f2 = resources
+            .get(main_shape)
+            .and_then(|bytes| tore_formats::shape::contact_offset(bytes).ok().flatten())
+            .map(|v| tore_world::terrain::PlacedSize::of(definition).feet(f64::from(v)));
+        let lift = (0..3)
+            .map(|i| (stance.origin[i] - stance.support_origin[i]) * stance.basis.up[i])
+            .sum::<f64>();
+        let stand = crate::scenery::surface_art::Stand {
+            scale: stance.scale,
+            basis: stance.basis,
+            origin: stance.origin,
         };
-        let Ok(scale) = tore_world::terrain::placed_shape_scale(&definition, shape_bytes) else {
-            continue;
-        };
-        let Some([low, high]) = tore_world::terrain::shape_height_range(&shape) else {
-            continue;
-        };
-        let f2 = tore_formats::shape::contact_offset(shape_bytes)
-            .ok()
-            .flatten()
-            .map(|v| tore_world::terrain::PlacedSize::of(&definition).feet(f64::from(v)));
-        let lift = tore_world::terrain::building_lift_ft(&definition, &shape, scale);
+        let (drawn, sprites) =
+            crate::scenery::surface_art::drawn_bottoms(shape, &stand, &GROUNDING_RANGES_FT);
+        let hit_box = stance.center[1] - stance.half[1];
+        let foot = footing(definition);
         total += 1;
-        if lift > 0. {
+        if lift.abs() > GROUNDING_TOLERANCE_FT {
             lifted += 1;
         }
+        let tall = (high - low) * stance.scale;
+        if foot == Footing::Bottom {
+            let mut wrong = |what: &str, at: f64| {
+                if at.abs() > GROUNDING_TOLERANCE_FT {
+                    problems.push(format!("{name} {what} at {at:+.2} ft, the ground at 0"));
+                }
+            };
+            if let Some(at) = drawn {
+                wrong("faces' bottom", at);
+            }
+            for (range, at) in GROUNDING_RANGES_FT.iter().zip(&sprites) {
+                if let Some(at) = at {
+                    wrong(&format!("man at {range:.0} ft"), *at);
+                }
+            }
+            // The hit box is at least 2 ft tall: a thinner shape's box
+            // reaches below its bottom by the difference.
+            if tall >= 2. {
+                wrong("hit box bottom", hit_box);
+            }
+        }
         println!(
-            "grounding: {name} shape {} size {:?} low {:.1} high {:.1} below {:.0}% f2 {} lift {:.1} hp {}",
-            definition.main_shape.as_deref().unwrap_or("-"),
-            tore_world::terrain::PlacedSize::of(&definition),
-            low * scale,
-            high * scale,
+            "grounding: {name} shape {main_shape} size {:?} class {:#06x} footing {foot:?} low {:.1} high {:.1} below {:.0}% f2 {} lift {lift:.1} drawn {} box {hit_box:.2} near {} far {} hp {}",
+            tore_world::terrain::PlacedSize::of(definition),
+            definition.category,
+            low * stance.scale,
+            high * stance.scale,
             if high > low {
                 (-low).max(0.) / (high - low) * 100.
             } else {
                 0.
             },
             f2.map_or("-".into(), |v| format!("{v:.1}")),
-            lift,
+            feet(drawn),
+            feet(sprites[0]),
+            feet(sprites[1]),
             definition
                 .hit_points
                 .map_or("-".into(), |hp| hp.to_string()),
         );
     }
-    println!("grounding: {total} types, {lifted} lifted");
+    // Parked aircraft, stood on their wheels the way a ground target's are.
+    let surface = tore_world::surface::Surface {
+        parked: resources
+            .keys()
+            .filter(|name| chosen(&name.to_ascii_uppercase(), &[".PT"]))
+            .filter(|name| {
+                tore_formats::parked_aircraft::ParkedType::parse(&resources[*name]).is_ok()
+            })
+            .enumerate()
+            .map(|(n, name)| tore_world::surface::ParkedAircraft {
+                id: tore_world::surface::UnitId(0x5100_0000 + n as u32),
+                resource: name.clone(),
+                position: [0; 3],
+                angles: [0; 3],
+                nationality: None,
+                side: tore_sim::combat::live::Side(1),
+                target: false,
+                deck: None,
+            })
+            .collect(),
+        ..Default::default()
+    };
+    let (poses, _) = tore_world::surface::parked::place(resources, &surface, &|_, _| 0.);
+    for pose in poses {
+        let Some(down) = resources
+            .get(&pose.shape)
+            .and_then(|bytes| tore_formats::parked_aircraft::gear(bytes).ok())
+            .map(|gear| gear.down)
+        else {
+            continue;
+        };
+        let Some([low, high]) = height_range(&down) else {
+            continue;
+        };
+        let stand = crate::scenery::surface_art::Stand {
+            scale: pose.scale,
+            basis: pose.basis,
+            origin: pose.origin,
+        };
+        let (drawn, _) = crate::scenery::surface_art::drawn_bottoms(&down, &stand, &[]);
+        let lift = pose.origin[1] - pose.ground[1];
+        total += 1;
+        if lift.abs() > GROUNDING_TOLERANCE_FT {
+            lifted += 1;
+        }
+        if let Some(at) = drawn.filter(|at| at.abs() > GROUNDING_TOLERANCE_FT) {
+            problems.push(format!(
+                "{} parked faces' bottom at {at:+.2} ft, the ground at 0",
+                pose.resource
+            ));
+        }
+        println!(
+            "grounding: {} shape {} size Aircraft class {:#06x} footing Bottom low {:.1} high {:.1} below {:.0}% f2 - lift {lift:.1} drawn {} box - near - far - hp {}",
+            pose.resource,
+            pose.shape,
+            pose.class,
+            low * pose.scale,
+            high * pose.scale,
+            if high > low {
+                (-low).max(0.) / (high - low) * 100.
+            } else {
+                0.
+            },
+            feet(drawn),
+            pose.hit_points,
+        );
+    }
+    for problem in &problems {
+        println!("grounding: problem {problem}");
+    }
+    println!(
+        "grounding: {total} types, {lifted} lifted, {} problems",
+        problems.len()
+    );
     Ok(())
 }
 
@@ -344,7 +484,7 @@ fn damage_survey(resources: &BTreeMap<String, Vec<u8>>, named: &[String]) -> App
     let (mut total, mut branch, mut variant) = (0, 0, 0);
     let summary = |shape: &Shape| {
         let faces = shape.faces.len();
-        let range = tore_world::terrain::shape_height_range(shape).unwrap_or([0.; 2]);
+        let range = tore_world::grounding::height_range(shape).unwrap_or([0.; 2]);
         let mut h: u64 = 0xcbf2_9ce4_8422_2325;
         for face in &shape.faces {
             for p in &face.positions {
