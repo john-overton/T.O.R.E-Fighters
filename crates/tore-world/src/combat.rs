@@ -446,6 +446,17 @@ impl Combat {
         // fires"): a fixed pick per object and mission for vehicles.
         let fires = crate::surface::wreck::scene_fires(&terrain.surface, &terrain.airport_scene);
         let burns = |id: u32| fires.get(&id).is_some_and(|class| class.burns());
+        // A building's or fixed object's fire burns for the whole mission;
+        // a vehicle's or ship's lasts 15 minutes (nr-fx2).
+        let lasting = |id: u32| {
+            matches!(
+                fires.get(&id),
+                Some(
+                    crate::surface::wreck::FireClass::Building
+                        | crate::surface::wreck::FireClass::Hard
+                )
+            )
+        };
         let runways: std::collections::BTreeSet<u32> = terrain
             .airport_scene
             .objects
@@ -487,6 +498,7 @@ impl Combat {
                         explosion: unit.explosion?,
                         crater: scorched(unit.id.0, unit.crater?),
                         burns: burns(unit.id.0),
+                        lasting: lasting(unit.id.0),
                         // A template's own runway is one of its units.
                         pavement: runways.contains(&unit.id.0),
                     },
@@ -501,6 +513,7 @@ impl Combat {
                 explosion: tore_sim::combat::blast::GROUND_OBJECT,
                 crater: scorched(object.id, 0),
                 burns: burns(object.id),
+                lasting: lasting(object.id),
                 pavement: object.runway,
             });
         }

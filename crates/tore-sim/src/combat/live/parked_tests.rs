@@ -198,7 +198,7 @@ fn gun_rounds_meet_the_aircraft_volume_and_damage_its_sections() {
 }
 
 #[test]
-fn destroyed_it_explodes_as_an_aircraft_burns_and_leaves_a_crater_on_land() {
+fn destroyed_it_explodes_as_an_aircraft_and_burns_as_a_hulk_on_a_scorch_on_land() {
     for water in [false, true] {
         let mut s = scene(water);
         s.projectiles
@@ -233,7 +233,13 @@ fn destroyed_it_explodes_as_an_aircraft_burns_and_leaves_a_crater_on_land() {
         if water {
             assert!(craters.is_empty());
         } else {
-            assert_eq!(craters, [(blast::CRASH_CRATER, [0., 0., 3000.])]);
+            // A scorch under the hulk, not the crash site's crater.
+            assert_eq!(craters, [(blast::HULK_SCORCH, [0., 0., 3000.])]);
+            assert!(
+                s.marks
+                    .iter()
+                    .all(|m| m.kind != MarkKind::Crater(blast::CRASH_CRATER))
+            );
         }
         // The kill goes to the shooter under the PT's class word, not as an
         // aircraft of the roster.
@@ -252,35 +258,39 @@ fn destroyed_it_explodes_as_an_aircraft_burns_and_leaves_a_crater_on_land() {
 }
 
 #[test]
-fn a_broken_section_throws_the_types_fragment_from_its_attachment_point() {
-    // A type the game does not fly: a break at the nose throws piece 0, at
-    // the left wing piece 1, from the given offsets.
-    // Gun rounds from ahead meet the nose or the left wing first.
+fn a_destroyed_parked_aircraft_throws_no_piece_and_leaves_a_hulk() {
+    // A break at the nose or the left wing once threw a fragment; now the
+    // aircraft stays where it stood (its charred look is the picture's).
     let ahead = |right: f64| toward(9, record("M61.JT", 3000), [right, 8., 3100.], [0., 0., -1.]);
-    for (right, variant) in [(0., 0usize), (-20., 1)] {
+    for right in [0., -20.] {
         let mut s = scene(false);
         s.projectiles.push(ahead(right));
         run(&mut s, 10, false);
         assert_eq!(row(&s).hp, 0);
-        assert_eq!(s.debris.len(), 1, "{right}");
-        let piece = &s.debris[0];
-        assert_eq!((piece.owner, piece.variant), (PARKED, variant));
-        assert!(piece.velocity[1] > 0., "tossed up");
+        assert!(s.debris.is_empty(), "{right}");
+        assert!(s.is_parked(PARKED), "the hulk is still a body of the scene");
     }
-    // The Rafale flies: its reviewed pair says a left-wing break is piece 0.
     let mut s = fixture(true);
     s.targets.clear();
     s.add_parked_aircraft(&parked([0., 8., 3000.], Some(AircraftId::Rafale)))
         .unwrap();
     s.projectiles.push(ahead(-20.));
     run(&mut s, 10, false);
-    let piece = &s.debris[0];
-    assert_eq!(piece.variant, 0);
-    // Released at the attachment point: offset 0 from the origin.
-    let start: Vector = [0., 8. + 0., 3000. + 20.];
-    for (at, want) in piece.position.iter().zip(start) {
-        assert!((at - want).abs() < 6., "{piece:?}");
+    assert!(s.debris.is_empty());
+}
+
+#[test]
+fn a_parked_aircraft_killed_by_splash_burns_the_same_way() {
+    let mut s = scene(false);
+    // Kill it as a host's destroyed event does: no round of its own.
+    for t in s.targets.iter_mut().filter(|t| t.id == PARKED) {
+        t.hp = 0;
     }
+    run(&mut s, 3, false);
+    let fires: Vec<_> = s.marks.iter().filter(|m| m.is_limited_fire()).collect();
+    assert_eq!(fires.len(), 1);
+    assert_eq!(fires[0].position, [0., 0., 3000.]);
+    assert_eq!(fires[0].ticks, blast::CRASH_TICKS - 2);
 }
 
 #[test]

@@ -863,6 +863,7 @@ fn a_bomb_on_pavement_leaves_its_crater_and_a_building_hit_does_not() {
                 explosion: 35,
                 crater: 0,
                 burns: false,
+                lasting: false,
                 pavement,
             },
         ));
@@ -931,6 +932,7 @@ fn a_destroyed_unit_explodes_and_craters_as_its_record_says() {
                 explosion: 21,
                 crater: 5,
                 burns: false,
+                lasting: false,
                 pavement: false,
             }),
             false,
@@ -940,6 +942,7 @@ fn a_destroyed_unit_explodes_and_craters_as_its_record_says() {
                 explosion: 21,
                 crater: 5,
                 burns: false,
+                lasting: false,
                 pavement: false,
             }),
             true,
@@ -1027,6 +1030,7 @@ fn a_destroyed_unit_explodes_and_craters_as_its_record_says() {
             explosion: 21,
             crater: 1,
             burns: false,
+            lasting: false,
             pavement: false,
         }
     ));
@@ -1062,6 +1066,7 @@ fn surface_rounds_and_looks_restore_from_a_checkpoint_and_fly_on_identically() {
             explosion: 21,
             crater: 4,
             burns: true,
+            lasting: false,
             pavement: false,
         },
     );
@@ -1169,6 +1174,7 @@ fn a_burning_wreck_lights_one_fire_at_the_foot_of_its_box() {
                 explosion: 21,
                 crater: 0,
                 burns,
+                lasting: false,
                 pavement: false,
             },
         );
@@ -1184,4 +1190,79 @@ fn a_burning_wreck_lights_one_fire_at_the_foot_of_its_box() {
     assert_eq!(fires(&s), [([0., 2., 30_000.], CRASH_TICKS)]);
     run(&mut s, 120);
     assert_eq!(fires(&s).len(), 1, "once per wreck");
+}
+
+/// A building's fire burns for the whole mission and never counts against
+/// (or gets evicted by) the crash fires' cap, while the crash fires keep
+/// their 15 minutes and their cap (nr-fx2, John 2026-10-13).
+#[test]
+fn a_buildings_fire_burns_for_the_whole_mission_outside_the_crash_fire_cap() {
+    use crate::combat::blast::{CRASH_TICKS, FOREVER, MAX_FIRES, MarkKind};
+    let mut s = scene();
+    let buildings = MAX_FIRES as u32 + 40;
+    for n in 0..buildings {
+        unit(
+            &mut s,
+            UNIT + n,
+            [f64::from(n) * 100., 10., 30_000.],
+            REDFOR,
+        );
+        s.set_ground_look(
+            UNIT + n,
+            GroundLook {
+                explosion: 35,
+                crater: 0,
+                burns: true,
+                lasting: true,
+                pavement: false,
+            },
+        );
+    }
+    // One vehicle that burns for 15 minutes.
+    let truck = UNIT + buildings;
+    unit(&mut s, truck, [0., 10., 40_000.], REDFOR);
+    s.set_ground_look(
+        truck,
+        GroundLook {
+            explosion: 21,
+            crater: 0,
+            burns: true,
+            lasting: false,
+            pavement: false,
+        },
+    );
+    for t in s.targets.iter_mut().filter(|t| t.id >= UNIT) {
+        t.hp = 0;
+    }
+    run(&mut s, 1);
+    let kind = |s: &State| {
+        let forever = s.marks.iter().filter(|m| m.ticks == FOREVER).count();
+        let limited = s.marks.iter().filter(|m| m.is_limited_fire()).count();
+        (forever, limited)
+    };
+    assert_eq!(kind(&s), (buildings as usize, 1));
+    // A crowd of crash sites past the cap: the oldest limited fire goes out,
+    // every building's stays.
+    for n in 0..(MAX_FIRES as u32 + 10) {
+        s.aircraft_crashed(9_000 + n, [f64::from(n) * 50., 0., 80_000.], false);
+    }
+    assert_eq!(kind(&s), (buildings as usize, MAX_FIRES));
+    assert!(
+        s.marks
+            .iter()
+            .filter(|m| m.kind == MarkKind::Fire && m.ticks == FOREVER)
+            .all(|m| m.position[2] == 30_000.)
+    );
+    // After the crash fires' 15 minutes only the buildings burn.
+    assert!(
+        s.marks
+            .iter()
+            .all(|m| m.ticks == FOREVER || m.ticks > CRASH_TICKS - 5)
+    );
+    for m in s.marks.iter_mut().filter(|m| m.is_limited_fire()) {
+        m.ticks = 5;
+    }
+    run(&mut s, 6);
+    assert_eq!(kind(&s), (buildings as usize, 0));
+    assert!(s.marks.iter().all(|m| m.strength() == 1.), "full strength");
 }

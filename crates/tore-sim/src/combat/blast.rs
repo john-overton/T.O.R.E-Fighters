@@ -131,10 +131,17 @@ pub const FIRE_FADE_TICKS: u32 = 60 * 120;
 pub const FIRE_SIZE: u8 = 100;
 pub const FIRE_SOUND: &str = "&FIRE.5K";
 pub const FIRE_SOUND_FT: f64 = 2000.;
-/// Crash fires burning at once; the oldest goes out past this many. Weapon
-/// craters and gun pock marks have no cap: every one stays for the whole
-/// mission (opinionated, John, 2026-10-12; the 256 crater cap is gone).
+/// Fires of limited life (crash sites, burning vehicles, a parked aircraft's
+/// hulk) burning at once; the oldest goes out past this many. Weapon craters
+/// and gun pock marks have no cap: every one stays for the whole mission
+/// (opinionated, John, 2026-10-12; the 256 crater cap is gone). A
+/// destroyed building's or fixed object's fire burns for the whole mission
+/// ([`FOREVER`]) and is outside the cap (John, 2026-10-13; agent decision:
+/// the cap guards the crash sites, which can come without limit).
 pub const MAX_FIRES: usize = 64;
+/// The scorch a parked aircraft's hulk lies on: crater size 2, 32 ft of half
+/// width, a fighter's wing reach (agent decision, 2026-10-13).
+pub const HULK_SCORCH: u8 = 2;
 /// The crater size a gun round's pock mark is kept as: a crater of size 0
 /// is the small scorched dent a shell up to 57 mm leaves, sized by its
 /// scale ([`mark_half_width`]). An older build draws it as nothing.
@@ -283,6 +290,11 @@ pub struct Mark {
     pub scale: u8,
 }
 impl Mark {
+    /// A fire that goes out and counts against [`MAX_FIRES`]: not a
+    /// building's, which burns for good.
+    pub fn is_limited_fire(&self) -> bool {
+        self.kind == MarkKind::Fire && self.ticks != FOREVER
+    }
     /// A fire's strength: full, then fading to nothing over its last minute.
     pub fn strength(&self) -> f32 {
         if self.ticks == FOREVER {

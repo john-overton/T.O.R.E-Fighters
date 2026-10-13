@@ -20,6 +20,11 @@ pub fn contrail_altitude_ft(sortie: u64, aircraft: u32) -> f64 {
 }
 
 pub const MAX_PUFFS: usize = 8192;
+/// Burning columns that smoke at the full ten puffs a second: a column's
+/// puffs live 44 seconds, so 16 of them keep 7,000 of the [`MAX_PUFFS`].
+/// More burning sources thin each column's puffs to fit
+/// ([`Smoke::step`]).
+pub const FULL_COLUMNS: usize = 16;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Missile,
@@ -133,11 +138,25 @@ impl Smoke {
             puff.position[2] += puff.drift[1] / 120.;
         }
         self.puffs.retain(|p| p.age < p.kind.lifetime());
+        let sources: Vec<(Vector, Kind)> = sources.into_iter().collect();
+        // Past FULL_COLUMNS burning columns each one lets a puff go less
+        // often (a whole number of 12 tick steps, staggered from column to
+        // column), so a bombed airfield's fires fit the puff budget with
+        // every column standing, thinner, instead of the oldest puffs of
+        // all of them being thrown away (nr-fx2).
+        let burning = sources.iter().filter(|(_, k)| *k == Kind::Burning).count();
+        let stretch = burning.div_ceil(FULL_COLUMNS).max(1) as u64;
+        let mut column = 0u64;
         for (position, kind) in sources {
-            if !self
-                .ticks
-                .is_multiple_of(if kind == Kind::Missile { 8 } else { 12 })
-            {
+            let (period, phase) = match kind {
+                Kind::Missile => (8, 0),
+                Kind::Burning => {
+                    column += 1;
+                    (12 * stretch, (column - 1) * 12)
+                }
+                _ => (12, 0),
+            };
+            if !(self.ticks + phase).is_multiple_of(period) {
                 continue;
             }
             if self.puffs.len() == MAX_PUFFS {
@@ -374,6 +393,50 @@ mod tests {
         );
         smoke.step([]);
         assert_eq!(smoke.puffs.len(), 12001);
+    }
+
+    fn burning(count: usize) -> Vec<(Vector, Kind)> {
+        (0..count)
+            .map(|n| ([n as f64 * 100., 0., 0.], Kind::Burning))
+            .collect()
+    }
+
+    #[test]
+    fn up_to_sixteen_columns_smoke_at_the_full_rate() {
+        let mut smoke = Smoke::default();
+        for _ in 0..120 {
+            smoke.step(burning(FULL_COLUMNS));
+        }
+        // Ten puffs a second from each.
+        assert_eq!(smoke.puffs.len(), FULL_COLUMNS * 10);
+    }
+
+    #[test]
+    fn many_burning_columns_thin_out_to_fit_the_budget_with_every_column_standing() {
+        let mut smoke = Smoke::default();
+        for _ in 0..(BURNING_LIFETIME_TICKS as usize + 600) {
+            smoke.step(burning(500));
+        }
+        assert!(smoke.puffs.len() <= MAX_PUFFS, "{}", smoke.puffs.len());
+        // The oldest puffs of some columns were not thrown away to make
+        // room: the budget holds a full lifetime of every column.
+        let oldest = smoke.puffs.iter().map(|p| p.age).max().unwrap();
+        assert!(oldest + 400 >= BURNING_LIFETIME_TICKS, "{oldest}");
+        // Every column has puffs, and they are staggered over the cadence.
+        for n in 0..500 {
+            let at = n as f64 * 100.;
+            assert!(
+                smoke.puffs.iter().any(|p| (p.position[0] - at).abs() < 10.),
+                "column {n} has no smoke"
+            );
+        }
+        let ages: std::collections::BTreeSet<u16> = smoke
+            .puffs
+            .iter()
+            .filter(|p| p.age < 400)
+            .map(|p| p.age % 384)
+            .collect();
+        assert!(ages.len() > 20, "{} phases", ages.len());
     }
 
     #[test]

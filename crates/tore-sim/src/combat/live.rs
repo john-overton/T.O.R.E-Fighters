@@ -3828,7 +3828,7 @@ impl State {
     /// crater with a fire and a smoke column for 15 minutes. Once per
     /// aircraft; presentation only (docs/spec/explosions.md).
     pub fn aircraft_crashed(&mut self, id: u32, position: Vector, water: bool) {
-        use super::blast::{self, MarkKind};
+        use super::blast;
         if !self.crashed.insert(id) {
             return;
         }
@@ -3853,22 +3853,23 @@ impl State {
             super::blast_scale::FULL,
             blast::CRASH_TICKS,
         );
-        if self
-            .marks
-            .iter()
-            .filter(|m| m.kind == MarkKind::Fire)
-            .count()
-            == blast::MAX_FIRES
+        self.light_fire(position, blast::CRASH_TICKS);
+    }
+    /// A fire and its smoke column at `position` for `ticks` (a crash
+    /// site's 15 minutes, or [`blast::FOREVER`] for a destroyed building's).
+    /// Fires of limited life are capped at [`blast::MAX_FIRES`]: the oldest
+    /// goes out when a new one would pass it. A fire that burns for good is
+    /// never evicted and never counted, so a bombed airfield keeps every
+    /// fire without crowding out the crash sites.
+    pub(crate) fn light_fire(&mut self, position: Vector, ticks: u32) {
+        use super::blast::MarkKind;
+        if ticks != super::blast::FOREVER
+            && self.marks.iter().filter(|m| m.is_limited_fire()).count() >= super::blast::MAX_FIRES
+            && let Some(oldest) = self.marks.iter().position(|m| m.is_limited_fire())
         {
-            let oldest = self.marks.iter().position(|m| m.kind == MarkKind::Fire);
-            self.marks.remove(oldest.unwrap());
+            self.marks.remove(oldest);
         }
-        self.mark(
-            position,
-            MarkKind::Fire,
-            blast::CRASH_TICKS,
-            super::blast_scale::FULL,
-        );
+        self.mark(position, MarkKind::Fire, ticks, super::blast_scale::FULL);
     }
     fn mark(&mut self, position: Vector, kind: super::blast::MarkKind, ticks: u32, scale: u8) {
         self.marks.push(super::blast::Mark {
@@ -4939,8 +4940,6 @@ impl State {
         let mut sources = Vec::new();
         // Score changes, owner and whether it is a kill, applied after the loop.
         let mut scored: Vec<(u32, bool)> = Vec::new();
-        // Parked aircraft destroyed this tick, for their crash sites.
-        let mut parked_wrecks: Vec<u32> = Vec::new();
         // Jammer deception on target hits takes the first ownship's ECM record.
         let fixture_ecm = ships.first().map(|own| own.config.ecm);
         let friendly_fire_off = self.friendly_fire == FriendlyFire::Off;
@@ -5739,9 +5738,6 @@ impl State {
                         // A ground object explodes as its unit record says,
                         // leaving its crater on land.
                         let parked = self.parked.contains_key(&t.id);
-                        if parked {
-                            parked_wrecks.push(t.id);
-                        }
                         let (explosion, crater) = if t.role == TargetRole::Aircraft || parked {
                             (super::blast::AIRCRAFT, 0)
                         } else if let Some(look) = self.ground_looks.get(&t.id) {
@@ -5858,9 +5854,6 @@ impl State {
                 }
                 keep
             });
-        }
-        for id in parked_wrecks {
-            self.parked_destroyed(id);
         }
         self.ground_bursts.clear();
         for burst in &bursts {
