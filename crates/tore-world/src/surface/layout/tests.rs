@@ -1459,6 +1459,15 @@ fn area(aaa: usize, sam: usize, seed: u32) -> crate::surface::resolve::AreaDefen
         seed,
         enemy_nationality: 10,
         night_stealth: false,
+        rolled: true,
+    }
+}
+
+/// The first build's fixed counts (a recording made then).
+fn legacy_area(aaa: usize, sam: usize, seed: u32) -> crate::surface::resolve::AreaDefense {
+    crate::surface::resolve::AreaDefense {
+        rolled: false,
+        ..area(aaa, sam, seed)
     }
 }
 
@@ -1512,13 +1521,30 @@ fn area_defenses_are_seeded_and_the_same_for_the_same_seed() {
     assert_ne!(a.digest(), d.digest());
 }
 
+const SAM_TYPES: [&str; 7] = [
+    "SA6.NT", "SA7.NT", "SA9.NT", "SA13.NT", "SA14.NT", "SA15.NT", "2S6.NT",
+];
+
 #[test]
-fn area_counts_follow_the_strengths() {
+fn area_counts_are_rolled_like_the_template_slots() {
     let grid = Grid::land(128);
     let ground = Ground::new(&grid, Vec::new(), vec![red_runway()], Some(area_front()));
-    for (aaa, &aaa_sites) in AREA_AAA_SITES.iter().enumerate() {
-        for (sam, &sam_sites) in AREA_SAM_SITES.iter().enumerate() {
-            let mut s = area_surface(area(aaa, sam, 5));
+    for (aaa, sam) in [(0, 0), (1, 2), (2, 1), (3, 3), (0, 3), (3, 0)] {
+        for seed in 1..=4 {
+            let settings = area(aaa, sam, seed);
+            let (sam_sites, aaa_sites) = area::site_counts(&settings, "TEST.MM");
+            // Ten slots of a kind, none at "not", all at "heavy".
+            assert!(sam_sites <= AREA_SLOTS && aaa_sites <= AREA_SLOTS);
+            if sam == 0 {
+                assert_eq!(sam_sites, 0);
+            }
+            if aaa == 3 {
+                assert_eq!(aaa_sites, AREA_SLOTS);
+            }
+            if sam == 3 {
+                assert_eq!(sam_sites, AREA_SLOTS);
+            }
+            let mut s = area_surface(settings);
             lay(&mut s, &ground, &[]);
             let units = area_units(&s);
             let count = |c: &[&str]| {
@@ -1527,12 +1553,10 @@ fn area_counts_follow_the_strengths() {
                     .filter(|u| c.contains(&u.resource.as_str()))
                     .count()
             };
-            let sams = count(&[
-                "SA6.NT", "SA7.NT", "SA9.NT", "SA13.NT", "SA14.NT", "SA15.NT", "2S6.NT",
-            ]);
+            let sams = count(&SAM_TYPES);
             let guns = count(&["ZSU23.NT", "ZSU57.NT"]);
-            assert_eq!(sams, sam_sites * AREA_SITE_UNITS, "{aaa} {sam}");
-            assert_eq!(guns, aaa_sites * AREA_SITE_UNITS, "{aaa} {sam}");
+            assert_eq!(sams, sam_sites * AREA_SITE_UNITS, "{aaa} {sam} {seed}");
+            assert_eq!(guns, aaa_sites * AREA_SITE_UNITS, "{aaa} {sam} {seed}");
             assert_eq!(units.len(), sams + guns);
             for unit in &units {
                 assert_eq!(unit.id.range(), IdRange::AreaDefense);
@@ -1540,9 +1564,137 @@ fn area_counts_follow_the_strengths() {
                 assert!(!unit.is_target() && unit.route.is_none());
                 assert_eq!(s.side_of(unit.id.0), ENEMY_SIDE);
             }
-            // No supply truck, no front line, no starts: just the sites.
-            assert!(s.trucks.is_empty() && s.starts.is_none());
+            // No front line and no starts: just the sites (and the SAM
+            // sites' trucks).
+            assert!(s.starts.is_none());
         }
+    }
+}
+
+#[test]
+fn rolled_area_counts_follow_the_template_chances_per_strength() {
+    // Over many seeds each slot is manned 25, 60 or 100 percent of the
+    // time (the template rule), so the mean site count of a kind is 2.5,
+    // 6 and 10 of ten, and the range of any one mission is 0 to 10.
+    let mean = |level: usize| {
+        let (mut sam, mut aaa, mut low, mut high) = (0usize, 0usize, usize::MAX, 0usize);
+        for seed in 1..=400u32 {
+            let (a, b) = area::site_counts(&area(level, level, seed), "TEST.MM");
+            sam += a;
+            aaa += b;
+            low = low.min(a).min(b);
+            high = high.max(a).max(b);
+        }
+        (sam as f64 / 400., aaa as f64 / 400., low, high)
+    };
+    for (level, expect) in [(1, 2.5), (2, 6.0)] {
+        let (sam, aaa, low, high) = mean(level);
+        assert!((sam - expect).abs() < 0.4, "level {level} SAM mean {sam}");
+        assert!((aaa - expect).abs() < 0.4, "level {level} AAA mean {aaa}");
+        assert!(
+            low <= 1 && high >= if level == 1 { 5 } else { 9 },
+            "{level}"
+        );
+        assert!(high <= AREA_SLOTS);
+    }
+    assert_eq!(mean(3), (10.0, 10.0, 10, 10));
+    assert_eq!(mean(0), (0.0, 0.0, 0, 0));
+    // Sam and gun slots roll apart: some seed differs between the kinds.
+    assert!((1..=50u32).any(|seed| {
+        let (a, b) = area::site_counts(&area(2, 2, seed), "TEST.MM");
+        a != b
+    }));
+    // The layout is part of the stream: another layout, another rolls.
+    assert!(
+        (1..=50u32).any(|seed| area::site_counts(&area(2, 2, seed), "TEST.MM")
+            != area::site_counts(&area(2, 2, seed), "OTHER.MM"))
+    );
+}
+
+#[test]
+fn a_slot_manned_at_a_lower_strength_is_manned_at_a_higher_one() {
+    // Each slot rolls apart against the strength's percent, so the same
+    // seed at a higher strength keeps every site and may add more.
+    for seed in 1..=40u32 {
+        let counts = |level| area::site_counts(&area(level, level, seed), "TEST.MM");
+        let (l, m, h) = (counts(1), counts(2), counts(3));
+        assert!(
+            l.0 <= m.0 && m.0 <= h.0 && l.1 <= m.1 && m.1 <= h.1,
+            "{seed}"
+        );
+    }
+}
+
+#[test]
+fn the_first_builds_fixed_counts_stay_readable() {
+    let grid = Grid::land(128);
+    let ground = Ground::new(&grid, Vec::new(), vec![red_runway()], Some(area_front()));
+    for (level, (sam_sites, aaa_sites)) in [(1, (2, 4)), (2, (4, 8)), (3, (6, 12))] {
+        let mut s = area_surface(legacy_area(level, level, 5));
+        lay(&mut s, &ground, &[]);
+        let units = area_units(&s);
+        let sams = units
+            .iter()
+            .filter(|u| SAM_TYPES.contains(&u.resource.as_str()))
+            .count();
+        assert_eq!(sams, sam_sites * AREA_SITE_UNITS, "{level}");
+        assert_eq!(units.len() - sams, aaa_sites * AREA_SITE_UNITS, "{level}");
+        // The first build had no trucks.
+        let rolled_digest = {
+            let mut r = area_surface(area(level, level, 5));
+            lay(&mut r, &ground, &[]);
+            r.digest()
+        };
+        assert_ne!(s.digest(), rolled_digest);
+    }
+}
+
+#[test]
+fn area_sam_units_get_supply_trucks_that_reload_and_guns_get_none() {
+    let grid = Grid::land(128);
+    let ground = Ground::new(&grid, Vec::new(), vec![red_runway()], Some(area_front()));
+    for seed in 1..=6u32 {
+        let mut s = area_surface(area(3, 3, seed));
+        lay(&mut s, &ground, &[]);
+        let launchers: Vec<UnitId> = area_units(&s)
+            .iter()
+            .filter(|u| SAM_TYPES.contains(&u.resource.as_str()))
+            .map(|u| u.id)
+            .collect();
+        assert!(!launchers.is_empty());
+        let per_unit: Vec<_> = s.trucks.iter().filter_map(|t| t.serves).collect();
+        for id in &launchers {
+            let truck = s
+                .trucks
+                .iter()
+                .find(|t| t.serves == Some(*id) && t.added)
+                .unwrap_or_else(|| panic!("seed {seed}: {id:?} has no truck"));
+            let (tu, lu) = (s.unit(truck.id).unwrap(), s.unit(*id).unwrap());
+            assert_eq!(tu.resource, "MISTRK.NT");
+            assert_eq!((tu.side, tu.nationality), (lu.side, lu.nationality));
+            assert_eq!(tu.id.range(), IdRange::SupplyTruck);
+            let apart = distance2(at(tu), at(lu)) as f64;
+            let [lo, hi] = TRUCK_FT;
+            assert!(apart >= (lo * lo) as f64 && apart <= ((hi * hi) as f64) * 1.0001);
+            assert!(apart.sqrt() <= crate::surface::RESUPPLY_RADIUS_FT);
+        }
+        // No truck for a gun, and every battery has its own.
+        assert!(per_unit.iter().all(|id| launchers.contains(id)));
+        for battery in &s.batteries {
+            assert!(battery.truck.is_some(), "seed {seed}");
+        }
+        assert!(
+            s.trucks.len() >= launchers.len(),
+            "seed {seed}: {} trucks for {} launchers",
+            s.trucks.len(),
+            launchers.len()
+        );
+        // Placement is seeded: the same seed, the same trucks.
+        let mut again = area_surface(area(3, 3, seed));
+        lay(&mut again, &ground, &[]);
+        assert_eq!(s.digest(), again.digest());
+        assert_eq!(s.trucks, again.trucks);
+        assert!(area::audit(&s, &ground, &mut types).is_empty());
     }
 }
 
@@ -1568,9 +1720,20 @@ fn area_sites_stand_in_the_band_or_by_a_red_airfield() {
             by_field += usize::from(by_airfield && !in_band);
             assert!(!runway.within(p, AREA_RUNWAY_CLEARANCE_FT));
         }
-        // One site in three of each kind guards the airfield (two of six
-        // SAM sites, four of twelve gun sites), two units each.
-        assert_eq!(by_field, 12, "seed {seed}");
+        // One site in three of each kind (the first included) guards the
+        // airfield: ceil(sites / 3) of each, two units each.
+        let (sam_sites, aaa_sites) = area::site_counts(&area(3, 3, seed), "TEST.MM");
+        let guarded = |n: usize| n.div_ceil(AREA_AIRFIELD_EVERY);
+        // With one airfield in the theater and up to eight sites asking for
+        // it (3 nm apart in a 2 to 5 nm ring), a late one may find the ring
+        // full and stand in the band instead (the fallback), so the count
+        // is at most that and at least half of it.
+        let want = (guarded(sam_sites) + guarded(aaa_sites)) * AREA_SITE_UNITS;
+        assert!(
+            by_field <= want && by_field * 2 >= want,
+            "seed {seed}: {by_field} of {want}"
+        );
+        assert_eq!(by_field % AREA_SITE_UNITS, 0, "seed {seed}");
     }
 }
 
@@ -1628,18 +1791,19 @@ fn an_area_sa6_site_gets_its_radar_and_its_own_battery() {
     let missing = [
         "SA7.NT", "SA9.NT", "SA13.NT", "SA14.NT", "SA15.NT", "2S6.NT",
     ];
-    let mut s = area_surface(area(0, 1, 3));
+    let mut s = area_surface(area(0, 3, 3));
     lay(&mut s, &ground, &missing);
     let launchers: Vec<UnitId> = area_units(&s)
         .iter()
         .filter(|u| u.resource == "SA6.NT")
         .map(|u| u.id)
         .collect();
-    assert_eq!(launchers.len(), 4);
-    assert_eq!(s.batteries.len(), 2);
+    assert_eq!(launchers.len(), AREA_SLOTS * AREA_SITE_UNITS);
+    assert_eq!(s.batteries.len(), AREA_SLOTS);
     for battery in &s.batteries {
         assert_eq!(battery.system, BatterySystem::Sa6);
-        assert!(battery.radar_added && battery.truck.is_none());
+        // The radar is added and the battery has its own supply truck.
+        assert!(battery.radar_added && battery.truck.is_some());
         assert_eq!(battery.launchers.len(), 2);
         assert!(battery.launchers.iter().all(|id| launchers.contains(id)));
         let radar = s.unit(battery.radar).unwrap();

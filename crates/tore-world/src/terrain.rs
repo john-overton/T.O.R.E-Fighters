@@ -566,6 +566,12 @@ impl SurfaceSite {
         crate::surface::layout::audit(surface, &ground, &mut types)
     }
 
+    /// The SAM sites and gun sites `area` rolls on this site's layout,
+    /// before any is left out for want of a place.
+    pub fn area_site_counts(&self, area: &crate::surface::resolve::AreaDefense) -> (usize, usize) {
+        crate::surface::layout::area::site_counts(area, &format!("{}.MM", self.code))
+    }
+
     /// [`crate::surface::layout::area::audit`] for a surface this site
     /// placed: the area defenses' own rules.
     pub fn audit_area(

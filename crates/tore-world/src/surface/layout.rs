@@ -186,7 +186,14 @@ pub const AREA_DEPTH_NM: [i64; 2] = [10, 60];
 pub const AREA_FALLBACK_DEPTH_NM: [i64; 2] = [10, 120];
 /// Red airfields this deep or less, nm, get the airfield cover.
 pub const AREA_AIRFIELD_DEPTH_NM: i64 = 100;
-/// SAM sites and AAA sites by strength (none, light, moderate, heavy).
+/// Site slots of each kind, like the ten `<sam>` and ten `<aaa>` slots of
+/// 79 of the 95 templates; each is manned with the strength's chance (0, 25,
+/// 60 or 100 percent), so a heavy mission stands all ten sites of a kind
+/// and a light one a quarter of them on average (nr-b23b, 2026-10-13; the
+/// count is fitted, agent).
+pub const AREA_SLOTS: usize = 10;
+/// The first build's fixed SAM sites and AAA sites by strength (none,
+/// light, moderate, heavy), kept for a recording made then.
 pub const AREA_SAM_SITES: [usize; 4] = [0, 2, 4, 6];
 pub const AREA_AAA_SITES: [usize; 4] = [0, 4, 8, 12];
 /// Launchers or guns per site, all of one type.
@@ -327,7 +334,7 @@ pub fn place(surface: &mut Surface, inputs: &mut Inputs<'_, '_>) {
     let mut notes = Vec::new();
     // Area defenses join the surface before the batteries form, so a SAM
     // site gets its radar.
-    let area = area::add(surface, inputs, &obstacles, &mut notes);
+    let (area, area_sams) = area::add(surface, inputs, &obstacles, &mut notes);
     commit(surface, area);
     let mut batteries =
         batteries::form(surface, inputs, &frames, &obstacles, &mut added, &mut notes);
@@ -335,6 +342,7 @@ pub fn place(surface: &mut Surface, inputs: &mut Inputs<'_, '_>) {
         surface,
         inputs,
         &mut batteries,
+        &area_sams,
         &obstacles,
         &mut added,
         &mut notes,

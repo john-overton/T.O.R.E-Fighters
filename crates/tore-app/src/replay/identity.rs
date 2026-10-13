@@ -117,6 +117,7 @@ fn area_defense(recorded: &tore_replay::AreaDefense) -> AppResult<AreaDefense> {
         seed: recorded.seed,
         enemy_nationality: usize::from(recorded.enemy_nationality),
         night_stealth: recorded.night_stealth,
+        rolled: recorded.rolled,
     })
 }
 
@@ -128,6 +129,7 @@ fn recorded_area(area: &AreaDefense) -> tore_replay::AreaDefense {
         seed: area.seed,
         enemy_nationality: u8::try_from(area.enemy_nationality).unwrap_or(u8::MAX),
         night_stealth: area.night_stealth,
+        rolled: area.rolled,
     }
 }
 
@@ -515,9 +517,17 @@ mod tests {
             seed: 4_000_000_001,
             enemy_nationality: 33,
             night_stealth: true,
+            rolled: true,
         };
         let header = recorded_area(&area);
         assert_eq!(area_defense(&header).unwrap(), area);
+        // A recording from the first build has no rolled mark and keeps the
+        // fixed counts.
+        let old = tore_replay::AreaDefense {
+            rolled: false,
+            ..header
+        };
+        assert!(!area_defense(&old).unwrap().rolled);
         assert!(
             of(&tore_world::test_support::terrain())
                 .area_defense

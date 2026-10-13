@@ -758,6 +758,22 @@ def area_sweep_problems(output: str) -> list[str]:
     return problems
 
 
+def area_resupply_problems(output: str) -> list[str]:
+    """The first area SAM unit has a supply truck: with its rails drained it
+    rearms in the run, and does not once its truck is killed."""
+    runs_ = runs(output)
+    problems: list[str] = []
+    if not runs_:
+        return ["no trace run"]
+    if not re.search(r"^surface-trace: subject 0x5f000000 \S+ side 2 ", runs_[0], re.M):
+        problems.append(f"subject {subject(runs_[0])} is not the first enemy area unit")
+    if int(summary(runs_[0]).get("rearms", "0")) < 1:
+        problems.append(f"drained area SAM never rearmed: rearms {summary(runs_[0]).get('rearms')}")
+    if len(runs_) > 1 and int(summary(runs_[1]).get("rearms", "0")) != 0:
+        problems.append("the area SAM rearmed after its truck was killed")
+    return problems
+
+
 def area_engage_problems(output: str) -> list[str]:
     """The first area unit is an enemy SAM and launches at the aircraft."""
     run = runs(output)[0]
@@ -994,6 +1010,20 @@ def scenarios() -> list[Scenario]:
             forbid=[r"^surface-trace: t=\S+ player crashed"],
             check=area_engage_problems,
             notes=TRACE_NOTES + " A Quick Mission with no ground target and heavy strengths (B23).",
+        ),
+        Scenario(
+            name="surface-area-resupply", lane="ai", timeout=900,
+            args=trace("UKR", "--area", "--defenses", "0", "3", "--surface-seed", "1", "--unit", "0x5f000000",
+                       "--drain", "--altitude", "15000", "--from", "62", "--seconds", "700", "--invulnerable"),
+            then=[
+                Step(trace("UKR", "--area", "--defenses", "0", "3", "--surface-seed", "1", "--unit", "0x5f000000",
+                           "--drain", "--kill-truck-at", "0", "--altitude", "15000", "--from", "62",
+                           "--seconds", "700", "--invulnerable"), timeout=300),
+            ],
+            check=area_resupply_problems,
+            notes=TRACE_NOTES + " The first area SAM unit (heavy SAM strength, no guns) drained at the start "
+                  "rearms from its supply truck in 300 to 600 s; with the truck killed at once it does not "
+                  "(nr-b23b).",
         ),
         Scenario(
             name="surface-start-placement", lane="ai",
