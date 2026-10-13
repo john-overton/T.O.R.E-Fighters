@@ -143,6 +143,20 @@ pub enum StoreLook {
 /// has no pod shape).
 pub const POD_BODY: [f64; 2] = [8.5, 1.4];
 
+/// A rocket pod's length and diameter, feet, by weapon record: the real
+/// pod's size (slice BP2, docs/spec/stores-on-pylons.md#store-sizes);
+/// [`POD_BODY`] for one not listed. Opinionated (John 2026-10-12: real
+/// sizes), from public data.
+pub fn pod_body(source: &str) -> [f64; 2] {
+    match source.to_ascii_uppercase().as_str() {
+        "LAU61.JT" => [5.5, 1.38],
+        "LAU10.JT" => [8.3, 1.25],
+        "B8.JT" => [8.9, 1.71],
+        "B13.JT" => [11.7, 1.35],
+        _ => POD_BODY,
+    }
+}
+
 /// A fitted fuel tank's length and diameter, feet, from the fuel it holds:
 /// 13 by 2 ft for 2,000 lb (300 US gallons), scaled by the cube root of the
 /// fuel (retail has no tank shape).
@@ -186,7 +200,11 @@ pub fn store_poses(
                 } else {
                     StoreLook::Store
                 },
-                body: if per_item > 1 { POD_BODY } else { [0.; 2] },
+                body: if per_item > 1 {
+                    pod_body(&station.weapon.source)
+                } else {
+                    [0.; 2]
+                },
                 items: u16::try_from(rounds(index).div_ceil(per_item)).unwrap_or(u16::MAX),
                 loaded: station.count,
             })
