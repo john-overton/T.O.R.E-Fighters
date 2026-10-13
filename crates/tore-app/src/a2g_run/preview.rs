@@ -268,6 +268,8 @@ fn options(shot: &Shot) -> Options {
         render: None,
         record: None,
         verify: false,
+        scene_at: Vec::new(),
+        condition: None,
         ai: super::ai::Config::new(),
     }
 }

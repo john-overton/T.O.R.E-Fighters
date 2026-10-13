@@ -26,7 +26,7 @@ and is killed in flight before it releases; the server keeps plane 0 for it and 
 game then joins again with its token (`--a2g watch`) and finds its cockpit as it left it: the same station, LVL,
 fewer bombs, and the designation on the same target while it stands.
 
-`net-a2g-stores` (protocol 26, slice BP3, docs/spec/stores-on-pylons.md): the same column with two enemy MiG-29s
+`net-a2g-stores` (protocol 27, slice BP3, docs/spec/stores-on-pylons.md): the same column with two enemy MiG-29s
 free to fire and invulnerable players. `Bomber` (plane 0, Mk 82s in a Cheat loading, `tore-bot --a2g bomb`) drops
 a Mk 82 in CCIP every four seconds; `Watch` (plane 1, `--a2g watch`) flies on. Each bot prints its `stores:` line:
 Watch must draw the other aircraft's stores and see plane 0's Mk 82 station and an AI aircraft's missile station
@@ -319,7 +319,7 @@ def stores_problems(text: str, players: tuple[int, ...]) -> list[str]:
 
 
 def drive_stores(d: Drive) -> None:
-    """Another player's and an AI's stores empty on a client's screen as they release (protocol 26)."""
+    """Another player's and an AI's stores empty on a client's screen as they release (protocol 27)."""
     port = d.port()
     server = start_server(d, port, STORES_MISSION, king="first-player", loadouts="any")
     bomber = start_bots(

@@ -345,7 +345,8 @@ impl Scene {
             commands: std::mem::take(&mut self.commands),
             ..SeatInput::default()
         };
-        self.recorded(|world, out| world.step(std::slice::from_ref(&input), out))
+        self.recorded(|world, out| world.step(std::slice::from_ref(&input), out))?;
+        super::scene_render::after_step(self)
     }
 }
 

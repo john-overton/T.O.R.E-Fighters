@@ -166,7 +166,7 @@ pub fn tank_body(fuel_lbs: f64) -> [f64; 2] {
 }
 
 /// One drawn station's whole stores (B3): the part of an aircraft's stores
-/// that changes in flight, which the network (protocol 26, the Stores event)
+/// that changes in flight, which the network (protocol 27, the Stores event)
 /// and mission recordings carry. Everything else a drawn store needs comes
 /// from the aircraft's loadout ([`store_poses_of`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -383,6 +383,9 @@ pub struct ProjectilePose {
     /// Speed in 1/256 feet per second, as simulated.
     #[allow(dead_code)] // Read by mission recordings and exports.
     pub speed_f8: i32,
+    /// Its motor is burning: a missile or rocket draws its flame only then
+    /// (bug B7). Gun rounds and bombs never are.
+    pub powered: bool,
 }
 
 /// One flare, chaff cloud, launch flash, hit or explosion.
@@ -394,6 +397,10 @@ pub struct EffectPose {
     pub ticks: u16,
     /// The original explosion type it shows, when it has one.
     pub blast: Option<u8>,
+    /// How big it is drawn against its type's size, percent
+    /// ([`tore_sim::combat::blast_scale`]); 100 for anything that is not a
+    /// weapon's impact.
+    pub scale: u8,
 }
 
 /// One crater or crash-site fire.
@@ -405,6 +412,8 @@ pub struct MarkPose {
     pub age: u64,
     /// A fire's strength, 1 until it fades in its last minute.
     pub strength: f32,
+    /// A crater's drawn scale, percent (`Mark::scale`).
+    pub scale: u8,
 }
 impl MarkPose {
     pub fn of(mark: &tore_sim::combat::blast::Mark, tick: u64) -> Self {
@@ -413,6 +422,7 @@ impl MarkPose {
             position: mark.position,
             age: tick.saturating_sub(mark.born),
             strength: mark.strength(),
+            scale: mark.scale,
         }
     }
 }

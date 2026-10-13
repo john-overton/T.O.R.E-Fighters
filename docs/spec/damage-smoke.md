@@ -91,6 +91,15 @@ stop this trail. Ground impact or an airburst stops new emission; existing puffs
 persist and fade through their remaining lifetime.
 No dark damage smoke is emitted by an undamaged aircraft. Missile motors emit
 no smoke before ignition or after burnout. Existing smoke continues to disperse after its source stops or disappears.
+Unguided rockets smoke like missiles while their motor burns (bug B6, fixed
+2026-10-12, slice BF): every record with a motor smokes, not only one with a
+seeker signature, so a rocket pod's salvo leaves a white trail per rocket.
+The bright motor flame drawn over a missile or rocket's path burns only while
+the motor does and goes out at burnout; a bomb never shows one (bug B7). Both
+follow the same powered interval, so a networked client and a replay agree
+with the host. Smoke already in the air keeps drifting and fading after
+burnout (agent decision: "stop rendering at burnout" read as no new trail and
+no flame, since puffs vanishing in mid-air would look wrong).
 
 Smoke samples use fixed 120 Hz simulation time. As an opinionated change requested
 by John on 2026-09-21, missile puffs emit every 8 ticks (15 per second), aircraft

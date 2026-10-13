@@ -823,6 +823,7 @@ mod events {
                     position: [32, 64, 96],
                     ticks: 20,
                     blast: None,
+                    scale: 100,
                 },
             ),
             (
@@ -830,6 +831,7 @@ mod events {
                 WireEvent::Mark {
                     kind: MarkKind::Crater(4),
                     position: [0, 0, 0],
+                    scale: 100,
                 },
             ),
             (17, WireEvent::GroundDestroyed { object: 900 }),

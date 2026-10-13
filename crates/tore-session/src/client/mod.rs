@@ -212,7 +212,7 @@ fn newest_at<T: Clone>(
         .collect()
 }
 
-/// Draws `pose`'s pylons and stores (B3, protocol 26): its loadout from the
+/// Draws `pose`'s pylons and stores (B3, protocol 27): its loadout from the
 /// session's copy of the mission, with the stores the host last told, or as
 /// built when it told none. An aircraft with no loadout there draws none.
 pub(crate) fn put_stores(
@@ -750,6 +750,7 @@ struct Shown {
     position: [f64; 3],
     ticks: u16,
     blast: Option<u8>,
+    scale: u8,
 }
 
 /// The client session. See the module documentation.
@@ -774,13 +775,13 @@ pub struct Client {
     released: Vec<ReceivedEvent>,
     held: VecDeque<ReceivedEvent>,
     effects: Vec<Shown>,
-    marks: Vec<(u32, MarkKind, [f64; 3])>,
+    marks: Vec<(u32, MarkKind, [f64; 3], u8)>,
     destroyed: BTreeMap<u32, u32>,
     /// Each surface unit's states the host has told (protocol 22), by
     /// unit, oldest first, each from its tick; the picture takes the newest
     /// at or before the drawn tick.
     surface_units: BTreeMap<u32, VecDeque<(u32, SurfaceUnitView)>>,
-    /// Each aircraft's drawn stores the host has told (protocol 26), by
+    /// Each aircraft's drawn stores the host has told (protocol 27), by
     /// aircraft, oldest first, each from its tick; the picture takes the
     /// newest at or before the drawn tick, and an aircraft never told is
     /// drawn as its loadout built it.
@@ -1744,17 +1745,19 @@ impl Client {
                 position: e.position,
                 ticks: (f64::from(e.ticks) - (render - f64::from(e.tick))).max(0.) as u16,
                 blast: e.blast,
+                scale: e.scale,
             })
             .collect();
         let marks = self
             .marks
             .iter()
             .filter(|(tick, ..)| f64::from(*tick) <= render)
-            .map(|(tick, kind, position)| MarkPose {
+            .map(|(tick, kind, position, scale)| MarkPose {
                 kind: *kind,
                 position: *position,
                 age: (render - f64::from(*tick)).max(0.) as u64,
                 strength: 1.,
+                scale: *scale,
             })
             .collect();
         let pilots = presented
@@ -1841,7 +1844,7 @@ impl Client {
         })
     }
 
-    // ----- Stores at the drawn tick (protocol 26) ------------------------
+    // ----- Stores at the drawn tick (protocol 27) ------------------------
 
     /// Each told aircraft's drawn stores at drawn tick `render`; the older
     /// ones are no longer needed.
@@ -2860,15 +2863,21 @@ impl Client {
                 position: at,
                 ticks,
                 blast,
+                scale,
             } => self.effects.push(Shown {
                 tick: event.tick,
                 kind: *kind,
                 position: position(at),
                 ticks: *ticks,
                 blast: *blast,
+                scale: *scale,
             }),
-            WireEvent::Mark { kind, position: at } => {
-                self.marks.push((event.tick, *kind, position(at)));
+            WireEvent::Mark {
+                kind,
+                position: at,
+                scale,
+            } => {
+                self.marks.push((event.tick, *kind, position(at), *scale));
             }
             WireEvent::GroundDestroyed { object } => {
                 self.destroyed.entry(*object).or_insert(event.tick);

@@ -93,17 +93,19 @@ pub fn aim_error_deg(skill: i32, radar: bool) -> f64 {
 /// the visual guns' ([`aim_error_deg`]), so 6.0, 4.0, 2.8 and 2.0 for novice,
 /// average, veteran and ace (fitted, agent, 2026-10-12; John's report that
 /// airfield guns "shoot with very high accuracy"). Riflemen and light machine
-/// guns shoot by eye with no mount, no sight and no lead computer, yet with
-/// the visual guns' error one squad hit a low jet with 35 percent of its
-/// rounds at average experience and 65 percent at ace, and took 55 and 93
-/// percent of an F/A-18's hit points in one pass. With this error a squad
-/// hits 3, 4, 9 and 15 percent and costs the jet 3, 7, 14 and 24 percent of
-/// its hit points in a low pass (docs/spec/surface-defenses.md, "Small
-/// arms"). Squads shooting at ground units keep the old error, a quarter of
-/// the visual guns' ([`surface_aim_error_deg`]).
+/// guns shoot by eye with no mount, no sight and no lead computer. Together
+/// with their poor lead ([`SMALL_ARMS_LEAD`]) a squad hits about one round in a
+/// hundred of a 400 kt jet 300 ft over it, whatever its experience
+/// (docs/spec/surface-defenses.md, "Small arms"). Squads shooting at ground
+/// units keep the old error, a quarter of the visual guns'
+/// ([`surface_aim_error_deg`]).
 pub fn small_arms_aim_error_deg(skill: i32) -> f64 {
     aim_error_deg(skill, false) * SMALL_ARMS_ERROR_FACTOR
 }
+/// The share of the correct lead a squad's small arms give an aircraft
+/// (fitted, agent, 2026-10-12): the aim point carries the target on at this
+/// share of its velocity. 0 shoots where the target was seen.
+pub const SMALL_ARMS_LEAD: f64 = 0.3;
 /// How much wider a squad's small arms aim error at an aircraft is than the
 /// visual guns' (fitted, agent, 2026-10-12).
 pub const SMALL_ARMS_ERROR_FACTOR: f64 = 4.0;

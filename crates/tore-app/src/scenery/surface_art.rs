@@ -5,7 +5,9 @@
 //!   `DEST.OT` wreck of a vehicle, SAM launcher or gun, a bunker's damaged
 //!   `~` variant, a carrier's damaged island) has its wreck built beside its
 //!   standing geometry, and the batch swaps one for the other when combat
-//!   destroys it.
+//!   destroys it. Every other building gets one too (B16): its shape's
+//!   damage branch, else a ruin generated from it ([`super::rubble`]), and
+//!   pavement keeps its intact look, so nothing destroyed vanishes but men.
 //! - **Launcher rails.** A launcher shape that draws one missile per round
 //!   still loaded (CHAP, SA2, SA3, SCD) is redrawn from its hardpoints' loads
 //!   whenever they change, through `shape::loaded_count_word`.
@@ -38,6 +40,16 @@ use tore_world::surface::{
 const FLOATS: usize = 10;
 /// The static scene's geometry budget, in floats (32 MiB).
 pub(super) const BUDGET: usize = 32 * 1024 * 1024 / 4;
+/// The range, feet, out to which a man (SOLDIER, TROOPS) is drawn at his own
+/// size; farther he is drawn larger in proportion, so he stays about as many
+/// pixels tall as at this range (opinionated, agent, 2026-10-12).
+const MAN_FULL_SIZE_RANGE_FT: f64 = 1_000.;
+/// The most a man is drawn larger than life: six times, from 6,000 ft out.
+const MAN_MAX_BOOST: f64 = 6.;
+/// How much larger than life a man is drawn `distance` ft from the viewer.
+fn man_boost(distance: f64) -> f64 {
+    (distance / MAN_FULL_SIZE_RANGE_FT).clamp(1., MAN_MAX_BOOST)
+}
 /// The deck crew sprite's frames (`shape::SPRITE_FRAME_WORD`, 0 to 10).
 const CREW_FRAMES: i32 = 11;
 /// Frames per second of the deck crew's signal cycle (fitted: the native
@@ -194,6 +206,34 @@ pub(super) fn emit(
         }
     }
     Ok(())
+}
+
+/// Appends one untextured `face` standing at `stand` in colour `color`
+/// (sRGB, lit as the scene's own colours are): a ruin's charred faces.
+pub(super) fn emit_tinted(
+    face: &tore_formats::shape::Face,
+    stand: &Stand,
+    color: [f32; 3],
+    out: &mut Drawn,
+) {
+    if face.positions.len() < 3 {
+        return;
+    }
+    let place = |point: [f32; 3]| -> Vector {
+        std::array::from_fn(|axis| {
+            stand.origin[axis]
+                + stand.basis.right[axis] * f64::from(point[0]) * stand.scale
+                + stand.basis.up[axis] * f64::from(point[2]) * stand.scale
+                + stand.basis.forward[axis] * f64::from(point[1]) * stand.scale
+        })
+    };
+    for triangle in 1..face.positions.len() - 1 {
+        for at in [0, triangle, triangle + 1] {
+            let mut v = vertex(place(face.positions[at]), [0., 0.], -1.);
+            v[6..9].copy_from_slice(&color);
+            out.vertices.extend(v);
+        }
+    }
 }
 
 /// A sprite turned to face the viewer whose right and up are the world
@@ -387,6 +427,22 @@ pub struct SurfaceArt {
     /// hit points took the airport away; the bomb craters on it show the
     /// damage instead.
     kept: BTreeSet<u32>,
+    /// Each building type's destroyed look when retail gives it no `~`
+    /// variant (B16): its shape's damage branch, a generated ruin, or its
+    /// intact look kept; made once per type.
+    ruins: BTreeMap<String, std::sync::Arc<Ruined>>,
+}
+
+/// How a destroyed building with no `~` variant is drawn (B16,
+/// docs/spec/surface-defenses.md, "Destroyed looks").
+enum Ruined {
+    /// The ruin retail keeps inside the shape: its damage branch (`ac`),
+    /// drawn with `shape::DAMAGED_WORD` set.
+    Branch(Shape),
+    /// A ruin generated from the intact shape ([`super::rubble`]).
+    Generated(super::rubble::Ruin),
+    /// Pavement, a bridge end, a rock: it stays as it stood.
+    Intact,
 }
 
 /// What [`SurfaceArt::add`] needs from the scenery build.
@@ -464,8 +520,15 @@ impl SurfaceArt {
             Some(unit) => unit.look.clone(),
             None => {
                 let damaged = format!("~{object_type}");
+                let wreck = tore_formats::surface_unit::DESTROYED_VEHICLE_OBJECT;
                 if !object_type.starts_with('~') && build.resources.contains_key(&damaged) {
                     DestroyedLook::DamagedObject(damaged)
+                } else if tore_world::surface::wreck::is_vehicle_type(object_type)
+                    && build.resources.contains_key(wreck)
+                {
+                    // A layout's vehicle with no unit record leaves the
+                    // vehicles' wreck (B16).
+                    DestroyedLook::Wreck(wreck.to_owned())
                 } else {
                     DestroyedLook::Removed
                 }
@@ -496,6 +559,19 @@ impl SurfaceArt {
             log::warn!("Surface: {object_type} {id:#010x} has no destroyed look: {error}");
             None
         });
+        // A building with no `~` variant: its retail ruin, a generated one,
+        // or (pavement, bridge ends, rocks) its intact look (B16).
+        let ruined = if matches!(look, DestroyedLook::Removed) && !self.kept.contains(&id) {
+            self.ruined(build, object_type, main_shape.as_deref(), intact)
+        } else {
+            None
+        };
+        if ruined
+            .as_deref()
+            .is_some_and(|r| matches!(r, Ruined::Intact))
+        {
+            self.kept.insert(id);
+        }
         // The men stand as sprites.
         if !intact.billboards.is_empty() {
             self.sprites.push(Sprite {
@@ -554,6 +630,11 @@ impl SurfaceArt {
             )?;
             Ok(drawn)
         });
+        if wreck_drawn.is_none()
+            && let Some(ruin) = &ruined
+        {
+            wreck_drawn = self.ruin_drawn(ruin, stand, lift, land).map(Ok);
+        }
         let mut parts = Drawn::default();
         if let Some(carrier) = main_shape
             .as_deref()
@@ -597,6 +678,86 @@ impl SurfaceArt {
             }
         }
         Ok((parts, false))
+    }
+
+    /// The destroyed look of building type `object_type` (main shape
+    /// `main_shape`, intact look `intact`) when retail gives it no `~`
+    /// variant: made once per type. `None`: nothing can be drawn.
+    fn ruined(
+        &mut self,
+        build: &mut Build,
+        object_type: &str,
+        main_shape: Option<&str>,
+        intact: &Shape,
+    ) -> Option<std::sync::Arc<Ruined>> {
+        if let Some(ruined) = self.ruins.get(object_type) {
+            return Some(std::sync::Arc::clone(ruined));
+        }
+        use tore_world::surface::wreck::{FireClass, object_fire};
+        let bytes = main_shape.and_then(|name| build.resources.get(name));
+        // Retail's damage branch, when following it changes the shape.
+        let branch = main_shape.zip(bytes).and_then(|(name, bytes)| {
+            let damaged = BTreeMap::from([(DAMAGED_WORD, 1)]);
+            let plain = Shape::with_export_state(bytes, &BTreeMap::new()).ok()?;
+            let after = Shape::with_export_state(bytes, &damaged).ok()?;
+            let same = plain.faces.len() == after.faces.len()
+                && plain
+                    .faces
+                    .iter()
+                    .zip(&after.faces)
+                    .all(|(a, b)| a.positions == b.positions && a.texture == b.texture);
+            if same {
+                return None;
+            }
+            build.shape(&mut self.layers, name, Some(&damaged)).ok()
+        });
+        // What does not burn (pavement, a bridge end, a rock) stays as it
+        // stood unless retail draws it broken.
+        let burns = object_fire(object_type, false) != FireClass::None;
+        let ruined = match branch {
+            Some(shape) => Ruined::Branch(shape),
+            None if !burns => Ruined::Intact,
+            None => match super::rubble::collapse(intact) {
+                Some(ruin) => Ruined::Generated(ruin),
+                None => Ruined::Intact,
+            },
+        };
+        let ruined = std::sync::Arc::new(ruined);
+        self.ruins
+            .insert(object_type.to_owned(), std::sync::Arc::clone(&ruined));
+        Some(ruined)
+    }
+
+    /// A ruin's geometry standing where the building stood (`stand`, its
+    /// shape `lift` feet above its placement point; a `land` object's ruin
+    /// rests on its own lowest point). `None` for a kept intact look.
+    fn ruin_drawn(&self, ruin: &Ruined, stand: &Stand, lift: f64, land: bool) -> Option<Drawn> {
+        let (shape, charred): (&Shape, &[_]) = match ruin {
+            Ruined::Branch(shape) => (shape, &[]),
+            Ruined::Generated(ruin) => (&ruin.walls, &ruin.charred[..]),
+            Ruined::Intact => return None,
+        };
+        let shape_lift = if land {
+            match ruin {
+                // The generated ruin keeps the intact shape's lowest point.
+                Ruined::Generated(..) => lift,
+                _ => ground_lift(shape, stand.scale),
+            }
+        } else {
+            lift
+        };
+        let at = Stand {
+            origin: std::array::from_fn(|i| {
+                stand.origin[i] + stand.basis.up[i] * (shape_lift - lift)
+            }),
+            ..*stand
+        };
+        let mut drawn = Drawn::default();
+        emit(shape, &at, &self.layers, &mut drawn, BUDGET).ok()?;
+        for (face, color) in charred {
+            emit_tinted(face, &at, *color, &mut drawn);
+        }
+        Some(drawn)
     }
 
     /// Registers unit `id` (object type `object_type`, main shape `name`)
@@ -1142,6 +1303,21 @@ impl SurfaceArt {
         seconds: f64,
         out: &mut Drawn,
     ) {
+        // A man stays a few pixels tall at the range a pilot sees a field:
+        // beyond 1,000 ft he is drawn taller by the distance over 1,000 ft,
+        // up to six times (presentation only; the hit box is unchanged).
+        let stand = &if sprite.crew.is_none() {
+            let away = (0..3)
+                .map(|i| (eye[i] - stand.origin[i]).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            Stand {
+                scale: stand.scale * man_boost(away),
+                ..*stand
+            }
+        } else {
+            *stand
+        };
         let view = camera.uniform(1., [0.; 4], [0; 3]);
         let right: Vector = std::array::from_fn(|i| f64::from(view[4 + i]));
         let up: Vector = std::array::from_fn(|i| f64::from(view[8 + i]));
@@ -1297,6 +1473,82 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    /// A 20 ft cube standing on its origin, its faces textured nothing.
+    fn cube() -> Shape {
+        let corners = |pick: [[f32; 3]; 4]| Face {
+            fog: FogMode::Enabled,
+            positions: pick.to_vec(),
+            colors: vec![7; 4],
+            uv: Vec::new(),
+            texture: String::new(),
+            subtype: 0,
+            normal: None,
+            address: 0,
+        };
+        let (l, h) = (0., 20.);
+        Shape {
+            lines: Vec::new(),
+            faces: vec![
+                corners([[l, l, l], [h, l, l], [h, h, l], [l, h, l]]),
+                corners([[l, l, h], [h, l, h], [h, h, h], [l, h, h]]),
+                corners([[l, l, l], [h, l, l], [h, l, h], [l, l, h]]),
+                corners([[l, h, l], [h, h, l], [h, h, h], [l, h, h]]),
+                corners([[l, l, l], [l, h, l], [l, h, h], [l, l, h]]),
+                corners([[h, l, l], [h, h, l], [h, h, h], [h, l, h]]),
+            ],
+            billboards: Vec::new(),
+            state_words: BTreeSet::new(),
+        }
+    }
+
+    #[test]
+    fn a_destroyed_building_never_vanishes_and_pavement_stays_as_it_stood() {
+        // B16: a building with no `~` variant and no retail damage branch
+        // falls into a generated ruin, lower than it stood; a road keeps
+        // its look; neither hides.
+        let terrain = tore_world::test_support::terrain();
+        let resources = BTreeMap::new();
+        let definitions = BTreeMap::new();
+        let mut pages = Vec::new();
+        let mut build = Build {
+            resources: &resources,
+            terrain: &terrain,
+            definitions: &definitions,
+            first_page: 0,
+            pages: &mut pages,
+        };
+        let mut art = SurfaceArt::default();
+        let stand = level([100., 0., 100.]);
+        let intact = cube();
+        for (id, kind) in [(0x4000_0001, "HANGR.OT"), (0x4000_0002, "ROAD.OT")] {
+            art.add(&mut build, id, kind, &intact, &stand, 0.).unwrap();
+        }
+        let hangar = art.look(0x4000_0001, false, true, None);
+        assert_eq!(hangar, Some(Look::Wreck));
+        let ruin = art.drawn(0x4000_0001, &Look::Wreck).unwrap();
+        assert!(!ruin.vertices.is_empty());
+        let top = positions(&ruin.vertices)
+            .iter()
+            .map(|p| p[1])
+            .fold(f32::MIN, f32::max);
+        // The cube stood 40 ft high (scale 2); its ruin is at most 30
+        // percent of that.
+        assert!(
+            top <= 40. * (super::super::rubble::KEEP[0] + super::super::rubble::KEEP[1]) + 1e-3,
+            "{top}"
+        );
+        // Some faces are charred: drawn in a colour, not the palette.
+        assert!(
+            ruin.vertices
+                .chunks_exact(FLOATS)
+                .any(|v| v[9] == -1. && v[6] > 0.)
+        );
+        // The road is kept as it stood (its intact look).
+        assert_eq!(art.look(0x4000_0002, false, true, None), None);
+        // Nothing else changed: a living building keeps its intact look.
+        assert_eq!(art.look(0x4000_0001, true, true, None), None);
     }
 
     #[test]
@@ -1592,6 +1844,15 @@ mod tests {
             art.frame(&picture, &|id| id != 9, &camera, [0.; 3], 0.)
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn a_man_stays_visible_at_a_pilots_range() {
+        // Life size to 1,000 ft, then larger by the distance, to six times.
+        assert_eq!(man_boost(300.), 1.);
+        assert_eq!(man_boost(1_000.), 1.);
+        assert_eq!(man_boost(3_000.), 3.);
+        assert_eq!(man_boost(50_000.), MAN_MAX_BOOST);
     }
 
     #[test]

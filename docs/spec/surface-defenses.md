@@ -830,7 +830,7 @@ quarter seconds.
 | --- | --- | --- | --- |
 | Radar guns (flag 0x4000: ZSU-23, 2S6, Phalanx, AAA30, KS-12, KS-19) | Observed target, refreshed every tick while tracking | Time of flight and drop from the existing gunsight solution, plus aim error by skill | retail (the flag); error fitted |
 | Visual guns (ZSU-57, M1939, AAA30BAD, tank and APC guns) | Observation refreshed every 0.5 s | Lead from that stale velocity, larger aim error by skill | manual pp. 157 to 158; numbers fitted |
-| Small arms (a squad's SMLARMS) at an aircraft | The same stale observation and lead as a visual gun | Four times the visual guns' aim error by skill ([small arms](#small-arms)) | fitted, agent, 2026-10-12 |
+| Small arms (a squad's SMLARMS) at an aircraft | The same stale observation as a visual gun, carried on at 30 percent of the target's velocity | Lead 30 percent of the gunsight solution and four times the visual guns' aim error by skill ([small arms](#small-arms)) | fitted, agent, 2026-10-12 |
 
 Aim error by skill is a random angular offset per burst plus the existing
 per-round dispersion: radar guns 0.6, 0.4, 0.3 and 0.2 degrees; visual guns 1.5,
@@ -846,49 +846,113 @@ and 2,000 ft altitude). Squads stand in the airfield templates and most other
 ground targets (3 to 7 in `~QAPFAIR`, `~QBAIR`, `~QBFAIR`, `~QCFAIR`,
 `~QLFFAIR`, `~QNSFAIR`, `~QPGFAIR` and `~QSPFAIR`, 8 in `~QIRFAIR` and 19 in
 `~QGRSAIR`, counted with the surface dump); the theater layouts' base
-defenses hold only one squad, in Egypt. A squad is drawn (viewer-facing
-soldier sprites, [men](#drawing)) but, before 2026-10-12, it shot at jets
-with no tracer and no flash and with the same aim error as a 57 mm gun, so a
-low pass over a field was met by hits from nothing visible: the "airport shoots
+defenses hold only one squad, in Egypt. A squad is drawn and can be killed
+([below](#squads-are-seen-and-killed)). Before 2026-10-12 it shot at jets with
+no tracer and no flash and with the same aim error as a 57 mm gun, so a low
+pass over a field was met by hits from nothing visible: the "airport shoots
 with very high accuracy and nothing to see" report (B17, John, 2026-10-12).
 
+**Round one (B17).** Tracers every third round, a muzzle spark, and four times
+the visual guns' aim error (6.0, 4.0, 2.8 and 2.0 degrees for novice, average,
+veteran and ace; fitted, agent). That still let one squad hit a 400 kt jet 300
+ft over it with 5, 7, 11 and 13 of its 35 to 40 rounds by experience (the
+F/A-18 has 232 hit points; a field of squads took about 30 percent of it at
+average experience and 70 percent at ace). John, 2026-10-12: infantry fire at
+aircraft "must be nerfed considerably"; small bullets, not radar guided,
+"should rarely hit an aircraft passing through".
+
+**Round two (BD2): what a squad does against an aircraft now.** Riflemen shoot
+by eye with no sight and no lead computer. A squad has the same stale
+observation of its target as a visual gun (refreshed every half second), but
+aims at where the jet was seen carried on at only **30 percent** of its
+velocity, not all of it, so the bullets arrive behind a fast jet (the miss is
+70 percent of its speed times the bullet's flight time: about 100 ft at 1,000
+ft range for a 400 kt jet), and a slow target is hit much more than a fast
+one. On top of that the aim error stays four times the visual guns'. The
+tuning goal (opinionated, John 2026-10-12; the numbers are the lead's fit, so
+fitted, agent): one squad hits a 400 kt jet at 300 ft with about 0.5 to 2
+percent of its rounds; a whole field of squads, even at ace, rarely costs more
+than 10 to 15 percent of a jet's hit points in a low pass; almost nothing
+above about 1,000 ft above the ground or at high speed. A squad shooting at a
+ground unit or ship keeps a quarter of the visual guns' error and leads in
+full ([surface against surface](#surface-against-surface)). The record's
+damage, rate, range and the table's burst are unchanged (a reduced reach
+against aircraft was considered and not needed: the lead and error already
+make long shots miss).
+
 Measured on 2026-10-12 with the surface trace (`--surface-trace APA QAPFAIR
---over TROOPS --solo`, one squad armed, an F/A-18 at 400 kt, 300 ft over the
-squad and 300 ft over a line 1,500 ft to its side, 40 s from 3 nm out, three
-random streams, six passes per row):
+--over TROOPS --solo`, one squad armed, an F/A-18 flying north at 400 kt, 300
+ft above the squad unless stated, 3 nm out, surface random streams 31 to 42 (fewer
+for the rows with fewer rounds),
+experience as stated; a pass is 35 to 40 rounds per squad):
 
-| Experience | Visual-gun error: rounds hitting, jet hit points lost | Small-arms error (now): rounds hitting, jet hit points lost |
-| --- | ---: | ---: |
-| Novice | 24 percent, 31 percent | 3 percent, 3 percent |
-| Average | 35 percent, 55 percent | 4 percent, 7 percent |
-| Veteran | 50 percent, 76 percent | 9 percent, 14 percent |
-| Ace | 65 percent, 93 percent | 15 percent, 24 percent |
+| Pass | Rounds fired | Rounds hit | Jet hit points lost (average of the passes) |
+| --- | ---: | ---: | ---: |
+| One squad, straight over it, novice | 420 | 4 (0.95 percent) | 1.4 percent |
+| Average | 480 | 6 (1.25 percent) | 2.1 percent |
+| Veteran | 480 | 6 (1.25 percent) | 2.1 percent |
+| Ace | 480 | 5 (1.04 percent) | 1.7 percent |
+| Average, 1,500 ft to the side | 480 | 0 | 0 |
+| Ace, 1,500 ft to the side | 480 | 0 | 0 |
+| Average, 1,000 ft above the squad | 480 | 0 | 0 |
+| Ace, 1,000 ft above the squad | 480 | 0 | 0 |
+| Average, 600 ft above, 400 kt | 320 | 2 (0.6 percent) | 1.0 percent |
+| Ace, 600 ft above, 400 kt | 320 | 0 | 0 |
+| Average, 300 ft, 600 kt | 240 | 0 | 0 |
+| Ace, 300 ft, 600 kt | 348 | 0 | 0 |
+| Average, 300 ft, 200 kt (slow) | 640 | 28 (4.4 percent) | 14 percent |
+| Average, 300 ft, 100 kt (helicopter speed) | 240 | 6 (2.5 percent) | 3 percent |
+| Average, 1,000 ft above, 200 kt | 640 | 4 (0.6 percent) | 2 percent |
+| The squads of the field within 2.5 nm (`--near 15000`), average | 864 | 11 (1.3 percent) | 7.6 percent |
+| The same field, ace | 720 | 6 (0.8 percent) | 4.2 percent |
+| The same field, ace, 1,000 ft to the side | 720 | 2 (0.3 percent) | 1.4 percent |
+| The same field, ace, 600 ft above | 720 | 4 (0.6 percent) | 2.8 percent |
 
-One squad took a jet apart in a pass before (the F/A-18 has 232 hit points),
-better the higher its experience. Straight over the squad, the worst case, the
-new error hits 5, 7, 11 and 13 of 35 to 40 rounds (the jet loses 20, 28, 43 and
-51 percent of its hit points); 1,500 ft to the side it hits 0, 0, 0 and 3. All
-the squads of `~QAPFAIR` within 2.5 nm of the first, at average experience, fire
-144 rounds in a pass, 8 hit and the jet loses 31 percent (an ace field:
-72 percent). The battery scenario `surface-small-arms-airfield` holds these. The fix (fitted, agent, 2026-10-12; John's
-default of giving small arms the AAA tuning's treatment): a squad shooting at an
-aircraft has four times the visual guns' aim error, 6.0, 4.0, 2.8 and 2.0
-degrees for novice, average, veteran and ace, so a squad is a nuisance that a
-whole airfield of squads can still turn into a real threat, not a gun that
-hits half its rounds. A squad shooting at a ground unit or ship keeps a quarter
-of the visual guns' error ([surface against surface](#surface-against-surface)).
-The record's damage, rate, range and the table's burst are unchanged. For
-scale, the same pass against one ZSU-23 or M163 (radar guns, 0.6 to 0.2 degrees)
-destroys the jet at any experience above novice in one or two bursts; their
-tuning is John's 2026-10-10 AAA table and is not changed here.
+The battery scenario `surface-small-arms-airfield` holds these (a single
+squad hits at most 3 of its 40 rounds; the four squads together at most 3
+percent of their rounds; a field costs a jet at most 25 percent; the
+1,000 ft, 600 kt and 1,500 ft passes hit at most twice). For scale, the same
+pass against one ZSU-23 or M163 (radar guns, 0.6 to 0.2 degrees) destroys the
+jet at any experience above novice in one or two bursts; their tuning is
+John's 2026-10-10 AAA table and stays (John, 2026-10-12: "keep the ZSU-23
+table"). Small arms carry tracers (every third round, as the other light
+guns) and a muzzle spark ([flak bursts, gunfire, launches and
+light](#flak-bursts-gunfire-launches-and-light)), so a field's fire reads on
+screen. Every machine online shows the same: a client rebuilds each round of a
+surface burst from the host's burst event with the same tracer rule and the
+same lead (`fire::observation`) the host's simulation uses, so no wire field
+changed.
 
-Small arms now carry tracers (every third round, as the other light guns) and a
-muzzle spark ([flak bursts, gunfire, launches and light](#flak-bursts-gunfire-launches-and-light)),
-so a field's fire reads on screen. No new infantry art (John, 2026-10-12:
-tracers, no sprites; the squads' existing soldier sprites stay as they are). Every machine online shows the same: a
-client rebuilds each round of a surface burst from the host's burst event with
-the same tracer rule the host's simulation uses (`surface_tracer`), so no wire
-field changed.
+##### Squads are seen and killed
+
+(BD2, John, 2026-10-12: "render them so they can be killed".)
+
+| Question | Answer |
+| --- | --- |
+| Drawn? | Yes: each TROOPS unit draws a group of soldier sprites (six in the renders, the SOLDIER sprite sheet), standing on the ground, always facing the viewer; never absent. |
+| Visible at a pilot's range? | A man is 4 ft tall, a few pixels at 1,000 ft. Beyond 1,000 ft he is drawn larger by the distance over 1,000 ft, up to six times (24 ft) from 6,000 ft out, so a squad stays a few pixels tall as a dark group on a field (opinionated, agent, 2026-10-12; presentation only, the hit box is unchanged). Deck crew are not scaled. |
+| Hit box | The shape's contact volume: 30 ft wide, 6.6 ft tall, 12 ft deep, centred on the squad; 75 hit points. |
+| Killed by | Guns (the A-4E's Mk 12 kills a squad in a strafing pass; 155 rounds fired), bombs (an Mk 82 within its splash kills it), rockets and splash (an LAU-61 rocket 26 ft away took 2 hit points, so a pod's salvo is what kills), AAA and tank shells of the other side. Splash needs no hit: the collateral radius of the weapon applies to the squad as to any ground unit. |
+| After death | The unit's hit points are 0: it stops firing at once (no burst after the kill tick), the sprites vanish with their unit (the destroyed look of men, [Destroyed looks](#destroyed-looks): removed, no wreck), and its record's explosion plays. |
+| Counted | As a kill of a ground unit like every other (any destroyed combat target is recorded as a `Kill` for its shooter, and a flagged destroy target counts toward the objective). Online, retail scores no ground kills, so no score. |
+| Synced online | Like every surface unit: ids `0x5000_0000` and up, the host's destroyed events, the same hit points and vanish look on every client; no new wire field. |
+
+The battery scenario `surface-squad-killable` kills one squad of `~QAPFAIR`
+with the A-4E's gun, with an F/A-18's Mk 82, and in the trace by `--kill-at`,
+and checks the kill of that id and that a killed squad fires no more.
+
+##### Airfield defences fire at all times
+
+(BD2, John, 2026-10-12: "airfields fire at enemies at all times".) An armed
+surface unit's controller reads only the unit's side, its react mask and the
+aircraft in the air: the mission's objective, whether the field is a destroy
+target (flag 0x80) and whether the player flies against it play no part. A
+squad, an airfield's AAA gun and the theater layout's base defenses all
+engage every hostile aircraft in their reach, and never their own side, a
+unit with no side, or an aircraft that is still on the ground. The unit tests
+`an_airfields_squad_and_gun_fire_at_enemies_target_or_not_and_never_at_their_own_side`
+and `guns_fire_only_at_the_other_sides_airborne_aircraft` hold it for a squad
+and a ZSU-23 with and without the target flag.
 
 #### Flak
 
@@ -1614,9 +1678,11 @@ John accepted the recommended looks (12.4).
 | --- | --- | --- |
 | Ships | Swap to the `_A` shape (every ship has one), keep it in place, burning with fire and smoke for 15 minutes | retail shapes |
 | Carriers | The `_A` hull, the island's own damage branch (`shape::DAMAGED_WORD`), the deck tractors as they were and the deck crew gone, burning | retail shapes, fitted parts rule |
-| Ground vehicles, SAM launchers, AAA guns | Replace with the DEST.SH wreck ("Destroyed Vehicle", DEST.OT, hp 0) at the unit's pose, standing on its own lowest point like the unit it replaces, fire and smoke for 15 minutes | retail wreck object; the swap rule is untraced (fitted) |
-| Buildings with a damaged variant (`~BNK5`, `~BNK6`, `~BNK8`, and in layouts `~COLTWR`) | Swap to the damaged OT's shape; no fire | retail |
-| Other buildings | Removed, with the crater the hit leaves; no fire | current behaviour |
+| Ground vehicles, SAM launchers, AAA guns (and a layout's vehicles with no unit record, such as parked fuel trucks) | Replace with the DEST.SH wreck ("Destroyed Vehicle", DEST.OT, hp 0) at the unit's pose, standing on its own lowest point like the unit it replaces; about half of them burn with fire and smoke for 15 minutes, the others only smoke ([wreck fires](#wreck-fires)) | retail wreck object; the swap rule is untraced (fitted); the half that burn: John, 2026-10-12 |
+| Buildings with a damaged variant (`~BNK5`, `~BNK6`, `~BNK8`, and in layouts `~COLTWR`) | Swap to the damaged OT's shape; burns | retail look; fire John, 2026-10-12 |
+| Buildings whose shape holds a damage branch (57 types: hangars, towers, fuel tanks, factories, stores, bunkers, masts, bridge spans; [the survey](../formats/objects-and-shapes.md#destroyed-looks-of-buildings-and-bridges-2026-10-12)) | The shape's own damaged copy (`shape::DAMAGED_WORD`), on its own lowest point; burns, except a bridge, whose span breaks or drops | retail shapes (B16, 2026-10-12); the condition the original draws it on is unknown, here destruction |
+| Other buildings (city and town blocks, houses, apartments, industry without a branch, sites, tents, crates) | A ruin generated from the intact shape: split, sunk to 6 to 30 percent of its height, its fallen roof partly charred; burns | fitted, agent decision (B16, 2026-10-12) |
+| Runways, roads, lots, crops, bridge ends, rocks | Stay as they stood; a runway keeps the craters of every weapon that hit it | runway B15; the rest agent decision (B16) |
 | Parked aircraft | The aircraft look: type 30 explosion, the crash crater (none on a deck), fire and smoke for 15 minutes, one fragment drawn with the type's own `_B` or `_D` shape | existing aircraft path |
 | Men, barrage zones | Removed | |
 
@@ -1626,9 +1692,60 @@ size on land, rather than one fitted value for all ground objects.
 - **The fire.** However a burning wreck died (a hit, splash, the host's
   destroyed event), it gets one fire with its smoke column, the crash site's
   look, at the foot of its hit box, for 15 minutes; the oldest fire goes out
-  when 64 burn at once, as for crash sites (fitted).
+  when 64 burn at once, as for crash sites (fitted). See [wreck
+  fires](#wreck-fires).
+- **Nothing vanishes** (B16, John 2026-10-12): every destroyed building and
+  fixed object stays drawn in its destroyed look, in live flight, online
+  and in replays. Only men and the invisible barrage zones go, and a parked
+  aircraft explodes as an aircraft does (its crash site and pieces).
+- **What destruction does in play is unchanged**: the same explosion, the
+  same splash, objectives, scoring and debrief; a destroyed object's
+  contact is as before.
 - **A moving unit** destroyed stops where it died and its wreck lies there.
 - **A replay** shows the wreck of every object it recorded as destroyed.
+
+### Wreck fires
+
+B16 (John, 2026-10-12): destroyed objects stay on fire.
+
+- **Who burns.** Every destroyed building and fixed object, and ships, as
+  before. Ground vehicles, SAM launchers and guns burn about half the time:
+  the pick is a fixed function of the object's id and the mission's surface
+  digest (`tore_world::surface::wreck::vehicle_burns`), never a random
+  stream, so every machine in an online game and every replay of the same
+  mission agrees. Pavement (runways, airstrips, roads, lots, crop fields),
+  bridges, rocks, flags, the crater object and men do not burn (agent
+  decision). A vehicle that does not burn smokes for 15 minutes, as a wreck
+  with no fire always has.
+- **How hard.** Fuel, ammunition and industry (FUEL, OILW, SUPPLY, STORE,
+  CRATE, CONT, FACT, FCTY, IND, PRDR, REACT, NUC, SILO types) burn hard: a
+  fire 1.1 times the larger side of the object's plan, 60 to 160 ft wide.
+  Other buildings burn smaller: 0.6 times the smaller side, 24 to 90 ft. A
+  vehicle's or ship's fire keeps the width its hit points give, 24 to 140 ft;
+  a crash site's is 100 ft. Opinionated, agent fit (B16).
+- **The scorch.** A burning building leaves a crater mark round its foot
+  reaching a tenth past the larger half of its plan (16 ft of half width a
+  size unit, sizes 2 to 16; the type's own crater word when larger): the
+  burnt ground the ruin stands on. On water, none.
+- **How long.** 15 minutes, as a crash site, fading over the last minute
+  (agent decision: the fire is the crash site's, so it keeps its life; the
+  ruin and the scorch stay for the mission).
+- **The cap.** Fires share the crash sites' 64: past it the oldest goes
+  out. Craters keep their 256. A whole airfield of about 30 buildings and its
+  vehicles fits.
+- **Simulation data.** The fire and scorch are ordinary combat marks, so
+  they are deterministic, travel online as the crash sites' do and are
+  recorded and replayed with no format change; a ground object's look
+  (`GroundLook`) gained the pavement flag, carried in checkpoints. No protocol
+  change. Fire widths and the ruins are presentation only.
+
+### Craters on pavement
+
+A weapon that hits a runway or airstrip leaves its own crater there, as it
+would on open ground (B16, John 2026-10-12): bombing a runway pocks it
+whether or not it is destroyed, and a destroyed runway keeps its pavement and
+every crater (B15). Other objects leave a crater only when destroyed (their
+scorch). Craters last the mission; past 256 the oldest goes.
 
 ### Drawing
 

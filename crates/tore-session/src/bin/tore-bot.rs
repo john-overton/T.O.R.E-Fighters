@@ -158,7 +158,7 @@
 //!
 //! A bot also prints the snapshot rate of each flight as it is seated
 //! ("Bot: snapshots: 30 a second", slice R1), and with its statistics what
-//! its frames showed of the other aircraft's stores (protocol 26, slice
+//! its frames showed of the other aircraft's stores (protocol 27, slice
 //! BP3): "NAME: stores: told T, bytes B, largest L, drawn D, emptied [IDS]",
 //! the Stores events told, their coded bytes summed and the largest, the
 //! most other aircraft one frame drew with stores, and the aircraft it drew
@@ -1910,7 +1910,7 @@ fn main() -> ExitCode {
                         r.name, bot.watched, bot.watched_aircraft
                     );
                 }
-                // The other aircraft's stores (protocol 26).
+                // The other aircraft's stores (protocol 27).
                 println!("{}: stores: {}", r.name, bot.stores.line());
                 // A ground target (protocol 22): what the frames showed.
                 if let Some(world) = bot

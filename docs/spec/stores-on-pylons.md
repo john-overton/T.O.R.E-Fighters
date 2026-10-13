@@ -89,7 +89,7 @@ Where the stores come from:
 
 - **Single player, the host, AI aircraft:** the render snapshot carries each
   aircraft's stations and their stores left ([`AircraftPose::stores`]).
-- **Network clients (protocol 26, slice BP3, John 2026-10-12):** a client
+- **Network clients (protocol 27, slice BP3, John 2026-10-12):** a client
   draws every aircraft's pylons and stores from its own copy of the
   aircraft's loadout (the session's copy of the mission, which every game
   builds the same), as the loadout built it until the host says otherwise.
@@ -102,7 +102,7 @@ Where the stores come from:
   release, the same moment the store appears as a weapon. The seat's own
   aircraft is still drawn from its cockpit readout, which is newer. A
   Stores event is about 14 bytes for a fighter's six stations and costs
-  nothing while nothing changes ([the protocol](../formats/net-protocol.md#stores-protocol-26)).
+  nothing while nothing changes ([the protocol](../formats/net-protocol.md#protocol-27-stores)).
 - **Mission replays (slice BP3, John 2026-10-12):** a recording keeps each
   aircraft's drawn stations the first time it is recorded and their whole
   stores whenever one empties, as `stores.*` events; the viewer draws each

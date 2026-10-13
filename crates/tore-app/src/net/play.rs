@@ -729,21 +729,6 @@ impl App {
         ) {
             ours.copy_flattened(told);
         }
-        // The seat's own pylons and stores (B3): its loadout from the
-        // session's copy of the mission, the rounds left from its readout,
-        // which is newer than the drawn tick the session puts every other
-        // aircraft's stores at (protocol 26).
-        let mut picture = frame.picture.clone();
-        if let Some(readout) = &frame.readout
-            && let Some(own) = self.world.combat.state.ownship(readout.plane)
-        {
-            picture.player.stores = tore_world::snapshot::store_poses(
-                own.configuration(),
-                |station| u32::from(readout.stores.rounds(station)),
-                |station| station < 32 && readout.stores.loaded & (1 << station) != 0,
-            );
-        }
-        self.combat_view.show_picture(picture);
 
         // The weather clock follows the host's tick.
         let behind = frame.tick.saturating_sub(flight.weather_steps);
@@ -771,7 +756,24 @@ impl App {
                     sortie: self.world.combat.contrail_sortie(),
                 },
             );
+            // The motors that burn draw their flame (bug B7).
+            session.mark_powered(&mut frame.picture, &self.theater_resources);
         }
+        // The seat's own pylons and stores (B3): its loadout from the
+        // session's copy of the mission, the rounds left from its readout,
+        // which is newer than the drawn tick the session puts every other
+        // aircraft's stores at (protocol 27).
+        let mut picture = frame.picture.clone();
+        if let Some(readout) = &frame.readout
+            && let Some(own) = self.world.combat.state.ownship(readout.plane)
+        {
+            picture.player.stores = tore_world::snapshot::store_poses(
+                own.configuration(),
+                |station| u32::from(readout.stores.rounds(station)),
+                |station| station < 32 && readout.stores.loaded & (1 << station) != 0,
+            );
+        }
+        self.combat_view.show_picture(picture);
 
         // What the frame shows, presented.
         let session = self.net.as_ref().expect("a session");

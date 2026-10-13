@@ -167,14 +167,17 @@ impl Events {
                     position,
                     ticks,
                     blast,
+                    scale,
                 } => vec![Put::Effect(replay::EffectSpawn {
                     kind: effect_kind(*effect, *blast),
                     position: feet(position),
                     duration_ticks: u32::from(*ticks),
+                    scale: *scale,
                 })],
                 WireEvent::Mark {
                     kind: mark,
                     position,
+                    scale,
                 } => vec![Put::Effect(replay::EffectSpawn {
                     kind: match mark {
                         MarkKind::Crater(size) => replay::EffectKind::Crater(*size),
@@ -182,6 +185,7 @@ impl Events {
                     },
                     position: feet(position),
                     duration_ticks: blast::FOREVER,
+                    scale: *scale,
                 })],
                 WireEvent::GroundDestroyed { object } => vec![
                     Put::Surface(*object),
@@ -275,7 +279,7 @@ impl Events {
                 | WireEvent::SurfaceBurstEnd { .. }
                 // Recordings do not yet show knocked-down fill buildings.
                 | WireEvent::CityFlattened { .. } => Vec::new(),
-                // Stores (protocol 26) are kept by the conversion's frames.
+                // Stores (protocol 27) are kept by the conversion's frames.
                 WireEvent::Stores { .. } => Vec::new(),
             };
             out.extend(events.into_iter().map(|put| (tick, put)));

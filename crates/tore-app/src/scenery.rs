@@ -4,6 +4,7 @@
 //! simulation half is [`Terrain`]; code that needs the weather or the airport
 //! scene takes `&Terrain` alongside `&Scenery`.
 mod redrawn_pavement;
+mod rubble;
 mod runway_cutout;
 pub mod surface_art;
 
@@ -46,6 +47,10 @@ struct StandingGeometry {
 
 pub struct Scenery {
     pub ocean_motion: crate::ocean::Motion,
+    /// How wide each scene object's wreck fire is drawn (B16): the picture
+    /// sizes the simulation's fires by it
+    /// ([`crate::gun_flash::Tracker::set_fire_widths`]).
+    pub fire_widths: Arc<BTreeMap<u32, f64>>,
     /// Source palette indices, one byte per texel. Retail terrain and sky art is
     /// entirely weather-palette indexed, so the artwork is uploaded unresolved
     /// and the live palette is applied on the GPU. 255 is the water cutout.
@@ -381,6 +386,10 @@ impl Scenery {
             haze: [0; 3],
             origin: [0.; 3],
             fill: None,
+            fire_widths: Arc::new(crate::surface_fx::scene_fire_widths(
+                &tore_world::surface::wreck::scene_fires(&terrain.surface, &terrain.airport_scene),
+                &terrain.airport_scene,
+            )),
         };
         out.resolve_palette(terrain, 0.);
         out.vertices = Self::build_mesh(
@@ -766,21 +775,27 @@ impl Scenery {
         {
             let mut vertices = Vec::new();
             let mut lines = Vec::new();
+            // A destroyed look can draw more than the intact one did (a
+            // retail damage branch, a ruin): past the static budget a wreck
+            // keeps its intact look instead, so the batch never outgrows
+            // its buffer and nothing vanishes (B16).
+            let intact: usize = self.static_vertices.values().map(Vec::len).sum();
+            let mut room = surface_art::BUDGET.saturating_sub(intact);
             for id in self.placement_ids() {
-                match looks.get(&id) {
-                    None => {
-                        vertices.extend_from_slice(
-                            self.static_vertices.get(&id).map_or(&[][..], Vec::as_slice),
-                        );
+                let standing = self.static_vertices.get(&id).map_or(&[][..], Vec::as_slice);
+                let drawn = looks.get(&id).map(|look| self.surface.drawn(id, look));
+                match drawn {
+                    Some(Some(drawn)) if drawn.vertices.len() <= standing.len() + room => {
+                        room = (room + standing.len()) - drawn.vertices.len();
+                        vertices.extend_from_slice(&drawn.vertices);
+                        lines.extend_from_slice(&drawn.lines);
+                    }
+                    Some(None) => {}
+                    _ => {
+                        vertices.extend_from_slice(standing);
                         lines.extend_from_slice(
                             self.static_lines.get(&id).map_or(&[][..], Vec::as_slice),
                         );
-                    }
-                    Some(look) => {
-                        if let Some(drawn) = self.surface.drawn(id, look) {
-                            vertices.extend_from_slice(&drawn.vertices);
-                            lines.extend_from_slice(&drawn.lines);
-                        }
                     }
                 }
             }
@@ -991,6 +1006,7 @@ pub(crate) mod tests {
             haze: [0; 3],
             origin: [0.; 3],
             fill: None,
+            fire_widths: Arc::new(BTreeMap::new()),
         }
     }
     #[test]
@@ -1092,6 +1108,32 @@ pub(crate) mod tests {
             scene.static_geometry(&targets, &quiet()).vertices,
             vec![9.; 30]
         );
+    }
+
+    #[test]
+    fn a_wreck_past_the_static_budget_keeps_its_intact_look() {
+        // B16: a ruin can draw more than the building did; one that would
+        // take the batch past its buffer stands intact instead of vanishing
+        // or overflowing.
+        let mut scene = scenery();
+        let full = surface_art::BUDGET - 30;
+        scene.static_vertices = BTreeMap::from([(1, vec![1.; full]), (2, vec![2.; 30])]);
+        let wreck = |floats| surface_art::Drawn {
+            vertices: vec![9.; floats],
+            lines: Vec::new(),
+        };
+        scene.surface = surface_art::SurfaceArt::default().with_wreck(2, wreck(60));
+        let mut targets = tore_world::test_support::spawned();
+        targets.truncate(2);
+        targets[1].hp = 0;
+        let geometry = Arc::clone(scene.static_geometry(&targets, &quiet()));
+        assert_eq!(geometry.vertices.len(), surface_art::BUDGET);
+        assert_eq!(geometry.vertices[full..], [2.; 30]);
+        // One that fits is drawn.
+        scene.surface = surface_art::SurfaceArt::default().with_wreck(2, wreck(30));
+        scene.standing_geometry = None;
+        let geometry = Arc::clone(scene.static_geometry(&targets, &quiet()));
+        assert_eq!(geometry.vertices[full..], [9.; 30]);
     }
 
     #[test]

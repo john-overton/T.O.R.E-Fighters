@@ -1,4 +1,4 @@
-//! Other aircraft's stores online (protocol 26, B3): a client draws every
+//! Other aircraft's stores online (protocol 27, B3): a client draws every
 //! aircraft's pylons and stores from its own copy of the loadouts, as built
 //! until the host tells it otherwise, and a Stores event empties a station
 //! as the host's aircraft lets its stores go, for a late joiner too.

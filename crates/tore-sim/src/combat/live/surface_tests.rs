@@ -848,6 +848,81 @@ fn surface_fire_leaves_room_for_the_aircraft_weapons() {
     assert_eq!(s.fire_surface(filler), Ok(SURFACE_PROJECTILE_ID_BASE));
 }
 
+/// B16: a bomb that hits pavement (a runway) leaves its own crater there,
+/// as on open ground, without destroying it; a building hit and left
+/// standing leaves none.
+#[test]
+fn a_bomb_on_pavement_leaves_its_crater_and_a_building_hit_does_not() {
+    for pavement in [true, false] {
+        let mut s = scene();
+        unit(&mut s, UNIT, [0., 10., 3000.], REDFOR);
+        s.targets.iter_mut().find(|t| t.id == UNIT).unwrap().hp = 30_000;
+        assert!(s.set_ground_look(
+            UNIT,
+            GroundLook {
+                explosion: 35,
+                crater: 0,
+                burns: false,
+                pavement,
+            },
+        ));
+        let mut w = record("MK82.JT");
+        w.seeker.signature = 0;
+        w.flags = 0x14;
+        w.damage.by_class = [500; 5];
+        w.effects.object_explosion = 18;
+        w.effects.crater_size = 4;
+        s.projectiles.push(Projectile {
+            id: 5,
+            owner: 0,
+            weapon: Some(w),
+            guidance: None,
+            motion: None,
+            guidance_ticks: None,
+            age: 0,
+            incoming: None,
+            station: 0,
+            position: [0., 15., 2900.],
+            previous: [0., 15., 2900.],
+            direction: [0., 0., 1.],
+            speed_f8: 600 << 8,
+            launched_t: 0,
+            target: None,
+            fall: FallState::default(),
+            gun_round: None,
+            tracer: false,
+        });
+        let events = (0..60)
+            .flat_map(|_| {
+                s.step_surface(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: false,
+                        launcher: far(),
+                    }],
+                    |_, _| 0.,
+                    |_, _| false,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert!(events.contains(&Event::Hit(UNIT)), "{pavement}");
+        assert!(!events.contains(&Event::Destroyed(UNIT)), "{pavement}");
+        let craters: Vec<_> = s
+            .marks
+            .iter()
+            .filter_map(|m| match m.kind {
+                crate::combat::blast::MarkKind::Crater(size) => Some(size),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            craters,
+            if pavement { vec![4] } else { vec![] },
+            "{pavement}"
+        );
+    }
+}
+
 #[test]
 fn a_destroyed_unit_explodes_and_craters_as_its_record_says() {
     for (look, water) in [
@@ -856,6 +931,7 @@ fn a_destroyed_unit_explodes_and_craters_as_its_record_says() {
                 explosion: 21,
                 crater: 5,
                 burns: false,
+                pavement: false,
             }),
             false,
         ),
@@ -864,6 +940,7 @@ fn a_destroyed_unit_explodes_and_craters_as_its_record_says() {
                 explosion: 21,
                 crater: 5,
                 burns: false,
+                pavement: false,
             }),
             true,
         ),
@@ -949,7 +1026,8 @@ fn a_destroyed_unit_explodes_and_craters_as_its_record_says() {
         GroundLook {
             explosion: 21,
             crater: 1,
-            burns: false
+            burns: false,
+            pavement: false,
         }
     ));
 }
@@ -984,6 +1062,7 @@ fn surface_rounds_and_looks_restore_from_a_checkpoint_and_fly_on_identically() {
             explosion: 21,
             crater: 4,
             burns: true,
+            pavement: false,
         },
     );
     s.targets
@@ -1090,6 +1169,7 @@ fn a_burning_wreck_lights_one_fire_at_the_foot_of_its_box() {
                 explosion: 21,
                 crater: 0,
                 burns,
+                pavement: false,
             },
         );
     }

@@ -411,6 +411,12 @@ pub struct AiActor {
     /// my target", slice ST-O). Slice ST-L flies the orbit and lases it;
     /// until it does the order only stands.
     lase: Option<u32>,
+    /// The helicopters' and the V-22's control memory (slice H1): the
+    /// rotor laws' integrators and regime. Default on other aircraft.
+    rotor: super::rotor_adapter::RotorAdapter,
+    /// The AV-8's and Yak-141's jetborne memory (slice H1), for the hovers
+    /// the airfield sequences ask for. Default on other aircraft.
+    jet_lift: super::jet_lift::JetLift,
     /// Write-only record of the latest mission step. No decision reads it.
     trace: ActorTrace,
     /// Write-only memory of what the journal already said about this actor.
@@ -484,6 +490,8 @@ impl AiActor {
             seed: setup.seed,
             strike: None,
             lase: None,
+            rotor: super::rotor_adapter::RotorAdapter::new(),
+            jet_lift: super::jet_lift::JetLift::new(),
             trace: ActorTrace::default(),
             journal_memory: JournalMemory::default(),
         })
@@ -1346,6 +1354,8 @@ impl AiActor {
             intent: None,
             terrain_floor_deg: None,
             adapter: None,
+            rotor: None,
+            jet_lift: None,
             achieved: thought::Achieved::default(),
         };
         let mut input = match command.control {
@@ -1396,25 +1406,40 @@ impl AiActor {
                 } else {
                     None
                 };
-                let adapter = self.adapter.controls(
-                    &self.flight,
-                    &intent,
-                    &own.limits,
-                    own.g_limit,
-                    own.roll_limit_deg_per_s,
-                    own.maximum_bank_deg,
-                    floor,
-                    flight::DT,
-                )?;
-                let mut input = adapter.input.clone();
                 fly.intent = Some(intent);
                 fly.terrain_floor_deg = floor;
-                fly.adapter = Some(adapter);
-                if guidance.full_power {
-                    input.throttle = Some(1.0);
+                if super::rotor_adapter::flies(&self.flight) {
+                    // Helicopters and the V-22 (slice H1): the engines
+                    // are governed at full power anyway.
+                    self.fly_rotor(
+                        super::rotor_adapter::RotorRequest::Steer {
+                            intent: &intent,
+                            terrain_pitch_floor_deg: floor,
+                        },
+                        own,
+                        surface,
+                        &mut fly,
+                    )
+                } else {
+                    let adapter = self.adapter.controls(
+                        &self.flight,
+                        &intent,
+                        &own.limits,
+                        own.g_limit,
+                        own.roll_limit_deg_per_s,
+                        own.maximum_bank_deg,
+                        floor,
+                        flight::DT,
+                    )?;
+                    let mut input = adapter.input.clone();
+                    fly.adapter = Some(adapter);
+                    if guidance.full_power {
+                        input.throttle = Some(1.0);
+                    }
+                    input
                 }
-                input
             }
+            Control::Hover(guidance) => self.fly_hover(&guidance, own, surface, &mut fly),
         };
         input.commands = vec![
             tore_input::PilotCommand::Set(tore_input::Switch::Burner, command.afterburner),
@@ -4406,7 +4431,17 @@ impl AiActor {
                     heading_deg: own.heading_deg,
                     speed_ft_s: own.speed.0,
                     bank_deg: own.bank_deg,
-                    maximum_ft_s: own.limits.maximum.0,
+                    // The rotor adapter holds the speed on the cyclic
+                    // whatever the path, so a descent does not speed it
+                    // up: its few knots over the maximum are no reason to
+                    // stop coming down (slice H1).
+                    maximum_ft_s: own.limits.maximum.0
+                        + if super::rotor_adapter::flies(&self.flight) {
+                            super::rotor_adapter::SPEED_HOLD_MARGIN_KT
+                                * crate::runway_wind::FEET_PER_SECOND_PER_KNOT
+                        } else {
+                            0.0
+                        },
                 },
                 super::helicopter_defense::Threat {
                     bearing_deg: threat,
@@ -4476,11 +4511,18 @@ impl AiActor {
         // Terrain ahead of the aircraft, for the B44 floor: the highest
         // ground along the look-ahead (see [`terrain_lookahead_ft`]).
         let heading = self.flight.yaw;
+        // A rotorcraft on its own control keeps a lower floor than the
+        // fighters', so it can fly the 200 ft masking height (slice H1).
+        let minimum_altitude = if super::rotor_adapter::flies(&self.flight) {
+            super::rotor_adapter::MINIMUM_ALTITUDE_FT
+        } else {
+            MINIMUM_ALTITUDE_FT
+        };
         let (terrain_ahead, terrain_climb) = terrain_ahead_ft(
             self.flight.position,
             heading,
             terrain_lookahead_ft(self.flight.speed),
-            MINIMUM_ALTITUDE_FT,
+            minimum_altitude,
             ground,
         );
         let limits = self.speed_limits();
@@ -4497,7 +4539,7 @@ impl AiActor {
             agl_ft: agl,
             terrain_ahead_ft: terrain_ahead,
             terrain_climb_deg: terrain_climb,
-            minimum_altitude_ft: MINIMUM_ALTITUDE_FT,
+            minimum_altitude_ft: minimum_altitude,
             at_ceiling: false,
             on_ground: agl <= GROUND_CONTACT_FT,
             g_limit: positive_g.min(
@@ -4954,6 +4996,8 @@ impl AiActor {
             intent: intent.copied(),
             terrain_floor_deg: None,
             adapter: None,
+            rotor: None,
+            jet_lift: None,
             achieved: thought::Achieved::default(),
         };
         let input = match intent {
@@ -4974,20 +5018,33 @@ impl AiActor {
                 } else {
                     general
                 };
-                let output = self.adapter.controls(
-                    &self.flight,
-                    intent,
-                    &own.limits,
-                    own.g_limit,
-                    own.roll_limit_deg_per_s,
-                    own.maximum_bank_deg,
-                    floor,
-                    flight::DT,
-                )?;
-                let input = output.input.clone();
                 fly.terrain_floor_deg = floor;
-                fly.adapter = Some(output);
-                input
+                if super::rotor_adapter::flies(&self.flight) {
+                    // Helicopters and the V-22 (slice H1).
+                    self.fly_rotor(
+                        super::rotor_adapter::RotorRequest::Steer {
+                            intent,
+                            terrain_pitch_floor_deg: floor,
+                        },
+                        own,
+                        surface,
+                        &mut fly,
+                    )
+                } else {
+                    let output = self.adapter.controls(
+                        &self.flight,
+                        intent,
+                        &own.limits,
+                        own.g_limit,
+                        own.roll_limit_deg_per_s,
+                        own.maximum_bank_deg,
+                        floor,
+                        flight::DT,
+                    )?;
+                    let input = output.input.clone();
+                    fly.adapter = Some(output);
+                    input
+                }
             }
             None => PilotInput::default(),
         };
@@ -4995,6 +5052,112 @@ impl AiActor {
         fly.achieved = self.achieved();
         self.trace.fly = Some(fly);
         Ok(())
+    }
+
+    /// One tick of the rotor adapter (slice H1): the controls, with what
+    /// it commanded in the trace.
+    fn fly_rotor(
+        &mut self,
+        request: super::rotor_adapter::RotorRequest<'_>,
+        own: &OwnState,
+        surface: &dyn Fn(f64, f64) -> Surface,
+        fly: &mut FlyTrace,
+    ) -> PilotInput {
+        let [x, _, z] = self.flight.position;
+        let here = surface(x, z);
+        let (input, command) = self.rotor.controls(
+            &self.flight,
+            request,
+            here.height,
+            here.wind,
+            own.maximum_bank_deg,
+        );
+        fly.adapter = Some(super::steering_adapter::AdapterOutput {
+            input: input.clone(),
+            fallbacks: Vec::new(),
+            requested: super::steering::SteeringState {
+                heading_deg: command.heading_deg,
+                flight_path_pitch_deg: command.flight_path_pitch_deg,
+                bank_deg: command.bank_deg,
+                body_pitch_offset_deg: 0.0,
+            },
+        });
+        fly.rotor = Some(command);
+        input
+    }
+
+    /// A hover or slow-flight request (slice H1, for the vertical airfield
+    /// sequences of slice H2): the rotor adapter's hover on a helicopter or
+    /// the V-22, the jet-lift law on the AV-8 and Yak-141. An aircraft that
+    /// cannot hover is steered toward the point, level, at its minimum
+    /// speed.
+    fn fly_hover(
+        &mut self,
+        guidance: &super::rotor_adapter::HoverGuidance,
+        own: &OwnState,
+        surface: &dyn Fn(f64, f64) -> Surface,
+        fly: &mut FlyTrace,
+    ) -> PilotInput {
+        if super::rotor_adapter::flies(&self.flight) {
+            return self.fly_rotor(
+                super::rotor_adapter::RotorRequest::Hover(*guidance),
+                own,
+                surface,
+                fly,
+            );
+        }
+        let [x, _, z] = self.flight.position;
+        if super::jet_lift::flies(&self.flight) {
+            let (input, command) =
+                self.jet_lift
+                    .controls(&self.flight, guidance, surface(x, z).height);
+            fly.jet_lift = Some(command);
+            return input;
+        }
+        let heading = (guidance.point[0] - x)
+            .atan2(guidance.point[1] - z)
+            .to_degrees()
+            .rem_euclid(360.0);
+        let bank = super::motion::Bank::Unconstrained;
+        let duration = super::motion::Duration::Timed(1);
+        let intent = MotionIntent {
+            id: 0,
+            request: super::motion::MotionRequest::new(
+                heading.round() as i32,
+                super::motion::PitchRequest::Explicit(0),
+                bank,
+                super::motion::SpeedRequest::Explicit(own.limits.minimum),
+                duration,
+            ),
+            heading_deg: heading,
+            flight_path_pitch_deg: 0.0,
+            speed: own.limits.minimum,
+            bank,
+            completion: super::controller::Completion::Axis(super::motion::CompletionAxis::Heading),
+            steering_point: None,
+            mode: super::steering::CommandMode::OtherState,
+            formation_flight: false,
+            afterburner: false,
+        };
+        let output = self.adapter.controls(
+            &self.flight,
+            &intent,
+            &own.limits,
+            own.g_limit,
+            own.roll_limit_deg_per_s,
+            own.maximum_bank_deg,
+            None,
+            flight::DT,
+        );
+        fly.intent = Some(intent);
+        match output {
+            Ok(output) => {
+                let input = output.input.clone();
+                fly.adapter = Some(output);
+                input
+            }
+            Err(_) => PilotInput::default(),
+        }
     }
 
     fn fly_input(

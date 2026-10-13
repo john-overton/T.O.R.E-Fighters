@@ -391,6 +391,7 @@ impl Guns {
             target: None,
             incoming: false,
             speed_f8: round.speed_f8,
+            powered: false,
         };
         // A round keeps its number for its whole flight, so whatever reads
         // the picture (the muzzle flashes) sees a new number only for a new
@@ -960,12 +961,8 @@ fn surface_round(
         };
         let back = (now as f64 - seen as f64) / 120.;
         let age = (release - seen) as f64 / 120.;
-        let observed = tore_sim::combat::gunsight::TargetObservation {
-            position: std::array::from_fn(|i| {
-                pose.position[i] - pose.velocity[i] * back + pose.velocity[i] * age
-            }),
-            velocity: pose.velocity,
-        };
+        let seen_at: Vector = std::array::from_fn(|i| pose.position[i] - pose.velocity[i] * back);
+        let observed = fire::observation(weapon, false, seen_at, pose.velocity, age);
         let point = fire::gun_aim_point(weapon, &place, muzzle, observed);
         let d: Vector = std::array::from_fn(|i| point[i] - muzzle[i]);
         (

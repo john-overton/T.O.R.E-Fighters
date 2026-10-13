@@ -402,6 +402,16 @@ actuators and engine progression remain in the shared systems model. Damaged
 pilots can request recovery but cannot repair a component or override physics.
 Ground-started AI aircraft use the researched model for runway contact.
 An airborne AI actor switches to that model when its landing sequence begins.
+AI helicopters (AH-64, Mi-24, CH-47) and the AI V-22 fly the researched model, and
+so their powered-lift physics, from the mission start under every AI flight model,
+single player's `standard` included: an intended default change of 2026-10-12
+(opinionated: John's request for AI helicopter and VTOL hover, takeoff and landing;
+the mechanism the lead's decision, slice H1), because on the legacy model a
+rotorcraft flies as an aeroplane and cannot hover. They are flown by their own
+[rotorcraft control](spec/ai.md#rotorcraft-and-jet-lift-control), which commands the
+collective, cyclic, pedals and V-22 nacelles. The vectoring jets keep the AI flight
+model's choice. The player's adapter flags (`--legacy-flight` and the others) do
+not apply to AI aircraft and are unchanged.
 The control mapping accounts for current flap lift and low-speed G authority.
 [Takeoff, landing and return to base](spec/ai-airfield.md) define the sequence.
 The three player adapters stay distinct. Exact input-replay validation is

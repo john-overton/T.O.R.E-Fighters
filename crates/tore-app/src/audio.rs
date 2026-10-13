@@ -2087,6 +2087,7 @@ mod tests {
                 shape: None,
                 gun: false,
                 tracer: false,
+                powered: true,
                 position: [100., 5., 200.],
                 previous: [100., 5., 200.],
                 direction: [0., 1., 0.],

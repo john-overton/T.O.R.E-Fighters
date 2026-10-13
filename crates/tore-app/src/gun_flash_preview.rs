@@ -465,6 +465,7 @@ fn tracers(mount: &Mount, out: f64) -> Vec<ProjectilePose> {
                 target: None,
                 incoming: false,
                 speed_f8: (speed * 256.) as i32,
+                powered: false,
             }
         })
         .collect()

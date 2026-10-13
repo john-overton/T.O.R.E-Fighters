@@ -767,7 +767,7 @@ impl SurfaceSeen {
     }
 }
 
-/// What a bot's frames showed of the other aircraft's stores (protocol 26,
+/// What a bot's frames showed of the other aircraft's stores (protocol 27,
 /// B3), for `tore-bot` to print and the net lane's `net-stores` scenario to
 /// read.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -838,7 +838,7 @@ pub struct Bot {
     /// What its frames have shown of a ground target (protocol 22).
     pub surface: SurfaceSeen,
     /// What its frames have shown of the other aircraft's stores
-    /// (protocol 26).
+    /// (protocol 27).
     pub stores: StoresSeen,
     last_frame: Option<Duration>,
     picture: Option<RenderSnapshot>,

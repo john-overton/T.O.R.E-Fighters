@@ -245,6 +245,8 @@ impl Checkpoint for AiActor {
             seed,
             strike,
             lase,
+            rotor,
+            jet_lift,
             trace: _,
             journal_memory: _,
         } = self;
@@ -307,7 +309,11 @@ impl Checkpoint for AiActor {
         seed.save(s, None)?;
         strike.save(s, None)?;
         // The ground target a wingman was ordered to lase (ST-O).
-        lase.save(s, None)
+        lase.save(s, None)?;
+        // The rotorcraft and jet-lift laws' memory (slice H1): integrators
+        // and regime the next tick flies on.
+        rotor.save(s, None)?;
+        jet_lift.save(s, None)
     }
 
     fn load(l: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
@@ -371,6 +377,8 @@ impl Checkpoint for AiActor {
             seed: Checkpoint::load(l, None)?,
             strike: Checkpoint::load(l, None)?,
             lase: Checkpoint::load(l, None)?,
+            rotor: Checkpoint::load(l, None)?,
+            jet_lift: Checkpoint::load(l, None)?,
             trace: ActorTrace::default(),
             journal_memory: JournalMemory::default(),
         })

@@ -502,6 +502,64 @@ above the ground), so hit boxes, crashes into buildings and AI terrain
 clearance near them change. Rocks and mesas (ROCK, ROCKB, 267 ft below their
 origin) stand on their lowest point too.
 
+## Destroyed looks of buildings and bridges (2026-10-12)
+
+Research and implementation, slice B16 of the bug-fix round. Build: FA.EXE
+1.02F (SHA-256 `e31560c2...e99244c`), the OT and SH resources of `FA_2.LIB`
+and `FA_1.LIB` read at runtime from John's installed copy; no retail bytes
+are kept. Tool: `tore-app --surface-dump --damage [TYPE ...]` (one line per
+OT: shape, class, hit points, explosion and crater words, intact and damaged
+face counts and heights, whether the shape has a damage branch, and its `~`
+variant).
+
+**What retail holds.** Of the 170 OT records, only eight have a `~` damaged
+variant OT: the bunkers `~BNK5`, `~BNK6`, `~BNK8` (shapes `DBK5`, `DBK6`,
+`DBK8`), `~COLTWR` (whose shape is `COLTWR.SH` itself) and the four carrier
+islands. The real store of destroyed looks is **inside the shapes**: an
+`ac` record (jump to damage, see [damaged islands](#damaged-islands)) at the
+top of a shape leads to a damaged copy. Followed with `shape::DAMAGED_WORD`
+set, it changes the geometry of 57 placed OT types (61 counting the `~`
+variants and islands), so the guide's hypothesis that "some buildings contain
+damage geometry internally" holds. Examples, intact faces and height span
+against damaged ones (shape units); the descriptions come from the B16
+renders (`.local/next-round/renders/nr-b16/`) and the height spans:
+
+| Type | Intact | Damaged | What the damaged copy is |
+| --- | --- | --- | --- |
+| HANGR | 22, -20..29 | 82, -20..29 | the hangar with its roof broken |
+| HANGRB, FCTYA, STORE, SHELT, BUNKER | 5 to 14 | 25 to 32 | the same block, damage textured |
+| TOWER | 14, -103..113 | 12, -103..-30 | the stump of the tower |
+| CTWR1, CTWR2, CTOWR, COLTWR | 30 to 192 | 17 to 56 | towers cut down to their base |
+| FUEL | 11, -27..38 | 4, -27..-27 | the tank gone, a flat pad |
+| FACT1 | 118, -61..130 | 9, -61..1 | the factory flattened |
+| BR1MID, BR2MID, BR3MID, BRDMID, BRD1-BRD4 | 17 to 198 | 12 to 181 | a changed span; BRDMID's (31 faces to 12) leaves only the stubs at its towers |
+| REDOM, MICRO, MICROM, RELAY, WNDMLL, CRANE, PRDR1-2 | 12 to 97 | 10 to 68 | lower: masts and domes cut down (by the height spans) |
+| BARKSA/B, BLDG1-3, BNK1-9, CMHQ1-2, DKHOS1-2, NUC*, OILW, SILO, HILT | 5 to 192 | 9 to 102 | damaged copies, not all reviewed in renders |
+
+No branch: the bridge ends (BR1END, BR2END, BR3END, BRDEND), the runways
+(STRIP*, DTSTRP), roads, lots, crops, rocks, flags, trees, the apartment and
+city blocks (APT*, CTYBK*, TWNBK*, CITY1-3), the city groups (CGRP, HGRP,
+SGRP), houses, slums, IND1-2, RES1-2, FCTYB, KING, CASTLE, the HAWK and SA-3
+sites, tents, crates and containers. `CRATER.SH` does not read (native
+re-entry). The generic damaged unit shapes `AAA_A`, `SAM_A`, `TANK_A` and
+`VEHI_A` and `DEBRIS.SH` exist but no record names them; units keep the
+`DEST.OT` wreck.
+
+**Unknown.** Which condition makes the original draw the branch: destruction,
+or a damage fraction before it. Next step: trace the reader of the damage
+word in FA.EXE's shape interpreter. The round shows it on destruction only
+(one destroyed state, John 2026-10-12).
+
+**Use** (`scenery/surface_art.rs`): a destroyed building draws its `~`
+variant when it has one, else its shape's damage branch, else a generated
+ruin (`scenery/rubble.rs`: the intact shape split into small triangles that
+sink to 6 to 30 percent of its height by a fixed function of each point,
+the fallen level pieces partly charred; fitted, agent decision) for anything
+that burns, else (pavement, a bridge end, a rock) its intact look. The
+branch is drawn with `Shape::with_export_state`; it stands on its own lowest
+point like the variants. What a player sees is in
+[destroyed looks](../spec/surface-defenses.md#destroyed-looks).
+
 ## Surface unit shapes: envelopes and sprites (2026-10-10)
 
 Research and implementation, slice S1 of the surface objectives round. Shapes

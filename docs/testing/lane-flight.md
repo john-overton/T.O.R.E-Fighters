@@ -58,6 +58,7 @@ weapon slice adds its attack kind as a submodule of `crates/tore-app/src/a2g_run
 | `a2g-rocket-ccip` | `--attack rocket`: an A-4E's LAU-61s in a 10 degree dive on a truck, fired once the rocket pipper says IN RNG, held a second | Rockets hit and destroy the truck; a rocket that bursts on the ground does so within a foot of the pipper of the tick it was fired on ([rockets](../spec/air-to-ground.md#rockets-and-guns)) |
 | `a2g-warnings` | `--attack ccip` with an A-4E's Mk 82 from a 30 degree dive at 300 ft, a level pass at 400 ft and one at 1,500 ft | LOW and FRAG, FRAG only, and neither; the LOW bomb lands a dud (a puff, nothing destroyed), the others burst ([warnings](../spec/air-to-ground.md#warnings)) |
 | `a2g-rocket-pod` | An A-4E's two LAU-61 pods tapped three times, held for a second and held until empty; two LAU-10 pods held for two seconds | 38 rockets in the pods, one a press; four or five in a second held, a quarter second apart on the game's quarter-second clock; all 38 when held on; the LAU-10 pods hold 8 and fire one however long the trigger is held ([rockets](../spec/air-to-ground.md#rockets)) |
+| `a2g-rocket-smoke` | An A-4E's LAU-61 pod held for a second over `~QUCOL` | The `motors` line: rockets whose motors lit, and missile smoke puffs in the air while they fly (bug B6: rockets have no seeker and smoked nothing before; [smoke](../spec/damage-smoke.md)) |
 | `a2g-gun-key` | `--a2g-run --attack strafe`: an A-4E with an Mk 82 selected, Tab held for two seconds, the trigger never pressed | the gun fires a burst and its ammunition falls round for round, about one round in three a tracer, the selection stays on the bomb, the bomb stays on its pylon ([the gun key](../spec/air-to-ground.md#the-gun-key)) |
 | `a2g-cluster` | Over `~QUCOL` (scenario file [`a2g_cluster.py`](../../tools/battery_scenarios/a2g_cluster.py), attack kind `cluster`): an A-4E CBU-87 and Mk 20 from a level pass and an F-4B RBK-500 from a 30 degree dive | The burst is the type 18 family with no crater; a vehicle inside the record's splash (2,200, 1,600 and 2,500 ft) loses the record's damage times 70 percent, falling in a line to nothing at the edge, and one outside loses none; the 28 bomblet flashes the renderer derives are the same on every derivation, inside 1,200 ft of the burst and start within its first half second ([cluster flashes](../spec/ordnance-presentation.md#cluster-bomb-flashes)) |
 
@@ -73,6 +74,7 @@ rule](../spec/ordnance-presentation.md#novelty-bombs-are-cheat-only)).
 | `a2g-bar` | `--attack jdam --release bar` then `--attack laser --release bar`: an F-16C's GBU-30 from 12,000 ft at 450 kt at a standing object of the truck park, then its GBU-10 on its own Pave Spike from 8,000 ft at 400 kt at a `~QUCOL` tank; the run turns onto the designated object and holds the trigger in LVL | One release each, within 60 ft of the T's bar (along track) and within 10 degrees of the stem; the bomb guides to the end, lands within 60 ft of the target and destroys it, its time to impact counts down ([the level T for guided bombs](../spec/air-to-ground.md#guided-bomb-release-range-indicator)) |
 | `a2g-laser-missile` | `--attack laser`: an Su-25's AS-14 from 3,000 ft, on its built-in designator's spot | Released guiding on its own spot; ends guiding within 60 ft and destroys the tank ([weapon classes](../spec/air-to-ground.md#weapon-classes)) |
 | `a2g-at2` | `--attack at2`: a Mi-24 300 ft up, 2 nmi out at 60 kt, launches an AT-2 at a `~QUCOL` tank (Easy targeting's Ctrl+X: it has no ground page); again turning 90 degrees away 2 s after the launch | The AT-2 is command guided and hits (the T-80 takes 120 of its 200 hit points); turning away makes it blind for good, it never guides again and misses ([weapon classes](../spec/air-to-ground.md#weapon-classes)) |
+| `a2g-missile-burnout` | An A-10's AGM-65G from 6 nmi at 3,000 ft over `~QUCOL` | The `motors` line: one motor lit, smoked and burnt out while the missile still flew, which ends its smoke and its drawn flame (bug B7; [smoke](../spec/damage-smoke.md)) |
 | `a2g-terrain-cruise` | F/A-18D AGM-65A at `VLA QVARMOR`, target `0x50000000`, 6 nmi, 1,100 ft above target ground, heading 60, 350 kt | Logged altitude rises above 1,900 ft over the ridge, then the missile resumes its profile and kills the tank within 40 ft. Without terrain clearance the logged maximum was 1,866 ft ([cruise clearance](../spec/missiles.md#cruise-terrain-clearance)) |
 | `a2g-terrain-mask` | F/A-18D AGM-65G at `VLA QVSUP`, target `0x50000000`, 6 nmi, 300 ft above target ground, heading 180, 350 kt, 10 s | Terrain rises above the measured sight line near the target; TERRAIN MASK, no launch. This caught a ridge skipped by the old eight-probe visibility check ([terrain gates](../spec/air-to-ground.md#terrain-at-lock-and-launch)) |
 | `a2g-maverick` | Over `~QUCOL`: an A-10's AGM-65G on a tank designated on the A-G page (Ctrl+R, T), the same with nothing designated (BORE), an AV-8B's AGM-65G on a tank designated on its FLIR (M, T), an A-10's AGM-65A on the tank Enter picks, and an AGM-65A from 6 nmi on the A-G page | CUED with the seeker locked on the designated tank, launched at it and killed; in BORE the candidate and the missile's target are the strongest return in the 5 degree bore circle, locked at release, killed; the FLIR run kills, both AGM-65A runs hit and the 6 nmi shot ends within 40 ft of the tank ([missiles](../spec/air-to-ground.md#missiles-and-the-harm-boresight-cue)) |
@@ -184,6 +186,31 @@ The scenarios' parsing and checks have unit tests in `tools/test_battery_ai_stri
 battery selection family `ai-strike` (`ai-strike-*`, `ai-sead-*`, `ai-wing-*`, `qmc-strike-*`) is chosen by changes to
 `ai.rs`, `guided.rs`, the scenario file, the AI sources (`tore-sim/src/ai`, `tore-world/src/ai_wings`)
 and the laser and sight step (`combat/laser.rs`, `combat/live/sighting.rs`).
+
+## Rotor probe
+
+`--rotor-probe` (slice H1) flies each imported powered-lift PT through scripted
+requests to the AI's [rotorcraft and jet-lift control](../spec/ai.md#rotorcraft-and-jet-lift-control)
+over flat ground at sea level, clean, at the Damper level, and prints one `ROTOR`
+line per flight. The flights are `tore_sim::ai::rotor_probe`'s, the same ones the
+unit tests in `flight/powered/ai_lift_tests.rs` assert on the synthetic PT fixtures.
+The battery scenario `flight-powered-ai-probe` checks the lines against the unit
+tests' bands.
+
+| Line | Flight | Band |
+| --- | --- | --- |
+| `hold calm`, `hold wind15` | A hover held over a point at 200 ft for 60 s after 30 s to settle, calm and in a 15 kt wind across the heading | within 10 ft and 10 ft of height |
+| `move500` | The point moved 500 ft diagonally | overshoot under 10 ft, arrives within 10 ft |
+| `climb500` | A vertical climb from 20 to 500 ft at 25 ft/s | fastest 23 to 27 ft/s, top under 515 ft, ends within 10 ft |
+| `forward <kt> <fpm>` | 40, 80 and 120 kt climbing and descending 1,000 ft/min | climb within 150 ft/min, speed within 5 kt, heading within 3 degrees |
+| `turn200` | 180 degrees at 200 ft asking 160 kt, more than these aircraft make | loses under 50 ft, turns round within 5 degrees in 60 s |
+| `slow120` | From 120 kt at 1,000 ft to a hover over a point 3,000 ft ahead | loses under 50 ft, ends within 10 ft hovering |
+| `convert` (V-22) | From a hover to airplane mode asking 220 kt, then a hover 15,000 ft ahead | nacelles down and over 200 kt, back over 80 degrees within 10 ft, within 300 ft of height, no corridor override |
+| `jet hover` (AV-8, Yak-141) | A hover at 200 ft, then a vertical landing at a 5 ft/s sink | within 10 ft, touchdown under 8 ft/s within 15 ft of the point |
+
+```sh
+TORE_DATA_DIR=<a copy of your profile> cargo run --locked -p tore-app -- --rotor-probe --no-audio
+```
 
 ## Powered-lift scenarios (VTOL overhaul)
 

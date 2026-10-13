@@ -909,6 +909,7 @@ impl Viewer {
             options,
             growth,
         )?;
+        viewer.playback.add_motors(resources);
         // Other aircraft's launches name their weapon record.
         viewer
             .sound
@@ -1144,6 +1145,9 @@ impl Viewer {
             return;
         }
         self.playback.extend(Arc::clone(&recording));
+        if let Some(growth) = &self.growth {
+            self.playback.add_motors(&growth.resources);
+        }
         self.sound.extend(Arc::clone(&recording));
         self.scanner.feed(Arc::clone(&recording));
         self.weather.set_end(last);
@@ -3046,6 +3050,8 @@ impl Viewer {
         // barrels, as live flight draws them.
         let flash_now = tick as f64 + self.clock.alpha();
         let mounts = crate::gun_flash::mounts(&picture, None);
+        self.gun_flash
+            .set_fire_widths(std::sync::Arc::clone(&self.scenery.fire_widths));
         Self::observe_surface(
             (&self.tracks, &self.recording),
             &mut self.gun_flash,

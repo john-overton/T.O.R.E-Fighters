@@ -8,7 +8,7 @@
 //! the new things become events. It reads combat's shared state after the
 //! step, so it needs no seat and runs whether or not anyone is connected.
 //!
-//! An aircraft's drawn stores (protocol 26, B3) are a Stores event when
+//! An aircraft's drawn stores (protocol 27, B3) are a Stores event when
 //! they change (a release, a jettison, a rearm), and at a seat for every
 //! aircraft not as its loadout built them.
 //!
@@ -27,6 +27,7 @@
 use crate::wire::events::{StationStores, SurfaceUnitView, WireEvent};
 use crate::wire::from_world;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use tore_sim::combat::blast::MarkKind;
 use tore_sim::combat::live::{self, DeviceNote};
 use tore_sim::combat::missiles::TargetRole;
 use tore_world::snapshot::{EffectPose, MarkPose};
@@ -67,13 +68,18 @@ pub struct Timed {
     pub event: Wide,
 }
 
-type EffectKey = (u8, [u64; 3], Option<u8>);
+/// The gun pock marks a newly seated player is told of at most, the
+/// newest (agent decision, slice BF, 2026-10-12): about 13.5 KB of events.
+pub const SEAT_POCK_MARKS: usize = 1_000;
+
+type EffectKey = (u8, [u64; 3], Option<u8>, u8);
 
 fn effect_key(effect: &live::Effect) -> EffectKey {
     (
         effect.kind as u8,
         effect.position.map(f64::to_bits),
         effect.blast,
+        effect.scale,
     )
 }
 
@@ -115,7 +121,7 @@ pub struct Tracker {
     /// when they were (protocol 25).
     flattened: BTreeSet<u32>,
     fill_version: u64,
-    /// Each aircraft's drawn stores as last told (protocol 26), its loadout
+    /// Each aircraft's drawn stores as last told (protocol 27), its loadout
     /// as built (what a client draws) until the first change.
     stores: BTreeMap<u32, Vec<StationStores>>,
 }
@@ -148,7 +154,7 @@ impl Tracker {
                 .as_ref()
                 .map_or(0, |fill| fill.version()),
             // Clients draw an untold aircraft as built, so anything else is
-            // told on the first tick sorted (protocol 26).
+            // told on the first tick sorted (protocol 27).
             stores: BTreeMap::new(),
         }
     }
@@ -281,7 +287,7 @@ impl Tracker {
             }
         }
 
-        // Aircraft whose drawn stores changed (protocol 26): a release, a
+        // Aircraft whose drawn stores changed (protocol 27): a release, a
         // jettison, a rearm. An aircraft not yet told is compared with its
         // loadout as built, which is how a client draws it.
         for (aircraft, loads) in world.station_stores() {
@@ -431,9 +437,27 @@ impl Tracker {
     /// protocol's "first snapshot").
     pub fn standing(world: &World, tick: u64) -> Vec<Timed> {
         let state = &world.combat.state;
+        // Every crater and fire, but only the newest gun pock marks: a long
+        // mission's thousands would hold every other event back for a minute
+        // in the snapshots' event share (agent decision, slice BF,
+        // 2026-10-12; a late joiner misses only older pock marks).
+        let pocks = state
+            .marks
+            .iter()
+            .filter(|m| m.kind == MarkKind::Crater(tore_sim::combat::blast::POCK))
+            .count();
+        let mut skip = pocks.saturating_sub(SEAT_POCK_MARKS);
         let marks = state
             .marks
             .iter()
+            .filter(move |mark| {
+                if skip > 0 && mark.kind == MarkKind::Crater(tore_sim::combat::blast::POCK) {
+                    skip -= 1;
+                    false
+                } else {
+                    true
+                }
+            })
             .map(|mark| Wide::Event(from_world::mark_event(&MarkPose::of(mark, state.tick()))));
         let effects = state
             .effects
@@ -459,7 +483,7 @@ impl Tracker {
             .map(|fill| flattened_events(&fill.flattened()))
             .unwrap_or_default();
         // Every aircraft whose stores are not as its loadout built them
-        // (protocol 26).
+        // (protocol 27).
         let stores = world
             .station_stores()
             .into_iter()
@@ -501,6 +525,7 @@ fn effect_pose(effect: &live::Effect) -> EffectPose {
         position: effect.position,
         ticks: effect.ticks,
         blast: effect.blast,
+        scale: effect.scale,
     }
 }
 
@@ -655,7 +680,7 @@ mod tests {
     /// An aircraft's drawn stores are told once per change (a release), and
     /// a player seated later is told every aircraft not as its loadout
     /// built it; nothing is told while every aircraft is as built
-    /// (protocol 26).
+    /// (protocol 27).
     #[test]
     fn stores_are_told_when_they_change_and_at_a_seat() {
         let mut world = world();

@@ -141,9 +141,19 @@ pub enum WireEvent {
         position: [i64; 3],
         ticks: u16,
         blast: Option<u8>,
+        /// How big the explosion is drawn, percent of its type's size
+        /// (protocol 26; `tore_sim::combat::blast_scale`). Sent as one bit
+        /// when it is 100.
+        scale: u8,
     },
     /// A crater or crash-site fire, from the event's tick.
-    Mark { kind: MarkKind, position: [i64; 3] },
+    /// `scale` (protocol 26) is the drawn scale of a crater, percent, sent as
+    /// one bit when it is 100; size 0 is a gun round's pock mark.
+    Mark {
+        kind: MarkKind,
+        position: [i64; 3],
+        scale: u8,
+    },
     /// A ground object was destroyed.
     GroundDestroyed { object: u32 },
     /// Chaff or a flare left an aircraft: the release geometry the client
@@ -206,7 +216,7 @@ pub enum WireEvent {
     /// every building already flat; a game knocks the same ones down in its
     /// copy of the mission, so its prediction and its picture fly past them.
     CityFlattened { buildings: Vec<u32> },
-    /// An aircraft's drawn stores (protocol 26, B3): every external station
+    /// An aircraft's drawn stores (protocol 27, B3): every external station
     /// it draws, in station order, with the whole stores still on it. Sent
     /// when they change (a release, a jettison, a rearm), and at seating for
     /// every aircraft not as its loadout built it. A client draws an
@@ -681,6 +691,7 @@ impl WireEvent {
                 position,
                 ticks,
                 blast,
+                scale,
             } => {
                 let _ = w.write_bits(effect_code(*kind), 3);
                 write_position(w, position);
@@ -688,8 +699,19 @@ impl WireEvent {
                 bits::write_option(w, *blast, |w, blast| {
                     let _ = w.write_bits(u64::from(blast), 8);
                 });
+                bits::write_option(
+                    w,
+                    (*scale != tore_sim::combat::blast_scale::FULL).then_some(*scale),
+                    |w, scale| {
+                        let _ = w.write_bits(u64::from(scale), 8);
+                    },
+                );
             }
-            Self::Mark { kind, position } => {
+            Self::Mark {
+                kind,
+                position,
+                scale,
+            } => {
                 match kind {
                     MarkKind::Crater(size) => {
                         w.write_bool(false);
@@ -698,6 +720,13 @@ impl WireEvent {
                     MarkKind::Fire => w.write_bool(true),
                 }
                 write_position(w, position);
+                bits::write_option(
+                    w,
+                    (*scale != tore_sim::combat::blast_scale::FULL).then_some(*scale),
+                    |w, scale| {
+                        let _ = w.write_bits(u64::from(scale), 8);
+                    },
+                );
             }
             Self::GroundDestroyed { object } => w.write_varint(u64::from(*object)),
             Self::Countermeasure {
@@ -856,6 +885,8 @@ impl WireEvent {
                 position: read_steps(r)?,
                 ticks: r.read_bits(16)? as u16,
                 blast: bits::read_option(r, |r| Ok(r.read_bits(8)? as u8))?,
+                scale: bits::read_option(r, |r| Ok(r.read_bits(8)? as u8))?
+                    .unwrap_or(tore_sim::combat::blast_scale::FULL),
             },
             12 => {
                 let kind = if r.read_bool()? {
@@ -866,6 +897,8 @@ impl WireEvent {
                 Self::Mark {
                     kind,
                     position: read_steps(r)?,
+                    scale: bits::read_option(r, |r| Ok(r.read_bits(8)? as u8))?
+                        .unwrap_or(tore_sim::combat::blast_scale::FULL),
                 }
             }
             13 => Self::GroundDestroyed {
@@ -1396,5 +1429,47 @@ impl EventReceiver {
     /// Events waiting for their names.
     pub fn held(&self) -> usize {
         self.held.len()
+    }
+}
+
+#[cfg(test)]
+mod mark_stress_tests {
+    use super::*;
+
+    /// The bytes a seat's backlog of marks costs a joining client after a
+    /// long mission (slice BF, 2026-10-12): 20,000 gun pock marks and 1,000
+    /// craters, each its own Mark event. Run with `--ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn a_long_missions_marks_cost_a_join() {
+        let mut w = BitWriter::new();
+        for n in 0..21_000_i64 {
+            let (kind, scale) = if n < 20_000 {
+                (MarkKind::Crater(0), 50)
+            } else {
+                (MarkKind::Crater(9), 159)
+            };
+            WireEvent::event(n, kind, scale).write(&mut w).unwrap();
+        }
+        let bytes = bits::finish(w).len();
+        println!(
+            "mark stress: 21000 Mark events {bytes} bytes, {:.1} bytes each",
+            bytes as f64 / 21_000.
+        );
+    }
+
+    impl super::super::events::WireEvent {
+        fn event(n: i64, kind: MarkKind, scale: u8) -> Self {
+            // Spread over a 20 nmi square in 1/32 ft steps.
+            Self::Mark {
+                kind,
+                position: [
+                    (n * 37_301) % 3_900_000 * 32 - 62_000_000,
+                    (n % 97) * 256,
+                    (n * 91_127) % 3_900_000 * 32 - 62_000_000,
+                ],
+                scale,
+            }
+        }
     }
 }

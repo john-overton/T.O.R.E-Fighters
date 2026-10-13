@@ -120,8 +120,15 @@ pub struct GroundLook {
     /// The wreck stays and burns: a fire with its smoke column for 15
     /// minutes at the foot of its box ([`State::burn_wrecks`]). Ships, ground
     /// vehicles, SAM launchers and AAA guns (docs/spec/surface-defenses.md,
-    /// "Destroyed looks"); men and bunkers do not.
+    /// "Destroyed looks"): ships, about half the ground vehicles, SAM
+    /// launchers and AAA guns (a fixed pick per object and mission), and
+    /// every building and fixed object but pavement and bridges (B16,
+    /// docs/spec/surface-defenses.md, "Wreck fires"); men do not.
     pub burns: bool,
+    /// Pavement (a runway or airstrip): a weapon that hits it leaves its
+    /// own crater there, as on open ground, so a bombed runway shows its
+    /// craters (B16). Other objects leave a crater only when destroyed.
+    pub pavement: bool,
 }
 
 /// One surface unit's shot for [`State::fire_surface`].
@@ -413,7 +420,12 @@ impl State {
             {
                 self.marks.remove(oldest);
             }
-            self.mark(at, MarkKind::Fire, blast::CRASH_TICKS);
+            self.mark(
+                at,
+                MarkKind::Fire,
+                blast::CRASH_TICKS,
+                crate::combat::blast_scale::FULL,
+            );
         }
     }
 }

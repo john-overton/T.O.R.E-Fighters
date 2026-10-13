@@ -125,7 +125,7 @@ pub struct Feeder {
     surface: Option<bool>,
     /// Each surface unit's state as last recorded, for its stock changes.
     surface_told: BTreeMap<u32, tore_session::wire::events::SurfaceUnitView>,
-    /// Each aircraft's stores as last recorded (B3, protocol 26).
+    /// Each aircraft's stores as last recorded (B3, protocol 27).
     stores: tore_session::client::convert::stores::StoresWatch,
 }
 
@@ -419,6 +419,7 @@ impl Feeder {
                     kind: convert::effect_kind(effect.kind, effect.blast),
                     position: effect.position,
                     duration_ticks: u32::from(effect.ticks),
+                    scale: effect.scale,
                 });
             }
             playing.insert(seen);
@@ -433,6 +434,7 @@ impl Feeder {
                     },
                     position: mark.position,
                     duration_ticks: blast::FOREVER,
+                    scale: mark.scale,
                 });
             }
         }
@@ -961,6 +963,7 @@ mod tests {
             target: Some(3),
             incoming: false,
             speed_f8: 1_000 * 256,
+            powered: false,
         }
     }
 
@@ -1149,12 +1152,14 @@ mod tests {
             position: [1., 2., 3.],
             ticks: 30,
             blast: None,
+            scale: tore_sim::combat::blast_scale::FULL,
         };
         let crater = MarkPose {
             kind: blast::MarkKind::Crater(2),
             position: [4., 0., 4.],
             age: 7,
             strength: 1.,
+            scale: 100,
         };
         let mut first = frame(10.0, vec![plane(0, 0.), plane(3, 100.), ground(900, 50)]);
         let out = feed(&mut feeder, &first, &roster);

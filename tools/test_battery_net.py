@@ -918,7 +918,7 @@ class StrikeHandbackTests(unittest.TestCase):
 
 
 class StoresTests(unittest.TestCase):
-    """`net-a2g-stores` (protocol 26, slice BP3): the other aircraft's stores drawn and seen emptying."""
+    """`net-a2g-stores` (protocol 27, slice BP3): the other aircraft's stores drawn and seen emptying."""
 
     LINES = (
         "Bomber: stores: told 6, bytes 66, largest 12, drawn 3, emptied [3]\n"

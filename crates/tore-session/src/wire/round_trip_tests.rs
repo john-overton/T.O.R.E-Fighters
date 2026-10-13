@@ -401,6 +401,11 @@ pub(crate) fn event(rng: &mut SplitMix64) -> WireEvent {
             position: position(rng),
             ticks: rng.below(65_536) as u16,
             blast: chance(rng).then(|| rng.below(256) as u8),
+            scale: if chance(rng) {
+                100
+            } else {
+                rng.below(256) as u8
+            },
         },
         12 => WireEvent::Mark {
             kind: if chance(rng) {
@@ -409,6 +414,11 @@ pub(crate) fn event(rng: &mut SplitMix64) -> WireEvent {
                 MarkKind::Crater(rng.below(256) as u8)
             },
             position: position(rng),
+            scale: if chance(rng) {
+                100
+            } else {
+                rng.below(256) as u8
+            },
         },
         13 => WireEvent::GroundDestroyed {
             object: rng.below(1 << 32) as u32,
@@ -971,7 +981,7 @@ fn records_code_against_baselines_up_to_127_snapshots_back() {
     }
 }
 
-/// A Stores event (protocol 26) costs a few bytes for a release: an
+/// A Stores event (protocol 27) costs a few bytes for a release: an
 /// aircraft's six drawn stations are 14 bytes with the code; a full
 /// loadout's 64 stations, each with 65,535, at most 243. Stations out of order or past the
 /// loadout's 64 are refused.

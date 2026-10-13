@@ -19,12 +19,22 @@ Some types sometimes show a related type instead, so repeated hits vary.
 A destroyed aircraft adds its own type 30 blast; a destroyed ground object adds
 its unit's own blast (a large ground blast when it has none).
 
+Each impact is drawn at its weapon's size: a cannon shell's burst is half
+its type's size, the AC-130's 105 mm like a 500 lb bomb, and a bomb or warhead grows
+with its weight, so a 2,000 lb bomb's blast is clearly bigger than a 500 lb
+bomb's (see [size by weapon](#size-by-weapon)). Every impact also throws a
+brief flash of light that lights the ground around it at night and a spray
+of glowing sparks ([impact light and sparks](#impact-light-and-sparks)).
+
 Every large ground or sea explosion also throws out a shockwave: a ring of
 dust (white spray on water) that races out from the blast, slows and fades
 while the fireball burns.
 
 A weapon that strikes land with a crater size leaves one of three crater
-pictures lying flat on the ground. It stays for the rest of the mission.
+pictures lying flat on the ground, sized with the explosion by weapon, and
+a gun round leaves a small pock mark. Every crater and pock mark stays for
+the rest of the mission, however many there are
+([craters by weapon](#craters-by-weapon)).
 
 As John requested on 2026-09-28, every aircraft that crashes on land, the
 player's or any AI's, leaves a crash site for 15 minutes: a large ground blast,
@@ -69,9 +79,11 @@ fitted. Each burst throws a flash of light and leaves a dark puff that hangs for
 about four seconds ([surface defenses](surface-defenses.md#flak-bursts-gunfire-launches-and-light)).
 
 Craters: half width 16 feet per unit of the weapon's crater size, at most 333
-feet. Guns have no crater; air-to-air missiles 3 (96 feet across); rockets 1
+feet. In the records guns have no crater; air-to-air missiles 3 (96 feet across); rockets 1
 or 2; anti-ship missiles 6; air-to-ground missiles and 500 and 1,000 lb class
 bombs 9; SAMs 12; guided 2,000 lb bombs 15; the Mk 84 18 (576 feet across).
+Since 2026-10-12 the drawn crater follows the weapon's scale instead
+([craters by weapon](#craters-by-weapon)).
 
 Shockwave (agent design, 2026-10-10): explosion types 21 to 23 and 35 to 37
 throw out a ring of 32 grey `SMOKE.PIC` dust puffs, type 34 a ring of white
@@ -82,6 +94,131 @@ slows, then drifts out another 0.15 widths while it fades to nothing over the
 rest of the explosion's two seconds. Each puff stands on the ground, growing
 from 0.12 to 0.5 of the width across, and is lit by the scene like the
 craters, not self-lit like the fireball.
+
+### Size by weapon
+
+Opinionated, John, 2026-10-12 (bugs B8 to B10). Before it, an explosion's
+size came from its type alone: a 20 mm and a 105 mm round, or a 500 lb and a
+2,000 lb bomb, drew the same. Now the impact effect carries a scale, the
+percent of its type's rolled size it is drawn at, and the fireball and its
+shockwave ring both grow with it:
+
+| Weapon | Scale | Example |
+| --- | --- | --- |
+| Guns up to 40 mm: every aircraft gun, the AC-130's 25 mm and 40 mm, AAA (ZSU-23, 2S6, M163, Phalanx, AK-630 and AK-230, 37 mm M1939), vehicle guns and small arms | 50 % on the ground and on aircraft | a 20 mm dirt puff about 37 ft wide instead of 75 |
+| The AC-130's 105 mm | 100 %, like a 500 lb bomb (John retuned it from 200 % on 2026-10-12: kinetic plus explosive) | its type 22 ground blast 255 ft wide, as a Mk 82's (the type's rolled width is always capped at 255) |
+| 57 mm (ZSU-57), the 85 mm and 100 mm flak guns, the 120 mm and 125 mm tank guns | 100 % | unchanged |
+| Bombs | cube root of the bomb's weight over 500 lb (a pack's weight is shared by its bombs) | 250 lb 79 % (about 200 ft wide), 500 lb 100 % (255 ft), 1,000 lb 126 %, 2,000 lb 159 % (405 ft), GBU-28 (4,500 lb) 208 % |
+| Missiles and rockets | cube root of the warhead's weight over 500 lb, at least 50 % | AGM-65G (300 lb) 84 %, Harpoon (488 lb) 99 %, SS-N-9 (1,100 lb) 130 %; a Sidewinder or a 2.75 in rocket 50 % |
+
+- The scale applies to a weapon's own impact: its hit on an aircraft or
+  object, its ground or water strike and a flak burst. A target's death
+  blast, a crash and a launch keep their type's size.
+- The retail weapon records carry no warhead weight, so the missiles' and
+  rockets' come from a table of the real weapons' published warhead weights,
+  rounded (fitted); fictional records (the AAM-L, the AEMP-1) take an agent's
+  estimate, and a record the table does not name keeps its type's size.
+- The 50 % floor for missiles and rockets is an agent decision (2026-10-12):
+  a 21 lb Sidewinder warhead would draw at 35 %, smaller than a cannon shell.
+- The scale is a byte (1 to 255 percent); 0 marks a dud bomb's inert dirt
+  puff, drawn at full size with no flash and no sparks. It rides the
+  simulation's effect, the network's Effect event
+  ([protocol 26](../formats/net-protocol.md#protocol-26-explosions-sized-by-weapon))
+  and recordings (the [effect scales section](../REPLAYS.md#versions-and-damage)),
+  so every machine and every replay draws the same size. Older recordings
+  draw every explosion at its type's size.
+- Sounds are unchanged.
+
+### Impact light and sparks
+
+Opinionated, agent design within John's request of 2026-10-12 (bug B11:
+every impact lights the night and throws sparks; he wants sharp visibility
+aids, no glint). Every weapon's hit, ground strike and kill blast, but not a
+dud's puff, a flak burst (which has its own flash) or a small round's
+splash in the water:
+
+- **Flash of light.** A point light at the burst, lifted 15 % of the
+  explosion's drawn width above the ground for a surface blast, at 2.5
+  flares per 150 ft of drawn width (a fifth of a flare to twelve flares; a
+  20 mm hit about 0.6 of a flare, a 500 lb bomb about 4, a 2,000 lb bomb
+  about 7, the 105 mm about 4 like a 500 lb bomb). It holds two ticks and fades over 10 ticks plus
+  14 per unit of the weapon's scale (about 0.15 s for a cannon shell, 0.2 s
+  for a 500 lb bomb and the 105 mm, 0.27 s for a 2,000 lb bomb), the quadratic fade of a flak
+  burst's flash. It rides the flare light path, so like every flare light
+  it counts up to four times as much against the night scene and hardly
+  shows by day. A picture lights at most its 24 newest impacts, so a long
+  gun burst cannot crowd out the flares (the scene lights its 16 strongest
+  lights).
+- **Sparks.** 6 plus 10 per unit of scale glowing streaks (at most 30): 11
+  for a cannon shell, 16 for a 500 lb bomb or the 105 mm, 22 for a 2,000 lb bomb. Each leaves
+  at 60 to 160 ft/s times the square root of the scale, upward and outward
+  from a ground burst (15 to 75 degrees up) and every way from an air burst,
+  falls under gravity, and lives 0.2 to 0.4 s plus 0.1 s per unit of scale,
+  cooling as it goes; one that lands goes out. A spark is drawn as a short
+  tracer streak (the last 0.05 s of its path, half a tracer's width, 2.2 times its radiance when fresh),
+  so it glows additively day and night. Water strikes throw none. At most
+  1,500 sparks are drawn, the newest impacts first.
+- **Smoke.** A ground burst (not one in the water, and not an air burst)
+  leaves dark dust and smoke that grows and lingers with the weapon's size
+  (opinionated, John, 2026-10-12: the whole effect, light, fireball and
+  smoke, scales by the same rule; the numbers are agent choices): 1 plus 4
+  per unit of scale puffs, at most 10 (3 for a cannon shell, 5 for a 500 lb
+  bomb or the 105 mm, 7 for a 2,000 lb), each growing from 0.15 to 0.45
+  of the explosion's drawn width across and rising 6 ft/s times the square
+  root of the scale, fading in over a quarter second behind the fireball and
+  gone after 6 seconds times the scale (3 s for a cannon shell, 4.7 s for a
+  250 lb bomb, 6 s for a 500 lb or the 105 mm, 9.5 s for a 2,000 lb).
+  Up to 96 recent impacts are remembered for it.
+- The flash's strength grows with the drawn width, so a bigger weapon's
+  light is both brighter and reaches farther before it fades into the
+  night; the fireball and the shockwave ring scale with the width too.
+- **No fires.** An impact starts no fire (John, 2026-10-12): fires stay with
+  crash sites and destroyed units and buildings.
+- All of it comes from the effect alone (where, which type, its scale and how far
+  into its life), with each spark's direction, speed and life drawn from the
+  burst's exact position, so a networked client and a replay show the same
+  and nothing reaches the simulation, the wire or a recording.
+
+### Craters by weapon
+
+Opinionated, John, 2026-10-12. Bombs and guns leave craters that follow the
+same yield scale as the explosion, on land only (a water strike keeps its
+spray and leaves nothing; a hit on an aircraft or object leaves nothing):
+
+| Weapon | Crater | Drawn across |
+| --- | --- | --- |
+| Bombs with a crater in their record (not cluster bombs) | a 500 lb bomb's (size 9) at the bomb's scale | 250 lb about 230 ft, 500 lb 288 ft, 2,000 lb about 458 ft, GBU-28 about 600 ft |
+| The AC-130's 105 mm | a 500 lb bomb's | 288 ft |
+| Missiles and rockets | their record's size at their scale | AGM-65G (9) about 242 ft |
+| Tank guns (120 mm, 125 mm) | their record's size (6) | 192 ft |
+| Every other gun round (aircraft guns, AAA, 57 mm, small arms) | a pock mark: crater size 0, 5 ft across at the 50 % gun scale (10 ft at 100 %) | 5 ft |
+
+- Every crater's drawn half width is at most 333 ft. The retail sizes for
+  bombs (9 for both the Mk 82 and the FAB-1000, 18 for the Mk 84) do not
+  follow weight, so every bomb now takes the 500 lb bomb's size at its own
+  scale (agent decision within John's rule): the Mk 84's drawn crater
+  shrinks from 576 to about 458 ft.
+- **No cap** (John, 2026-10-12): every weapon crater and gun pock mark
+  stays for the whole mission; the old 256-crater cap is gone. Crash fires
+  keep their 64 cap.
+- **Drawing** (agent decisions): a mark is drawn out to 4,000 times its
+  half width (a pock mark to 10,000 ft, where it is half a pixel; a 500 lb
+  bomb's crater to about 95 nmi), at most 3,072 marks at once, the nearest,
+  so a long mission's marks never crowd out the explosions. Measured on
+  2026-10-12 with 20,000 pock marks and 1,000 craters: about 0.4 ms of a
+  frame's CPU time (release build), 1.5 MB of sprites, 1 MB of simulation
+  state, 0.9 MB of checkpoint (a standby's first full state; later states
+  code only what changed), about 0.5 MB of recording, and 13.5 bytes of
+  network event each.
+- **Online**: a new mark reaches every client as it is made. A player
+  seated later is told of every crater and fire but only the newest 1,000
+  gun pock marks (about 13.5 KB; agent decision), since 20,000 would hold
+  every other event back for a minute in the snapshots' event share; older
+  pock marks are missing only on that late joiner's screen.
+- A pock mark is a crater of size 0, which an older build or replay viewer
+  draws as nothing. The crater code is shared: `blast::mark_half_width`
+  sizes any crater by its scale and the effect renderer's `visible` budget
+  culls flat marks, for the runway craters slice B16 adds.
 
 Cluster bombs (agent design, 2026-10-10): the five cluster records explode as type 18 on land and water with no crater, and a ground burst of that family also draws 28 small bomblet flashes over 1,200 feet, derived from the burst's position alone; see [ordnance presentation](ordnance-presentation.md#cluster-bomb-flashes).
 
@@ -97,7 +234,8 @@ over the last minute.
 ## Edge cases
 
 - A weapon strike on water never leaves a crater.
-- At most 256 craters and 64 crash fires are kept; the oldest goes first.
+- Every crater and pock mark is kept for the mission (no cap since
+  2026-10-12); at most 64 crash fires burn at once, the oldest going first.
 - An aircraft is given one crash site, however its crash is detected.
 - A missing sheet or recording skips that picture or sound; the rest play.
 
@@ -119,10 +257,15 @@ Fitted, by the agent:
 - Explosions and fire face the camera; surface types stand on their point.
   Craters lie flat, drawn slightly toward the eye so they stay above uneven
   ground.
-- Crater and fire caps (256, 64).
+- The fire cap (64).
 - A debris piece landing keeps its 15-foot `GRDLRGA` puff and stays silent.
 
 Opinionated:
+- Explosion size by weapon (John, 2026-10-12) and the impact light and
+  sparks (agent design on John's request of the same day): see
+  [size by weapon](#size-by-weapon) and
+  [impact light and sparks](#impact-light-and-sparks) for the rules, which
+  numbers are fitted and which are agent decisions.
 - The shockwave ring (agent, X1, 2026-10-10; John asked on 2026-10-10 that
   ground explosions show a shockwave). The original has no shockwave art or
   effect: neither `EXP.SH` nor any picture in the archives is a ring or wave

@@ -420,9 +420,82 @@ def touchdown_scenarios() -> list[Scenario]:
     )]
 
 
+# The AI's rotorcraft and jet-lift control (slice H1 of the helicopter and VTOL AI pass): `--rotor-probe`
+# flies each imported powered-lift PT through scripted AI requests over flat ground and prints one `ROTOR`
+# line per flight. The bands are the unit tests' (crates/tore-sim/src/flight/powered/ai_lift_tests.rs).
+ROTOR_LINE = re.compile(r"^ROTOR (\S+) (.+?): (.*)$", re.M)
+ROTOR_FLIGHTS = (["hold calm", "hold wind15", "move500", "climb500"]
+                 + [f"forward {k}kt {c}fpm" for k in (40, 80, 120) for c in ("+1000", "-1000")]
+                 + ["turn200", "slow120"])
+
+
+def _rotor_values(text: str) -> dict[str, str]:
+    return dict(pair.split("=", 1) for pair in text.split() if "=" in pair)
+
+
+def _number(value: str) -> float:
+    return float(re.match(r"-?[0-9.]+", value).group(0))
+
+
+def check_rotor_probe(output: str) -> list[str]:
+    """Every rotorcraft flies every flight, the V-22 converts, the jets hover and land, all inside the unit
+    tests' bands, and nothing crashes."""
+    lines = {(ac, flight): rest for ac, flight, rest in ROTOR_LINE.findall(output)}
+    problems = []
+    wanted = [(f"{ac.upper()}.PT", flight) for ac in ROTORCRAFT for flight in ROTOR_FLIGHTS]
+    wanted += [("V22.PT", "convert")] + [(f"{ac.upper()}.PT", "jet hover") for ac in JETS]
+    for key in wanted:
+        if key not in lines:
+            problems.append(f"no ROTOR line for {key[0]} {key[1]}")
+    for (ac, flight), rest in lines.items():
+        label = f"{ac} {flight}"
+        if "CRASHED" in rest or "cannot hover" in rest:
+            problems.append(f"{label}: {rest}")
+            continue
+        v = _rotor_values(rest)
+        if flight.startswith("hold") and not (_number(v["off"]) < 10 and _number(v["height"]) < 10 and v["hover"] == "true"):
+            problems.append(f"{label} did not hold its point: {rest}")
+        elif flight == "move500" and not (_number(v["overshoot"]) < 10 and _number(v["off"]) < 10 and v["arrived"] != "never"):
+            problems.append(f"{label} did not move cleanly: {rest}")
+        elif flight == "climb500" and not (23 <= _number(v["fastest"]) < 27 and _number(v["top"]) < 515 and abs(_number(v["end"]) - 500) < 10):
+            problems.append(f"{label} did not climb at 25 ft/s to 500 ft: {rest}")
+        elif flight.startswith("forward"):
+            want = float(flight.split()[2].replace("fpm", ""))
+            if not (abs(_number(v["climb"]) - want) < 150 and _number(v["speed_off"]) < 5 and _number(v["heading_off"]) < 3):
+                problems.append(f"{label} missed its speed, climb or heading: {rest}")
+        elif flight == "turn200" and not (_number(v["lost"]) < 50 and _number(v["heading_off"]) < 5):
+            problems.append(f"{label} sank or did not turn round at 200 ft: {rest}")
+        elif flight == "slow120" and not (_number(v["lost"]) < 50 and _number(v["off"]) < 10 and v["hover"] == "true"):
+            problems.append(f"{label} did not slow to a hover: {rest}")
+        elif flight == "convert":
+            out_deg, out_kt = rest.split()[0].split("=")[1], rest.split()[1]
+            if not (_number(out_deg) < 1 and _number(out_kt) > 200 and _number(v["back"]) > 80 and _number(v["off"]) < 10
+                    and v["hover"] == "true" and _number(v["height"]) < 300 and v["corridor_ticks"] == "0"):
+                problems.append(f"{label} did not convert both ways inside the corridor: {rest}")
+        elif flight == "jet hover":
+            touchdown = v.get("touchdown", "none")
+            if not (_number(v["off"]) < 10 and _number(v["height"]) < 10 and touchdown != "none"
+                    and _number(touchdown) > -8 and _number(v["landing_off"]) < 15):
+                problems.append(f"{label} did not hover and land vertically: {rest}")
+    return problems
+
+
+def ai_probe_scenarios() -> list[Scenario]:
+    return [Scenario(
+        name="flight-powered-ai-probe", lane="flight", args=["--rotor-probe"],
+        check=check_rotor_probe, timeout=600,
+        notes="The AI's rotorcraft and jet-lift control (slice H1) on each imported powered-lift PT over flat "
+              "ground: hover holds in calm air and a 15 kt wind, a 500 ft move, the 25 ft/s climb to 500 ft, "
+              "40/80/120 kt climbing and descending 1,000 ft/min, a 180 degree turn at 200 ft asking more than full speed, "
+              "slowing from 120 kt to a hover, the V-22's "
+              "conversion both ways, and the jets' hover and vertical landing.",
+    )]
+
+
 def powered_scenarios() -> list[Scenario]:
     return (
-        hover_scenarios()
+        ai_probe_scenarios()
+        + hover_scenarios()
         + hover_hold_scenarios()
         + transition_scenarios()
         + corridor_scenarios()

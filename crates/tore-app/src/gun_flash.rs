@@ -367,6 +367,11 @@ impl Tracker {
         self.surface.set_deaths(deaths);
     }
 
+    /// How wide each scene object's wreck fire is drawn (B16).
+    pub fn set_fire_widths(&mut self, widths: std::sync::Arc<BTreeMap<u32, f64>>) {
+        self.surface.set_fire_widths(widths);
+    }
+
     /// Forgets every shot and round, as a new flight or replay does.
     #[allow(dead_code)] // For a viewer that changes recordings.
     pub fn reset(&mut self) {
@@ -565,6 +570,7 @@ mod tests {
             target: None,
             incoming: false,
             speed_f8: 0,
+            powered: false,
         }
     }
 

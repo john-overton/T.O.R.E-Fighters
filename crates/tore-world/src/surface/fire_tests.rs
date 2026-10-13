@@ -798,6 +798,126 @@ fn guns_fire_only_at_the_other_sides_airborne_aircraft() {
     assert_eq!(rounds(RED, BLUE, false), 0, "not while it is on the ground");
 }
 
+/// The retail SMLARMS record's fire zones: visual, 0 to 4,000 ft, to 2,000 ft.
+fn smlarms() -> Weapon {
+    let mut w = gun(
+        "SMLARMS.JT",
+        0x100c0,
+        0,
+        [
+            zone(32767, 0, 20_000, i32::MIN, i32::MAX),
+            zone(8190, 0, 4_000, i32::MIN, 2_000),
+        ],
+        3666,
+    );
+    w.burst.game_rounds_in_burst = 4;
+    w.burst.game_burst_t = 1;
+    w.burst.reload_t = 4;
+    w
+}
+
+const SQUAD_ID: u32 = 0x5000_0021;
+
+fn squad(side: Side, flags: i32) -> Placed {
+    let mut squad = placed(SQUAD_ID, "TROOPS.NT", 0x0040, 0., 0., 1).with_gun(
+        smlarms(),
+        "TROOPS",
+        arc(0, FREE, FREE),
+        0,
+    );
+    squad.unit.side = side;
+    squad.arms.side = side;
+    squad.unit.flags = flags;
+    squad
+}
+
+/// An airfield's defences fire at the other side's aircraft in reach whether
+/// or not the airfield is a mission target (John, 2026-10-12: "airfields fire
+/// at enemies at all times"): a squad of the field's template, flagged as a
+/// destroy target or not, and the field's AAA gun beside it, engage a Blue
+/// jet, and neither engages a Redfor one.
+#[test]
+fn an_airfields_squad_and_gun_fire_at_enemies_target_or_not_and_never_at_their_own_side() {
+    const GUN: u32 = 0x5000_0022;
+    let shooters = |flags: i32, jet_side: Side| {
+        let aaa = placed(GUN, "ZSU23.NT", 0x0800, 40., 0., 1)
+            .with_gun(zsu23(), "ZSU23", arc(0, FREE, [0., 90.]), 0)
+            .radar(false, None);
+        let mut f = Fixture::new(vec![squad(RED, flags), aaa], Vec::new());
+        f.jet.side = jet_side;
+        f.jet.position = [0., 600., 2_500.];
+        f.run(40 * TPS);
+        let mut who = f.shooters();
+        who.sort_unstable();
+        who.dedup();
+        who
+    };
+    for flags in [0, tore_formats::quick_template::TARGET_FLAG] {
+        assert_eq!(
+            shooters(flags, BLUE),
+            vec![SQUAD_ID, GUN],
+            "flags {flags:#x}: squad and gun both engage"
+        );
+        assert!(shooters(flags, RED).is_empty(), "never their own side");
+    }
+}
+
+/// A squad killed in the fight stops firing at once, and a squad at its
+/// full strength fires at a hostile jet inside its reach only.
+#[test]
+fn a_squad_fires_inside_its_reach_and_stops_when_it_is_killed() {
+    let mut f = Fixture::new(vec![squad(RED, 0)], Vec::new());
+    f.jet.position = [0., 600., 2_500.];
+    f.run(40 * TPS);
+    let fired = f.rounds();
+    assert!(fired > 0, "the squad engages a jet 2,500 ft away");
+    f.kill(SQUAD_ID);
+    f.run(1);
+    let at_death = f.rounds();
+    f.run(60 * TPS);
+    assert_eq!(f.rounds(), at_death, "a dead squad is silent");
+    // Out of its 4,000 ft reach, and above its 2,000 ft ceiling.
+    for position in [[0., 600., 6_000.], [0., 3_000., 1_000.]] {
+        let mut far = Fixture::new(vec![squad(RED, 0)], Vec::new());
+        far.jet.position = position;
+        far.run(40 * TPS);
+        assert_eq!(far.rounds(), 0, "{position:?} is out of reach");
+    }
+}
+
+/// Riflemen shoot at where a fast jet was: a squad's aim point carries the
+/// jet on at 30 percent of its velocity, a cannon's at all of it, and a
+/// squad shooting at a ground unit leads it as any gun does.
+#[test]
+fn a_squads_small_arms_lead_an_aircraft_poorly() {
+    let weapon = |record: Weapon, unit: &str| {
+        WeaponArms::gun(record, unit, arc(0, FREE, FREE), 1, false, GUN_NPC, 0)
+            .unwrap()
+            .0
+    };
+    let rifle = weapon(smlarms(), "TROOPS");
+    let cannon = weapon(zsu23(), "ZSU23");
+    let (position, velocity) = ([0., 500., 2_000.], [0., 0., 675.]);
+    let seen =
+        |weapon: &WeaponArms, surface: bool| observation(weapon, surface, position, velocity, 0.5);
+    let flat = seen(&cannon, false);
+    assert_eq!(flat.velocity, velocity);
+    assert!((flat.position[2] - (2_000. + 675. * 0.5)).abs() < 1e-9);
+    let poor = seen(&rifle, false);
+    let share = control::SMALL_ARMS_LEAD;
+    assert!((poor.velocity[2] - 675. * share).abs() < 1e-9);
+    assert!((poor.position[2] - (2_000. + 675. * 0.5 * share)).abs() < 1e-9);
+    assert!(
+        share > 0. && share < 0.5,
+        "a poor lead, not none and not good"
+    );
+    assert_eq!(
+        seen(&rifle, true).velocity,
+        velocity,
+        "a ground target is led in full"
+    );
+}
+
 #[test]
 fn an_m1939_swaps_in_60_s_and_a_ks19_opens_with_eight_shells() {
     let gun = placed(ZSU_ID, "M1939.NT", 0x0800, 0., 0., 1)

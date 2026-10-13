@@ -576,7 +576,7 @@ impl World {
     }
 
     /// Every aircraft's drawn stations and the whole stores on each, by
-    /// aircraft id (B3, protocol 26).
+    /// aircraft id (B3, protocol 27).
     pub fn station_stores(
         &self,
     ) -> std::collections::BTreeMap<u32, Vec<crate::snapshot::StationStores>> {

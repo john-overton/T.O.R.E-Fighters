@@ -615,7 +615,7 @@ impl Conversion {
         let mut events = events::Events::new(seen, flight.plane, &weapon_ids, first, last);
         let net = self.net_events(flight);
         let mut net = net.into_iter().peekable();
-        // Each aircraft's drawn stores as the host told them (protocol 26),
+        // Each aircraft's drawn stores as the host told them (protocol 27),
         // by aircraft, in tick order; one never told is as its loadout
         // built it.
         let mut told: BTreeMap<u32, Vec<(u64, Vec<crate::wire::events::StationStores>)>> =
