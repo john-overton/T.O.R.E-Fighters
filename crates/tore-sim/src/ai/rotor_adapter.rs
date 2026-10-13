@@ -48,11 +48,14 @@ pub const FORWARD_CLIMB_FPS: f64 = 3_000. / 60.;
 /// The coupled law is asked for at most this speed change at a time, ft/s
 /// (about 6 kt: a gentle nose-down, not the pitch limit at once).
 pub const SPEED_STEP_FPS: f64 = 10.;
-/// Sinking this much faster than the climb asked for, ft/s, starts slowing
+/// Sinking this much faster than the descent asked for (or than level when
+/// a climb is asked), ft/s, starts slowing
 /// it and easing the bank; at SINK_FULL_RELIEF_FPS it slows at the full
 /// step.
 pub const SINK_TOLERANCE_FPS: f64 = 2.;
 pub const SINK_FULL_RELIEF_FPS: f64 = 5.;
+/// Height before speed applies below this height over the ground, ft.
+pub const RELIEF_AGL_FT: f64 = 1_000.;
 /// A collective demand at or above this is out of travel.
 pub const COLLECTIVE_SATURATED: f64 = 0.99;
 /// A rotor speed below this share of 100 percent is out of power.
@@ -330,6 +333,7 @@ impl RotorAdapter {
                     pointing,
                     nacelles_up,
                     tiltrotor,
+                    s.position[1] - ground,
                 )
             }
             RotorRequest::Hover(guidance) => {
@@ -377,6 +381,7 @@ impl RotorAdapter {
                         false,
                         nacelles_up,
                         tiltrotor,
+                        s.position[1] - ground,
                     )
                 }
             }
@@ -397,6 +402,7 @@ impl RotorAdapter {
         pointing: bool,
         nacelles_up: bool,
         tiltrotor: bool,
+        agl: f64,
     ) -> RotorCommand {
         let coupled = !pointing && nacelles_up;
         let requested = speed;
@@ -443,9 +449,18 @@ impl RotorAdapter {
         } else {
             SINK_TOLERANCE_FPS
         };
-        let relief = ((climb - s.vertical_speed - tolerance)
-            / (SINK_FULL_RELIEF_FPS - SINK_TOLERANCE_FPS))
-            .clamp(0., 1.);
+        // Pointing flies the path, not a height: no relief there (a
+        // pop-up's pull asks for far more climb than it has). Nor high up,
+        // where a few feet do not matter and the strike's timing does.
+        let relief = if pointing || agl > RELIEF_AGL_FT {
+            0.
+        } else {
+            // Against level or the descent asked, not a climb: a climb
+            // that comes slower than asked loses no height.
+            ((climb.min(0.) - s.vertical_speed - tolerance)
+                / (SINK_FULL_RELIEF_FPS - SINK_TOLERANCE_FPS))
+                .clamp(0., 1.)
+        };
         let held = if coupled {
             let step = (speed - along).clamp(-SPEED_STEP_FPS, SPEED_STEP_FPS);
             if relief > 0. {
