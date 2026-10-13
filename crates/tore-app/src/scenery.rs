@@ -688,12 +688,17 @@ impl Scenery {
         surface: &tore_world::surface::SurfaceState,
     ) -> usize {
         let known = targets.iter().find(|t| t.id == id).map(|t| t.hp);
-        match self
-            .surface
-            .look(id, known.is_some_and(|hp| hp > 0), known.is_some(), Some(surface))
-        {
+        match self.surface.look(
+            id,
+            known.is_some_and(|hp| hp > 0),
+            known.is_some(),
+            Some(surface),
+        ) {
             None => self.static_vertices.get(&id).map_or(0, Vec::len),
-            Some(look) => self.surface.drawn(id, &look).map_or(0, |d| d.vertices.len()),
+            Some(look) => self
+                .surface
+                .drawn(id, &look)
+                .map_or(0, |d| d.vertices.len()),
         }
     }
 

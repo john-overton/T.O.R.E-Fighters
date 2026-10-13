@@ -561,11 +561,11 @@ pub fn run() -> AppResult<()> {
         if !near {
             continue;
         }
-        let redrawn = tore_world::terrain::redrawn::Built::for_runway(
-            &world.terrain.redrawn,
-            runway.object,
-        )
-        .map_or("retail".to_owned(), |built| format!("redrawn {}", built.plan));
+        let redrawn =
+            tore_world::terrain::redrawn::Built::for_runway(&world.terrain.redrawn, runway.object)
+                .map_or("retail".to_owned(), |built| {
+                    format!("redrawn {}", built.plan)
+                });
         let drawn = scenery.as_mut().map_or(String::new(), |scenery| {
             format!(
                 " drawn {}",
