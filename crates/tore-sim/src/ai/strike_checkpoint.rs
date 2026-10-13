@@ -14,6 +14,7 @@
 
 use super::{Lase, LaseEnd, NoLaze, NoLazeCall, Pass, Phase, Segment, StoreKind, Strike};
 use crate::ai::awareness::ground::ThreatLevel;
+use crate::ai::helicopter_threat::{Call, Decision, HeliThreat, Ring};
 
 crate::checkpoint_enum!(Pass {
     Straight = 0,
@@ -50,6 +51,7 @@ crate::checkpoint_enum!(Phase {
     Defend = 6,
     Home = 7,
     Lase = 8,
+    HoldOff = 9,
 });
 
 crate::checkpoint_enum!(LaseEnd {
@@ -88,6 +90,38 @@ crate::checkpoint_enum!(Segment {
     Final = 2,
     Climb = 3,
     Guide = 4,
+});
+
+crate::checkpoint_enum!(Decision {
+    HoldOff = 0,
+    Resume = 1,
+    Retarget = 2,
+    Home = 3,
+    Leave = 4,
+});
+
+crate::checkpoint_struct!(Ring {
+    id,
+    centre,
+    radius_ft,
+});
+
+crate::checkpoint_struct!(Call {
+    decision,
+    tick,
+    target,
+    ring,
+    told,
+});
+
+crate::checkpoint_struct!(HeliThreat {
+    hold,
+    announced,
+    waited,
+    ambush,
+    approach,
+    standoff_ft,
+    call,
 });
 
 crate::checkpoint_enum!(ThreatLevel {
@@ -135,6 +169,7 @@ crate::checkpoint_struct!(Strike {
     cue_across_sum,
     cue_last,
     tasked_agl_ft,
+    heli,
 } skip {
     inputs = None,
 });

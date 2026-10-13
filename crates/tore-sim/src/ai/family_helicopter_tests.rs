@@ -128,6 +128,9 @@ fn the_at2_popup_keeps_its_speed_and_holds_the_line_to_impact() {
 
 #[test]
 fn under_a_sam_it_attacks_from_low_at_the_weapons_range() {
+    // A short-range SAM by the target (its ring, 5,000 ft plus the 2,000 ft
+    // margin, covers the target but not the firing point 10,800 ft out:
+    // slice H4 lets the stand-off through).
     let mut world = heli_world(at2(4));
     const SAM: u32 = 0x5000_0009;
     world.picture = picture(
@@ -137,7 +140,7 @@ fn under_a_sam_it_attacks_from_low_at_the_weapons_range() {
                 SAM,
                 [3_000., 0., TARGET_AT[2]],
                 0x1000,
-                site(30_000., 0., true),
+                site(5_000., 0., true),
             ),
         ],
         vec![SAM],
@@ -168,7 +171,7 @@ fn under_a_sam_it_attacks_from_low_at_the_weapons_range() {
                 SAM,
                 [3_000., 0., TARGET_AT[2]],
                 0x1000,
-                site(30_000., 0., true),
+                site(5_000., 0., true),
             ),
         ],
         vec![SAM],
@@ -268,6 +271,165 @@ fn the_helicopter_is_deterministic_and_round_trips_through_a_checkpoint() {
     assert_eq!(twin, a);
     for tick in 300..600 {
         world.own.position[2] += 2.;
+        assert_eq!(
+            a.step(&world.context(tick)),
+            twin.step(&world.context(tick))
+        );
+    }
+}
+
+// Slice H4: John's threat rule (2026-10-12), docs/spec/ai-strike.md,
+// "Helicopter threat awareness".
+
+const SAM: u32 = 0x5000_0009;
+const SAM_AT: Vector = [3_000., 0., 24_000.];
+
+/// The target, and a SAM beside it that out-ranges the AT-2 (its ring
+/// covers the target and every firing point), standing or destroyed.
+fn sam_picture(standing: bool) -> crate::ai::awareness::ground::GroundPicture {
+    let mut sam = ground(SAM, SAM_AT, 0x1000, site(30_000., 0., true));
+    sam.object.destroyed = !standing;
+    picture(&[ground(TARGET, TARGET_AT, 0x200, None), sam], vec![SAM])
+}
+
+fn defended_world() -> World {
+    let mut world = heli_world(at2(4));
+    world.picture = sam_picture(true);
+    world
+}
+
+fn call(strike: &Strike) -> Option<crate::ai::helicopter_threat::Decision> {
+    strike.threat_call().map(|c| c.decision)
+}
+
+#[test]
+fn aware_of_a_ring_it_holds_off_outside_it_and_resumes_once_sead_kills_the_site() {
+    use crate::ai::helicopter_threat::{Decision, HOLD_CALL_TICKS, HOLD_RADIUS_FT};
+    let mut world = defended_world();
+    let mut strike = Strike::new(3);
+    let order = strike.step(&world.context(1));
+    assert_eq!(strike.phase(), Phase::HoldOff);
+    assert_eq!(order.release, None);
+    // Its circle lies outside the SAM's ring (30,000 ft plus the margin).
+    let (centre, since) = strike.hold_off().expect("holding off");
+    assert_eq!(since, 1);
+    assert!(horizontal(SAM_AT, centre) >= 32_000. + HOLD_RADIUS_FT - 1.);
+    let hold = steer(&order);
+    assert_eq!(hold.speed, SpeedRequest::Maximum);
+    assert!((hold.heading_deg - bearing_deg(world.own.position, centre)).abs() < 1e-9);
+    // No call for a moment, then "holding off", naming the SAM.
+    assert_eq!(call(&strike), None);
+    strike.step(&world.context(1 + HOLD_CALL_TICKS));
+    let held = *strike.threat_call().expect("called");
+    assert_eq!(held.decision, Decision::HoldOff);
+    assert_eq!((held.target, held.ring), (Some(TARGET), Some(SAM)));
+    // SEAD kills the SAM: the ring is gone and it attacks again.
+    world.picture = sam_picture(false);
+    strike.step(&world.context(2_000));
+    assert_eq!(strike.phase(), Phase::Attack);
+    assert_eq!(call(&strike), Some(Decision::Resume));
+    assert!(strike.hold_off().is_none());
+}
+
+#[test]
+fn after_three_minutes_with_nothing_outside_the_rings_it_goes_home() {
+    use crate::ai::helicopter_threat::{Decision, HOLD_WAIT_TICKS};
+    let world = defended_world();
+    let mut strike = Strike::new(3);
+    strike.step(&world.context(1));
+    strike.step(&world.context(HOLD_WAIT_TICKS));
+    assert_eq!(strike.phase(), Phase::HoldOff, "not quite three minutes");
+    strike.step(&world.context(1 + HOLD_WAIT_TICKS));
+    assert_eq!(strike.phase(), Phase::Home);
+    assert_eq!(call(&strike), Some(Decision::Home));
+}
+
+#[test]
+fn after_three_minutes_it_takes_a_target_outside_every_ring() {
+    use crate::ai::awareness::ground::{GroundPicture, Subjects};
+    use crate::ai::engagement::{StrikeObjective, StrikeRole};
+    use crate::ai::helicopter_threat::{Decision, HOLD_WAIT_TICKS};
+    const OTHER: u32 = 0x5000_0002;
+    let other_at = [-40_000., 0., -20_000.];
+    let subjects = [
+        ground(TARGET, TARGET_AT, 0x200, None),
+        ground(OTHER, other_at, 0x200, None),
+        ground(SAM, SAM_AT, 0x1000, site(30_000., 0., true)),
+    ];
+    let mut picture = GroundPicture::new(StrikeRole::Strike);
+    picture.set_objective(StrikeObjective {
+        targets: vec![TARGET, OTHER],
+        defenses: vec![SAM],
+        point: Some(TARGET_AT),
+    });
+    picture.rebuild(0, Vec::new(), &Subjects::new(&subjects), Vec::new());
+    let mut world = heli_world(at2(4));
+    world.picture = picture;
+    let mut strike = Strike::new(3);
+    strike.step(&world.context(1));
+    assert_eq!(strike.phase(), Phase::HoldOff);
+    assert_eq!(strike.target(), Some(TARGET), "the nearest first");
+    strike.step(&world.context(1 + HOLD_WAIT_TICKS));
+    assert_eq!(strike.target(), Some(OTHER));
+    assert_eq!(strike.phase(), Phase::Attack);
+    assert_eq!(call(&strike), Some(Decision::Retarget));
+}
+
+#[test]
+fn ambushed_by_a_threat_it_did_not_know_it_breaks_leaves_the_ring_then_resumes() {
+    use crate::ai::awareness::ground::RecentWarnings;
+    use crate::ai::helicopter_threat::{AMBUSH_QUIET_TICKS, AMBUSH_RADIUS_FT, Decision};
+    use crate::ai::strike::WARNING_TICKS;
+    let mut world = heli_world(at2(4));
+    world.own.position = [0., 1_500., 12_000.];
+    let mut strike = Strike::new(3);
+    strike.step(&world.context(1));
+    assert_eq!(strike.phase(), Phase::Attack);
+    // A launch from the north: the break flies (the controller's), and the
+    // place it was engaged from becomes a ring.
+    let engaged = Context {
+        defending: true,
+        threat_bearing_deg: Some(0.),
+        warnings: RecentWarnings {
+            air_to_air: false,
+            surface_to_air: true,
+        },
+        ..world.context(2)
+    };
+    let order = strike.step(&engaged);
+    assert_eq!(strike.phase(), Phase::Defend);
+    assert!(order.steer.is_none());
+    assert_eq!(call(&strike), Some(Decision::Leave));
+    // Quiet for ten seconds: it leaves the ring, south, away from the threat.
+    let order = strike.step(&world.context(2 + WARNING_TICKS));
+    assert_eq!(strike.phase(), Phase::HoldOff);
+    let (centre, _) = strike.hold_off().expect("leaving");
+    let heading = steer(&order).heading_deg;
+    assert!((heading - 180.).abs() < 1., "{heading}");
+    assert!(horizontal(centre, world.own.position) > AMBUSH_RADIUS_FT - 6_100.);
+    // Out of the ring and a minute quiet: it may resume.
+    world.own.position = centre;
+    strike.step(&world.context(2 + AMBUSH_QUIET_TICKS - 1));
+    assert_eq!(strike.phase(), Phase::HoldOff, "not yet a minute quiet");
+    strike.step(&world.context(2 + AMBUSH_QUIET_TICKS));
+    assert_eq!(strike.phase(), Phase::Attack);
+    assert_eq!(call(&strike), Some(Decision::Resume));
+}
+
+#[test]
+fn a_hold_off_is_deterministic_and_round_trips_through_a_checkpoint() {
+    let mut world = defended_world();
+    let mut a = Strike::new(5);
+    for tick in 0..900 {
+        world.own.position[2] -= 2.;
+        a.step(&world.context(tick));
+    }
+    assert_eq!(a.phase(), Phase::HoldOff);
+    let models = Models::default();
+    let mut twin: Strike = from_bytes(&to_bytes(&a, &models).unwrap(), &models).unwrap();
+    assert_eq!(twin, a);
+    for tick in 900..1_500 {
+        world.own.position[2] -= 2.;
         assert_eq!(
             a.step(&world.context(tick)),
             twin.step(&world.context(tick))

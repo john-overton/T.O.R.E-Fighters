@@ -32,6 +32,7 @@ pub mod formation;
 pub mod geometry;
 pub mod gunnery;
 pub mod helicopter_defense;
+pub mod helicopter_threat;
 pub mod incoming_fire;
 pub mod launch;
 pub mod link;

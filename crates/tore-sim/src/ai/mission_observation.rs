@@ -546,6 +546,22 @@ impl super::AiMission {
                     }
                 }
             }
+            // A helicopter learns where the radars painting it stand (slice
+            // H4); fixed-wing strikers keep to their sensors.
+            if actor.is_rotorcraft() {
+                let id = actor.id();
+                let painted: Vec<u32> = scene
+                    .painted
+                    .iter()
+                    .filter(|(plane, _)| *plane == id)
+                    .map(|(_, unit)| *unit)
+                    .collect();
+                if !painted.is_empty()
+                    && let Some(picture) = actor.ground.as_mut()
+                {
+                    picture.reveal(tick, &painted, &subjects);
+                }
+            }
         }
     }
 }

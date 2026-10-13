@@ -41,6 +41,7 @@ use super::{
 };
 use crate::ai::awareness::ground::{BriefedKind, ThreatLevel};
 use crate::ai::controller::{Activity, OwnState};
+use crate::ai::helicopter_threat::{self as threat, Decision};
 use crate::ai::motion::SpeedRequest;
 use crate::attitude::Vector;
 
@@ -162,6 +163,7 @@ pub(super) fn step(s: &mut Strike, cx: &Context<'_>) -> Order {
             s.enter(Phase::Ingress, cx.tick);
         }
     }
+    track_ambush(s, cx);
     if cx.defending || s.threatened(cx) {
         if s.phase != Phase::Defend {
             s.enter(Phase::Defend, cx.tick);
@@ -173,12 +175,10 @@ pub(super) fn step(s: &mut Strike, cx: &Context<'_>) -> Order {
         if !s.quiet(cx) {
             return mask_run(cx, order);
         }
-        if s.safe(cx) {
-            s.enter(Phase::Ingress, cx.tick);
-        } else {
-            s.withdrawn = true;
-            exit(s, cx);
-        }
+        // The threat has gone quiet: back to the ingress, where the rings it
+        // knows (and the ring it was ambushed in) decide whether it attacks
+        // or holds off (slice H4), in place of the fighters' safe test.
+        s.enter(Phase::Ingress, cx.tick);
     }
     let solution = s.solution(cx);
     let target_at = solution
@@ -192,20 +192,35 @@ pub(super) fn step(s: &mut Strike, cx: &Context<'_>) -> Order {
     if s.phase == Phase::Attack && !target_alive {
         exit(s, cx);
     }
+    // A pass not yet fired that a ring now blocks is given up for the
+    // hold-off (slice H4): it does not press an attack through a threat.
+    if s.phase == Phase::Attack
+        && s.released == 0
+        && s.segment == Segment::Approach
+        && s.forced.is_none()
+        && let (Some(target), Some(point)) = (s.target, target_at)
+        && plan(s, cx, point).is_none()
+    {
+        hold_off(s, cx, target);
+    }
     match s.phase {
         Phase::Ingress | Phase::Wait => {
             let point = target_at.or_else(|| objective_point(cx.picture));
             let near = point.is_none_or(|p| horizontal(own.position, p) <= CHOICE_DISTANCE_FT);
+            // A ring across the way in makes it choose (and hold off) now.
+            let ringed = point.is_some_and(|p| !threat::clear(&rings(s, cx), own.position, p));
             let waited =
                 s.phase != Phase::Wait || cx.tick.saturating_sub(s.since) >= super::WAIT_TICKS;
-            if near && waited {
+            if (near || ringed) && waited {
                 choose(s, cx);
             }
         }
+        Phase::HoldOff => hold_check(s, cx),
         Phase::TurnBack => match target_at {
             Some(point)
                 if angle_difference(own.heading_deg, bearing_deg(own.position, point)).abs()
-                    > TURN_BACK_DEG => {}
+                    > TURN_BACK_DEG
+                    && threat::clear(&rings(s, cx), own.position, point) => {}
             _ => choose(s, cx),
         },
         Phase::Exit => {
@@ -238,6 +253,14 @@ pub(super) fn step(s: &mut Strike, cx: &Context<'_>) -> Order {
     };
     match s.phase {
         Phase::Home | Phase::Defend | Phase::Regain | Phase::Lase => order,
+        Phase::HoldOff => Order {
+            steer: s
+                .heli
+                .hold
+                .map(|(centre, _)| hold_steer(cx, centre, &rings(s, cx))),
+            activity: Some(Activity::Pursuing),
+            ..order
+        },
         Phase::Ingress | Phase::Wait | Phase::TurnBack => Order {
             steer: target_at
                 .or_else(|| objective_point(cx.picture))
@@ -307,7 +330,24 @@ fn cruise_altitude(s: &Strike, cx: &Context<'_>, target: Vector) -> f64 {
 /// The choice: target, store, pass and aim; or wait, or home.
 fn choose(s: &mut Strike, cx: &Context<'_>) {
     let own = cx.own;
-    let Some(target) = s.pick_target(cx) else {
+    // Once it has waited out a hold-off, a target no attack outside the
+    // rings can reach is not taken (slice H4).
+    let picked = if s.heli.waited && s.forced.is_none() {
+        let allow =
+            |id: u32| known_position(cx.picture, id).is_some_and(|p| plan(s, cx, p).is_some());
+        s.pick_target_where(cx, &allow)
+    } else {
+        s.pick_target(cx)
+    };
+    let Some(target) = picked else {
+        if s.heli.waited && s.forced.is_none() && s.pick_target(cx).is_some() {
+            // Everything left is inside a ring: home (John, 2026-10-12).
+            s.heli.decide(Decision::Home, cx.tick, s.target, None);
+            s.heli.hold = None;
+            s.enter(Phase::Home, cx.tick);
+            s.target = None;
+            return;
+        }
         let waiting = cx
             .picture
             .briefed()
@@ -352,10 +392,33 @@ fn choose(s: &mut Strike, cx: &Context<'_>) {
     s.station = Some(store.station);
     s.kind = Some(store.kind);
     s.threat = threat;
+    // The rings it knows decide how, or whether, it attacks (slice H4).
+    let wanted = choose_pass(store.kind, threat);
+    s.heli.approach = None;
+    s.heli.standoff_ft = None;
     let pass = match s.forced {
         Some(pass @ (Pass::PopUp | Pass::StandOff)) => pass,
-        _ => choose_pass(store.kind, threat),
+        _ => match plan_with(s, cx, target_at, Some(store), wanted == Pass::StandOff) {
+            Some(threat::Plan::PopUp) => Pass::PopUp,
+            Some(threat::Plan::StandOff { approach, range_ft }) => {
+                s.heli.approach = approach;
+                s.heli.standoff_ft = approach.map(|_| range_ft);
+                Pass::StandOff
+            }
+            None => {
+                hold_off(s, cx, target);
+                return;
+            }
+        },
     };
+    if s.heli.hold.take().is_some() && std::mem::take(&mut s.heli.announced) {
+        let decision = if s.heli.waited && s.heli.call.is_some_and(|c| c.target != Some(target)) {
+            Decision::Retarget
+        } else {
+            Decision::Resume
+        };
+        s.heli.decide(decision, cx.tick, Some(target), None);
+    }
     s.pass = Some(pass);
     s.pass_number += 1;
     let radius_ft = release_circle_ft(cx.experience);
@@ -411,12 +474,261 @@ fn exit_steer(s: &Strike, cx: &Context<'_>, target_at: Option<Vector>) -> Steer 
         EXIT_CLIMB_DEG
     };
     Steer {
-        heading_deg: s.exit_heading_deg,
+        heading_deg: clear_heading(&rings(s, cx), own.position, s.exit_heading_deg),
         pitch_deg: pitch,
         speed: SpeedRequest::Maximum,
         afterburner: false,
         bank_deg: None,
         handling: Handling::PLAIN,
+    }
+}
+
+/// A stand-off flown to a firing point off the straight line unmasks
+/// within this of it (fitted, agent).
+pub const APPROACH_REACHED_FT: f64 = 1_000.;
+/// A stand-off shot leaves only with the nose within this of the target's
+/// bearing (fitted, agent).
+pub const STANDOFF_NOSE_DEG: f64 = 15.;
+/// On the firing point's radial within this, across it (fitted, agent).
+pub const ON_RADIAL_FT: f64 = 1_000.;
+/// How far ahead an exit looks for a ring across its heading (fitted,
+/// agent).
+pub const EXIT_LOOK_FT: f64 = 4_000.;
+
+/// The rings the helicopter knows (slice H4): its picture's hostile
+/// defences, and the ring of an ambush it is keeping out of.
+fn rings(s: &Strike, cx: &Context<'_>) -> Vec<threat::Ring> {
+    let mut rings = threat::known_rings(cx.picture, cx.side);
+    if let Some((ring, _)) = s.heli.ambush {
+        rings.push(ring);
+    }
+    rings
+}
+
+/// The attack on a target at `target_at` with the store it would choose.
+fn plan(s: &Strike, cx: &Context<'_>, target_at: Vector) -> Option<threat::Plan> {
+    let store = choose_store(&cx.inputs.stores, cx.inputs.designator);
+    let threat_level = cx
+        .picture
+        .threats()
+        .level(cx.side, &[target_at], cx.warnings);
+    let wanted = store.is_some_and(|st| choose_pass(st.kind, threat_level) == Pass::StandOff);
+    plan_with(s, cx, target_at, store, wanted)
+}
+
+fn plan_with(
+    s: &Strike,
+    cx: &Context<'_>,
+    target_at: Vector,
+    store: Option<Store>,
+    prefer_standoff: bool,
+) -> Option<threat::Plan> {
+    let standoff = store
+        .filter(|st| !st.kind.unguided())
+        .map(|st| (st.maximum_range_ft, st.fire_range_ft));
+    threat::plan_attack(
+        cx.own.position,
+        target_at,
+        standoff,
+        prefer_standoff,
+        &rings(s, cx),
+    )
+}
+
+/// Holds off `target`: circles masked outside the rings (slice H4).
+fn hold_off(s: &mut Strike, cx: &Context<'_>, target: u32) {
+    let rings = rings(s, cx);
+    let centre = threat::hold_centre(cx.own.position, &rings, cx.terrain);
+    let since = match s.heli.hold {
+        // A hold already running keeps its clock.
+        Some((_, since)) if s.target == Some(target) => since,
+        _ => cx.tick,
+    };
+    if s.heli.hold.is_none() || s.target != Some(target) {
+        s.heli.announced = false;
+    }
+    s.heli.hold = Some((centre, since));
+    s.target = Some(target);
+    s.heli.approach = None;
+    s.heli.standoff_ft = None;
+    s.released = 0;
+    s.holding = None;
+    s.enter(Phase::HoldOff, cx.tick);
+}
+
+/// The ring that stands between the helicopter and `target`: the first
+/// covering the target, else the first across the line to it.
+fn target_ring(cx: &Context<'_>, target: u32, rings: &[threat::Ring]) -> Option<u32> {
+    let at = known_position(cx.picture, target)?;
+    threat::inside(rings, at)
+        .or_else(|| {
+            rings
+                .iter()
+                .find(|r| !threat::clear(std::slice::from_ref(r), cx.own.position, at))
+        })
+        .map(|r| r.id)
+}
+
+/// While holding off: attack once a plan stands clear of the rings; after
+/// [`threat::HOLD_WAIT_TICKS`] give the target up for another outside the
+/// rings, or go home (John, 2026-10-12).
+fn hold_check(s: &mut Strike, cx: &Context<'_>) {
+    let Some((_, since)) = s.heli.hold else {
+        choose(s, cx);
+        return;
+    };
+    // The call, once the hold has lasted: "holding off" for a known ring,
+    // nothing more for the ambush ring it already called leaving.
+    if !s.heli.announced
+        && cx.tick.saturating_sub(since) >= threat::HOLD_CALL_TICKS
+        && let Some(target) = s.target
+    {
+        s.heli.announced = true;
+        let rings = rings(s, cx);
+        let ring = target_ring(cx, target, &rings);
+        if ring != Some(threat::AMBUSH_ID) {
+            s.heli
+                .decide(Decision::HoldOff, cx.tick, Some(target), ring);
+        }
+    }
+    // A ring learnt since over the hold point moves it out again.
+    let rings_now = rings(s, cx);
+    if let Some((centre, since)) = s.heli.hold
+        && rings_now
+            .iter()
+            .any(|r| horizontal(r.centre, centre) < r.radius_ft + threat::HOLD_RADIUS_FT - 1.)
+    {
+        let moved = threat::hold_centre(cx.own.position, &rings_now, cx.terrain);
+        s.heli.hold = Some((moved, since));
+    }
+    let target_at = s.target.and_then(|id| known_position(cx.picture, id));
+    let alive = s.target.is_some_and(|id| standing(cx.picture, id));
+    if !alive || target_at.is_some_and(|p| plan(s, cx, p).is_some()) {
+        choose(s, cx);
+        return;
+    }
+    if cx.tick.saturating_sub(since) >= threat::HOLD_WAIT_TICKS {
+        s.heli.waited = true;
+        choose(s, cx);
+        if s.phase == Phase::HoldOff {
+            // The same target came back blocked: nothing outside the rings.
+            s.heli.decide(Decision::Home, cx.tick, s.target, None);
+            s.heli.hold = None;
+            s.target = None;
+            s.enter(Phase::Home, cx.tick);
+        }
+    }
+}
+
+/// The hold-off circle: on the way there the heading turns round any ring
+/// across it; there, retail's circle law about `centre` at the hold
+/// radius (as the gunship's orbit, with the adapter's own bank), at
+/// maximum speed, down at the masked height over the highest ground under
+/// and ahead of it.
+fn hold_steer(cx: &Context<'_>, centre: Vector, rings: &[threat::Ring]) -> Steer {
+    let own = cx.own;
+    let radius = threat::HOLD_RADIUS_FT;
+    let distance = horizontal(own.position, centre);
+    let offset = (90. - 45. * (distance - radius) / radius).clamp(0., 135.);
+    let heading = if distance > threat::HOLD_REACHED_FT {
+        // On the way there, round any ring across the line (slice H4).
+        clear_heading(rings, own.position, bearing_deg(own.position, centre))
+    } else {
+        // A left-hand circle.
+        (bearing_deg(own.position, centre) - offset).rem_euclid(360.)
+    };
+    let ground = (own.position[1] - own.agl_ft).max(own.terrain_ahead_ft);
+    Steer {
+        heading_deg: heading,
+        pitch_deg: hold_pitch_deg(own.position[1], ground + MASK_AGL_FT),
+        speed: SpeedRequest::Maximum,
+        afterburner: false,
+        bank_deg: None,
+        handling: Handling::PLAIN,
+    }
+}
+
+/// Flying to a firing point off the straight line (slice H4): first the
+/// lead-in point [`threat::LEAD_IN_FT`] beyond it on the target's radial,
+/// then, once on the radial (within [`ON_RADIAL_FT`] of it and outside the
+/// firing point), the firing point itself, so it arrives nose on.
+fn on_radial(own: Vector, target: Vector, point: Vector) -> Vector {
+    let range = horizontal(target, point).max(1.);
+    let u = [
+        (point[0] - target[0]) / range,
+        (point[2] - target[2]) / range,
+    ];
+    let (dx, dz) = (own[0] - target[0], own[2] - target[2]);
+    let along = dx * u[0] + dz * u[1];
+    let across = (dx * u[1] - dz * u[0]).abs();
+    if along >= range && across <= ON_RADIAL_FT {
+        point
+    } else {
+        let k = (range + threat::LEAD_IN_FT) / range;
+        [
+            target[0] + (point[0] - target[0]) * k,
+            point[1],
+            target[2] + (point[2] - target[2]) * k,
+        ]
+    }
+}
+
+/// The heading nearest `heading` whose next [`EXIT_LOOK_FT`] stays out of
+/// every ring, in 15 degree steps, right first; `heading` itself when none
+/// does (boxed in). Inside a ring it is straight out of it.
+fn clear_heading(rings: &[threat::Ring], own: Vector, heading: f64) -> f64 {
+    if let Some(ring) = threat::inside(rings, own) {
+        return bearing_deg(ring.centre, own);
+    }
+    let ahead = |h: f64| {
+        let b = h.to_radians();
+        [
+            own[0] + b.sin() * EXIT_LOOK_FT,
+            own[1],
+            own[2] + b.cos() * EXIT_LOOK_FT,
+        ]
+    };
+    for k in 0..=12 {
+        for side in [1., -1.] {
+            let h = (heading + side * f64::from(k) * 15.).rem_euclid(360.);
+            if threat::clear(rings, own, ahead(h)) {
+                return h;
+            }
+            if k == 0 || k == 12 {
+                break;
+            }
+        }
+    }
+    heading
+}
+
+/// The ring of a threat it did not know (slice H4, John's rule): engaged
+/// (a defence flown) from outside every ring it knows, it marks an ambush
+/// ring there; each engagement keeps it fresh, and once the threat has
+/// been quiet for [`threat::AMBUSH_QUIET_TICKS`] and the helicopter is out
+/// of it, it is forgotten and the attack may resume.
+fn track_ambush(s: &mut Strike, cx: &Context<'_>) {
+    let own = cx.own.position;
+    if cx.defending {
+        match s.heli.ambush.as_mut() {
+            Some((_, last)) => *last = cx.tick,
+            None => {
+                let known = threat::known_rings(cx.picture, cx.side);
+                if threat::inside(&known, own).is_none() {
+                    let ring = threat::ambush_ring(own, cx.threat_bearing_deg);
+                    s.heli.ambush = Some((ring, cx.tick));
+                    s.heli
+                        .decide(Decision::Leave, cx.tick, s.target, Some(threat::AMBUSH_ID));
+                }
+            }
+        }
+        return;
+    }
+    if let Some((ring, last)) = s.heli.ambush
+        && cx.tick.saturating_sub(last) >= threat::AMBUSH_QUIET_TICKS
+        && horizontal(ring.centre, own) >= ring.radius_ft
+    {
+        s.heli.ambush = None;
     }
 }
 
@@ -449,9 +761,10 @@ fn attack(s: &mut Strike, cx: &Context<'_>, target: Vector, solution: Option<Sol
     };
     let distance = horizontal(own.position, target);
     let ahead = angle_difference(own.heading_deg, bearing_deg(own.position, target)).abs() < 90.;
-    let standoff = s
-        .store(cx)
-        .map_or(POPUP_PULL_AT_FT, |st| STANDOFF_SHARE * st.maximum_range_ft);
+    let standoff = s.heli.standoff_ft.unwrap_or_else(|| {
+        s.store(cx)
+            .map_or(POPUP_PULL_AT_FT, |st| STANDOFF_SHARE * st.maximum_range_ft)
+    });
 
     // Segment changes.
     match (pass, s.segment) {
@@ -462,7 +775,17 @@ fn attack(s: &mut Strike, cx: &Context<'_>, target: Vector, solution: Option<Sol
             s.segment_to(Segment::Final, cx.tick)
         }
         // The stand-off run unmasks at its range: the "pull" is the climb.
-        (Pass::StandOff, Segment::Approach) if distance <= standoff => {
+        (Pass::StandOff, Segment::Approach)
+            if distance <= standoff && s.heli.approach.is_none() =>
+        {
+            s.segment_to(Segment::Pull, cx.tick)
+        }
+        // A firing point off the straight line (slice H4): unmask there.
+        (Pass::StandOff, Segment::Approach)
+            if s.heli
+                .approach
+                .is_some_and(|p| horizontal(own.position, p) <= APPROACH_REACHED_FT) =>
+        {
             s.segment_to(Segment::Pull, cx.tick)
         }
         _ => {}
@@ -508,7 +831,12 @@ fn attack(s: &mut Strike, cx: &Context<'_>, target: Vector, solution: Option<Sol
             corner,
         ),
         (Pass::StandOff, Segment::Approach) => (
-            bearing_deg(own.position, target),
+            bearing_deg(
+                own.position,
+                s.heli
+                    .approach
+                    .map_or(target, |p| on_radial(own.position, target, p)),
+            ),
             hold_pitch_deg(own.position[1], own.position[1] - own.agl_ft + MASK_AGL_FT),
             corner,
         ),
@@ -581,6 +909,17 @@ fn attack(s: &mut Strike, cx: &Context<'_>, target: Vector, solution: Option<Sol
                             && sol.impact.is_some_and(|i| {
                                 horizontal(i, aim) <= release_circle_ft(cx.experience)
                             }))
+                }
+                // A stand-off shot leaves with the nose on the target: a
+                // firing point off the straight line is reached turning
+                // (slice H4).
+                _ if pass == Pass::StandOff => {
+                    first
+                        && sol.due
+                        && !sol.guided_in_flight
+                        && angle_difference(own.heading_deg, bearing_deg(own.position, target))
+                            .abs()
+                            <= STANDOFF_NOSE_DEG
                 }
                 _ => first && sol.due && !sol.guided_in_flight,
             };

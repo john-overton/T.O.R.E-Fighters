@@ -105,6 +105,12 @@ impl AiActor {
         self.strike.as_mut().is_some_and(|s| s.told_no_laze())
     }
 
+    /// A helicopter's threat decision has been said on the radio (slice
+    /// H4); the decision if there was one still to say.
+    pub fn told_threat_call(&mut self) -> Option<crate::ai::helicopter_threat::Decision> {
+        self.strike.as_mut().and_then(|s| s.told_threat_call())
+    }
+
     /// The object the actor is lasing, if it is.
     pub fn lasing(&self) -> Option<u32> {
         self.strike.as_ref().and_then(|s| s.lasing())
@@ -120,9 +126,11 @@ impl AiActor {
     /// said on the radio or recorded keeps the strike one step longer, so
     /// the host sees it before the strike is dropped (slice ST-G).
     pub(super) fn strike_home(&self) -> bool {
-        self.strike
-            .as_ref()
-            .is_some_and(|s| s.home() && s.no_laze().is_none_or(|call| call.told))
+        self.strike.as_ref().is_some_and(|s| {
+            s.home()
+                && s.no_laze().is_none_or(|call| call.told)
+                && s.threat_call().is_none_or(|call| call.told)
+        })
     }
 
     /// The target the striker is attacking, for its wingmates' allowance.
@@ -148,6 +156,7 @@ impl AiActor {
         inputs: Option<Inputs>,
         mates: &[u32],
         wing: strike::WingFacts,
+        terrain: &dyn Fn(f64, f64) -> f64,
     ) -> Option<Order> {
         if !self.strikes() {
             if self.strike.is_some() && self.ground.is_none() {
@@ -197,6 +206,8 @@ impl AiActor {
             mates,
             wing,
             ceiling_ft: self.ceiling_ft(),
+            terrain: Some(terrain),
+            threat_bearing_deg: self.trace.rotor_break.and_then(|(_, bearing)| bearing),
         };
         let strike = self.strike.as_mut()?;
         let order = strike.step(&context);

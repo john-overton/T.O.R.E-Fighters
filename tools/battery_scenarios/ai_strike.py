@@ -439,11 +439,13 @@ HELI_AGL_MIN_FT = 150.0
 
 
 def heli_defense_problems(output: str, runs_wanted: list[dict]) -> list[str]:
-    """`ai-strike-heli-defended`: for each run (`label`, `profile`, `breaks` BREAK lines at least,
-    `release` and `kill` wanted or not), the AI named its pass, flew the helicopter break (a BREAK
-    line a second while it did, each at an offset of 60, 90 or 120 degrees, at 75 knots or more, no
-    steeper than 10 degrees, never blocked by the ground), released as wanted, was not lost and did
-    not fly lower than 150 ft above the ground."""
+    """`ai-strike-heli-defended`: for each run (`label`, `profile` or None for any, `breaks` BREAK
+    lines at least, `release` wanted, `no_release`, `hurt`, `kill`, `decisions` the THREAT reasons
+    wanted in this order, `sead` the SEAD stand-in fired), the AI named its pass, flew the helicopter
+    break (each BREAK at an offset of 60, 90 or 120 degrees, at 75 knots or more, no steeper than 10
+    degrees, never blocked by the ground), made its threat decisions (slice H4: hold off outside a
+    known ring, resume, switch targets, go home, leave an ambush's ring), released as wanted, was not
+    lost and did not fly lower than 150 ft above the ground."""
     runs = parse_runs(output)
     if len(runs) != len(runs_wanted):
         return [f"{len(runs)} runs finished, want {len(runs_wanted)}"]
@@ -452,10 +454,10 @@ def heli_defense_problems(output: str, runs_wanted: list[dict]) -> list[str]:
         label = want["label"]
         problems += consistency_problems(run, label)
         named = (run.of("PROFILE") or [{}])[-1]
-        if named.get("name") != want["profile"]:
+        if want.get("profile") and named.get("name") != want["profile"]:
             problems.append(f"{label}: flew PROFILE {named.get('name')}, want {want['profile']}")
         breaks = run.of("BREAK")
-        if len(breaks) < want["breaks"]:
+        if len(breaks) < want.get("breaks", 0):
             problems.append(f"{label}: {len(breaks)} BREAK lines, want at least {want['breaks']}")
         for line in breaks:
             at = f"{label}: BREAK at t={line.get('t')}"
@@ -467,8 +469,19 @@ def heli_defense_problems(output: str, runs_wanted: list[dict]) -> list[str]:
                 problems.append(f"{at} asks for a flight path of {line.get('pitch')} degrees")
             if number(line.get("blocked_s")) != 0:
                 problems.append(f"{at} is blocked by the ground for {line.get('blocked_s')} s")
-        if want["release"] and not (run.of("RELEASE") and run.of("IMPACT")):
+        made = [line.get("decision") for line in run.of("THREAT")]
+        wanted = [f"threat_{d}" for d in want.get("decisions", [])]
+        rest = iter(made)
+        if not all(any(d == m for m in rest) for d in wanted):
+            problems.append(f"{label}: threat decisions {made}, want {wanted} in that order")
+        if want.get("sead") and not run.of("SEAD"):
+            problems.append(f"{label}: the SEAD stand-in never fired")
+        if want.get("release") and not (run.of("RELEASE") and run.of("IMPACT")):
             problems.append(f"{label}: no release and impact")
+        if want.get("no_release") and run.of("RELEASE"):
+            problems.append(f"{label}: released into a ring it knew ({run.first('RELEASE')})")
+        if want.get("hurt") and not _target_hurt(run):
+            problems.append(f"{label}: the target is unhurt ({run.summary.get('target_hp')})")
         if want.get("kill") and not any(k.get("target") == "yes" for k in run.of("KILL")):
             problems.append(f"{label}: the target was not killed ({run.summary.get('target_hp')})")
         if run.of("LOST"):
@@ -953,35 +966,56 @@ def scenarios() -> list[Scenario]:
     heli = ["--altitude", "1500", "--speed", "120", "--seconds", "150"]
     at2 = ["--aircraft", "mi24", "--load", "AT2", *heli]
     heli_rockets = ["--aircraft", "ah64", "--load", "LAU61", *heli]
-    # Light SAMs with the layout of surface seed 19: the Mi-24's pop-up goes through their warnings,
+    # Light SAMs with the layout of surface seed 16: the Mi-24's pop-up goes through their warnings,
     # breaks and gets its AT-2 away (slice ST-H; before it, the fighters' defence sank a helicopter).
+    # Seed 19, ST-H's layout, holds a SAM that out-ranges the AT-2: since slice H4 the helicopter
+    # holds off there (ai-strike-heli-defended).
+    sams16 = ["--defenses", "0", "1", "--surface-seed", "16"]
     sams19 = ["--defenses", "0", "1", "--surface-seed", "19"]
     heli_runs = [
         (pilot_run("UKR", "QUCOL", *at2, "--skill", "2"),
          dict(label="mi24 at2 popup", profile="popup", skill=2, miss=None, hit=True)),
-        (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams19),
+        (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams16),
          dict(label="mi24 at2 popup under SAMs", profile="popup", skill=2, miss=None, hit=True, defends=True)),
         (pilot_run("UKR", "QUCOL", *heli_rockets, "--skill", "2"),
          dict(label="ah64 rockets skill 2", profile="popup", skill=2, miss=MISS_FT_MAX[2], egress=False)),
         (pilot_run("UKR", "QUCOL", *heli_rockets, "--skill", "3"),
          dict(label="ah64 rockets skill 3", profile="popup", skill=3, miss=MISS_FT_MAX[3], egress=False)),
     ]
-    # The helicopter's defence (slice ST-H): the AI picks its own pass, a break of plus or minus 90
-    # degrees comes with every warning, speed and height are kept, and the helicopter is not lost.
-    # AAA: heavy on the column (skill 1), light on the factory. SAMs: the layout of seed 1 from 4 nm
-    # at 200 ft, where the AI chooses the stand-off attack itself and the SAMs out-range it, so
-    # nothing is released and the helicopter lives (the stand-off attack's own pass is the unit
-    # tests').
+    # The helicopter's defence (slice ST-H) and threat awareness (slice H4, John's rule of
+    # 2026-10-12): the AI picks its own pass; a known SAM or gun ring it does not fly into (it attacks
+    # from outside every ring, or holds off up to 3 minutes for SEAD, then switches targets or goes
+    # home); a threat it did not know gets the break, then it leaves that ring and resumes once the
+    # threat is quiet. Every run lives. The switch to another target outside the rings is the unit
+    # tests' (no driver layout has a second target outside every ring).
+    sams = ["--defenses", "0", "1"]
     defended_runs = [
+        # Heavy AAA on the column (before H4 the Mi-24 flew the pop-up through it and was lost):
+        # a firing point off the straight line, outside the guns' rings.
         (pilot_run("UKR", "QUCOL", *at2, "--skill", "1", "--defenses", "3", "0"),
-         dict(label="mi24 under heavy AAA", profile="popup", breaks=20, release=True, kill=True)),
+         dict(label="mi24 under heavy AAA", profile="standoff", release=True, hurt=True)),
         (pilot_run("UKR", "QUFACT", *at2, "--skill", "1", "--defenses", "1", "0"),
-         dict(label="mi24 under light AAA at the factory", profile="popup", breaks=5, release=True, kill=True)),
-        (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams19),
-         dict(label="mi24 under SAMs", profile="popup", breaks=5, release=True)),
+         dict(label="mi24 under light AAA at the factory", profile="popup", release=True, kill=True)),
+        # A SAM that out-ranges the AT-2 (the open ST-H question): hold off, then home.
+        (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams19, "--seconds", "240"),
+         dict(label="mi24 under a SAM that out-ranges the AT-2", decisions=["hold_off", "home"],
+              no_release=True)),
+        # An SA-14 on the target: hold off, nothing outside the ring, home.
+        (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams, "--surface-seed", "4", "--seconds", "240"),
+         dict(label="mi24 holds off then goes home", decisions=["hold_off", "home"], no_release=True)),
+        # The same with SEAD killing the sites a minute in: it resumes and fires.
+        (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams, "--surface-seed", "4", "--seconds", "240",
+                   "--sead-at", "60"),
+         dict(label="mi24 resumes after SEAD", decisions=["hold_off", "resume"], sead=True, release=True,
+              hurt=True)),
+        # An ambush by a SAM it did not know: break, leave the ring, resume once it is quiet.
+        (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams, "--surface-seed", "15", "--seconds", "420"),
+         dict(label="mi24 ambushed", decisions=["leave", "resume"], breaks=5, release=True, hurt=True)),
+        # From 4 nm at 200 ft on seed 1 the AI would choose the stand-off under the SAMs; it holds off.
         (pilot_run("UKR", "QUCOL", "--aircraft", "mi24", "--load", "AT2", "--altitude", "200", "--from", "4",
-                   "--speed", "120", "--seconds", "200", "--skill", "2", "--defenses", "0", "1", "--surface-seed", "1"),
-         dict(label="mi24 chooses the stand-off under SAMs", profile="standoff", breaks=5, release=False)),
+                   "--speed", "120", "--seconds", "200", "--skill", "2", *sams, "--surface-seed", "1"),
+         dict(label="mi24 holds off the SAMs it would stand off under", profile="standoff",
+              decisions=["hold_off", "home"], no_release=True)),
     ]
     # The AC-130 (slice ST-F) on the moving armoured column: the TVIET truck park's radar-laid guns
     # (26,200 and 44,250 ft reach) shoot it down on its way in, so the quiet column it is.
@@ -1268,14 +1302,17 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="ai-strike-heli-defended", lane="flight",
             args=defended_runs[0][0], timeout=600,
-            then=[Step(a, timeout=300) for a, _ in defended_runs[1:]],
+            then=[Step(a, timeout=600) for a, _ in defended_runs[1:]],
             check=lambda out: heli_defense_problems(out, [w for _, w in defended_runs]),
-            notes="A Mi-24 under fire (slice ST-H): heavy AAA on the column and light AAA at the "
-                  "factory (it breaks, still fires its AT-2 and kills the target), light SAMs (it "
-                  "breaks, fires, hurts the target), and the layout the AI answers with the stand-off "
-                  "attack itself (it breaks and lives). Each break is the retail plus or minus 90 "
-                  "degrees to the threat's bearing (or the masking alternatives), kept at speed, within "
-                  "10 degrees of level and clear of the ground; the helicopter is not lost.",
+            notes="A Mi-24 against defences (slices ST-H and H4, John's threat rule of 2026-10-12): "
+                  "heavy AAA on the column (it fires its AT-2 from outside every gun ring and hurts the "
+                  "tank), light AAA at the factory (pop-up, kill), a SAM that out-ranges the AT-2 and an "
+                  "SA-14 on the target (it holds off, then goes home), the SA-14 with SEAD a minute in "
+                  "(it resumes and fires), an ambush by a SAM it did not know (it breaks, leaves the "
+                  "ring, resumes once quiet and fires), and the stand-off layout of seed 1 (it holds "
+                  "off). Each break is the retail plus or minus 90 degrees to the threat's bearing (or "
+                  "the masking alternatives), kept at speed, within 10 degrees of level and clear of "
+                  "the ground; the helicopter is never lost.",
         ),
         Scenario(
             name="qmc-strike-heli", lane="flight",

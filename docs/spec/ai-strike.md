@@ -573,7 +573,7 @@ rockets' aim offset (the [skill circle](#skill-and-release-precision)).
 | Rule | Value | Label |
 | --- | --- | --- |
 | Store | The AT-2 (or any guided or seeker store) first, then rockets; a laser store only with its own designator. Guns are not used against the ground | fitted (agent) |
-| Pass | Under threat Missiles with a guided store: the stand-off attack. Otherwise the pop-up | fitted (agent), spec rule above |
+| Pass | Under threat Missiles with a guided store: the stand-off attack. Otherwise the pop-up. Either only when it stays outside every threat ring the helicopter knows ([threat awareness](#helicopter-threat-awareness)): a ring on the target turns a pop-up into a stand-off from outside it, and with neither it holds off | fitted (agent), spec rule above; rings opinionated (John, 2026-10-12) |
 | Pop-up | Toward a point 1,500 ft above the target until 10,000 ft out, a pull 30 degrees over the line of sight for 6 s, then the nose on the target until 1,500 ft or the target is behind. The pull does not bleed speed: retail's operand slip asks for minimum speed there, T.O.R.E does not copy it | retail shape; no bleed opinionated (John, 2026-10-11, "maintain proper speed for defense and quick exfil") |
 | Speed | Every leg asks for the helicopter's maximum speed. Asked for corner speed, the AI's input-only adapter slows a helicopter until it sinks (a Mi-24 on the pop-up went from 120 to 85 kt and into the ground), and the adapter holds a helicopter at about 85 to 140 kt on maximum | opinionated (John) for keeping speed; the value fitted (agent) to what the adapter can fly |
 | Stand-off attack | Masked: toward the target, down toward 200 ft above the ground, to 60% of the weapon's zone-1 range (about where the guided T bar stands, 40% of the reach in from its far edge; 10,800 ft for the AT-2). Unmask: climb 500 ft, nose on the target, for at most 10 s while the shot comes up. Fire, hold the line, then mask again turning away from the target and run out to the weapon's range plus 6,000 ft before turning back | fitted (agent) |
@@ -583,7 +583,8 @@ rockets' aim offset (the [skill circle](#skill-and-release-precision)).
 | Run floor | A pop-up's final ends 500 ft above the ground whatever the cue says (the adapter cannot pull a helicopter out of a steep dive near the ground) | fitted (agent) |
 | Exit | Retail's: 5 degrees up at maximum speed on the exit heading, levelling at the pass's height, to max(20,000 ft, 2R); then turn back and choose again | retail |
 | Defence | The helicopter's own break ([below](#helicopter-defence)); the fighters' break sank a helicopter | opinionated (John, 2026-10-11) |
-| Safe, home | The fighters' (above); a helicopter has no landing, so home is the ordinary return-to-base heading ([below](#ai-helicopters-in-quick-mission)) | spec-derived |
+| After a defence | Back to the ingress, where the rings it knows (and the ring it was ambushed in) decide whether it attacks or holds off ([below](#helicopter-threat-awareness)); the fighters' safe test and withdrawal are not used | opinionated (John, 2026-10-12) |
+| Home | A helicopter has no landing, so home is the ordinary return-to-base heading ([below](#ai-helicopters-in-quick-mission)) | spec-derived |
 
 ### Helicopter defence
 
@@ -623,13 +624,70 @@ retail's 90 degrees off the threat, held at 85 to 147 knots with the flight path
 within 10 degrees of level: the numbers are in the `BREAK` lines of the
 [driver](../testing/lane-flight.md#ai-strike-driver).
 
-What it does not do. The break does not save a helicopter that has to cross
-SAMs which cover its whole approach: the column's SA-9s and SA-14 out-range the
-AT-2, so a stand-off attack (which the AI chooses there, as intended) is shot
-down or aborted before its firing point in 15 of the 16 driver runs, and flat
-ground gives no cover to mask behind. A hit that breaks a helicopter's controls
-or engine ends in a spiral or a fall whatever the AI does. Both are open
-([Unknowns](#unknowns)).
+What it does not do. The break alone does not save a helicopter that has to
+cross SAMs which cover its whole approach (the column's SA-9s and SA-14
+out-range the AT-2). Slice H4 stops it flying into them when it knows of them
+([threat awareness](#helicopter-threat-awareness)). A hit that breaks a
+helicopter's controls or engine ends in a spiral or a fall whatever the AI does.
+
+### Helicopter threat awareness
+
+*Built in slice H4 (`tore_sim::ai::helicopter_threat`, the helicopter family's
+hold-off; John's rule, 2026-10-12).* A helicopter is slow and low: a SAM or gun
+site it knows about is somewhere it does not go. What it knows decides what it
+does.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Attack: an attack outside every ring
+    [*] --> HoldOff: every attack crosses a known ring
+    Attack --> HoldOff: a new ring blocks the pass before release
+    HoldOff --> Attack: the ring is gone (SEAD killed the site)
+    HoldOff --> Attack: 3 minutes, another target outside every ring
+    HoldOff --> Home: 3 minutes, nothing outside the rings
+    Attack --> Defend: engaged by a threat it did not know
+    Defend --> HoldOff: quiet 10 s, leaves the ambush ring
+    HoldOff --> Attack: ambush quiet 60 s and out of its ring
+```
+
+| Rule | Value | Label |
+| --- | --- | --- |
+| Aware | A defence in its ground picture: briefed, seen by its sensors, or a surface radar that painted it (the radar, and for a battery's radar the launchers it guides for, become known as if seen, from the next quarter-second refresh). A radar busy with another aircraft gives nothing away | opinionated (John, 2026-10-12) |
+| Ring | A threat's reach for that helicopter, the farthest launch zone of its missiles while it can guide, or of its guns for a SAM or AAA site or a ship (a tank's gun does not count), plus a 2,000 ft margin, measured on the ground | rule opinionated (John, 2026-10-12); reach from the defence facts [above](#perceived-threat-and-available-speed); margin fitted (agent) |
+| Attack outside the rings | The pop-up needs the target, and the straight line to it, outside every ring. A guided store (the AT-2) may instead fire from a point outside the rings: tried at its usual stand-off range (60% of the zone) and just inside the AI's fire range (95% of 10,000 ft or half the zone), on bearings from the target that start at the helicopter's own and step 15 degrees either way round; the point, the line to it and the 2,500 ft it carries on toward the target while it unmasks and guides must all be outside the rings. Off the straight line, it flies to that point masked, turns its nose onto the target and fires only within 15 degrees of it | fitted (agent) |
+| This covers SAMs that out-range the weapon | A SAM whose ring covers every firing point blocks the attack: the helicopter holds off instead of flying the stand-off under it (the open ST-H question) | opinionated (John, 2026-10-12) |
+| Not pressed through | A ring that appears (a new site perceived, a radar painting it) before anything has left blocks the pass in hand: the helicopter turns away to hold off. A pass already fired is finished (its AT-2 held to impact) | opinionated (John, 2026-10-12) |
+| Hold off | It circles a point outside every ring (with room for its 3,000 ft circle), at maximum speed, 200 ft over the highest ground under and ahead of it: the nearest such point, or one slid round the nearest site by 30 or 60 degrees where the terrain hides it from the site | rule opinionated (John, 2026-10-12); numbers fitted (agent): the AI's adapter cannot hover a helicopter |
+| Wait for SEAD | Up to 3 minutes. Each step it looks again; once an attack outside the rings exists (the site destroyed or no longer able to guide), it attacks | opinionated (John, 2026-10-12; 3 minutes the lead's number) |
+| Then | Another target an attack outside every ring can reach (the nearest briefed, then an opportunity target near the objective); with none, home. From then on it does not wait again | opinionated (John, 2026-10-12) |
+| Not aware | Engaged (a missile warning or gunfire) from outside every ring it knows, it breaks (the [helicopter defence](#helicopter-defence)) and marks an ambush ring of 3 nm round a point 1 nm from where it was engaged toward the threat's bearing (or round that place with no bearing) | opinionated (John, 2026-10-12); ring fitted (agent) |
+| Leave and stay out | Once the break's 10 quiet seconds are over it leaves the ambush ring (the hold off above) and stays out while the threat engages it. A minute with no warning or gunfire, outside the ring, and the ring is forgotten: it may resume. A threat it now knows is a ring of its own | opinionated (John, 2026-10-12); 60 s fitted (agent) |
+| Exit | An exit heading that would carry it into a ring within 4,000 ft turns by 15 degree steps to the nearest heading that does not | fitted (agent) |
+| No dice | Every choice is a fixed function of the threats, the positions, the store and the terrain | John's decision 13 |
+
+**Radio and replay.** The decisions use the wingman's text line to its lead
+(the "Winchester" style): "Threat on target, holding off" (once the hold-off
+has lasted 5 s, so a plan that comes clear at once says nothing), "Threat
+clear, resuming", "Target defended, switching targets", "Target defended, RTB"
+and "Engaged, leaving the threat ring". Each is an `ai.strike` replay event with
+the reason `threat_hold_off`, `threat_resume`, `threat_retarget`, `threat_home`
+or `threat_leave`, like the no-laze decisions; the strike driver prints them as
+`THREAT` lines ([driver](../testing/lane-flight.md#ai-strike-driver)).
+
+Measured on the strike driver (`ai-strike-heli-defended`, Mi-24 with AT-2s from
+4 nm at 1,500 ft, slice H4). Under the column's heavy AAA (skill 1) it flies to
+a firing point off the straight line, outside the guns' rings, fires from
+11,000 ft and hurts the tank without a shot fired at it (before, it flew the
+pop-up through the guns and was lost). Under a SAM that out-ranges the AT-2
+(surface seed 19) and under an SA-14 on the target (seed 4) every attack crosses
+a ring: it holds off for three minutes and goes home untouched. With the seed 4
+sites destroyed a minute in (the driver's SEAD stand-in) it resumes at once and
+hurts the tank. Under seed 15 an SA-14 it had not seen engages it at 155 s: it
+breaks, leaves the ring, holds, resumes at 266 s, once the threat has been quiet
+a minute, and hurts the tank from outside the rings it now knows. What it cannot do: a helicopter that starts, or is
+sent, inside a lethal ring it knows (the driver's 4 nm start under some SAM
+layouts) still has to fly out through it, and is often lost on the way; and the
+flight home is the mission's return heading, which does not avoid rings.
 
 ### AI helicopters in Quick Mission
 
@@ -972,6 +1030,10 @@ strike order or a takeover of a striking plane.
 | Helicopter rocket gate | 25% of `R`, at least 40 ft | fitted |
 | Helicopter break | the threat's bearing plus or minus 90 degrees (60 and 120 for cover), flight path within 10 degrees of level, 200 ft over the highest ground in 6 s, maximum speed | retail (90), opinionated (John, 2026-10-11), fitted |
 | Helicopter start | 1,500 ft over the ground in an AI wing; no fuel schedule; no airfield sequence | opinionated (agent) |
+| Helicopter threat ring | the threat's reach plus 2,000 ft | rule opinionated (John, 2026-10-12), margin fitted |
+| Helicopter hold-off | up to 3 minutes for SEAD, circling 3,000 ft at 200 ft over the ground outside every ring; then another target outside the rings, else home | opinionated (John, 2026-10-12), numbers fitted |
+| Helicopter stand-off points | 60% of the zone or 95% of the fire range, bearings in 15 degree steps, 2,500 ft of carry-on clear, nose within 15 degrees to fire | fitted |
+| Helicopter ambush ring | 3 nm round a point 1 nm toward the threat; forgotten after 60 s quiet and outside it | fitted |
 | AC-130 retail orbit | 4,000 ft radius, 2,000 ft high, 4,472 ft slant, bank 20 to 30 (`maxBank` 30) | retail |
 | Lase orbit | radius max(3 nm, 1.2 turn radii), at most 80% of the laser's reach | fitted |
 | Lase bank limit | the target's depression below the horizon less 5 degrees, divided by the sine of its azimuth (pod hemisphere) | fitted (agent) |
@@ -990,14 +1052,15 @@ strike order or a takeover of a striking plane.
 | Unknown | Fallback | Next step |
 | --- | --- | --- |
 | How retail's AC-130 rounds hit from its orbit (aim 20 ft above the target, no drop; hit test `_PROJHitChance`) | T.O.R.E aims with the player's gun ballistics instead (ST-F): its rounds land on their aim | Only if John wants retail's aim back |
-| A stand-off attack against SAMs that out-range the weapon (the column's SA-9s and SA-14 against the AT-2) | The AI chooses the stand-off attack, breaks, and is shot down or aborts before its firing point | A hold-off or SEAD first for helicopters, as the fighters hold off |
 | A helicopter takeoff, hover and landing | A helicopter starts in the air, never lands, and a ground start leaves the player's helicopter wing to the player | A hover controller for the AI adapter |
 | How retail's Quick Mission strike wings reach the target area (placement) | Strike wings fly to the objective (Who strikes) | Read the wing placement code if John wants retail parity |
 | The wing message sent when an order deadline passes (20 s) | None | Low priority |
 | Retail's choice of jink side and heading | Seeded channel or a fixed side | None |
 
 Closed by ST-H, no longer unknown: a helicopter's defence against SAMs and guns
-(retail breaks plus or minus 90 degrees, B20).
+(retail breaks plus or minus 90 degrees, B20). Closed by H4: a stand-off attack
+against SAMs that out-range the weapon (John's rule: the helicopter holds off
+outside the ring, waits for SEAD, takes another target or goes home).
 
 Closed by ST-R, no longer unknown: the steering frame, dive rollout, jink path,
 AC-130 circle and mount arcs, how retail gives the AI a ground target, Alt+F,

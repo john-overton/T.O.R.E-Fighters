@@ -559,6 +559,12 @@ pub struct Context<'a> {
     pub wing: WingFacts,
     /// The aircraft's ceiling, feet above sea level.
     pub ceiling_ft: f64,
+    /// The terrain height, for a helicopter's masked hold-off (slice H4);
+    /// `None` masks nothing.
+    pub terrain: Option<&'a dyn Fn(f64, f64) -> f64>,
+    /// The compass bearing of the threat a helicopter is breaking from, when
+    /// known (slice H4, the ambush ring).
+    pub threat_bearing_deg: Option<f64>,
 }
 
 /// The strike's phase.
@@ -582,6 +588,9 @@ pub enum Phase {
     Home,
     /// Holding a laser spot on a target in an offset turn ([`lase`]).
     Lase,
+    /// A helicopter holds off outside a threat's ring (slice H4,
+    /// [`super::helicopter_threat`]).
+    HoldOff,
 }
 
 /// A pass's stage.
@@ -713,6 +722,8 @@ pub struct Strike {
     /// The striker's height above the ground when it was first tasked: a
     /// heavy's "mission airborne height" when the host gives none.
     tasked_agl_ft: Option<f64>,
+    /// A helicopter's threat awareness (slice H4).
+    heli: super::helicopter_threat::HeliThreat,
     /// The host's inputs for this step, consumed by it.
     inputs: Option<Inputs>,
 }
@@ -757,6 +768,7 @@ impl Strike {
             cue_across_sum: 0.,
             cue_last: None,
             tasked_agl_ft: None,
+            heli: Default::default(),
             inputs: None,
         }
     }
@@ -815,6 +827,25 @@ impl Strike {
             _ => false,
         }
     }
+    /// A helicopter's last threat decision (slice H4), if any.
+    pub fn threat_call(&self) -> Option<&super::helicopter_threat::Call> {
+        self.heli.call.as_ref()
+    }
+    /// The radio has said the threat decision; the decision if there was
+    /// one still to say.
+    pub fn told_threat_call(&mut self) -> Option<super::helicopter_threat::Decision> {
+        match self.heli.call.as_mut() {
+            Some(call) if !call.told => {
+                call.told = true;
+                Some(call.decision)
+            }
+            _ => None,
+        }
+    }
+    /// Where a helicopter holding off circles, and since when.
+    pub fn hold_off(&self) -> Option<(Vector, u64)> {
+        self.heli.hold
+    }
     /// Done: the mission sends it home.
     pub fn home(&self) -> bool {
         self.phase == Phase::Home
@@ -850,7 +881,7 @@ impl Strike {
     /// What the strike cockpit must hold for the host to solve the next
     /// step.
     pub fn selection(&self) -> Option<Selection> {
-        if matches!(self.phase, Phase::Home | Phase::Wait) {
+        if matches!(self.phase, Phase::Home | Phase::Wait | Phase::HoldOff) {
             return None;
         }
         let (target, station, kind) = (self.target?, self.station?, self.kind?);
@@ -1010,7 +1041,7 @@ impl Strike {
                     }
                 }
             }
-            Phase::Attack | Phase::Defend | Phase::Home | Phase::Lase => {}
+            Phase::Attack | Phase::Defend | Phase::Home | Phase::Lase | Phase::HoldOff => {}
         }
         // The choice may have changed the target or ended the strike.
         let solution = self.solution(cx);
@@ -1018,7 +1049,7 @@ impl Strike {
             .map(|s| s.target_position)
             .or_else(|| self.focus_position(cx));
         match self.phase {
-            Phase::Home | Phase::Defend | Phase::Lase => order,
+            Phase::Home | Phase::Defend | Phase::Lase | Phase::HoldOff => order,
             Phase::Ingress | Phase::Wait => {
                 let point = target_at
                     .or_else(|| objective_point(cx.picture))
@@ -1359,6 +1390,21 @@ impl Strike {
     /// [`Self::pick_target`], or with `unbound` the target it would pick if
     /// its laser stores needed no spot (the no-laze decision names it).
     fn pick_target_as(&self, cx: &Context<'_>, unbound: bool) -> Option<u32> {
+        self.pick_target_with(cx, unbound, None)
+    }
+
+    /// [`Self::pick_target`] among the candidates `allow` accepts (a
+    /// helicopter's targets outside every ring, slice H4).
+    fn pick_target_where(&self, cx: &Context<'_>, allow: &dyn Fn(u32) -> bool) -> Option<u32> {
+        self.pick_target_with(cx, false, Some(allow))
+    }
+
+    fn pick_target_with(
+        &self,
+        cx: &Context<'_>,
+        unbound: bool,
+        allow: Option<&dyn Fn(u32) -> bool>,
+    ) -> Option<u32> {
         let own = cx.own.position;
         let manual = self.manual_on(cx);
         let view;
@@ -1395,6 +1441,11 @@ impl Strike {
         {
             for c in &mut candidates {
                 c.usable &= cx.inputs.lase.spot_targets.contains(&c.id.0);
+            }
+        }
+        if let Some(allow) = allow {
+            for c in &mut candidates {
+                c.usable &= allow(c.id.0);
             }
         }
         let ordered = candidates

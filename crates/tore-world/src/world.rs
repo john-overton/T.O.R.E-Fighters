@@ -1119,6 +1119,9 @@ impl World {
             // A heavy striker's floor reads the mission's airborne height
             // (slice ST-T2).
             bridge.set_mission_height(self.setup.mission.map(|(altitude, _)| altitude));
+            // The radars painting each aircraft: a helicopter learns where
+            // they stand (slice H4).
+            bridge.set_painting(self.combat.surface.painting.clone());
             let stepped = bridge.step(&mut self.combat.state, &humans, &self.terrain);
             // The A-G page lists aircraft only in an airfield sequence.
             for (id, attached) in bridge.airfield_attachment() {
