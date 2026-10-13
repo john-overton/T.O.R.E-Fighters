@@ -376,6 +376,10 @@ pub struct Situation<'a> {
     /// an AI that drops it by hand with no spot sees it (slice ST-G). Never
     /// set for a human's HUD, which shows a guided bomb the guided sight.
     pub ballistic: bool,
+    /// A rocket's pipper carries on past the round's lifetime to the ground
+    /// ([`rocket_impact_beyond`]): set for a human's HUD, never for the AI,
+    /// whose release gate reads the in-life impact only.
+    pub beyond_life: bool,
 }
 
 /// The solution for the selected station, or `None` when it holds neither an
@@ -391,7 +395,12 @@ pub fn solve(s: Situation<'_>, ground: impl Fn(f64, f64) -> f64) -> Option<Deliv
         let release = ReleaseState::from_station(s.launcher, s.station, 0);
         predict_impact(release, &ground).map(|impact| Ccip::new(s.launcher, release, impact, w))
     } else {
-        rocket_impact(w, s.launcher, s.station, s.clock, &ground)
+        let fly = if s.beyond_life {
+            rocket_impact_beyond
+        } else {
+            rocket_impact
+        };
+        fly(w, s.launcher, s.station, s.clock, &ground)
             .map(|(release, impact)| Ccip::new(s.launcher, release, impact, w))
     };
     let mode = if bomb { s.mode } else { DeliveryMode::Ccip };
@@ -530,13 +539,51 @@ fn level_release(
 /// leaves in: the unguided round's own steps, tick by tick (the speed command
 /// of flag 0x40, travel along the launch direction by the service units, the
 /// gravity flag's sink), from the clock of this step, against the terrain
-/// test combat uses. `None` when its lifetime ends first.
+/// test combat uses. `None` when its lifetime ends first. The AI's release
+/// gate reads this one.
 pub fn rocket_impact(
     weapon: &Weapon,
     launcher: &Launcher,
     station: &Station,
     clock: Clock,
     ground: &impl Fn(f64, f64) -> f64,
+) -> Option<(ReleaseState, Impact)> {
+    fly_rocket(weapon, launcher, station, clock, ground, false)
+}
+
+/// The rocket pipper's point for a human's HUD: [`rocket_impact`] when the
+/// round reaches the ground in its life, else the same flight carried on past
+/// the lifetime (the 20 s of the rocket records) in coarse steps until it
+/// meets the terrain, so the pipper has a ground point however high or flat
+/// the pass (opinionated, John 2026-10-12: "the rocket pipper should always
+/// be visible"; the continuation and its limits are the agent's). When it
+/// does not come down within [`BEYOND_SECONDS`] (a nose above the horizon, a
+/// very high pass) or leaves the world's height, the point is where the round
+/// stood when its life ended. `None` only when the round's motion cannot be
+/// worked out.
+pub fn rocket_impact_beyond(
+    weapon: &Weapon,
+    launcher: &Launcher,
+    station: &Station,
+    clock: Clock,
+    ground: &impl Fn(f64, f64) -> f64,
+) -> Option<(ReleaseState, Impact)> {
+    fly_rocket(weapon, launcher, station, clock, ground, true)
+}
+
+/// How long the pipper's continuation flies on, seconds (fitted).
+pub const BEYOND_SECONDS: f64 = 300.;
+/// The continuation's step, in combat's 120 Hz ticks: a tenth of a second
+/// (fitted). Inside the lifetime the steps are combat's own.
+const BEYOND_STEP_TICKS: u64 = 12;
+
+fn fly_rocket(
+    weapon: &Weapon,
+    launcher: &Launcher,
+    station: &Station,
+    clock: Clock,
+    ground: &impl Fn(f64, f64) -> f64,
+    beyond: bool,
 ) -> Option<(ReleaseState, Impact)> {
     let m = &weapon.movement;
     let basis = launcher.basis;
@@ -552,18 +599,45 @@ pub fn rocket_impact(
     let launched_t = (clock.tick / 30) as u16;
     let mut fall = FallState::default();
     let mut clock = clock;
-    for k in 0..ROCKET_TICKS {
+    // Ticks flown, fractional once the steps go coarse.
+    let mut elapsed = 0.;
+    // Where the round stood when its lifetime ended, the pipper's fallback.
+    let mut life_end = None;
+    let limit = if beyond {
+        BEYOND_SECONDS * 120.
+    } else {
+        ROCKET_TICKS as f64
+    };
+    while elapsed < limit {
         let now = (clock.tick / 30) as u16;
-        if removal_due(m, now, launched_t, (position[1] * 256.) as i32) {
+        let height_f8 = (position[1] * 256.) as i32;
+        let expired = removal_due(m, now, launched_t, height_f8);
+        let coarse = expired && now.wrapping_sub(launched_t) >= m.remove_t;
+        if expired && !beyond {
             return None;
         }
+        if coarse && life_end.is_none() {
+            life_end = Some(Impact {
+                position,
+                seconds: elapsed / 120.,
+            });
+        }
+        if expired && height_f8 > 0x0186_a000 {
+            break;
+        }
+        let (service, ticks) = if coarse {
+            // 256 service units are a second: a step of `BEYOND_STEP_TICKS`.
+            ((BEYOND_STEP_TICKS * 256 / 120) as i16, BEYOND_STEP_TICKS)
+        } else {
+            (clock.service, 1)
+        };
         let phase = engine_phase(m, now, launched_t);
         if weapon.flags & 0x40 != 0 {
             let target = commanded_speed(m, phase, speed_f8, (position[1] * 256.) as i32) as i16;
-            speed_f8 = axial_speed(m, speed_f8, target, false, clock.service).ok()?;
+            speed_f8 = axial_speed(m, speed_f8, target, false, service).ok()?;
         }
         let previous = position;
-        let distance = f64::from(speed_f8) * f64::from(clock.service) / 65536.;
+        let distance = f64::from(speed_f8) * f64::from(service) / 65536.;
         for i in 0..3 {
             position[i] += direction[i] * distance;
         }
@@ -571,7 +645,7 @@ pub fn rocket_impact(
             fall.advance(
                 weapon.flags & 4 != 0,
                 phase,
-                clock.service,
+                service,
                 (position[1] * 256.) as i32,
             )
             .ok()?,
@@ -582,13 +656,24 @@ pub fn rocket_impact(
                 release,
                 Impact {
                     position: point,
-                    seconds: (k as f64 + at) / 120.,
+                    seconds: (elapsed + at * ticks as f64) / 120.,
                 },
             ));
         }
-        clock = clock.next();
+        elapsed += ticks as f64;
+        clock = if coarse {
+            Clock {
+                tick: clock.tick + ticks,
+                ..clock
+            }
+        } else {
+            clock.next()
+        };
     }
-    None
+    // No ground within reach of the continuation (a nose above the horizon,
+    // or too high and flat to come down in time): the pipper marks where the
+    // round would be when its life ended, so it is still on the HUD.
+    life_end.map(|impact| (release, impact))
 }
 
 /// A guided bomb's reach: the nearest and farthest ground range ahead of a

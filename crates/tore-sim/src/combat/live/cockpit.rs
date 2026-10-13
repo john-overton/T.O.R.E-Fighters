@@ -512,6 +512,7 @@ impl State {
         ground: &impl Fn(f64, f64) -> f64,
         clock: delivery::Clock,
         ballistic: bool,
+        beyond_life: bool,
     ) -> Option<Delivery> {
         if !cockpit.armed || !launcher.alive {
             return None;
@@ -549,6 +550,7 @@ impl State {
                 clock,
                 falling,
                 ballistic,
+                beyond_life,
             },
             ground,
         )
@@ -586,6 +588,8 @@ impl State {
             ground,
             self.next_clock(),
             ballistic,
+            // The AI's gate reads the in-life impact only.
+            false,
         )
     }
 

@@ -4433,6 +4433,8 @@ impl State {
                     remainder: self.service_remainder,
                 },
                 false,
+                // A human's rocket pipper always has a ground point.
+                true,
             );
             let selected = own.selected;
             let grouped = own

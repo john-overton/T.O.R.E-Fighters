@@ -30,6 +30,12 @@ degrees; the bomb is one random draw), and OVERFLY shows after.
 fired once the rocket pipper says IN RNG: they hit and destroy it, and a
 rocket that bursts on the ground does so on its pipper.
 
+`a2g-rocket-shallow`: an A-4E's LAU-61 on shallow passes at 3,000 ft and 400 kt, 2 and 0.5 degrees
+down, the passes that used to show no rocket pipper (the rocket's 20 s life ends before the ground).
+Every logged sight has an impact on the ground, found past the lifetime (a fall over 20 s). The
+continuation's end-of-life fallback for a nose above the horizon is in the unit tests (the probe's
+passes only descend). John, 2026-10-12.
+
 `a2g-warnings`: an A-4E's Mk 82 released from a 30 degree dive at 300 ft
 (LOW: it falls in under the fuze's one second, so it lands a dud, a puff of
 dirt that destroys nothing; FRAG), from a level pass at 400 ft (FRAG only:
@@ -248,6 +254,29 @@ def rocket_problems(output: str) -> list[str]:
     return problems
 
 
+IMPACT_XYZ = re.compile(r"fall (\S+) impact (\S+) (\S+) (\S+) ", re.M)
+
+
+def rocket_shallow_problems(output: str) -> list[str]:
+    parts = runs(output)
+    if len(parts) != 2:
+        return [f"{len(parts)} runs finished, want 2"]
+    problems: list[str] = []
+    for part, label in zip(parts, ["A-4E LAU-61 2 degrees down", "A-4E LAU-61 0.5 degrees down"]):
+        sights = _sights(part, label, problems)
+        if any(not s["rocket"] for s in sights):
+            problems.append(f"{label}: a sight that is not the rocket pipper")
+        if re.search(r"^a2g-run: sight .* no-impact", part, re.M):
+            problems.append(f"{label}: a sight with no impact: the rocket pipper must always have a point")
+        points = [(float(f), float(y)) for f, _, y, _ in IMPACT_XYZ.findall(part)]
+        if not points:
+            problems.append(f"{label}: no impact point logged")
+        for fall, y in points:
+            if fall <= 20.1 or abs(y) > 50:
+                problems.append(f"{label}: fall {fall} s at height {y:.0f} ft, want a ground point past 20 s")
+    return problems
+
+
 def warning_problems(output: str) -> list[str]:
     parts = runs(output)
     if len(parts) != 3:
@@ -320,6 +349,17 @@ def scenarios() -> list[Scenario]:
             timeout=300,
             check=rocket_problems,
             notes="Rocket pipper on a truck: hits and a kill; ground bursts on the pipper.",
+        ),
+        Scenario(
+            name="a2g-rocket-shallow", lane="flight",
+            args=run + truck + ["--aircraft", "a4e", "--load", "LAU61", "--attack", "rocket", "--altitude", "3000",
+                                "--dive", "2", "--speed", "400", "--from", "3", "--seconds", "3"],
+            timeout=300,
+            then=[Step(run + truck + ["--aircraft", "a4e", "--load", "LAU61", "--attack", "rocket",
+                                      "--altitude", "3000", "--dive", "0.5", "--speed", "400", "--from", "3",
+                                      "--seconds", "3"], timeout=300)],
+            check=rocket_shallow_problems,
+            notes="The rocket pipper on shallow passes at 3,000 ft: always a ground point, past the 20 s life.",
         ),
         Scenario(
             name="a2g-warnings", lane="flight",
