@@ -61,6 +61,36 @@ pub fn flies(s: &State) -> bool {
             .is_some_and(|lift| lift.kind == LiftKind::VectorJet)
 }
 
+/// Fitted (agent decision, slice H2): the hover check of [`hover_throttle`]
+/// is made this high above the ground, so the ground's suck-down right
+/// under the wheels does not count.
+pub const HOVER_CHECK_RISE_FT: f64 = 50.;
+
+/// The throttle the engines need to hold `s` in a hover at its present
+/// weight, stores included, at [`HOVER_CHECK_RISE_FT`] above `ground_ft`:
+/// the hover trim's balance ([`State::trim_hover`]) of the weight against
+/// the vertical thrust with its lapse and suck-down. `None` when `s` is not
+/// a vectoring jet on the hybrid model. Above 1 it cannot hover at all.
+pub fn hover_throttle(s: &State, ground_ft: f64) -> Option<f64> {
+    if !flies(s) {
+        return None;
+    }
+    let jet = s.model().powered_lift()?.jet?;
+    let c = s.model().configuration();
+    let weight = c.mass.empty_lbs + s.fuel + s.carried_lbs();
+    let altitude = ground_ft + HOVER_CHECK_RISE_FT;
+    let lapse = (-altitude.max(0.) / c.tuning.thrust_lapse_feet).exp();
+    let vertical = std::f64::consts::FRAC_PI_2;
+    let suck = crate::flight::powered::jet::suck_down(&jet, HOVER_CHECK_RISE_FT, vertical);
+    let lift_engines = jet.lift_engines.map_or(0., |e| e.thrust_lbf);
+    let thrust = (c.propulsion.military_thrust_lbf
+        * crate::flight::powered::jet::nozzle_efficiency(&jet, vertical)
+        + lift_engines)
+        * lapse
+        * (1. - suck);
+    (thrust > 0.).then(|| weight / thrust)
+}
+
 /// One AI jet's jetborne memory: the integrators of the attitude loops
 /// (`stick`), the hover power (`collective`, used here for the throttle)
 /// and the speed (`tilt`: along and across the heading).
@@ -83,6 +113,12 @@ pub struct JetLiftCommand {
 impl JetLift {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Forget the integrators: the next hover starts from the aircraft's
+    /// own throttle (slice H2, a new liftoff or a landing's hover).
+    pub fn reset(&mut self) {
+        *self = Self::default();
     }
 
     /// The controls for this tick toward `guidance` over terrain at `ground`

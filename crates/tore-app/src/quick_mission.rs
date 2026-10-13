@@ -681,20 +681,13 @@ impl QuickMission {
         self.wing_files.iter().position(|n| n == id.selection_key())
     }
     /// Why no AI wingman can share friendly wing 1 with the player: the
-    /// player's aircraft is one the AI cannot fly, or a helicopter on a
-    /// ground start (the AI starts and flies a helicopter in the air, but
-    /// cannot lift one off the ground yet, slice ST-H). The words end
-    /// "so friendly wing 1 ...".
+    /// player's aircraft is one the AI cannot fly. The words end "so
+    /// friendly wing 1 ...". A helicopter's wingmen take off from a ground
+    /// start too since slice H2 (vertical takeoffs).
     fn wingmen_refusal(&self) -> Option<String> {
         let player = self.player()?;
         if !player.ai_flyable() {
             return Some(format!("The AI cannot fly the {} yet", player.label()));
-        }
-        if player.is_helicopter() && self.ground_start() {
-            return Some(format!(
-                "The AI cannot take a {} off the ground yet",
-                player.label()
-            ));
         }
         None
     }
@@ -3160,7 +3153,7 @@ mod tests {
         assert_eq!(q.draft.values[4], 3);
     }
     #[test]
-    fn a_helicopter_leads_ai_wingmen_in_the_air_but_not_off_the_ground() {
+    fn a_helicopter_leads_ai_wingmen_in_the_air_and_off_the_ground() {
         let mut q = full_catalog();
         q.airport_names[0] = vec!["First Field".into()];
         q.airport_objects[0] = vec![0x4000_0000];
@@ -3178,23 +3171,11 @@ mod tests {
             q.apply(4, 3);
             assert_eq!(q.draft.values[4], 3, "{id:?}");
             assert!(q.unsupported().is_none());
-            // A ground start leaves the wing to the player alone, with the
-            // reason, and keeps it so.
+            // A ground start keeps the wing (slice H2: the AI takes a
+            // helicopter off the ground vertically).
             q.apply(33, 1);
-            assert_eq!(q.draft.values[4], 1, "{id:?}");
-            assert!(
-                q.notice
-                    .as_deref()
-                    .is_some_and(|n| n.contains("off the ground") && n.contains("just you")),
-                "{:?}",
-                q.notice
-            );
-            q.apply(4, 2);
-            assert_eq!(q.draft.values[4], 1);
-            // A draft that slipped through is refused with the reason.
-            q.draft.values[4] = 2;
-            assert!(q.unsupported().unwrap().contains("off the ground"));
-            q.draft.values[4] = 1;
+            assert_eq!(q.draft.values[4], 3, "{id:?}");
+            assert!(q.unsupported().is_none(), "{id:?}");
             // The AI's other wings take the helicopter at either start.
             for field in [9, 12] {
                 q.apply(field, q.ai_choice(id).unwrap());

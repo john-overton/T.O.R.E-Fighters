@@ -524,7 +524,37 @@ impl AiActor {
                 (p[0] - position[0]).hypot(p[2] - position[2]) <= 100.0
             })
         });
-        self.airfield = Some(super::airfield::Sequence::departure(start, position, slot));
+        let lift = self.airfield_lift();
+        self.airfield =
+            Some(super::airfield::Sequence::departure(start, position, slot).with_lift(lift));
+    }
+
+    /// How this aircraft takes off and lands now (slice H2): a helicopter
+    /// or the V-22 vertically, a vectoring jet vertically when its engines
+    /// hold its weight at no more than
+    /// [`super::airfield::HOVER_THROTTLE_LIMIT`] and by a short takeoff and
+    /// a runway landing when heavier, any other aircraft on a runway.
+    /// A vectoring jet's engines hold it, stores included, in a hover over
+    /// ground at `ground_ft` at no more than
+    /// [`super::airfield::HOVER_THROTTLE_LIMIT`].
+    fn hover_capable(&self, ground_ft: f64) -> bool {
+        super::jet_lift::hover_throttle(&self.flight, ground_ft)
+            .is_some_and(|t| t <= super::airfield::HOVER_THROTTLE_LIMIT)
+    }
+
+    pub fn airfield_lift(&self) -> super::airfield::Lift {
+        use super::airfield::Lift;
+        if super::rotor_adapter::flies(&self.flight) {
+            Lift::Rotor
+        } else if super::jet_lift::flies(&self.flight) {
+            if self.hover_capable(self.flight.position[1]) {
+                Lift::Jet
+            } else {
+                Lift::ShortJet
+            }
+        } else {
+            Lift::Conventional
+        }
     }
 
     pub fn ground_start(&self) -> Option<&super::airfield::GroundStart> {
@@ -1171,15 +1201,6 @@ impl AiActor {
         own: &OwnState,
         surface: &dyn Fn(f64, f64) -> Surface,
     ) {
-        // The airfield sequences are an aeroplane's: a runway approach and
-        // rollout flown by a helicopter at 120 knots puts it in the ground
-        // (a Mi-24 did, in the probe). A helicopter has no landing yet
-        // (slice ST-H): it goes home by the ordinary return-to-base heading
-        // and stays over the field. Opinionated (agent).
-        if self.is_rotorcraft() {
-            self.landing_order = None;
-            return;
-        }
         if self.flight.research.is_none() {
             let seed = (self.identity.actor.0 as i32).wrapping_mul(7919) | 1;
             if self.flight.enable_research(seed).is_err() {
@@ -1216,7 +1237,9 @@ impl AiActor {
             route,
         );
         sequence.prefer_clear_approach(wind, max_takeoff_lbs, &|x, z| surface(x, z).height);
-        self.airfield = Some(sequence);
+        // Helicopters, the V-22 and a hovering jet land vertically (slice
+        // H2; John 2026-10-12: vertical for all three VTOL types).
+        self.airfield = Some(sequence.with_lift(self.airfield_lift()));
     }
 
     /// One tick of a takeoff or landing sequence. Returns `false` when the
@@ -1329,9 +1352,36 @@ impl AiActor {
             runway_free: clearance.runway_free,
             wing_landed: clearance.wing_landed,
             free_slot: clearance.free_slot,
+            touchdown_safe: self.touchdown_safe(surface),
+            hover_capable: matches!(
+                self.airfield.as_ref().map(|s| s.lift()),
+                Some(super::airfield::Lift::Jet | super::airfield::Lift::ShortJet)
+            ) && self
+                .hover_capable(surface(self.flight.position[0], self.flight.position[2]).height),
+            detour: if phase == Phase::Inbound {
+                self.home_detour()
+            } else {
+                None
+            },
         };
         let sequence = self.airfield.as_mut().expect("phase read above");
         let mut step = sequence.step(&situation);
+        // A hover law starting afresh (a liftoff, a landing's hover, the air
+        // taxi off the ground) forgets its memory of the last one (slice H2).
+        let hovering = |p: Phase| {
+            matches!(
+                p,
+                Phase::VerticalClimb
+                    | Phase::Transition
+                    | Phase::HoverApproach
+                    | Phase::VerticalDescent
+                    | Phase::AirTaxi
+            )
+        };
+        if hovering(sequence.phase()) && !hovering(phase) {
+            self.rotor.reset();
+            self.jet_lift.reset();
+        }
         if self.damage_return.is_some()
             && let Control::Air(guidance) = &mut step.command.control
             && !guidance.full_power
@@ -1447,10 +1497,61 @@ impl AiActor {
             tore_input::PilotCommand::Set(tore_input::Switch::Flaps, command.flaps_down),
             tore_input::PilotCommand::Set(tore_input::Switch::Airbrake, command.brakes),
         ];
+        // The collective and nozzle an airfield phase sets itself (slice H2).
+        if let Some(collective) = command.lift.collective {
+            input.collective = Some(collective);
+            input.collective_rate = 0.0;
+        }
+        if let Some(degrees) = command.lift.nozzle_deg
+            && let Some(jet) = self.flight.model().powered_lift().and_then(|l| l.jet)
+        {
+            input.vector_pitch = Some((degrees / jet.nozzle_range_degrees).clamp(0.0, 1.0));
+            input.vector_pitch_rate = 0.0;
+        }
         self.fly_input(input, ground, surface);
         fly.achieved = self.achieved();
         self.trace.fly = Some(fly);
         Ok(true)
+    }
+
+    /// A helicopter's (or the V-22's) way home past the threat rings in its
+    /// ground picture (slice H2): the point to fly to first, when a known
+    /// ring stands across the straight line to the landing point or it is
+    /// inside one ([`super::threat_route`]).
+    fn home_detour(&self) -> Option<[f64; 2]> {
+        let sequence = self.airfield.as_ref()?;
+        if sequence.lift() != super::airfield::Lift::Rotor {
+            return None;
+        }
+        let picture = self.ground.as_deref()?;
+        let rings = super::helicopter_threat::known_rings(picture, self.identity.side);
+        super::threat_route::detour(&rings, self.flight.position, sequence.landing_point())
+    }
+
+    /// Whether the shared touchdown rule ([`crate::touchdown`]) would accept
+    /// this aircraft touching down now on the ground under it, held to the
+    /// rule's off-field limits (sink and ground speed) on an airfield too, so
+    /// an AI vertical landing is a gentle one anywhere (slice H2). An
+    /// aircraft whose touchdown class may not land off an airfield is judged
+    /// by the airfield rule alone.
+    fn touchdown_safe(&self, surface: &dyn Fn(f64, f64) -> Surface) -> bool {
+        use crate::touchdown::{Verdict, assess, assess_with};
+        if self.airfield.as_ref().is_none_or(|s| !s.lift().vertical()) {
+            return true;
+        }
+        let below = surface(self.flight.position[0], self.flight.position[2]);
+        let now = assess(&self.flight, &below);
+        if now.verdict != Verdict::Safe {
+            return false;
+        }
+        if !now.class.can_land_off_airfield() {
+            return true;
+        }
+        let open = Surface {
+            landable: false,
+            ..below
+        };
+        assess_with(now.class, now.sink_fps, now.ground_speed_knots, &open).verdict == Verdict::Safe
     }
 
     /// The home position for fuel planning: the home airport, or the home
@@ -2010,9 +2111,8 @@ impl AiMission {
                 && !a.flight.research.as_ref().is_some_and(|r| r.on_ground)
                 && pick(a)
         }) {
-            // A helicopter has no landing (slice ST-H): it goes home as an
-            // aircraft with no runway does.
-            if a.home_runway.is_some() && !a.is_rotorcraft() {
+            // Helicopters land too since slice H2.
+            if a.home_runway.is_some() {
                 ids.push(a.id());
             } else if a.identity.is_leader() && !a.controller.mission_complete() {
                 // No runway: the leader flies home and holds; its
@@ -3082,6 +3182,9 @@ impl AiMission {
                             | super::airfield::Phase::Rollout
                             | super::airfield::Phase::TaxiClear
                             | super::airfield::Phase::Parked
+                            | super::airfield::Phase::VerticalDescent
+                            | super::airfield::Phase::Settle
+                            | super::airfield::Phase::AirTaxi
                     )
                 )
             {
@@ -3939,12 +4042,14 @@ impl AiMission {
             && !busy_human
             && !self.priority_landing.values().any(|held| *held == airport);
 
-        // Earlier wing members landing here must be down first.
+        // Earlier wing members landing here must be down first. A helicopter
+        // air taxiing to its slot is down (slice H2).
         let wing_landed = wingmates().all(|a| {
             a.identity.member >= member
                 || !a.airfield.as_ref().is_some_and(|s| {
                     !s.is_departure()
                         && s.runway().airport == airport
+                        && !s.landed()
                         && !a.flight.research.as_ref().is_some_and(|r| r.on_ground)
                 })
         });
@@ -5183,6 +5288,9 @@ impl AiActor {
                         | super::airfield::Phase::Rollout
                         | super::airfield::Phase::TaxiClear
                         | super::airfield::Phase::Parked
+                        | super::airfield::Phase::VerticalDescent
+                        | super::airfield::Phase::Settle
+                        | super::airfield::Phase::AirTaxi
                 )
             );
         // The engine-protection throttle cut is a jet's: on a helicopter the
@@ -7794,6 +7902,10 @@ mod engagement_integration_tests;
 #[cfg(test)]
 #[path = "airfield_integration_tests.rs"]
 mod airfield_integration_tests;
+
+#[cfg(test)]
+#[path = "vertical_field_tests.rs"]
+mod vertical_field_tests;
 
 #[cfg(test)]
 #[path = "thought_tests.rs"]

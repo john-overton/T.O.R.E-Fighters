@@ -32,7 +32,7 @@ const POWERED: [AircraftId; 6] = [
     AircraftId::Yak141,
 ];
 
-pub(super) fn aircraft(id: AircraftId) -> Aircraft {
+pub(crate) fn aircraft(id: AircraftId) -> Aircraft {
     match id {
         AircraftId::Ah64 | AircraftId::Mi24 => helicopter::tests::pt_aircraft(id),
         AircraftId::Ch47 => tandem::tests::pt_aircraft(),

@@ -4991,12 +4991,12 @@ mod tests {
     }
 
     #[test]
-    fn a_helicopter_keeps_no_fuel_schedule_and_is_never_put_through_the_airfield_sequence() {
-        // Slice ST-H. The runway is 110 nm away: a jet told to land begins
-        // the approach; a helicopter, whose data gives
-        // it minutes of fuel against the hour a cruise of 80 knots takes,
-        // would be bingo in every Quick Mission, and an approach and rollout
-        // flown at 120 knots put it in the ground.
+    fn a_helicopter_keeps_no_fuel_schedule_and_flies_the_vertical_landing() {
+        // Slice ST-H. The runway is 110 nm away: a helicopter, whose data
+        // gives it minutes of fuel against the hour a cruise of 80 knots
+        // takes, would be bingo in every Quick Mission. Told to land, a jet
+        // begins its landing and, since slice H2, so does a helicopter: its
+        // vertical one.
         use tore_sim::ai::route::FuelState;
         let runway = runway_view(9, [0., 10., 700_000.]);
         let airfields = Airfields {
@@ -5038,6 +5038,16 @@ mod tests {
             wings.apply_mission_preset(Preset::Hold, [0., 3_000., 0.]);
             wings.set_flight_model(AiFlightModel::AllHybrid).unwrap();
             let mut targets = targets;
+            for _ in 0..120 {
+                fly_one_tick(&mut wings, &mut targets, vec![]);
+            }
+            if helicopter {
+                assert_eq!(
+                    wings.mission.actor(1).unwrap().controller().fuel_state(),
+                    Some(FuelState::NoManagement),
+                    "no schedule"
+                );
+            }
             let order = tore_sim::ai::airfield::LandingOrder {
                 runway,
                 reason: tore_sim::ai::airfield::LandingReason::Ordered,
@@ -5048,21 +5058,21 @@ mod tests {
                 .unwrap()
                 .order(tore_sim::ai::wing::WingRequest::Land(order), 0)
                 .unwrap();
-            let mut entered = false;
+            let mut entered = None;
             for _ in 0..1_800 {
                 fly_one_tick(&mut wings, &mut targets, vec![]);
-                entered |= wings.mission.actor(1).unwrap().airfield().is_some();
+                if let Some(sequence) = wings.mission.actor(1).unwrap().airfield() {
+                    entered.get_or_insert(sequence.lift());
+                }
             }
             let actor = wings.mission.actor(1).unwrap();
             assert!(!actor.flight().crashed);
-            assert_eq!(entered, !helicopter, "helicopter {helicopter}");
-            if helicopter {
-                assert_eq!(
-                    actor.controller().fuel_state(),
-                    Some(FuelState::NoManagement),
-                    "no schedule"
-                );
-            }
+            let lift = if helicopter {
+                tore_sim::ai::airfield::Lift::Rotor
+            } else {
+                tore_sim::ai::airfield::Lift::Conventional
+            };
+            assert_eq!(entered, Some(lift), "helicopter {helicopter}");
         }
     }
 

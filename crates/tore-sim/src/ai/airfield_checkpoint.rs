@@ -9,7 +9,7 @@
 //! `Control`, `AirGuidance`, `Command` and `Step` are per-tick inputs and
 //! outputs of `Sequence::step`, never held between ticks.
 
-use super::{GroundStart, Kind, Sequence};
+use super::{GroundStart, Kind, Lift, Sequence};
 use crate::checkpoint::{Checkpoint, CheckpointError, Loader, Saver, invalid};
 
 crate::checkpoint_struct!(GroundStart { end, order } shared { runway });
@@ -56,4 +56,13 @@ crate::checkpoint_struct!(Sequence {
     climb_away,
     abort,
     ground_trim,
+    lift,
+    hover_heading,
 } shared { runway });
+
+crate::checkpoint_enum!(Lift {
+    Conventional = 0,
+    Rotor = 1,
+    Jet = 2,
+    ShortJet = 3,
+});

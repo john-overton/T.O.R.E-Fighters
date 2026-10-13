@@ -243,6 +243,13 @@ impl RotorAdapter {
         self.regime
     }
 
+    /// Forget the laws' memory: the next request starts from the aircraft
+    /// as it is (slice H2: a liftoff from the ground, after the collective
+    /// was held down on the wheels).
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
     /// Change law: the attitude integrators (the stick trim) are kept, the
     /// outer loops start again from the aircraft's state.
     fn enter(&mut self, regime: Regime) {

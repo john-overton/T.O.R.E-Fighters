@@ -237,6 +237,13 @@ pub fn airfield_label(phase: AirfieldPhase) -> &'static str {
         AirfieldPhase::Rollout => "rollout",
         AirfieldPhase::TaxiClear => "taxiing to parking",
         AirfieldPhase::Parked => "parked",
+        AirfieldPhase::VerticalHold => "holding before a vertical takeoff",
+        AirfieldPhase::VerticalClimb => "vertical climb",
+        AirfieldPhase::Transition => "transition to forward flight",
+        AirfieldPhase::HoverApproach => "hover approach",
+        AirfieldPhase::VerticalDescent => "vertical descent",
+        AirfieldPhase::Settle => "landed, settling",
+        AirfieldPhase::AirTaxi => "air taxiing to parking",
     }
 }
 

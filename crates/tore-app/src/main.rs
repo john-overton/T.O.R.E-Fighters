@@ -6105,7 +6105,20 @@ enum ProbePhase {
 struct ProbePilot {
     phase: ProbePhase,
     terrain: ProbeTerrain,
+    /// A helicopter or V-22 leader's controls (slice H2): the AI's own
+    /// rotor laws fly the scripted liftoff and cruise.
+    rotor: tore_sim::ai::rotor_adapter::RotorAdapter,
+    /// Where a rotorcraft leader lifted off, world X/Z.
+    lift_point: Option<[f64; 2]>,
 }
+
+/// A rotorcraft leader's scripted flight (slice H2): straight up to this
+/// wheel height over its spot at 25 ft/s, then on along the runway heading
+/// at [`PROBE_ROTOR_KT`], [`PROBE_ROTOR_AGL_FT`] over the highest ground
+/// ahead.
+const PROBE_ROTOR_LIFT_FT: f64 = 500.;
+const PROBE_ROTOR_KT: f64 = 100.;
+const PROBE_ROTOR_AGL_FT: f64 = 1_500.;
 
 /// What the terrain along the heading ahead asks of the scripted leader.
 #[derive(Clone, Copy, Debug, Default)]
@@ -6256,7 +6269,69 @@ impl ProbePilot {
         Self {
             phase: ProbePhase::Roll,
             terrain: ProbeTerrain::default(),
+            rotor: tore_sim::ai::rotor_adapter::RotorAdapter::new(),
+            lift_point: None,
         }
+    }
+
+    /// A helicopter or V-22 leader (slice H2): the rotor adapter lifts it
+    /// straight up, then flies it on along the runway heading. The wing
+    /// orders and the rest of the script are as for an aeroplane.
+    fn fly_rotor(
+        &mut self,
+        tick: u64,
+        flight: &flight::State,
+        keys: &mut flight::PilotInput,
+        world: &terrain::Terrain,
+        ground: Option<&mission_layout::GroundLayout>,
+    ) {
+        use tore_sim::ai::rotor_adapter::{HoverGuidance, RotorRequest};
+        let [x, y, z] = flight.position;
+        let here = world.surface(x, z);
+        let clearance = flight.model().configuration().equipment.ground_clearance_ft;
+        let wheel = y - here.height - clearance;
+        let course = ground.map_or(flight.yaw, |g| g.heading).to_degrees();
+        let point = *self.lift_point.get_or_insert([x, z]);
+        let (input, _) = if self.phase == ProbePhase::Roll {
+            if wheel >= PROBE_ROTOR_LIFT_FT - 25. {
+                println!("t={tick} player: up {wheel:.0} ft, flying on");
+                self.phase = ProbePhase::Cruise;
+            }
+            let hover = HoverGuidance {
+                point,
+                velocity_fps: [0.; 2],
+                height_agl_ft: PROBE_ROTOR_LIFT_FT,
+                heading_deg: course,
+                max_climb_fps: 25.,
+                max_descent_fps: 10.,
+                max_speed_fps: 10.,
+            };
+            self.rotor.controls(
+                flight,
+                RotorRequest::Hover(hover),
+                here.height,
+                here.wind,
+                30.,
+            )
+        } else {
+            self.look(tick, flight, world);
+            let wanted = self.terrain.highest_ft.max(here.height) + PROBE_ROTOR_AGL_FT;
+            let path = ((wanted - y) / 3_000.).atan().to_degrees().clamp(-5., 10.);
+            let intent = tore_sim::ai::rotor_probe::steer(course, path, PROBE_ROTOR_KT * 1.687_81);
+            self.rotor.controls(
+                flight,
+                RotorRequest::Steer {
+                    intent: &intent,
+                    terrain_pitch_floor_deg: None,
+                },
+                here.height,
+                here.wind,
+                30.,
+            )
+        };
+        let commands = std::mem::take(&mut keys.commands);
+        *keys = input;
+        keys.commands = commands;
     }
 
     /// Read the terrain along the heading, four times a second.
@@ -6341,6 +6416,10 @@ impl ProbePilot {
         script: &ProbeScript,
     ) {
         use flight::{PilotCommand::*, Switch};
+        if tore_sim::ai::rotor_adapter::flies(flight) {
+            self.fly_rotor(tick, flight, keys, world, ground);
+            return;
+        }
         let [x, y, z] = flight.position;
         let agl = y - world.surface(x, z).height;
         if !matches!(self.phase, ProbePhase::Roll | ProbePhase::Home) {
@@ -6479,6 +6558,9 @@ struct ProbeWatch {
     /// Distance past each final's aim point last tick, to catch the
     /// threshold crossing.
     final_past: std::collections::BTreeMap<u32, f64>,
+    /// A vertical type's wheels last tick (slice H2): on the ground, sink
+    /// ft/s and ground speed kt, for its `TOUCHDOWN` line.
+    wheels: std::collections::BTreeMap<u32, (bool, f64, f64)>,
     /// `--probe-redfor`: the player's wing is Enemy Wing 1 and the player
     /// flies this plane, not plane 0.
     redfor: Option<u32>,
@@ -6641,6 +6723,35 @@ impl ProbeWatch {
                 } else {
                     self.final_past.remove(&slot.id);
                 }
+            }
+            // A vertical type's touchdowns (slice H2): the sink and ground
+            // speed it came down at, and whether the gear was damaged.
+            if let Some(sequence) = actor
+                .airfield()
+                .filter(|s| s.lift() != tore_sim::ai::airfield::Lift::Conventional)
+            {
+                let wheels = f.research.as_ref().is_some_and(|r| r.on_ground);
+                let now = (
+                    wheels,
+                    -f.velocity[1],
+                    f.velocity[0].hypot(f.velocity[2]) / 1.68781,
+                );
+                if let Some((false, sink, knots)) = self.wheels.get(&slot.id).copied()
+                    && wheels
+                    && !sequence.is_departure()
+                {
+                    println!(
+                        "t={tick} ({seconds:.1}s) TOUCHDOWN {} sink_fps={sink:.1} ground_kt={knots:.1} phase={:?} lift={:?} gear_damaged={} crashed={}",
+                        slot.label(),
+                        sequence.phase(),
+                        sequence.lift(),
+                        f.systems.has(16),
+                        f.crashed
+                    );
+                }
+                self.wheels.insert(slot.id, now);
+            } else {
+                self.wheels.remove(&slot.id);
             }
             if !actor.alive() || f.crashed {
                 continue;

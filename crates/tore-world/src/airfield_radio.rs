@@ -597,6 +597,29 @@ impl WingStatus {
                     ),
                     Some(Phase::TaxiClear) => ("Taxiing clear", None),
                     Some(Phase::Parked) => ("Parked", Some("^WELHOME")),
+                    // The vertical phases (slice H2) reuse the runway calls.
+                    Some(Phase::VerticalHold) => ("Cleared for takeoff", {
+                        let roll = comms.roll();
+                        rolls.push(Roll::pick("takeoff call", roll, 2));
+                        Some(Comms::pick(roll, &["^TAKOFF1", "^RDYROLL"]))
+                    }),
+                    Some(Phase::VerticalClimb) => ("Airborne", Some("^AIRBORN")),
+                    Some(Phase::Transition) => ("Transitioning to forward flight", None),
+                    Some(Phase::HoverApproach) => ("On final", None),
+                    Some(Phase::VerticalDescent) if sequence.landed() => {
+                        ("Setting down at parking", None)
+                    }
+                    Some(Phase::VerticalDescent) => ("Landing vertically", None),
+                    Some(Phase::Settle) => (
+                        "Landed",
+                        actor
+                            .flight()
+                            .research
+                            .as_ref()
+                            .and_then(|r| r.landings.grade())
+                            .map(|grade| if grade >= 100 { "^GDLAND" } else { "^FRLAND" }),
+                    ),
+                    Some(Phase::AirTaxi) => ("Air taxiing to parking", None),
                     None => {
                         change(None);
                         continue;
