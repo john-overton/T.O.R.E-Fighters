@@ -4621,10 +4621,11 @@ impl AiActor {
         // Terrain ahead of the aircraft, for the B44 floor: the highest
         // ground along the look-ahead (see [`terrain_lookahead_ft`]).
         let heading = self.flight.yaw;
-        // A rotorcraft on its own control keeps a lower floor than the
-        // fighters', so it can fly the 200 ft masking height (slice H1).
+        // A helicopter on its own control keeps a lower floor than the
+        // fighters', so it can fly the 200 ft masking height (slice H1);
+        // the V-22 keeps the fighters' (slice HF1).
         let minimum_altitude = if super::rotor_adapter::flies(&self.flight) {
-            super::rotor_adapter::MINIMUM_ALTITUDE_FT
+            super::rotor_adapter::minimum_altitude_ft(&self.flight, MINIMUM_ALTITUDE_FT)
         } else {
             MINIMUM_ALTITUDE_FT
         };
@@ -4704,7 +4705,7 @@ impl AiActor {
     /// these "the aircraft's loaded envelope limits at its current altitude"
     /// without naming the query, so this reads the same envelope block the
     /// flight model uses rather than inventing a table.
-    fn speed_limits(&self) -> SpeedLimits {
+    pub fn speed_limits(&self) -> SpeedLimits {
         let envelopes = &self.flight.model().configuration().aerodynamics.envelopes;
         let altitude = self.flight.position[1];
         let mut minimum = f64::INFINITY;

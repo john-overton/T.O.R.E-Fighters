@@ -5853,6 +5853,10 @@ struct ProbeScript {
     wing_route: Vec<[f64; 3]>,
     /// Ticks between `AI fuel:` lines (`--probe-fuel-trace`), 0 for none.
     fuel_trace_ticks: u64,
+    /// Ticks between `AI rotor:` lines (`--probe-rotor-trace`), 0 for none:
+    /// each AI helicopter and V-22's flight state and what the rotor
+    /// adapter commanded (slice HF1).
+    rotor_trace_ticks: u64,
     /// `--probe-fuel POUNDS`: every AI aircraft starts with this much
     /// internal fuel (slice H3), so a return on low fuel can be probed
     /// without a half-hour mission.
@@ -8546,6 +8550,57 @@ fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<
                             }
                         }
                     }
+                    if script.rotor_trace_ticks > 0 && tick % script.rotor_trace_ticks == 0 {
+                        // Every AI rotorcraft's flight and the rotor adapter's
+                        // command (slice HF1).
+                        for actor in bridge.mission().actors().iter() {
+                            let f = actor.flight();
+                            if !tore_sim::ai::rotor_adapter::flies(f) || f.crashed {
+                                continue;
+                            }
+                            let fly = actor.trace().fly.as_ref();
+                            let rotor = fly.and_then(|t| t.rotor);
+                            let intent = fly.and_then(|t| t.intent);
+                            let ground =
+                                mission.terrain.surface(f.position[0], f.position[2]).height;
+                            println!(
+                                "AI rotor: tick={tick} actor={} activity={:?} agl={:.0} kt={:.0} vs={:.1} pitch={:.1} bank={:.1} hdg={:.0} nacelle={:.0} collective={:.2} nr={:.2} regime={:?} cmd_hdg={} cmd_path={} cmd_kt={} cmd_climb={} cmd_nacelle={} intent_path={} floor={:?} max_kt={:.0}",
+                                actor.id(),
+                                actor.activity(),
+                                f.position[1] - ground,
+                                f.speed / tore_sim::runway_wind::FEET_PER_SECOND_PER_KNOT,
+                                f.vertical_speed,
+                                f.pitch.to_degrees(),
+                                f.bank.to_degrees(),
+                                f.yaw.to_degrees().rem_euclid(360.),
+                                f.nacelle_degrees(),
+                                f.lift_controls.collective,
+                                f.lift_controls.drive.rotor_speed,
+                                rotor.map(|r| r.regime),
+                                rotor.map_or("-".to_owned(), |r| format!("{:.0}", r.heading_deg)),
+                                rotor.map_or("-".to_owned(), |r| format!(
+                                    "{:.1}",
+                                    r.flight_path_pitch_deg
+                                )),
+                                rotor.map_or("-".to_owned(), |r| format!(
+                                    "{:.0}",
+                                    r.speed_fps / tore_sim::runway_wind::FEET_PER_SECOND_PER_KNOT
+                                )),
+                                rotor.map_or("-".to_owned(), |r| format!("{:.1}", r.climb_fps)),
+                                rotor
+                                    .and_then(|r| r.nacelle_deg)
+                                    .map_or("-".to_owned(), |n| format!("{n:.0}")),
+                                intent.map_or("-".to_owned(), |i| format!(
+                                    "{:.1}",
+                                    i.flight_path_pitch_deg
+                                )),
+                                fly.and_then(|t| t.terrain_floor_deg)
+                                    .map(|d| (d * 10.).round() / 10.),
+                                actor.speed_limits().maximum.0
+                                    / tore_sim::runway_wind::FEET_PER_SECOND_PER_KNOT,
+                            );
+                        }
+                    }
                     if let Some(attacker) = &mut attacker {
                         attacker.observe(tick, bridge, &ejected);
                     }
@@ -10068,6 +10123,13 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     return Err("--probe-fuel-trace needs 0..3600 seconds".into());
                 }
                 probe_script.fuel_trace_ticks = (seconds * 120.).round().max(1.) as u64;
+            }
+            "--probe-rotor-trace" => {
+                let seconds: f64 = args.next().ok_or("--probe-rotor-trace needs seconds")?.parse().map_err(|e| bad_number(&arg, &e))?;
+                if !(seconds > 0. && seconds <= 3600.) {
+                    return Err("--probe-rotor-trace needs 0..3600 seconds".into());
+                }
+                probe_script.rotor_trace_ticks = (seconds * 120.).round().max(1.) as u64;
             }
             "--probe-fuel" => {
                 let pounds: f64 = args

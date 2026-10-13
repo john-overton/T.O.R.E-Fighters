@@ -123,6 +123,47 @@ fn the_v22_converts_both_ways() {
     assert!(c.height_ft < 300. && c.corridor_ticks == 0, "{c:?}");
 }
 
+/// Wingborne, the V-22 climbs the steep path the terrain floor asks over
+/// rising ground (slice HF1): converted to aeroplane mode at 240 kt and
+/// asked for a 12 degree path, it climbs at more than the collective's
+/// 50 ft/s (3,000 ft/min) within 10 s, about the 80 ft/s the path is at
+/// that speed, and keeps its nacelles down.
+#[test]
+fn the_v22_wingborne_climbs_the_terrain_floors_path() {
+    use crate::ai::rotor_adapter::FORWARD_CLIMB_FPS;
+    let mut s = rotor_probe::hovering(&aircraft(AircraftId::V22), 1_000., [0.; 3]).unwrap();
+    let mut adapter = RotorAdapter::new();
+    let cruise = rotor_probe::steer(0., 0., 240. * KT);
+    for _ in 0..120 * 120 {
+        let request = RotorRequest::Steer {
+            intent: &cruise,
+            terrain_pitch_floor_deg: None,
+        };
+        rotor_probe::tick(&mut s, &mut adapter, request, [0.; 3]);
+    }
+    assert!(
+        s.nacelle_degrees() < 1. && s.speed / KT > 200.,
+        "{}",
+        s.speed / KT
+    );
+    let level = rotor_probe::steer(0., 0., 240. * KT);
+    let mut fastest: f64 = 0.;
+    for _ in 0..10 * 120 {
+        let request = RotorRequest::Steer {
+            intent: &level,
+            terrain_pitch_floor_deg: Some(12.),
+        };
+        rotor_probe::tick(&mut s, &mut adapter, request, [0.; 3]);
+        fastest = fastest.max(s.vertical_speed);
+    }
+    assert!(!s.crashed, "crashed");
+    assert!(
+        fastest > FORWARD_CLIMB_FPS + 15.,
+        "climbed at most {fastest:.1} ft/s"
+    );
+    assert!(s.nacelle_degrees() < 30., "{}", s.nacelle_degrees());
+}
+
 /// The AV-8 and Yak-141 hold a hover over a point within 10 ft for 60 s
 /// and descend vertically onto the ground at 5 ft/s without a crash.
 #[test]

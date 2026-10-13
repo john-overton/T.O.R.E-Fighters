@@ -65,10 +65,16 @@ pub const BANK_RELIEF_SHARE: f64 = 0.5;
 /// Wingborne, the climb error is handed to the law this many times over
 /// on top of the climb.
 pub const WINGBORNE_CLIMB_BOOST: f64 = 4.;
-/// The B44 terrain floor's minimum height for an aircraft on this adapter,
-/// ft (the fighters' is 300): below the helicopter defence's and the
-/// stand-off attack's 200 ft masking height.
+/// The B44 terrain floor's minimum height for a helicopter on this
+/// adapter, ft (the fighters' is 300): below the helicopter defence's and
+/// the stand-off attack's 200 ft masking height. The V-22 keeps the
+/// fighters' 300 ft (slice HF1): it never masks, and at 250 kt in
+/// aeroplane mode it needs the fighters' margin over rising ground.
 pub const MINIMUM_ALTITUDE_FT: f64 = 100.;
+/// Wingborne (the V-22's nacelles below the coupled law's 72 degrees), the
+/// pitch attitude the law may command for the path, degrees (fitted, slice
+/// HF1): enough for the terrain floor's 15 degree paths at cruise.
+pub const WINGBORNE_PITCH_DEG: f64 = 25.;
 /// The speed the adapter holds may stand this far over the maximum while
 /// it settles, kt: the helicopter defence's "no descent past the maximum"
 /// allows for it.
@@ -213,6 +219,20 @@ pub fn flies(s: &State) -> bool {
         && s.model()
             .powered_lift()
             .is_some_and(|lift| matches!(lift.kind, LiftKind::Helicopter | LiftKind::Tiltrotor))
+}
+
+/// The B44 terrain floor's minimum height for `s` on this adapter, ft:
+/// [`MINIMUM_ALTITUDE_FT`] for a helicopter, the fighters' `fighters` for
+/// the V-22.
+pub fn minimum_altitude_ft(s: &State, fighters: f64) -> f64 {
+    if s.model()
+        .powered_lift()
+        .is_some_and(|lift| lift.kind == LiftKind::Tiltrotor)
+    {
+        fighters
+    } else {
+        MINIMUM_ALTITUDE_FT
+    }
 }
 
 /// The scheduled nacelle angle at `kcas`, degrees.
@@ -435,7 +455,13 @@ impl RotorAdapter {
             speed.min(fastest).max(slowest.min(fastest))
         });
         let airspeed = s.speed.max(HOVER_SPEED_KT * KT);
-        let climb = if pointing {
+        // Wingborne (the V-22 with its nacelles down) the path is flown on
+        // the pitch as an aeroplane's: its climb is not held to the
+        // collective's FORWARD_CLIMB_FPS, which at 240 kt is a 7 degree
+        // path, flatter than the terrain floor asks over rising ground
+        // (slice HF1: the V-22 flew into a hillside climbing at 50 ft/s).
+        let wingborne = !coupled && !pointing;
+        let climb = if pointing || wingborne {
             airspeed * path_deg.to_radians().sin()
         } else {
             (airspeed * path_deg.to_radians().sin()).clamp(-FORWARD_CLIMB_FPS, FORWARD_CLIMB_FPS)
@@ -484,7 +510,7 @@ impl RotorAdapter {
         // second of sink barely moves at 280 ft/s; the AI asks for the
         // climb plus a multiple of its error, as the player's A modes'
         // altitude term would.
-        let law_climb = if !coupled && !pointing {
+        let law_climb = if wingborne {
             climb + WINGBORNE_CLIMB_BOOST * (climb - s.vertical_speed)
         } else {
             climb
@@ -495,6 +521,8 @@ impl RotorAdapter {
             speed: held,
             pitch_limit: if pointing {
                 POINTING_PITCH_DEG
+            } else if wingborne {
+                WINGBORNE_PITCH_DEG
             } else {
                 FORWARD_PITCH_DEG
             }

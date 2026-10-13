@@ -718,6 +718,58 @@ def vertical_scenario(name: str, runs: list[tuple[list[str], int, dict]], notes:
     )
 
 
+def v22_problems(output: str, *, ground: bool) -> list[str]:
+    """`ai-v22-quick-mission` (slice HF1): one probe run passes the probe's own checks, nobody fired
+    (the V-22s are in free flight, not a fight) and every AI V-22 is alive at the end."""
+    problems = probe_problems(output, ground=ground, need_takeoff=ground)
+    totals = TOTALS.search(output)
+    if totals and int(totals.group(3)) > 0:
+        problems.append(f"{totals.group(3)} shots fired: the run is meant to be free flight")
+    v22s = [m for m in (ACTOR.match(line) for line in output.splitlines()) if m and m.group(3) == "V22"]
+    if not v22s:
+        problems.append("no AI V-22 in the run")
+    for m in v22s:
+        if m.group(5) != "true":
+            problems.append(f"{m.group(2)} V-22 lost ({m.group(4)})")
+    return problems
+
+
+def v22_quick_mission() -> Scenario:
+    """Slice HF1: AI V-22s in a Quick Mission from the airborne start (the player's F/A-18D wing on the
+    ground at Odesa, a friendly wing 2 and the enemy wing of V-22s in the air, the enemy starting 50 nm
+    north toward rising ground) and from the ground (the player's V-22 wing of three at Odesa, a
+    friendly wing 2 of V-22s, the enemy V-22s parked at Kharkiv): 300 s of flight (400 s from the
+    ground) and no V-22 lost."""
+    common = ["--ground-start", "9", "--probe-friendly-aircraft", "v22", "--probe-enemy-aircraft", "v22",
+              "--separation", "50", "--no-audio"]
+    airborne = ["--ai-probe-ticks", "36000", "--aircraft", "f18", *common]
+    ground = ["--ai-probe-ticks", "48000", "--aircraft", "v22", "--maneuver", "takeoff", "--probe-wing-size",
+              "3", "--enemy-ground-start", "6", *common]
+
+    def check(output: str) -> list[str]:
+        parts = re.split(r"(?m)^(?=AI probe: aircraft=)", output)
+        runs = [part for part in parts if part.startswith("AI probe: aircraft=")]
+        if len(runs) != 2:
+            return [f"{len(runs)} probe runs finished, want 2"]
+        return ([f"airborne: {p}" for p in v22_problems(runs[0], ground=False)]
+                + [f"ground: {p}" for p in v22_problems(runs[1], ground=True)])
+
+    return Scenario(
+        name="ai-v22-quick-mission",
+        lane="ai",
+        args=airborne,
+        timeout=1800,
+        then=[Step(ground, timeout=2400)],
+        expect=[r"AI probe totals:"],
+        check=check,
+        notes="AI V-22s in every wing of a Quick Mission fly 300 s from an airborne start (the "
+              "enemy pair 50 nm north of Odesa heads into rising ground, where it used to fly into a "
+              "hill 22 s in) and 400 s from a ground start (the player's V-22 wing at Odesa and the "
+              "enemy pair at Kharkiv take off vertically; the enemy used to hit the ground about 100 s "
+              "in): no V-22 lost, no shot fired.",
+    )
+
+
 def vertical_scenarios() -> list[Scenario]:
     """Slice H2: vertical takeoffs and landings (docs/spec/ai-airfield.md, "Vertical takeoff and
     landing")."""
@@ -764,6 +816,11 @@ def vertical_scenarios() -> list[Scenario]:
               "converts to helicopter mode on the way, lands vertically with the nacelles at 75 degrees "
               "or more and parks.",
     ))
+    # The V-22 in free flight (slice HF1): wingborne, its climb was held to the collective's 50 ft/s,
+    # a 7 degree path at 240 kt, and it flew into rising ground (22 s from the airborne enemy start
+    # north of Odesa, about 100 s after the enemy ground start at Kharkiv). V-22s in every wing of a
+    # Quick Mission, airborne and from the ground, fly 300 and 400 s without crashing.
+    out.append(v22_quick_mission())
     # The AV-8 and Yak-141: light enough to hover (guns only), the AV-8 taxis to the spot and takes off
     # vertically, comes home and lands vertically; the Yak-141 on full fuel needs 99% thrust to hover,
     # so it makes the short takeoff and lands on the runway; the AV-8 with its stores makes the short
