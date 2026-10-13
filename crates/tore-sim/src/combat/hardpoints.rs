@@ -34,6 +34,15 @@ pub const DUAL_PYLON_SPREAD: f64 = 1.4;
 /// (opinionated, John 2026-10-13: 2 ft on every aircraft).
 pub const PYLON_DEPTH: f64 = 2.0;
 
+/// How deep a fuselage or centreline station's launcher rail is, feet,
+/// from the body's underside to the top of the store (or rack beam): about
+/// 4 inches (opinionated, John 2026-10-13: fuselage and centreline stations
+/// use short rails and launchers, not 2 ft pylons).
+pub const RAIL_DEPTH: f64 = 4. / 12.;
+
+/// How far fore and aft of a wingtip record the tip's edge is read, feet.
+pub const TIP_REACH: f64 = 2.5;
+
 /// A rack beam's depth under its pylon, feet (fitted).
 pub const RACK_DEPTH: f64 = 0.3;
 
@@ -131,6 +140,12 @@ pub struct Rack {
     /// when the model was not read. A store under a known surface hangs
     /// [`PYLON_DEPTH`] below it; otherwise at the record's height.
     pub over: [Option<f32>; 5],
+    /// A wingtip station's tip edge: [how far right (feet) the model's
+    /// outermost edge beside the record is, the height of that edge's
+    /// middle]. The store's centre line sits on it (John 2026-10-13: no
+    /// rail below the tip). `None` for other stations, or when the model was
+    /// not read.
+    pub tip: Option<[f32; 2]>,
 }
 
 /// One pylon of one side of a station: the point its stores hang from (feet
@@ -157,6 +172,7 @@ impl Rack {
                 && (h.flags & PAIRED_FLAG != 0
                     || matches!(location, Location::Wing | Location::Wingtip)),
             over: [None; 5],
+            tip: None,
         }
     }
     pub fn location(self) -> Location {
@@ -221,6 +237,15 @@ impl Rack {
             .filter(|s| self.pylon(per_side, *s, length).0 == pylon)
             .collect()
     }
+    /// How deep the pylon or rail is from the surface over it to its
+    /// stores' lugs (or rack beam): [`RAIL_DEPTH`] at a fuselage or
+    /// centreline station, [`PYLON_DEPTH`] on a wing.
+    pub fn depth(self) -> f64 {
+        match self.location() {
+            Location::Fuselage | Location::Centerline => RAIL_DEPTH,
+            _ => PYLON_DEPTH,
+        }
+    }
     /// The model's underside over a pylon `offset` ([outboard, forward]
     /// feet) from the record, when it is known.
     fn surface(self, offset: [f64; 2]) -> Option<f64> {
@@ -271,11 +296,23 @@ impl Rack {
                     0.
                 };
                 let rack = if slots.len() >= 2 { RACK_DEPTH } else { 0. };
+                if let (Location::Wingtip, Some([edge, middle])) = (self.location(), self.tip) {
+                    // On the tip's edge, centred on it: no pylon or rail.
+                    let edge = if mount[0].abs() > 1e-9 {
+                        f64::from(edge) * mount[0].signum() * mirror
+                    } else {
+                        0.
+                    };
+                    return PylonPlace {
+                        point: [edge, f64::from(middle), mount[2] + offset[1]],
+                        slots,
+                    };
+                }
                 let up = match self.surface(offset) {
                     Some(surface)
                         if self.location().external() && self.location() != Location::Wingtip =>
                     {
-                        surface - PYLON_DEPTH - rack - size.top
+                        surface - self.depth() - rack - size.top
                     }
                     _ => mount[1],
                 };
@@ -321,7 +358,7 @@ impl Rack {
         std::array::from_fn(|i| place.point[i] + offset[i])
     }
     /// How far the model's underside over store `slot`'s pylon is above
-    /// the store's lugs, feet ([`PYLON_DEPTH`], plus [`RACK_DEPTH`] on a
+    /// the store's lugs, feet ([`Self::depth`], plus [`RACK_DEPTH`] on a
     /// rack), or `None` for a store on a wingtip rail, inside the aircraft
     /// or under no known surface. The battery's release scenario reports it.
     pub fn store_depth(
@@ -431,6 +468,17 @@ pub fn placed(h: &Hardpoint, model: Option<&Underside>) -> (Vector, Rack) {
         _ => {}
     }
     if let Some(model) = model
+        && rack.location() == Location::Wingtip
+    {
+        rack.tip = model
+            .tip_edge(
+                mount[0].abs(),
+                mount[1],
+                [mount[2] - TIP_REACH, mount[2] + TIP_REACH],
+            )
+            .map(|[edge, low, high]| [edge as f32, ((low + high) / 2.) as f32]);
+    }
+    if let Some(model) = model
         && rack.location().external()
         && rack.location() != Location::Wingtip
     {
@@ -501,6 +549,50 @@ impl Underside {
             }
         }
         lowest.map(|h| from + h)
+    }
+    /// The model's outermost point on the right at most 0.3 ft outboard of
+    /// `right` and 4 ft inboard of it, between `forward[0]` and `forward[1]`
+    /// and within 3 ft of `up`: [how far right, lowest, highest] of the model
+    /// within 0.3 ft of that edge, feet; `None` when nothing is there.
+    pub fn tip_edge(&self, right: f64, up: f64, forward: [f64; 2]) -> Option<[f64; 3]> {
+        let mut points = Vec::new();
+        for triangle in &self.triangles {
+            for i in 0..3 {
+                let [mut a, mut b] = [triangle[i], triangle[(i + 1) % 3]];
+                if a[1] > b[1] {
+                    std::mem::swap(&mut a, &mut b);
+                }
+                if b[1] < forward[0] || a[1] > forward[1] {
+                    continue;
+                }
+                let at = |t: f64| -> [f64; 3] { std::array::from_fn(|k| a[k] + t * (b[k] - a[k])) };
+                let span = b[1] - a[1];
+                let [t0, t1] = if span < 1e-9 {
+                    [0., 1.]
+                } else {
+                    [
+                        ((forward[0] - a[1]) / span).max(0.),
+                        ((forward[1] - a[1]) / span).min(1.),
+                    ]
+                };
+                points.extend([at(t0), at(t1)]);
+            }
+        }
+        let near =
+            |q: &[f64; 3]| q[0] <= right + 0.3 && q[0] >= right - 4. && (q[2] - up).abs() <= 3.;
+        let edge = points
+            .iter()
+            .filter(|q| near(q))
+            .map(|q| q[0])
+            .fold(f64::MIN, f64::max);
+        if edge == f64::MIN {
+            return None;
+        }
+        let (low, high) = points
+            .iter()
+            .filter(|q| near(q) && q[0] >= edge - 0.3)
+            .fold((f64::MAX, f64::MIN), |(l, h), q| (l.min(q[2]), h.max(q[2])));
+        Some([edge, low, high])
     }
     /// [`Self::over`] at `right` (the model is mirror symmetric, so a
     /// left-hand point is looked up on the right) and, when nothing is
@@ -659,6 +751,23 @@ mod tests {
         };
         assert_eq!(tip.store_point(mount, 2, 0, 0, SIZE), mount);
         assert_eq!(rack(4).store_point(mount, 2, 0, 0, SIZE), mount);
+        // A wingtip store's centre line sits on the tip's edge, either side.
+        let on_tip = Rack {
+            tip: Some([9.5, 0.25]),
+            ..tip
+        };
+        assert_eq!(on_tip.store_point(mount, 2, 0, 0, SIZE), [9.5, 0.25, 0.]);
+        assert_eq!(on_tip.store_point(mount, 2, 1, 0, SIZE), [-9.5, 0.25, 0.]);
+        assert_eq!(on_tip.store_depth(mount, 2, 0, 0, SIZE), None);
+        // A centreline or fuselage store hangs on a 4 inch rail.
+        let belly = Rack {
+            location: 0,
+            paired: false,
+            ..wing
+        };
+        let under = belly.store_point([0., -6., 0.], 1, 0, 0, SIZE);
+        assert!((under[1] + SIZE.top - (1. - RAIL_DEPTH)).abs() < 1e-9);
+        assert!((RAIL_DEPTH - 1. / 3.).abs() < 1e-12, "4 inches");
     }
 
     #[test]
@@ -684,12 +793,12 @@ mod tests {
         }
         // Spaced by the store's length and the gap: they do not touch.
         assert!((points[0][2] - points[2][2]).abs() - SIZE.length >= TANDEM_GAP - 1e-9);
-        // Each hangs 2 ft under the surface over it, interpolated between
-        // the samples 7 ft ahead and behind.
+        // Each hangs on a 4 inch rail under the surface over it,
+        // interpolated between the samples 7 ft ahead and behind.
         let surface = |forward_of_record: f64| -3. + forward_of_record / TANDEM_SAMPLE;
         for point in &points {
             let lugs = point[1] + SIZE.top;
-            assert!((lugs - (surface(point[2] - 5.) - PYLON_DEPTH)).abs() < 1e-9);
+            assert!((lugs - (surface(point[2] - 5.) - RAIL_DEPTH)).abs() < 1e-9);
         }
     }
 
@@ -764,8 +873,15 @@ mod tests {
         let model = Underside::of(&flat, 1. / 3.);
         let (_, rack) = placed(&f4e, Some(&model));
         assert_eq!(rack.over, [Some(-1.); 5]);
-        // A wingtip rail reads nothing.
-        let tip = Hardpoint { location: 5, ..f4e };
-        assert_eq!(placed(&tip, Some(&model)).1.over, [None; 5]);
+        // A wingtip missile recorded 0.67 ft past the 20 ft tip, level with
+        // it, reads no underside: its centre line sits on the tip's edge.
+        let tip = Hardpoint {
+            location: 5,
+            position: [62, -3, 0],
+            ..f4e
+        };
+        let (_, tip) = placed(&tip, Some(&model));
+        assert_eq!(tip.over, [None; 5]);
+        assert_eq!(tip.tip, Some([20., -1.]), "a wingtip reads the tip's edge");
     }
 }

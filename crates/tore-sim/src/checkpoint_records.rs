@@ -140,7 +140,8 @@ crate::checkpoint_struct!(Station { mount, count, internal, rack } shared { weap
 crate::checkpoint_struct!(Rack {
     location,
     paired,
-    over
+    over,
+    tip
 });
 
 crate::checkpoint_struct!(Tank {
@@ -396,6 +397,7 @@ mod tests {
                         location: 4,
                         paired: true,
                         over: [Some(-0.25), None, Some(1.5), None, Some(-3.)],
+                        tip: Some([19.25, 0.5]),
                     },
                     store: Some(TankStore {
                         source: "F18_330.GAS".into(),

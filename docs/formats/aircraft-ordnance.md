@@ -255,8 +255,9 @@ What the table shows, by inspection:
   0x4: retail releases them from the centreline. T.O.R.E hangs them 3 ft either side,
   in the Sparrow wells (fitted, slice PY2).
 - The records' heights (y) are where retail releases stores; T.O.R.E hangs and
-  releases every store 2 ft under the model's underside over its pylon instead
-  (opinionated, John 2026-10-13), so the y column is not where a store leaves in
+  releases every wing store 2 ft under the model's underside over its pylon, a
+  fuselage or centreline store 4 inches under it, and a wingtip missile on the tip's
+  edge instead (opinionated, John 2026-10-13), so the y column is not where a store leaves in
   T.O.R.E ([pylon depth](../spec/stores-on-pylons.md#pylon-depth)). Fuselage rows
   with two stores a side hang them one behind another, which no record says either.
 

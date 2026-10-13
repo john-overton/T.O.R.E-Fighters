@@ -276,9 +276,19 @@ pub fn store_poses_of(
             hardpoint: u8::try_from(tank.hardpoint).unwrap_or(u8::MAX),
             mount: tank.mount,
             rack: Rack {
-                location: if tank.mount[0].abs() > 1e-9 { 4 } else { 0 },
+                // The record's location; a tank built without one (Rack's
+                // default, the centreline) off the centreline is a wing's.
+                location: if tank.rack.location().external()
+                    && !(tank.rack.location == 0 && tank.mount[0].abs() > 1e-9)
+                {
+                    tank.rack.location
+                } else if tank.mount[0].abs() > 1e-9 {
+                    4
+                } else {
+                    0
+                },
                 paired: tank.quantity > 1,
-                over: tank.rack.over,
+                ..tank.rack
             },
             shape: None,
             look: StoreLook::Tank,

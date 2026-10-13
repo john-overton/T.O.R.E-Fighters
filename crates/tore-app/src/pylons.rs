@@ -9,9 +9,11 @@
 //!   do ([`hung`], [`tore_sim::combat::hardpoints::Rack::store_point`]):
 //!   a paired station's split between its position and its mirror, a wing
 //!   side with two stores (or four or more) on an inboard and an outboard
-//!   pylon, a fuselage side's in tandem, and every store's lugs 2 ft under
-//!   the model's underside over its pylon (John 2026-10-13). A released
-//!   store leaves from that same point, so it never jumps.
+//!   pylon, a fuselage side's in tandem; a wing store's lugs 2 ft under the
+//!   model's underside over its pylon, a fuselage or centreline store's
+//!   4 inches under the body on a short rail, and a wingtip store's centre
+//!   line on the tip's edge with nothing drawn under it (John 2026-10-13).
+//!   A released store leaves from that same point, so it never jumps.
 //! - **Several on one pylon** sit on a fitted rack: two side by side, three
 //!   as a triple ejector rack (two shoulders, one below), four as two pairs
 //!   one behind another, more as triple racks one behind another. The
@@ -22,8 +24,9 @@
 //!   so those, and a store with no shape, are fitted bodies.
 //! - **Pylons** are fitted slabs from the top of the store's body (its lugs)
 //!   up into the model's underside, each corner meeting the surface above
-//!   it ([`Airframe::underside`]). A store with nothing above it beside a
-//!   wingtip hangs on a rail that joins the tip ([`Airframe::tip_edge`]).
+//!   it ([`Airframe::underside`]). A store on a wing station with nothing
+//!   of the model above it hangs on a rail that joins the wing's edge beside
+//!   it ([`Airframe::tip_edge`]).
 //!   A pylon stays when its stores are gone.
 //!
 //! All geometry is solid colour in the aircraft vertex format, so it joins
@@ -33,7 +36,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use tore_formats::shape::Shape;
 use tore_sim::attitude::{Basis, Vector};
-use tore_sim::combat::hardpoints::{PylonPlace, rack_group, slot_offset};
+use tore_sim::combat::hardpoints::{Location, PylonPlace, rack_group, slot_offset};
 use tore_sim::combat::store_sizes::StoreSize;
 use tore_world::snapshot::{StoreLook, StorePose};
 
@@ -217,7 +220,8 @@ pub fn vertices(
         // Each pylon once, with what it carries.
         let mut drawn: Vec<&PylonPlace> = Vec::new();
         for place in &places {
-            if !drawn.contains(&&place.pylon) {
+            // A wingtip store sits on the tip itself: no pylon or rail.
+            if store.rack.location() != Location::Wingtip && !drawn.contains(&&place.pylon) {
                 drawn.push(&place.pylon);
                 hanger(
                     out,
@@ -843,20 +847,14 @@ mod tests {
     }
 
     #[test]
-    fn a_wingtip_store_hangs_on_a_rail_joined_to_the_tip() {
+    fn a_wingtip_store_sits_on_the_tips_edge_with_nothing_under_it() {
         let airframe = flat_wing();
-        // A store 1.2 ft out past the 15 ft tip, level with the wing.
-        let tip = plain([16.2, 0.2, 0.], 5, 2);
-        let out = draw(&[tip], &airframe);
-        let rail: Vec<[f32; 3]> = grey(&out).into_iter().filter(|v| v[0] > 0.).collect();
-        let inner = rail.iter().map(|v| v[0]).fold(f32::MAX, f32::min);
-        let outer = rail.iter().map(|v| v[0]).fold(f32::MIN, f32::max);
-        assert!(inner < 15., "rail reaches into the tip: {inner}");
-        assert!(outer > 16.2, "rail reaches over the store: {outer}");
-        let low = rail.iter().map(|v| v[1]).fold(f32::MAX, f32::min);
-        let high = rail.iter().map(|v| v[1]).fold(f32::MIN, f32::max);
-        let lugs = 0.2 + PLAIN[1] / 2.;
-        assert!(f64::from(low) <= 0. && f64::from(high) >= lugs - 1e-4);
+        // A store recorded 1.2 ft out past the 15 ft tip, a little above it.
+        let tip = on_flat_wing(plain([16.2, 0.2, 0.], 5, 2));
+        let out = draw(std::slice::from_ref(&tip), &airframe);
+        assert!(grey(&out).is_empty(), "no pylon or rail");
+        let centres: Vec<Vector> = hung(&tip).iter().map(|h| h.centre).collect();
+        assert_eq!(centres, [[15., 0., 0.], [-15., 0., 0.]]);
     }
 
     /// [`flat_wing`]'s stores as a loadout reads them: the wing's underside
@@ -871,18 +869,23 @@ mod tests {
             count: i32::from(store.loaded),
             weight_class: 0,
         };
-        store.rack.over = tore_sim::combat::hardpoints::placed(&h, Some(&model))
-            .1
-            .over;
+        let (_, placed) = tore_sim::combat::hardpoints::placed(&h, Some(&model));
+        store.rack.over = placed.over;
+        store.rack.tip = placed.tip;
         store
     }
 
     #[test]
-    fn a_pylon_is_two_feet_deep_from_the_wing_to_the_stores_top() {
+    fn a_wing_pylon_is_two_feet_deep_and_a_fuselage_rail_four_inches() {
         let airframe = flat_wing();
-        // Recorded 5 ft below the wing: the store moves up to hang 2 ft under it.
-        for loaded in [2, 4] {
-            let store = on_flat_wing(plain([9., -5., 0.], 4, loaded));
+        // Recorded 5 ft below the wing: the store moves up to hang 2 ft under
+        // it on a wing, 4 inches under it at a fuselage station.
+        for (location, loaded, depth) in [
+            (4, 2, tore_sim::combat::hardpoints::PYLON_DEPTH),
+            (4, 4, tore_sim::combat::hardpoints::PYLON_DEPTH),
+            (1, 2, tore_sim::combat::hardpoints::RAIL_DEPTH),
+        ] {
+            let store = on_flat_wing(plain([9., -5., 0.], location, loaded));
             let out = draw(std::slice::from_ref(&store), &airframe);
             let tank_top = out
                 .chunks_exact(10)
@@ -890,8 +893,8 @@ mod tests {
                 .map(|v| v[1])
                 .fold(f32::MIN, f32::max);
             assert!(
-                (f64::from(tank_top) + tore_sim::combat::hardpoints::PYLON_DEPTH).abs() < 1e-4,
-                "store top {tank_top} with {loaded} loaded"
+                (f64::from(tank_top) + depth).abs() < 1e-4,
+                "store top {tank_top} with {loaded} loaded at {location}"
             );
             // The pylon fills the 2 ft with no gap at either end.
             let ys: Vec<f32> = grey(&out).iter().map(|v| v[1]).collect();

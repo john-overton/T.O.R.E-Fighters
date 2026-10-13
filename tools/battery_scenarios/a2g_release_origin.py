@@ -16,7 +16,8 @@ sight holds the fourth Mk 82 past the target, so three of those count):
 * an F-4B's centreline row (x 0) loaded with two Mk 82s, side by side, right then left.
 
 Every store leaves from the point it hangs at (within 0.05 ft across and up, half a foot
-along for the tick flown), and its pylon is 2 ft deep (2.3 ft over a rack's beam). Paired
+along for the tick flown). A wing pylon is 2 ft deep; a fuselage or centreline launcher rail
+4 inches (John 2026-10-13), with a rack's 0.3 ft beam between rail and stores. Paired
 rows alternate left and right.
 """
 import re
@@ -32,18 +33,22 @@ ORIGIN = re.compile(
 # How far either side of a wing row's position its two pylons stand, feet
 # (tore_sim::combat::hardpoints::DUAL_PYLON_SPREAD).
 DUAL = 1.4
+# A fuselage or centreline launcher rail's depth (4 inches) and a rack beam's, feet
+# (tore_sim::combat::hardpoints::RAIL_DEPTH, RACK_DEPTH).
+RAIL = 4 / 12
+RACK = 0.3
 # A Mk 82's shoulder on a rack: 0.55 of its 1.27 ft fin span.
 SHOULDER = 0.55 * 1.27
 
 # (label, station right ft, presses, the releases' sides, how far out each leaves,
 # whether each leaves ahead of the row (+1), behind (-1) or either (0), pylon depth ft)
 CASES = [
-    ("A-4E Mk 82 centreline rack", 0.0, 4, "RLRL", [SHOULDER] * 4, [1, 1, -1, -1], 2.3),
+    ("A-4E Mk 82 centreline rack", 0.0, 4, "RLRL", [SHOULDER] * 4, [1, 1, -1, -1], RAIL + RACK),
     ("A-4E LAU-61", 26 / 3, 4, "LRLR", [26 / 3] * 4, [0] * 4, 2.0),
-    ("F-4B fuselage Mk 82", 13 / 3, 4, "LRLR", [13 / 3] * 4, [1, 1, -1, -1], 2.0),
+    ("F-4B fuselage Mk 82", 13 / 3, 4, "LRLR", [13 / 3] * 4, [1, 1, -1, -1], RAIL),
     ("F-16C inner wing Mk 82", 32 / 3, 4, "LRLR",
      [32 / 3 + DUAL] * 2 + [32 / 3 - DUAL] * 2, [0] * 4, 2.0),
-    ("F-4B centreline Mk 82", 0.0, 2, "RL", [SHOULDER] * 2, [0] * 2, 2.3),
+    ("F-4B centreline Mk 82", 0.0, 2, "RL", [SHOULDER] * 2, [0] * 2, RAIL + RACK),
 ]
 
 
@@ -79,7 +84,7 @@ def origin_problems(output: str) -> list[str]:
             if abs(abs(r) - outs[n]) > 0.05:
                 problems.append(f"{label}: release {n} left from {r:.2f} ft right, want {outs[n]:.2f} either side")
             if depth == "none" or abs(float(depth) - depth_want) > 0.01:
-                problems.append(f"{label}: release {n} pylon depth {depth}, want {depth_want}")
+                problems.append(f"{label}: release {n} pylon depth {depth}, want {depth_want:.2f}")
             sides.append("L" if r < 0 else "R")
         # One behind another: the front stores leave first, a store length ahead.
         ahead = [float(o[8]) for o, a in zip(firsts, alongs) if a > 0]
@@ -109,6 +114,6 @@ def scenarios() -> list[Scenario]:
                       "--station", "0", "--load", "MK82", "--count", "2"], timeout=300),
             ],
             check=origin_problems,
-            notes="Four presses on four rows and two on a centreline row: each store leaves from where it hangs, 2 ft under its pylon (B3, BP2, PY2).",
+            notes="Four presses on four rows and two on a centreline row: each store leaves from where it hangs, under a 2 ft wing pylon or a 4 inch body rail (B3, BP2, PY2).",
         ),
     ]

@@ -942,53 +942,11 @@ fn underside(shape: &Shape, scale: f64, right: f64, forward: f64, from: f64) -> 
         .map(|h| h - from)
 }
 
-/// The outermost point of `shape` (scaled to feet by `scale`) on the right
-/// at most 0.3 ft outboard of `right` and 4 ft inboard of it, between
-/// `forward[0]` and `forward[1]` and within 3 ft of `up`: [how far right,
-/// lowest, highest] of the model within 0.3 ft of that edge.
+/// The outermost point of `shape` (scaled to feet by `scale`) beside a
+/// store ([`tore_sim::combat::hardpoints::Underside::tip_edge`], the same
+/// edge the simulation sits wingtip stores on).
 fn tip_edge(shape: &Shape, scale: f64, right: f64, up: f64, forward: [f64; 2]) -> Option<[f64; 3]> {
-    let mut points = Vec::new();
-    for face in &shape.faces {
-        let p: Vec<[f64; 3]> = face
-            .positions
-            .iter()
-            .map(|q| [q[0], q[1], q[2]].map(|v| f64::from(v) * scale))
-            .collect();
-        for i in 0..p.len() {
-            let [mut a, mut b] = [p[i], p[(i + 1) % p.len()]];
-            if a[1] > b[1] {
-                std::mem::swap(&mut a, &mut b);
-            }
-            if b[1] < forward[0] || a[1] > forward[1] {
-                continue;
-            }
-            let at = |t: f64| -> [f64; 3] { std::array::from_fn(|k| a[k] + t * (b[k] - a[k])) };
-            let span = b[1] - a[1];
-            let [t0, t1] = if span < 1e-9 {
-                [0., 1.]
-            } else {
-                [
-                    ((forward[0] - a[1]) / span).max(0.),
-                    ((forward[1] - a[1]) / span).min(1.),
-                ]
-            };
-            points.extend([at(t0), at(t1)]);
-        }
-    }
-    let near = |q: &[f64; 3]| q[0] <= right + 0.3 && q[0] >= right - 4. && (q[2] - up).abs() <= 3.;
-    let edge = points
-        .iter()
-        .filter(|q| near(q))
-        .map(|q| q[0])
-        .fold(f64::MIN, f64::max);
-    if edge == f64::MIN {
-        return None;
-    }
-    let (low, high) = points
-        .iter()
-        .filter(|q| near(q) && q[0] >= edge - 0.3)
-        .fold((f64::MAX, f64::MIN), |(l, h), q| (l.min(q[2]), h.max(q[2])));
-    Some([edge, low, high])
+    tore_sim::combat::hardpoints::Underside::of(shape, scale).tip_edge(right, up, forward)
 }
 
 #[cfg(test)]
