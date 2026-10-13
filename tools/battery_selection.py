@@ -357,10 +357,13 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-sim/src/turbulence.rs", ("flight-environment", "flight-maneuvers"), "turbulence"),
     _r("crates/tore-sim/src/runway_wind.rs", ("flight-takeoff", "flight-landing", "flight-environment"), "runway wind"),
     _r("crates/tore-sim/src/autopilot.rs", ("flight-maneuvers", "flight-landing", "ai-fights", "flight-powered"), "autopilot; hover hold and the powered-lift A modes"),
+    _r("crates/tore-sim/src/autopilot/*", ("flight-powered", "ai-strike", "ai-fights"), "the rotor laws shared by hover hold, the powered-lift A modes and the AI"),
     _r("crates/tore-sim/src/telemetry.rs", ("flight-maneuvers", "instruments"), "telemetry"),
     _r("crates/tore-sim/src/cheats.rs", ("flight-damage", "flight-maneuvers", "flight-powered"), "cheats; Easy flight physics"),
     # tore-sim: AI.
     _r("crates/tore-sim/src/ai/surface*", ("surface",), "the surface engagement controller"),
+    _r("crates/tore-sim/src/ai/rotor_*", ("flight-powered", "ai-strike", "ai-fights"), "the AI's rotorcraft control and its probe", unit_tests=("test_battery_flight",)),
+    _r("crates/tore-sim/src/ai/jet_lift.rs", ("flight-powered",), "the AI's jet-lift control"),
     _r("crates/tore-sim/src/ai/*", AI_CORE + ("radio", "ai-strike"), "AI"),
     # tore-sim: the flight data link's radar table.
     _r("crates/tore-sim/src/datalink.rs", ("ai-datalink", "ai-orders", "ai-fights"), "data link radar table"),
