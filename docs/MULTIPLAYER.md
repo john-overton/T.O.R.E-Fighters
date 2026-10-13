@@ -1278,7 +1278,7 @@ estimates. How they are used is in the
 | Snapshots | 60 a second to each player (every second tick, each seat on its own tick of the two: seat number modulo the ticks per snapshot, an agent decision so a full server does not build all at once); a server setting of 10, 12, 15, 20, 24, 30, 40 or 60, the rates that divide 120; in a game a player hosts, the King's lobby setting of 60 (default), 30 or 20 | John, 2026-10-06 (30 a second from 2026-09-28 to 2026-10-06; the King's setting, Q56); the other rates are an agent proposal |
 | Relay | Each relayed channel up to 128 KB/s each way, bursts of 256 KB (64 KB/s before 2026-10-06); a relayed player's busiest second at 60 snapshots a second is 63 to 74 KB/s | John, 2026-10-06 (Q55) |
 | Inputs | Up to 60 packets a second, each repeating every unacknowledged tick up to 24 ticks (200 ms) | Agent proposal |
-| Keepalive | At least 10 packets a second each way; a joined game whose loop is stalled sends a [Keepalive](formats/net-protocol.md#keepalive) once a second, for at most 60 seconds (EF-K) | Agent proposal |
+| Keepalive | At least 10 packets a second each way; a joined game whose loop is stalled sends a [Keepalive](formats/net-protocol.md#keepalive) once a second, for at most 60 seconds (EF-K); a host building a mission sends each player a loading Keepalive twice a second, for at most 3 minutes (protocol 28, slice NET2) | Agent proposal; host loading John 2026-10-13 |
 | Packet size | At most 1,200 bytes | Guide |
 
 **Clocks, delays and smoothing.**
@@ -1345,7 +1345,7 @@ target window come from the host's own readout, not from the drawn aircraft.
 | Item | Value |
 | --- | --- |
 | Connecting | The client repeats each handshake step every 250 ms and gives up after 10 seconds |
-| Dropped player | 5 seconds without a valid packet; the AI takes the plane at once. A game whose loop is stalled (a window dragged, a long frame) keeps its plane for up to 60 seconds through its [keepalive](ARCHITECTURE.md#a-stalled-game-stays-connected-ef-k) (EF-K, agent decision), flown neutral meanwhile. The same 60 seconds cover a game building the mission as it joins or as a flight starts, which a slow machine can take longer than 5 seconds over ([a long mission build](ARCHITECTURE.md#a-long-mission-build-slice-net), slice NET, agent decision) |
+| Dropped player | 5 seconds without a valid packet; the AI takes the plane at once. A game whose loop is stalled (a window dragged, a long frame) keeps its plane for up to 60 seconds through its [keepalive](ARCHITECTURE.md#a-stalled-game-stays-connected-ef-k) (EF-K, agent decision), flown neutral meanwhile. The same 60 seconds cover a game building the mission as it joins or as a flight starts, which a slow machine can take longer than 5 seconds over ([a long mission build](ARCHITECTURE.md#a-long-mission-build-slice-net), slice NET, agent decision). A host building a mission (the King's change, a flight with loadouts, the next mission) keeps every player for up to 3 minutes: it tells them it is loading twice a second, and while it says so a player waits 4 seconds of silence, not 1.5, before it counts the host lost and races the standbys (protocol 28, slice NET2; John 2026-10-13, the 3 minutes fitted, the 4 seconds an agent decision; [wire](formats/net-protocol.md#protocol-28-host-loading)) |
 | Players per server | A setting, default 30 (John, 2026-09-28); a co-op mission seats at most its 15 friendly planes |
 | Default port | UDP 26900, a setting |
 

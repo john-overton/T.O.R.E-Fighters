@@ -15,8 +15,10 @@
 //! - a **Reach answer** to one of this game's own Reaches is taken here and
 //!   timed;
 //! - while the game is a player, what only a host receives (Connect
-//!   requests, Challenge answers, Discover queries, Keepalives) is dropped,
-//!   and everything else goes to the client ([`Route::Client`]);
+//!   requests, Challenge answers, Discover queries) is dropped, and
+//!   everything else goes to the client ([`Route::Client`]), a host's
+//!   loading Keepalive included (protocol 28: the client takes it only from
+//!   its host, with its connection's id);
 //! - once the game hosts ([`Peers::set_hosting`]), everything goes to its
 //!   host's transport, except datagrams from the old host's address, which
 //!   still go to the client.
@@ -245,10 +247,7 @@ impl Peers {
                 self.on_answer(now, body);
                 Route::Taken
             }
-            PacketKind::ConnectRequest
-            | PacketKind::ChallengeAnswer
-            | PacketKind::Discover
-            | PacketKind::Keepalive
+            PacketKind::ConnectRequest | PacketKind::ChallengeAnswer | PacketKind::Discover
                 if onward == Route::Client =>
             {
                 self.counters.dropped += 1;

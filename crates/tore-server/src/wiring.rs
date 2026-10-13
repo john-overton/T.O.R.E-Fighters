@@ -118,8 +118,15 @@ pub fn start_host_with(
     config.entropy = Entropy::System;
     // The program has already refused the switch; the host refuses it too.
     config.retail_stall_speeds = false;
-    let host = tore_session::Host::new(spec, resources, config)
+    let mut host = tore_session::Host::new(spec, resources, config)
         .map_err(|error| format!("The host session cannot start: {error}"))?;
+    // Protocol 28 (slice NET2): while the server builds a mission its
+    // loading thread keeps every player connected, on a clone of its socket.
+    if let Ok(base) = socket.try_clone() {
+        host.set_loading_socket(Box::new(move || {
+            Ok(Box::new(base.try_clone()?) as Box<dyn tore_net::Datagrams + Send>)
+        }));
+    }
     // Stage L: the server's own content, which every player's is compared
     // with (`--check` lists its items).
     let own = host.content();
@@ -360,6 +367,9 @@ impl SessionHost {
                 entry @ (HostLog::Stalled { .. } | HostLog::Resumed { .. }) => {
                     Event::Note(entry.stall_text().unwrap_or_default())
                 }
+                entry @ HostLog::Loaded { .. } => {
+                    Event::Note(entry.loading_text().unwrap_or_default())
+                }
                 HostLog::Chat {
                     callsign,
                     receiver,
@@ -385,6 +395,9 @@ impl SessionHost {
 impl Host for SessionHost {
     fn poll(&mut self, now: Time) {
         self.now = now;
+        // A build's loading keepalives reach relayed players through the
+        // channels open now (protocol 28).
+        self.host.set_relay_channels(self.listing.relay_channels());
         // A socket error is not fatal to a server: note it and go on.
         if let Err(error) = self
             .host

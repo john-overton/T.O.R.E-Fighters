@@ -64,10 +64,20 @@ fn lines(version: u16) -> Vec<(String, String)> {
     // the version.
     let keepalive = tore_net::packet::Packet::Keepalive(tore_net::packet::Keepalive {
         connection: 0xDEAD_BEEF,
+        loading: false,
     });
     out.push((
         "transport-keepalive".into(),
         hex(&keepalive.encode(version).unwrap()),
+    ));
+    // The host's loading keepalive (protocol 28, slice NET2).
+    let loading = tore_net::packet::Packet::Keepalive(tore_net::packet::Keepalive {
+        connection: 0xDEAD_BEEF,
+        loading: true,
+    });
+    out.push((
+        "transport-keepalive-loading".into(),
+        hex(&loading.encode(version).unwrap()),
     ));
     // The transport's Challenge answer, which carries the player's platform
     // since protocol 7 and the path since protocol 9, sealed for the version. It is padded with zeros to

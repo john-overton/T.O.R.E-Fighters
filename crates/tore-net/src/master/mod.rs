@@ -97,7 +97,7 @@ pub use packet::{
     RelayOffer, RelayOpen, RelayOpenAck, RelayRequest, RelayResult, Report, Role, UnknownListing,
     Unregister, Unsupported,
 };
-pub use relay::{Channels, HostRelays, RelayCounters, RelayFraming};
+pub use relay::{Channels, HostRelays, RelayCounters, RelayFraming, RelayFramings};
 pub use rendezvous::{
     HostListing, HostRendezvous, HostTally, ListingState, Rendezvous, RendezvousCounters,
     RendezvousEvent,

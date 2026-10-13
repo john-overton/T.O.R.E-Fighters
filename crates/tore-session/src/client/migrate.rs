@@ -6,8 +6,10 @@
 //!
 //! - **The succession** (message 45) names the ready standbys and their
 //!   addresses; a client keeps the newest.
-//! - **Detection.** [`DETECT_SILENCE`] without a packet from the host, or a
-//!   Host moving (51), starts the **race**: from the same socket, Connect
+//! - **Detection.** [`DETECT_SILENCE`] without a packet from the host
+//!   ([`crate::standby::takeover::LOADING_SILENCE`] while its keepalives say
+//!   it is building a mission, protocol 28), or a Host moving (51), starts
+//!   the **race**: from the same socket, Connect
 //!   requests to every address of every standby but this game's own, every
 //!   250 ms, with the rejoin token in the Challenge answer. A relayed game
 //!   races its relayed address again. A client with no ready standby to race
@@ -36,7 +38,7 @@
 use super::prediction::Predictor;
 use super::{Client, ClientEvent, ClientPhase, Correction, SEATING_SNAP, prediction};
 use crate::host::Present;
-use crate::standby::takeover::{DETECT_SILENCE, GIVE_UP, due};
+use crate::standby::takeover::{DETECT_SILENCE, GIVE_UP, detect_silence, due};
 use crate::wire::PROTOCOL_VERSION;
 use crate::wire::inputs::{Command, InputFrame, NumberedCommand};
 use crate::wire::messages::{Message, StandbyMark};
@@ -96,9 +98,15 @@ pub struct MigrationCounts {
     pub resumed: u64,
     /// Migrations the session was lost to.
     pub failed: u64,
-    /// Resumes whose replay differed from the prediction: the own plane
-    /// was corrected.
+    /// Resumes whose replay differed from the prediction although the old
+    /// host's state at T was the predicted one (or that was not known): the
+    /// own plane was corrected by the replay itself.
     pub corrected: u64,
+    /// Resumes whose replay differed from the prediction because the old
+    /// host's state at T already did (an input it repeated or dropped, a
+    /// command it applied at another tick, a hit the prediction cannot
+    /// know): corrected as the next snapshot would have.
+    pub inherited: u64,
 }
 
 /// One predicted tick kept for a backlog.
@@ -242,6 +250,14 @@ impl Client {
         self.net.stats().map(|stats| stats.since_last_received)
     }
 
+    /// Whether the host's newest word since its last packet of the game was
+    /// its loading keepalive: it is building a mission (protocol 28, slice
+    /// NET2), and its silence counts as lost only after
+    /// [`crate::standby::takeover::LOADING_SILENCE`].
+    pub fn host_loading(&self) -> bool {
+        self.net.stats().is_some_and(|stats| stats.peer_loading)
+    }
+
     /// Where a migration is, for the screens.
     pub fn migration(&self) -> MigrationState {
         match (self.migration.lost_at, &self.migration.race) {
@@ -294,7 +310,14 @@ impl Client {
         let silence = self.host_silence().unwrap_or(Duration::ZERO);
         let answered =
             self.migration.found.is_some() || self.migration.race.as_ref().is_some_and(|r| r.own);
-        due(self.standby_role(), silence, handover, answered, ready)
+        due(
+            self.standby_role(),
+            silence,
+            self.host_loading(),
+            handover,
+            answered,
+            ready,
+        )
     }
 
     /// The old host's address while this game keeps its connection to it:
@@ -480,7 +503,7 @@ impl Client {
         }
         let silence = self.host_silence().unwrap_or(Duration::ZERO);
         match self.migration.lost_at {
-            None if silence >= DETECT_SILENCE => self.lose_host(now),
+            None if silence >= detect_silence(self.host_loading()) => self.lose_host(now),
             // The old host answers again before anyone else: the race stops.
             Some(_)
                 if silence < DETECT_SILENCE
@@ -815,6 +838,13 @@ impl Client {
             }
         };
         let newest = seat.predictor.tick();
+        // The old host's state at T was already not the predicted one (the
+        // prediction labels it T - 1): a difference is then the old host's,
+        // as any snapshot's correction is, not the replay's.
+        let inherited = matches!(
+            (seat.predictor.exact_hash_at(tick.saturating_sub(1)), state.hash()),
+            (Some(ours), Ok(host)) if ours != host
+        );
         // The kept ticks from T on, unbroken.
         let ticks: Vec<KeptTick> = {
             let from_t: Vec<&KeptTick> = self
@@ -922,12 +952,17 @@ impl Client {
                 shown,
             });
             corrected = Some(feet);
-            self.migration.counts.corrected += 1;
+            if inherited {
+                self.migration.counts.inherited += 1;
+            } else {
+                self.migration.counts.corrected += 1;
+            }
         }
         let newest = seat.predictor.tick();
         seat.seated_tick = newest;
         if let Some(feet) = corrected {
-            self.log("migrate", &["corrected", &format!("{feet:.1}ft")]);
+            let kind = if inherited { "inherited" } else { "corrected" };
+            self.log("migrate", &[kind, &format!("{feet:.1}ft")]);
         }
         let message = backlog(
             ticks
