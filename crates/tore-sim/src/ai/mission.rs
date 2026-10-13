@@ -1507,6 +1507,16 @@ impl AiActor {
             input.collective = Some(collective);
             input.collective_rate = 0.0;
         }
+        // The engine switch, only when it changes: a parked helicopter
+        // shuts down (slice HF1).
+        if let Some(on) = command.lift.engine
+            && on != self.flight.engine
+        {
+            input.commands.push(tore_input::PilotCommand::Set(
+                tore_input::Switch::Engine,
+                on,
+            ));
+        }
         if let Some(degrees) = command.lift.nozzle_deg
             && let Some(jet) = self.flight.model().powered_lift().and_then(|l| l.jet)
         {

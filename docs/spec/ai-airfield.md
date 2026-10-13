@@ -351,6 +351,7 @@ wingman joining its leader) flies it.
 | Touchdown | below 30 ft it goes on only while the [shared touchdown rule](touchdown.md) would accept a touchdown now, at its off-field limits (10 ft/s, 20 kt; 10 kt for a jet) even on an airfield | opinionated (John's limits) / fitted |
 | On the ground | 5 s, the runway still busy | spec-derived |
 | Air taxi (helicopters) | straight up to 20 ft, then to its slot at up to 25 ft/s (15 kt), down within 15 ft, onto the slot on the parking heading, then shut down | opinionated (the lead's default, accepted by John 2026-10-12); numbers fitted |
+| Shut down (helicopters, V-22) | parked for good on its slot: collective down, throttle closed and the engine switch off, so the engines stop and the rotor runs down (the engine-off state the replay and the sound show). Until slice HF1 only the throttle and collective came down and the governed engines kept the rotor turning. A fixed-wing aircraft parks at idle; pads as homes are later | opinionated (John, 2026-10-13: "parked AI helicopters shut down") |
 | Taxi in (jets) | the runway taxi-back route, nozzles aft | fitted |
 
 Retail's 50 ft/s descent is out of the hybrid physics' reach: at full
