@@ -94,7 +94,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "instruments": (
         "cockpit panels, HUD and sensors",
-        ("flight-panel-*", "flight-sensor-*", "replay-sensor-*", "menus-panel-*"),
+        ("flight-panel-*", "flight-window-*", "flight-sensor-*", "replay-sensor-*", "menus-panel-*"),
     ),
     # AI lane.
     "ai-fights": (

@@ -276,6 +276,7 @@ each and the windowed ones five to eight seconds. See "Runtime" at the end for t
 | `fight-*`, `attack-*` | 56 | Round two: the player passive, then attacking through its own controls, in a 5 v 5 against ace or average AI from ahead and behind: the debrief's fate, damage, hit points, crash flag and hit and shot counts agree, and the AI invariants hold. |
 | `environment-*` | 96 | The wind, air data and turbulence probe in every base theater at 100 and 5,000 ft in three winds. |
 | `panel-*`, `panelfault*` | 175 | Every instrument page of every aircraft, and the Systems page under panel faults 1..35. |
+| `window-seeker-*` | 8 | The seeker window: the target camera's place in the small and the large layout before a seeker launch, after it (pop-up at the top right, or left of the top-right window), with free slots, and after the landing ([spec](../spec/target-window.md#seeker-window)). |
 
 Also run by hand and found clean: bad or out-of-range command lines (about twenty, all refused
 with a message and no panic), extreme winds up to 200 ft/s (the scripted takeoff pilot crashes in the strongest headwinds only because it holds its rotation), starting at 90,000 ft, and every

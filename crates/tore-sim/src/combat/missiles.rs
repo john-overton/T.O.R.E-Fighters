@@ -142,22 +142,24 @@ pub const SURFACE_ROLE: [&str; 10] = [
 ];
 
 /// The air-to-ground weapons whose seeker has a picture, by record name: the
-/// infrared AGMs (class 8, AGM-65G, AGM-65A and the AGM-84E SLAM) and the
-/// laser missiles (class 12, AS-14, AS-30 and AT-12). The target camera
+/// infrared AGMs (class 8, AGM-65G, AGM-65A and the AGM-84E SLAM), the
+/// laser missiles (class 12, AS-14, AS-30 and AT-12) and the AT-2 (retail's
+/// "optical", command guided from the launcher's sight). The target camera
 /// follows the player's last one in flight (docs/spec/target-window.md,
 /// "Seeker view"). Left out, by design: the anti-radiation, active radar and
-/// supported radar missiles (no picture), the laser bombs and JDAMs (they
-/// follow a spot or a point and carry no camera) and the AT-2 (command
-/// guided from the launcher's sight). Opinionated, agent decision of
-/// 2026-10-12 on John's "every weapon with a seeker view": the data has no
-/// such flag.
-pub const SEEKER_VIEW: [&str; 6] = [
+/// supported radar missiles (no picture) and the laser bombs and JDAMs (they
+/// follow a spot or a point and carry no camera; John 2026-10-12: "JDAM
+/// no"). Opinionated: the pick was the agent's on John's "every weapon with a
+/// seeker view" (2026-10-12), and John added the AT-2 the same day; the data
+/// has no such flag.
+pub const SEEKER_VIEW: [&str; 7] = [
     "AGM65G.JT",
     "AGM65A.JT",
     "AGM84E.JT",
     "AS14.JT",
     "AS30.JT",
     "AT12.JT",
+    "AT2.JT",
 ];
 
 /// Whether the weapon record named `source` has a seeker picture for the
