@@ -98,9 +98,15 @@ pub struct MigrationCounts {
     pub resumed: u64,
     /// Migrations the session was lost to.
     pub failed: u64,
-    /// Resumes whose replay differed from the prediction: the own plane
-    /// was corrected.
+    /// Resumes whose replay differed from the prediction although the old
+    /// host's state at T was the predicted one (or that was not known): the
+    /// own plane was corrected by the replay itself.
     pub corrected: u64,
+    /// Resumes whose replay differed from the prediction because the old
+    /// host's state at T already did (an input it repeated or dropped, a
+    /// command it applied at another tick, a hit the prediction cannot
+    /// know): corrected as the next snapshot would have.
+    pub inherited: u64,
 }
 
 /// One predicted tick kept for a backlog.
@@ -832,6 +838,13 @@ impl Client {
             }
         };
         let newest = seat.predictor.tick();
+        // The old host's state at T was already not the predicted one (the
+        // prediction labels it T - 1): a difference is then the old host's,
+        // as any snapshot's correction is, not the replay's.
+        let inherited = matches!(
+            (seat.predictor.exact_hash_at(tick.saturating_sub(1)), state.hash()),
+            (Some(ours), Ok(host)) if ours != host
+        );
         // The kept ticks from T on, unbroken.
         let ticks: Vec<KeptTick> = {
             let from_t: Vec<&KeptTick> = self
@@ -939,12 +952,17 @@ impl Client {
                 shown,
             });
             corrected = Some(feet);
-            self.migration.counts.corrected += 1;
+            if inherited {
+                self.migration.counts.inherited += 1;
+            } else {
+                self.migration.counts.corrected += 1;
+            }
         }
         let newest = seat.predictor.tick();
         seat.seated_tick = newest;
         if let Some(feet) = corrected {
-            self.log("migrate", &["corrected", &format!("{feet:.1}ft")]);
+            let kind = if inherited { "inherited" } else { "corrected" };
+            self.log("migrate", &[kind, &format!("{feet:.1}ft")]);
         }
         let message = backlog(
             ticks

@@ -683,10 +683,10 @@ impl Mig {
     /// The migration's counts and the old host's progress, once a second.
     pub fn counts_line(&self, bot: &Bot) -> Option<String> {
         let counts = bot.client.migration_counts();
-        (counts.resumed + counts.failed + counts.corrected > 0).then(|| {
+        (counts.resumed + counts.failed + counts.corrected + counts.inherited > 0).then(|| {
             format!(
-                "migrations resumed {}, failed {}, corrected {}",
-                counts.resumed, counts.failed, counts.corrected
+                "migrations resumed {}, failed {}, corrected {}, inherited {}",
+                counts.resumed, counts.failed, counts.corrected, counts.inherited
             )
         })
     }

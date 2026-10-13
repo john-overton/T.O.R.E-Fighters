@@ -1347,8 +1347,13 @@ def drive_migrate_kill(d: Drive) -> None:
         d.problem(problem)
     pilots.forbid(NET_BAD + r"|No other game could take over", "a network problem or a session given up")
     pilots.forbid(r"migrations resumed \d+, failed [1-9]", "a failed migration")
+    # A plane the old host's state at T already differed for (an input it repeated under load, a hit) is corrected
+    # as the next snapshot would have: counted as inherited, allowed. Corrected counts only a replay from T that
+    # strayed from a prediction the old host agreed with.
     pilots.forbid(r"corrected [1-9]", "a corrected plane at the resume")
-    pilots.expect(r"^Pilot\d: migrate: migrations resumed 1, failed 0, corrected 0$", "the migration's counts")
+    pilots.expect(
+        r"^Pilot\d: migrate: migrations resumed 1, failed 0, corrected 0, inherited \d+$", "the migration's counts"
+    )
 
 
 def drive_migrate_handover(d: Drive) -> None:

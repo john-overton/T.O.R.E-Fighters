@@ -18,7 +18,7 @@
 
 use super::*;
 use crate::client::candidate::CandidateSettings;
-use crate::client::migrate::{MigrationState, words};
+use crate::client::migrate::{MigrationCounts, MigrationState, words};
 use crate::client::{Client, ClientConfig, ClientEvent, ClientPhase, Controls};
 use crate::standby::takeover::take_over;
 use crate::standby::{Budget, MissionKey, Standby};
@@ -199,6 +199,8 @@ struct Rig {
     /// The system the bots' games say they run on: another than this
     /// build's makes their standbys cold.
     platform: Platform,
+    /// The original host's game is stalled: nothing of it runs.
+    stalled: bool,
 }
 
 impl Rig {
@@ -246,6 +248,7 @@ impl Rig {
             cut_at: None,
             takeovers: Vec::new(),
             platform: Platform::current(),
+            stalled: false,
         };
         rig.games.push(Game {
             callsign: "Lead".into(),
@@ -407,7 +410,7 @@ impl Rig {
         self.net.advance(MS);
         let now = self.net.now();
         for index in 0..self.games.len() {
-            if self.games[index].gone {
+            if self.games[index].gone || (index == 0 && self.stalled) {
                 continue;
             }
             self.step_game(index, now);
@@ -2103,4 +2106,75 @@ fn a_slow_build_sends_loading_keepalives_and_logs_the_build() {
         .collect();
     assert_eq!(logged.len(), 1, "{logged:?}");
     assert!(logged[0].contains("3 players kept"), "{}", logged[0]);
+}
+
+/// Standby 1 takes over after the cut and every remote player resumes: each
+/// one's migration counts.
+fn resumed_counts(rig: &mut Rig) -> Vec<(String, MigrationCounts)> {
+    assert!(
+        rig.run_until(Duration::from_secs(3), |r| !r.takeovers.is_empty()),
+        "standby 1 takes over"
+    );
+    let _ = rig.back_after_cut(Duration::from_secs(5));
+    (1..rig.games.len())
+        .map(|g| {
+            let game = &rig.games[g];
+            (game.callsign.clone(), game.client.migration_counts())
+        })
+        .collect()
+}
+
+/// Slice NET2: the old host repeats every remote player's inputs for the
+/// last 150 ms before it is cut (they stop reaching it). Its state at T is
+/// then not what those players predicted, so each resume corrects the plane,
+/// as the next snapshot would have: inherited, not corrected by the replay.
+#[test]
+fn inputs_the_old_host_repeated_before_the_cut_are_inherited_at_the_resume() {
+    let (mut rig, _, _) = flying(5, false);
+    rig.run(Duration::from_secs(3));
+    let host = rig.games[0].address();
+    let lost = LinkConfig {
+        loss: 1.,
+        ..LinkConfig::for_round_trip(40 * MS, 0., 0., 0.)
+    };
+    let repeats = |rig: &Rig| -> u64 {
+        rig.host()
+            .peers
+            .values()
+            .filter(|p| p.callsign != "Lead")
+            .map(|p| p.inputs.repeats_total())
+            .sum()
+    };
+    let before = repeats(&rig);
+    for g in 1..rig.games.len() {
+        let from = rig.games[g].address();
+        rig.net.set_link(from, host, lost);
+    }
+    rig.run(Duration::from_millis(150));
+    assert!(repeats(&rig) > before, "the old host repeated their inputs");
+    rig.cut(0);
+    for (callsign, counts) in resumed_counts(&mut rig) {
+        assert_eq!(counts.resumed, 1, "{callsign}");
+        assert_eq!(counts.corrected, 0, "{callsign}: {counts:?}");
+        assert_eq!(counts.inherited, 1, "{callsign}: {counts:?}");
+    }
+}
+
+/// Slice NET2: the host's whole game stalls for 400 ms (an overloaded
+/// machine), catches up for a moment and is cut. No input was late, so no
+/// resume corrects anything.
+#[test]
+fn a_host_that_lagged_before_the_cut_corrects_no_plane_at_the_resume() {
+    let (mut rig, _, _) = flying(5, false);
+    rig.run(Duration::from_secs(3));
+    rig.stalled = true;
+    rig.run(Duration::from_millis(400));
+    rig.stalled = false;
+    rig.run(Duration::from_millis(1));
+    rig.cut(0);
+    for (callsign, counts) in resumed_counts(&mut rig) {
+        assert_eq!(counts.resumed, 1, "{callsign}");
+        assert_eq!(counts.corrected, 0, "{callsign}: {counts:?}");
+        assert_eq!(counts.inherited, 0, "{callsign}: {counts:?}");
+    }
 }
