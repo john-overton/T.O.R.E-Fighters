@@ -412,7 +412,10 @@ fn fnv(bytes: &[u8]) -> u64 {
 
 /// The format 2 writer's output for a world with no surface content, hashed
 /// when the format 3 change was made on the writer before it: the bytes of a
-/// recording that does not use format 3 must not move.
+/// recording that does not use format 3 must not move. The scenario's trig is
+/// [`common::DetTrig`], so the bytes are the same on every platform; the hash
+/// was taken again with the format 2 writer (the parent of 4dbbbdb2) when the
+/// fixtures moved to it (2026-10-12), and the current writer matches it.
 #[test]
 fn a_recording_without_surface_content_is_byte_for_byte_what_format_2_wrote() {
     let dir = temp_dir("surface-bytes");
@@ -435,7 +438,7 @@ fn a_recording_without_surface_content_is_byte_for_byte_what_format_2_wrote() {
     let bytes = std::fs::read(writer.finish(&scenario.footer).unwrap()).unwrap();
     assert_eq!(
         (fnv(&bytes), bytes.len()),
-        (643_258_352_877_265_443, 57_176)
+        (17_311_645_078_411_106_792, 57_181)
     );
     let _ = std::fs::remove_dir_all(dir);
 }

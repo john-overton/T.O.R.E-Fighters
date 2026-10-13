@@ -540,6 +540,19 @@ fn an_anti_radiation_carrier_takes_sam_radars_then_aaa_radars_then_other_radars(
     );
 }
 
+/// The strike's aim is the draw's, to a billionth of a foot. Not bit for bit:
+/// this crate's tests build optimised, so a draw with constant arguments can
+/// be folded at compile time with the compiler's own sine while the strike's
+/// call uses the target's maths library, and on i686 Windows the two differ
+/// in the last bit (CI, 2026-10-12). The gunship's burst test uses the same
+/// tolerance.
+fn assert_same_aim(aim: [f64; 2], drawn: [f64; 2]) {
+    assert!(
+        aim.iter().zip(drawn).all(|(a, d)| (a - d).abs() < 1e-9),
+        "aim {aim:?}, drawn {drawn:?}"
+    );
+}
+
 #[test]
 fn a_pass_releases_on_the_gate_exits_turns_back_and_attacks_again() {
     let mut world = quiet_world();
@@ -558,7 +571,8 @@ fn a_pass_releases_on_the_gate_exits_turns_back_and_attacks_again() {
     let (aim, inside) = strike.aim();
     let circle = release_circle_ft(Experience::Average);
     let draw = aim_draw(9, OWN, 1, circle);
-    assert_eq!((aim, inside), (draw.offset_ft, draw.inside));
+    assert_eq!(inside, draw.inside);
+    assert_same_aim(aim, draw.offset_ft);
     assert_eq!(selection.aim_ft, aim, "a still target: no lead");
     assert!((selection.gate_ft - (GATE_SHARE * circle).max(GATE_FLOOR_FT)).abs() < 1e-9);
 
@@ -595,7 +609,7 @@ fn a_pass_releases_on_the_gate_exits_turns_back_and_attacks_again() {
     strike.step(&world.context(4_100));
     assert_eq!(strike.phase(), Phase::Attack);
     assert_eq!(strike.pass_number(), 2);
-    assert_eq!(strike.aim().0, aim_draw(9, OWN, 2, circle).offset_ft);
+    assert_same_aim(strike.aim().0, aim_draw(9, OWN, 2, circle).offset_ft);
 }
 
 #[test]
