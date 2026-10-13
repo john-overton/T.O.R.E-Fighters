@@ -584,6 +584,11 @@ fn mesh(
                 );
                 let layer = out.len() - 5;
                 out[layer] = -1.;
+                // The face's own palette entry and fog mode, as an
+                // airframe's faces and the stores on its pylons carry them,
+                // so a weapon is lit by the weather as they are (PY2).
+                let last = out.len() - 1;
+                out[last] = f32::from(face.colors[j]) + 256. * f32::from(face.fog as u8);
             }
         }
     }

@@ -106,7 +106,8 @@ Every number below is fitted (agent decision).
 | Rack | Two or more stores on one pylon hang from a beam 0.3 ft deep over them, as wide as the side by side pair and as long as the racks one behind another; a post runs down to each triple rack's lower store |
 | Wingtip | Nothing drawn under a wingtip store ([rules](#rules)) |
 | Edge rail | A wing station's store with nothing of the model above it, beside a wing's edge less than 4 ft inboard, hangs on a rail from 0.3 ft inside the tip's edge out over the store, as deep as both the tip's edge and the store's upper half, 0.6 store lengths long (3 to 9 ft). With no tip beside it, a 0.35 ft rail |
-| Colours | Pylons and racks grey (0.5, 0.52, 0.54); weapon shapes keep their palette colours |
+| Colours | Pylons and racks grey (0.5, 0.52, 0.54), tanks light grey, pods grey-green; weapon shapes keep their palette colours |
+| Lighting | Exactly the airframe's: every pylon, rack, fitted body and weapon face carries a palette entry (a fitted colour takes the aircraft palette's nearest entry) with its fog mode, so the weather's time-of-day palette darkens it at night and at dusk, fog and haze fall on it, and the same sun, moon and ambient light it, as they do the untextured faces of the aircraft it hangs on; a released weapon in flight is lit the same way. Before 2026-10-13 they carried fixed colours and showed bright at night (John's report, an A-10 at night). The stepped compatibility lighting (`TORE_WEATHER_SMOOTH=0`), which picks a light row per airframe face, is not applied to stores | opinionated, John 2026-10-13; the nearest-entry rule is an agent decision |
 
 Where the stores come from:
 

@@ -57,7 +57,17 @@ pub fn run() -> AppResult<()> {
     let assets = crate::reel::load_assets()?;
     let resources = &assets.theater_resources;
     let overrides = Overrides {
-        time: Some([13, 0]),
+        // `TORE_STORES_PREVIEW_TIME=HH:MM` poses them at another hour (a
+        // night or dusk check of the stores' lighting).
+        time: Some(
+            std::env::var("TORE_STORES_PREVIEW_TIME")
+                .ok()
+                .and_then(|t| {
+                    let (h, m) = t.split_once(':')?;
+                    Some([h.parse().ok()?, m.parse().ok()?])
+                })
+                .unwrap_or([13, 0]),
+        ),
         wind: None,
         cloud_altitude: Some(0),
         redrawn_airports: crate::scenery::redrawn_airports()?,

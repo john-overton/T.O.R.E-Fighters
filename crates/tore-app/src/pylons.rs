@@ -199,6 +199,7 @@ pub fn vertices(
     if stores.is_empty() {
         return;
     }
+    let start = out.len();
     let basis = Basis::new(yaw, pitch, bank);
     let at = |offset: Vector| -> Vector {
         std::array::from_fn(|i| {
@@ -252,6 +253,49 @@ pub fn vertices(
             }
         }
     }
+    palette_lit(&mut out[start..], palette);
+}
+
+/// Gives every vertex in `vertices` that carries its own colour (the fitted
+/// pylons, racks, tanks and pods) the palette entry nearest that colour, so
+/// it is lit exactly as the airframe's untextured faces are: the scene's
+/// weather and time-of-day palette (night darkening, fog and haze), then
+/// the same surface lighting (John 2026-10-13: stores were drawn bright at
+/// night). A weapon shape's faces already carry their own palette indices.
+fn palette_lit(vertices: &mut [f32], palette: &[[u8; 3]; 256]) {
+    let mut found: Vec<([u32; 3], f32)> = Vec::new();
+    for v in vertices.chunks_exact_mut(10) {
+        if v[9] >= 0. {
+            continue;
+        }
+        let key = [v[6], v[7], v[8]].map(f32::to_bits);
+        let index = match found.iter().find(|(k, _)| *k == key) {
+            Some((_, index)) => *index,
+            None => {
+                let index = nearest(palette, [v[6], v[7], v[8]]) as f32;
+                found.push((key, index));
+                index
+            }
+        };
+        v[9] = index;
+    }
+}
+
+/// The palette entry nearest `color` (0 to 1 per channel), leaving out the
+/// first and last entries, which palettes keep for special uses.
+fn nearest(palette: &[[u8; 3]; 256], color: [f32; 3]) -> usize {
+    (1..255)
+        .min_by_key(|i| {
+            palette[*i]
+                .iter()
+                .zip(color)
+                .map(|(p, c)| {
+                    let d = i32::from(*p) - (c * 255.).round() as i32;
+                    d * d
+                })
+                .sum::<i32>()
+        })
+        .unwrap_or(1)
 }
 
 /// The size `store` draws at.
@@ -486,6 +530,10 @@ fn mesh(
                     pos,
                     palette[face.colors[j] as usize].map(|c| f32::from(c) / 255.),
                 );
+                // The face's own palette entry and fog mode, as the
+                // airframe's faces carry them, for the weather's lighting.
+                let last = out.len() - 1;
+                out[last] = f32::from(face.colors[j]) + 256. * f32::from(face.fog as u8);
             }
         }
     }
@@ -963,5 +1011,70 @@ mod tests {
                 assert_eq!(gone, [release], "{shape} on {location}, {rounds} left");
             }
         }
+    }
+
+    /// Every pylon, rack, fitted body and weapon face is lit as the
+    /// airframe's untextured faces are: a palette entry (with its fog mode)
+    /// that the weather's time-of-day rows darken, never a fixed colour
+    /// (John 2026-10-13: stores drawn bright at night).
+    #[test]
+    fn stores_and_pylons_take_the_airframes_palette_lighting() {
+        let mut palette = [[0u8; 3]; 256];
+        for (i, entry) in palette.iter_mut().enumerate() {
+            *entry = [i as u8, i as u8, (255 - i) as u8];
+        }
+        let airframe = flat_wing();
+        let art = CombatArt::synthetic(std::collections::BTreeMap::from([(
+            "SPAR.SH".to_owned(),
+            flat_wing().poses.swap_remove(0),
+        )]));
+        let stores = [
+            on_flat_wing(plain([9., -5., 0.], 4, 4)),
+            StorePose {
+                look: StoreLook::Tank,
+                body: [13., 2.],
+                ..on_flat_wing(plain([3., -5., 0.], 1, 2))
+            },
+            StorePose {
+                look: StoreLook::Pod,
+                body: [5.5, 1.38],
+                ..on_flat_wing(plain([12., -5., 0.], 4, 2))
+            },
+            StorePose {
+                shape: Some("SPAR.SH".into()),
+                ..on_flat_wing(plain([6., -5., 0.], 4, 2))
+            },
+        ];
+        let mut out = Vec::new();
+        vertices(
+            &mut out,
+            &stores,
+            [0.; 3],
+            [0.; 3],
+            Some(&airframe),
+            &art,
+            &palette,
+        );
+        assert!(!out.is_empty());
+        for v in out.chunks_exact(10) {
+            assert_eq!(v[5], -1., "an untextured face, as the airframe's");
+            assert!(v[9] >= 0., "a palette entry, not a fixed colour");
+            let index = v[9] as usize % 256;
+            assert!((1..255).contains(&index));
+        }
+        // The fitted grey takes the palette's nearest grey-ish entry.
+        assert_eq!(nearest(&palette, PYLON), 126);
+        // A weapon face keeps its own entry: the synthetic face's colour 1.
+        let mut weapon = Vec::new();
+        vertices(
+            &mut weapon,
+            &stores[3..],
+            [0.; 3],
+            [0.; 3],
+            None,
+            &art,
+            &palette,
+        );
+        assert!(weapon.chunks_exact(10).any(|v| v[9] == 1.));
     }
 }
