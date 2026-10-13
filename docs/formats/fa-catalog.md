@@ -113,6 +113,7 @@ host's quarter second timer unit, speeds are feet per second.
 | `aircraft_default_stations` | Aircraft stations across all 145 PTs naming this store as their default. 70 records have a nonzero count, matching the earlier audit in [importer coverage](coverage.md) |
 | `surface_type_references` | Ground and ship type records (NT, OT) naming this store |
 | `shape`, `fire_sound` | Resources the record names |
+| `max_sound_distance_ft`, `frequency_adjust` | Source `maxSndDist` (feet at which the fire sound reaches zero) and `freqAdj` (pitch offset in 1/256 of the 11 kHz rate). See [weapon launch and bomb release sound](sound.md#weapon-launch-and-bomb-release-sound) |
 | `archive` | Source archive |
 
 ### Derived kind rule

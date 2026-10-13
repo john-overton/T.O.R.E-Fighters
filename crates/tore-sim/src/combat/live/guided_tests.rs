@@ -130,6 +130,7 @@ fn scene(weapon: Weapon, designator: bool, ahead: f64) -> State {
         mount: [0.; 3],
         count: 4,
         internal: false,
+        rack: Default::default(),
     }];
     let mut s = State::new(config, true).unwrap();
     s.targets.clear();

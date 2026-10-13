@@ -129,10 +129,14 @@ impl Renderer {
             pixels,
         );
     }
+    /// The flown aircraft, with `stores`, the vertices of the pylons and
+    /// stores it carries (B3, [`crate::pylons`]), which show and hide with it.
+    #[allow(clippy::too_many_arguments)]
     pub fn aircraft(
         &mut self,
         hornet: &crate::aircraft::Airframe,
         state: &crate::flight::State,
+        stores: &[f32],
         visible: bool,
         camera: &crate::camera::Camera,
         world: &crate::terrain::Terrain,
@@ -141,13 +145,12 @@ impl Renderer {
         self.mirror_camera = crate::mirrors::camera(state);
         if !visible {
             self.mirror_vertices = hornet.vertices(state, &self.mirror_camera, world, scenery);
+            self.mirror_vertices.extend_from_slice(stores);
         }
-        self.sim.aircraft(
-            &self.device,
-            &self.queue,
-            hornet,
-            &hornet.vertices(state, camera, world, scenery),
-        );
+        let mut vertices = hornet.vertices(state, camera, world, scenery);
+        vertices.extend_from_slice(stores);
+        self.sim
+            .aircraft(&self.device, &self.queue, hornet, &vertices);
         if !visible {
             self.sim.hide_aircraft();
         }

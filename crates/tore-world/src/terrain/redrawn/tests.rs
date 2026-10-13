@@ -229,6 +229,7 @@ fn synthetic_plan(text: &str) -> Plans {
     let defaults = plan::default_materials(DEFAULTS).unwrap();
     Plans {
         plans: vec![Plan::parse(text, &defaults).unwrap()],
+        retail_templates: false,
     }
 }
 
@@ -320,6 +321,46 @@ fn a_redrawn_airport_keeps_the_retail_runway_and_replaces_its_field() {
         .unwrap();
     let rebuilt = sources.stance(placement, 0.).unwrap();
     assert!((rebuilt.center[0] - scene.bounds.center[0]).abs() < 1e-6);
+}
+
+/// B14: a runway piece the ground target's template brings is redrawn like
+/// the layout's, as its own airport keyed by the template object's id, and
+/// stays retail when the plans say so (a scene 1 replay).
+#[test]
+fn a_templates_own_runway_piece_is_redrawn_too() {
+    let map = synthetic_resources();
+    let template_id = crate::surface::UnitId::template(0).unwrap().0;
+    let with_template = || {
+        let mut sources = Placements::load(&map, "UKR").unwrap();
+        let mut strip = sources
+            .layout
+            .placements
+            .iter()
+            .find(|p| p.object_type == "STRIP.OT")
+            .unwrap()
+            .clone();
+        strip.position[0] += 60_000;
+        sources.surface.push((template_id, strip));
+        sources
+    };
+    let plans = synthetic_plan(SYNTHETIC);
+    let mut sources = with_template();
+    let built = apply(&map, &mut sources, &plans, &mut [], |_, _| 0.).unwrap();
+    let mut ids: Vec<u32> = built.iter().map(|b| b.strip_id).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, [AIRPORT_RUNWAY, template_id]);
+    let template = Built::for_runway(&built, template_id).unwrap();
+    let layout = Built::for_runway(&built, AIRPORT_RUNWAY).unwrap();
+    // The same plan, 60,000 ft east.
+    assert_eq!(template.patches, layout.patches);
+    assert!((template.frame.origin[0] - layout.frame.origin[0] - 60_000.).abs() < 1e-9);
+    // Kept retail on request.
+    let mut plans = plans;
+    plans.retail_templates = true;
+    let mut sources = with_template();
+    let built = apply(&map, &mut sources, &plans, &mut [], |_, _| 0.).unwrap();
+    assert!(Built::for_runway(&built, template_id).is_none());
+    assert!(Built::for_runway(&built, AIRPORT_RUNWAY).is_some());
 }
 
 #[test]

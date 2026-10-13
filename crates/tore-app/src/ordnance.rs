@@ -1034,6 +1034,23 @@ impl Ordnance {
             "ordnance-message" => {
                 self.activate(13);
             }
+            "ordnance-laser" | "lobby-ordnance-laser" => {
+                // A laser bomb on the first station that takes one, on the
+                // air-to-surface page (the laser warning and sensor helper).
+                self.category = 1;
+                if let Some(weapon) = self
+                    .catalog
+                    .iter()
+                    .find(|w| tore_sim::combat::laser::is_laser_weapon(w))
+                    .cloned()
+                {
+                    for slot in 0..self.loadout.quantities.len() {
+                        if self.loadout.select(slot, weapon.clone()).is_ok() {
+                            break;
+                        }
+                    }
+                }
+            }
             "lobby-ordnance-gaps" => {
                 // The catalog's first and third weapons are in a gap, and
                 // the first is the one the player just tried.
@@ -1359,8 +1376,20 @@ impl Ordnance {
                 (13, (103, 85, 230, 25)),
             ];
         }
+        // The page's words, one band by priority: what the player just did
+        // (the message), then the laser warning. The sensor helper line sits
+        // in the strip under the title bar; the lobby's one band is that
+        // strip, so there it gives way to the other two (slice BQ, B24).
+        let warning = laser_warning(&self.loadout);
         if let Some(message) = &self.message {
             notice(&mut c, font, message, self.lobby);
+        } else if let Some(words) = warning {
+            band(&mut c, font, words, self.lobby, WARNING_INK);
+        }
+        if !(self.lobby && (self.message.is_some() || warning.is_some()))
+            && let Some(words) = sensor_helper(&self.loadout, !self.designator_catalog.is_empty())
+        {
+            band(&mut c, font, &words, true, HELPER_INK);
         }
         if let Some(drag) = self.drag.as_ref().filter(|drag| drag.moved)
             && let Some((x, y)) = self.pointer
@@ -1388,17 +1417,75 @@ const NOTICE_Y: i32 = 335;
 const LOBBY_NOTICE_Y: i32 = 64;
 
 fn notice(c: &mut Canvas, font: &Sprite, message: &str, lobby: bool) {
+    band(c, font, message, lobby, [235, 225, 179]);
+}
+/// The laser warning's ink: a dim amber, quieter than a message's cream
+/// (opinionated, John 2026-10-12 asked for a subtle warning; the colour is
+/// the lead's default).
+const WARNING_INK: [u8; 3] = [196, 138, 52];
+/// The sensor helper line's ink: a quiet blue-grey (agent decision).
+const HELPER_INK: [u8; 3] = [150, 170, 180];
+/// One line of the page's words on its dark strip, in `ink`: low on the
+/// left in single player, or in the lobby's strip under the title bar
+/// (`high`).
+fn band(c: &mut Canvas, font: &Sprite, message: &str, high: bool, ink: [u8; 3]) {
     let line = message.split_whitespace().collect::<Vec<_>>().join(" ");
     let line = fit(font, &line, 572);
     if line.is_empty() {
         return;
     }
-    let y = if lobby { LOBBY_NOTICE_Y } else { NOTICE_Y };
+    let y = if high { LOBBY_NOTICE_Y } else { NOTICE_Y };
     c.rect(
         (30, y, text_width(font, &line) + 8, font.height as i32 + 4),
         [35, 44, 46, 255],
     );
-    c.text(font, &line, 34, y + 2, Some([235, 225, 179]));
+    c.text(font, &line, 34, y + 2, Some(ink));
+}
+/// Said when a laser weapon is loaded and nothing on the aircraft can lase
+/// (slice BQ, B24; wording the lead's default). The player may still fly: a
+/// flight mate's laser spot guides it (buddy lasing, docs/spec/air-to-ground.md).
+pub const NO_LASER_WARNING: &str = "No laser designator: needs buddy lase";
+/// The warning when laser ordnance (a loaded laser bomb or laser missile,
+/// signature 1 with the designator flag) has no designator on the aircraft:
+/// no built-in laser, and no pod on this station or another.
+pub fn laser_warning(loadout: &Loadout) -> Option<&'static str> {
+    let laser_loaded = loadout
+        .configuration
+        .stations
+        .iter()
+        .zip(&loadout.quantities)
+        .any(|(station, quantity)| {
+            *quantity > 0 && tore_sim::combat::laser::is_laser_weapon(&station.weapon)
+        });
+    let can_lase = loadout
+        .configuration
+        .sight_sensor()
+        .is_some_and(|sensor| sensor.laser);
+    (laser_loaded && !can_lase).then_some(NO_LASER_WARNING)
+}
+/// One line on what the aircraft's own sensors do for its weapons, from its
+/// data (slice BQ, B24; wording the lead's default): a built-in or fitted
+/// laser designator or FLIR, or, with neither, that a Pave pod can be hung
+/// (`pods`: the page offers one). `None` when there is nothing to say.
+pub fn sensor_helper(loadout: &Loadout, pods: bool) -> Option<String> {
+    use tore_sim::combat::sight::Gimbal;
+    let Some(sensor) = loadout.configuration.sight else {
+        return pods.then(|| {
+            "No built-in designator: hang a Pave Spike or Pave Knife pod to lase.".to_string()
+        });
+    };
+    let (what, needs) = if sensor.laser {
+        ("laser designator", "laser ordnance")
+    } else {
+        ("FLIR", "IR weapons")
+    };
+    Some(if sensor.gimbal == Gimbal::Hemisphere {
+        let mut what = what.to_string();
+        what[..1].make_ascii_uppercase();
+        format!("{what} pod fitted: no extra pod needed for {needs}.")
+    } else {
+        format!("Built-in {what}: no pod needed for {needs}.")
+    })
 }
 /// Darkens a block of the picture: a weapon the lobby's page cannot load.
 fn dim(c: &mut Canvas, (x, y, w, h): Rect) {
@@ -3519,5 +3606,196 @@ mod tests {
         let spec = tore_world::mission::LoadoutSpec::of(&ui.loadout);
         assert_eq!(spec.stations[1].weapon, "PAVESPK.SEE");
         assert_eq!(spec.stations[1].quantity, 0);
+    }
+
+    // Slice BQ, B24: the laser warning and the sensor helper line.
+    fn laser_fixture() -> Ordnance {
+        let mut ui = fixture();
+        // Station 0 holds two laser bombs: signature 1 and the designator flag.
+        let weapon = &mut ui.loadout.configuration.stations[0].weapon;
+        weapon.source = "GBU10.JT".into();
+        weapon.seeker.signature = 1;
+        weapon.flags |= 0x400 | 1;
+        ui.loadout.configuration.sight = None;
+        ui.loadout.quantities[0] = 2;
+        ui
+    }
+    fn sensor(
+        laser: bool,
+        gimbal: tore_sim::combat::sight::Gimbal,
+    ) -> tore_sim::combat::sight::SightSensor {
+        tore_sim::combat::sight::SightSensor {
+            laser,
+            range_ft: 60_760.,
+            gimbal,
+            eye: [0.; 3],
+            default_look: [0., -0.17],
+        }
+    }
+    const CONE: tore_sim::combat::sight::Gimbal = tore_sim::combat::sight::Gimbal::Cone {
+        search: 1.0,
+        track: 0.8,
+    };
+    #[test]
+    fn laser_ordnance_with_nothing_to_lase_it_warns() {
+        let mut ui = laser_fixture();
+        assert_eq!(laser_warning(&ui.loadout), Some(NO_LASER_WARNING));
+        // Unloaded, the bomb warns of nothing.
+        ui.loadout.quantities[0] = 0;
+        assert_eq!(laser_warning(&ui.loadout), None);
+        // A weapon that is not a laser one never does: signature 1 without the
+        // designator flag needs no designator, and another seeker with the
+        // flag is not a laser seeker.
+        let mut other = laser_fixture();
+        other.loadout.configuration.stations[0].weapon.flags &= !0x400;
+        assert_eq!(laser_warning(&other.loadout), None);
+        let mut other = laser_fixture();
+        other.loadout.configuration.stations[0]
+            .weapon
+            .seeker
+            .signature = 2;
+        assert_eq!(laser_warning(&other.loadout), None);
+    }
+    #[test]
+    fn a_laser_on_the_aircraft_or_a_pod_on_any_station_silences_the_warning() {
+        use tore_sim::combat::sight::Gimbal;
+        // A built-in laser, or a fitted laser pod (the F-16C and A-10 rows).
+        for gimbal in [CONE, Gimbal::Hemisphere] {
+            let mut ui = laser_fixture();
+            ui.loadout.configuration.sight = Some(sensor(true, gimbal));
+            assert_eq!(laser_warning(&ui.loadout), None);
+        }
+        // A FLIR sees but does not lase.
+        let mut ui = laser_fixture();
+        ui.loadout.configuration.sight = Some(sensor(false, Gimbal::Hemisphere));
+        assert_eq!(laser_warning(&ui.loadout), Some(NO_LASER_WARNING));
+        // A pod hung on another station counts, and takes the warning back
+        // when it comes off.
+        let mut ui = with_pod_station();
+        let weapon = &mut ui.loadout.configuration.stations[0].weapon;
+        weapon.seeker.signature = 1;
+        weapon.flags |= 0x400 | 1;
+        ui.loadout.quantities[0] = 2;
+        assert_eq!(laser_warning(&ui.loadout), Some(NO_LASER_WARNING));
+        ui.activate(4);
+        ui.activate(100);
+        assert_eq!(ui.activate(201), Action::OrdnanceWeapon);
+        assert!(ui.loadout.designator(1).is_some());
+        assert_eq!(laser_warning(&ui.loadout), None);
+        ui.station = 1;
+        ui.change_station(1, -1, false);
+        assert_eq!(laser_warning(&ui.loadout), Some(NO_LASER_WARNING));
+    }
+    #[test]
+    fn the_helper_line_says_what_the_aircraft_brings_from_its_data() {
+        use tore_sim::combat::sight::Gimbal;
+        let mut ui = fixture();
+        ui.loadout.configuration.sight = None;
+        assert_eq!(sensor_helper(&ui.loadout, false), None);
+        assert_eq!(
+            sensor_helper(&ui.loadout, true).as_deref(),
+            Some("No built-in designator: hang a Pave Spike or Pave Knife pod to lase.")
+        );
+        for (laser, gimbal, words) in [
+            (
+                true,
+                CONE,
+                "Built-in laser designator: no pod needed for laser ordnance.",
+            ),
+            (false, CONE, "Built-in FLIR: no pod needed for IR weapons."),
+            (
+                true,
+                Gimbal::Hemisphere,
+                "Laser designator pod fitted: no extra pod needed for laser ordnance.",
+            ),
+            (
+                false,
+                Gimbal::Hemisphere,
+                "FLIR pod fitted: no extra pod needed for IR weapons.",
+            ),
+        ] {
+            ui.loadout.configuration.sight = Some(sensor(laser, gimbal));
+            // Pods on offer or not, a sensor the aircraft has is what is said.
+            for pods in [false, true] {
+                assert_eq!(sensor_helper(&ui.loadout, pods).as_deref(), Some(words));
+            }
+        }
+    }
+    /// The first and last row of `ink` in the page's pixels, and whether any
+    /// of it is there.
+    fn ink_rows(pixels: &[u8], ink: [u8; 3]) -> Option<(usize, usize)> {
+        // A tint is multiplied by the font's own colour (200 in the fixture).
+        let ink = ink.map(|channel| ((u32::from(channel) * 200 + 127) / 255) as u8);
+        let rows: Vec<usize> = (0..HEIGHT)
+            .filter(|row| {
+                pixels[row * WIDTH * 4..(row + 1) * WIDTH * 4]
+                    .chunks_exact(4)
+                    .any(|p| p[..3] == ink)
+            })
+            .collect();
+        Some((*rows.first()?, *rows.last()?))
+    }
+    fn drawn(ui: &mut Ordnance) -> Vec<u8> {
+        let mut pixels = vec![0u8; WIDTH * HEIGHT * 4];
+        ui.render(&mut pixels);
+        pixels
+    }
+    #[test]
+    fn the_warning_takes_the_message_band_and_a_message_takes_it_back() {
+        let mut ui = laser_fixture();
+        let pixels = drawn(&mut ui);
+        let (top, bottom) = ink_rows(&pixels, WARNING_INK).expect("the warning draws");
+        assert!(
+            top >= NOTICE_Y as usize && bottom < NOTICE_Y as usize + 20,
+            "{top} {bottom}"
+        );
+        // A message the player just earned shows instead, never both.
+        ui.message = Some(LOBBY_CHEAT_NOTICE.into());
+        let pixels = drawn(&mut ui);
+        assert_eq!(ink_rows(&pixels, WARNING_INK), None);
+        // No laser bomb, no warning.
+        let mut quiet = fixture();
+        assert_eq!(ink_rows(&drawn(&mut quiet), WARNING_INK), None);
+        // The player can still start with it up.
+        // The warning never refuses Fly: the loadout's own validation is the
+        // only thing that can, and it does not look at the designator.
+        let mut ui = laser_fixture();
+        let valid = ui.loadout.validate().is_ok();
+        let action = ui.activate(7);
+        assert_eq!(action == Action::MissionFly, valid);
+        assert_ne!(ui.message.as_deref(), Some(NO_LASER_WARNING));
+        ui.loadout.configuration.designator_pods.clear();
+        assert_eq!(ui.loadout.validate().is_ok(), valid);
+    }
+    #[test]
+    fn the_helper_sits_under_the_title_bar_and_the_lobbys_one_band_gives_way() {
+        use tore_sim::combat::sight::Gimbal;
+        let mut ui = fixture();
+        ui.loadout.configuration.sight = Some(sensor(false, CONE));
+        let (top, bottom) = ink_rows(&drawn(&mut ui), HELPER_INK).expect("the helper draws");
+        assert!(
+            top >= LOBBY_NOTICE_Y as usize && bottom < 86,
+            "{top} {bottom}"
+        );
+        // Single player: the warning low, the helper high, both at once.
+        let mut both = laser_fixture();
+        both.loadout.configuration.sight = Some(sensor(false, Gimbal::Hemisphere));
+        let pixels = drawn(&mut both);
+        assert!(ink_rows(&pixels, WARNING_INK).is_some());
+        assert!(ink_rows(&pixels, HELPER_INK).is_some());
+        // The lobby has the one band: the warning is in it, the helper gives
+        // way, and with nothing to warn of the helper has it.
+        both.lobby = true;
+        let pixels = drawn(&mut both);
+        let (top, bottom) = ink_rows(&pixels, WARNING_INK).expect("the lobby's warning draws");
+        assert!(
+            top >= LOBBY_NOTICE_Y as usize && bottom < 86,
+            "{top} {bottom}"
+        );
+        assert_eq!(ink_rows(&pixels, HELPER_INK), None);
+        both.loadout.quantities[0] = 0;
+        let pixels = drawn(&mut both);
+        assert_eq!(ink_rows(&pixels, WARNING_INK), None);
+        assert!(ink_rows(&pixels, HELPER_INK).is_some());
     }
 }

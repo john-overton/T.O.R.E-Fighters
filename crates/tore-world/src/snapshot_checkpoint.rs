@@ -14,7 +14,7 @@
 
 use super::{
     AircraftPose, Damage, DebrisPose, Draw, EffectPose, Engine, MarkPose, PilotPose,
-    ProjectilePose, RenderSnapshot, SurfacePose,
+    ProjectilePose, RenderSnapshot, StoreLook, StorePose, SurfacePose,
 };
 use tore_sim::checkpoint::{Checkpoint, CheckpointError, Loader, Saver, invalid};
 use tore_sim::combat::live::EffectKind;
@@ -77,7 +77,39 @@ tore_sim::checkpoint_struct!(AircraftPose {
     airborne,
     wreck,
     crashed,
+    stores,
 });
+
+tore_sim::checkpoint_struct!(StorePose {
+    hardpoint,
+    mount,
+    rack,
+    shape,
+    look,
+    items,
+    loaded,
+    body,
+});
+
+// How a store is drawn. Written by hand so a new variant fails to compile.
+impl Checkpoint for StoreLook {
+    fn save(&self, s: &mut Saver, _: Option<&Self>) -> Result<(), CheckpointError> {
+        s.writer().write_varint(match self {
+            Self::Store => 0,
+            Self::Pod => 1,
+            Self::Tank => 2,
+        });
+        Ok(())
+    }
+    fn load(l: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
+        match l.reader().read_varint()? {
+            0 => Ok(Self::Store),
+            1 => Ok(Self::Pod),
+            2 => Ok(Self::Tank),
+            other => invalid(format!("a store look has no variant {other}")),
+        }
+    }
+}
 
 tore_sim::checkpoint_struct!(Engine {
     lit,
@@ -235,6 +267,7 @@ mod tests {
             airborne: id != 5,
             wreck: (id == 4).then_some(wreck::Phase::Falling),
             crashed: id == 4,
+            stores: Vec::new(),
         }
     }
 

@@ -156,6 +156,7 @@ pub fn run() -> AppResult<()> {
     let mut sweep = false;
     let mut starts = false;
     let mut classes = false;
+    let mut grounding = false;
     let mut seeds = None;
     let mut variation = Variation::ON;
     let mut separation = DUMP_SEPARATION_NM;
@@ -175,6 +176,7 @@ pub fn run() -> AppResult<()> {
             "--sweep" => sweep = true,
             "--starts" => starts = true,
             "--classes" => classes = true,
+            "--grounding" => grounding = true,
             "--no-jitter" => variation.jitter = false,
             "--no-relocate" => variation.relocate = false,
             "--no-front" => variation.front = false,
@@ -197,6 +199,9 @@ pub fn run() -> AppResult<()> {
     if starts {
         return start_placement(&resources, &positional);
     }
+    if grounding {
+        return grounding_survey(&resources, &positional);
+    }
     let [theater, rest @ ..] = positional.as_slice() else {
         return Err("--surface-dump THEATER [STEM] [--defenses AAA SAM] [--surface-seed N] [--enemy-nationality N] [--night-stealth] [--no-jitter] [--no-relocate] | --all [--seeds N] | --sweep [--seeds N] [THEATER...] | --starts [THEATER...]".into());
     };
@@ -218,6 +223,77 @@ pub fn run() -> AppResult<()> {
     let terrain =
         Terrain::for_mission_with(&resources, theater, Some(0), &overrides()?, target.as_ref())?;
     print_surface(theater, &terrain.surface);
+    Ok(())
+}
+
+/// `--surface-dump --grounding [TYPE ...]`: every placed structure type (or
+/// the types named) with its drawn shape's lowest and highest point about
+/// its origin, world feet at the size it is drawn, its F2 ground offset at
+/// that size, and the lift [`tore_world::terrain::building_lift_ft`] gives
+/// it (docs/formats/objects-and-shapes.md, "Building grounding").
+fn grounding_survey(resources: &BTreeMap<String, Vec<u8>>, named: &[String]) -> AppResult<()> {
+    let wanted: Vec<String> = named.iter().map(|n| n.to_ascii_uppercase()).collect();
+    let mut lifted = 0;
+    let mut total = 0;
+    for (name, bytes) in resources {
+        let upper = name.to_ascii_uppercase();
+        let chosen = if wanted.is_empty() {
+            upper.ends_with(".OT")
+        } else {
+            wanted
+                .iter()
+                .any(|w| *w == upper || format!("{w}.OT") == upper)
+        };
+        if !chosen {
+            continue;
+        }
+        let Ok(definition) = tore_formats::static_object::Definition::parse(bytes) else {
+            continue;
+        };
+        let Some(shape_bytes) = definition
+            .main_shape
+            .as_ref()
+            .and_then(|s| resources.get(s))
+        else {
+            continue;
+        };
+        let Ok(shape) = tore_formats::shape::Shape::scenery(shape_bytes) else {
+            continue;
+        };
+        let Ok(scale) = tore_world::terrain::placed_shape_scale(&definition, shape_bytes) else {
+            continue;
+        };
+        let Some([low, high]) = tore_world::terrain::shape_height_range(&shape) else {
+            continue;
+        };
+        let f2 = tore_formats::shape::contact_offset(shape_bytes)
+            .ok()
+            .flatten()
+            .map(|v| tore_world::terrain::PlacedSize::of(&definition).feet(f64::from(v)));
+        let lift = tore_world::terrain::building_lift_ft(&definition, &shape, scale);
+        total += 1;
+        if lift > 0. {
+            lifted += 1;
+        }
+        println!(
+            "grounding: {name} shape {} size {:?} low {:.1} high {:.1} below {:.0}% f2 {} lift {:.1} hp {}",
+            definition.main_shape.as_deref().unwrap_or("-"),
+            tore_world::terrain::PlacedSize::of(&definition),
+            low * scale,
+            high * scale,
+            if high > low {
+                (-low).max(0.) / (high - low) * 100.
+            } else {
+                0.
+            },
+            f2.map_or("-".into(), |v| format!("{v:.1}")),
+            lift,
+            definition
+                .hit_points
+                .map_or("-".into(), |hp| hp.to_string()),
+        );
+    }
+    println!("grounding: {total} types, {lifted} lifted");
     Ok(())
 }
 

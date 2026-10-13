@@ -156,13 +156,20 @@ impl ReleaseState {
     /// sight both start here, so the sight shows where a released bomb's
     /// mean path goes.
     pub fn from_station(launcher: &Launcher, station: &Station, index: usize) -> Self {
+        Self::from_mount(launcher, station, station.mount, index)
+    }
+
+    /// [`Self::from_station`] from `mount` (feet right, up and forward), the
+    /// side of a paired station the store leaves from
+    /// ([`super::hardpoints::Rack::release_mount`]).
+    pub fn from_mount(launcher: &Launcher, station: &Station, mount: Vector, index: usize) -> Self {
         let [side, up] = pack_offset(index);
         let basis = launcher.basis;
         let position = std::array::from_fn(|i| {
             launcher.position[i]
-                + basis.right[i] * (station.mount[0] + side)
-                + basis.up[i] * station.mount[1]
-                + basis.forward[i] * station.mount[2]
+                + basis.right[i] * (mount[0] + side)
+                + basis.up[i] * mount[1]
+                + basis.forward[i] * mount[2]
                 + [0., up, 0.][i]
         });
         let speed =

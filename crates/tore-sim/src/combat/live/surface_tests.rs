@@ -283,6 +283,13 @@ fn a_surface_gun_round_carries_its_record_its_share_and_its_tracer() {
     // Flak and tank guns carry no tracer.
     assert!(!surface_tracer(&ks19(), 0));
     assert!(surface_tracer(&zsu23(), 3) && !surface_tracer(&zsu23(), 1));
+    // A squad's small arms mark every third round as the light cannon do
+    // (John, 2026-10-12: airfield small arms were fired unseen).
+    let mut rifle = record("SMLARMS.JT");
+    rifle.burst.game_rounds_in_burst = 4;
+    rifle.burst.actual_rounds_per_game = 1;
+    rifle.burst.game_burst_t = 1;
+    assert!(surface_tracer(&rifle, 3) && surface_tracer(&rifle, 0) && !surface_tracer(&rifle, 1));
 }
 
 #[test]

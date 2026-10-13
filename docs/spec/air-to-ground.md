@@ -524,9 +524,10 @@ agent for the layout).
 | Gimbal limit | The AC-130 eye icon |
 
 Retail shows the weapon's own view in the IR/Laser window after launch (Shift+2,
-retail manual p. 88). The weapon camera in the flight views already does that,
-so the page keeps the pod view (opinionated, agent; John asked for the page to
-show the lasing).
+retail manual p. 88). The page does that for the weapons with a seeker picture,
+from launch until impact, and the Clear designation key goes back to the pod
+view ([seeker view](target-window.md#seeker-view); opinionated, John
+2026-10-12, which reverses the earlier agent choice to keep the pod view).
 
 ## The HUD in air-to-ground modes
 
@@ -826,6 +827,18 @@ retail behaviour; the reach scale serves both.
   The prediction takes the very steps combat gives the round, on combat's own
   quarter-second clock, so a rocket fired on that tick lands on the pipper. The
   rocket pipper has no fall line.
+  **Always shown** (opinionated, John 2026-10-12: it used to show only below
+  about 3 degrees of dive, because the rocket's 20 second life ended before it
+  reached the ground). The human's pipper carries the flight on past the life,
+  in tenth-second steps with the same speed command and sink, until it meets
+  the terrain (at most 300 s); with no ground in that time (a nose above the
+  horizon, a very high flat pass) it marks where the rocket stands when its
+  life ends. Off the HUD's cue region it is pinned to the edge nearest the
+  impact as an arrowhead pointing at it (the lower edge's caret that the bomb
+  pipper uses, turned to any side; retail draws nothing off the HUD, so this
+  is TORE's addition, labelled opinionated); behind the view it is the caret
+  under the flight path. The AI's release gate reads the in-life impact only
+  and is unchanged.
   Retail rockets carry the gravity flag, so they sink at 32 ft/s squared to an
   80 ft/s cap after burnout (retail data). The range arc follows the record's
   zone-1 maximum, as CCIP.
@@ -1523,7 +1536,8 @@ cue plus the retail page; 10 Maverick boresight; 11 retail A-G mode only; 12
 real rocket counts and a pipper; 13 retail cluster splash plus flashes; 14 no
 ripple settings; 15 LOW and FRAG warnings; 17 data over manual; 18 no AI strike
 this round; 19 replay events without a format change; 20 stores on pylons stay
-undrawn; 21 Tab and Ctrl+X.
+undrawn (reversed by John on 2026-10-12: they are drawn and leave from their
+own pylons, [stores on pylons](stores-on-pylons.md)); 21 Tab and Ctrl+X.
 
 ## Fold-in record
 

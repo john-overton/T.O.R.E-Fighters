@@ -311,6 +311,7 @@ impl Viewer {
             render_snapshot::aircraft_batches(
                 &picture,
                 &self.models,
+                &self.art,
                 &camera,
                 &self.world,
                 &self.scenery,

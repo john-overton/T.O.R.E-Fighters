@@ -2945,7 +2945,7 @@ impl AiMission {
                     let landing = sequence.landing_point();
                     let field = crate::ejection::AirfieldContext {
                         agl_ft: y - below.height,
-                        landable_below: below.landable,
+                        below,
                         landing_distance_ft: (landing[0] - x).hypot(landing[2] - z),
                     };
                     let catastrophic = crate::ejection::catastrophic(&actor.flight, found, field);
@@ -2969,7 +2969,7 @@ impl AiMission {
                                 let descent = (-actor.flight.velocity[1])
                                     .atan2(actor.flight.velocity[0].hypot(actor.flight.velocity[2]))
                                     .to_degrees();
-                                !touchdown.landable
+                                crate::touchdown::assess(&actor.flight, &touchdown).is_refused()
                                     || actor.flight.gear < 0.99
                                     || descent > super::airfield::GO_AROUND_DESCENT_DEG
                             }
@@ -3458,7 +3458,14 @@ impl AiMission {
             .collect();
         actor.controller.set_gun_views(gun_views);
         // A striker's pass, flown below a B47 defence (slice ST-T).
-        let strike = actor.strike_step(tick, &own, strike_inputs, &strike_mates, strike_wing);
+        let strike = actor.strike_step(
+            tick,
+            &own,
+            strike_inputs,
+            &strike_mates,
+            strike_wing,
+            terrain,
+        );
         actor.controller.set_strike(strike);
         let stations = actor.station_views(&targets[..observed_len], &own);
         actor.trace.station_aim = actor

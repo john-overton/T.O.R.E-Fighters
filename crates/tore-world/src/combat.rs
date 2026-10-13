@@ -733,6 +733,35 @@ impl Combat {
             .filter(|actor| actor.alive() && actor.flight().afterburner_active())
             .map(|actor| actor.id())
             .collect();
+        // The AI aircraft's stores as drawn: what each station holds now
+        // (B3). An unlimited store shows its loaded quantity.
+        let ai_stores: BTreeMap<u32, Vec<crate::snapshot::StorePose>> = wings
+            .into_iter()
+            .flat_map(|wings| {
+                wings.mission().actors().iter().filter_map(move |actor| {
+                    let config = wings.configuration(actor.id())?;
+                    let rounds = |index: usize| {
+                        let loaded = config.stations.get(index).map_or(0, |s| {
+                            u32::from(s.count) * tore_sim::combat::live::pod_rounds(&s.weapon)
+                        });
+                        actor
+                            .stations()
+                            .iter()
+                            .find(|spec| usize::from(spec.station.0) == index)
+                            .map_or(loaded, |spec| match spec.rounds() {
+                                tore_sim::ai::weapon_service::Rounds::Finite(rounds) => rounds,
+                                tore_sim::ai::weapon_service::Rounds::Unlimited => loaded,
+                            })
+                    };
+                    let loaded =
+                        |index: usize| config.stations.get(index).is_some_and(|s| s.count > 0);
+                    Some((
+                        actor.id(),
+                        crate::snapshot::store_poses(config, rounds, loaded),
+                    ))
+                })
+            })
+            .collect();
         // The last devices drawn hold once an aircraft stops flying.
         let simulated = |id: u32| {
             flying
@@ -809,6 +838,7 @@ impl Combat {
                 airborne: true,
                 wreck: player.wreck.as_ref().map(|wreck| wreck.phase),
                 crashed: player.crashed,
+                stores: own_stores(own),
             },
             targets: self
                 .state
@@ -850,6 +880,7 @@ impl Combat {
                     airborne: t.airborne,
                     wreck: t.wreck.as_ref().map(|wreck| wreck.phase),
                     crashed: t.hp <= 0,
+                    stores: ai_stores.get(&t.id).cloned().unwrap_or_default(),
                 })
                 .chain(others.iter().map(|(own, pose)| AircraftPose {
                     id: own.aircraft,
@@ -872,6 +903,7 @@ impl Combat {
                     airborne: true,
                     wreck: pose.wreck,
                     crashed: pose.crashed,
+                    stores: own_stores(own),
                 }))
                 .collect(),
             projectiles: self
@@ -1772,6 +1804,16 @@ pub fn feedback(
         Event::OwnshipDestroyed { aircraft: who } if *who == aircraft => Some(F::Crash),
         _ => None,
     }
+}
+
+/// A flown aircraft's stores as drawn: each station's rounds left, and the
+/// stations its mission started with (B3).
+fn own_stores(own: &live::Ownship) -> Vec<crate::snapshot::StorePose> {
+    crate::snapshot::store_poses(
+        own.configuration(),
+        |index| u32::from(own.rounds(index)),
+        |index| own.was_loaded(index),
+    )
 }
 
 #[cfg(test)]

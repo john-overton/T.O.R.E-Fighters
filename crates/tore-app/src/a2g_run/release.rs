@@ -117,7 +117,7 @@ pub(super) fn run(scene: &mut Scene, o: &Options) -> AppResult<()> {
         scene.step(trigger)?;
         let tick_now = scene.world.combat.state.tick();
         // What this tick released from the attack station.
-        let fresh: Vec<(u32, Vector)> = scene
+        let fresh: Vec<(u32, Vector, Vector)> = scene
             .world
             .combat
             .state
@@ -126,7 +126,7 @@ pub(super) fn run(scene: &mut Scene, o: &Options) -> AppResult<()> {
             .filter(|p| {
                 p.owner == scene.owner && p.station == scene.station && !seen.contains(&p.id)
             })
-            .map(|p| (p.id, p.position))
+            .map(|p| (p.id, p.position, p.previous))
             .collect();
         if !fresh.is_empty() {
             fired += fresh.len();
@@ -139,13 +139,43 @@ pub(super) fn run(scene: &mut Scene, o: &Options) -> AppResult<()> {
             );
         }
         let launcher = scene.launcher();
-        for (n, &(id, position)) in fresh.iter().enumerate() {
+        for (n, &(id, _, previous)) in fresh.iter().enumerate() {
+            // Where every round started against the aircraft, feet right,
+            // up and forward (B3): the forward figure includes the tick the
+            // aircraft has flown since.
+            let from: Vector = std::array::from_fn(|i| previous[i] - launcher.position[i]);
+            println!(
+                "a2g-run: origin n={n} id={id} right {:.2} up {:.2} forward {:.2} station-right {:.2} rounds-after {}",
+                dot(from, launcher.basis.right),
+                dot(from, launcher.basis.up),
+                dot(from, launcher.basis.forward),
+                scene.station().mount[0],
+                scene.rounds(),
+            );
+        }
+        for (n, &(id, position, _)) in fresh.iter().enumerate() {
             seen.insert(id);
             let Some(motion) = scene.world.combat.state.bomb_motion(id) else {
                 continue;
             };
-            let mean = ReleaseState::from_station(&launcher, scene.station(), n);
-            let first = ReleaseState::from_station(&launcher, scene.station(), 0);
+            // The side of its station the bomb left from (B3): the
+            // station's whole releases left after this one pick it.
+            let station = scene.station();
+            let mount = station.rack.release_mount(
+                station.mount,
+                tore_sim::combat::hardpoints::units(
+                    u32::from(scene.rounds()),
+                    u32::from(station.weapon.burst.actual_rounds_per_game),
+                ),
+            );
+            let mean = ReleaseState::from_mount(&launcher, station, mount, n);
+            let first = ReleaseState::from_mount(&launcher, station, mount, 0);
+            if n == 0 {
+                println!(
+                    "a2g-run: release-mount right {:.2} up {:.2} forward {:.2} station-right {:.2}",
+                    mount[0], mount[1], mount[2], station.mount[0]
+                );
+            }
             let actual = ReleaseState {
                 position: motion.origin,
                 velocity: motion.velocity(0.),

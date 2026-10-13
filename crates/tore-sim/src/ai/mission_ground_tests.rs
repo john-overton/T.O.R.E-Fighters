@@ -148,6 +148,7 @@ fn observe_with(
     mission.tick = tick;
     mission.observe_ground(
         GroundScene {
+            painted: &[],
             subjects,
             weather: &Weather::default(),
         },
@@ -599,6 +600,7 @@ fn cap_actors_have_no_picture_and_fly_exactly_as_before() {
         assert!(!described.ground_due());
         described.observe_ground(
             GroundScene {
+                painted: &[],
                 subjects: &scene,
                 weather: &Weather::default(),
             },

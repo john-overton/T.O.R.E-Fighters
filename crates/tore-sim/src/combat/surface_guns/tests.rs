@@ -197,6 +197,28 @@ fn surface_guns_table_is_pinned() {
         assert_eq!(row.burst, 1);
     }
     assert!(tuning("", "ZSU23.JT").unwrap().tracer);
+    // Small arms carry tracers like the other light guns (John, 2026-10-12);
+    // only flak and the tank guns go without.
+    let rifle = tuning("TROOPS", "SMLARMS.JT").unwrap();
+    assert!(rifle.tracer);
+    for row in TABLE {
+        assert_eq!(
+            row.tracer,
+            !matches!(row.record, "KS12.JT" | "KS19.JT" | "M1.JT" | "T72.JT"),
+            "{}",
+            row.record
+        );
+    }
+    // Only the squad's rifles are small arms.
+    for row in TABLE {
+        assert_eq!(
+            is_small_arms(row.record),
+            row.record == "SMLARMS.JT",
+            "{}",
+            row.record
+        );
+    }
+    assert!(is_small_arms("smlarms.jt") && !is_small_arms("M2.JT"));
     // The origin labels follow the numbers: retail where the row repeats the
     // retail record, and John's reload times.
     for row in TABLE {

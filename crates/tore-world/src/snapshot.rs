@@ -97,6 +97,120 @@ pub struct AircraftPose {
     pub wreck: Option<wreck::Phase>,
     /// The player's crash flag, or a target with no hit points left.
     pub crashed: bool,
+    /// The external stations it carries stores on, as drawn: pylons and
+    /// the stores still on them (B3). Empty for an aircraft with no combat
+    /// configuration, and for anything a client or a replay knows no loadout
+    /// for.
+    pub stores: Vec<StorePose>,
+}
+
+/// One external station's pylon and the stores still on it (B3,
+/// docs/spec/stores-on-pylons.md).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StorePose {
+    /// The source hardpoint record (PT ordinal) it hangs from: the drawing
+    /// finds the pylon's height under that aircraft's model with it.
+    pub hardpoint: u8,
+    /// The record's position, feet right, up and forward of the aircraft's
+    /// reference point: the right-hand pylon of a paired record.
+    pub mount: Vector,
+    pub rack: tore_sim::combat::hardpoints::Rack,
+    /// The store's own shape, when its record names one.
+    pub shape: Option<String>,
+    pub look: StoreLook,
+    /// Whole stores still on the station (pods, tanks and single stores).
+    pub items: u16,
+    /// Whole stores it was loaded with: the rack's layout.
+    pub loaded: u16,
+    /// A fitted body's length and diameter, feet (a pod or a tank, which
+    /// have no shape); zero for a store drawn with its own shape.
+    pub body: [f64; 2],
+}
+
+/// How a store is drawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StoreLook {
+    /// With its own shape (a missile or a bomb), or a plain body without one.
+    #[default]
+    Store,
+    /// A rocket pod: a fitted pod body, since retail has no pod shape.
+    Pod,
+    /// An external fuel tank: a fitted tank body, since retail has none.
+    Tank,
+}
+
+/// A fitted rocket pod's length and diameter, feet: LAU-61 size (retail
+/// has no pod shape).
+pub const POD_BODY: [f64; 2] = [8.5, 1.4];
+
+/// A fitted fuel tank's length and diameter, feet, from the fuel it holds:
+/// 13 by 2 ft for 2,000 lb (300 US gallons), scaled by the cube root of the
+/// fuel (retail has no tank shape).
+pub fn tank_body(fuel_lbs: f64) -> [f64; 2] {
+    let scale = (fuel_lbs.max(100.) / 2_000.).cbrt();
+    [13. * scale, 2. * scale]
+}
+
+/// The stores `config` carries as drawn: every external station loaded at
+/// the mission's start, each with the whole stores it holds now. `rounds`
+/// gives a station's rounds left and `loaded` whether it was loaded at the
+/// start; `tanks` the tanks still carried at each tank station.
+pub fn store_poses(
+    config: &tore_sim::combat::live::Configuration,
+    rounds: impl Fn(usize) -> u32,
+    loaded: impl Fn(usize) -> bool,
+) -> Vec<StorePose> {
+    use tore_sim::combat::{hardpoints::Rack, live};
+    let hardpoint = |station: usize| {
+        config
+            .hardpoint_slots
+            .iter()
+            .position(|slot| *slot == Some(station))
+    };
+    let mut stores: Vec<StorePose> = config
+        .stations
+        .iter()
+        .enumerate()
+        .filter(|(index, station)| {
+            station.rack.location().external() && !live::is_gun(&station.weapon) && loaded(*index)
+        })
+        .filter_map(|(index, station)| {
+            let per_item = live::pod_rounds(&station.weapon).max(1);
+            Some(StorePose {
+                hardpoint: u8::try_from(hardpoint(index)?).ok()?,
+                mount: station.mount,
+                rack: station.rack,
+                shape: station.weapon.shape.clone(),
+                look: if per_item > 1 {
+                    StoreLook::Pod
+                } else {
+                    StoreLook::Store
+                },
+                body: if per_item > 1 { POD_BODY } else { [0.; 2] },
+                items: u16::try_from(rounds(index).div_ceil(per_item)).unwrap_or(u16::MAX),
+                loaded: station.count,
+            })
+        })
+        .collect();
+    // Tanks: no record names a location, so a tank off the centreline
+    // pairs when there are two (fitted).
+    stores.extend(config.tanks.iter().filter_map(|tank| {
+        let store = tank.store.as_ref()?;
+        (tank.quantity > 0).then(|| StorePose {
+            hardpoint: u8::try_from(tank.hardpoint).unwrap_or(u8::MAX),
+            mount: tank.mount,
+            rack: Rack {
+                location: if tank.mount[0].abs() > 1e-9 { 4 } else { 0 },
+                paired: tank.quantity > 1,
+            },
+            shape: None,
+            look: StoreLook::Tank,
+            items: tank.quantity,
+            loaded: tank.quantity,
+            body: tank_body(f64::from(store.tank.fuel_weight)),
+        })
+    }));
+    stores
 }
 
 /// What the nozzle material reads, and whether the flame lights the scene.

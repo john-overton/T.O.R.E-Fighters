@@ -3105,6 +3105,7 @@ fn player_pose(
         airborne: true,
         wreck: flight.wreck.as_ref().map(|w| w.phase),
         crashed: flight.crashed,
+        stores: Vec::new(),
     }
 }
 
@@ -3137,6 +3138,7 @@ fn ground_poses(world: &World) -> Vec<AircraftPose> {
             airborne: t.airborne,
             wreck: None,
             crashed: t.hp <= 0,
+            stores: Vec::new(),
         })
         .collect()
 }

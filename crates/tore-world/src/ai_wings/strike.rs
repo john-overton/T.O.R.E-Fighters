@@ -17,6 +17,7 @@
 //! [`AiWings::release_seeker`] for its seeker missiles. With no striker it
 //! costs one scan of the actors and changes nothing.
 use super::{AiWings, Chatter};
+use crate::comms::journal::WingLine;
 use tore_sim::ai::strike::{self, Inputs, LaseInputs, LaseSensor, Solution, Store, StoreKind};
 use tore_sim::ai::weapon_service::{Rounds, StationId};
 use tore_sim::attitude::{Vector, unit};
@@ -218,6 +219,37 @@ pub(super) fn step(
             actor.set_strike_inputs(inputs);
             actor.set_laser_set(laser_set);
         }
+    }
+    // A helicopter's threat decision (slice H4): a text line to its lead,
+    // in the wing-line style ("Threat on target, holding off").
+    let heli_calls: Vec<u32> = wings
+        .mission
+        .actors()
+        .iter()
+        .filter(|a| {
+            a.strike()
+                .and_then(|s| s.threat_call())
+                .is_some_and(|c| !c.told)
+        })
+        .map(|a| a.id())
+        .collect();
+    for id in heli_calls {
+        let Some(decision) = wings
+            .mission
+            .actor_mut(id)
+            .and_then(|actor| actor.told_threat_call())
+        else {
+            continue;
+        };
+        use tore_sim::ai::helicopter_threat::Decision;
+        let line = match decision {
+            Decision::HoldOff => WingLine::HoldingOff,
+            Decision::Resume => WingLine::Resuming,
+            Decision::Retarget => WingLine::SwitchingTargets,
+            Decision::Home => WingLine::DefendedRtb,
+            Decision::Leave => WingLine::LeavingRing,
+        };
+        wings.chat(Chatter::Line { speaker: id, line });
     }
     for (id, rtb) in no_laze {
         if wings
@@ -566,6 +598,13 @@ impl AiWings {
         self.mission_height_ft = height_ft;
     }
 
+    /// The surface radars painting aircraft this tick, as (aircraft,
+    /// emitter) pairs (`SurfaceState::painting`); the host sets it before
+    /// every step (slice H4).
+    pub fn set_painting(&mut self, painting: Vec<(u32, u32)>) {
+        self.painting = painting;
+    }
+
     /// Whether `event` is a striker's gun burst at its strike target (a gun
     /// run, slice ST-T2), which [`Self::release_strafe`] makes.
     pub(super) fn striker_gun(&self, event: &tore_sim::ai::mission::LaunchEvent) -> bool {
@@ -783,7 +822,18 @@ impl AiWings {
         };
         let (aim, velocity) = (row.position, row.velocity);
         let flight = actor.flight();
-        let origin = flight.position;
+        // From its own side of its station (B3).
+        let origin = self
+            .release_mount(event.actor, station)
+            .map_or(flight.position, |mount| {
+                let basis = tore_sim::attitude::Basis::new(flight.yaw, flight.pitch, flight.bank);
+                std::array::from_fn(|i| {
+                    flight.position[i]
+                        + basis.right[i] * mount[0]
+                        + basis.up[i] * mount[1]
+                        + basis.forward[i] * mount[2]
+                })
+            });
         let direction = missiles::sub(aim, origin);
         let length = missiles::length(direction);
         if !length.is_finite() || length <= 0. {

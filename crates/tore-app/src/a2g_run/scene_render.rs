@@ -198,7 +198,14 @@ fn render(
     gpu.sim.dummies(
         &gpu.device,
         &gpu.queue,
-        render_snapshot::aircraft_batches(&snapshot, &models, &camera, &world.terrain, &scenery),
+        render_snapshot::aircraft_batches(
+            &snapshot,
+            &models,
+            &art,
+            &camera,
+            &world.terrain,
+            &scenery,
+        ),
     );
     gpu.sim.combat(
         &gpu.device,

@@ -263,6 +263,7 @@ impl CombatView {
         crate::render_snapshot::aircraft_batches(
             &self.presented(combat),
             &self.models,
+            &self.art,
             camera,
             world,
             scenery,

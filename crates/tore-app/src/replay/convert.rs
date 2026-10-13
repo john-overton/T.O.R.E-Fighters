@@ -249,6 +249,7 @@ pub fn aircraft_pose(
         airborne: state.flags.airborne,
         wreck: wreck_phase(state.wreck_phase),
         crashed: state.flags.crashed,
+        stores: Vec::new(),
     }
 }
 
@@ -1785,7 +1786,14 @@ mod tests {
                     for camera in fixture::cameras() {
                         if with_models {
                             let batches = [&a, &b].map(|s| {
-                                aircraft_batches(s, &view.models, &camera, &world, &scenery)
+                                aircraft_batches(
+                                    s,
+                                    &view.models,
+                                    &view.art,
+                                    &camera,
+                                    &world,
+                                    &scenery,
+                                )
                             });
                             assert_eq!(batches[0].len(), batches[1].len());
                             for ((ma, va, ca), (mb, vb, cb)) in batches[0].iter().zip(&batches[1]) {
@@ -1852,6 +1860,7 @@ mod tests {
             airborne: true,
             wreck: Some(wreck::Phase::Grounded),
             crashed: true,
+            stores: Vec::new(),
         };
         for phase in [
             None,

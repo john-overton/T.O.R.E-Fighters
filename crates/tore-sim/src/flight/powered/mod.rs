@@ -51,6 +51,8 @@ pub mod trim;
 mod easy_physics_tests;
 #[cfg(test)]
 mod hover_hold_tests;
+#[cfg(test)]
+mod touchdown_tests;
 
 use super::{DT, FlightAxis, PilotInput, State, airframe, trace};
 #[cfg(test)]

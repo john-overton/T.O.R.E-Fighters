@@ -16,7 +16,7 @@
 //!     [--order KIND [--order-at S]] [--quick-wing] [--render OUT.png --render-at S]
 //!     [--choose-store] [--buddy ID]
 //!     [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG]
-//!     [--defenses AAA SAM] [--surface-seed N] [--seconds S]
+//!     [--defenses AAA SAM] [--surface-seed N] [--seconds S] [--sead-at S]
 //! ```
 //!
 //! - `--aircraft`, `--load`, `--station`, `--count`: the striker and its store,
@@ -90,6 +90,15 @@
 //!   `manual` (a laser bomb let go as an unguided bomb) or `rtb` (a laser
 //!   store that cannot fall unguided, so home), once, with the radio's
 //!   words; the replay records it as an `ai.strike` event.
+//! - `THREAT t= decision=D target=T ring=R words="..."`: a helicopter's
+//!   threat decision (slice H4): `threat_hold_off`, `threat_resume`,
+//!   `threat_retarget`, `threat_home` or `threat_leave`, the target it
+//!   concerns and the ring (a defence's id, 0 for an ambush); the replay
+//!   records it as an `ai.strike` event. `HOLDOFF` every ten seconds of a
+//!   hold-off: seconds held, distance from the hold point, height above
+//!   the ground and range to the target. `SEAD t= killed=N`: `--sead-at`
+//!   destroyed the hostile sites. `RINGS` with each `THREAT`: the rings it
+//!   knew (id, radius, distance from the target, feet).
 //! - `LASER plane=P state=S mask=M`: the laser of the striker, and of the
 //!   buddy when there is one, each time its state or mask changes (slice
 //!   ST-L). The summary counts the seconds a laser weapon of the run was in
@@ -282,6 +291,10 @@ pub(crate) struct Config {
     /// `--offset FT`: the striker starts this far right of the pass line
     /// (negative: left), for the first-pass convergence tests.
     pub offset_ft: f64,
+    /// `--sead-at S`: every hostile SAM and gun site but the target is
+    /// destroyed `S` seconds into the run, a stand-in for a SEAD flight
+    /// (slice H4: a helicopter holding off resumes once the ring is gone).
+    pub sead_at: Option<f64>,
 }
 
 impl Config {
@@ -634,6 +647,8 @@ struct Watch {
     phase: Option<tore_sim::ai::strike::Phase>,
     /// The no-laze decision last reported (slice ST-G).
     no_laze: Option<tore_sim::ai::strike::NoLaze>,
+    /// A helicopter's threat decision last reported (slice H4).
+    threat_call: Option<(tore_sim::ai::helicopter_threat::Decision, u64)>,
     /// The planes whose lasers are reported, and what each last showed.
     lasers: Vec<(u32, Option<LaserShown>)>,
     /// Ticks a laser weapon of the run flew guiding, and ticks of those its
@@ -702,6 +717,7 @@ impl Watch {
             gunship_bursts: 0,
             phase: None,
             no_laze: None,
+            threat_call: None,
             lasers: vec![(plane.0, None)],
             fall_ticks: 0,
             blind_ticks: 0,
@@ -886,6 +902,9 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
     {
         w.phase = Some(phase);
         println!("ai-strike: PHASE t={t:.3} name={phase:?}");
+        if scene.actor(w.plane).is_some_and(AiActor::is_rotorcraft) {
+            print_rings(scene, w, t, target_at);
+        }
     }
     let no_laze = scene
         .actor(w.plane)
@@ -914,6 +933,44 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
             call.target
                 .map_or_else(|| "none".into(), |id| format!("{id:#x}")),
             call.kind.words(),
+        );
+    }
+    // A helicopter's threat decision (slice H4), and every ten seconds of a
+    // hold-off where it circles, how far out and how high.
+    let threat_call = scene
+        .actor(w.plane)
+        .and_then(|a| a.strike())
+        .and_then(|s| s.threat_call())
+        .copied();
+    if let Some(call) = threat_call
+        && w.threat_call != Some((call.decision, call.tick))
+    {
+        w.threat_call = Some((call.decision, call.tick));
+        println!(
+            "ai-strike: THREAT t={t:.3} decision={} target={} ring={} words=\"{}\"",
+            call.decision.reason(),
+            call.target
+                .map_or_else(|| "none".into(), |id| format!("{id:#x}")),
+            call.ring
+                .map_or_else(|| "none".into(), |id| format!("{id:#x}")),
+            call.decision.words(),
+        );
+        print_rings(scene, w, t, target_at);
+    }
+    if w.phase == Some(tore_sim::ai::strike::Phase::HoldOff)
+        && tick.is_multiple_of(1200)
+        && let Some((p, _)) = scene.striker_at(w.plane)
+        && let Some((centre, since)) = scene
+            .actor(w.plane)
+            .and_then(|a| a.strike())
+            .and_then(|s| s.hold_off())
+    {
+        let agl = p[1] - scene.ground(p[0], p[2]);
+        println!(
+            "ai-strike: HOLDOFF t={t:.3} held_s={:.1} from_hold_ft={:.0} agl_ft={agl:.0} range_ft={:.0}",
+            tick.saturating_sub(since) as f64 / 120.,
+            (p[0] - centre[0]).hypot(p[2] - centre[2]),
+            target_at.map_or(-1., |tp| (p[0] - tp[0]).hypot(p[2] - tp[2])),
         );
     }
     // The offset turn of a lase hold, every five seconds.
@@ -1143,6 +1200,32 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
     }
 }
 
+/// `RINGS`: the rings a helicopter striker knows now (slice H4): id,
+/// radius and distance from the target, feet.
+fn print_rings(scene: &Scene, w: &Watch, t: f64, target_at: Option<Vector>) {
+    if let Some(actor) = scene.actor(w.plane)
+        && let Some(picture) = actor.ground_picture()
+    {
+        let rings = tore_sim::ai::helicopter_threat::known_rings(picture, actor.identity().side);
+        let text: Vec<String> = rings
+            .iter()
+            .map(|r| {
+                format!(
+                    "{:#x}:{:.0}:{:.0}",
+                    r.id,
+                    r.radius_ft,
+                    target_at.map_or(-1., |tp| (r.centre[0] - tp[0]).hypot(r.centre[2] - tp[2]))
+                )
+            })
+            .collect();
+        println!(
+            "ai-strike: RINGS t={t:.3} n={} rings={}",
+            rings.len(),
+            text.join(",")
+        );
+    }
+}
+
 /// `TORE_AI_STRIKE_TRACE=1`: a `trace` line every half second with the
 /// striker's flight and strike state, for tuning a pass by eye.
 fn trace(scene: &Scene, w: &Watch, tick: u64, target_at: Option<Vector>) {
@@ -1160,8 +1243,20 @@ fn trace(scene: &Scene, w: &Watch, tick: u64, target_at: Option<Vector>) {
         .map_or(("none".to_owned(), "none".to_owned()), |s| {
             (format!("{:?}", s.phase()), format!("{:?}", s.segment()))
         });
+    // A helicopter's margin to the nearest ring it knows (slice H4):
+    // negative inside one.
+    let ring_ft = actor
+        .ground_picture()
+        .map(|picture| {
+            tore_sim::ai::helicopter_threat::known_rings(picture, actor.identity().side)
+                .iter()
+                .map(|r| horizontal(f.position, r.centre) - r.radius_ft)
+                .fold(f64::INFINITY, f64::min)
+        })
+        .filter(|m| m.is_finite())
+        .map_or_else(|| "none".to_owned(), |m| format!("{m:.0}"));
     println!(
-        "ai-strike: trace t={:.1} range_ft={:.0} agl_ft={:.0} speed_fps={:.0} fpp={fpp:.1} bank={:.0} heading={:.0} track={:.0} bearing={:.0} pitch={:.0} phase={phase} segment={segment}",
+        "ai-strike: trace t={:.1} range_ft={:.0} agl_ft={:.0} speed_fps={:.0} fpp={fpp:.1} bank={:.0} heading={:.0} track={:.0} bearing={:.0} pitch={:.0} phase={phase} segment={segment} ring_ft={ring_ft}",
         tick as f64 / 120.,
         horizontal(f.position, tp),
         f.position[1] - scene.ground(f.position[0], f.position[2]),
@@ -1607,6 +1702,7 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         }
     }
     let mut watch = Watch::new(striker, target);
+    let mut sead_done = false;
     if let Some(b) = &buddy {
         watch.lasers.push((b.plane.0, None));
     }
@@ -1844,6 +1940,25 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
                     }
                 }
             }
+        }
+        // `--sead-at S`: the stand-in for a SEAD flight (slice H4).
+        if let Some(at) = cfg.sead_at
+            && !sead_done
+            && scene.seconds() >= at
+        {
+            sead_done = true;
+            let target = scene.target;
+            let mut killed = 0;
+            for row in scene.world.combat.state.targets.iter_mut().filter(|row| {
+                row.category & 0x1800 != 0
+                    && row.aircraft.is_none()
+                    && row.hp > 0
+                    && row.id != target
+            }) {
+                row.hp = 0;
+                killed += 1;
+            }
+            println!("ai-strike: SEAD t={:.3} killed={killed}", scene.seconds());
         }
         let trigger = human && cfg.trigger && scene.selected();
         step(&mut scene, human, trigger, buddy.as_mut(), companion)?;

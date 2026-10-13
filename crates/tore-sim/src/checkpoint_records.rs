@@ -10,6 +10,7 @@
 //! on many aircraft, is coded once), and so is a configuration's sensor
 //! profile set, which the aircraft's `Sensors` carries a second copy of.
 
+use crate::combat::hardpoints::Rack;
 use crate::combat::live::{Configuration, GunPod, Station, TankStation, TankStore};
 use tore_formats::weapons::{
     Burst, Countermeasures, Damage as WeaponDamage, Effects, Guidance as WeaponGuidance, Movement,
@@ -133,7 +134,10 @@ crate::checkpoint_struct!(Countermeasures {
     infrared_lose_lock_time,
 });
 
-crate::checkpoint_struct!(Station { mount, count, internal } shared { weapon });
+crate::checkpoint_struct!(Station { mount, count, internal, rack } shared { weapon });
+
+// A station's source location and pairing (B3).
+crate::checkpoint_struct!(Rack { location, paired });
 
 crate::checkpoint_struct!(Tank {
     empty_weight,
@@ -373,6 +377,7 @@ mod tests {
                     mount: [i as f64, -1.5, 0.25],
                     count: 1 + i as u16,
                     internal: i % 2 == 0,
+                    rack: Default::default(),
                 })
                 .collect(),
             hit_points: 20,

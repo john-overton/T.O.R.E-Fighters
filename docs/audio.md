@@ -86,17 +86,28 @@ decay.
 | Aircraft pass | `&AIRPASS.11K` | 200 | 2,000 | 0.5 |
 | Missile pass | `&MPASS.5K` | 80 | 1,500 | 0.5 |
 | Sonic boom | `&SNCBOOM.11K` | 500 | 13,000 | 0.8 |
-| Player weapon release | Weapon's imported fire sound | 80 | 8,000 | 0.4 |
+| Player weapon release | Weapon's imported fire sound | 100 | The record's `maxSndDist` (6,000 or 7,000 ft), straight-line fade | 0.4 |
+| Other aircraft's weapon release | The firing weapon record's fire sound | 100 | The record's `maxSndDist`, straight-line fade, from the firing aircraft | 0.4 |
 | Chaff or flare release, player or AI | `&CHAFF.5K` or `&FLARE.5K` | 100 | 4,000 | 0.31 |
 
 Impact/explosion positions come from the actual combat effect producer, never
 a target's later location. Simultaneous equal recordings at different positions
-remain separate. Cockpit weapon releases stay immediate; external releases use
-travel. A chaff or flare release takes its distances and level from the
+remain separate. Weapon launches and bomb releases start at once in every view
+and fade in the original's straight line to the record's `maxSndDist`; one
+sound plays per fire call, so a bomb pack is one sound
+([spec](spec/sound.md#weapon-launch-and-bomb-release)). A chaff or flare release takes its distances and level from the
 [original](spec/countermeasures.md#release-sound); 0.31 is its level 200
 against the 255 of a weapon release. The player's own release plays in the
 cockpit at once, centered, at its peak gain, as the original does. In external
-views, and for AI releases, it travels from the release point.
+views, chaff and flare releases and other aircraft's releases travel from the
+release point; weapon launches, the player's own and other aircraft's, do not
+wait for travel. Another aircraft's launch (AI wingmen and enemies, other
+players online, AI in replays) is heard from where that aircraft fired, in a
+cockpit through the canopy like any outside sound; one sound plays per aircraft
+per release, and when more than four aircraft launch in one tick the four
+nearest sound. A multiplayer client and a replay find the record's reach by the
+weapon's name in the local weapon catalog
+([spec](spec/sound.md#other-aircrafts-launches)).
 Cockpit avionics, radio and controls stay local; engine loops follow the view
 (see below).
 At most 256 waves wait in flight and 16 spatial voices play; overload discards

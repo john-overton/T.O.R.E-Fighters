@@ -30,6 +30,16 @@ ticks and remains unchanged when rendering frequency changes, and
 consecutive ticks differ by one fixed step. Engine off or no fuel returns the
 blades to their source pose immediately.
 
+## Radar domes
+
+The E-3, the Redfor IL-76 Mainstay and the E-2 turn their radar dome
+(fitted, John 2026-10-12; the E-2 is an agent addition): one revolution in
+10 seconds (6 rpm, clockwise seen from above) about the dome's pole, from
+the picture's tick like the propellers, while an engine is lit and the
+aircraft is not a wreck. Retail has no spin for these shapes. Faces, pivots
+and the rig are in
+[airborne radar domes](../formats/objects-and-shapes.md#airborne-radar-domes-fitted-2026-10-12).
+
 ## Rotor speed and blade angle
 
 A rotorcraft's rotors turn at the simulated rotor speed: the drawn speed is

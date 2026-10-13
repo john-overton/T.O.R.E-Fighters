@@ -561,7 +561,7 @@ adapter. Use `--aircraft rafale` for the exact Rafale C identity.
 The powered-lift aircraft (`av8`, `yak141`, `v22`, `ah64`, `mi24`, `ch47`) start in
 trimmed forward flight. `--maneuver hover` starts one at rest in the air in its own
 hover trim (hands off it holds), and `--replay-input TAPE` flies a `tore-pilot 3`
-tape from there; the battery's `flight-powered-*` scenarios do exactly this
+tape from there. `--maneuver settle:SINK_FPS` starts a powered-lift aircraft 60 ft over flat open ground in its hover trim and holds that sink rate on the collective (the throttle on the jets) until it is down, then prints a `touchdown:` line, the probe of the [touchdown rule](spec/touchdown.md); the battery's `flight-powered-*` scenarios do exactly this
 ([flight lane](testing/lane-flight.md#powered-lift-scenarios-vtol-overhaul)).
 
 For an individual aircraft's actual surface geometry, before broad integration
@@ -848,7 +848,10 @@ and `debrief-1` through `debrief-5` (the retail reference result on DEBSCV);
 they use the original 640×480 menu canvas. The empty/drag ordnance fixtures
 support CPU snapshots for inspecting card outlines and the carried thumbnail.
 `ordnance-message` previews the Cheat notice; `ordnance-message-long` previews
-the single-line notice's ellipsis and fitted background width.
+the single-line notice's ellipsis and fitted background width. `ordnance-laser` (and
+`lobby-ordnance-laser`) load a laser missile or bomb to show the laser warning and the
+sensor helper line; `first-load` shows the creator as a first load draws it, every
+aircraft slot random from a fixed seed ([first load](spec/quick-mission-menu.md#first-load-and-the-saved-draft)).
 Old caches re-import when local media is present. Aircraft switching refreshes
 GPU atlas/cockpit resources, camera previews and instruments before launch.
 See [validation and remaining parity](baselines/rafale-quick-mission.md).
@@ -1601,6 +1604,15 @@ smoke, the motor flame ending at burnout and impacts in a real run:
 TORE_CITY_FILL=0 TORE_DATA_DIR=.local/tmp-me/profile target/debug/tore-app --a2g-run UKR QUCOL --attack release --from 1 --aircraft a4e --load LAU61 --altitude 1500 --dive 10 --speed 400 --hold 1.5 --render-scene .local/tmp/rockets --scene-at 0.6,1.5,3
 ```
 
+`--cockpit-sheet OUT_DIR [ID,ID,...]` (first argument) renders every flyable
+aircraft's cockpit with live mirrors, its cockpit art with the mirror masks
+tinted (centre red, left green, right blue) and two contact sheets, offscreen;
+`summary.txt` lists each picture's mirror regions. `--dome-sheet OUT_DIR`
+renders the E-3, IL-76 and E-2 from above and behind at six ticks (50 degrees
+of dome turn apart). Both read `TORE_DATA_DIR`, like `--blast-preview`
+([mirror review](baselines/mirrors.md#2026-10-12-review-of-every-cockpit-picture),
+[radar domes](formats/objects-and-shapes.md#airborne-radar-domes-fitted-2026-10-12)).
+
 ## Surface unit inspection
 
 `--surface-dump` prints a theater's surface units as a mission resolves and
@@ -1623,6 +1635,11 @@ every base layout and every template placement and lists each moved unit on
 the wrong class (`surface-class-sweep`).
 `--starts [THEATER ...]` builds one mission per theater with a ground target
 and reports where Blue and Red start (`surface-start-placement`).
+`--grounding [TYPE ...]` lists every OT (or the types named) with its shape's
+lowest and highest point about its origin, the share below it, its F2 ground
+offset and the lift that stands it on the ground, in world feet at its drawn
+size ([building grounding](formats/objects-and-shapes.md#building-grounding-2026-10-12),
+`surface-building-grounding`).
 `--surface-sheets` renders each template from above and closer, heavy
 defenses, at its retail spot (seed 1, no jitter or relocation); `--variants`
 adds the placed layout with seeds 1 and 2. A marker per unit: red Redfor, blue
@@ -1695,8 +1712,9 @@ The `surface-*` engagement battery scenarios run it.
 draws it, offscreen at 1080p (no window): it steps the whole world
 `--seconds S` (`--surface-only` steps just the moving units, for long
 marches), optionally destroys units (`--kill all`, or a comma list of
-template ordinals, unit types such as `SA3.NT`, and `within:FEET` of the
-framed units) and lets them burn for `--burn S` seconds, sets every
+template ordinals, unit types such as `SA3.NT`, `within:FEET` of the
+framed units and `runways`, every runway object within the framed distance,
+the layout's too) and lets them burn for `--burn S` seconds, sets every
 launcher's rails to at most `--rails N` rounds, then writes one PNG per view
 (`--views oblique,close,low,top,deck`, or `--look YAW,PITCH` in degrees)
 framing `--focus` (`routed`, `parked`, ordinals or types) within
@@ -1789,7 +1807,13 @@ SAM and AAA hits and launches, the kill rows, friendly fire and who shot the
 player down. `--redfor` builds the multiplayer mission and seats the human in
 the first enemy plane, so the targets are a Protect objective and a Blue plane
 drops the bombs; `--defenses AAA SAM` and `--surface-seed N` as above. The
-`surface-objective-*` battery scenarios run it.
+`surface-objective-*` battery scenarios run it. An `end runway` line gives each
+runway within 20,000 ft of a target with its hit points and whether it is
+redrawn (`redrawn PLAN`) or `retail`; `--runway-art` also builds the scenery on
+the CPU and adds the vertex floats the runway draws now (`drawn N`), and
+`--retail-airfields` builds the retail airfield shapes instead of the redraw.
+The `surface-runway-stays` scenario uses them (B15: bombs on `~QUSTRIP`'s
+buildings bring its 750 hit point runway down, and it stays drawn).
 
 `--record PATH` records the run as a mission recording (a format 3 file, see
 [Mission replays](REPLAYS.md#versions-and-damage)); `--verify-render` then reads

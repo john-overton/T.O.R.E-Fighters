@@ -28,6 +28,18 @@ theater with a ground target and a 50 nm enemy distance. Red starts within
 at the target; both on the map. See
 docs/spec/surface-defenses.md.
 
+`surface-building-grounding` (B13, 2026-10-12) runs `--surface-dump
+--grounding`: every OT the import and the retail media hold, with its shape's
+lowest and highest point and the lift that stands it on the ground. Buildings
+stand on their lowest point (the factory hall FACTD, 89 percent below its
+origin, is lifted 42.7 ft; the hangar 26.7 ft), and that point agrees with the
+shape's F2 ground offset within 3 ft; runways, bridges and roads are not
+lifted.
+
+`surface-small-arms-airfield` flies a 400 kt, 300 ft pass over an airfield target's squads (B17): one
+squad at each experience, then the squads around it. Their rounds carry tracers (every third round) and
+their hits on the jet stay within the fitted bounds (the visual-gun aim error hit half the rounds).
+
 The engagement scenarios run `--surface-trace`, which flies the player on a
 scripted straight line past one surface unit and prints what its controller
 does (phases, shots, bursts, radar, HARM rolls, battery changes), the RWR's
@@ -348,6 +360,55 @@ def zsu23_problems(output: str) -> list[str]:
     return problems
 
 
+SMALL_ARMS_PLAYER_HP = 232  # an F/A-18's hit points
+# Per experience (novice, average, veteran, ace), what one squad may do to a
+# jet on a pass straight over it (fitted bounds around the measured 5, 7, 11
+# and 13 hits of 35 to 40 rounds; the old visual-gun error hit 15, 21, 26 and 26).
+SMALL_ARMS_MAX_HIT_SHARE = (0.25, 0.30, 0.40, 0.45)
+SMALL_ARMS_MAX_HP_LOSS = (0.45, 0.50, 0.65, 0.70)
+
+
+def small_arms_problems(output: str) -> list[str]:
+    """Airfield small arms (B17, John, 2026-10-12): a squad's rounds carry a
+    tracer on every third round, a squad at each experience hits a jet on a
+    low pass within bounds (not half its rounds, as the visual-gun aim error
+    did), it still hits, and a whole field's squads together do not destroy an
+    average-experience jet in one pass."""
+    problems: list[str] = []
+    found = runs(output)
+    if len(found) != 5:
+        return [f"expected 5 runs (4 experiences and a field), got {len(found)}"]
+    for skill, run in enumerate(found[:4]):
+        unit = subject(run)
+        if "SMLARMS.JT" not in run:
+            problems.append(f"skill {skill}: the subject {unit} does not fire SMLARMS")
+        s = summary(run)
+        rounds, hits = int(s.get("rounds", "0")), int(s.get("hits", "0"))
+        tracers, hp = int(s.get("tracers", "0")), int(s.get("player-hp", "0"))
+        if rounds < 20:
+            problems.append(f"skill {skill}: only {rounds} rounds fired")
+            continue
+        if abs(tracers - rounds / 3) > 2:
+            problems.append(f"skill {skill}: {tracers} tracers in {rounds} rounds, every third")
+        if hits / rounds > SMALL_ARMS_MAX_HIT_SHARE[skill]:
+            problems.append(f"skill {skill}: {hits} of {rounds} rounds hit, above {SMALL_ARMS_MAX_HIT_SHARE[skill]:.0%}")
+        lost = 1 - hp / SMALL_ARMS_PLAYER_HP
+        if lost > SMALL_ARMS_MAX_HP_LOSS[skill]:
+            problems.append(f"skill {skill}: the jet lost {lost:.0%} of its hit points to one squad, above {SMALL_ARMS_MAX_HP_LOSS[skill]:.0%}")
+        if skill == 3 and hits < 3:
+            problems.append(f"an ace squad hit only {hits} times: small arms must still threaten")
+    field = summary(found[4])
+    rounds, tracers = int(field.get("rounds", "0")), int(field.get("tracers", "0"))
+    hp = int(field.get("player-hp", "0"))
+    if rounds < 80 or abs(tracers - rounds / 3) > 6:
+        problems.append(f"field: {tracers} tracers in {rounds} rounds")
+    if hp <= 0:
+        problems.append("the field's squads destroyed an average-experience jet in one pass")
+    if int(field.get("hits", "0")) == 0:
+        problems.append("the field's squads never hit")
+    return problems
+
+
 def stock(run: str, unit: str) -> list[tuple[int, str]]:
     """The final (loaded, reserve) of each of a unit's hardpoints."""
     return [
@@ -600,8 +661,44 @@ def start_placement_problems(output: str) -> list[str]:
     return problems
 
 
+GROUNDING = re.compile(
+    r"^grounding: (\S+) shape \S+ size (\w+) low (-?[\d.]+) high (-?[\d.]+) below \d+% f2 (\S+) "
+    r"lift (-?[\d.]+) hp \S+$",
+    re.M,
+)
+
+
+def grounding_problems(output: str) -> list[str]:
+    rows = {m.group(1): m for m in GROUNDING.finditer(output)}
+    problems: list[str] = []
+    if len(rows) < 150:
+        problems.append(f"{len(rows)} OT types surveyed, want the retail data's 167")
+    for name, m in rows.items():
+        low, lift, size, f2 = float(m.group(3)), float(m.group(6)), m.group(2), m.group(5)
+        tied = size == "MapTied"
+        if tied and lift != 0:
+            problems.append(f"{name}: a runway, bridge or road lifted {lift} ft")
+        if not tied and abs(lift - max(-low, 0.0)) > 0.11:
+            problems.append(f"{name}: lifted {lift} ft, its lowest point is {low} ft")
+        if not tied and f2 != "-" and low < 0 and abs(float(f2) - low) > 3.0:
+            problems.append(f"{name}: lowest point {low} ft is {abs(float(f2) - low):.1f} ft from its F2 offset {f2}")
+    for name, want in [("FACTD.OT", 42.7), ("HANGR.OT", 26.7), ("FACT1.OT", 162.7)]:
+        m = rows.get(name)
+        if m is None or abs(float(m.group(6)) - want) > 0.11:
+            problems.append(f"{name}: lift {m and m.group(6)}, want {want} ft")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     return [
+        Scenario(
+            name="surface-building-grounding", lane="ai",
+            args=["--surface-dump", "--grounding"], timeout=300,
+            expect=[r"^grounding: \d+ types, \d+ lifted$"],
+            check=grounding_problems,
+            notes="B13: buildings stand on their lowest point. Reads the OT records the import lacks from the "
+                  "retail media.",
+        ),
         Scenario(
             name="surface-resolve-all", lane="ai",
             args=["--surface-dump", "--all"], timeout=300,
@@ -666,6 +763,24 @@ def scenarios() -> list[Scenario]:
             args=trace("BAL", "--over", "ZSU23", "--altitude", "1500", "--speed", "250", "--from", "4",
                        "--seconds", "120", "--quiet-shots"),
             check=zsu23_problems, notes=TRACE_NOTES,
+        ),
+        Scenario(
+            name="surface-small-arms-airfield", lane="ai", timeout=600,
+            args=trace("APA", "QAPFAIR", "--over", "TROOPS", "--solo", "--skill", "0", "--rng", "11",
+                       "--altitude", "300", "--speed", "400", "--from", "3", "--seconds", "40", "--quiet-shots"),
+            then=[
+                Step(trace("APA", "QAPFAIR", "--over", "TROOPS", "--solo", "--skill", str(skill), "--rng", "11",
+                           "--altitude", "300", "--speed", "400", "--from", "3", "--seconds", "40",
+                           "--quiet-shots"), timeout=300)
+                for skill in (1, 2, 3)
+            ] + [
+                Step(trace("APA", "QAPFAIR", "--over", "TROOPS", "--solo", "--near", "15000", "--skill", "1",
+                           "--rng", "11", "--altitude", "300", "--speed", "400", "--from", "3",
+                           "--seconds", "60", "--quiet-shots"), timeout=300),
+            ],
+            check=small_arms_problems,
+            notes=TRACE_NOTES + " A low pass over Afghanistan's airfield target (~QAPFAIR): one squad at each "
+                  "experience, then every squad within 2.5 nm of it, the other units laid down (--solo).",
         ),
         Scenario(
             name="surface-resupply", lane="ai", timeout=900,

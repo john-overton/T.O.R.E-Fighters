@@ -304,6 +304,52 @@ Collapse whitespace to single spaces. Messages wider than 572 pixels end with
 `...` within that width, so the strip never exceeds 580 pixels or wraps.
 An empty message draws no strip. Other screens retain their own message layout.
 
+### Laser warning and sensor helper
+
+Slice BQ, B24 (John asked on 2026-10-12 for helper text on aircraft with built-in
+IR or targeting sensors and a subtle warning for laser ordnance with no
+designator; the wording, colours and places are the lead's defaults,
+opinionated). The words come from the aircraft's data, never from a list of
+names, and they are advisory: Fly and Accept still work with the warning up (a
+flight mate's laser spot guides the bomb, [buddy
+lasing](air-to-ground.md#buddy-lasing)).
+
+- **Warning.** When a loaded station (quantity above zero) holds a laser weapon,
+  signature 1 with the designator flag (the Paveway bombs and GBU-28, and the
+  laser missiles AS-30 and AT-12), and nothing on the aircraft can lase, the page
+  says **No laser designator: needs buddy lase** in the message band, in a dim
+  amber (196, 138, 52) on the message's dark strip. Something can lase when the
+  aircraft has a laser in its own sensor records (the Su-25, the V-22, the F-16C
+  and A-10's fixed Pave Spike) or a designator pod hangs on any station. A FLIR
+  does not lase. A message the player has just earned (a refused load, Cheat
+  loading) takes the band while it is up; the warning is back when the message
+  clears. Single player's band is the message strip at (30, 335); the lobby's is
+  the strip under the title bar, the same place its messages use.
+- **Helper.** One line in the strip under the title bar, at (30, 64) in a quiet
+  blue-grey (150, 170, 180), from the aircraft's sight sensor
+  ([who has a sight](air-to-ground.md#who-has-a-sight)): "Built-in laser
+  designator: no pod needed for laser ordnance." or "Built-in FLIR: no pod needed
+  for IR weapons." for a built-in sensor (a cone gimbal); "Laser designator pod
+  fitted: no extra pod needed for laser ordnance." or "FLIR pod fitted: no extra
+  pod needed for IR weapons." for a fixed pod (a hemisphere gimbal: the Pave
+  Spike row, the AAS-38); and, for an aircraft with no sensor but a station that
+  takes a pod, "No built-in designator: hang a Pave Spike or Pave Knife pod to
+  lase." An aircraft with none of these shows no line. The lobby's page has one
+  band: a message, then the warning, then the helper, whichever comes first.
+- **Preview.** `--quick-mission --snapshot-state ordnance-laser` and
+  `lobby-ordnance-laser` load a laser bomb on the first station that takes one
+  and show the air-to-surface page.
+
+### Opening on a saved load
+
+Slice BQ2 (John, 2026-10-12). In Quick Mission, a Custom load opens the page on
+the load flown the last time the same mission was flown, kept in the profile
+across restarts; a changed mission opens it on the aircraft's standard load. The
+rules, the file and what counts as the same mission are in [the custom loadout
+across restarts](quick-mission-menu.md#the-custom-loadout-across-restarts). A
+saved load goes through the same checks as any accepted load, and falls back to
+the standard load if it fails them. The lobby's page is not affected.
+
 ## Dragging and empty stations
 
 John requested visible weapon dragging, unloading into the catalog, station

@@ -41,6 +41,37 @@ impl AiWings {
         emitted
     }
 
+    /// The rounds AI `actor`'s `station` holds now, after the weapon
+    /// service's debit; an unlimited store answers with the next projectile
+    /// number, so its releases still alternate sides.
+    fn rounds_after(&self, actor: u32, station: usize) -> u32 {
+        let rounds = self.mission.actor(actor).and_then(|actor| {
+            actor
+                .stations()
+                .iter()
+                .find(|spec| usize::from(spec.station.0) == station)
+                .map(|spec| spec.rounds())
+        });
+        match rounds {
+            Some(tore_sim::ai::weapon_service::Rounds::Finite(rounds)) => rounds,
+            _ => self.next_projectile_id & 1,
+        }
+    }
+
+    /// Where AI `actor`'s next store from `station` leaves, feet right, up
+    /// and forward of the aircraft: its side of a paired station (B3,
+    /// [`tore_sim::combat::hardpoints::Rack::release_mount`]). `None` for an
+    /// aircraft with no combat configuration.
+    pub(super) fn release_mount(&self, actor: u32, station: usize) -> Option<Vector> {
+        let config = self.configs.get(&actor)?;
+        let s = config.stations.get(station)?;
+        let units = tore_sim::combat::hardpoints::units(
+            self.rounds_after(actor, station),
+            u32::from(s.weapon.burst.actual_rounds_per_game),
+        );
+        Some(s.rack.release_mount(s.mount, units))
+    }
+
     /// A ground store's release through the shared release, from the
     /// actor's strike cockpit: the station becomes its selected and armed
     /// store and the event's target its target (a ground point the AI chose
@@ -78,6 +109,7 @@ impl AiWings {
             .iter()
             .any(|(id, _)| *id == event.target)
             .then_some(event.target);
+        let rounds_after = self.rounds_after(event.actor, station);
         let mut emitted = 0;
         for _ in 0..event.projectiles {
             let next = &mut self.next_projectile_id;
@@ -88,6 +120,7 @@ impl AiWings {
                     station,
                     launcher,
                     incoming,
+                    rounds_after,
                 },
                 || {
                     let id = *next;

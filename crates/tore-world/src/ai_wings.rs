@@ -724,6 +724,10 @@ pub struct AiWings {
     /// it before every step; `None` lets a striker use the height it was
     /// tasked at.
     mission_height_ft: Option<f64>,
+    /// The surface radars painting aircraft this tick, as (aircraft,
+    /// emitter) pairs (slice H4): a helicopter learns where they stand. The
+    /// host sets it before every step.
+    painting: Vec<(u32, u32)>,
 }
 
 struct PendingGun {
@@ -1321,6 +1325,7 @@ impl AiWings {
             decoy_rolls: Vec::new(),
             ground_ceiling: None,
             mission_height_ft: None,
+            painting: Vec::new(),
         })
     }
 
@@ -2894,15 +2899,20 @@ impl AiWings {
             .iter()
             .find(|s| s.station == event.station)
             .map_or([0.; 3], |s| s.mount);
-        let origin = if gun {
-            std::array::from_fn(|i| {
+        // A store leaves its own side of its station, as a human's does
+        // (B3); an aircraft with no combat configuration keeps its centre.
+        let origin = match if gun {
+            Some(mount)
+        } else {
+            self.release_mount(event.actor, station)
+        } {
+            Some(mount) => std::array::from_fn(|i| {
                 flight.position[i]
                     + basis.right[i] * mount[0]
                     + basis.up[i] * mount[1]
                     + basis.forward[i] * mount[2]
-            })
-        } else {
-            flight.position
+            }),
+            None => flight.position,
         };
         if physical_gun {
             let Some(target) = actor.gun_target().filter(|t| t.id == event.target) else {

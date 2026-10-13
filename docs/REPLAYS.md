@@ -767,8 +767,10 @@ beyond them.
   - **The airfield scene**, `world.airfield_scene=N`, written only when N is
     not 0. 0 is the retail airfields, which every recording before the field
     has; 1 is the [redrawn airports](formats/redrawn-airports.md), the
-    default since 2026-10-11 (protocol 24), so a recording of a flight over
-    the redrawn airports is a format 3 file. A flight with
+    default since 2026-10-11 (protocol 24), with a ground target template's
+    own runway piece still retail; 2 (since 2026-10-12, slice BG) is the
+    redraw with that piece redrawn too, what a flight records now. A
+    recording of a flight over the redrawn airports is a format 3 file. A flight with
     `TORE_REDRAWN_AIRPORTS=0` writes scene 0 and, with no other format 3
     content, stays format 2. The viewer rebuilds the
     scene the header names, whatever `TORE_REDRAWN_AIRPORTS` says: an old

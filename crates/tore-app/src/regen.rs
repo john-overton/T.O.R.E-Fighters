@@ -326,6 +326,7 @@ mod tests {
             airborne: true,
             wreck: None,
             crashed: false,
+            stores: Vec::new(),
         }
     }
 

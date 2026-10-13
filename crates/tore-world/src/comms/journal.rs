@@ -528,14 +528,29 @@ pub enum WingLine {
     NoDesignator,
     /// "Lase my target" taken.
     Lasing,
+    /// A helicopter holds off outside a threat's ring (slice H4).
+    HoldingOff,
+    /// The threat is gone and the helicopter resumes its attack.
+    Resuming,
+    /// The hold-off ran out: another target outside the rings.
+    SwitchingTargets,
+    /// The hold-off ran out and nothing is outside the rings: home.
+    DefendedRtb,
+    /// Ambushed by a threat it did not know: leaving its ring.
+    LeavingRing,
 }
 
 impl WingLine {
-    pub const ALL: [WingLine; 4] = [
+    pub const ALL: [WingLine; 9] = [
         WingLine::Winchester,
         WingLine::NoTarget,
         WingLine::NoDesignator,
         WingLine::Lasing,
+        WingLine::HoldingOff,
+        WingLine::Resuming,
+        WingLine::SwitchingTargets,
+        WingLine::DefendedRtb,
+        WingLine::LeavingRing,
     ];
     /// The words on the radio.
     pub fn text(self) -> &'static str {
@@ -544,6 +559,11 @@ impl WingLine {
             WingLine::NoTarget => "No target",
             WingLine::NoDesignator => "No designator",
             WingLine::Lasing => "Lasing",
+            WingLine::HoldingOff => "Threat on target, holding off",
+            WingLine::Resuming => "Threat clear, resuming",
+            WingLine::SwitchingTargets => "Target defended, switching targets",
+            WingLine::DefendedRtb => "Target defended, RTB",
+            WingLine::LeavingRing => "Engaged, leaving the threat ring",
         }
     }
 }

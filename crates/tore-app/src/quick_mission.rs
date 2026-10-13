@@ -22,8 +22,10 @@ use tore_world::mission::{
     ground_targets,
 };
 pub mod allegiance;
+pub mod loadout_memory;
 pub mod map;
 pub mod matrix;
+pub mod remember;
 /// The aircraft fields of the five wings the AI flies. Field 6 is friendly
 /// wing 1's, which is also the player's own aircraft.
 const AI_AIRCRAFT_FIELDS: [usize; 5] = [9, 12, 23, 26, 29];
@@ -166,7 +168,7 @@ impl ViewKind {
         }
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Draft {
     pub values: [usize; FIELDS],
 }
@@ -1847,6 +1849,9 @@ impl QuickMission {
     pub fn preview_selector(&mut self, name: &str) -> crate::AppResult<()> {
         match name {
             "normal" | "ordnance" => {}
+            // A first load: every aircraft slot random (slice BQ, B22), from a
+            // fixed seed so the picture is repeatable.
+            "first-load" => self.randomize_aircraft(0x2026_1012, false),
             // The creator opened from a multiplayer lobby (EF8), and after the
             // host refused an Accept.
             "lobby-creator" => self.enter_lobby(),
@@ -1884,7 +1889,7 @@ impl QuickMission {
             | "lobby-creator-view-flying"
             | "lobby-creator-view-locked" => self.preview_view(name)?,
             "lobby-ordnance" | "lobby-ordnance-refused" | "lobby-ordnance-cheat" => {}
-            "lobby-ordnance-gaps" => {
+            "lobby-ordnance-gaps" | "lobby-ordnance-laser" => {
                 if let Some(ordnance) = &mut self.ordnance {
                     ordnance.preview(name);
                 }
@@ -1893,7 +1898,8 @@ impl QuickMission {
             | "ordnance-empty"
             | "ordnance-drag"
             | "ordnance-message"
-            | "ordnance-message-long" => {
+            | "ordnance-message-long"
+            | "ordnance-laser" => {
                 if let Some(ordnance) = &mut self.ordnance {
                     ordnance.preview(name);
                 }
@@ -1989,7 +1995,7 @@ impl QuickMission {
                 self.open(OBJECTIVE_BASE + group - 1);
             }
             _ => {
-                let id=name.strip_prefix("field-").and_then(|v|v.parse::<usize>().ok()).filter(|v|(3..FIELDS).contains(v)).ok_or("snapshot states: normal, aircraft, objectives, ground-start, ground-start-auto, ground-target, ground-target-last, airports, enemy-ground-start, enemy-ground-start-auto, enemy-airports, map, map-building, map-wide, map-close, map-lobby, objective-1 through objective-6, theaters, help, field-3 through field-36")?;
+                let id=name.strip_prefix("field-").and_then(|v|v.parse::<usize>().ok()).filter(|v|(3..FIELDS).contains(v)).ok_or("snapshot states: normal, aircraft, objectives, ground-start, ground-start-auto, ground-target, ground-target-last, airports, enemy-ground-start, enemy-ground-start-auto, enemy-airports, map, map-building, map-wide, map-close, map-lobby, objective-1 through objective-6, theaters, help, first-load, field-3 through field-36")?;
                 self.open(id);
             }
         }
@@ -3014,7 +3020,7 @@ mod tests {
         q.choose_theater_code("UKR", &BTreeMap::new());
         assert_eq!(q.theater_codes[q.draft.values[13]], "UKR");
     }
-    fn setup() -> QuickMission {
+    pub(super) fn setup() -> QuickMission {
         // The retail list sizes: a target list per theater (the templates'),
         // and the four strengths of the AAA and SAM fields.
         let mut options = Options {
@@ -3058,7 +3064,7 @@ mod tests {
         q
     }
     /// A creator offering every selectable aircraft.
-    fn full_catalog() -> QuickMission {
+    pub(super) fn full_catalog() -> QuickMission {
         let mut q = setup();
         q.aircraft_files = AircraftId::SELECTABLE
             .map(|id| id.selection_key().to_string())

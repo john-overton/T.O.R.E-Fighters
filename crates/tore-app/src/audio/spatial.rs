@@ -7,6 +7,9 @@ struct SpatialVoice {
     voice: Voice,
     mix: Mix,
     kind: Kind,
+    /// A weapon launch: its record's `maxSndDist`, which sets how it fades
+    /// with distance in place of `kind`'s curve.
+    launch_ft: Option<i16>,
     position: [f64; 3],
     /// Heard inside the releasing aircraft's own cockpit: its mix never
     /// follows distance or direction.
@@ -226,7 +229,10 @@ impl Scene {
             return;
         }
         for voice in self.voices.iter_mut().filter(|v| !v.cockpit) {
-            let mix = acoustics::mix(voice.kind, voice.position, listener);
+            let mix = match voice.launch_ft {
+                Some(feet) => acoustics::launch_mix(voice.position, listener, feet),
+                None => acoustics::mix(voice.kind, voice.position, listener),
+            };
             if mix != voice.mix {
                 voice.mix = mix;
                 voice.filter_rate = 0.;
@@ -275,10 +281,32 @@ impl Scene {
             self.play(arrival, false);
         }
     }
-    pub fn weapon(&mut self, clip: Arc<Clip>, position: [f64; 3], listener: Listener) {
-        self.field.emit(clip, Kind::Impact, position, listener);
+    /// A weapon launch heard from outside the aircraft: it starts at once (the
+    /// original asks for the sound as the weapon leaves), full within 100 ft
+    /// of `position` and silent at the record's `max_sound_distance` feet.
+    pub fn weapon(
+        &mut self,
+        clip: Arc<Clip>,
+        max_sound_distance: i16,
+        position: [f64; 3],
+        listener: Listener,
+    ) {
+        let mix = acoustics::launch_mix(position, listener, max_sound_distance);
+        self.play_with(
+            Arrival {
+                payload: clip,
+                mix,
+                kind: Kind::Impact,
+                position,
+            },
+            false,
+            Some(max_sound_distance),
+        );
     }
     fn play(&mut self, arrival: Arrival<Arc<Clip>>, cockpit: bool) {
+        self.play_with(arrival, cockpit, None);
+    }
+    fn play_with(&mut self, arrival: Arrival<Arc<Clip>>, cockpit: bool, launch_ft: Option<i16>) {
         self.voices.retain(|v| !v.voice.finished());
         if arrival.mix.gain <= 0. {
             return;
@@ -302,6 +330,7 @@ impl Scene {
             },
             mix: arrival.mix,
             kind: arrival.kind,
+            launch_ft,
             position: arrival.position,
             cockpit,
             filtered: 0.,
@@ -311,6 +340,10 @@ impl Scene {
             filter_alpha: 0.,
             gain_smoothing: 0.,
         });
+    }
+    #[cfg(test)]
+    pub fn voice_count(&self) -> usize {
+        self.voices.len()
     }
     pub fn sample(&mut self, rate: f64) -> [f32; 2] {
         let mut out = [0.; 2];
@@ -565,6 +598,43 @@ mod tests {
         }
         assert_eq!(scene.voices.len(), 2);
         assert_ne!(scene.voices[0].mix.pan, scene.voices[1].mix.pan);
+    }
+    #[test]
+    fn a_launch_seen_from_outside_starts_at_once_and_fades_to_its_records_distance() {
+        let clip = Arc::new(Clip {
+            samples: vec![255; 8000],
+            rate: 8000.,
+        });
+        let mut outside = listener();
+        outside.external = true;
+        let mut scene = Scene::default();
+        // Fired 150 ft from the camera: at once (no travel time), nearly
+        // the full level of the original's 255.
+        scene.weapon(clip.clone(), 7000, [150., 0., 0.], outside);
+        assert_eq!(scene.voices.len(), 1);
+        let near = scene.voices[0].mix.gain;
+        assert!(
+            near > 0.39 && near <= acoustics::FULL_LEVEL as f32,
+            "{near}"
+        );
+        assert_eq!(scene.voices[0].mix.pan, 1.);
+        // As the camera falls behind, the same voice fades in a straight line
+        // and is silent at the record's 7,000 ft.
+        let mut far = outside;
+        far.position = [-3_450., 0., 0.];
+        scene.tick(&BTreeMap::new(), far, &[], &[], true);
+        let half = scene.voices[0].mix.gain;
+        assert!(
+            (half - acoustics::FULL_LEVEL as f32 / 2.).abs() < 0.01,
+            "{half}"
+        );
+        far.position = [-6_900., 0., 0.];
+        scene.tick(&BTreeMap::new(), far, &[], &[], true);
+        assert_eq!(scene.voices[0].mix.gain, 0.);
+        // Released past the record's distance it is not heard at all.
+        let mut scene = Scene::default();
+        scene.weapon(clip, 6000, [6_500., 0., 0.], outside);
+        assert!(scene.voices.is_empty());
     }
     #[test]
     fn own_release_is_centered_in_cockpit_travels_outside_and_far_releases_are_silent() {

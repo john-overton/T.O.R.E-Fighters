@@ -385,9 +385,13 @@ pub const MAX_RELEASE_RECORDS: usize = 256;
 #[derive(Clone, Debug)]
 pub struct Station {
     pub weapon: Weapon,
+    /// The source record's position, feet right, up and forward: a paired
+    /// record's right-hand pylon ([`super::hardpoints::Rack`]).
     pub mount: Vector,
     pub count: u16,
     pub internal: bool,
+    /// Its source location and pairing (B3).
+    pub rack: super::hardpoints::Rack,
 }
 /// One selected external tank type, kept separate from weapon ammunition.
 #[derive(Clone, Debug)]
@@ -765,6 +769,7 @@ impl Configuration {
             stations.push(Station {
                 weapon,
                 mount: h.position.map(|v| f64::from(v) / 3.),
+                rack: super::hardpoints::Rack::from_source(h),
                 count: h.count as u16,
                 // Source bit 8 fixes the loading slot; the reviewed SUU16 pod
                 // is still separate external hardware rather than an internal gun.
@@ -818,6 +823,7 @@ impl Configuration {
                 stations.push(Station {
                     weapon,
                     mount: h.position.map(|v| f64::from(v) / 3.),
+                    rack: super::hardpoints::Rack::from_source(h),
                     count: 0,
                     internal: false,
                 });
@@ -4459,6 +4465,8 @@ impl State {
                     remainder: self.service_remainder,
                 },
                 false,
+                // A human's rocket pipper always has a ground point.
+                true,
             );
             let selected = own.selected;
             let grouped = own
@@ -4643,6 +4651,9 @@ impl State {
                     (0, u16::from(w.burst.actual_rounds_per_game), None, false)
                 };
                 let mut fired = false;
+                // With unlimited ammunition the count never moves, so a
+                // paired station alternates by the call's first number.
+                let unlimited_side = self.next_shot & 1;
                 if count > 0 {
                     for round in 0..count {
                         // A gun debits each round; any other call debits once,
@@ -4710,6 +4721,13 @@ impl State {
                                 }
                                 flight
                             });
+                        // The whole releases left on the station, which pick
+                        // the side of a paired station this one leaves (B3).
+                        let units_after = if self.cheats.unlimited_ammo {
+                            unlimited_side
+                        } else {
+                            super::hardpoints::units(u32::from(own.rounds(index)), u32::from(debit))
+                        };
                         // The one release function, a human's trigger and
                         // an AI's release alike ([`cockpit`]).
                         let released = self.release_round(
@@ -4730,6 +4748,7 @@ impl State {
                                 seeker_target: target,
                                 gun_round,
                                 tracer,
+                                units_after,
                             },
                             &spots_before,
                             &ground,
@@ -6810,6 +6829,7 @@ mod tests {
                     mount: [0.; 3],
                     count: 11,
                     internal: !guided,
+                    rack: Default::default(),
                 }],
                 hit_points: 20,
                 target_category: 0x80,

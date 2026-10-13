@@ -72,6 +72,11 @@ const PAIR_RANGE_FT: f64 = 14_000.;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Plans {
     pub plans: Vec<Plan>,
+    /// Keep the runway pieces a Quick Mission ground target template brings
+    /// (`~QUSTRIP`, `~QFFACT`, ...) retail, as the redraw did before B14
+    /// (2026-10-12): only a replay of a recording flown on airfield scene 1
+    /// sets it.
+    pub retail_templates: bool,
 }
 
 impl Plans {
@@ -82,6 +87,7 @@ impl Plans {
         }
         Ok(Self {
             plans: Self::builtin()?,
+            retail_templates: false,
         })
     }
 
@@ -358,9 +364,15 @@ pub fn on_pavement(built: &[Built], x: f64, z: f64) -> bool {
     built.iter().any(|b| b.on_pavement(x, z))
 }
 
-/// A STRIP placement of the layout, with what the plans need of it.
+/// A STRIP placement of the layout or of the ground target's template, with
+/// what the plans need of it.
 struct StripPlacement {
+    /// Its index among the airfields' strips (the building rule's zones).
     index: usize,
+    /// Its runway object id.
+    id: u32,
+    /// The placement, for the buildings the plan adds.
+    placement: Placement,
     object_type: String,
     angle: i32,
     stance: super::Stance,
@@ -381,8 +393,25 @@ pub(super) fn apply(
     if plans.is_empty() {
         return Ok(Vec::new());
     }
+    // The layout's strips, then the template's (B14: a Quick Mission
+    // airfield target's own runway piece is redrawn like any other).
+    let mut candidates = Vec::new();
+    for placement in &sources.layout.placements {
+        let id = crate::surface::UnitId::layout(placement.key.ordinal)
+            .ok_or("airport object ID overflow")?
+            .0;
+        candidates.push((id, placement));
+    }
+    if !plans.retail_templates {
+        candidates.extend(
+            sources
+                .surface
+                .iter()
+                .map(|(id, placement)| (*id, placement)),
+        );
+    }
     let mut strips = Vec::new();
-    for (index, placement) in sources.layout.placements.iter().enumerate() {
+    for (id, placement) in candidates {
         let is_strip = sources
             .definitions
             .get(&placement.object_type)
@@ -412,7 +441,9 @@ pub(super) fn apply(
         };
         let length = runway_length_ft(stance.min[2], stance.max[2], Some(anchor[2]));
         strips.push(StripPlacement {
-            index,
+            index: strips.len(),
+            id,
+            placement: placement.clone(),
             object_type: placement.object_type.to_ascii_uppercase(),
             angle: placement.angles[0],
             stance,
@@ -585,6 +616,7 @@ pub(super) fn apply(
                 vehicles: base_plan.extras.vehicles,
             },
             anchors.map(|a| (a.parking, a.parking_heading)),
+            &base.placement,
             &mut taken,
             &mut added_count,
         );
@@ -606,15 +638,8 @@ pub(super) fn apply(
                 .any(|patch| geometry::contains(&patch.poly, p))
         };
         let snapped = buildings::snap_parked(parked, &frame, &own, &zones, &spots, &on_pavement);
-        let id = |index: usize| -> WorldResult<u32> {
-            Ok(
-                crate::surface::UnitId::layout(sources.layout.placements[index].key.ordinal)
-                    .ok_or("airport object ID overflow")?
-                    .0,
-            )
-        };
-        let base_id = id(base.index)?;
-        let tile_id = tile.map(|t| id(t.index)).transpose()?;
+        let base_id = base.id;
+        let tile_id = tile.map(|t| t.id);
         let built = Built {
             plan: name.clone(),
             strip_id: base_id,

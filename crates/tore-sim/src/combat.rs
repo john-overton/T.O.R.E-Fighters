@@ -13,6 +13,7 @@ pub mod gun_round;
 pub mod gunship;
 pub mod gunship_impact;
 pub mod gunsight;
+pub mod hardpoints;
 pub mod laser;
 pub mod ledger;
 pub mod loading;

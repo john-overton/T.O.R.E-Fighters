@@ -453,6 +453,55 @@ come from map-tied runways and stay as they were (validated: `--validate-ils`
 and ground-start, landing and parking probes give identical output before and
 after). Positions of every placed object are unchanged.
 
+## Building grounding (2026-10-12)
+
+Implementation, slice BG of the bug-fix round (John's report B13, "factory
+objects sit halfway in the ground").
+
+**The finding.** Retail building shapes do not have their origin at their
+base. `--surface-dump --grounding` lists every OT of the import and the
+retail media with its drawn shape's lowest and highest point about the
+origin (world feet at the drawn size), its F2 ground offset at that size and
+the lift below. On the retail data (167 OT types):
+
+| Shape | Lowest | Highest | Below the origin | F2 offset |
+| --- | --- | --- | --- | --- |
+| FACTD (aircraft factory hall) | -42.7 | 5.3 | 89 % | -40.0 |
+| FACT1 (factory with stacks) | -162.7 | 346.7 | 32 % | -162.7 |
+| FCTYA, FCTYB (factories) | -20.0, -19.3 | 27.3, 26.7 | 42 % | -20.0, -18.7 |
+| BLDG1 (plant building) | -44.0 | 30.7 | 59 % | -43.3 |
+| HANGR (hangar) | -26.7 | 38.7 | 41 % | -26.7 |
+| CTWR1 (control tower) | -106.7 | 74.7 | 59 % | -106.7 |
+| BNK5 (hardened shelter) | -58.7 | 20.7 | 74 % | -58.7 |
+| TWNBKA (town block) | -176.0 | -64.0 | all of it | -176.0 |
+
+Most buildings put about 41 percent of their height below the origin; some
+town blocks lie wholly below it. For every OT that is not a runway, bridge or
+road, the lowest point equals the shape's F2 ground offset (the word FA
+0x42e0c0 reads, see [contact offset](#contact-offset-reader-2026-09-15))
+within 3 ft. Placed on its origin, as every building was until this slice, a
+building lost that part to the ground: hangar doors cut off, the factory hall
+FACTD down to its roof, towns invisible.
+
+**The rule.** Every placed real-size object that is not a ship or a man stands
+on the lowest point of its shape: the land surface units since the surface
+round, and now every OT that is not a runway (`_STRIPProc`, which keeps its
+pavement rule) and not map-tied (bridges and roads keep the map's height). One
+function, `tore_world::terrain::stands_on_lowest_point`, decides it, and
+`Placements::stance` applies it, so the drawn mesh, the contact box, the
+collision box and the hit box move together; a building's damaged variant
+(`~BNK5` and the others) stands on its own lowest point the same way. 126 of
+the 167 types are lifted; the rest already stand on their origin. Provenance:
+fitted (agent, BG, 2026-10-12): the lowest point rather than the F2 offset,
+the same rule the land units use, and within 3 ft of it.
+
+**What a player notices.** Buildings stand on the ground at their full height:
+factories, hangars, towers, houses, city and town blocks. They are taller
+targets and taller obstacles than before (a hangar 65 ft rather than 39 ft
+above the ground), so hit boxes, crashes into buildings and AI terrain
+clearance near them change. Rocks and mesas (ROCK, ROCKB, 267 ft below their
+origin) stand on their lowest point too.
+
 ## Surface unit shapes: envelopes and sprites (2026-10-10)
 
 Research and implementation, slice S1 of the surface objectives round. Shapes
@@ -626,6 +675,39 @@ above. The missile launchers of both ships (SA-N-4, SA-N-7) have no
 envelope. The control towers and the HAWK site are placed scenery, not
 surface units: their antennas are drawn still (not built: every airfield's
 tower would have to be drawn every frame).
+
+### Airborne radar domes (fitted, 2026-10-12)
+
+Slice BC. The three radar aircraft are not in the table above: `AWACS.SH`
+(E-3), `IL76.SH` (the Redfor Mainstay) and `E2C.SH` (E-2) carry no `f0`
+envelope and no `_currentTicks` read, so retail never turns their domes. John
+asked on 2026-10-12 for the E-3 and the Mainstay to turn slowly; the E-2 is an
+agent addition. The turn is therefore a fitted rig over reviewed faces, not a
+retail routine, and it does not use the surface path's
+`shape::CURRENT_TICKS_WORD`: the aircraft path animates faces by address from
+the presented flight state (`variety_rotors::animate`).
+
+Each dome is a lens of flat triangles (eight or ten around a pole, a lower
+and an upper ring), found by shape inspection:
+
+| Shape | Faces | Lens | Pole (x, y), z range |
+| --- | --- | --- | --- |
+| AWACS.SH | 16, `3e6a` to `4092` (listed in `variety_rotors::E3_DOME`) | 8-sided, 45 units across | (0, -45), 29 to 36 |
+| IL76.SH | 20, `4ba2` to `4d31` (`IL76_DOME`) | 10-sided, 38 units across | (0, -23), 28 to 36 |
+| E2C.SH | 16, `205a` to `21c3` (`E2_DOME`) | 4-sided lens, 38 units across | (0, -11), 16 to 21 |
+
+The lens turns about the vertical (source Z) line through its pole, clockwise
+seen from above, so the mast struts (separate faces, `4e6f` and its
+neighbours in AWACS.SH) stay fixed. Normals turn with the faces. The angle
+is `-(ticks / 120) * 2 pi * 6 / 60`, one turn in 10 s (6 rpm, the E-3's
+operating rate), where `ticks` is the picture's tick (`State::ticks`, the
+mission tick in a replay, a recording or another client's view), so every
+client draws the same angle. It turns while an engine is lit and the aircraft
+is not a wreck, and rests at zero otherwise (an agent decision). Presentation
+only: no simulation, wire or checkpoint change. Only the E-3 dome carries a
+texture feature (a stripe), so its turn is the one that shows; the Mainstay
+and Hawkeye lenses are plain-coloured and turn without a visible change
+beyond the rim. `tore-app --dome-sheet OUT_DIR` renders the three at six ticks.
 
 ## Carriers, islands and deck crew (2026-10-10)
 

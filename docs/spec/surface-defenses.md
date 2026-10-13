@@ -829,13 +829,66 @@ quarter seconds.
 | Gun kind | Aim | Lead | Basis |
 | --- | --- | --- | --- |
 | Radar guns (flag 0x4000: ZSU-23, 2S6, Phalanx, AAA30, KS-12, KS-19) | Observed target, refreshed every tick while tracking | Time of flight and drop from the existing gunsight solution, plus aim error by skill | retail (the flag); error fitted |
-| Visual guns (ZSU-57, M1939, AAA30BAD, tank and APC guns, small arms) | Observation refreshed every 0.5 s | Lead from that stale velocity, larger aim error by skill | manual pp. 157 to 158; numbers fitted |
+| Visual guns (ZSU-57, M1939, AAA30BAD, tank and APC guns) | Observation refreshed every 0.5 s | Lead from that stale velocity, larger aim error by skill | manual pp. 157 to 158; numbers fitted |
+| Small arms (a squad's SMLARMS) at an aircraft | The same stale observation and lead as a visual gun | Four times the visual guns' aim error by skill ([small arms](#small-arms)) | fitted, agent, 2026-10-12 |
 
 Aim error by skill is a random angular offset per burst plus the existing
 per-round dispersion: radar guns 0.6, 0.4, 0.3 and 0.2 degrees; visual guns 1.5,
 1.0, 0.7 and 0.5 degrees for novice, average, veteran and ace. Fitted. A jammer
 on the target widens a radar-directed gun's aim error two times; visual guns
 are unaffected (defined, John, 2026-10-10: "fine for now").
+
+#### Small arms
+
+A squad (the TROOPS unit, record SMLARMS) fires 5 rounds in half a second, then
+pauses a second (rounds 10 damage each, muzzle 3,000 ft/s, to 4,000 ft range
+and 2,000 ft altitude). Squads stand in the airfield templates and most other
+ground targets (3 to 7 in `~QAPFAIR`, `~QBAIR`, `~QBFAIR`, `~QCFAIR`,
+`~QLFFAIR`, `~QNSFAIR`, `~QPGFAIR` and `~QSPFAIR`, 8 in `~QIRFAIR` and 19 in
+`~QGRSAIR`, counted with the surface dump); the theater layouts' base
+defenses hold only one squad, in Egypt. A squad is drawn (viewer-facing
+soldier sprites, [men](#drawing)) but, before 2026-10-12, it shot at jets
+with no tracer and no flash and with the same aim error as a 57 mm gun, so a
+low pass over a field was met by hits from nothing visible: the "airport shoots
+with very high accuracy and nothing to see" report (B17, John, 2026-10-12).
+
+Measured on 2026-10-12 with the surface trace (`--surface-trace APA QAPFAIR
+--over TROOPS --solo`, one squad armed, an F/A-18 at 400 kt, 300 ft over the
+squad and 300 ft over a line 1,500 ft to its side, 40 s from 3 nm out, three
+random streams, six passes per row):
+
+| Experience | Visual-gun error: rounds hitting, jet hit points lost | Small-arms error (now): rounds hitting, jet hit points lost |
+| --- | ---: | ---: |
+| Novice | 24 percent, 31 percent | 3 percent, 3 percent |
+| Average | 35 percent, 55 percent | 4 percent, 7 percent |
+| Veteran | 50 percent, 76 percent | 9 percent, 14 percent |
+| Ace | 65 percent, 93 percent | 15 percent, 24 percent |
+
+One squad took a jet apart in a pass before (the F/A-18 has 232 hit points),
+better the higher its experience. Straight over the squad, the worst case, the
+new error hits 5, 7, 11 and 13 of 35 to 40 rounds (the jet loses 20, 28, 43 and
+51 percent of its hit points); 1,500 ft to the side it hits 0, 0, 0 and 3. All
+the squads of `~QAPFAIR` within 2.5 nm of the first, at average experience, fire
+144 rounds in a pass, 8 hit and the jet loses 31 percent (an ace field:
+72 percent). The battery scenario `surface-small-arms-airfield` holds these. The fix (fitted, agent, 2026-10-12; John's
+default of giving small arms the AAA tuning's treatment): a squad shooting at an
+aircraft has four times the visual guns' aim error, 6.0, 4.0, 2.8 and 2.0
+degrees for novice, average, veteran and ace, so a squad is a nuisance that a
+whole airfield of squads can still turn into a real threat, not a gun that
+hits half its rounds. A squad shooting at a ground unit or ship keeps a quarter
+of the visual guns' error ([surface against surface](#surface-against-surface)).
+The record's damage, rate, range and the table's burst are unchanged. For
+scale, the same pass against one ZSU-23 or M163 (radar guns, 0.6 to 0.2 degrees)
+destroys the jet at any experience above novice in one or two bursts; their
+tuning is John's 2026-10-10 AAA table and is not changed here.
+
+Small arms now carry tracers (every third round, as the other light guns) and a
+muzzle spark ([flak bursts, gunfire, launches and light](#flak-bursts-gunfire-launches-and-light)),
+so a field's fire reads on screen. No new infantry art (John, 2026-10-12:
+tracers, no sprites; the squads' existing soldier sprites stay as they are). Every machine online shows the same: a
+client rebuilds each round of a surface burst from the host's burst event with
+the same tracer rule the host's simulation uses (`surface_tracer`), so no wire
+field changed.
 
 #### Flak
 
@@ -1428,7 +1481,7 @@ tracer, each marked retail or fitted. Tags: `R` retail record value, `F` fitted,
 | KPVT 14.5 mm | BTR80 | 2 in 0.5 s / 3.0 s / 0 / 3,666 | 600 F | 10 F (1.0 s) | 3.0 R | 0 R | 500 F | 60 O | vehicle | 2 F | 3,280 F | every 3rd | 1/5 of retail F | 0.88 |
 | M2HB .50 cal | M113 | 2 in 0.5 s / 3.0 s / 0 / 3,666 | 500 F | 21 F (2.5 s) | 3.0 R | 0 R | 2,000 F | 60 O | vehicle | 2 F | 2,910 F | every 3rd | 1/7 of retail F | 0.95 |
 | M242 25 mm | M2 | 2 in 0.5 s / 3.0 s / 0 / 3,666 | 200 F | 20 F (6.0 s) | 3.0 R | 0 R | 300 F | 60 O | vehicle | 2 F | 3,600 F | every 3rd | 1/4 of retail F | 0.97 |
-| Squad small arms | SMLARMS (TROOPS) | 4 in 0.25 s / 1.0 s / 0 / 3,666 | 600 F | 5 F (0.5 s) | 1.0 R | 0 R | 1,000 F | 60 O | troops | 2 F | 3,000 F | none | retail R | 1.04 |
+| Squad small arms | SMLARMS (TROOPS) | 4 in 0.25 s / 1.0 s / 0 / 3,666 | 600 F | 5 F (0.5 s) | 1.0 R | 0 R | 1,000 F | 60 O | troops | 2 F | 3,000 F | every 3rd | retail R | 1.04 |
 <!-- surface-guns-table:end -->
 
 ## Parked aircraft
@@ -1535,9 +1588,11 @@ A land unit (an NT that is not a ship, a structure or a man) stands on the
 lowest point of its shape, standing or moving, and its contact and hit box
 stand with it (fitted: a vehicle's shape origin is at its turret or rails,
 and for every land unit the lowest point equals the F2 ground offset within a
-unit; a T-80 drawn on its origin hid its hull in the ground). Ships keep
-their waterline and buildings their authored depth: their F2 offsets lie well
-below their geometry (Krivak -100 against -26, the bunkers -176 against -88).
+unit; a T-80 drawn on its origin hid its hull in the ground). Since slice BG
+(B13, 2026-10-12) buildings do too, bunkers included: their lowest point also
+equals their F2 offset within 3 ft ([building
+grounding](../formats/objects-and-shapes.md#building-grounding-2026-10-12)).
+Ships keep their waterline (Krivak F2 -100 against its geometry's -26).
 
 ### Shapes the reader learned
 
@@ -1686,8 +1741,8 @@ light's units, one flare is 4,000).
 | Flak light | One point light at the burst: 10,000 (85 mm) or 14,000 (100 mm) at the peak, held 2 ticks, gone by 14 ticks | fitted |
 | Flak puff | Three dark puffs growing from 0.3 to 0.8 of the explosion's width, fading in over 0.2 s and out by 4 s, drifting up 3 ft/s | fitted |
 | Flak shell in flight | Not drawn; no tracer | John |
-| AAA tracers | The existing flag and drawing: every third round for guns whose tuning row has a tracer (Shilka, Tunguska, Vulcan, ship guns, 37 mm, 57 mm), none for flak, tank guns and small arms | spec-derived ([AAA tuning](#aaa-tuning)) |
-| Muzzle flash and firing light | The gun-flash sprite at the muzzle, along the barrel, in three classes: light cannon (ZSU-23, 2S6, Vulcan and Phalanx, 30 mm ship guns, BMP-2, BTR-80, M113, M2: a flicker that never goes dark at any cadence, 8 ft, light 160), 37 mm and 57 mm (a distinct pop, 14 ft, light 340, one puff) and 85 mm to 125 mm guns (flak and tank guns: a big flash, 28 ft, light 700, three puffs). One flash per gun, its newest round. The barrage zone and small arms flash nothing | fitted |
+| AAA tracers | The existing flag and drawing: every third round for guns whose tuning row has a tracer (Shilka, Tunguska, Vulcan, ship guns, 37 mm, 57 mm, IFV and APC guns, small arms), none for flak and tank guns | spec-derived ([AAA tuning](#aaa-tuning)); small arms added as opinionated, John, 2026-10-12 |
+| Muzzle flash and firing light | The gun-flash sprite at the muzzle, along the barrel, in three classes: light cannon (ZSU-23, 2S6, Vulcan and Phalanx, 30 mm ship guns, BMP-2, BTR-80, M113, M2: a flicker that never goes dark at any cadence, 8 ft, light 160), 37 mm and 57 mm (a distinct pop, 14 ft, light 340, one puff) and 85 mm to 125 mm guns (flak and tank guns: a big flash, 28 ft, light 700, three puffs). One flash per gun, its newest round. The barrage zone flashes nothing. A squad's small arms flash a spark (3 ft, light 50, 3 ticks, no smoke; opinionated, John, 2026-10-12, size by the agent) | fitted |
 | SAM launch | When the motor lights (speed 30 ft/s; the SA-6 sits about 2 s on its rail first): a flash 40 ft long along its heading for 0.15 s, a point light of 2,800 fading over 40 ticks, and a white cloud of six puffs growing from 10 to 60 ft over 8 s. The missile's own smoke trail is the simulation's | fitted |
 | Wreck smoke | A destroyed unit whose wreck burns (ships, vehicles, launchers and guns) has the simulation's crash-site fire and its smoke column, 15 minutes, one column per wreck. The fire sprite is fitted to the unit: 30 ft wide for a 100 point vehicle, growing with the square root of its hit points, from 24 ft to 140 ft (a crash site's is 100 ft). A destroyed unit that does not burn (a building or bunker) sends up a smaller dark column of its own for 15 minutes, the last minute fading it out: a puff every 0.4 s rising 16 ft/s in a fixed 7 ft/s breeze, growing from 6 ft by 3 ft/s, living 30 s, sized by its hit points ((hp / 100) to the one quarter, from 0.6 to 2.4); the 24 newest draw. A wreck that lights its fire later gives up its own column | fitted |
 

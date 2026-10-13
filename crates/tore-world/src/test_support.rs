@@ -226,6 +226,7 @@ pub fn terrain() -> Terrain {
         city_fill: None,
         redrawn: Vec::new(),
         redrawn_airports: false,
+        redrawn_templates: false,
         layout: "TEST.MM".into(),
         condition: None,
         weather: tore_sim::environment::Environment::new(
@@ -365,6 +366,7 @@ pub fn combat_fixture(guided: bool) -> live::State {
                 mount: [0.; 3],
                 count: 11,
                 internal: !guided,
+                rack: Default::default(),
             }],
             hit_points: 20,
             target_category: 0x80,
