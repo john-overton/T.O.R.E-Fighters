@@ -59,6 +59,7 @@ impl Viewer {
         );
         self.weather
             .seek(&mut self.world, &mut self.scenery, &self.tracks, tick);
+        self.follow_city(tick);
         if let Some(minutes) = frame.time_minutes {
             let config = self.world.weather.configuration();
             let resources = crate::reel::visual_weather_module(&self.world)?;
@@ -73,7 +74,10 @@ impl Viewer {
         }
         let player = self.player_state(&picture, tick);
         // u32::MAX is the recipe's static first-runway camera anchor.
-        let (position, heading) = if frame.anchor == u32::MAX {
+        let (position, heading) = if frame.anchor == crate::reel::WORLD_ANCHOR {
+            // The world itself: eye and target are world feet.
+            ([0.; 3], 0.)
+        } else if frame.anchor == u32::MAX {
             let runway = self
                 .world
                 .airport_scene
@@ -105,7 +109,7 @@ impl Viewer {
         // A fixed eye stays where the anchor's recorded frame put it at
         // eye_tick; the look target still follows the anchor.
         let place_eye = match frame.eye_tick {
-            Some(at) if frame.anchor != u32::MAX => {
+            Some(at) if frame.anchor < crate::reel::WORLD_ANCHOR => {
                 let state = self
                     .playback
                     .aircraft(at, frame.anchor)
@@ -189,7 +193,7 @@ impl Viewer {
                 scrubbing: !forward,
                 camera: &listener,
                 view: (cockpit_view).then_some(0),
-                selected: if frame.anchor == u32::MAX {
+                selected: if frame.anchor >= crate::reel::WORLD_ANCHOR {
                     0
                 } else {
                     frame.anchor

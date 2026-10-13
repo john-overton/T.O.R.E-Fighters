@@ -105,8 +105,10 @@ struct Shot {
     /// Each impact as it went off and the picture tick it did: the flash
     /// and smoke follow it from there.
     births: Vec<(u64, EffectPose)>,
-    /// Craters and pock marks on the ground.
+    /// Craters and pock marks on the ground, and fires.
     marks: Vec<crate::snapshot::MarkPose>,
+    /// Each fire's spot and the width it is drawn at (a unit's fire).
+    fires: Vec<([f64; 3], f64)>,
     eye: [f64; 3],
     look: [f64; 3],
     fov: f64,
@@ -136,6 +138,100 @@ const SHOCKWAVE_ROW: [Impact; 3] = [
 ];
 const SHOCKWAVE_SPACING: f64 = 1_300.;
 const SHOCKWAVE_SECONDS: [f64; 6] = [0.1, 0.5, 2., 10., 30., 60.];
+
+/// The night range set (nr-fx3, `--impact-preview OUT_DIR night-range`):
+/// a 250 lb, a 500 lb and a 2,000 lb bomb [`NIGHT_SPACING`] apart, and
+/// behind them a 24 ft and a 90 ft building fire and a 160 ft fuel fire, at
+/// night, seen from 3,000 ft up (800 ft a mile past that) at
+/// [`NIGHT_RANGES_NM`] from the row, 0.15 s
+/// after the bombs went off (the flash) and 1 s after (the fireball).
+const NIGHT_ROW: [Impact; 3] = [
+    Impact {
+        label: "250lb",
+        record: "MK82.JT",
+        weight: Some(250),
+    },
+    Impact {
+        label: "500lb",
+        record: "MK82.JT",
+        weight: None,
+    },
+    Impact {
+        label: "2000lb",
+        record: "MK84.JT",
+        weight: None,
+    },
+];
+const NIGHT_SPACING: f64 = 1_200.;
+const NIGHT_FIRES_FT: [f64; 3] = [24., 90., 160.];
+const NIGHT_RANGES_NM: [f64; 6] = [0.3, 2., 5., 10., 20., 30.];
+const NIGHT_SECONDS: [f64; 2] = [0.15, 1.];
+
+fn night_range_shots(
+    resources: &std::collections::BTreeMap<String, Vec<u8>>,
+    world: &Terrain,
+    base: [f64; 3],
+) -> AppResult<Vec<Shot>> {
+    let row: Vec<Weapon> = NIGHT_ROW
+        .iter()
+        .map(|impact| record(resources, impact.record, impact.weight))
+        .collect::<AppResult<_>>()?;
+    let ground = |x: f64, z: f64| f64::from(world.height(x as f32, z as f32)).max(0.);
+    let spot = |n: f64, back: f64| {
+        let x = base[0] + n * NIGHT_SPACING;
+        let z = base[2] + back;
+        [x, ground(x, z), z]
+    };
+    let middle = spot(1., 300.);
+    let births: Vec<(u64, EffectPose)> = row
+        .iter()
+        .enumerate()
+        .filter_map(|(n, weapon)| ground_hit(weapon, spot(n as f64, 0.), 0))
+        .map(|e| (10_000, e))
+        .collect();
+    let fires: Vec<([f64; 3], f64)> = NIGHT_FIRES_FT
+        .iter()
+        .enumerate()
+        .map(|(n, width)| (spot(n as f64, 700.), *width))
+        .collect();
+    let mut shots = Vec::new();
+    for nm in NIGHT_RANGES_NM {
+        for seconds in NIGHT_SECONDS {
+            let elapsed = (seconds * 120.) as u16;
+            let away = nm * 6_076.12;
+            shots.push(Shot {
+                name: format!("night-{nm:04.1}nm-t{seconds:.2}s"),
+                effects: row
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(n, weapon)| ground_hit(weapon, spot(n as f64, 0.), elapsed))
+                    .collect(),
+                births: births.clone(),
+                marks: fires
+                    .iter()
+                    .map(|(at, _)| crate::snapshot::MarkPose {
+                        kind: blast::MarkKind::Fire,
+                        position: *at,
+                        age: 10_000 + u64::from(elapsed),
+                        strength: 1.,
+                        scale: 100,
+                    })
+                    .collect(),
+                fires: fires.clone(),
+                // A strike aircraft's height for the range, clear of the hills.
+                eye: [
+                    middle[0],
+                    middle[1] + (800. * nm).max(3_000.),
+                    middle[2] - away,
+                ],
+                look: [middle[0], middle[1], middle[2]],
+                fov: if nm < 1. { 70. } else { 40. },
+                tick: 10_000 + u64::from(elapsed),
+            });
+        }
+    }
+    Ok(shots)
+}
 
 fn shockwave_shots(
     resources: &std::collections::BTreeMap<String, Vec<u8>>,
@@ -185,6 +281,7 @@ fn shockwave_shots(
                         })
                     })
                     .collect(),
+                fires: Vec::new(),
                 eye: [middle[0], middle[1] + 260., middle[2] - 2_400.],
                 look: [middle[0], middle[1] + 150., middle[2]],
                 fov: 75.,
@@ -196,10 +293,11 @@ fn shockwave_shots(
 
 pub fn run() -> AppResult<()> {
     let args: Vec<_> = std::env::args().skip(2).collect();
-    let (out, climate) = match args.as_slice() {
-        [out] => (out, false),
-        [out, set] if set == "shockwave" => (out, true),
-        _ => return Err("--impact-preview OUTPUT_DIRECTORY [shockwave]".into()),
+    let (out, climate, night_range) = match args.as_slice() {
+        [out] => (out, false, false),
+        [out, set] if set == "shockwave" => (out, true, false),
+        [out, set] if set == "night-range" => (out, true, true),
+        _ => return Err("--impact-preview OUTPUT_DIRECTORY [shockwave|night-range]".into()),
     };
     let out = Path::new(out);
     std::fs::create_dir_all(out)?;
@@ -211,6 +309,9 @@ pub fn run() -> AppResult<()> {
         .map(|impact| Ok((impact, record(resources, impact.record, impact.weight)?)))
         .collect::<AppResult<_>>()?;
     for (light, condition, time) in [("day", None, Some([13, 0])), ("night", Some(5), None)] {
+        if night_range && light == "day" {
+            continue;
+        }
         let overrides = Overrides {
             time,
             wind: None,
@@ -258,7 +359,11 @@ pub fn run() -> AppResult<()> {
                     })
                 })
                 .ok_or("no open land near the theater's start")?;
-            shots = shockwave_shots(resources, &world, land, light)?;
+            shots = if night_range {
+                night_range_shots(resources, &world, land)?
+            } else {
+                shockwave_shots(resources, &world, land, light)?
+            };
         } else {
             let row_births: Vec<(u64, EffectPose)> = row
                 .iter()
@@ -278,6 +383,7 @@ pub fn run() -> AppResult<()> {
                     effects,
                     marks: Vec::new(),
                     births: row_births.clone(),
+                    fires: Vec::new(),
                     eye: [middle[0], middle[1] + 300., middle[2] - 2_500.],
                     look: [middle[0], middle[1] + 60., middle[2]],
                     fov: 80.,
@@ -297,6 +403,7 @@ pub fn run() -> AppResult<()> {
                             .map(|e| (10_000, e))
                             .into_iter()
                             .collect(),
+                        fires: Vec::new(),
                         eye: [at[0] - 260., at[1] + 60., at[2] - 420.],
                         look: [at[0], at[1] + 15., at[2]],
                         fov: 30.,
@@ -329,6 +436,7 @@ pub fn run() -> AppResult<()> {
                             ground_hit(cannon, place(k), 0).map(|e| (10_000 + u64::from(k) * 2, e))
                         })
                         .collect(),
+                    fires: Vec::new(),
                     eye: [at[0] - 300., at[1] + 90., at[2] - 520.],
                     look: [at[0] + 30., at[1] + 10., at[2]],
                     fov: 30.,
@@ -397,6 +505,7 @@ pub fn run() -> AppResult<()> {
                         effects: Vec::new(),
                         births: Vec::new(),
                         marks: marks.clone(),
+                        fires: Vec::new(),
                         eye,
                         look,
                         fov,
@@ -441,7 +550,8 @@ pub fn run() -> AppResult<()> {
                 tracker.observe(&born, tick as f64, |_| None);
             }
             let now = picture.tick as f64;
-            let drawn = tracker.draw(now, |_| None);
+            let mut drawn = tracker.draw(now, |_| None);
+            drawn.fires.extend_from_slice(&shot.fires);
             let device = &gpu.device;
             let queue = &gpu.queue;
             let devices = tore_sim::combat::countermeasures::Devices::default();
@@ -460,6 +570,11 @@ pub fn run() -> AppResult<()> {
                 ),
             );
             gpu.sim.aircraft(device, queue, &ownship, &[]);
+            if night_range {
+                // The night scene's haze ramp: start, end (feet), amounts.
+                let fog = scenery.sample_view(&world, camera.position[1], 0).fog;
+                println!("Impact preview: {} haze {fog:?}", shot.name);
+            }
             let pixels = gpu.pixels(&camera, &world, &scenery)?;
             let path = out.join(format!("{}.png", shot.name));
             std::fs::write(

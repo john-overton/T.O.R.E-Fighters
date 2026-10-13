@@ -254,6 +254,8 @@ fn dust_ring(
                 opacity: (opacity * fade) as f32,
                 emissive: false,
                 tint,
+                glow: 0.,
+                heat: 0.,
             });
         }
     }
@@ -292,6 +294,8 @@ fn spray_ring(position: [f64; 3], width: f64, elapsed: u16, duration: u16, out: 
             opacity: opacity as f32,
             emissive: false,
             tint: PLAIN,
+            glow: 0.,
+            heat: 0.,
         });
     }
 }
@@ -373,6 +377,10 @@ struct Sprite {
     emissive: bool,
     /// Multiplies the art's colour: [`PLAIN`], or a shockwave's dust colour.
     tint: [f32; 3],
+    /// Its night glow in flares, 0 for none, and how white-hot it is
+    /// ([`crate::night_glow`]).
+    glow: f32,
+    heat: f32,
 }
 
 /// Drawn in the art's own colours.
@@ -420,6 +428,8 @@ fn sprites(
                     opacity: 1.,
                     emissive: false,
                     tint: PLAIN,
+                    glow: 0.,
+                    heat: 0.,
                 }
             }
             MarkKind::Fire => {
@@ -439,6 +449,9 @@ fn sprites(
                     opacity: mark.strength,
                     emissive: true,
                     tint: PLAIN,
+                    // Refit to the unit's width in `update`.
+                    glow: (crate::night_glow::fire_light(width) * f64::from(mark.strength)) as f32,
+                    heat: 0.,
                 }
             }
         };
@@ -495,6 +508,22 @@ fn sprites(
         let aspect = f64::from(layout.height) / f64::from(layout.width);
         let standing = blast::explosion(kind).is_some_and(|row| row.surface)
             || effect.kind == EffectKind::DebrisImpact;
+        let (glow, heat) = if effect.kind == EffectKind::DebrisImpact {
+            (0., 0.)
+        } else {
+            let detonates = crate::impact_fx::detonation(effect).is_some()
+                || matches!(effect.kind, EffectKind::Flak);
+            let glow = crate::night_glow::explosion_glow(
+                effect.position,
+                detonates.then_some(kind),
+                effect.scale,
+                width,
+                elapsed,
+                duration,
+            );
+            let flash = 1. - f64::from(elapsed) / f64::from(duration.max(1));
+            (glow as f32, (flash * flash) as f32)
+        };
         out.push(Sprite {
             position: effect.position,
             extent: if standing {
@@ -512,6 +541,8 @@ fn sprites(
             opacity: 1.,
             emissive: true,
             tint: PLAIN,
+            glow,
+            heat,
         });
         bomblets(art, effect, elapsed, &mut out);
     }
@@ -545,6 +576,12 @@ fn bomblets(art: &Art, effect: &EffectPose, elapsed: u16, out: &mut Vec<Sprite>)
             opacity: 1.,
             emissive: true,
             tint: PLAIN,
+            // A bomblet's flash as an ember of its width, fading as it plays.
+            glow: (crate::night_glow::EMBER_SHARE * crate::impact_fx::light_of(flash.width, 1.).0
+                / crate::countermeasure_renderer::FLARE_STRENGTH
+                * (1. - f64::from(played) / f64::from(cluster::FLASH_TICKS)).powi(2))
+                as f32,
+            heat: 0.5,
         });
     }
 }
@@ -563,6 +600,14 @@ pub struct EffectRenderer {
     /// Whether the fire sheet is in the art.
     fire_present: bool,
     count: u32,
+    /// Burning city buildings past the fire sprites' reach or budget, drawn
+    /// as glow points only ([`crate::city_fires::Frame::glows`]).
+    far_city: Vec<crate::night_glow::Glow>,
+    /// This frame's glow points and the fires that light the ground (their
+    /// base and width), built by `update` ([`crate::night_glow`]).
+    glows: Vec<crate::night_glow::Glow>,
+    fire_spots: Vec<([f64; 3], f64)>,
+    glow_on: bool,
 }
 
 /// What the camera at `eye` draws, in drawing order: the nearest
@@ -601,6 +646,30 @@ fn visible(sprites: &[Sprite], eye: [f64; 3]) -> Vec<&Sprite> {
         .collect()
 }
 
+/// The glow points of the glowing sprites, at the middle of their art, and
+/// the fires among them (base and width) that light the ground.
+fn glows_of(sprites: &[Sprite]) -> (Vec<crate::night_glow::Glow>, Vec<([f64; 3], f64)>) {
+    let mut glows = Vec::new();
+    let mut fires = Vec::new();
+    for s in sprites.iter().filter(|s| s.glow > 0.) {
+        let lift = match s.mode {
+            Mode::Standing => s.extent[1] / 2.,
+            _ => 0.,
+        };
+        let width = 2. * s.extent[0];
+        glows.push(crate::night_glow::Glow {
+            position: [s.position[0], s.position[1] + lift, s.position[2]],
+            width,
+            strength: f64::from(s.glow),
+            heat: s.heat,
+        });
+        if s.layer == FIRE_SHEET {
+            fires.push((s.position, width * f64::from(s.opacity)));
+        }
+    }
+    (glows, fires)
+}
+
 /// A fire this near a fitted fire's spot (feet, level) is that fire.
 const FIRE_FIT_FT: f64 = 2.;
 
@@ -618,6 +687,12 @@ fn fit_fires(sprites: &[Sprite], fires: &[([f64; 3], f64)]) -> Vec<Sprite> {
                     (at[0] - sprite.position[0]).hypot(at[2] - sprite.position[2]) <= FIRE_FIT_FT
                 })
             {
+                // Its glow by its own width, at the strength its art shows.
+                if sprite.glow > 0. {
+                    let shown = f64::from(sprite.glow)
+                        / crate::night_glow::fire_light(f64::from(blast::FIRE_SIZE));
+                    sprite.glow = (crate::night_glow::fire_light(*width) * shown) as f32;
+                }
                 sprite.extent = [
                     width / 2.,
                     width * f64::from(layout.height) / f64::from(layout.width),
@@ -648,6 +723,8 @@ fn city_sprites(fires: &[crate::city_fires::CityFire], tick: u64) -> Vec<Sprite>
                 opacity: 1.,
                 emissive: true,
                 tint: PLAIN,
+                glow: crate::night_glow::fire_light(fire.width) as f32,
+                heat: 0.,
             }
         })
         .collect()
@@ -673,6 +750,10 @@ impl EffectRenderer {
             city: Vec::new(),
             fire_present: false,
             count: 0,
+            far_city: Vec::new(),
+            glows: Vec::new(),
+            fire_spots: Vec::new(),
+            glow_on: crate::night_glow::enabled(),
         }
     }
     /// The fires of destroyed units and the width each is drawn at, for the
@@ -690,6 +771,18 @@ impl EffectRenderer {
         } else {
             Vec::new()
         };
+    }
+    /// The burning city buildings drawn only as glow points this frame.
+    pub fn set_far_city(&mut self, glows: Vec<crate::night_glow::Glow>) {
+        self.far_city = glows;
+    }
+    /// This frame's glow points, after `update`.
+    pub fn glows(&self) -> &[crate::night_glow::Glow] {
+        &self.glows
+    }
+    /// The ground light of the fires nearest `eye`, after `update`.
+    pub fn fire_lights(&self, eye: [f64; 3]) -> Vec<crate::countermeasure_renderer::FlareLight> {
+        crate::night_glow::fire_lights(&self.fire_spots, eye)
     }
     /// Rebuild for a new anti-aliasing sample count; the next `prepare`
     /// recreates the bindings.
@@ -840,6 +933,12 @@ impl EffectRenderer {
         let eye = camera.position;
         let mut fitted = fit_fires(&self.sprites, &self.fires);
         fitted.extend_from_slice(&self.city);
+        self.glows.clear();
+        self.fire_spots.clear();
+        if self.glow_on {
+            (self.glows, self.fire_spots) = glows_of(&fitted);
+            self.glows.extend_from_slice(&self.far_city);
+        }
         let visible = visible(&fitted, eye);
         let mut instances = Vec::with_capacity(visible.len().min(MAX_INSTANCES) * INSTANCE_BYTES);
         for s in visible {

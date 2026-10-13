@@ -612,7 +612,11 @@ impl Conversion {
             .map(|(key, states)| Track::new(*key, states))
             .collect();
         let launches = events::launches(seen);
-        let mut events = events::Events::new(seen, flight.plane, &weapon_ids, first, last);
+        let city = self
+            .client
+            .mission()
+            .and_then(|world| world.terrain.city_fill.as_deref());
+        let mut events = events::Events::new(seen, flight.plane, &weapon_ids, first, last, city);
         let net = self.net_events(flight);
         let mut net = net.into_iter().peekable();
         // Each aircraft's drawn stores as the host told them (protocol 27),

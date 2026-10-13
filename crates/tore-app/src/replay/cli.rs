@@ -138,6 +138,16 @@ pub fn info(path: &Path, out: &mut impl Write) -> AppResult<()> {
     if world.city_fill_scene != 0 {
         writeln!(out, "City fill   scene {}", world.city_fill_scene)?;
     }
+    let city = recording.city();
+    if !city.is_empty() {
+        writeln!(
+            out,
+            "City        {} buildings knocked down in {} changes, first at tick {}",
+            city.all().len(),
+            city.changes.len(),
+            city.changes[0].0
+        )?;
+    }
     let frames = recording.frame_count();
     let aircraft = recording.aircraft().count().max(1) as u64;
     match recording.first_tick().zip(recording.last_tick()) {

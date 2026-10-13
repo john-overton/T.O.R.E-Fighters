@@ -85,6 +85,9 @@ pub struct Playback {
     commits: Vec<u64>,
     /// Every crater and fire the recording started.
     marks: Vec<(u64, tore_replay::EffectSpawn)>,
+    /// The city fill buildings the recording knocked down, tick by tick
+    /// (nr-fx3): none in a recording from before them.
+    city: tore_replay::CityTrack,
     /// Every aircraft's recorded stores over time (B3): none in a recording
     /// from before them.
     stores: tore_replay::stores::StoreTrack,
@@ -122,6 +125,7 @@ impl Playback {
             identities: Identities::of(&recording),
             commits: commit_ticks(last),
             marks: convert::recorded_marks(&recording),
+            city: recording.city().clone(),
             stores: tore_replay::stores::StoreTrack::from_events(recording.events()),
             recording,
             first,
@@ -164,6 +168,7 @@ impl Playback {
         }
         self.identities = Identities::of(&recording);
         self.stores = tore_replay::stores::StoreTrack::from_events(recording.events());
+        self.city = recording.city().clone();
         self.recording = recording;
         self.pair = None;
         self.smoke = None;
@@ -278,6 +283,21 @@ impl Playback {
         let mut turns = self.rotor_starts[index].clone();
         add_rotor_turns(&mut turns, &frames[..=at]);
         Some(turns)
+    }
+
+    /// Where the city fill buildings flat at `tick` stand.
+    pub fn city_at(&self, tick: u64) -> Vec<[i32; 2]> {
+        self.city.flattened_at(tick)
+    }
+
+    /// Where every city fill building the recording knocks down stands.
+    pub fn city_all(&self) -> Vec<[i32; 2]> {
+        self.city.all()
+    }
+
+    /// How many recorded city changes lead up to `tick`.
+    pub fn city_changes_at(&self, tick: u64) -> usize {
+        self.city.changes_at(tick)
     }
 
     /// The craters and fires alive at `tick`.
@@ -425,6 +445,9 @@ mod tests {
         }
         // The identities and the registry of a format 2 file are as ever.
         assert_eq!(playback.identities.surface.len(), 0);
+        // From before the city section (nr-fx3): the city stands whole.
+        assert!(playback.city_all().is_empty());
+        assert!(playback.city_at(last).is_empty());
     }
 
     #[test]

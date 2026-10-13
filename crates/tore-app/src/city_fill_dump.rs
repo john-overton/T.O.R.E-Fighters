@@ -53,11 +53,19 @@ use tore_world::{
     surface::layout::trig,
 };
 
-/// Noon, no wind, no cloud; the redrawn airports unless
+/// Noon (or `TORE_CITY_DUMP_TIME=HH:MM`, nr-fx3: the burning city at
+/// night), no wind, no cloud; the redrawn airports unless
 /// `TORE_REDRAWN_AIRPORTS=0`; the city fill `on` or off.
 fn overrides(on: bool) -> AppResult<crate::terrain::Overrides> {
+    let time = match std::env::var("TORE_CITY_DUMP_TIME") {
+        Ok(text) => {
+            let (h, m) = text.split_once(':').ok_or("TORE_CITY_DUMP_TIME is HH:MM")?;
+            [h.parse()?, m.parse()?]
+        }
+        Err(_) => [12, 0],
+    };
     Ok(crate::terrain::Overrides {
-        time: Some([12, 0]),
+        time: Some(time),
         wind: None,
         cloud_altitude: Some(0),
         redrawn_airports: crate::scenery::redrawn_airports()?,

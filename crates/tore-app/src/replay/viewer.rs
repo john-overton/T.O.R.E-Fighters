@@ -705,6 +705,27 @@ pub(super) fn targets(
     out
 }
 
+/// The building of `fill` standing at each of `places` (east, north, whole
+/// feet), for a recording's knocked-down city buildings (nr-fx3). A place
+/// with no building in this fill is left out.
+pub(crate) fn city_index(
+    fill: &tore_world::city::CityFill,
+    places: &[[i32; 2]],
+) -> std::collections::HashMap<[i32; 2], u32> {
+    let wanted: std::collections::HashSet<[i32; 2]> = places.iter().copied().collect();
+    let mut out = std::collections::HashMap::with_capacity(wanted.len());
+    if wanted.is_empty() {
+        return out;
+    }
+    for (n, i) in fill.layout.instances.iter().enumerate() {
+        let at = [i.x, i.z];
+        if wanted.contains(&at) {
+            out.entry(at).or_insert(n as u32);
+        }
+    }
+    out
+}
+
 pub struct Viewer {
     pub path: PathBuf,
     recording: Arc<Recording>,
@@ -723,6 +744,12 @@ pub struct Viewer {
     /// AC-130 muzzle flashes: the gunship rounds each picture showed.
     gun_flash: crate::gun_flash::Tracker,
     playback: Playback,
+    /// The city fill (by address) and the count of recorded city changes
+    /// it was last set to (nr-fx3), so the fill is set only when a seek or
+    /// the clock crosses a change.
+    city_shown: Option<(usize, usize)>,
+    /// The fill's building at each place the recording knocks one down.
+    city_index: std::collections::HashMap<[i32; 2], u32>,
     /// The plane the recording is for (`draw.player`, plane 0 in single
     /// player's), or [`convert::NO_PLAYER`] for an observer's.
     player: u32,
@@ -1018,6 +1045,8 @@ impl Viewer {
             models,
             art,
             playback,
+            city_shown: None,
+            city_index: std::collections::HashMap::new(),
             player,
             clock,
             info,
@@ -1360,6 +1389,39 @@ impl Viewer {
 
     /// The launcher rails as the recording had them at `tick`, in the shape
     /// the scenery draws them from (format 3).
+    /// Shows the city fill as the recording left it at `tick` (nr-fx3): its
+    /// knocked-down buildings flat, and so burning, whether the clock got
+    /// there playing, seeking or playing backwards. A recording names each
+    /// building by where it stands; the rebuilt fill's building there falls,
+    /// and a place where it has none is skipped. A recording from before
+    /// the city section keeps the city whole.
+    pub(super) fn follow_city(&mut self, tick: u64) {
+        let Some(fill) = &self.world.city_fill else {
+            return;
+        };
+        // A developer aid: replay as a build from before the city section.
+        if std::env::var("TORE_REPLAY_CITY").as_deref() == Ok("0") {
+            return;
+        }
+        let address = std::sync::Arc::as_ptr(fill) as usize;
+        let key = (address, self.playback.city_changes_at(tick));
+        if self.city_shown == Some(key) {
+            return;
+        }
+        if self.city_shown.is_none_or(|(at, _)| at != address) {
+            self.city_index = city_index(fill, &self.playback.city_all());
+        }
+        self.city_shown = Some(key);
+        let mut ids: Vec<u32> = self
+            .playback
+            .city_at(tick)
+            .iter()
+            .filter_map(|at| self.city_index.get(at).copied())
+            .collect();
+        ids.sort_unstable();
+        fill.set_flattened(&ids);
+    }
+
     pub(super) fn rails(&self, tick: u64) -> tore_world::surface::SurfaceState {
         use tore_world::surface::{MountStock, SurfaceState, SurfaceUnitState, UnitId};
         let units = self
@@ -2982,6 +3044,7 @@ impl Viewer {
         self.refresh_object_menu();
         self.weather
             .seek(&mut self.world, &mut self.scenery, &self.tracks, tick);
+        self.follow_city(tick);
         let player = self.player_state(&picture, tick);
         let camera = self.frame_camera(&picture, tick, seconds, shift);
         // The back view from the player's seat draws its airframe but is

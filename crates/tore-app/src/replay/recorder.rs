@@ -331,6 +331,9 @@ pub struct Recorder {
     effects: EffectWatch,
     /// Serial of the next crater or fire to record.
     marks: u64,
+    /// The city fill's version and knocked-down buildings the recording
+    /// last wrote (nr-fx3).
+    city: Option<(u64, Vec<u32>)>,
     surface: BTreeMap<u32, i32>,
     watches: BTreeMap<u32, Watch>,
     shots: BTreeMap<u32, Shot>,
@@ -429,6 +432,7 @@ impl Recorder {
             weapon_notes: BTreeMap::new(),
             effects: EffectWatch::default(),
             marks: 0,
+            city: None,
             surface: BTreeMap::new(),
             watches: BTreeMap::new(),
             shots: BTreeMap::new(),
@@ -955,6 +959,7 @@ impl Recorder {
             }
         }
         frame.new_puffs = new_puffs(tick.combat);
+        self.city_changes(tick.world, &mut frame);
 
         // The stores each aircraft carries (B3): its layout the first time,
         // then each change, so the viewer draws them emptying.
@@ -983,6 +988,14 @@ impl Recorder {
         frame.events.extend(events);
         self.frames += 1;
         self.frame = Some(frame);
+    }
+
+    /// The city fill buildings knocked down since the last tick (nr-fx3,
+    /// John 2026-10-13: replays show the flattened blocks and their fires).
+    fn city_changes(&mut self, world: &terrain::Terrain, frame: &mut Frame) {
+        if let Some(fill) = &world.city_fill {
+            city_change(fill, &mut self.city, frame);
+        }
     }
 
     /// The surface world of the tick (format 3): names for every surface unit
@@ -1896,6 +1909,42 @@ fn cheat_changes(
 }
 
 /// The cheats switched on, for a recording's header.
+/// What the city fill's knocked-down buildings did since `last` (its
+/// version and flat buildings the recording last wrote), put on `frame` by
+/// where each stands: only what changed, read when the fill's version moved.
+/// Fewer flat than before means the city stood again (a restart): the frame
+/// says so and lists every building flat now.
+pub(crate) fn city_change(
+    fill: &tore_world::city::CityFill,
+    last: &mut Option<(u64, Vec<u32>)>,
+    frame: &mut Frame,
+) {
+    let version = fill.version();
+    if last.as_ref().is_some_and(|(seen, _)| *seen == version) {
+        return;
+    }
+    let now = fill.flattened();
+    let before = last.take().map(|(_, ids)| ids).unwrap_or_default();
+    let fell: Vec<u32> =
+        if now.len() < before.len() || before.iter().any(|id| now.binary_search(id).is_err()) {
+            frame.city_stood = true;
+            now.clone()
+        } else {
+            now.iter()
+                .copied()
+                .filter(|id| before.binary_search(id).is_err())
+                .collect()
+        };
+    // Named by where each stands, so a viewer's rebuilt fill finds it
+    // whatever its index there.
+    frame.city_fell = fell
+        .iter()
+        .filter_map(|&n| fill.layout.instances.get(n as usize))
+        .map(|i| [i.x, i.z])
+        .collect();
+    *last = Some((version, now));
+}
+
 pub fn cheats_on(cheats: &tore_sim::cheats::Cheats) -> Vec<String> {
     let mut on: Vec<String> = cheat_changes(cheats, cheats)
         .into_iter()

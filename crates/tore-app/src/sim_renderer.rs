@@ -106,6 +106,8 @@ pub struct SimRenderer {
     countermeasures: crate::countermeasure_renderer::Instances,
     /// Experiment AP1: the redrawn airports' lights.
     airfield_lights: crate::airfield_lights::Lights,
+    /// The night glow of explosions and fires (nr-fx3).
+    glow_points: crate::night_glow::Points,
     battle: Option<(wgpu::Buffer, u32)>,
     battle_contacts: Vec<Contact>,
     airports: Option<(wgpu::Buffer, u32)>,
@@ -192,6 +194,7 @@ struct Pipelines {
     rim_depth_layout: wgpu::BindGroupLayout,
     countermeasures: crate::countermeasure_renderer::Pipelines,
     airfield_lights: crate::airfield_lights::Pipeline,
+    night_glow: crate::night_glow::Pipeline,
 }
 impl Pipelines {
     fn new(
@@ -465,6 +468,8 @@ impl Pipelines {
         );
         let airfield_lights =
             crate::airfield_lights::Pipeline::new(device, shader, format, samples, &surface_layout);
+        let night_glow =
+            crate::night_glow::Pipeline::new(device, shader, format, samples, &surface_layout);
         let sky_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Retail sky preview"),
             layout: Some(&sky_layout),
@@ -570,6 +575,7 @@ impl Pipelines {
             rim_depth_layout,
             countermeasures,
             airfield_lights,
+            night_glow,
         }
     }
 }
@@ -586,13 +592,14 @@ impl SimRenderer {
             label: Some("Simulation terrain"),
             source: wgpu::ShaderSource::Wgsl(
                 format!(
-                    "{}\n{}\n{}\n{}\n{}\n{}",
+                    "{}\n{}\n{}\n{}\n{}\n{}\n{}",
                     include_str!("surface_lighting.wgsl"),
                     include_str!("terrain.wgsl"),
                     include_str!("spotting.wgsl"),
                     include_str!("countermeasures.wgsl"),
                     include_str!("gun_flash.wgsl"),
-                    include_str!("airfield_lights.wgsl")
+                    include_str!("airfield_lights.wgsl"),
+                    include_str!("night_glow.wgsl")
                 )
                 .into(),
             ),
@@ -825,6 +832,7 @@ impl SimRenderer {
             climate: scenery.climate,
             countermeasures: crate::countermeasure_renderer::Instances::new(device),
             airfield_lights: crate::airfield_lights::Lights::new(),
+            glow_points: crate::night_glow::Points::new(device),
             battle: None,
             battle_contacts: Vec::new(),
             airports: None,
@@ -1604,19 +1612,27 @@ impl SimRenderer {
                 self.city_fires.observe(fill, now);
                 let frame = self.city_fires.frame(camera.position, now);
                 self.effects.set_city_fires(&frame.fires, now as u64);
+                self.effects.set_far_city(frame.glows);
                 self.smoke.set_city_smoke(&frame.puffs);
             }
             None => {
                 self.effects.set_city_fires(&[], 0);
+                self.effects.set_far_city(Vec::new());
                 self.smoke.set_city_smoke(&[]);
             }
         }
         self.effects.update(queue, camera);
+        // The night glow of every explosion and fire, and the ground light
+        // of the nearest fires beside the flares' (nr-fx3).
+        self.glow_points
+            .update(queue, self.effects.glows(), camera.position);
+        let mut lights = self.countermeasures.lights.clone();
+        lights.extend(self.effects.fire_lights(camera.position));
         self.smoke.update(
             queue,
             camera,
             size[0] as f32 / (size[1] as f32 * camera.view_fraction),
-            &self.countermeasures.lights,
+            &lights,
         );
         let mut entries = Vec::with_capacity(12 * 1024);
         for row in std::iter::once(&weather.palette).chain(weather.fog_palette.iter()) {
@@ -1672,7 +1688,7 @@ impl SimRenderer {
         }
         if self
             .lighting
-            .prepare(queue, camera, world, scenery, &self.countermeasures.lights)
+            .prepare(queue, camera, world, scenery, &lights)
         {
             let mut objects = Vec::new();
             if let Some((buffer, count)) = &self.airports {
@@ -1878,6 +1894,7 @@ impl SimRenderer {
             .draw_world(&mut pass, &self.p.countermeasures);
         self.airfield_lights
             .draw(&mut pass, &self.p.airfield_lights);
+        self.glow_points.draw(&mut pass, &self.p.night_glow);
         drop(pass);
         if let Some((_, bind)) = &targets.scaled {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
