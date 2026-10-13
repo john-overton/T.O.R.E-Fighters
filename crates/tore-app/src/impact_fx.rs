@@ -130,6 +130,7 @@ pub fn smoke(
                 * (age / SMOKE_FADE_IN_TICKS).min(1.) as f32
                 * (1. - t as f32).powf(1.5),
             dark: true,
+            tint: crate::gun_flash::PLAIN,
         });
     }
 }

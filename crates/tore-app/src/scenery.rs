@@ -51,6 +51,9 @@ pub struct Scenery {
     /// sizes the simulation's fires by it
     /// ([`crate::gun_flash::Tracker::set_fire_widths`]).
     pub fire_widths: Arc<BTreeMap<u32, f64>>,
+    /// The mission's climate, which colours a blast's shockwave and decides
+    /// its vapor and dust (slice B12, [`tore_world::climate`]).
+    pub climate: crate::blast_climate::Climate,
     /// Source palette indices, one byte per texel. Retail terrain and sky art is
     /// entirely weather-palette indexed, so the artwork is uploaded unresolved
     /// and the live palette is applied on the GPU. 255 is the water cutout.
@@ -386,6 +389,9 @@ impl Scenery {
             haze: [0; 3],
             origin: [0.; 3],
             fill: None,
+            climate: crate::blast_climate::Climate {
+                humidity: terrain.humidity(),
+            },
             fire_widths: Arc::new(crate::surface_fx::scene_fire_widths(
                 &tore_world::surface::wreck::scene_fires(&terrain.surface, &terrain.airport_scene),
                 &terrain.airport_scene,
@@ -1007,6 +1013,7 @@ pub(crate) mod tests {
             origin: [0.; 3],
             fill: None,
             fire_widths: Arc::new(BTreeMap::new()),
+            climate: crate::blast_climate::Climate::default(),
         }
     }
     #[test]

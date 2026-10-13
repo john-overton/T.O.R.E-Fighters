@@ -1594,6 +1594,18 @@ city fill out of the row:
 TORE_CITY_FILL=0 TORE_DATA_DIR=.local/tmp-me/profile target/debug/tore-app --impact-preview .local/tmp/impacts
 ```
 
+Add `shockwave` after the folder for the [climate](spec/explosions.md#climate)
+set: a 500 lb bomb, a 2,000 lb bomb and an AGM-65G 1,300 ft apart on open
+land near the theater's start, seen from low beside the row at 0.1, 0.5, 2,
+10, 30 and 60 seconds, by day and at night (`shock-tSSS.Ss-day.png`), with
+their shockwave ring, condensation cloud or dust and craters.
+`TORE_PREVIEW_THEATER` picks the theater and so its humidity (`TVIET` humid,
+`EGY` arid):
+
+```sh
+TORE_CITY_FILL=0 TORE_PREVIEW_THEATER=EGY TORE_DATA_DIR=.local/tmp-me/profile target/debug/tore-app --impact-preview .local/tmp/shock-egy shockwave
+```
+
 On a player's `--a2g-run`, `--render-scene DIR --scene-at S,...` draws the
 world offscreen S seconds after the first rocket, missile or bomb leaves,
 chasing the newest one from just behind and beside it (`DIR/scene-tS.png`),

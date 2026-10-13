@@ -217,6 +217,23 @@ pub struct Tracker {
     /// addition): where, which explosion, its scale and the presentation
     /// tick it went off on ([`crate::impact_fx`]), by place and tick.
     impacts: BTreeMap<(i64, i64, i64, i64), ImpactSeen>,
+    /// Impacts whose vapor or dust is still up (slice B12,
+    /// [`crate::blast_climate`]), by place and tick, apart from `impacts` so
+    /// a long gun burst cannot push a bomb's dust out.
+    raised: BTreeMap<(i64, i64, i64, i64), RaisedSeen>,
+}
+
+/// An impact that raised vapor or dust: as [`crate::blast_climate::Raised`],
+/// with the presentation tick it went off on and, once a newer impact has
+/// pushed it out of the budget, the tick it began to fade.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct RaisedSeen {
+    position: Vector,
+    kind: EffectKind,
+    explosion: u8,
+    scale: u8,
+    born: f64,
+    retired: Option<f64>,
 }
 
 /// An effect that is a flak burst: the simulation's own flak effect, or an
@@ -258,6 +275,7 @@ impl Tracker {
             self.launches.clear();
             self.bursts.clear();
             self.impacts.clear();
+            self.raised.clear();
             self.wrecks.clear();
             self.alive.clear();
         }
@@ -354,7 +372,71 @@ impl Tracker {
                 self.impacts.remove(&key);
             }
         }
+        self.raise(picture);
         self.wrecks_of(picture);
+    }
+
+    /// Notes the impacts in `picture` that raise vapor or dust, and keeps
+    /// the newest [`blast_climate::MAX_RAISED`] of them up: one more retires
+    /// the oldest, which fades out, at most
+    /// [`blast_climate::MAX_RETIRING`] at once.
+    fn raise(&mut self, picture: &RenderSnapshot) {
+        use crate::blast_climate::{self as climate, MAX_RAISED, MAX_RETIRING, RETIRE_TICKS};
+        let now = picture.tick as f64;
+        for effect in &picture.effects {
+            let Some(explosion) = effect.blast else {
+                continue;
+            };
+            if climate::class(effect.kind, explosion, effect.scale).is_none() {
+                continue;
+            }
+            let Some(row) = blast::explosion(explosion) else {
+                continue;
+            };
+            let life = u16::from(row.seconds) * 120;
+            let born = now - f64::from(life.saturating_sub(effect.ticks));
+            let (x, y, z) = cell(effect.position);
+            self.raised
+                .entry((x, y, z, born.round() as i64))
+                .or_insert(RaisedSeen {
+                    position: effect.position,
+                    kind: effect.kind,
+                    explosion,
+                    scale: effect.scale,
+                    born,
+                    retired: None,
+                });
+        }
+        self.raised.retain(|_, r| {
+            let up = climate::class(r.kind, r.explosion, r.scale)
+                .is_some_and(|class| now - r.born <= climate::lasts(class, r.scale) + 1.);
+            up && r.retired.is_none_or(|at| now - at <= RETIRE_TICKS)
+        });
+        let mut active: Vec<_> = self
+            .raised
+            .iter()
+            .filter(|(_, r)| r.retired.is_none())
+            .map(|(key, r)| (r.born, *key))
+            .collect();
+        if active.len() > MAX_RAISED {
+            active.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+            for (_, key) in &active[..active.len() - MAX_RAISED] {
+                if let Some(r) = self.raised.get_mut(key) {
+                    r.retired = Some(now);
+                }
+            }
+        }
+        let mut retiring: Vec<_> = self
+            .raised
+            .iter()
+            .filter_map(|(key, r)| r.retired.map(|at| (at, r.born, *key)))
+            .collect();
+        if retiring.len() > MAX_RETIRING {
+            retiring.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+            for (_, _, key) in &retiring[..retiring.len() - MAX_RETIRING] {
+                self.raised.remove(key);
+            }
+        }
     }
 
     /// How wide each scene object's wreck fire is drawn
@@ -479,6 +561,22 @@ impl Tracker {
             // Its dust and smoke, as big and as long as the weapon.
             crate::impact_fx::smoke(position, kind, scale, now - born, &mut out.puffs);
         }
+        for r in self.raised.values() {
+            let age = now - r.born;
+            if age < 0. {
+                continue;
+            }
+            out.raised.push(crate::blast_climate::Raised {
+                position: r.position,
+                kind: r.kind,
+                explosion: r.explosion,
+                scale: r.scale,
+                age,
+                left: r.retired.map_or(1., |at| {
+                    (1. - (now - at) / crate::blast_climate::RETIRE_TICKS).clamp(0., 1.)
+                }),
+            });
+        }
         self.draw_wrecks(now, out);
         out.fires.extend(self.fires.iter().copied());
     }
@@ -524,6 +622,7 @@ impl Tracker {
                             * (1. - (1. - t).powi(2)),
                     opacity: launch::CLOUD_OPACITY * (1. - t as f32).powi(2),
                     dark: false,
+                    tint: crate::gun_flash::PLAIN,
                 });
             }
         }
@@ -565,6 +664,7 @@ impl Tracker {
                     radius: w.scale * (wreck::START_FT + wreck::GROWTH_FPS * s),
                     opacity: wreck::OPACITY * (fade_in * life * overall) as f32,
                     dark: true,
+                    tint: crate::gun_flash::PLAIN,
                 });
                 if n == 0 {
                     break;
@@ -628,6 +728,7 @@ fn draw_burst(burst: &Burst, now: f64, out: &mut Drawn) {
                 * (age / puff::FADE_IN_TICKS).min(1.) as f32
                 * (1. - t as f32).powf(1.5),
             dark: true,
+            tint: crate::gun_flash::PLAIN,
         });
     }
 }
@@ -1186,5 +1287,60 @@ mod tests {
             let silent = ["A_M1939.JT"].contains(&row.record);
             assert_eq!(muzzle_class(row.record).is_none(), silent, "{}", row.record);
         }
+    }
+
+    #[test]
+    fn a_long_bombing_run_keeps_the_newest_dust_and_fades_the_rest_out() {
+        use crate::blast_climate::{MAX_RAISED, MAX_RETIRING, RETIRE_TICKS};
+        let bomb = |n: u32, ticks: u16| EffectPose {
+            kind: EffectKind::Ground,
+            position: [f64::from(n) * 600., 0., 0.],
+            ticks,
+            blast: Some(35),
+            scale: 159,
+        };
+        let mut tracker = Tracker::default();
+        tracker.observe(&picture(1_000), 1_000., false);
+        // Forty 2,000 lb bombs a second apart, each seen as it goes off,
+        // with a long gun burst landing all through it.
+        for n in 0..40_u32 {
+            let tick = 1_120 + u64::from(n) * 120;
+            let mut effects = vec![bomb(n, 240)];
+            effects.extend((0..120).map(|k| EffectPose {
+                kind: EffectKind::Ground,
+                position: [f64::from(k) * 3., 0., 5_000. + f64::from(n) * 50.],
+                ticks: 120,
+                blast: Some(15),
+                scale: 50,
+            }));
+            tracker.observe(
+                &RenderSnapshot {
+                    effects,
+                    ..picture(tick)
+                },
+                tick as f64,
+                true,
+            );
+        }
+        let now = (1_120 + 39 * 120) as f64;
+        let out = drawn(&tracker, now);
+        // The gun rounds raise nothing; the bombs stay within the budget.
+        assert!(out.raised.iter().all(|r| r.explosion == 35));
+        assert!(out.raised.len() <= MAX_RAISED + MAX_RETIRING);
+        // The 32 kept up, and the one this bomb pushed out, which starts its
+        // fade from full.
+        let up = out.raised.iter().filter(|r| r.left == 1.).count();
+        assert_eq!(up, MAX_RAISED + 1);
+        // The newest is up; the oldest retired ones fade, then go.
+        assert!(out.raised.iter().any(|r| r.age == 0. && r.left == 1.));
+        assert!(out.raised.iter().any(|r| r.left < 1.));
+        let later = picture(now as u64 + RETIRE_TICKS as u64 + 2);
+        tracker.observe(&later, later.tick as f64, true);
+        let out = drawn(&tracker, later.tick as f64);
+        assert_eq!(out.raised.len(), MAX_RAISED);
+        assert!(out.raised.iter().all(|r| r.left == 1.));
+        // A seek starts over.
+        tracker.observe(&picture(10), 10., false);
+        assert!(drawn(&tracker, 10.).raised.is_empty());
     }
 }
