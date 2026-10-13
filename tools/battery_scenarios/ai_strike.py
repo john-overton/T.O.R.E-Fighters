@@ -1008,8 +1008,11 @@ def scenarios() -> list[Scenario]:
                    "--sead-at", "60"),
          dict(label="mi24 resumes after SEAD", decisions=["hold_off", "resume"], sead=True, release=True,
               hurt=True)),
-        # An ambush by a SAM it did not know: break, leave the ring, resume once it is quiet.
-        (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams, "--surface-seed", "15", "--seconds", "420"),
+        # An ambush by a SAM it did not know: break, leave the ring, resume once it is quiet. Since
+        # slice H1 the Mi-24 (at its real 150 kt) fires before the ambush, which comes on its exit, so
+        # the run follows it past the impact (--follow-threat) to the resume (slice H2).
+        (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams, "--surface-seed", "15", "--seconds", "420",
+                   "--follow-threat"),
          dict(label="mi24 ambushed", decisions=["leave", "resume"], breaks=5, release=True, hurt=True)),
         # From 4 nm at 200 ft on seed 1 the AI would choose the stand-off under the SAMs; it holds off.
         (pilot_run("UKR", "QUCOL", "--aircraft", "mi24", "--load", "AT2", "--altitude", "200", "--from", "4",

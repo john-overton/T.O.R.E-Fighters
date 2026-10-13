@@ -224,6 +224,7 @@ fn options() -> AppResult<Options> {
             "--render-scene" => o.ai.render_scene = Some(next()?.into()),
             "--offset" => o.ai.offset_ft = next()?.parse()?,
             "--sead-at" => o.ai.sead_at = Some(next()?.parse()?),
+            "--follow-threat" => o.ai.follow_threat = true,
             other if other.starts_with("--") => return Err(format!("unknown {other}").into()),
             other => positional.push(other.to_owned()),
         }
