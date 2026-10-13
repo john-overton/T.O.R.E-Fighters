@@ -1385,7 +1385,7 @@ recovery phase and physical throttle/power/temperature. [Validation](baselines/a
 `--probe-guns` keeps the player attack script on its gun.
 `--probe-ai-guns-only` restricts AI stores to their carried gun without changing
 the player script. It is useful for sustained [gun-employment checks](baselines/ai-gun-implementation.md). `--probe-trace SECONDS` also
-prints enemy observation sources, permission, target and incoming-fire cues.
+prints enemy observation sources, permission, target and incoming-fire cues. `--probe-fuel-trace SECONDS` prints one `AI fuel:` line per AI aircraft at that interval (tick, aircraft, fuel, endurance, time home, fuel state, activity). `--probe-fuel POUNDS` starts every AI aircraft with that much internal fuel, so a return on low fuel can be probed in a minute.
 Every probe prints first visual acquisition, first release, first gun/hit defense
 and peak bank for each enemy.
 

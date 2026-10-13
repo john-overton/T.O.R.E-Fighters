@@ -262,17 +262,22 @@ own aircraft, experience, side and leader. Friendly Wing 1 follows the human;
 the other wings have their own AI leaders. No command-line option is required.
 `--ai-wings` remains a shortcut to open the creator.
 
-AI helicopters (slice ST-H, John's decision of 2026-10-11): the AH-64 and the
-Mi-24 are offered in the five AI wing fields, and in friendly wing 1 when the
-player flies one on an airborne start. The CH-47, the V-22, the AV-8 and the
-Yak-141 are not offered to the AI. A helicopter of the AI's own wings starts
-1,500 ft over the ground under it rather than at the chosen altitude, in forward
-flight (**opinionated**, agent: the AI cannot yet make a helicopter climb or
-descend by much). A player in a helicopter who chooses a ground start leads
-friendly wing 1 alone, with a notice, because the AI cannot take a helicopter off
-the ground; the other wings start airborne at any start. With a ground target set,
-a friendly wing 2 or 3 of helicopters strikes by the bomber-class default. See
-[AI strike](ai-strike.md#ai-helicopters-in-quick-mission).
+AI helicopters and VTOL aircraft (slice ST-H, John's decision of 2026-10-11;
+slice H3, John's decisions of 2026-10-12): every aircraft is offered in the five AI
+wing fields, the AH-64, Mi-24, CH-47, V-22, AV-8 and Yak-141 included, and in
+friendly wing 1 when the player flies one of them on an airborne start. The CH-47
+is an AI wing choice only (no escort objective: the creator's escort missions
+already protect a chosen wing) and carries no weapons, so it never takes the Strike
+role, whatever the wing's objective or the bomber-class default. A helicopter of
+the AI's own wings starts 1,500 ft over the ground under it rather than at the
+chosen altitude, in forward flight (**opinionated**, agent, kept by John,
+2026-10-12). A player in a helicopter, the V-22, the AV-8 or the Yak-141 who
+chooses a ground start leads friendly wing 1 alone, with a notice, because the AI
+cannot take them off the ground yet (slice H2); the other wings start airborne at
+any start. With a ground target set, a friendly wing 2 or 3 of armed helicopters
+strikes by the bomber-class default. See
+[AI strike](ai-strike.md#ai-helicopters-in-quick-mission) and, for their fuel,
+[the AI's fuel](ai.md#b48-routes-fuel-and-recovery).
 
 John requested separate delta formations on 2026-09-17. The host uses the B43
 alternating trailing slots with level stacking: slots 1 and 2 are 512 ft right

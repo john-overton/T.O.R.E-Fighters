@@ -90,7 +90,7 @@ seeded draws for hit rolls and countermeasures.
 | --- | --- |
 | Every AI family can strike: fighters, attack jets, heavies, helicopters and the AC-130 | opinionated (John, 2026-10-11) |
 | The behaviour is side neutral. Any side's wing with the Strike role strikes | opinionated (John, 2026-10-11) |
-| Quick Mission gives each wing a role, **CAP** (today's behaviour) or **Strike**. It is the wing's objective in the creator: "Strike the ground target" is a choice for friendly wings 2 and 3 (not the player's wing, not Redfor) and takes effect once a ground target is set; "Combat air patrol" and the other objectives are CAP. The default objective, "Use mission setting", gives a wing of **bomber-class** aircraft (the type's class word 0x4000, retail's own test) the Strike role when a ground target is set, and every other wing CAP (John, 2026-10-11, answering item 9). A Strike wing flies to the objective, strikes, goes home. Its loadout is the loadout page; a Strike wing with no surface stores is told so | opinionated (John, 2026-10-11); the bomber-class default is retail's rule |
+| Quick Mission gives each wing a role, **CAP** (today's behaviour) or **Strike**. It is the wing's objective in the creator: "Strike the ground target" is a choice for friendly wings 2 and 3 (not the player's wing, not Redfor) and takes effect once a ground target is set; "Combat air patrol" and the other objectives are CAP. The default objective, "Use mission setting", gives a wing of **bomber-class** aircraft (the type's class word 0x4000, retail's own test) the Strike role when a ground target is set, and every other wing CAP (John, 2026-10-11, answering item 9). A Strike wing flies to the objective, strikes, goes home. Its loadout is the loadout page; a Strike wing with no surface stores is told so. An aircraft that carries no store that can attack a ground target never takes the role, whatever its class word or its wing's objective (slice H3, agent, for the CH-47: its wing flies CAP and is not sent home as a striker with nothing to strike with) | opinionated (John, 2026-10-11); the bomber-class default is retail's rule |
 | **Retail's rule, recorded beside it** ([ST-R](../formats/ai.md#strike-maneuvers-steering-frame-and-orbit)). Retail Quick Mission has no role setting. When a ground target is set, every *friendly* bomber-class wing (A-4E, A-6, F-117, B-52, AC-130U, AH-64, Mi-24, Su-24, Tornado) is given ground classes (ship, tank, vehicle, structure) to attack and defend and fighters to evade, and attacks what it sees within about 26,400 ft. Fighter-class wings (A-10, A-7, AV-8B, Su-25 included) stay air only. No wing is ever given SAMs or AAA, so retail has no SEAD. Enemy wings never strike. How the wings reach the area is open. T.O.R.E follows the bomber-class default and adds the per-wing choice on top; the player can set any friendly wing 2 or 3 to Strike or to CAP | retail (rule), opinionated (John, 2026-10-11) for the choice |
 | Redfor can strike but Quick Mission gives Redfor no air-to-ground objectives, so no Redfor wing is tasked in Quick Mission. Imported missions can task any side later | opinionated (John, 2026-10-11) |
 | PvP: a Blue Strike wing goes after Redfor's protected objects ([objectives](surface-defenses.md#objectives-scoring-and-debrief)); Redfor wings stay CAP and defend | opinionated (agent) |
@@ -283,7 +283,7 @@ this order. Fields are in [the aircraft table](../formats/fa-aircraft.csv).
   Class thresholds are **opinionated (John, 2026-10-11)**, the order and the
   top-speed test **opinionated (agent)**; retail has only the script binding
   (retail: fighter, bomber, helicopter and the AC-130's own).
-- **The current import.** Helicopter: AH-64, Mi-24, V-22, CH-47. Gunship:
+- **The current import.** Helicopter: AH-64, Mi-24, V-22, CH-47 (the CH-47 and the V-22 carry no surface store, so they never strike). Gunship:
   AC-130U. Heavy: C-130, E-3, Il-76, E-2C, B747, A310 (none carries ground
   stores today). Attack: A-4E, Su-25, AV-8B, A-7, A-10, MiG-17F. Fighter: every
   other imported aircraft, the F/A-18D included. The F-22 uses its bay as in
@@ -694,16 +694,17 @@ flight home is the mission's return heading, which does not avoid rings.
 *Built in slice ST-H (John, 2026-10-11, "AI helicopters as Quick Mission AI
 wingmen").* The AH-64 and the Mi-24 are offered in every AI wing of the creator
 (friendly wings 2 and 3, enemy wings 1 to 3) and in friendly wing 1 on an
-airborne start; the CH-47, the V-22, the AV-8 and the Yak-141 are still not
-(`AircraftId::ai_flyable`). The AI flies them on the same powered-lift physics a
-player uses ([AI wingmen](variety-flight.md#ai-wingmen)).
+airborne start. Since slice H3 (John, 2026-10-12) so are the CH-47, the V-22, the
+AV-8 and the Yak-141 (`AircraftId::ai_flyable` is true for every aircraft). The AI
+flies them on the same powered-lift physics a player uses ([AI
+wingmen](variety-flight.md#ai-wingmen)).
 
 | Rule | Value | Label |
 | --- | --- | --- |
-| Role | The bomber-class default applies: the AH-64 and the Mi-24 carry the class word 0x4000, like the A-4E, so a friendly wing 2 or 3 of helicopters strikes when a ground target is set (or when "Strike the ground target" is chosen) and flies CAP otherwise; the player's wing and every Redfor wing stay CAP | retail (the class word), opinionated (John, 2026-10-11) |
+| Role | The bomber-class default applies: the AH-64 and the Mi-24 carry the class word 0x4000, like the A-4E, so a friendly wing 2 or 3 of helicopters strikes when a ground target is set (or when "Strike the ground target" is chosen) and flies CAP otherwise; the player's wing and every Redfor wing stay CAP. The CH-47 and the V-22 carry the same word and no surface store: they never strike. The CH-47 (unarmed, an AI wing choice only, John 2026-10-12) flies the mission's route, defends with the helicopter break, and answers a ground order "Winchester" (no usable surface store) | retail (the class word), opinionated (John, 2026-10-11 and 2026-10-12); the no-store rule agent (slice H3) |
 | Start, AI wings | A helicopter of the AI's own wings starts 1,500 ft over the ground under it, in trimmed forward flight, not at the mission altitude and not raised to the 5,000 ft sea-level floor of the other aircraft, at the height the pop-up flies. It was a workaround (the fighters' adapter could not make a helicopter climb or descend by much); since slice H1 the AI climbs and descends on the collective, and the start is kept because John liked it (2026-10-12). A helicopter of the player's wing starts with the player | opinionated (agent; kept, John 2026-10-12) |
 | Start, ground | The AI cannot lift a helicopter off the ground (it cannot hold a hover: asked to start from one it crashes in 5 s). A player in a helicopter on a ground start therefore leads friendly wing 1 alone, with the notice "The AI cannot take a Mi-24 Hind-D off the ground yet, so friendly wing 1 is just you"; an airborne start offers the wingmen. The other wings start airborne at any start. A mission file that asks for both is refused by the creator's check, not by the world | opinionated (agent); the next step is a hover controller |
-| Fuel | A helicopter keeps no fuel schedule: no bingo, no critical, no caution. Its data gives it minutes of fuel at the rate it burns against the hour a cruise of 80 knots takes to a far field, so every Quick Mission helicopter would be bingo at the start and fly home at once. The AI burns no fuel in a mission in any case | opinionated (agent) |
+| Fuel | A helicopter and the V-22 keep a fuel schedule of their own since slice H3: the AI does burn fuel (the military flow of the record, every second, at any speed; the AH-64 and the V-22 33 minutes, the CH-47 55, the Mi-24 18 because its record says 3 lb/s). Time home is at 80 percent of the envelope's top speed (the fighters' fifth of the envelope is 55 knots for the AH-64), bingo under it plus 3 minutes, caution plus 7, critical under 2; a home a full tank could not fly to and back from with the reserve is no home (no schedule). Bingo flies the way home at that speed; the landing is slice H2's. Details and why in [the AI's fuel](ai.md#rotorcraft-fuel-slice-h3) | fitted (agent, slice H3) |
 | Landing | A helicopter is never put through the airfield sequences, which are an aeroplane's: a runway approach and rollout flown at 120 knots put a Mi-24 into the ground in the probe. A landing order (Land, Bug Out, the end of the mission, damage) sends a leader home by the ordinary return-to-base heading and holds it there; its wingmen stay in formation on it. It does not land | opinionated (agent); landing is open |
 | Air combat | Unchanged: the fighters' air logic, which in the 5 v 5 probes keeps a helicopter within 16 degrees of level at under 135 knots. The probes (`ai-fight-heli-*`) found no helicopter that dived or overspeed without a hit | spec-derived |
 | Pass | The pop-up and the stand-off, defence and exit above | as above |
@@ -1044,7 +1045,7 @@ strike order or a takeover of a striking plane.
 | Helicopter stand-off | masked at 200 ft AGL to 60% of the zone-1 range, unmask 500 ft for up to 10 s | fitted |
 | Helicopter rocket gate | 25% of `R`, at least 40 ft | fitted |
 | Helicopter break | the threat's bearing plus or minus 90 degrees (60 and 120 for cover), flight path within 10 degrees of level, 200 ft over the highest ground in 6 s, maximum speed | retail (90), opinionated (John, 2026-10-11), fitted |
-| Helicopter start | 1,500 ft over the ground in an AI wing; no fuel schedule; no airfield sequence | opinionated (agent) |
+| Helicopter start | 1,500 ft over the ground in an AI wing; fuel schedule of its own (slice H3); no airfield sequence yet | opinionated (agent) |
 | Helicopter threat ring | the threat's reach plus 2,000 ft | rule opinionated (John, 2026-10-12), margin fitted |
 | Helicopter hold-off | up to 3 minutes for SEAD, circling 3,000 ft at 200 ft over the ground outside every ring; then another target outside the rings, else home | opinionated (John, 2026-10-12), numbers fitted |
 | Helicopter stand-off points | 60% of the zone or 95% of the fire range, bearings in 15 degree steps, 2,500 ft of carry-on clear, nose within 15 degrees to fire | fitted |
@@ -1132,12 +1133,13 @@ and is open to change.
 
 13. **Helicopters (ST-H).** Agent choices carrying John's decisions of
     2026-10-11. The break beams the threat rather than turning toward it (retail
-    turns toward its target when ahead); the AH-64 and Mi-24 are offered to the AI
-    and the CH-47 is not (a transport with no weapons); AI helicopters start 1,500
-    ft over the ground and never land, and the AI cannot take one off the ground,
-    so a player's helicopter wing needs an airborne start; helicopters keep no
-    fuel schedule. Say if the CH-47 should be offered, or if a helicopter should
-    fly home to a pad in a hover.
+    turns toward its target when ahead); the AH-64 and Mi-24 are offered to the AI;
+    AI helicopters start 1,500 ft over the ground and never land, and the AI
+    cannot take one off the ground, so a player's helicopter wing needs an
+    airborne start. Answered since: John (2026-10-12) offered the CH-47 as an AI
+    wing choice only (unarmed, never strikes), and slice H3 gave helicopters a
+    fuel schedule. Open: whether a helicopter should fly home to a pad in a
+    hover (slice H2 builds the landing).
 
 ## Source notes
 
@@ -1153,6 +1155,13 @@ and is open to change.
   [surface defenses](surface-defenses.md), [AI experience](ai-experience.md),
   [AI guns](ai-gun-employment.md), [AC-130 guns](ac130-linked-guns.md),
   [keyboard](keyboard.md).
+- Built in H3: `ai/route.rs` (`rotorcraft_cruise_speed`, `rotorcraft_fuel_state`,
+  `rotorcraft_home_in_range`), `ai/mission.rs` (the time home and the full-tank range),
+  `ai/controller.rs` (`OwnState::rotorcraft`), `ai_wings/ground_orders.rs` and
+  `ai_wings/strike.rs` (`armed_for_ground`: no store, no Strike role),
+  `AircraftId::ai_flyable`. Evidence: the `ai-fight-*-friendly-wings`,
+  `ai-fight-*-enemy-wing`, `ai-fight-*-player-wing` and `ai-fight-heli-fuel-bingo-ah64`
+  probes.
 - Built in ST-H: `ai/helicopter_defense.rs` (the break, the masking search),
   `ai/mission.rs` (`update_defense`, the helicopter's fuel, landing and damage
   rules), `ai/family_helicopter.rs` (the run between the warning and the break),
