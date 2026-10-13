@@ -635,6 +635,7 @@ fn ai_cockpits_survive_a_checkpoint_and_go_with_a_lost_aircraft() {
 /// B3 (docs/spec/stores-on-pylons.md): a paired station's stores leave from
 /// the record's position and its mirror in turn, left first, a human's
 /// presses and the AI's releases alike; the pack stagger and the height stay.
+/// Four on a wing row hang from two pylons a wing (BP2): outboard first.
 #[test]
 fn a_paired_station_alternates_sides_for_a_human_and_the_ai() {
     let paired = |mut c: Configuration| {
@@ -670,7 +671,12 @@ fn a_paired_station_alternates_sides_for_a_human_and_the_ai() {
         human.push(origin_x(&person, fresh[0]));
         assert!((person.bomb_motion(fresh[0]).unwrap().origin[1] - (8_000. - 3.)).abs() < 1e-9);
     }
-    assert_eq!(human, [-2., 2., -2., 2.]);
+    let s = crate::combat::hardpoints::DUAL_PYLON_SPREAD;
+    let want = [-(2. + s), 2. + s, -(2. - s), 2. - s];
+    assert!(
+        human.iter().zip(want).all(|(x, w)| (x - w).abs() < 1e-9),
+        "{human:?}"
+    );
 
     let mut robot = ai(mk82(), false);
     designate(&mut robot, &config);
