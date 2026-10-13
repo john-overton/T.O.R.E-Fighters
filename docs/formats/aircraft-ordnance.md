@@ -248,7 +248,17 @@ What the table shows, by inspection:
 - Two Wing rows lack flag 0x4: `A4E.PT` row 4 (four Mk 82s at x 8) and
   `MI24.PT` row 2 (four AT-2s at x 25, flags `0x0188` with the fixed-slot
   bit). Retail releases those from one side; T.O.R.E pairs every Wing and
-  Wingtip row (agent decision, [stores on pylons](../spec/stores-on-pylons.md#rules)).
+  Wingtip row (agent decision, [stores on pylons](../spec/stores-on-pylons.md#rules)),
+  except a one-sided wing row less than 3 ft out, the A-4E's, which it hangs as a
+  centreline rack (slice PY2, [the A-4E](../spec/stores-on-pylons.md#the-a-4e)).
+- `F4E.PT` and `F4.PT` (F-4G) row 5 records their four Sparrows at x 0 with flag
+  0x4: retail releases them from the centreline. T.O.R.E hangs them 3 ft either side,
+  in the Sparrow wells (fitted, slice PY2).
+- The records' heights (y) are where retail releases stores; T.O.R.E hangs and
+  releases every store 2 ft under the model's underside over its pylon instead
+  (opinionated, John 2026-10-13), so the y column is not where a store leaves in
+  T.O.R.E ([pylon depth](../spec/stores-on-pylons.md#pylon-depth)). Fuselage rows
+  with two stores a side hang them one behind another, which no record says either.
 
 Weapon and tank rows of the 36 registered identities (sensor, ECM and gun rows
 omitted; Count is the default quantity):
