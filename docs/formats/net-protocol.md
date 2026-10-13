@@ -288,7 +288,18 @@ Nine bytes, smaller than the empty Payload (19 bytes) it stands in for.
   after its last keepalive. The thread only sends this one packet; it never
   reads the socket or touches the client's state, and it stops when the
   connection closes or the session ends. The hosting game's own connection
-  has none: it is exempt from the timeout (EF4).
+  has none: it is exempt from the timeout (EF4). `tore-bot` runs the same
+  thread for each bot joined over UDP or through the Internet Lobby (slice
+  NET, 2026-10-12).
+- **A long mission build.** *Slice NET, agent decision; no wire change.* A
+  client builds the mission's world in the turn that reads the last of the
+  host's Mission message (or a flight's loadouts), which on a slow machine
+  takes longer than the 5-second timeout. The keepalive covers the build on
+  the host's side, within the same 60-second bound; no separate loading
+  grace exists. On the client's side the turn stops reading after that
+  datagram: what the host sent during the build is read on the next turn,
+  at that turn's time, so the client does not judge the host silent for the
+  length of the build ([details](../ARCHITECTURE.md#a-long-mission-build-slice-net)).
 - **What the host does.** A Keepalive from the connection's own address with
   its own id counts as hearing from the connection: no acknowledgement, no
   round trip, no rate statistic, no answer. The first since the game's last

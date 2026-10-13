@@ -2173,6 +2173,28 @@ def drive_content_missing(d: Drive) -> None:
     )
 
 
+def drive_slow_load(d: Drive) -> None:
+    """A bot whose every mission build takes 8 seconds (`tore-bot --slow-build 8`, a slow machine's debug build):
+    its keepalive thread keeps it connected through the lobby's build and the flight's, and it flies (slice NET)."""
+    port = d.port()
+    server = start_server(d, port, guide_mission(separation_nm=5), empty_timeout=3)
+    slow = start_bots(d, port, "slow", 45, "--callsign", "Slow", "--slow-build", "8")
+    slow.finish(120, 0)
+    server.finish(40, 0)
+    m = re.search(r"(?m)^Slow: mission loaded \(built in (\d+) ms\)$", slow.text())
+    if not m:
+        d.problem("slow: no \"mission loaded (built in N ms)\" line")
+    elif int(m.group(1)) < 8000:
+        d.problem(f"slow: the build took {m.group(1)} ms, not the 8 seconds asked for")
+    slow.expect(r"^Slow: held up; the keepalive thread kept the connection \(\d+ keepalives\)$", "the keepalives")
+    slow.expect(r"^Slow: seat \d+, plane \d+, at tick \d+$", "a seating")
+    slow.expect(r"^Slow: debrief: ", "a debrief")
+    slow.expect(r"^Slow: The connection ended: the player left\.$", "a clean leave")
+    slow.forbid(NET_BAD, "a network problem")
+    server.forbid(r"\bfault\b|protocol error|bad packets|no packet for 5 seconds", "a network problem")
+    log_must(d, server_log(d), r"joined as Slow", r"Slow: game stalled", r"Slow: game back after \d+\.\d s")
+
+
 # The network problems of NET_BAD without its refusals: Autobalance's own refusal is part of the test.
 NET_BAD_BUT_REFUSALS = (
     r"a protocol error|too many bad packets|no packets for 5 seconds|the game data differs|"
@@ -2521,6 +2543,12 @@ def scenarios() -> list[Scenario]:
             timeout=900,
             notes="a server on the profile's 1.02F import and a bot on a 1.0 import of gameassets' disc1 made in the "
             "run: every content item is the same, the bot says nothing about the build and flies (slices L3, L5)",
+        ),
+        Scenario(
+            name="net-server-slow-load", lane="net", args=[], driver=drive_slow_load, uses=("server", "bot"),
+            timeout=240,
+            notes="a bot whose mission builds each take 8 seconds (tore-bot --slow-build 8) joins and flies: its "
+            "keepalive thread keeps it past the 5-second silence rule while it builds (slice NET)",
         ),
         Scenario(
             name="net-content-missing", lane="net", args=[], driver=drive_content_missing, uses=("server", "bot"),
