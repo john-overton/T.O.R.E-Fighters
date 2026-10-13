@@ -2032,7 +2032,7 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
             watch.lost,
             watch
                 .last_impact
-                .filter(|_| !watch.busy() && !(cfg.follow_threat && watch.keeping_out())),
+                .filter(|_| !(watch.busy() || (cfg.follow_threat && watch.keeping_out()))),
         ]
         .into_iter()
         .flatten()
