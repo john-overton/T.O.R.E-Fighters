@@ -10,22 +10,25 @@
 
 Implementation mode, bug B21, requested by John on 2026-10-12. Fighters Anthology
 never let a player fly a helicopter, so none of this is original behaviour: the
-limits are **opinionated** (John, 2026-10-12) and the rest are **fitted** agent
-decisions, labelled below.
+limits and the gear-damage rule are **opinionated** (John, 2026-10-12) and the
+band numbers and thresholds are **fitted** agent decisions, labelled below.
 
 ## What the player sees and does
 
 Helicopters, the V-22 in helicopter mode and the AV-8 and Yak-141 in a hover can
 put down anywhere that is level, dry and solid enough: open ground, the roof of a
 building, a hangar, a bunker. Come down gently and the aircraft settles, sits, and
-takes off again. Come down hard and the gear is damaged. Come down much harder, or
-too fast over the ground, or on a steep slope, or on water, and it is a crash.
+takes off again. Come down too hard, or too fast over the ground, or on a steep
+slope, or on water, and it is a crash: off an airfield there is no middle ground.
+
+On an airfield, for every aircraft, a landing a little over the aircraft's own
+landing limits (a hard landing) damages the gear and the aircraft survives; a
+landing well over them is a crash.
 
 Everything else is as it was. A fixed-wing aircraft (and the V-22 in airplane mode,
 the AV-8 and Yak-141 in wingborne flight) that touches anything other than an
-airfield still crashes, and an airfield still accepts every aircraft on its own
-landing limits. Flying into the side of a building, or under its roof, still
-crashes every aircraft.
+airfield still crashes. Flying into the side of a building, or under its roof,
+still crashes every aircraft.
 
 ## Numbers
 
@@ -36,8 +39,9 @@ crashes every aircraft.
 | Clean ground speed, AV-8 and Yak-141 in a hover | at most 10 kt | opinionated, John 2026-10-12 |
 | Steepest ground or roof | 10 degrees | opinionated, John 2026-10-12 |
 | Water | never | opinionated, John 2026-10-12 |
-| Hard touchdown (gear damage) | sink over 10 up to 20 ft/s, or ground speed over the clean limit up to 1.5 times it (30 kt, or 15 kt in a hover) | fitted (agent) |
-| Crash | sink over 20 ft/s, or ground speed over 1.5 times the clean limit | fitted (agent) |
+| Off an airfield, over any limit above | crash | opinionated, John 2026-10-12 |
+| Hard landing on an airfield, every aircraft | over the aircraft's own landing limits (forward, side and sink speed, roll, pitch) but within the band: gear damaged, aircraft survives | opinionated, John 2026-10-12 |
+| The band | sink and side speed up to 2 times the limit; forward speed, roll and pitch up to 1.5 times it; beyond any of them, a crash | fitted (agent) |
 | V-22 counts as a helicopter | nacelles at 75 degrees or more of 97.5 (straight up is 90; its helicopter preset is 87) | fitted (agent) |
 | AV-8 or Yak-141 counts as hovering | nozzles at 60 degrees or more from aft (90 is straight down; the short takeoff stops are 60, 40 and 20) | fitted (agent) |
 | Smallest roof | a flat top at least 16 ft across each way, so a pole or mast is not a pad | fitted (agent) |
@@ -49,11 +53,13 @@ landing limits and the gear-down check still apply as on a runway; its record's
 forward, side and sink limits (a fighter's) are replaced off the airfield by the
 rows above.
 
-A hard touchdown jams the landing gear (the "Landing gear jammed" system fault,
-which on the retractable-gear aircraft keeps the gear down) and says "Hard
-landing: gear damaged". The airfield has no such step: there, as before, a touchdown
-over the landing limits is a crash. The gear-damage band is therefore the new,
-fitted part of John's "harder sinks damage the gear, then crash, as on runways".
+A hard landing on an airfield jams the landing gear (the "Landing gear jammed"
+system fault, which on the retractable-gear aircraft keeps the gear down) and says
+"Hard landing: gear damaged". Before 2026-10-12 every touchdown over the landing
+limits was a crash; the band is John's change. For example, a landing limit of
+30 ft/s sink damages the gear from 30 to 60 ft/s and crashes beyond 60. The
+gear-up check and the surface checks (water, not an airfield for a fixed-wing
+aircraft) are unchanged and still crash.
 
 ## One rule for the player and the AI
 
@@ -67,16 +73,15 @@ flowchart TD
   A[Touchdown on a surface] --> B{Water?}
   B -- yes --> X[Crash]
   B -- no --> C{Airfield box?}
-  C -- yes --> S[Safe: the aircraft's own landing limits]
+  C -- yes --> L{Over the aircraft's<br/>landing limits?}
+  L -- no --> S[Safe]
+  L -- "within the band" --> H[Gear damaged, survives]
+  L -- "beyond the band" --> X
   C -- no --> D{Rotor or hovering class?}
   D -- no --> X
-  D -- yes --> E{Slope over 10 degrees?}
+  D -- yes --> E{Slope over 10 degrees,<br/>sink over 10 ft/s or<br/>ground speed over the limit?}
   E -- yes --> X
-  E -- no --> F{Ground speed over 1.5 x limit,<br/>or sink over 20 ft/s?}
-  F -- yes --> X
-  F -- no --> G{Sink over 10 ft/s,<br/>or ground speed over limit?}
-  G -- yes --> H[Gear damaged, survives]
-  G -- no --> S2[Clean touchdown]
+  E -- no --> S2[Clean touchdown]
 ```
 
 ## Which surfaces count

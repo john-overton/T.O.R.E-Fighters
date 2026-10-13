@@ -320,7 +320,7 @@ the nose follow the flight path at speed.
   airfield. Away from one, the helicopters, the V-22 in helicopter mode and the
   AV-8 and Yak-141 in a hover can land on open ground or on any flat roof within
   John's limits (sink 10 ft/s, ground speed 20 kt or 10 kt in a hover, slope 10
-  degrees, never water), with gear damage and then a crash beyond them; see
+  degrees, never water); any excess off an airfield is a crash; see
   [touchdown away from an airfield](touchdown.md). Rotors still
   produce thrust on the ground; the aircraft lifts off when the summed force
   exceeds the weight.

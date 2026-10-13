@@ -294,7 +294,7 @@ class PoweredTapeTests(unittest.TestCase):
         def line(on_ground, damaged, crashed):
             return f"touchdown: on_ground={on_ground} gear_damaged={damaged} crashed={crashed}\n"
 
-        outcomes = {"down": line("true", "false", "false"), "lands": line("true", "true", "false"), "damaged": line("true", "true", "false"), "crash": line("false", "false", "true")}
+        outcomes = {"down": line("true", "false", "false"), "crash": line("false", "false", "true")}
         good = "".join(f"\n$ then {i}: x\n" + outcomes[row[2]] for i, row in enumerate(_powered.TOUCHDOWNS, start=1))
         self.assertEqual(_powered.check_touchdowns(good), [])
         bad = good.replace(outcomes["crash"], outcomes["down"], 1)

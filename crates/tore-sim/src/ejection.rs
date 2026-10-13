@@ -251,7 +251,6 @@ pub const UNAVOIDABLE_IMPACT_S: f64 = 1.0;
 /// a second that would be a crash (the shared touchdown rule, gear not down, or outside
 /// the aircraft's landing limits). Anything else is a go-around.
 pub fn catastrophic(s: &State, assessment: Assessment, field: AirfieldContext) -> bool {
-    use tore_formats::flight_model::ground::LandingSeverity;
     if assessment.hazard == Hazard::Destroyed
         || s.systems.structure.failed
         || s.systems.structure.burning()
@@ -272,11 +271,8 @@ pub fn catastrophic(s: &State, assessment: Assessment, field: AirfieldContext) -
     if assessment.impact_seconds > UNAVOIDABLE_IMPACT_S {
         return false;
     }
-    let severity =
-        crate::touchdown::severity(s.model().configuration().native.landing, s, &field.below);
-    crate::touchdown::assess(s, &field.below).is_refused()
+    crate::touchdown::judge(s.model().configuration().native.landing, s, &field.below).is_refused()
         || s.gear < 0.99
-        || severity != LandingSeverity::WithinLimits
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]

@@ -5,20 +5,22 @@
 //! check on final all ask [`assess`], so the player and the AI cannot
 //! disagree. The behaviour is specified in docs/spec/touchdown.md.
 //!
-//! - A landable surface (an airfield's box) is accepted for every aircraft,
-//!   exactly as before; its limits stay the aircraft's landing limits.
+//! - A landable surface (an airfield's box) is accepted for every aircraft on
+//!   its own landing limits. Over a limit but inside the hard-landing band
+//!   (see [`band`]) the gear is damaged and the aircraft survives; beyond the
+//!   band it is a crash (John, 2026-10-12).
 //! - Anywhere else, a fixed-wing aircraft (and the V-22 in airplane mode, the
 //!   AV-8 and Yak-141 in wingborne flight) crashes, exactly as before.
 //! - A helicopter, the V-22 in helicopter mode and a vectoring jet in a hover
 //!   may touch down on open ground or on the flat top of any object (a
 //!   building roof, a hangar, a bunker, a deck), when the surface is not
 //!   water, tilts under 10 degrees, and the sink rate and ground speed are
-//!   within John's limits (requested 2026-10-12, opinionated). A harder
-//!   touchdown damages the gear; a much harder one is a crash.
+//!   within John's limits (requested 2026-10-12, opinionated). Off an
+//!   airfield every over-limit touchdown is a crash.
 //!
-//! Provenance: the limits are opinionated (John, 2026-10-12); the hard and
-//! crash bands, the nacelle and nozzle thresholds and the minimum roof size
-//! are fitted (agent decisions).
+//! Provenance: the limits and the gear-damage rule are opinionated (John,
+//! 2026-10-12); the band's numbers, the nacelle and nozzle thresholds and the
+//! minimum roof size are fitted (agent decisions).
 
 use crate::{flight::State, models::variety::LiftKind, research::Surface};
 
@@ -34,13 +36,14 @@ pub const HOVER_MAX_GROUND_KNOTS: f64 = 10.;
 /// Steepest ground or roof that can be landed on, degrees. Opinionated (John,
 /// 2026-10-12).
 pub const MAX_SLOPE_DEG: f64 = 10.;
-/// A sink between [`MAX_SINK_FPS`] and this damages the gear; beyond it the
-/// touchdown is a crash, ft/s. Fitted: the width of the "gear damage" band is
-/// an agent decision (twice John's limit).
-pub const CRASH_SINK_FPS: f64 = 20.;
-/// Ground speed beyond this many times the clean limit is a crash rather than
-/// gear damage. Fitted.
-pub const CRASH_SPEED_FACTOR: f64 = 1.5;
+/// The hard-landing band on an airfield: a touchdown over an aircraft's
+/// landing limits but within these multiples of them damages the gear and
+/// survives; beyond them it is a crash. Fitted (agent): sink and side speed
+/// twice the limit, forward speed, roll and pitch one and a half times it.
+pub const BAND_SINK: f64 = 2.;
+pub const BAND_SIDE: f64 = 2.;
+pub const BAND_FORWARD: f64 = 1.5;
+pub const BAND_ANGLE: f64 = 1.5;
 /// The V-22 counts as a helicopter at or past this nacelle angle, degrees of
 /// its 97.5 travel (90 is straight up; its helicopter preset is 87). Fitted.
 pub const HELICOPTER_MODE_NACELLE_DEG: f64 = 75.;
@@ -125,10 +128,13 @@ pub enum Refusal {
     NotLandable,
     /// The ground or roof tilts past [`MAX_SLOPE_DEG`].
     Steep,
-    /// Ground speed beyond [`CRASH_SPEED_FACTOR`] times the clean limit.
+    /// Ground speed over the limit, off an airfield.
     TooFast,
-    /// Sink beyond [`CRASH_SINK_FPS`].
+    /// Sink over the limit, off an airfield.
     TooHard,
+    /// Over the aircraft's landing limits beyond the hard-landing band (on an
+    /// airfield), or over them at all off an airfield (roll and pitch).
+    LandingLimits,
 }
 
 /// What a touchdown on a surface comes to.
@@ -136,7 +142,8 @@ pub enum Refusal {
 pub enum Verdict {
     /// Within every limit (or on an airfield): no damage.
     Safe,
-    /// Over a clean limit but short of a crash: the gear is damaged.
+    /// Over the landing limits but inside the hard-landing band, on an
+    /// airfield: the gear is damaged and the aircraft survives.
     GearDamage,
     /// A crash.
     Refused(Refusal),
@@ -234,16 +241,50 @@ fn verdict(class: Class, sink: f64, knots: f64, surface: &Surface) -> Verdict {
     if surface.slope_deg > MAX_SLOPE_DEG {
         return Verdict::Refused(Refusal::Steep);
     }
-    if knots > clean_knots * CRASH_SPEED_FACTOR {
+    if knots > clean_knots {
         return Verdict::Refused(Refusal::TooFast);
     }
-    if sink > CRASH_SINK_FPS {
+    if sink > MAX_SINK_FPS {
         return Verdict::Refused(Refusal::TooHard);
     }
-    if sink > MAX_SINK_FPS || knots > clean_knots {
-        return Verdict::GearDamage;
-    }
     Verdict::Safe
+}
+
+/// `limits` widened to the hard-landing band.
+pub fn band(
+    limits: tore_formats::flight_model::ground::LandingLimits,
+) -> tore_formats::flight_model::ground::LandingLimits {
+    let scale = |value: i16, factor: f64| (f64::from(value) * factor).round() as i16;
+    tore_formats::flight_model::ground::LandingLimits {
+        forward_fps: scale(limits.forward_fps, BAND_FORWARD),
+        side_fps: scale(limits.side_fps, BAND_SIDE),
+        descent_fps: scale(limits.descent_fps, BAND_SINK),
+        pitch_degrees: scale(limits.pitch_degrees, BAND_ANGLE),
+        roll_degrees: scale(limits.roll_degrees, BAND_ANGLE),
+    }
+}
+
+/// The whole verdict on `s` touching down on `surface`: [`assess`]'s surface
+/// rule, then the aircraft's landing limits (`limits`). On an airfield,
+/// over the limits but inside [`band`] is [`Verdict::GearDamage`] and beyond
+/// it a crash; off an airfield any excess is a crash. The gear position is
+/// the caller's check, as it always was.
+pub fn judge(
+    limits: tore_formats::flight_model::ground::LandingLimits,
+    s: &State,
+    surface: &Surface,
+) -> Touchdown {
+    use tore_formats::flight_model::ground::LandingSeverity::WithinLimits;
+    let mut t = assess(s, surface);
+    if t.is_refused() || severity(limits, s, surface) == WithinLimits {
+        return t;
+    }
+    t.verdict = if surface.landable && severity(band(limits), s, surface) == WithinLimits {
+        Verdict::GearDamage
+    } else {
+        Verdict::Refused(Refusal::LandingLimits)
+    };
+    t
 }
 
 #[cfg(test)]
@@ -290,10 +331,13 @@ mod tests {
     #[test]
     fn sink_limit_on_both_sides_for_a_helicopter() {
         assert_eq!(rule(Class::Rotor, 10., 0., ground()), Verdict::Safe);
-        assert_eq!(rule(Class::Rotor, 10.01, 0., ground()), Verdict::GearDamage);
-        assert_eq!(rule(Class::Rotor, 20., 0., ground()), Verdict::GearDamage);
+        // Off an airfield every excess is a crash: no gear-damage band.
         assert_eq!(
-            rule(Class::Rotor, 20.01, 0., ground()),
+            rule(Class::Rotor, 10.01, 0., ground()),
+            Verdict::Refused(Refusal::TooHard)
+        );
+        assert_eq!(
+            rule(Class::Rotor, 25., 0., ground()),
             Verdict::Refused(Refusal::TooHard)
         );
         // Climbing is no sink at all.
@@ -303,21 +347,21 @@ mod tests {
     #[test]
     fn ground_speed_limit_on_both_sides_per_class() {
         assert_eq!(rule(Class::Rotor, 2., 20., ground()), Verdict::Safe);
-        assert_eq!(rule(Class::Rotor, 2., 20.1, ground()), Verdict::GearDamage);
-        assert_eq!(rule(Class::Rotor, 2., 30., ground()), Verdict::GearDamage);
         assert_eq!(
-            rule(Class::Rotor, 2., 30.1, ground()),
+            rule(Class::Rotor, 2., 20.1, ground()),
             Verdict::Refused(Refusal::TooFast)
         );
         assert_eq!(rule(Class::Hover, 2., 10., ground()), Verdict::Safe);
-        assert_eq!(rule(Class::Hover, 2., 10.1, ground()), Verdict::GearDamage);
         assert_eq!(
-            rule(Class::Hover, 2., 15.1, ground()),
+            rule(Class::Hover, 2., 10.1, ground()),
             Verdict::Refused(Refusal::TooFast)
         );
-        // 15 kt is clean for a helicopter and damaging for a hovering jet.
+        // 15 kt is clean for a helicopter and a crash for a hovering jet.
         assert_eq!(rule(Class::Rotor, 2., 15., ground()), Verdict::Safe);
-        assert_eq!(rule(Class::Hover, 2., 15., ground()), Verdict::GearDamage);
+        assert_eq!(
+            rule(Class::Hover, 2., 15., ground()),
+            Verdict::Refused(Refusal::TooFast)
+        );
     }
 
     #[test]
@@ -341,15 +385,32 @@ mod tests {
         // A roof arrives as a non-landable, level surface at the roof height.
         let roof = Surface::terrain(80.);
         assert_eq!(rule(Class::Rotor, 5., 5., roof), Verdict::Safe);
-        assert_eq!(rule(Class::Rotor, 15., 5., roof), Verdict::GearDamage);
         assert_eq!(
-            rule(Class::Rotor, 25., 5., roof),
+            rule(Class::Rotor, 15., 5., roof),
             Verdict::Refused(Refusal::TooHard)
         );
         assert_eq!(
             rule(Class::Fixed, 1., 1., roof),
             Verdict::Refused(Refusal::NotLandable)
         );
+    }
+
+    #[test]
+    fn the_band_widens_each_landing_limit() {
+        use tore_formats::flight_model::ground::LandingLimits;
+        let limits = LandingLimits {
+            forward_fps: 300,
+            side_fps: 10,
+            descent_fps: 20,
+            pitch_degrees: 15,
+            roll_degrees: 10,
+        };
+        let wide = band(limits);
+        assert_eq!(
+            (wide.forward_fps, wide.side_fps, wide.descent_fps),
+            (450, 20, 40)
+        );
+        assert_eq!((wide.pitch_degrees, wide.roll_degrees), (23, 15));
     }
 
     #[test]

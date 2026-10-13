@@ -90,27 +90,20 @@ fn a_helicopter_sets_down_on_open_ground_within_the_limits() {
 }
 
 #[test]
-fn a_harder_sink_damages_the_gear_and_a_much_harder_one_crashes() {
+fn off_an_airfield_every_excess_is_a_crash() {
     let s = touch(helicopter(AircraftId::Ah64), 15., 0., open_ground());
-    assert!(survived(&s) && gear_damaged(&s));
-    assert!(
-        s.systems
-            .messages
-            .iter()
-            .any(|m| m == "Hard landing: gear damaged")
-    );
-    let s = touch(helicopter(AircraftId::Ah64), 25., 0., open_ground());
-    assert!(s.crashed);
+    assert!(s.crashed && !gear_damaged(&s));
     let Some(Contact::Unsafe(u)) = s.trace().contact else {
         panic!("unsafe touchdown");
     };
     assert!(u.not_landable && !u.water);
+    assert!(touch(helicopter(AircraftId::Ah64), 10.5, 0., open_ground()).crashed);
 }
 
 #[test]
 fn ground_speed_slope_and_water_each_refuse_a_helicopter() {
     let ah = || helicopter(AircraftId::Ah64);
-    assert!(gear_damaged(&touch(ah(), 3., 25., open_ground())));
+    assert!(touch(ah(), 3., 25., open_ground()).crashed);
     assert!(touch(ah(), 3., 40., open_ground()).crashed);
     let mut steep = open_ground();
     steep.slope_deg = 10.5;
@@ -137,8 +130,10 @@ fn a_hovering_jet_has_half_the_speed_allowance_and_a_wingborne_one_none() {
             survived(&touch(jet(id, 90.), 5., 8., open_ground())),
             "{id:?}"
         );
-        let s = touch(jet(id, 90.), 5., 12., open_ground());
-        assert!(survived(&s) && gear_damaged(&s), "{id:?} 12 kt");
+        assert!(
+            touch(jet(id, 90.), 5., 12., open_ground()).crashed,
+            "{id:?} 12 kt"
+        );
         assert!(
             touch(jet(id, 90.), 5., 20., open_ground()).crashed,
             "{id:?}"
@@ -148,8 +143,8 @@ fn a_hovering_jet_has_half_the_speed_allowance_and_a_wingborne_one_none() {
 }
 
 #[test]
-fn an_airfield_stays_as_it_was_for_every_class() {
-    // A firm landing the off-airfield limits would damage, on a runway.
+fn an_airfield_takes_a_helicopter_on_its_own_landing_limits() {
+    // A firm landing the off-airfield limits would refuse, on a runway.
     let s = touch(helicopter(AircraftId::Ah64), 15., 40., Surface::runway(0.));
     assert!(survived(&s) && !gear_damaged(&s));
 }

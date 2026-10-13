@@ -15,7 +15,7 @@ use tore_formats::{
     flight_model::{
         clock_rng::{FixedClock, NativeRng},
         departure::{self, DepartureMode, StallState},
-        ground::{LandingLimits, LandingSeverity},
+        ground::LandingLimits,
     },
 };
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -347,9 +347,11 @@ impl Research {
             limits: c.native.landing,
         };
         let gear = s.gear;
-        // The shared touchdown rule: an airfield as before, off it only a
-        // helicopter or hovering aircraft within the limits (docs/spec/touchdown.md).
-        let rule = crate::touchdown::assess(s, &surface);
+        // The shared touchdown rule: on an airfield the landing limits, with
+        // a hard-landing band that only damages the gear; off it only a
+        // helicopter or hovering aircraft within the limits
+        // (docs/spec/touchdown.md).
+        let rule = crate::touchdown::judge(c.native.landing, s, &surface);
         let unsafe_touchdown = |bounced: bool| {
             Contact::Unsafe(UnsafeTouchdown {
                 bounced,
@@ -361,8 +363,7 @@ impl Research {
                 touchdown,
             })
         };
-        let refused =
-            rule.is_refused() || s.gear < 0.99 || severity != LandingSeverity::WithinLimits;
+        let refused = rule.is_refused() || s.gear < 0.99;
         if !self.on_ground && refused && s.cheats.no_crashes {
             s.trace.0.contact = Some(unsafe_touchdown(true));
             s.ricochet(floor);
@@ -376,8 +377,9 @@ impl Research {
             s.speed = 0.;
         } else {
             if !self.on_ground && rule.damages_gear() {
-                // A hard touchdown away from an airfield: the gear is
-                // damaged (fitted, docs/spec/touchdown.md).
+                // A touchdown over the landing limits but inside the
+                // hard-landing band: the gear is damaged (opinionated, John
+                // 2026-10-12; docs/spec/touchdown.md).
                 if !s.systems.has(16) {
                     s.systems.hit(16, s.throttle);
                 }
@@ -468,6 +470,7 @@ crate::flight::exact::exact_struct!(Landings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tore_formats::flight_model::ground::LandingSeverity;
     #[test]
     fn landings_after_real_flight_are_graded_and_bounces_are_not() {
         let limits = LandingLimits {
@@ -946,6 +949,17 @@ mod tests {
         let mut water = Surface::terrain(0.);
         water.water = true;
         let (s, _) = touch(Landings::FLIGHT_TICKS, -2., 1., water);
+        assert!(s.crashed);
+        // Over the 30 ft/s limit but inside the hard-landing band (twice it):
+        // the gear is damaged and the aircraft survives, on a runway.
+        let (s, r) = touch(Landings::FLIGHT_TICKS, -50., 1., Surface::runway(0.));
+        assert!(!s.crashed && r.on_ground && s.systems.has(16));
+        assert!(matches!(s.trace().contact, Some(Contact::Rolling(_))));
+        // Inside the limits nothing is damaged.
+        let (s, _) = touch(Landings::FLIGHT_TICKS, -25., 1., Surface::runway(0.));
+        assert!(!s.crashed && !s.systems.has(16));
+        // Beyond the band (over twice the limit) it is a crash.
+        let (s, _) = touch(Landings::FLIGHT_TICKS, -61., 1., Surface::runway(0.));
         assert!(s.crashed);
         // Descending three times the limit is over it by more than the margin.
         let (s, _) = touch(Landings::FLIGHT_TICKS, -90., 1., Surface::runway(0.));
