@@ -680,13 +680,14 @@ fn build_world(
     Ok((journal::Driver::new(world), reads.manifest()))
 }
 
-/// `spec` with a surface seed when it has a ground target and none was drawn
+/// `spec` with a surface seed when it has a ground target or area defenses
+/// (B23) and none was drawn
 /// (protocol 22; the Quick Mission creator's lobby mission, a server's file
 /// and a bot's mission carry 0): drawn from the session and the mission's
 /// number and text before the text is sent, so every player builds the same
 /// layout from it, and kept by a restart of the same mission. Never 0.
 pub(super) fn with_surface_seed(mut spec: MissionSpec, session: u64, number: u32) -> MissionSpec {
-    if spec.ground_target.is_some() && spec.surface_seed == 0 {
+    if spec.lays_out_surface() && spec.surface_seed == 0 {
         let text = tore_codec::hash::fnv1a64(spec.to_text().as_bytes());
         let mixed = session ^ (u64::from(number) << 32) ^ text;
         let drawn = tore_net::SplitMix64::new(mixed).next_u64();

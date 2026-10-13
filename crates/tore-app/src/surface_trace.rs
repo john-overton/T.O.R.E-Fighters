@@ -9,8 +9,12 @@
 //!     [--altitude FT] [--speed KT] [--pass FT] [--from NM] [--seconds S]
 //!     [--condition NAME] [--chaff S] [--flares S] [--harm-at NM] [--kill-at S]
 //!     [--player-side red] [--invulnerable] [--quiet-shots] [--no-relocate] [--front]
-//!     [--drain] [--drain-reserve] [--kill-truck-at S] [--solo]
+//!     [--drain] [--drain-reserve] [--kill-truck-at S] [--solo] [--area]
 //! ```
+//!
+//! `--area` with no `STEM` flies a Quick Mission with no ground target whose
+//! `--defenses` scatter the enemy's area defenses (B23); `--unit 0x5f000000`
+//! follows the first of them.
 //!
 //! The aircraft flies north (or along `--heading`) at `--altitude` feet above
 //! the unit, `--pass` feet to its east, starting `--from` nm short of it. Each
@@ -100,6 +104,7 @@ struct Options {
     near: f64,
     skill: Option<i32>,
     rng: Option<u64>,
+    area: bool,
 }
 
 fn options() -> AppResult<Options> {
@@ -140,6 +145,7 @@ fn options() -> AppResult<Options> {
         near: 0.,
         skill: None,
         rng: None,
+        area: false,
     };
     let mut positional = Vec::new();
     let mut it = args.iter();
@@ -194,6 +200,7 @@ fn options() -> AppResult<Options> {
             "--near" => o.near = next()?.parse()?,
             "--skill" => o.skill = Some(next()?.parse()?),
             "--rng" => o.rng = Some(next()?.parse()?),
+            "--area" => o.area = true,
             other if other.starts_with("--") => return Err(format!("unknown {other}").into()),
             other => positional.push(other.to_owned()),
         }
@@ -256,6 +263,18 @@ fn spec(o: &Options) -> AppResult<MissionSpec> {
             .position(|t| t.eq_ignore_ascii_case(&o.theater))
             .ok_or_else(|| format!("{}: no ground targets", o.theater))?;
         spec.ground_target = Some(stem.clone());
+        spec.aaa = Defense::from_level(o.defenses.0).ok_or("defense levels are 0 to 3")?;
+        spec.sam = Defense::from_level(o.defenses.1).ok_or("defense levels are 0 to 3")?;
+        spec.surface_seed = o.seed;
+        spec.enemy_nationality = o
+            .nationality
+            .unwrap_or(tables::ENEMY_NATIONALITY[index] as u8);
+    }
+    if o.area && o.stem.is_none() {
+        let index = tables::THEATERS
+            .iter()
+            .position(|t| t.eq_ignore_ascii_case(&o.theater))
+            .ok_or_else(|| format!("{}: not a Quick Mission theater", o.theater))?;
         spec.aaa = Defense::from_level(o.defenses.0).ok_or("defense levels are 0 to 3")?;
         spec.sam = Defense::from_level(o.defenses.1).ok_or("defense levels are 0 to 3")?;
         spec.surface_seed = o.seed;

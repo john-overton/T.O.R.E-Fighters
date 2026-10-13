@@ -229,7 +229,7 @@ impl QuickMission {
     /// it, so the flight flies the layout the map shows.
     pub(super) fn map_mission(&mut self) -> Result<(MissionSpec, bool), String> {
         let (mut spec, lobby) = self.map_spec()?;
-        if spec.ground_target.is_some() && !lobby && !self.seed_pending {
+        if spec.lays_out_surface() && !lobby && !self.seed_pending {
             self.surface_seed = super::fresh_seed();
             self.seed_pending = true;
             spec.surface_seed = self.surface_seed;
@@ -247,7 +247,7 @@ impl QuickMission {
         let mut spec = self.mission_spec()?;
         spec.ai_flight_model = AiFlightModel::Standard;
         let lobby = self.lobby || self.view.is_some();
-        if spec.ground_target.is_some() {
+        if spec.lays_out_surface() {
             spec.surface_seed = if lobby { 0 } else { self.surface_seed };
         }
         Ok((spec, lobby))

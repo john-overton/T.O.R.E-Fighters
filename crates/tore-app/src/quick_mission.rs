@@ -79,8 +79,6 @@ const ENEMY_ROWS_LAST_Y: i32 = 391;
 /// The first row of the Airport list when a ground target is set: the world
 /// picks the runway from the target (`start ground auto`).
 const AUTO_AIRPORT: &str = "Automatic (near the target)";
-/// Said when the AAA or SAM strength is touched with no ground target.
-const NO_TARGET_NOTICE: &str = "Choose a ground target first: the defenses are the target's.";
 /// Said when Ground is touched in a theater with no airfield of the pilot's
 /// side (slice AL1): the start stays airborne.
 pub const NO_FIELD_NOTICE: &str = "No airfield of your side in this theater, so you start airborne. Ground start needs a friendly or neutral airfield.";
@@ -993,8 +991,11 @@ impl QuickMission {
             }
         });
         spec.must_survive = self.group_must_survive;
-        // The ground target, by its template's stem, and the defenses that
-        // go with it (the creator clears them with no target).
+        // The ground target, by its template's stem. The defenses go with
+        // it, and with no target they are the enemy's area defenses (B23,
+        // John 2026-10-12).
+        spec.aaa = Defense::from_level(v[31]).ok_or("Choose an AAA strength.")?;
+        spec.sam = Defense::from_level(v[32]).ok_or("Choose a SAM strength.")?;
         if self.has_target() {
             spec.ground_target = Some(
                 ground_targets(&theater)
@@ -1002,8 +1003,6 @@ impl QuickMission {
                     .ok_or("Choose one of this theater's ground targets.")?
                     .to_string(),
             );
-            spec.aaa = Defense::from_level(v[31]).ok_or("Choose an AAA strength.")?;
-            spec.sam = Defense::from_level(v[32]).ok_or("Choose a SAM strength.")?;
         }
         spec.enemy_nationality = u8::try_from(v[20])
             .ok()
@@ -1045,16 +1044,25 @@ impl QuickMission {
         self.seed_pending = seed != 0;
         Ok(())
     }
+    /// The flight lays out a surface from the seed: a ground target, or with
+    /// none an AAA or SAM strength above none (the area defenses).
+    fn lays_out_surface(&self) -> bool {
+        self.has_target() || self.draft.values[31] != 0 || self.draft.values[32] != 0
+    }
     /// Draws the surface layout's seed for the flight about to start, when it
-    /// has a ground target to lay out. Kept until the next flight, so a
+    /// has a ground target or area defenses to lay out. Kept until the next flight, so a
     /// restart reuses it. `fitted`: any nonzero 32-bit value; the clock and
     /// the process make it, as nothing here has to be reproducible.
     pub fn roll_surface_seed(&mut self) {
         // The map drew this flight's already: keep it (slice CL-R).
-        if std::mem::take(&mut self.seed_pending) && self.has_target() {
+        if std::mem::take(&mut self.seed_pending) && self.lays_out_surface() {
             return;
         }
-        self.surface_seed = if self.has_target() { fresh_seed() } else { 0 };
+        self.surface_seed = if self.lays_out_surface() {
+            fresh_seed()
+        } else {
+            0
+        };
     }
     /// The aircraft/count pairs the current mission spawner still takes. This
     /// is the launch payload with side, member and experience dropped; it stays
@@ -1304,6 +1312,8 @@ impl QuickMission {
             );
             enemy_nationality(self.base_theater_index_of(theater))
         };
+        v[31] = spec.aaa.level();
+        v[32] = spec.sam.level();
         if let Some(stem) = &spec.ground_target {
             let offered = self.options.targets[self.base_theater_index_of(theater)].len();
             match ground_targets(&spec.theater)
@@ -1312,11 +1322,7 @@ impl QuickMission {
                 .map(|at| at + 1)
                 .filter(|at| *at < offered)
             {
-                Some(at) => {
-                    v[30] = at;
-                    v[31] = spec.aaa.level();
-                    v[32] = spec.sam.level();
-                }
+                Some(at) => v[30] = at,
                 None => {
                     unshown.insert(30, (stem.clone(), format!("the ground target {stem}")));
                 }
@@ -1685,12 +1691,8 @@ impl QuickMission {
             self.draft.values[34] = 0;
             self.draft.values[ENEMY_AIRPORT] = 0;
         }
-        // No ground target, no defenses (retail clears both). A theater
-        // change clears the target above, so it clears them here too.
-        if !self.has_target() {
-            self.draft.values[31] = 0;
-            self.draft.values[32] = 0;
-        }
+        // Retail clears both defenses with the target; here they stay, as
+        // the enemy's area defenses (B23, agent decision 2026-10-12).
         self.aircraft_selection = self.draft.values[6];
         self.selection = self.theater_index();
         self.notice = None;
@@ -1722,20 +1724,7 @@ impl QuickMission {
     fn hidden_airport(&self, id: usize) -> bool {
         (id == 34 && !self.ground_start()) || (id == ENEMY_AIRPORT && !self.enemy_ground_start())
     }
-    /// The defenses are the ground target's: with none, touching their
-    /// fields says so and changes nothing. True when it did.
-    fn refuse_defense(&mut self, id: usize) -> bool {
-        if matches!(id, 31 | 32) && !self.has_target() {
-            self.cancel();
-            self.notice = Some(NO_TARGET_NOTICE.into());
-            return true;
-        }
-        false
-    }
     fn open(&mut self, id: usize) {
-        if self.refuse_defense(id) {
-            return;
-        }
         self.selector = Some(id);
         self.cursor = if let Some(group) = id
             .checked_sub(OBJECTIVE_BASE)
@@ -2109,10 +2098,6 @@ impl QuickMission {
             self.notice = Some(kind.refusal().into());
             return Action::Click;
         }
-        if self.refuse_defense(id) {
-            self.focus = id;
-            return Action::Click;
-        }
         if self.hidden_airport(id) {
             return Action::None;
         }
@@ -2283,7 +2268,6 @@ impl QuickMission {
                 self.map_build = None;
                 return Action::Back;
             }
-            31 | 32 if self.refuse_defense(id) => self.focus = id,
             3..=36 => {
                 if self.hidden_airport(id) {
                     return Action::None;
@@ -3402,30 +3386,15 @@ mod tests {
         assert!(matches!(right_click(&mut q, 15), Action::None));
         assert_eq!(q.draft.values, before);
         q.cancel();
-        // The defenses are a target's: with none, both pointer buttons, the
-        // keys and a direct open say so and change nothing.
+        // With no target the defenses open like any field (B23: they are
+        // the enemy's area defenses), and a cancel changes nothing.
         for field in [31, 32] {
-            q.hover = Some(field);
-            q.down();
-            assert!(matches!(q.up(), Action::Click));
-            assert_eq!(q.notice.as_deref(), Some(NO_TARGET_NOTICE));
-            assert!(q.selector.is_none());
-            q.notice = None;
-            assert!(matches!(right_click(&mut q, field), Action::Click));
-            assert_eq!(q.notice.as_deref(), Some(NO_TARGET_NOTICE));
-            q.notice = None;
-            q.focus = field;
-            for shift in [false, true] {
-                q.key("Enter", shift);
-                assert_eq!(q.notice.as_deref(), Some(NO_TARGET_NOTICE));
-                assert!(q.selector.is_none());
-                q.notice = None;
-            }
             q.open(field);
-            assert!(q.selector.is_none());
+            assert_eq!(q.selector, Some(field));
             q.cancel();
             assert_eq!(q.draft.values, before);
         }
+        q.focus = 32;
         q.key(" ", false);
         q.activate(15);
         assert_ne!(q.draft.values[15], before[15]);
@@ -3614,37 +3583,34 @@ mod tests {
     }
 
     #[test]
-    fn the_defenses_go_when_the_target_does_and_wait_for_one() {
+    fn the_defenses_stay_without_a_target_as_the_area_defenses() {
         let mut q = lobby_creator();
-        // With no target the defenses cannot be touched: a notice says why.
-        for field in [31, 32] {
-            q.focus = field;
-            q.notice = None;
-            assert_eq!(q.activate(field), Action::Click);
-            assert_eq!(q.notice.as_deref(), Some(NO_TARGET_NOTICE));
-            assert_eq!(q.draft.values[field], 0);
-        }
-        q.apply(30, 2);
-        q.apply(31, 3);
-        q.apply(32, 1);
+        // With no target the strengths cycle (B23): they set the enemy's
+        // area defenses.
         assert_eq!(q.activate(31), Action::Click);
-        assert_eq!(q.draft.values[31], 0, "the strength cycles with a target");
-        // None clears both, as retail does.
-        q.apply(31, 3);
-        q.apply(30, 0);
-        assert_eq!((q.draft.values[31], q.draft.values[32]), (0, 0));
+        assert_eq!(q.draft.values[31], 1);
+        q.apply(32, 3);
         let spec = q.mission_spec().unwrap();
         assert_eq!(
-            (spec.ground_target, spec.aaa, spec.sam),
-            (None, Defense::None, Defense::None)
+            (spec.ground_target.as_deref(), spec.aaa, spec.sam),
+            (None, Defense::Light, Defense::Heavy)
         );
-        // A theater change clears the target and the defenses with it, at
-        // once (retail leaves them to the next change).
-        q.apply(30, 1);
-        q.apply(31, 2);
-        q.apply(32, 2);
+        assert!(spec.area_defenses());
+        assert!(spec.to_text().contains("\ndefenses aaa light sam heavy\n"));
+        // With a target they are the target's.
+        q.apply(30, 2);
+        let spec = q.mission_spec().unwrap();
+        assert!(spec.ground_target.is_some() && !spec.area_defenses());
+        assert_eq!((spec.aaa, spec.sam), (Defense::Light, Defense::Heavy));
+        // Back to none, and across a theater change, they stay.
+        q.apply(30, 0);
+        assert_eq!((q.draft.values[31], q.draft.values[32]), (1, 3));
         q.apply(13, 3);
-        assert_eq!(q.draft.values[30..=32], [0, 0, 0]);
+        assert_eq!(q.draft.values[30..=32], [0, 1, 3]);
+        // A spec read back into the creator keeps them.
+        let spec = q.mission_spec().unwrap();
+        let draft = Draft::from_spec(&spec, &q).unwrap();
+        assert_eq!(draft.values[31..=32], [1, 3]);
     }
 
     #[test]
@@ -3655,6 +3621,11 @@ mod tests {
         assert_eq!(q.activate(OK), Action::Mission);
         assert_eq!(q.mission_spec().unwrap().surface_seed, 0);
         assert!(!q.mission_spec().unwrap().to_text().contains("surface-seed"));
+        // Area defenses with no target draw one (B23).
+        q.apply(32, 1);
+        assert_eq!(q.activate(OK), Action::Mission);
+        assert_ne!(q.mission_spec().unwrap().surface_seed, 0);
+        q.apply(32, 0);
         q.apply(30, 1);
         assert_eq!(q.activate(OK), Action::Mission);
         let seed = q.mission_spec().unwrap().surface_seed;
@@ -4186,9 +4157,14 @@ mod tests {
         assert_eq!(q.mission_spec().unwrap().surface_seed, 4242);
         assert_eq!(q.activate(OK), Action::Mission);
         assert_ne!(q.mission_spec().unwrap().surface_seed, 4242);
-        // Without a target there is nothing to keep.
-        q.seed_pending = true;
+        // Without a target the kept strengths are area defenses (B23): a
+        // seed is drawn. With neither there is nothing to keep.
         q.apply(30, 0);
+        q.roll_surface_seed();
+        assert_ne!(q.surface_seed, 0);
+        q.seed_pending = true;
+        q.apply(31, 0);
+        q.apply(32, 0);
         q.roll_surface_seed();
         assert_eq!((q.surface_seed, q.seed_pending), (0, false));
     }
@@ -4480,7 +4456,8 @@ mod tests {
         q.draft.values[31] = 3;
         q.draft.values[32] = 3;
         q.apply(30, 0);
-        assert_eq!(&q.draft.values[30..33], &[0, 0, 0]);
+        // The strengths stay without a target (B23, area defenses).
+        assert_eq!(&q.draft.values[30..33], &[0, 3, 3]);
         for i in 0..16 {
             q.theater(i);
             assert_eq!(q.theater_index(), i);

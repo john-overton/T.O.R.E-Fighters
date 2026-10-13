@@ -793,6 +793,13 @@ beyond them.
     default. The viewer rebuilds the terrain with it, so the
     template, its defenses, the added trucks and radars, the parked aircraft
     and the starts are the flight's.
+  - **The area defenses** (B23, 2026-10-12), `world.area_defense=` followed
+    by `aaa,sam,seed,nationality,night_stealth` (for example `3,3,17,10,0`),
+    written only for a Quick Mission with no ground target whose AAA or SAM
+    strength is above none, which makes the file format 3. The viewer
+    rebuilds the same [area defenses](spec/surface-defenses.md#area-defenses)
+    from it. A build from before it keeps the unknown entry aside and
+    replays without the sites; `--recording-info` prints an `Area` line.
   - **The airfield scene**, `world.airfield_scene=N`, written only when N is
     not 0. 0 is the retail airfields, which every recording before the field
     has; 1 is the [redrawn airports](formats/redrawn-airports.md), the

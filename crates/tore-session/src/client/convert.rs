@@ -887,13 +887,13 @@ fn is_surface_id(id: u32) -> bool {
 /// The registry label of surface object `id` named `name`: `SA-6 #18` for a
 /// template object (its ordinal in the template), `ZSU-23 L4` for a
 /// base-layout unit, and `MISTRK +2` for a unit the mission added (a supply
-/// truck, a battery radar or a front line unit, numbered from 0 within its
-/// own id range). The single-player recorder uses this too, so a recorded and
+/// truck, a battery radar, a front line unit or an area defense, numbered
+/// from 0 within its own id range). The single-player recorder uses this too, so a recorded and
 /// a converted flight label alike.
 pub fn surface_label(name: &str, id: u32) -> String {
     use tore_world::surface::{
-        BATTERY_RADAR_BASE, FRONT_LINE_BASE, IdRange, LAYOUT_OBJECT_BASE, SUPPLY_TRUCK_BASE,
-        SURFACE_UNIT_BASE, UnitId,
+        AREA_DEFENSE_BASE, BATTERY_RADAR_BASE, FRONT_LINE_BASE, IdRange, LAYOUT_OBJECT_BASE,
+        SUPPLY_TRUCK_BASE, SURFACE_UNIT_BASE, UnitId,
     };
     match UnitId(id).range() {
         IdRange::Template => format!("{name} #{}", id - SURFACE_UNIT_BASE),
@@ -901,6 +901,7 @@ pub fn surface_label(name: &str, id: u32) -> String {
         IdRange::SupplyTruck => format!("{name} +{}", id - SUPPLY_TRUCK_BASE),
         IdRange::BatteryRadar => format!("{name} +{}", id - BATTERY_RADAR_BASE),
         IdRange::FrontLine => format!("{name} +{}", id - FRONT_LINE_BASE),
+        IdRange::AreaDefense => format!("{name} +{}", id - AREA_DEFENSE_BASE),
         IdRange::Other => format!("{name} {id:#x}"),
     }
 }
@@ -927,7 +928,8 @@ pub fn surface_infos(world: &World) -> Vec<replay::SurfaceInfo> {
                 IdRange::Template
                 | IdRange::SupplyTruck
                 | IdRange::BatteryRadar
-                | IdRange::FrontLine => true,
+                | IdRange::FrontLine
+                | IdRange::AreaDefense => true,
                 _ => false,
             }
         })

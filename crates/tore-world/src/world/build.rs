@@ -98,12 +98,16 @@ impl World {
         if let (Some(target), Some(variation)) = (target.as_mut(), hooks.ground_variation) {
             target.variation = variation;
         }
-        let terrain = crate::terrain::Terrain::for_mission_with(
+        // With no target, the creator's strengths scatter the enemy's area
+        // defenses (B23).
+        let area = crate::surface::resolve::AreaDefense::from_spec(spec);
+        let terrain = crate::terrain::Terrain::for_mission_surface(
             resources,
             &spec.theater,
             Some(spec.condition.index()),
             &spec.weather,
             target.as_ref(),
+            area.as_ref(),
         )?;
         let player = match hooks.player.clone() {
             Some(player) => player,

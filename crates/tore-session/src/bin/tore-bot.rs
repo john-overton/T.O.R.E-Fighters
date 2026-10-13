@@ -1956,12 +1956,11 @@ fn main() -> ExitCode {
                 }
                 // The other aircraft's stores (protocol 27).
                 println!("{}: stores: {}", r.name, bot.stores.line());
-                // A ground target (protocol 22): what the frames showed.
-                if let Some(world) = bot
-                    .client
-                    .mission()
-                    .filter(|w| w.terrain.surface.template.is_some())
-                {
+                // A ground target (protocol 22), or the enemy's area
+                // defenses (B23): what the frames showed.
+                if let Some(world) = bot.client.mission().filter(|w| {
+                    w.terrain.surface.template.is_some() || w.terrain.surface.area.is_some()
+                }) {
                     println!(
                         "{}: surface: digest {:016x}, {}",
                         r.name,

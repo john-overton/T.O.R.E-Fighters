@@ -14,7 +14,10 @@ capture converts into a format 3 replay with the ground target, its seed and the
 Enemy Wing 1's lead parked at the Redfor field the world picks and starts there on the ground (the bot's start
 line), Blue in the air; no radar paints the Red bot on its own field.
 
-Both read the `tore-bot` surface line (`NAME: surface: digest D, moving M, ...`, every five seconds). See
+`net-area-defenses`: the guide's mission with no ground target and heavy AAA and SAM strengths (B23): two bots
+build the same surface with the enemy's area defenses (one digest) and nobody is refused.
+
+All read the `tore-bot` surface line (`NAME: surface: digest D, moving M, ...`, every five seconds). See
 docs/testing/lane-net.md.
 """
 from __future__ import annotations
@@ -170,6 +173,30 @@ def drive_redfor_ground_start(d: Drive) -> None:
         d.problem("the server's mission line does not name the enemy ground start")
 
 
+def drive_area_defenses(d: Drive) -> None:
+    """B23: the guide's mission with no ground target and heavy AAA and SAM strengths. The server draws the
+    surface seed; both bots build the same surface (one digest) with the enemy's area defenses in it."""
+    port = d.port()
+    mission = guide_mission() + "defenses aaa heavy sam heavy\n"
+    server = start_server(d, port, mission)
+    bots = start_bots(d, port, "bots", 40, "--count", "2", "--callsign", "Bot")
+    bots.finish(120, 0)
+    server.finish(40, 0)
+    for n in (1, 2):
+        bots.expect(rf"^Bot{n}: seat \d+, plane \d+, at tick \d+$", "a seating")
+        bots.expect(rf"^Bot{n}: The connection ended: the player left\.$", "a clean leave")
+    bots.forbid(NET_BAD, "a network problem")
+    bots.forbid(r"places this mission's ground target differently", "a surface digest refusal")
+    seen = last_surface(bots.text())
+    for name in ("Bot1", "Bot2"):
+        if name not in seen:
+            d.problem(f"{name} printed no surface line")
+    digests = {line["digest"] for line in seen.values()}
+    if len(digests) > 1:
+        d.problem(f"the bots built different surfaces: {sorted(digests)}")
+    server.forbid(NET_BAD, "a network problem")
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
@@ -178,6 +205,10 @@ def scenarios() -> list[Scenario]:
         ),
         Scenario(
             name="net-surface-pvp", lane="net", args=[], driver=drive_pvp, uses=("server", "bot"), timeout=300,
+        ),
+        Scenario(
+            name="net-area-defenses", lane="net", args=[], driver=drive_area_defenses, uses=("server", "bot"),
+            timeout=300,
         ),
         Scenario(
             name="net-redfor-ground-start", lane="net", args=[], driver=drive_redfor_ground_start,
