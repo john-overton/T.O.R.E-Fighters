@@ -609,6 +609,7 @@ mod tests {
             alive: true,
             fuel_endurance_s: 1000.,
             time_home_s: None,
+            rotorcraft: false,
             internal_fuel_lbs: 1000.,
             radar_emitting: false,
         }

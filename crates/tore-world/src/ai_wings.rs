@@ -1754,6 +1754,15 @@ impl AiWings {
         &self.mission
     }
 
+    /// Gives every AI aircraft `pounds` of internal fuel (the probe's
+    /// `--probe-fuel`, which brings a low-fuel return forward without a
+    /// half-hour mission; slice H3).
+    pub fn set_internal_fuel_all(&mut self, pounds: f64) {
+        for actor in self.mission.actors_mut() {
+            actor.set_internal_fuel(pounds);
+        }
+    }
+
     /// Hand the AI mission the lead hold's claims for the next step (the
     /// lobby pass's slice R2; `world/lead_hold.rs`).
     pub(crate) fn set_lead_claims(&mut self, claims: Vec<tore_sim::ai::mission::LeadClaim>) {
@@ -4991,12 +5000,13 @@ mod tests {
     }
 
     #[test]
-    fn a_helicopter_keeps_no_fuel_schedule_and_is_never_put_through_the_airfield_sequence() {
-        // Slice ST-H. The runway is 110 nm away: a jet told to land begins
-        // the approach; a helicopter, whose data gives
-        // it minutes of fuel against the hour a cruise of 80 knots takes,
-        // would be bingo in every Quick Mission, and an approach and rollout
-        // flown at 120 knots put it in the ground.
+    fn a_helicopter_is_never_put_through_the_airfield_sequence_and_ignores_a_home_out_of_reach() {
+        // Slice ST-H (fuel states since slice H3). The runway is 110 nm
+        // away: a jet told to land begins the approach; a helicopter, whose
+        // data gives it 27 minutes of fuel against the 49 minutes the way
+        // takes at its cruise, has no fuel state to manage (the flight home
+        // is out of reach), and an approach and rollout flown at 120 knots
+        // put it in the ground.
         use tore_sim::ai::route::FuelState;
         let runway = runway_view(9, [0., 10., 700_000.]);
         let airfields = Airfields {
@@ -5060,10 +5070,106 @@ mod tests {
                 assert_eq!(
                     actor.controller().fuel_state(),
                     Some(FuelState::NoManagement),
-                    "no schedule"
+                    "out of reach"
                 );
             }
         }
+    }
+
+    /// A friendly Mi-24 (3,307 lb at the fixture's 2 lb/s: 1,653 s) with a
+    /// home runway `home_ft` away, airborne and holding, and an enemy.
+    fn fuel_wings(home_ft: f64) -> (AiWings, Vec<live::Target>) {
+        let runway = runway_view(9, [0., 10., home_ft]);
+        let airfields = Airfields {
+            runways: vec![HomeRunway {
+                view: runway,
+                friendly: true,
+                enemy: true,
+            }],
+            departure: None,
+            enemy_departure: None,
+        };
+        let selections = [
+            (launch::Side::Friendly, 1u8, 1usize),
+            (launch::Side::Enemy, 0, 1),
+        ]
+        .map(|(side, index, count)| WingSelection {
+            wing: WingId::new(side, index).unwrap(),
+            aircraft: AircraftId::F18,
+            count,
+            skill_level: 1,
+        });
+        let payload = resolve_wings(&selections, None).unwrap();
+        let targets: Vec<_> = vec![
+            target(1, [600., 3_000., 0.], 0.),
+            target(2, [0., 3_000., 900_000.], std::f64::consts::PI),
+        ];
+        let mut wings = AiWings::build_for(&payload, &targets, &airfields, &[], |_| {
+            Ok((crate::test_support::powered_profile(AircraftId::Mi24), None))
+        })
+        .unwrap();
+        wings.apply_mission_preset(Preset::Hold, [0., 3_000., 0.]);
+        wings.set_flight_model(AiFlightModel::AllHybrid).unwrap();
+        (wings, targets)
+    }
+
+    #[test]
+    fn a_helicopter_has_a_fuel_schedule_at_its_own_cruise_and_goes_home_on_bingo() {
+        // Slice H3. Home is 16 nm away (100,000 ft). The Mi-24's cruise is
+        // 80 percent of its 178 kt top, 240 ft/s: 417 s home.
+        use tore_sim::ai::controller::Activity;
+        use tore_sim::ai::route::FuelState;
+        let (mut wings, mut targets) = fuel_wings(100_000.);
+        fly_one_tick(&mut wings, &mut targets, vec![]);
+        let actor = wings.mission.actor(1).unwrap();
+        let fuel = actor.controller().trace().fuel.expect("a fuel judgement");
+        let home = fuel.time_home_s.expect("a time home");
+        // 80 percent of the envelope's top at 3,000 ft (a little under the
+        // sea-level 178 kt): within 5 percent of the sea-level figure.
+        let sea_level = 100_000. / (178. * 1.687_81 * 0.8);
+        assert!((home / sea_level - 1.).abs() < 0.05, "home {home}");
+        assert!(
+            (fuel.endurance_s - 1_653.).abs() < 5.,
+            "{}",
+            fuel.endurance_s
+        );
+        assert_eq!(fuel.state, Some(FuelState::Ok), "not bingo at the start");
+        // Short of the reserve it is bingo and turns for home at its cruise.
+        wings
+            .mission
+            .actor_mut(1)
+            .unwrap()
+            .set_internal_fuel(2. * (home + 100.));
+        let start = wings.mission.actor(1).unwrap().flight().position;
+        let away = |wings: &AiWings| {
+            let at = wings.mission.actor(1).unwrap().flight().position;
+            (at[0] - 0.).hypot(at[2] - 100_000.)
+        };
+        let before = away(&wings);
+        let mut state = None;
+        for _ in 0..6_000 {
+            fly_one_tick(&mut wings, &mut targets, vec![]);
+            let actor = wings.mission.actor(1).unwrap();
+            state = actor.controller().fuel_state();
+            if state == Some(FuelState::Bingo) {
+                break;
+            }
+        }
+        assert_eq!(state, Some(FuelState::Bingo));
+        for _ in 0..7_200 {
+            fly_one_tick(&mut wings, &mut targets, vec![]);
+        }
+        let actor = wings.mission.actor(1).unwrap();
+        assert!(!actor.flight().crashed);
+        assert_eq!(actor.activity(), Activity::ReturningToBase);
+        assert!(
+            away(&wings) < before - 3_000.,
+            "{} from {before}",
+            away(&wings)
+        );
+        // At about its cruise, not the fighters' 80 knots.
+        let kt = actor.flight().speed / 1.687_81;
+        assert!(kt > 100. && kt < 150., "{kt} kt, from {start:?}");
     }
 
     #[test]
