@@ -248,6 +248,7 @@ pub fn run() -> AppResult<()> {
         seed,
         enemy_nationality: nationality.unwrap_or(tables::ENEMY_NATIONALITY[index]),
         night_stealth: night,
+        rolled: true,
     });
     let terrain = Terrain::for_mission_surface(
         &resources,
@@ -1396,6 +1397,7 @@ fn area_sweep_run(
                     seed,
                     enemy_nationality: tables::ENEMY_NATIONALITY[index],
                     night_stealth: false,
+                    rolled: true,
                 };
                 let surface = site.place_with(resources, &terrain.theater, None, Some(&area))?;
                 builds += 1;
@@ -1407,8 +1409,8 @@ fn area_sweep_run(
                     );
                 }
                 let units: Vec<_> = layout::area::units(&surface).collect();
-                let wanted_units = (layout::AREA_SAM_SITES[level] + layout::AREA_AAA_SITES[level])
-                    * layout::AREA_SITE_UNITS;
+                let (sam_sites, aaa_sites) = site.area_site_counts(&area);
+                let wanted_units = (sam_sites + aaa_sites) * layout::AREA_SITE_UNITS;
                 if front.is_some() && units.len() < wanted_units {
                     short += 1;
                 }

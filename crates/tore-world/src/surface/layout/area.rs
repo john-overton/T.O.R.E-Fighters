@@ -8,13 +8,19 @@
 //!   [`AREA_AIRFIELD_EVERY`] instead guards a Red airfield on Red's side,
 //!   [`AREA_AIRFIELD_NM`] from its runway. Sites keep [`AREA_SITE_SPACING_NM`]
 //!   apart.
-//! - **How many.** [`AREA_SAM_SITES`] and [`AREA_AAA_SITES`] by the
-//!   creator's strength, [`AREA_SITE_UNITS`] units each.
+//! - **How many.** Rolled like a template's defense slots (nr-b23b,
+//!   2026-10-13): [`AREA_SLOTS`] site slots of each kind, each manned with
+//!   the strength's chance (0, 25, 60 or 100 percent) from a stream keyed
+//!   by the mission's surface seed, [`AREA_SITE_UNITS`] units a site. (A
+//!   recording from the first build, `rolled` false, keeps the fixed
+//!   [`AREA_SAM_SITES`] and [`AREA_AAA_SITES`].)
 //! - **Which.** A uniform pick from the enemy nationality's equipment group
 //!   for `<sam>` and `<aaa>`, as the targets' defenses; the battery rules
 //!   then give an SA-6 (SA-2, SA-3, HAWK) site its radar.
-//! - **How.** Standing still, no route, no supply truck, no front line: just
-//!   the site. Never a destroy target.
+//! - **How.** Standing still, no route, no front line: just the site. A
+//!   SAM unit gets a supply truck beside it and a battery one more, as a
+//!   template's ([`super::supply_trucks`]); guns get none. Never a destroy
+//!   target.
 //!
 //! Every unit stands where a ground unit may ([`stands`]: on level land,
 //! off the sea), [`AREA_OBJECT_CLEARANCE_FT`] clear of every layout object
@@ -30,7 +36,7 @@ use crate::ai_wings::{ENEMY_SIDE, FRIENDLY_SIDE};
 use crate::surface::{Surface, UnitId, resolve::AreaDefense};
 use tore_formats::quick_template::{
     Placeholder,
-    tables::{NIGHT_AAA, NIGHT_AAA_SKILL, equipment, group_of},
+    tables::{NIGHT_AAA, NIGHT_AAA_SKILL, defense_percent, equipment, group_of},
 };
 
 /// The stream ordinal of the site draws: site `k` keys `AREA_ORDINAL + k`
@@ -52,6 +58,9 @@ enum Pass {
 
 /// One site as drawn: what it holds and where it may stand.
 struct SiteDraw {
+    /// The slot's stream ordinal: its slot number when rolled (a site keeps
+    /// its place whatever the other slots rolled), else its index.
+    ordinal: u32,
     placeholder: Placeholder,
     /// Guards a Red airfield (the runway's origin) rather than the band.
     airfield: Option<[i64; 2]>,
@@ -69,33 +78,37 @@ pub struct Summary {
 
 /// Adds the area defenses of `surface.area` (no ground target), placed and
 /// ready to join the surface, or notes why there are none.
+///
+/// Returns the units and, apart, the ids of the SAM ones (which get supply
+/// trucks).
 pub(super) fn add(
     surface: &Surface,
     inputs: &mut Inputs<'_, '_>,
     obstacles: &Obstacles<'_>,
     notes: &mut Vec<String>,
-) -> Vec<Added> {
+) -> (Vec<Added>, Vec<UnitId>) {
+    let none = (Vec::new(), Vec::new());
     let Some(area) = &surface.area else {
-        return Vec::new();
+        return none;
     };
     if surface.template.is_some() {
         // A ground target's defenses are its own (never both).
-        return Vec::new();
+        return none;
     }
     let Some(front) = inputs.ground.front else {
         notes.push("no area defenses: the theater has no front".to_owned());
-        return Vec::new();
+        return none;
     };
     let Some(group) = group_of(area.enemy_nationality) else {
         notes.push("no area defenses: the enemy has no equipment group".to_owned());
-        return Vec::new();
+        return none;
     };
     let stem = stem(inputs.layout);
     let axis = front.axis();
     let length = trig::isqrt((axis[0].pow(2) + axis[1].pow(2)) as u128) as i64;
     if length == 0 {
         notes.push("no area defenses: the front has no axis".to_owned());
-        return Vec::new();
+        return none;
     }
     let mid = [
         (front.blue[0] + front.red[0]).div_euclid(2),
@@ -134,6 +147,7 @@ pub(super) fn add(
     let wanted_aaa = draws.len() - wanted_sam;
     let mut placed_sites: Vec<[i64; 2]> = Vec::new();
     let mut out = Vec::new();
+    let mut sams = Vec::new();
     let mut summary = Summary {
         wanted_sam,
         wanted_aaa,
@@ -142,8 +156,13 @@ pub(super) fn add(
     let spacing = AREA_SITE_SPACING_NM * NM_FT;
     let bands = [AREA_DEPTH_NM, AREA_FALLBACK_DEPTH_NM].map(|b| b.map(|nm| nm * NM_FT));
     for (k, draw) in draws.iter().enumerate() {
-        let mut stream = Stream::new(area.seed, &stem, AREA_ORDINAL + k as u32, Purpose::Group);
-        let mut pick = Stream::new(area.seed, &stem, AREA_ORDINAL + k as u32, Purpose::Pick);
+        let mut stream = Stream::new(
+            area.seed,
+            &stem,
+            AREA_ORDINAL + draw.ordinal,
+            Purpose::Group,
+        );
+        let mut pick = Stream::new(area.seed, &stem, AREA_ORDINAL + draw.ordinal, Purpose::Pick);
         let Some((entry, skill)) = kind(inputs, draw.placeholder, group, area, &mut pick) else {
             notes.push(format!(
                 "area site {k}: the import has no <{}> of group {group}",
@@ -207,6 +226,9 @@ pub(super) fn add(
             let Some(id) = UnitId::area_defense(out.len() as u32) else {
                 continue;
             };
+            if draw.placeholder == Placeholder::Sam {
+                sams.push(id);
+            }
             out.push(Added {
                 unit: added_unit_for(
                     id,
@@ -228,7 +250,48 @@ pub(super) fn add(
         summary.wanted_aaa,
         out.len()
     ));
+    (out, sams)
+}
+
+/// The slots that are manned for `area`, SAM slots first then guns, as
+/// (stream ordinal, kind). Rolled like a template's defense slots: each of
+/// the [`AREA_SLOTS`] slots of a kind is manned with the strength's chance
+/// (retail 0, 25, 60 or 100 percent), from its own stream of the mission's
+/// surface seed. The first build's fixed counts when `area.rolled` is
+/// false.
+fn manned(area: &AreaDefense, stem: &str) -> Vec<(u32, Placeholder)> {
+    if !area.rolled {
+        let sam = AREA_SAM_SITES.get(area.sam).copied().unwrap_or(0);
+        let aaa = AREA_AAA_SITES.get(area.aaa).copied().unwrap_or(0);
+        return (0..sam)
+            .map(|_| Placeholder::Sam)
+            .chain((0..aaa).map(|_| Placeholder::Aaa))
+            .enumerate()
+            .map(|(k, p)| (k as u32, p))
+            .collect();
+    }
+    let mut out = Vec::new();
+    for (kind, level, base) in [
+        (Placeholder::Sam, area.sam, 0),
+        (Placeholder::Aaa, area.aaa, AREA_SLOTS as u32),
+    ] {
+        let percent = defense_percent(level).unwrap_or(0);
+        for slot in 0..AREA_SLOTS as u32 {
+            let roll = Stream::new(area.seed, stem, base + slot, Purpose::Roll).below(100);
+            if roll < u64::from(percent) {
+                out.push((base + slot, kind));
+            }
+        }
+    }
     out
+}
+
+/// How many SAM sites and gun sites `area` stands (before any is left out
+/// for want of a place): the rolls alone. The sweep reports against it.
+pub fn site_counts(area: &AreaDefense, layout: &str) -> (usize, usize) {
+    let slots = manned(area, &stem(layout));
+    let sam = slots.iter().filter(|(_, p)| *p == Placeholder::Sam).count();
+    (sam, slots.len() - sam)
 }
 
 /// The sites a strength asks for, SAM sites first: every
@@ -236,27 +299,28 @@ pub(super) fn add(
 /// airfield, taken in turn from a seeded first one; without one it stands
 /// in the band.
 fn sites(area: &AreaDefense, fields: &[[i64; 2]], stem: &str) -> Vec<SiteDraw> {
-    let sam = AREA_SAM_SITES.get(area.sam).copied().unwrap_or(0);
-    let aaa = AREA_AAA_SITES.get(area.aaa).copied().unwrap_or(0);
     let mut first = Stream::new(area.seed, stem, u32::MAX, Purpose::Group);
     let mut next_field = if fields.is_empty() {
         0
     } else {
         first.below(fields.len() as u64) as usize
     };
-    let mut out = Vec::with_capacity(sam + aaa);
-    for (placeholder, count) in [(Placeholder::Sam, sam), (Placeholder::Aaa, aaa)] {
-        for n in 0..count {
-            let airfield = (n % AREA_AIRFIELD_EVERY == 0 && !fields.is_empty()).then(|| {
-                let at = fields[next_field % fields.len()];
-                next_field += 1;
-                at
-            });
-            out.push(SiteDraw {
-                placeholder,
-                airfield,
-            });
-        }
+    let slots = manned(area, stem);
+    let mut out = Vec::with_capacity(slots.len());
+    let mut of_kind = [0usize; 2];
+    for (ordinal, placeholder) in slots {
+        let n = &mut of_kind[usize::from(placeholder != Placeholder::Sam)];
+        let airfield = (*n % AREA_AIRFIELD_EVERY == 0 && !fields.is_empty()).then(|| {
+            let at = fields[next_field % fields.len()];
+            next_field += 1;
+            at
+        });
+        *n += 1;
+        out.push(SiteDraw {
+            ordinal,
+            placeholder,
+            airfield,
+        });
     }
     out
 }
@@ -371,6 +435,39 @@ pub fn audit(
         }
         for why in broken {
             out.push(format!("{:#010x} {} {why}", unit.id.0, unit.resource));
+        }
+    }
+    // The supply trucks: each area battery has its own, and each truck
+    // stands within the resupply reach of the area unit it serves.
+    for battery in surface
+        .batteries
+        .iter()
+        .filter(|b| b.launchers[0].range() == crate::surface::IdRange::AreaDefense)
+    {
+        if battery.truck.is_none() {
+            out.push(format!(
+                "battery {:#010x} has no supply truck",
+                battery.radar.0
+            ));
+        }
+    }
+    for truck in &surface.trucks {
+        let Some(served) = truck
+            .serves
+            .and_then(|id| surface.unit(id))
+            .filter(|u| u.id.range() == crate::surface::IdRange::AreaDefense)
+        else {
+            continue;
+        };
+        let apart = surface.unit(truck.id).map(|t| {
+            f64::from(t.position[0] - served.position[0])
+                .hypot(f64::from(t.position[2] - served.position[2]))
+        });
+        if apart.is_none_or(|d| d > crate::surface::RESUPPLY_RADIUS_FT) {
+            out.push(format!(
+                "{:#010x} supply truck out of reach of {:#010x}",
+                truck.id.0, served.id.0
+            ));
         }
     }
     out

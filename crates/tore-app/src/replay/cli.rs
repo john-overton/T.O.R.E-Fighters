@@ -120,8 +120,16 @@ pub fn info(path: &Path, out: &mut impl Write) -> AppResult<()> {
     if let Some(area) = &world.area_defense {
         writeln!(
             out,
-            "Area        defenses with AAA {} and SAM {}, surface seed {}, enemy nationality {}",
-            area.aaa, area.sam, area.seed, area.enemy_nationality,
+            "Area        defenses with AAA {} and SAM {}, surface seed {}, enemy nationality {}, {}",
+            area.aaa,
+            area.sam,
+            area.seed,
+            area.enemy_nationality,
+            if area.rolled {
+                "sites rolled per slot"
+            } else {
+                "fixed site counts (first build)"
+            },
         )?;
     }
     if world.airfield_scene != 0 {

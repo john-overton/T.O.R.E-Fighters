@@ -503,6 +503,11 @@ impl Surface {
             h.u32(area.seed);
             h.u32(area.enemy_nationality as u32);
             h.u8(u8::from(area.night_stealth));
+            // Only the rolled counts say so: the first build's digest
+            // (fixed counts) stays what it was.
+            if area.rolled {
+                h.bytes(b"rolled");
+            }
         }
         h.finish()
     }

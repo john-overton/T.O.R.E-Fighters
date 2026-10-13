@@ -148,9 +148,13 @@ writes the strengths `none`, `light`, `moderate` and `heavy`
 - **Area defenses** (John, 2026-10-12; B23). With no target and a strength
   above "not", the enemy's SAM sites (with their radar vehicles) and guns
   stand still on Red's side of the theater's front, 10 to 60 nm deep, with
-  one site in three guarding a Red airfield. Light, moderate and heavy give
-  2, 4 and 6 SAM sites and 4, 8 and 12 gun sites, two units each (fitted).
-  They are not objectives and are not on the map. Quick Mission only: free
+  one site in three guarding a Red airfield. Ten SAM site slots and ten gun
+  site slots are rolled the way a target's defense slots are (light 25,
+  moderate 60, heavy 100 percent manned; John, 2026-10-13), so light gives 0
+  to 10 sites of a kind (2.5 on average), moderate 0 to 10 (6) and heavy
+  all 10, two units each (the slot count is fitted). The SAM units have
+  supply trucks, as a target's do (John, 2026-10-13). They are not
+  objectives and are not on the map. Quick Mission only: free
   flight has no creator, so it never has them. Same on every machine and in
   replays ([area defenses](surface-defenses.md#area-defenses)).
 

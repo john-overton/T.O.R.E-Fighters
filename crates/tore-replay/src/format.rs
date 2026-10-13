@@ -260,6 +260,11 @@ pub(crate) fn encode_header(header: &Header) -> Result<Vec<u8>> {
     }
     if let Some(area) = &w.area_defense {
         lines.push(("world.area_defense".into(), area_defense_text(area)));
+        // Its own key, so a build that predates the rolled counts keeps it
+        // as an unknown extra and reads the rest as before.
+        if area.rolled {
+            lines.push(("world.area_rolled".into(), "1".into()));
+        }
     }
     if w.airfield_scene != 0 {
         lines.push(("world.airfield_scene".into(), w.airfield_scene.to_string()));
@@ -407,6 +412,8 @@ fn parse_area_defense(text: &str) -> Result<AreaDefense> {
             "1" => true,
             _ => return Err(bad()),
         },
+        // Set from its own key once the whole header is read.
+        rolled: false,
     })
 }
 
@@ -441,6 +448,7 @@ pub(crate) fn decode_header(bytes: &[u8], version: u16) -> Result<Header> {
         },
         ..Header::default()
     };
+    let mut area_rolled = false;
     for line in text.lines() {
         if line.is_empty() {
             continue;
@@ -481,6 +489,7 @@ pub(crate) fn decode_header(bytes: &[u8], version: u16) -> Result<Header> {
             "world.extent_ft" => w.extent_ft = Some(parse_numbers(&key, &value)?),
             "world.ground_target" => w.ground_target = Some(parse_ground_target(&value)?),
             "world.area_defense" => w.area_defense = Some(parse_area_defense(&value)?),
+            "world.area_rolled" => area_rolled = value == "1",
             "world.airfield_scene" => {
                 w.airfield_scene = value
                     .parse()
@@ -502,6 +511,9 @@ pub(crate) fn decode_header(bytes: &[u8], version: u16) -> Result<Header> {
                 header.extra.push((key, value));
             }
         }
+    }
+    if let Some(area) = &mut header.world.area_defense {
+        area.rolled = area_rolled;
     }
     Ok(header)
 }
@@ -662,6 +674,7 @@ mod tests {
                     seed: 4_000_000_009,
                     enemy_nationality: 33,
                     night_stealth: false,
+                    rolled: true,
                 }),
                 airfield_scene: 2,
                 city_fill_scene: 3,
@@ -679,5 +692,33 @@ mod tests {
             decode_header(&bytes, header.format_version).unwrap(),
             header
         );
+    }
+
+    #[test]
+    fn a_recording_from_the_first_area_build_keeps_its_fixed_counts() {
+        // nr-b23b: rolled counts are marked by their own key; the first
+        // build's five-field value carries no mark and decodes as fixed.
+        let old = b"mission=quick\nworld.area_defense=3,3,17,10,0\n";
+        let header = decode_header(old, 3).unwrap();
+        let area = header.world.area_defense.unwrap();
+        assert!(!area.rolled);
+        assert_eq!((area.aaa, area.sam, area.seed), (3, 3, 17));
+        // And a rolled one writes the mark and reads it back, whatever the
+        // order of the keys.
+        let rolled = Header {
+            world: World {
+                area_defense: Some(AreaDefense {
+                    rolled: true,
+                    ..area
+                }),
+                ..World::default()
+            },
+            ..Header::default()
+        };
+        let text = String::from_utf8(encode_header(&rolled).unwrap()).unwrap();
+        assert!(text.contains("world.area_rolled=1"));
+        let reversed: Vec<&str> = text.lines().rev().collect();
+        let back = decode_header(reversed.join("\n").as_bytes(), 3).unwrap();
+        assert!(back.world.area_defense.unwrap().rolled);
     }
 }

@@ -94,6 +94,11 @@ pub struct AreaDefense {
     /// Night, and a friendly wing flies an F-117 or a B-2 (the template
     /// rule's guns, dormant while neither is imported).
     pub night_stealth: bool,
+    /// How the sites are counted: `true` rolls ten site slots per kind like
+    /// a template's defense slots (nr-b23b, 2026-10-13); `false` is the
+    /// fixed 2/4/6 SAM and 4/8/12 gun sites of the first build, kept so a
+    /// recording made then still rebuilds the sites it saw.
+    pub rolled: bool,
 }
 
 impl AreaDefense {
@@ -106,6 +111,7 @@ impl AreaDefense {
             seed: spec.surface_seed,
             enemy_nationality: usize::from(spec.enemy_nationality),
             night_stealth: night_stealth(spec),
+            rolled: true,
         })
     }
 }
