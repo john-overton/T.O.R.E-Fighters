@@ -121,6 +121,7 @@ mod sound_prefs;
 mod sound_screen;
 mod startup;
 mod static_art;
+mod store_sizes;
 mod stores_preview;
 mod su25_animation;
 mod su27_animation;
@@ -9368,6 +9369,14 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     }
     if std::env::args().nth(1).as_deref() == Some("--dome-sheet") {
         cockpit_sheet::domes()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--stores-size-sheet") {
+        stores_preview::size_sheet()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--stores-sizes") {
+        stores_preview::sizes()?;
         return Ok(Outcome::Done);
     }
     if std::env::args().nth(1).as_deref() == Some("--stores-preview") {

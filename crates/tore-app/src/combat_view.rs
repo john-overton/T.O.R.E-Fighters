@@ -894,7 +894,7 @@ pub(crate) mod render_hash_tests {
             face(0x48a6, [-2., -16., 0.], 4, "", 0x20),
         ])
     }
-    fn damage() -> DamageArt {
+    pub(crate) fn damage() -> DamageArt {
         let piece = |address: usize, texture: &str| {
             shape(vec![
                 face(address, [2., 5., 1.], 4, texture, 0x60),
