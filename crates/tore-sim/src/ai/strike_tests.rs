@@ -1479,6 +1479,63 @@ fn a_drag_bomb_lays_down_clear_of_its_fuze_and_its_fragments() {
     assert_eq!(laydown_height_ft(&slow, 700.), 850.);
 }
 
+/// The cue's miss across the aircraft's track, feet (positive: the aim lies
+/// right), for a bomb thrown `throw_ft` ahead along the heading and blown
+/// `drift_ft` to the right on the way down.
+fn cue_across(world: &World, aim_point: Vector, throw_ft: f64, drift_ft: f64) -> (Vector, f64) {
+    let heading = world.own.heading_deg.to_radians();
+    let (sin, cos) = heading.sin_cos();
+    let cue = [
+        world.own.position[0] + sin * throw_ft + cos * drift_ft,
+        0.,
+        world.own.position[2] + cos * throw_ft - sin * drift_ft,
+    ];
+    let across = (aim_point[0] - cue[0]) * cos - (aim_point[2] - cue[2]) * sin;
+    (cue, across)
+}
+
+/// A fast-high or level bomb run's cue lies 13,500 ft ahead, so 400 ft of
+/// offset at the start and a 110 ft drift in the wind must be laid on the aim
+/// well before the release: from the fifth second the cue's miss across stays
+/// inside the release gate (nr-bombs, 2026-10-13). The slow trim this replaced
+/// left it 35 ft off at the fifth second here and swung it 180 ft either
+/// side in the battery's run, meeting the aim 44 ft off at the release: outside the gate and, with
+/// the drawn aim offset, outside the circle, so the first pass of the
+/// battery's `ai-strike-bombs` fast-high run released nothing, turned back
+/// and bombed after the run had ended.
+#[test]
+fn a_level_like_run_lays_its_far_cue_on_the_aim_before_the_release() {
+    for pass in [Pass::FastHigh, Pass::Level] {
+        let mut world = quiet_world();
+        world.own = own([-400., 5_000., 0.], 700.);
+        world.own.limits.corner = ScalarSpeed(700.);
+        let mut strike = Strike::new(9);
+        strike.force(Some(pass), None);
+        let gate = (GATE_SHARE * release_circle_ft(Experience::Average)).max(GATE_FLOOR_FT);
+        let mut worst = 0_f64;
+        let mut first = f64::NAN;
+        fly(&mut strike, &mut world, 12, |tick, strike, world| {
+            let (aim, _) = strike.aim();
+            let aim_point = [aim[0], 0., TARGET_AT[2] + aim[1]];
+            let (cue, across) = cue_across(world, aim_point, 13_500., 110.);
+            // Far short of the aim the whole time: nothing is due.
+            world.inputs.solution = Some(solution(TARGET_AT, cue, false));
+            if tick == 1 {
+                first = across;
+            }
+            // From the fifth second on the cue is on the aim.
+            if tick >= 600 {
+                worst = worst.max(across.abs());
+            }
+        });
+        assert!(first.abs() > 100., "{pass:?} starts {first} ft off");
+        assert!(
+            worst < gate,
+            "{pass:?}: the cue was {worst} ft across the aim late in the run, gate {gate} ft"
+        );
+    }
+}
+
 #[test]
 fn a_dive_pulls_out_on_its_plan_and_the_plan_sets_the_floor() {
     // 800 ft/s at 6 G: the pull-out radius is 800² / (32.174 x 5), 3,978 ft.
