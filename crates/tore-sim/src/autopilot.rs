@@ -18,10 +18,12 @@
 //! speed on the cyclic, as a helicopter's coupled autopilot does; the V-22
 //! with its nacelles down holds the height on the pitch and leaves its power
 //! lever to the pilot, as the throttle is on every other aircraft.
-use crate::flight::{DT, FlightAxis, PilotCommand, PilotInput, State, Switch, trace::Release};
+pub mod rotor_law;
+
+use crate::flight::{FlightAxis, PilotCommand, PilotInput, State, Switch, trace::Release};
 use crate::models::FlightModel;
 use crate::models::variety::LiftKind;
-use std::f64::consts::{PI, TAU};
+use rotor_law::angle;
 use tore_input::{LiftCommand, TrimAxis};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -61,30 +63,30 @@ pub struct Autopilot {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Loops {
     /// Set on the first tick the loops fly after an engagement.
-    started: bool,
+    pub(crate) started: bool,
     /// Hover hold: the ground point held, world X/Z ft. None while the
     /// drift is still being braked.
-    point: Option<[f64; 2]>,
+    pub(crate) point: Option<[f64; 2]>,
     /// Hover hold: the wheel height above the ground held, ft.
-    height: f64,
+    pub(crate) height: f64,
     /// Hover hold: the pilot's collective (or throttle) lever position when
     /// the hold first saw it. Moving it 2 percent from there cancels.
-    lever: Option<f64>,
+    pub(crate) lever: Option<f64>,
     /// Outer loop integrators, rad: hover hold's forward and right tilt
     /// that holds the ground velocity, or the A modes' pitch attitude [0].
-    tilt: [f64; 2],
+    pub(crate) tilt: [f64; 2],
     /// Attitude loop integrators: the stick and pedal travel that holds the
     /// commanded attitude and heading, [pitch, roll, yaw].
-    stick: [f64; 3],
+    pub(crate) stick: [f64; 3],
     /// The collective lever, 0..1, of hover hold and the rotorcraft A
     /// modes: their height loop's integrator.
-    collective: f64,
+    pub(crate) collective: f64,
     /// The rotorcraft A modes: whether they fly the collective (the
     /// helicopters, and the V-22 with its nacelles up).
-    coupled: bool,
+    pub(crate) coupled: bool,
     /// The rotorcraft A modes: the ground speed along the heading they hold
     /// while they fly the collective, ft/s.
-    speed: f64,
+    pub(crate) speed: f64,
 }
 
 /// Which law the heading and waypoint modes fly on an aircraft.
@@ -152,54 +154,7 @@ const ROTORCRAFT_PITCH_DEGREES: f64 = 15.;
 /// (fitted: the fixed-wing law's 20 m/s is beyond these aircraft).
 const ROTORCRAFT_CLIMB_FPM: f64 = 1_000.;
 
-// Fitted loop gains (agent decisions, 2026-10-09), tuned on the AH-64,
-// Mi-24, CH-47 and V-22 at every stability level, with and without the Easy
-// flight physics cheat, in calm air, steady 15 kt winds from four sides and
-// a gusting wind. "The coupled A modes" are the heading and waypoint modes
-// while they fly the collective (`collective_coupled`).
-/// Attitude loops: the commanded rate per radian of error, 1/s.
-const ATTITUDE_BANDWIDTH: f64 = 3.;
-/// Attitude loops: the commanded rate never exceeds this share of the
-/// aircraft's full-stick hover rate.
-const ATTITUDE_RATE_SHARE: f64 = 0.5;
-/// Attitude loops: stick travel per unit of rate error, as a share of the
-/// full-stick hover rate.
-const ATTITUDE_GAIN: f64 = 3.;
-/// Attitude loops integrate only within this error, rad, so a large
-/// attitude change does not wind them up.
-const ATTITUDE_WINDOW: f64 = 0.15;
-/// The heading and sideslip loops integrate within this error, rad.
-const HEADING_WINDOW: f64 = 0.3;
-/// Attitude loops: integrator, travel per radian-second of error.
-const ATTITUDE_INTEGRAL: f64 = 0.6;
-/// Heading loop: commanded yaw rate per radian of heading error, 1/s.
-const HEADING_BANDWIDTH: f64 = 2.;
-/// The rotorcraft A modes: yaw rate commanded per radian of sideslip, 1/s.
-const SIDESLIP_BANDWIDTH: f64 = 1.;
-/// Hover hold: ground velocity commanded per foot from the point, 1/s.
-const POSITION_GAIN: f64 = 0.15;
-/// Hover hold: the ground velocity it closes on the point at most, ft/s.
-const POSITION_SPEED_FPS: f64 = 10.;
-/// Hover hold's velocity loops and the coupled A modes' speed loop:
-/// acceleration commanded per ft/s of error, 1/s.
-const VELOCITY_GAIN: f64 = 0.8;
-/// The same loops' tilt integrator, rad per foot of velocity error.
-const VELOCITY_INTEGRAL: f64 = 0.002;
-/// Hover hold: climb commanded per foot of height error, 1/s.
-const HEIGHT_GAIN: f64 = 0.25;
-/// Hover hold and the coupled A modes: collective per ft/s of climb error.
-const CLIMB_GAIN: f64 = 0.08;
-/// The same loops' collective integrator per foot of climb error.
-const CLIMB_INTEGRAL: f64 = 0.02;
-/// The V-22's A modes with its nacelles down: pitch per radian of flight
-/// path error.
-const PATH_GAIN: f64 = 1.;
-/// The same law's pitch integrator per radian-second of flight path error.
-const PATH_INTEGRAL: f64 = 0.3;
-
-fn angle(value: f64) -> f64 {
-    (value + PI).rem_euclid(TAU) - PI
-}
+// The fitted loop gains of the rotorcraft laws live in [`rotor_law`].
 
 /// The 1 G stall speed at the aircraft's altitude, ft/s (900 without a
 /// 1 G envelope row there).
@@ -238,59 +193,6 @@ fn collective_coupled(s: &State) -> bool {
         && s.model().powered_lift().is_some_and(|lift| {
             lift.kind == LiftKind::Helicopter || s.nacelle_degrees() >= HOVER_NACELLE_DEGREES - 1e-9
         })
-}
-
-/// One attitude loop: the stick (or pedal) travel that drives `error`, rad,
-/// to zero against the body `rate`, normalized by the aircraft's full-stick
-/// hover `full_rate`, rad/s, plus its integrator.
-fn attitude_loop(
-    error: f64,
-    rate: f64,
-    full_rate: f64,
-    bandwidth: f64,
-    window: f64,
-    feedforward: f64,
-    integrator: &mut f64,
-) -> f64 {
-    let full_rate = full_rate.max(1e-3);
-    let limit = ATTITUDE_RATE_SHARE * full_rate;
-    let demand = (bandwidth * error).clamp(-limit, limit);
-    if error.abs() < window {
-        *integrator = (*integrator + ATTITUDE_INTEGRAL * error * DT).clamp(-1., 1.);
-    }
-    (ATTITUDE_GAIN * (demand - rate) / full_rate + *integrator + feedforward).clamp(-1., 1.)
-}
-
-/// The stick the stability level's attitude retention takes off the
-/// autopilot's at the attitude it commands, [pitch, bank] in travel: the
-/// Attitude level's hold about its reference, or the Easy flight physics
-/// cheat's weaker one. The autopilot adds it back, as a pilot holding an
-/// attitude away from the trim would, so its loops fly alike at every level.
-fn retention(s: &State, command: [f64; 2]) -> [f64; 2] {
-    use crate::flight::powered::sas;
-    use tore_input::StabilityLevel;
-    let (Some(lift), Some(level)) = (s.model().powered_lift(), s.stability_in_effect()) else {
-        return [0.; 2];
-    };
-    let reference = s.lift_controls.aids.attitude_reference;
-    let spans = sas::ATTITUDE_PER_TRAVEL_DEGREES.map(f64::to_radians);
-    let hold = [
-        (command[0] - reference[0]) / spans[0],
-        angle(command[1] - reference[1]) / spans[1],
-    ];
-    if level == StabilityLevel::Attitude {
-        hold.map(|h| h.clamp(-sas::ATTITUDE_AUTHORITY, sas::ATTITUDE_AUTHORITY))
-    } else if s.easy_retention(&lift, level) {
-        let weight = sas::EASY_RETENTION_GAIN * s.lift_controls.hover_fraction(lift.kind);
-        hold.map(|h| {
-            (weight * h).clamp(
-                -sas::EASY_RETENTION_AUTHORITY,
-                sas::EASY_RETENTION_AUTHORITY,
-            )
-        })
-    } else {
-        [0.; 2]
-    }
 }
 
 impl Autopilot {
@@ -563,186 +465,58 @@ impl Autopilot {
         }
         None
     }
-    /// The full-stick hover rates, [pitch, roll, yaw], rad/s.
-    fn full_rates(s: &State) -> [f64; 3] {
-        let rates = s.model().powered_lift().map_or([45., 45., 45.], |lift| {
-            lift.targets.hover_rates_degrees_per_second
-        });
-        [rates[1], rates[0], rates[2]].map(f64::to_radians)
-    }
     /// Hover hold (design 5.4): brakes the drift, then holds the point it
     /// stopped at, the heading at engagement and the wheel height above the
-    /// ground at engagement (at least 10 ft), through the cyclic, pedals and
-    /// collective. A cascade per axis: position to ground velocity to tilt
-    /// to attitude to stick, heading to yaw rate to pedals, height to climb
-    /// to collective, each with an integrator for the steady part (the
-    /// hover attitude, the wind, the cyclic and pedal trim, the collective).
+    /// ground at engagement (at least 10 ft), through [`rotor_law::hover`].
     fn hover(&mut self, s: &State, ground: f64, input: &mut PilotInput) {
         let clearance = s.model().configuration().equipment.ground_clearance_ft;
         let height = s.position[1] - ground - clearance;
         let loops = &mut self.loops;
         if !loops.started {
-            loops.started = true;
             loops.height = height.max(HOVER_MIN_HEIGHT_FT);
-            loops.collective = s.lift_controls.collective;
         }
-        let velocity = [s.velocity[0], s.velocity[2]];
-        if loops.point.is_none() && velocity[0].hypot(velocity[1]) < HOVER_CAPTURE_KT * KT {
+        if loops.point.is_none() && s.velocity[0].hypot(s.velocity[2]) < HOVER_CAPTURE_KT * KT {
             loops.point = Some([s.position[0], s.position[2]]);
         }
-        let mut wanted = loops.point.map_or([0.; 2], |point| {
-            [
-                POSITION_GAIN * (point[0] - s.position[0]),
-                POSITION_GAIN * (point[1] - s.position[2]),
-            ]
-        });
-        let closing = wanted[0].hypot(wanted[1]);
-        if closing > POSITION_SPEED_FPS {
-            wanted = wanted.map(|v| v * POSITION_SPEED_FPS / closing);
-        }
-        let error = [wanted[0] - velocity[0], wanted[1] - velocity[1]];
-        let (sin, cos) = s.yaw.sin_cos();
-        // Along the heading and to its right.
-        let along = [
-            error[0] * sin + error[1] * cos,
-            error[0] * cos - error[1] * sin,
-        ];
-        let limit = HOVER_TILT_DEGREES.to_radians();
-        let tilt: [f64; 2] = std::array::from_fn(|axis| {
-            let proportional = VELOCITY_GAIN * along[axis] / GRAVITY;
-            // Integrate only while the command is inside its limit, so
-            // braking a fast drift does not wind the integrator up.
-            if (proportional + loops.tilt[axis]).abs() < limit {
-                loops.tilt[axis] =
-                    (loops.tilt[axis] + VELOCITY_INTEGRAL * along[axis] * DT).clamp(-limit, limit);
-            }
-            (proportional + loops.tilt[axis]).clamp(-limit, limit)
-        });
-        let retained = retention(s, [-tilt[0], tilt[1]]);
-        let [p, q, r] = s.lift_controls.body_rates;
-        let full = Self::full_rates(s);
-        input.pitch = attitude_loop(
-            -tilt[0] - s.pitch,
-            q,
-            full[0],
-            ATTITUDE_BANDWIDTH,
-            ATTITUDE_WINDOW,
-            retained[0],
-            &mut loops.stick[0],
-        );
-        input.roll = attitude_loop(
-            angle(tilt[1] - s.bank),
-            p,
-            full[1],
-            ATTITUDE_BANDWIDTH,
-            ATTITUDE_WINDOW,
-            retained[1],
-            &mut loops.stick[1],
-        );
-        input.yaw = attitude_loop(
-            angle(self.heading - s.yaw),
-            r,
-            full[2],
-            HEADING_BANDWIDTH,
-            HEADING_WINDOW,
-            0.,
-            &mut loops.stick[2],
-        );
         let climb_limit = HOVER_CLIMB_FPM / 60.;
-        let climb = (HEIGHT_GAIN * (loops.height - height)).clamp(-climb_limit, climb_limit);
-        let climb_error = climb - s.vertical_speed;
-        loops.collective = (loops.collective + CLIMB_INTEGRAL * climb_error * DT).clamp(0., 1.);
-        input.collective = Some((loops.collective + CLIMB_GAIN * climb_error).clamp(0., 1.));
-        input.collective_rate = 0.;
+        let target = rotor_law::HoverTarget {
+            point: loops.point,
+            velocity: None,
+            height: loops.height,
+            heading: self.heading,
+            climb_limit,
+            descent_limit: climb_limit,
+            close_speed: rotor_law::POSITION_SPEED_FPS,
+            tilt_limit: HOVER_TILT_DEGREES.to_radians(),
+        };
+        rotor_law::hover(s, ground, &target, loops, input);
     }
     /// The heading and waypoint modes on the helicopters and the V-22: the
     /// fixed-wing law's bank command and its climb command toward the held
-    /// altitude (10 s, here within 1,000 ft/min), flown through attitude
-    /// loops on the cyclic. While the mode flies the collective
+    /// altitude (10 s, here within 1,000 ft/min), flown by
+    /// [`rotor_law::forward`]. While the mode flies the collective
     /// ([`collective_coupled`]) the climb goes to the collective and the
     /// pitch holds the ground speed along the heading taken at engagement
     /// (at least 40 kt; the pitch trim keys move it 2 kt a tap). Otherwise
-    /// the climb becomes a pitch attitude by the flight path error. The
-    /// pedals keep the turn coordinated, against the sideslip through the
-    /// air, at every stability level.
+    /// the climb becomes a pitch attitude by the flight path error.
     fn rotorcraft(&mut self, s: &State, wind: [f64; 3], input: &mut PilotInput) {
         let bearing = self.bearing(s.position);
         let coupled = collective_coupled(s);
-        let loops = &mut self.loops;
-        let pitch_limit = ROTORCRAFT_PITCH_DEGREES.to_radians();
-        if !loops.started {
-            loops.started = true;
-            loops.tilt[0] = s.pitch.clamp(-pitch_limit, pitch_limit);
+        if coupled && !self.loops.coupled {
+            // The speed is held from here.
+            self.loops.speed = rotor_law::speed_along(s).max(HOVER_SPEED_KT * KT);
         }
-        let (sin, cos) = s.yaw.sin_cos();
-        let along = s.velocity[0] * sin + s.velocity[2] * cos;
-        if coupled && !loops.coupled {
-            // The collective and the speed are held from here.
-            loops.coupled = true;
-            loops.collective = s.lift_controls.collective;
-            loops.speed = along.max(HOVER_SPEED_KT * KT);
-        }
-        loops.coupled = coupled;
         let bank = (angle(bearing - s.yaw) * 1.5).clamp(-30_f64.to_radians(), 30_f64.to_radians());
         let climb_limit = ROTORCRAFT_CLIMB_FPM / 60.;
         let climb = ((self.altitude - s.position[1]) / 10.).clamp(-climb_limit, climb_limit);
-        let pitch = if coupled {
-            // Speed on the cyclic, height on the collective.
-            let error = loops.speed - along;
-            let proportional = -VELOCITY_GAIN * error / GRAVITY;
-            if (proportional + loops.tilt[0]).abs() < pitch_limit {
-                loops.tilt[0] = (loops.tilt[0] - VELOCITY_INTEGRAL * error * DT)
-                    .clamp(-pitch_limit, pitch_limit);
-            }
-            let climb_error = climb - s.vertical_speed;
-            loops.collective = (loops.collective + CLIMB_INTEGRAL * climb_error * DT).clamp(0., 1.);
-            input.collective = Some((loops.collective + CLIMB_GAIN * climb_error).clamp(0., 1.));
-            input.collective_rate = 0.;
-            (proportional + loops.tilt[0]).clamp(-pitch_limit, pitch_limit)
-        } else {
-            // Wingborne: the climb on the pitch, the power lever the pilot's.
-            let path_error = (climb - s.vertical_speed) / s.speed.max(HOVER_SPEED_KT * KT);
-            loops.tilt[0] =
-                (loops.tilt[0] + PATH_INTEGRAL * path_error * DT).clamp(-pitch_limit, pitch_limit);
-            (loops.tilt[0] + PATH_GAIN * path_error).clamp(-pitch_limit, pitch_limit)
+        let target = rotor_law::ForwardTarget {
+            bank,
+            climb,
+            speed: self.loops.speed,
+            pitch_limit: ROTORCRAFT_PITCH_DEGREES.to_radians(),
+            coupled,
         };
-        let retained = retention(s, [pitch, bank]);
-        let [p, q, r] = s.lift_controls.body_rates;
-        let full = Self::full_rates(s);
-        input.pitch = attitude_loop(
-            pitch - s.pitch,
-            q,
-            full[0],
-            ATTITUDE_BANDWIDTH,
-            ATTITUDE_WINDOW,
-            retained[0],
-            &mut loops.stick[0],
-        );
-        input.roll = attitude_loop(
-            angle(bank - s.bank),
-            p,
-            full[1],
-            ATTITUDE_BANDWIDTH,
-            ATTITUDE_WINDOW,
-            retained[1],
-            &mut loops.stick[1],
-        );
-        // The pedals keep the turn coordinated: the yaw rate of the turn,
-        // and the sideslip through the air steered out.
-        let air = [s.velocity[0] - wind[0], s.velocity[2] - wind[2]];
-        let forward = air[0] * sin + air[1] * cos;
-        let right = air[0] * cos - air[1] * sin;
-        let sideslip = right.atan2(forward.max(1.));
-        let turn = GRAVITY * s.bank.clamp(-1.2, 1.2).tan() / forward.max(HOVER_SPEED_KT * KT);
-        input.yaw = attitude_loop(
-            sideslip,
-            r - turn,
-            full[2],
-            SIDESLIP_BANDWIDTH,
-            HEADING_WINDOW,
-            0.,
-            &mut loops.stick[2],
-        );
+        rotor_law::forward(s, &target, wind, &mut self.loops, input);
     }
 }
 
@@ -810,6 +584,19 @@ crate::flight::exact::exact_enum!(Mode {
 });
 crate::flight::exact::exact_struct!(NavigationTarget { number, position });
 crate::flight::exact::exact_struct!(Loops {
+    started,
+    point,
+    height,
+    lever,
+    tilt,
+    stick,
+    collective,
+    coupled,
+    speed,
+});
+// The AI's rotor and jet-lift laws keep their own Loops (slice H1), coded
+// with the AI actor (docs/formats/checkpoint.md).
+crate::checkpoint_struct!(Loops {
     started,
     point,
     height,
