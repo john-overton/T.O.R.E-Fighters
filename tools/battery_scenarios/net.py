@@ -2200,6 +2200,54 @@ def drive_slow_load(d: Drive) -> None:
     log_must(d, server_log(d), r"joined as Slow", r"Slow: game stalled", r"Slow: game back after \d+\.\d s")
 
 
+def drive_host_slow_build(d: Drive) -> None:
+    """A host's own long mission build (protocol 28, slice NET2): a hosting bot whose every build after its first
+    lasts 15 seconds (`tore-bot --host-slow-build 15`) and three pilots that stand by, each with a Cheat loading, so
+    the flight's start builds the mission again with their loadouts while two standbys are ready. The host's loading
+    thread keeps them: nobody is dropped, nobody races a migration and no standby takes over."""
+    fresh_data(d)
+    port = d.port()
+    mission = write_mission(d)
+    host = d.start(
+        "host",
+        [d.bot, "--host", mission, "--port", port, "--callsign", "Lead", "--slot", "0", "--seconds", 190,
+         "--players", "4", "--wait-standbys", 2, "--king", "loadouts=any", "--host-slow-build", 15],
+    )
+    if not host.wait_for(r"^Lead: hosting ", 60):
+        raise DriveError("the hosting bot never began to host")
+    # The King's loadout rule builds the lobby's mission again, alone: the pilots join after it.
+    if not host.wait_for(r"^Lead: host: loaded the mission in ", 90):
+        raise DriveError("the host never built the lobby's mission again for the loadout rule")
+    pilots = d.start(
+        "pilots",
+        [d.bot, "--connect", f"{LOCALHOST}:{port}", "--callsign", "Pilot", "--count", "3", "--slot", "1",
+         "--seconds", 90, "--standby", "on", "--load", "MK82.JT"],
+    )
+    if not host.wait_for(r"^Lead: host: mission started", 150):
+        raise DriveError("the hosting bot never started the mission (no two standbys ready?)")
+    # The pilots leave first, so the host's own end hands nothing over.
+    pilots.finish(150, 0)
+    host.finish(150, 0)
+    built = re.findall(
+        r"(?m)^Lead: host: loaded the mission in (\d+\.\d) s; (\d+) players? kept through it", host.text()
+    )
+    flight = [(float(took), int(kept)) for took, kept in built if int(kept) == 4]
+    if not flight:
+        d.problem(f"the host logged no 15-second build that kept its four players: {built}")
+    elif flight[0][0] < 15:
+        d.problem(f"the flight's build took {flight[0][0]} s, not the 15 asked for")
+    for name in ["Pilot1", "Pilot2", "Pilot3"]:
+        pilots.expect(rf"^{name}: the host is loading a mission$", f"{name} hearing the host load")
+        m = re.search(rf"(?m)^{name}: the host is back after (\d+) ms of loading$", pilots.text())
+        if not m:
+            d.problem(f"{name} never heard the host come back from loading")
+        pilots.expect(rf"^{name}: seat \d+, plane \d+, at tick \d+$", f"{name} seated")
+    pilots.forbid(r"migrate: lost the host|taking the game over|Lost contact with the host", "a migration")
+    pilots.forbid(NET_BAD + r"|No other game could take over", "a network problem or a session given up")
+    pilots.forbid(r"migrations resumed [1-9]", "a migration")
+    host.forbid(r"no packet for 5 seconds|\bfault\b|protocol error|bad packets", "a dropped player or a fault")
+
+
 # The network problems of NET_BAD without its refusals: Autobalance's own refusal is part of the test.
 NET_BAD_BUT_REFUSALS = (
     r"a protocol error|too many bad packets|no packets for 5 seconds|the game data differs|"
@@ -2554,6 +2602,13 @@ def scenarios() -> list[Scenario]:
             timeout=240,
             notes="a bot whose mission builds each take 8 seconds (tore-bot --slow-build 8) joins and flies: its "
             "keepalive thread keeps it past the 5-second silence rule while it builds (slice NET)",
+        ),
+        Scenario(
+            name="net-host-slow-build", lane="net", args=[], driver=drive_host_slow_build, uses=("bot",),
+            timeout=420,
+            notes="a hosting bot whose builds take 15 seconds (tore-bot --host-slow-build 15) starts the flight with "
+            "three pilots' Cheat loadings and two standbys ready: its loading keepalives (protocol 28) keep every "
+            "pilot, nobody races a migration, no standby takes over (slice NET2)",
         ),
         Scenario(
             name="net-content-missing", lane="net", args=[], driver=drive_content_missing, uses=("server", "bot"),
