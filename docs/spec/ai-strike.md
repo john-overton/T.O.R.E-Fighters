@@ -584,7 +584,7 @@ rockets' aim offset (the [skill circle](#skill-and-release-precision)).
 | Exit | Retail's: 5 degrees up at maximum speed on the exit heading, levelling at the pass's height, to max(20,000 ft, 2R); then turn back and choose again | retail |
 | Defence | The helicopter's own break ([below](#helicopter-defence)); the fighters' break sank a helicopter | opinionated (John, 2026-10-11) |
 | After a defence | Back to the ingress, where the rings it knows (and the ring it was ambushed in) decide whether it attacks or holds off ([below](#helicopter-threat-awareness)); the fighters' safe test and withdrawal are not used | opinionated (John, 2026-10-12) |
-| Home | A helicopter has no landing, so home is the ordinary return-to-base heading ([below](#ai-helicopters-in-quick-mission)) | spec-derived |
+| Home | The mission's return: a landing order with a home runway, flown as the [vertical landing](ai-airfield.md#vertical-takeoff-and-landing) since slice H2, the way home routed round the threat rings it knows ([below](#helicopter-threat-awareness)); with no runway the leader flies home and holds | spec-derived (the return); the landing and the routing fitted (agent, slice H2) |
 
 ### Helicopter defence
 
@@ -684,10 +684,21 @@ a ring: it holds off for three minutes and goes home untouched. With the seed 4
 sites destroyed a minute in (the driver's SEAD stand-in) it resumes at once and
 hurts the tank. Under seed 15 an SA-14 it had not seen engages it at 155 s: it
 breaks, leaves the ring, holds, resumes at 266 s, once the threat has been quiet
-a minute, and hurts the tank from outside the rings it now knows. What it cannot do: a helicopter that starts, or is
-sent, inside a lethal ring it knows (the driver's 4 nm start under some SAM
-layouts) still has to fly out through it, and is often lost on the way; and the
-flight home is the mission's return heading, which does not avoid rings.
+a minute, and hurts the tank from outside the rings it now knows. Since slice H1 the
+Mi-24 flies its real 150 kt and fires before that ambush, which then comes on its
+exit; the run follows it past the impact (`--follow-threat`) and sees the leave,
+the hold-off and the resume.
+
+**Leaving a ring and going home** (slice H2, fitted, agent). Inside a ring it
+knows, after a break it leaves by the shortest way out, straight away from the
+site, instead of holding its course deeper in, and the hold-off circle does the
+same near its centre. The flight home leaves any known ring first, then flies
+round the rings across the way home on a circle 1,000 ft outside each, on the
+side away from its centre, and straight home once the line is clear
+([home past threats](ai-airfield.md#vertical-takeoff-and-landing)). What it still
+cannot do: a helicopter that starts inside a lethal ring (the driver's 4 nm start
+under some SAM layouts) is often in a missile's reach before it is out, and the
+ambush ring it does not know yet is not routed round.
 
 ### AI helicopters in Quick Mission
 
@@ -703,9 +714,9 @@ wingmen](variety-flight.md#ai-wingmen)).
 | --- | --- | --- |
 | Role | The bomber-class default applies: the AH-64 and the Mi-24 carry the class word 0x4000, like the A-4E, so a friendly wing 2 or 3 of helicopters strikes when a ground target is set (or when "Strike the ground target" is chosen) and flies CAP otherwise; the player's wing and every Redfor wing stay CAP. The CH-47 and the V-22 carry the same word and no surface store: they never strike. The CH-47 (unarmed, an AI wing choice only, John 2026-10-12) flies the mission's route, defends with the helicopter break, and answers a ground order "Winchester" (no usable surface store) | retail (the class word), opinionated (John, 2026-10-11 and 2026-10-12); the no-store rule agent (slice H3) |
 | Start, AI wings | A helicopter of the AI's own wings starts 1,500 ft over the ground under it, in trimmed forward flight, not at the mission altitude and not raised to the 5,000 ft sea-level floor of the other aircraft, at the height the pop-up flies. It was a workaround (the fighters' adapter could not make a helicopter climb or descend by much); since slice H1 the AI climbs and descends on the collective, and the start is kept because John liked it (2026-10-12). A helicopter of the player's wing starts with the player | opinionated (agent; kept, John 2026-10-12) |
-| Start, ground | The AI cannot lift a helicopter off the ground (it cannot hold a hover: asked to start from one it crashes in 5 s). A player in a helicopter on a ground start therefore leads friendly wing 1 alone, with the notice "The AI cannot take a Mi-24 Hind-D off the ground yet, so friendly wing 1 is just you"; an airborne start offers the wingmen. The other wings start airborne at any start. A mission file that asks for both is refused by the creator's check, not by the world | opinionated (agent); the next step is a hover controller |
+| Start, ground | Since slice H2 the AI takes every vertical type off the ground ([vertical takeoff](ai-airfield.md#vertical-takeoff-and-landing)): a player in a helicopter, the V-22, the AV-8 or the Yak-141 on a ground start keeps the AI wingmen of friendly wing 1 (before, it led wing 1 alone), and an enemy ground start of these types takes off. The other wings start airborne at any start | opinionated (John, 2026-10-12: ground starts with AI wingmen) |
 | Fuel | A helicopter and the V-22 keep a fuel schedule of their own since slice H3: the AI does burn fuel (the military flow of the record, every second, at any speed; the AH-64 and the V-22 33 minutes, the CH-47 55, the Mi-24 18 because its record says 3 lb/s). Time home is at 80 percent of the envelope's top speed (the fighters' fifth of the envelope is 55 knots for the AH-64), bingo under it plus 3 minutes, caution plus 7, critical under 2; a home a full tank could not fly to and back from with the reserve is no home (no schedule). Bingo flies the way home at that speed; the landing is slice H2's. Details and why in [the AI's fuel](ai.md#rotorcraft-fuel-slice-h3) | fitted (agent, slice H3) |
-| Landing | A helicopter is never put through the airfield sequences, which are an aeroplane's: a runway approach and rollout flown at 120 knots put a Mi-24 into the ground in the probe. A landing order (Land, Bug Out, the end of the mission, damage) sends a leader home by the ordinary return-to-base heading and holds it there; its wingmen stay in formation on it. It does not land | opinionated (agent); landing is open |
+| Landing | Since slice H2 every landing (Land, Bug Out, bingo, the end of the mission, damage, a wingman joining its leader) flies the [vertical landing](ai-airfield.md#vertical-takeoff-and-landing): the helicopter marshal and gates, a hover over the landing point, a vertical descent under the shared touchdown rule, an air taxi to a parking slot, engines off | opinionated (John, 2026-10-12); numbers fitted (agent) |
 | Air combat | Unchanged: the fighters' air logic, which in the 5 v 5 probes keeps a helicopter within 16 degrees of level at under 135 knots. The probes (`ai-fight-heli-*`) found no helicopter that dived or overspeed without a hit | spec-derived |
 | Pass | The pop-up and the stand-off, defence and exit above | as above |
 
