@@ -742,8 +742,10 @@ pub(crate) mod render_hash_tests {
         // including the Hornet's retained main-gear art at full stow. Combat,
         // camera and ejection outputs below are unchanged by that repair.
         0x6031_e577_f39a_cffe,
-        0x87cb_4458_d06e_7fdc,
-        0x2f6c_0a1c_b3b7_f4e5,
+        // PY2 (2026-10-13): weapons in flight carry their faces' palette
+        // entries, so the weather lights them as it lights the airframe.
+        0x377b_8bc2_794a_84ec,
+        0xdacd_d293_7ddd_d75d,
         0x7ddb_79bb_1315_bf69,
         0x7e3f_dcdd_a149_201d,
     ];

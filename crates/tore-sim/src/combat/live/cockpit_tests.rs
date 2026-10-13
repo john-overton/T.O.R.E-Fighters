@@ -140,7 +140,12 @@ fn ai_release(s: &mut State, config: &Configuration) -> std::result::Result<Vec<
             station: 0,
             launcher: launcher(),
             incoming: None,
-            rounds_after: 0,
+            // What the human's station holds after the same release.
+            rounds_after: {
+                let s = &config.stations[0];
+                (u32::from(s.count) * super::pod_rounds(&s.weapon))
+                    .saturating_sub(u32::from(s.weapon.burst.actual_rounds_per_game).max(1))
+            },
         },
         || {
             let id = next;
@@ -395,8 +400,12 @@ fn an_ai_with_no_laze_support_drops_a_laser_bomb_by_hand_like_a_dumb_bomb() {
         )
         .expect("a bomb solution");
     let ccip = solution.ccip.expect("a CCIP");
-    let release =
-        crate::combat::ballistics::ReleaseState::from_station(&launcher(), &config.stations[0], 0);
+    let release = crate::combat::ballistics::ReleaseState::from_mount(
+        &launcher(),
+        &config.stations[0],
+        next(&robot, &config),
+        0,
+    );
     assert_eq!(
         ccip.impact,
         crate::combat::ballistics::predict_impact(release, ground)
@@ -692,6 +701,7 @@ fn a_paired_station_alternates_sides_for_a_human_and_the_ai() {
         c.stations[0].rack = crate::combat::hardpoints::Rack {
             location: 4,
             paired: true,
+            ..Default::default()
         };
         c
     };
@@ -766,6 +776,7 @@ fn the_bomb_sight_predicts_from_the_pylon_the_next_bomb_leaves() {
     config.stations[0].rack = crate::combat::hardpoints::Rack {
         location: 4,
         paired: true,
+        ..Default::default()
     };
     let mut person = with_tank(State::new(config.clone(), true).unwrap());
     person.own_mut().armed = true;
@@ -816,5 +827,7 @@ fn next(robot: &State, config: &Configuration) -> crate::attitude::Vector {
     robot
         .strike_cockpit(0)
         .and_then(|c| config.stations.get(c.selected))
-        .map_or([0.; 3], |s| s.mount)
+        .map_or([0.; 3], |s| {
+            s.next_release_point(u32::from(s.count) * super::pod_rounds(&s.weapon))
+        })
 }

@@ -58,7 +58,12 @@ fn carrying(weapon: Weapon, count: u16, mount: Vector) -> State {
         mount,
         count,
         internal: false,
-        rack: Default::default(),
+        rack: crate::combat::hardpoints::Rack {
+            // Released from the record's own point (a bay): these paths
+            // start at the mount, whatever a pylon's rack would add.
+            location: 3,
+            ..Default::default()
+        },
     }];
     State::new(config, true).unwrap()
 }
@@ -175,7 +180,12 @@ fn mk82_from_5000_ft_level_at_450_kt_lands_where_the_numbers_say() {
         mount: [0.; 3],
         count: 1,
         internal: false,
-        rack: Default::default(),
+        rack: crate::combat::hardpoints::Rack {
+            // Released from the record's own point (a bay): these paths
+            // start at the mount, whatever a pylon's rack would add.
+            location: 3,
+            ..Default::default()
+        },
     };
     let release = ReleaseState::from_station(&pass(5_000., 450., 0.), &station, 0);
     assert_eq!(release.speed(), 759.);
@@ -202,7 +212,12 @@ fn retard_scales_only_the_release_speed_and_cluster_bombs_clamp_higher() {
             mount: [0.; 3],
             count: 1,
             internal: false,
-            rack: Default::default(),
+            rack: crate::combat::hardpoints::Rack {
+                // Released from the record's own point (a bay): these paths
+                // start at the mount, whatever a pylon's rack would add.
+                location: 3,
+                ..Default::default()
+            },
         };
         ReleaseState::from_station(&pass(5_000., knots, 0.), &station, 0)
     };

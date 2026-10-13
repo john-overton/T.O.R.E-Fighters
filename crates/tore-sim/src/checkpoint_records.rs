@@ -137,7 +137,12 @@ crate::checkpoint_struct!(Countermeasures {
 crate::checkpoint_struct!(Station { mount, count, internal, rack } shared { weapon });
 
 // A station's source location and pairing (B3).
-crate::checkpoint_struct!(Rack { location, paired });
+crate::checkpoint_struct!(Rack {
+    location,
+    paired,
+    over,
+    tip
+});
 
 crate::checkpoint_struct!(Tank {
     empty_weight,
@@ -153,6 +158,7 @@ crate::checkpoint_struct!(TankStore { source, name, tank });
 crate::checkpoint_struct!(TankStation {
     hardpoint,
     mount,
+    rack,
     store,
     quantity,
 });
@@ -387,6 +393,12 @@ mod tests {
                 TankStation {
                     hardpoint: 3,
                     mount: [0.5, -2., 1.],
+                    rack: Rack {
+                        location: 4,
+                        paired: true,
+                        over: [Some(-0.25), None, Some(1.5), None, Some(-3.)],
+                        tip: Some([19.25, 0.5]),
+                    },
                     store: Some(TankStore {
                         source: "F18_330.GAS".into(),
                         name: "330 gal".into(),
@@ -401,6 +413,7 @@ mod tests {
                 TankStation {
                     hardpoint: 5,
                     mount: [-0.5, -2., 1.],
+                    rack: Default::default(),
                     store: None,
                     quantity: 0,
                 },

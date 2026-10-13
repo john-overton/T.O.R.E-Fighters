@@ -144,13 +144,27 @@ pub(super) fn run(scene: &mut Scene, o: &Options) -> AppResult<()> {
             // up and forward (B3): the forward figure includes the tick the
             // aircraft has flown since.
             let from: Vector = std::array::from_fn(|i| previous[i] - launcher.position[i]);
+            // Where the store hung (PY2): the point the drawing hangs it
+            // at, and how deep its pylon is.
+            let station = scene.station();
+            let units = tore_sim::combat::hardpoints::units(
+                u32::from(scene.rounds()),
+                u32::from(station.weapon.burst.actual_rounds_per_game),
+            );
+            let hung = station.release_point(units);
             println!(
-                "a2g-run: origin n={n} id={id} right {:.2} up {:.2} forward {:.2} station-right {:.2} rounds-after {}",
+                "a2g-run: origin n={n} id={id} right {:.2} up {:.2} forward {:.2} station-right {:.2} rounds-after {} hung {:.2} {:.2} {:.2} depth {}",
                 dot(from, launcher.basis.right),
                 dot(from, launcher.basis.up),
                 dot(from, launcher.basis.forward),
-                scene.station().mount[0],
+                station.mount[0],
                 scene.rounds(),
+                hung[0],
+                hung[1],
+                hung[2],
+                station
+                    .release_depth(units)
+                    .map_or("none".to_owned(), |d| format!("{d:.2}")),
             );
         }
         for (n, &(id, position, _)) in fresh.iter().enumerate() {

@@ -1562,6 +1562,7 @@ fn a_seated_loadout_counts_gun_pods_as_pods_and_names_its_tanks() {
         TankStation {
             hardpoint: 4,
             mount: [0.; 3],
+            rack: Default::default(),
             store: Some(TankStore {
                 source: "F4_370.GAS".into(),
                 name: "370 gal".into(),
@@ -1576,6 +1577,7 @@ fn a_seated_loadout_counts_gun_pods_as_pods_and_names_its_tanks() {
         TankStation {
             hardpoint: 5,
             mount: [0.; 3],
+            rack: Default::default(),
             store: None,
             quantity: 0,
         },

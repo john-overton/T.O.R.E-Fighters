@@ -23,6 +23,8 @@ pub fn store_record(pose: &StorePose) -> StoreRecord {
         items: pose.items,
         loaded: pose.loaded,
         body: pose.body,
+        over: pose.rack.over.map(|h| h.map(f64::from)),
+        tip: pose.rack.tip.map(|t| t.map(f64::from)),
     }
 }
 
@@ -34,6 +36,8 @@ pub fn store_pose(record: &StoreRecord) -> StorePose {
         rack: tore_sim::combat::hardpoints::Rack {
             location: record.location,
             paired: record.paired,
+            over: record.over.map(|h| h.map(|h| h as f32)),
+            tip: record.tip.map(|t| t.map(|v| v as f32)),
         },
         shape: record.shape.clone(),
         look: match record.look {
@@ -108,6 +112,8 @@ mod tests {
             rack: tore_sim::combat::hardpoints::Rack {
                 location: 4,
                 paired: true,
+                over: [Some(-0.75), Some(-0.5), None, None, Some(-1.25)],
+                tip: Some([18.5, 0.75]),
             },
             shape: Some("AGM65.3".into()),
             look: snapshot::StoreLook::Pod,
