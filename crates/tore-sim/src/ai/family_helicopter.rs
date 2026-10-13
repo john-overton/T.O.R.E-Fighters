@@ -35,8 +35,9 @@
 //!   then turn back and choose again. A helicopter flying it after a
 //!   pop-up crossed the target area at 1,800 ft, where a site it had not
 //!   seen shot an AH-64 down (slice HF1). T.O.R.E's helicopter leaves the
-//!   target area instead (opinionated, John 2026-10-13: "the helicopter
-//!   leaves after its run"; the shape is fitted, agent): it turns away from
+//!   target area instead, always, threat or not (opinionated, John
+//!   2026-10-13: "the helicopter leaves after its run", and no straight-on
+//!   exit even with no threat near; the shape is fitted, agent): it turns away from
 //!   the target, round every ring it knows and the ambush ring of a threat
 //!   that engaged it, and masks at 200 ft over the highest ground ahead at
 //!   its strike speed, to the same distance, then turns back and chooses

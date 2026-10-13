@@ -1014,17 +1014,16 @@ def scenarios() -> list[Scenario]:
                    "--sead-at", "60"),
          dict(label="mi24 resumes after SEAD", decisions=["hold_off", "resume"], sead=True, release=True,
               hurt=True)),
-        # Seed 15: the SA-14 whose ring it starts in engages it on its way in; it breaks, attacks from
-        # outside the rings (the stand-off), hurts the tank and leaves (slice HF1). Until slice HF1
-        # this run showed an ambush by an SA-7 it did not know (leave the ring, resume once quiet),
-        # but that came only because retail's exit carried it on over the column after its shot; the
-        # exit now turns away and masks, and no layout of 40 seeds at 4 nm or 160 seeds and headings
-        # at 6 nm gives an ambush followed by a resume and a hit. The ambush rule itself is the unit
-        # test `ambushed_by_a_threat_it_did_not_know_it_breaks_leaves_the_ring_then_resumes`.
+        # An ambush by a site it had not seen (slice H4's rule; restored in slice HF1, John
+        # 2026-10-13). Seed 15 with its SA-14 moved 5,000 ft south-west of the column
+        # (`--place-site`): it holds off that known ring, resumes once the column has driven out of
+        # it and fires; on its way out (the exit turns away and masks) an SA-7 it had not seen
+        # engages it: it breaks, leaves that ring, holds off, resumes and fires again, killing the
+        # tank. The run follows it (`--follow-threat`) to the shot after the resume.
         (pilot_run("UKR", "QUCOL", *at2, "--skill", "2", *sams, "--surface-seed", "15", "--seconds", "420",
-                   "--follow-egress"),
-         dict(label="mi24 engaged on its way in", profile="standoff", breaks=5, release=True, hurt=True,
-              egress=True)),
+                   "--follow-threat", "--place-site", "0x50000019,240,5000"),
+         dict(label="mi24 ambushed", decisions=["hold_off", "resume", "leave", "resume"], breaks=5,
+              release=True, kill=True)),
         # From 4 nm at 200 ft on seed 1 the AI would choose the stand-off under the SAMs; it holds off.
         (pilot_run("UKR", "QUCOL", "--aircraft", "mi24", "--load", "AT2", "--altitude", "200", "--from", "4",
                    "--speed", "120", "--seconds", "200", "--skill", "2", *sams, "--surface-seed", "1"),
@@ -1323,8 +1322,8 @@ def scenarios() -> list[Scenario]:
                   "heavy AAA on the column (it fires its AT-2 from outside every gun ring and hurts the "
                   "tank), light AAA at the factory (pop-up, kill), a SAM that out-ranges the AT-2 and an "
                   "SA-14 on the target (it holds off, then goes home), the SA-14 with SEAD a minute in "
-                  "(it resumes and fires), an SA-14 engaging it on its way in (it breaks, fires from "
-                  "outside the rings, hurts the tank and egresses), and the stand-off layout of seed 1 (it holds "
+                  "(it resumes and fires), an ambush by a site it had not seen on its way out (it "
+                  "breaks, leaves the ring, holds off, resumes and fires again), and the stand-off layout of seed 1 (it holds "
                   "off). Each break is the retail plus or minus 90 degrees to the threat's bearing (or "
                   "the masking alternatives), kept at speed, within 10 degrees of level and clear of "
                   "the ground; the helicopter is never lost.",

@@ -537,13 +537,14 @@ class HelicopterTests(unittest.TestCase):
                   heli_run(breaks=0, released=False, killed=False, decisions=held),
                   heli_run(breaks=0, released=False, killed=False, decisions=held),
                   heli_run(breaks=0, decisions=["threat_hold_off", "threat_resume"], sead=True),
-                  heli_run(profile="standoff", breaks=8, egress=True),
+                  heli_run(breaks=8, decisions=["threat_hold_off", "threat_resume", "threat_leave",
+                                                "threat_hold_off", "threat_resume"]),
                   heli_run(profile="standoff", breaks=3, released=False, killed=False, decisions=held)]
         self.assertEqual(defended.check("\n".join(honest)), [])
-        # Slice HF1: the run engaged on its way in must also egress.
-        stayed = list(honest)
-        stayed[5] = heli_run(profile="standoff", breaks=8)
-        self.assertNotEqual(defended.check("\n".join(stayed)), [])
+        # Slice HF1: the ambushed run must leave and resume after it.
+        unambushed = list(honest)
+        unambushed[5] = heli_run(breaks=8, decisions=["threat_hold_off", "threat_resume"])
+        self.assertNotEqual(defended.check("\n".join(unambushed)), [])
         quick = scenarios["qmc-strike-heli"]
         self.assertEqual(len([quick.args] + [st.args for st in quick.then]), 2)
 

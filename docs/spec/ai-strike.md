@@ -581,7 +581,7 @@ rockets' aim offset (the [skill circle](#skill-and-release-precision)).
 | The AT-2 | Leaves when the shared release test passes (the target inside the launcher's 45 degree cone with a clear line, inside the reach). The helicopter then holds its nose on the target, level, until the missile has hit or is gone (the [launcher sight rule](air-to-ground.md): command guidance needs the target in the cone every tick), and only then exits | spec-derived |
 | Rockets | The cue is flown onto the pass's drawn aim point: heading at the aim, flight path at the line to the aim plus three times the angle between the aim and the cue, no steeper than 20 degrees down. The first rocket leaves when the cue is within 25% of the circle of the aim, never less than 40 ft (with John's tighter circles a quarter is 8 to 29 ft at the top skills, closer than the AH-64's cue ever came; agent, at the integration) (a fighter's gate is 5%: a helicopter's cue moves slowly and its adapter holds it only to about this), then up to eight at the record's cadence while the cue stays inside the circle | fitted (agent); the circle opinionated (John) |
 | Run floor | A pop-up's final ends 500 ft above the ground whatever the cue says (the adapter cannot pull a helicopter out of a steep dive near the ground) | fitted (agent) |
-| Exit | The helicopter leaves the target area: it turns away from the target (the heading from the target to itself), round every ring it knows and the ambush ring of a threat that engaged it, and masks at 200 ft over the highest ground under and ahead of it, at its strike speed, out to max(20,000 ft, 2R); then it turns back and chooses again. Retail's exit is 5 degrees up at maximum speed straight on, levelling at the pass's height: after a pop-up that carried an AH-64 on over the Ukraine column at 1,800 ft, where a site it had not seen engaged it and shot it down 87 s into the driver's run (slice HF1) | leaving opinionated (John, 2026-10-13); its shape fitted (agent); the distance retail |
+| Exit | The helicopter leaves the target area, always, as if under threat whether or not one is near (John, 2026-10-13: no straight-on exit): it turns away from the target (the heading from the target to itself), round every ring it knows and the ambush ring of a threat that engaged it, and masks at 200 ft over the highest ground under and ahead of it, at its strike speed, out to max(20,000 ft, 2R); then it turns back and chooses again. Retail's exit is 5 degrees up at maximum speed straight on, levelling at the pass's height: after a pop-up that carried an AH-64 on over the Ukraine column at 1,800 ft, where a site it had not seen engaged it and shot it down 87 s into the driver's run (slice HF1) | leaving, always, opinionated (John, 2026-10-13); its shape fitted (agent); the distance retail |
 | Defence | The helicopter's own break ([below](#helicopter-defence)); the fighters' break sank a helicopter | opinionated (John, 2026-10-11) |
 | After a defence | Back to the ingress, where the rings it knows (and the ring it was ambushed in) decide whether it attacks or holds off ([below](#helicopter-threat-awareness)); the fighters' safe test and withdrawal are not used | opinionated (John, 2026-10-12) |
 | Home | The mission's return: a landing order with a home runway, flown as the [vertical landing](ai-airfield.md#vertical-takeoff-and-landing) since slice H2, the way home routed round the threat rings it knows ([below](#helicopter-threat-awareness)); with no runway the leader flies home and holds | spec-derived (the return); the landing and the routing fitted (agent, slice H2) |
@@ -687,11 +687,12 @@ breaks, leaves the ring, holds, resumes at 266 s, once the threat has been quiet
 a minute, and hurts the tank from outside the rings it now knows. Since slice H1 the
 Mi-24 flew its real 150 kt and fired before that ambush, which then came on its
 exit straight on over the column. Since slice HF1 it flies about 115 kt and its exit
-turns away from the target: on seed 15 the SA-14 whose ring it starts in engages it
-on its way in, it breaks, fires from outside the rings, hurts the tank and leaves,
-and the ambush no longer comes. No driver layout tried (40 seeds from 4 nm, 160
-seeds and headings from 6 nm) now gives an ambush followed by a resume and a hit,
-so the ambush rule is covered by the unit tests.
+turns away from the target, and that ambush no longer comes. The run now moves the
+seed's SA-14 5,000 ft south-west of the column (the driver's `--place-site`, John
+2026-10-13): the Mi-24 holds off that ring, resumes once the column has driven out
+of it and fires (234 s); on its way out an SA-7 it had not seen engages it (252 s):
+it breaks, leaves that ring, holds off, resumes (321 s) and fires again, killing
+the tank (352 s).
 
 **Leaving a ring and going home** (slice H2, fitted, agent). Inside a ring it
 knows, after a break it leaves by the shortest way out, straight away from the

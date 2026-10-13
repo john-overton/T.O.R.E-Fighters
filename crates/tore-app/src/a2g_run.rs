@@ -226,6 +226,27 @@ fn options() -> AppResult<Options> {
             "--sead-at" => o.ai.sead_at = Some(next()?.parse()?),
             "--follow-threat" => o.ai.follow_threat = true,
             "--follow-egress" => o.ai.follow_egress = true,
+            "--place-site" => {
+                let usage =
+                    "--place-site needs ID,BEARING_DEG,RANGE_FT (the id as 0x50000010 or decimal)";
+                let text = next()?;
+                let parts: Vec<&str> = text.split(',').collect();
+                let [id, bearing, range] = parts[..] else {
+                    return Err(usage.into());
+                };
+                let id = match id.strip_prefix("0x") {
+                    Some(hex) => u32::from_str_radix(hex, 16).map_err(|_| usage)?,
+                    None => id.parse().map_err(|_| usage)?,
+                };
+                let (bearing, range): (f64, f64) = (
+                    bearing.parse().map_err(|_| usage)?,
+                    range.parse().map_err(|_| usage)?,
+                );
+                if !(bearing.is_finite() && range.is_finite() && range >= 0.) {
+                    return Err(usage.into());
+                }
+                o.ai.place_site = Some((id, bearing, range));
+            }
             other if other.starts_with("--") => return Err(format!("unknown {other}").into()),
             other => positional.push(other.to_owned()),
         }
