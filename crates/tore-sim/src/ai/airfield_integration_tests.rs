@@ -287,11 +287,13 @@ fn an_airborne_wingman_ordered_to_land_flies_the_approach_and_parks() {
     assert_parked_on_runway(actor);
     // Touchdown and rollout toward the far end of the chosen runway end.
     assert!(actor.flight().position[2] > 0.);
-    // Parked aircraft stay parked and refuse orders.
+    // Parked aircraft stay parked and refuse orders, with their engines
+    // shut down (slice HF1, John 2026-10-13).
     for _ in 0..600 {
         step(&mut mission, None);
     }
     assert_parked_on_runway(mission.actor(1).unwrap());
+    assert!(!mission.actor(1).unwrap().flight().engine, "engines off");
     assert_eq!(
         mission
             .order(1, WingRequest::FormationSelection(Formation::Echelon))
