@@ -445,7 +445,7 @@ def touchdown_scenarios() -> list[Scenario]:
 ROTOR_LINE = re.compile(r"^ROTOR (\S+) (.+?): (.*)$", re.M)
 ROTOR_FLIGHTS = (["hold calm", "hold wind15", "move500", "climb500"]
                  + [f"forward {k}kt {c}fpm" for k in (40, 80, 120) for c in ("+1000", "-1000")]
-                 + ["turn200", "slow120"])
+                 + ["descent_turn", "turn200", "slow120"])
 
 
 def _rotor_values(text: str) -> dict[str, str]:
@@ -482,6 +482,10 @@ def check_rotor_probe(output: str) -> list[str]:
             want = float(flight.split()[2].replace("fpm", ""))
             if not (abs(_number(v["climb"]) - want) < 150 and _number(v["speed_off"]) < 5 and _number(v["heading_off"]) < 3):
                 problems.append(f"{label} missed its speed, climb or heading: {rest}")
+        elif flight == "descent_turn" and not ac.startswith("V22") and not (
+                _number(v["least_collective"]) >= 0.099 and _number(v["nose_off_track"]) < 30
+                and _number(v["steepest_pitch"]) < 30):
+            problems.append(f"{label} unloaded its rotor or lost its heading in a turning descent: {rest}")
         elif flight == "turn200" and not (_number(v["lost"]) < 50 and _number(v["heading_off"]) < 5):
             problems.append(f"{label} sank or did not turn round at 200 ft: {rest}")
         elif flight == "slow120" and not (_number(v["lost"]) < 50 and _number(v["off"]) < 10 and v["hover"] == "true"):

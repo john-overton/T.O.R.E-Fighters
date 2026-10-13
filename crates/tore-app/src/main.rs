@@ -8565,7 +8565,7 @@ fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<
                             let ground =
                                 mission.terrain.surface(f.position[0], f.position[2]).height;
                             println!(
-                                "AI rotor: tick={tick} actor={} activity={:?} agl={:.0} kt={:.0} vs={:.1} pitch={:.1} bank={:.1} hdg={:.0} nacelle={:.0} collective={:.2} nr={:.2} regime={:?} cmd_hdg={} cmd_path={} cmd_kt={} cmd_climb={} cmd_nacelle={} intent_path={} floor={:?} max_kt={:.0}",
+                                "AI rotor: tick={tick} actor={} activity={:?} agl={:.0} kt={:.0} vs={:.1} pitch={:.1} bank={:.1} hdg={:.0} nacelle={:.0} collective={:.2} nr={:.2} regime={:?} cmd_hdg={} cmd_path={} cmd_kt={} cmd_climb={} cmd_nacelle={} intent_path={} floor={:?} max_kt={:.0} course={:.0} along_kt={:.0}",
                                 actor.id(),
                                 actor.activity(),
                                 f.position[1] - ground,
@@ -8598,6 +8598,12 @@ fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<
                                 fly.and_then(|t| t.terrain_floor_deg)
                                     .map(|d| (d * 10.).round() / 10.),
                                 actor.speed_limits().maximum.0
+                                    / tore_sim::runway_wind::FEET_PER_SECOND_PER_KNOT,
+                                f.velocity[0]
+                                    .atan2(f.velocity[2])
+                                    .to_degrees()
+                                    .rem_euclid(360.),
+                                tore_sim::autopilot::rotor_law::speed_along(f)
                                     / tore_sim::runway_wind::FEET_PER_SECOND_PER_KNOT,
                             );
                         }

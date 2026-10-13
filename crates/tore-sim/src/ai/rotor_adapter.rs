@@ -103,6 +103,13 @@ pub const SPEED_COLLECTIVE_INTEGRAL: f64 = 0.002;
 /// The least collective the speed loop leaves a helicopter, so pointing
 /// never unloads the rotor.
 pub const POINTING_MINIMUM_COLLECTIVE: f64 = 0.2;
+/// The least collective a helicopter's AI flies in forward flight (fitted,
+/// slice CH47): the rotor is never unloaded. At the stop (a long descent
+/// asked at 120 knots) the rotor has no control power left, the nose swings
+/// away from the track, the speed along the nose reads near zero and the
+/// speed loop pitches the nose down after it into a dive. A tenth of the
+/// travel still flies the CH-47 down at 1,000 ft/min at 120 knots.
+pub const FORWARD_MINIMUM_COLLECTIVE: f64 = 0.1;
 /// The hover cascade takes over below this ground speed, kt (hover hold's
 /// 40 kt engage band).
 pub const HOVER_ENTRY_KT: f64 = HOVER_SPEED_KT;
@@ -534,6 +541,14 @@ impl RotorAdapter {
             self.loops.collective = s.lift_controls.collective;
         }
         rotor_law::forward(s, &target, wind, &mut self.loops, input);
+        if coupled && !tiltrotor {
+            // The climb loop wound the collective down to the stop to meet
+            // a descent: hold it at the floor, and its integrator with it,
+            // so the descent is flown as slowly as the floor allows and the
+            // climb loop is not buried when the descent ends.
+            self.loops.collective = self.loops.collective.max(FORWARD_MINIMUM_COLLECTIVE);
+            input.collective = input.collective.map(|c| c.max(FORWARD_MINIMUM_COLLECTIVE));
+        }
         if !coupled {
             // The speed on the collective (the V-22's power lever).
             let error = speed - rotor_law::speed_along(s);

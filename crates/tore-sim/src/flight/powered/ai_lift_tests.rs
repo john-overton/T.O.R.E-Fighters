@@ -95,6 +95,25 @@ fn the_ai_turns_low_at_full_speed_without_sinking() {
     }
 }
 
+/// A wingman's formation chase asks for a 12 degree descent while it slows
+/// from 120 to 60 kt and turns 50 degrees (slice CH47). The helicopter keeps
+/// the rotor loaded and its nose within 30 degrees of its track: with the
+/// collective wound to its stop the CH-47 yawed 85 degrees off its track,
+/// the speed loop read that as standing still and pitched the nose down
+/// into a dive.
+#[test]
+fn the_ai_keeps_the_rotor_loaded_in_a_slowing_turning_descent() {
+    for id in [AircraftId::Ah64, AircraftId::Mi24, AircraftId::Ch47] {
+        let d = rotor_probe::descent_turn(&aircraft(id)).unwrap();
+        assert!(!d.crashed, "{id:?}: {d:?}");
+        assert!(d.least_collective >= 0.099, "{id:?}: {d:?}");
+        assert!(
+            d.nose_off_track_deg < 30. && d.steepest_pitch_deg < 30.,
+            "{id:?}: {d:?}"
+        );
+    }
+}
+
 /// Slowing from 120 kt to a hover over a point 3,000 ft ahead: it loses
 /// under 50 ft on the way and ends holding the point.
 #[test]
@@ -235,7 +254,7 @@ fn the_rotor_adapter_is_deterministic_and_restores_mid_hover() {
 fn the_rotor_probe_reports_each_powered_lift_aircraft() {
     for id in ROTORCRAFT {
         let lines = rotor_probe::report(&aircraft(id));
-        let expected = if id == AircraftId::V22 { 13 } else { 12 };
+        let expected = if id == AircraftId::V22 { 14 } else { 13 };
         assert_eq!(lines.len(), expected, "{id:?}: {lines:#?}");
         assert!(lines.iter().all(|l| !l.contains("CRASHED")), "{lines:#?}");
     }
