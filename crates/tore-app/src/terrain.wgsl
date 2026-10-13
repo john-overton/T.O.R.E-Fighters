@@ -500,6 +500,10 @@ fn aircraft_color(in:VertexOut,normal:vec3<f32>)->vec4<f32>{
 // Static world textures use index255/mask cutouts without opaque backing color.
 @fragment fn airport_solid_fragment(in:VertexOut)->@location(0) vec4<f32>{
  if in.layer>=0.0 {discard;}
+ // A ground shadow decal (retail's colour 6 quad under the suspension
+ // bridge and the crane): dark, and translucent by keeping half the pixels
+ // in the 4 by 4 ordered pattern.
+ if in.layer==-9.0 && bayer4(vec2<u32>(in.clip.xy))>=8u {discard;}
  return aircraft_color(in,surface_normal(in.direction));
 }
 // City fill: only untextured triangles reach this pass, so it needs no

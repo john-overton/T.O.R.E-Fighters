@@ -621,14 +621,19 @@ corners; the damaged copies keep it. The weather palette holds a magenta at
 index 6, so drawn as a colour it is a magenta rectangle at the bridge's
 water level. It is a ground shadow polygon (the bridge's span on the water,
 the crane's footprint); the retail renderer's treatment of colour 6 is not
-traced (unknown; next step: the shape interpreter's solid face path).
+traced (unknown; not needed, John chose our own shadow look, 2026-10-13).
 
-**Use**: `surface_art::is_shadow_decal` skips a face that is solid (`0x41`),
-all colour 6, flat and within 1.5 shape units of its shape's lowest point,
-when building a scene object's geometry (the intact shape, its damage
-branch and the generated ruins, `rubble::collapse` too). Shadows come from
-the lighting pass (see [surface lighting](../spec/surface-lighting.md)), so
-the decal is not drawn rather than approximated (agent decision). A scan of
+**Use**: `surface_art::is_shadow_decal` finds a face that is solid (`0x41`),
+all colour 6, flat and within 1.5 shape units of its shape's lowest point.
+It is drawn as a ground shadow (John, 2026-10-13: "draw it the way our
+planes' and other objects' ground shadows are drawn", no retail research):
+near-black (sRGB 0.03, 0.03, 0.05) in its own colour, marked with the
+vertex layer -9 so the static solid pass (`airport_solid_fragment`) keeps
+half its pixels in the 4 by 4 ordered pattern, a screen-door translucency
+over the water or ground, lit and fogged like the rest. It still counts as
+the shape's lowest face for the grounding audit. The generated ruins
+(`rubble::collapse`) leave it out. The geometric shadows of the lighting
+pass (see [surface lighting](../spec/surface-lighting.md)) are separate. A scan of
 the OT shapes the dump can read found colour 6 faces only in `BRDMID`,
 `BRDEND` and `CRANE`; aircraft shapes use another path and are untouched.
 

@@ -233,11 +233,18 @@ fn vertex(position: Vector, uv: [f32; 2], index: f32) -> [f32; FLOATS] {
 /// The palette colour retail paints a ground shadow decal with: a solid
 /// quad flat on the shape's lowest plane (the suspension bridge's span on the
 /// water, the crane's footprint). The weather palette holds a magenta there,
-/// so drawn as a colour it was a magenta patch (nr-fx2); it is a shadow
-/// polygon, which this renderer does not draw (shadows come from the
-/// lighting pass), so it is skipped. `docs/formats/objects-and-shapes.md`,
+/// so drawn as a colour it was a magenta patch (nr-fx2). It is a shadow
+/// polygon, so it is drawn as one: a dark, half-covered (screen-door)
+/// patch ([`SHADOW_LAYER`], John 2026-10-13: draw it as our own ground
+/// shadows are drawn), not in the palette colour. `docs/formats/objects-and-shapes.md`,
 /// "Ground shadow decals".
 pub(super) const SHADOW_DECAL_COLOR: u8 = 6;
+/// The layer value that marks a shadow decal's vertices to the static solid
+/// pass, which keeps half its pixels in a fixed ordered pattern
+/// (`airport_solid_fragment`).
+pub const SHADOW_LAYER: f32 = -9.0;
+/// A shadow decal's colour, sRGB (near black, a little blue).
+const SHADOW_COLOR: [f32; 3] = [0.03, 0.03, 0.05];
 /// The solid-colour face record the decals use (`subtype` 0x41).
 const SOLID_FACE: u8 = 0x41;
 /// How far above the lowest point a decal's plane may lie, shape units: the
@@ -297,9 +304,10 @@ pub(super) fn emit(
     };
     let low = lowest_point(shape);
     for face in &shape.faces {
-        if face.positions.len() < 3 || is_shadow_decal(face, low) {
+        if face.positions.len() < 3 {
             continue;
         }
+        let decal = is_shadow_decal(face, low);
         let image = if face.texture.is_empty() || face.uv.is_empty() {
             None
         } else {
@@ -316,6 +324,13 @@ pub(super) fn emit(
                     let uv = image.map_or([0., 0.], |image| {
                         [uv[0] + 0.5, image.height as f32 - 0.5 - uv[1]]
                     });
+                    if decal {
+                        // Dark, half covered, in its own colour (no palette).
+                        let mut v = vertex(place(face.positions[at]), [0., 0.], -1.);
+                        v[5] = SHADOW_LAYER;
+                        v[6..9].copy_from_slice(&SHADOW_COLOR);
+                        return v;
+                    }
                     vertex(
                         place(face.positions[at]),
                         uv,
@@ -1632,7 +1647,7 @@ mod tests {
     }
 
     #[test]
-    fn a_ground_shadow_decal_is_not_drawn_but_a_painted_floor_is() {
+    fn a_ground_shadow_decal_is_drawn_dark_for_the_dithered_pass() {
         // The suspension bridge's span on the water and the crane's
         // footprint are solid colour 6 quads on the lowest plane: a magenta
         // patch when drawn as a colour (nr-fx2).
@@ -1660,14 +1675,33 @@ mod tests {
             drawn(&shape(faces))
         };
         assert_eq!(drawn(&shape(base.clone())), 12);
-        // The decal (colour 6, solid, flat on the lowest plane) is skipped.
-        assert_eq!(with(quad(-60., 6, 0x41)), 12);
-        assert_eq!(with(quad(-60.5, 6, 0x41)), 12);
-        // The same colour elsewhere, another colour, or another record kind,
-        // is an ordinary face.
-        assert_eq!(with(quad(0., 6, 0x41)), 18);
-        assert_eq!(with(quad(-60., 7, 0x41)), 18);
-        assert_eq!(with(quad(-60., 6, 0x44)), 18);
+        // The decal (colour 6, solid, flat on the lowest plane) is drawn as a
+        // dark shadow marked for the dithered pass, not in the palette's
+        // magenta; anything else is an ordinary face.
+        let layers_of = |extra: Face| {
+            let mut faces = base.clone();
+            faces.push(extra);
+            let mut out = Drawn::default();
+            emit(
+                &shape(faces),
+                &level([0.; 3]),
+                &Layers::new(),
+                &mut out,
+                usize::MAX,
+            )
+            .unwrap();
+            out.vertices
+                .chunks_exact(FLOATS)
+                .filter(|v| v[5] == SHADOW_LAYER)
+                .count()
+        };
+        assert_eq!(with(quad(-60., 6, 0x41)), 18);
+        assert_eq!(layers_of(quad(-60., 6, 0x41)), 6);
+        assert_eq!(layers_of(quad(-60.5, 6, 0x41)), 6);
+        // The same colour elsewhere, another colour, or another record kind.
+        assert_eq!(layers_of(quad(0., 6, 0x41)), 0);
+        assert_eq!(layers_of(quad(-60., 7, 0x41)), 0);
+        assert_eq!(layers_of(quad(-60., 6, 0x44)), 0);
     }
 
     #[test]
