@@ -162,7 +162,7 @@
 //! BP3): "NAME: stores: told T, bytes B, largest L, drawn D, emptied [IDS]",
 //! the Stores events told, their coded bytes summed and the largest, the
 //! most other aircraft one frame drew with stores, and the aircraft it drew
-//! with a station short of its load.
+//! with a station holding fewer stores than when it first drew it.
 //!
 //! `--load STORE[,STORE]...` (protocol 23, slice NA) makes every bot hang
 //! each store on its aircraft before it readies, a Cheat loading the host's

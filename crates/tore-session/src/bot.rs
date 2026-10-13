@@ -779,8 +779,12 @@ pub struct StoresSeen {
     pub largest: usize,
     /// The most other aircraft one frame drew with stores.
     pub drawn: usize,
-    /// Other aircraft drawn with a station short of its load.
+    /// Other aircraft drawn with a station holding fewer stores than when
+    /// the bot first drew it.
     pub emptied: std::collections::BTreeSet<u32>,
+    /// Each other aircraft's stations as first drawn: whole stores, by
+    /// aircraft and the station's place in its list.
+    first: std::collections::BTreeMap<(u32, usize), u16>,
 }
 
 impl StoresSeen {
@@ -792,7 +796,12 @@ impl StoresSeen {
             .filter(|pose| pose.id != frame.plane.0 && !pose.stores.is_empty());
         self.drawn = self.drawn.max(others.clone().count());
         for pose in others {
-            if pose.stores.iter().any(|store| store.items < store.loaded) {
+            let mut fewer = false;
+            for (slot, store) in pose.stores.iter().enumerate() {
+                let first = *self.first.entry((pose.id, slot)).or_insert(store.items);
+                fewer |= store.items < first;
+            }
+            if fewer {
                 self.emptied.insert(pose.id);
             }
         }

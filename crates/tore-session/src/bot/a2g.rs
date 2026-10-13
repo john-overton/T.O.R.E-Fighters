@@ -53,8 +53,9 @@ pub enum Role {
     /// Set up a level bomb pass at the nearest enemy ground object and fly
     /// it without releasing (slice ST-K).
     Strike,
-    /// Select the Mk 82s and drop one in CCIP every four seconds, wherever
-    /// it is (slice BP3, `net-a2g-stores`: other games see the stores go).
+    /// Select the Mk 82s and drop one in CCIP about every four seconds,
+    /// wherever it is (slice BP3, `net-a2g-stores`: other games see the
+    /// stores go).
     Bomb,
     /// Press nothing; report the cockpit (slice ST-K).
     Watch,
@@ -454,10 +455,15 @@ impl Script {
             }
             return;
         }
-        // The bomb role drops in CCIP: a press a second long every four
-        // seconds releases one Mk 82 a press.
+        // The bomb role drops in CCIP: a press, then three seconds before
+        // the next, one Mk 82 a press.
         if self.role == Role::Bomb {
-            controls.trigger = since.as_secs().is_multiple_of(4);
+            if self
+                .held_until
+                .is_none_or(|until| now.saturating_sub(until) >= Duration::from_secs(3))
+            {
+                self.held_until = Some(now + PRESS);
+            }
             return;
         }
         let mode = readout.bomb_sight.as_ref().map(|b| b.mode);
