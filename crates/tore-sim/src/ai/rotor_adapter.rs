@@ -45,6 +45,23 @@ const GRAVITY: f64 = 32.174;
 /// (fitted: 3,000 ft/min, three times the player A modes', so the
 /// helicopter defence's 10 degree path is flown at 150 kt).
 pub const FORWARD_CLIMB_FPS: f64 = 3_000. / 60.;
+/// The coupled law is asked for at most this speed change at a time, ft/s
+/// (about 6 kt: a gentle nose-down, not the pitch limit at once).
+pub const SPEED_STEP_FPS: f64 = 10.;
+/// Sinking this much faster than the climb asked for, ft/s, starts slowing
+/// it and easing the bank; at SINK_FULL_RELIEF_FPS it slows at the full
+/// step.
+pub const SINK_TOLERANCE_FPS: f64 = 2.;
+pub const SINK_FULL_RELIEF_FPS: f64 = 5.;
+/// A collective demand at or above this is out of travel.
+pub const COLLECTIVE_SATURATED: f64 = 0.99;
+/// A rotor speed below this share of 100 percent is out of power.
+pub const ROTOR_DROOP: f64 = 0.95;
+/// The share of the bank eased at the full step.
+pub const BANK_RELIEF_SHARE: f64 = 0.5;
+/// Wingborne, the climb error is handed to the law this many times over
+/// on top of the climb.
+pub const WINGBORNE_CLIMB_BOOST: f64 = 4.;
 /// The B44 terrain floor's minimum height for an aircraft on this adapter,
 /// ft (the fighters' is 300): below the helicopter defence's and the
 /// stand-off attack's 200 ft masking height.
@@ -410,10 +427,50 @@ impl RotorAdapter {
         } else {
             (airspeed * path_deg.to_radians().sin()).clamp(-FORWARD_CLIMB_FPS, FORWARD_CLIMB_FPS)
         };
+        // Height before speed: the cyclic is asked for at most
+        // SPEED_STEP_FPS of speed change at a time; sinking below the climb
+        // asked for, it slows instead and eases the bank, as a pilot out of
+        // collective does, so a hard turn at full speed near the ground does
+        // not trade height for speed.
+        let along = rotor_law::speed_along(s);
+        // Out of collective or out of power (the rotor drooping), any sink
+        // below the climb counts: the speed asked is more than the aircraft
+        // can hold level.
+        let tolerance = if s.lift_controls.collective >= COLLECTIVE_SATURATED
+            || s.lift_controls.drive.rotor_speed < ROTOR_DROOP
+        {
+            0.
+        } else {
+            SINK_TOLERANCE_FPS
+        };
+        let relief = ((climb - s.vertical_speed - tolerance)
+            / (SINK_FULL_RELIEF_FPS - SINK_TOLERANCE_FPS))
+            .clamp(0., 1.);
+        let held = if coupled {
+            let step = (speed - along).clamp(-SPEED_STEP_FPS, SPEED_STEP_FPS);
+            if relief > 0. {
+                along + step.min(0.) - SPEED_STEP_FPS * relief
+            } else {
+                along + step
+            }
+        } else {
+            speed
+        };
+        let bank_deg = bank_deg * (1. - BANK_RELIEF_SHARE * relief);
+        // Wingborne (the V-22 with its nacelles down) the law flies the
+        // climb on the pitch by the flight path error, which a few feet a
+        // second of sink barely moves at 280 ft/s; the AI asks for the
+        // climb plus a multiple of its error, as the player's A modes'
+        // altitude term would.
+        let law_climb = if !coupled && !pointing {
+            climb + WINGBORNE_CLIMB_BOOST * (climb - s.vertical_speed)
+        } else {
+            climb
+        };
         let target = ForwardTarget {
             bank: bank_deg.to_radians(),
-            climb,
-            speed,
+            climb: law_climb,
+            speed: held,
             pitch_limit: if pointing {
                 POINTING_PITCH_DEG
             } else {

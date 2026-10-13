@@ -320,6 +320,46 @@ pub fn forward(aircraft: &Aircraft, knots: f64, fpm: f64) -> Option<Forward> {
     Some(out)
 }
 
+/// A low turn's result.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Turn {
+    /// Most height lost below the start, ft, and the lowest wheel height.
+    pub lost_ft: f64,
+    pub lowest_ft: f64,
+    /// Heading error after 60 s, degrees.
+    pub heading_off_deg: f64,
+    pub crashed: bool,
+}
+
+/// A 180 degree turn at 200 ft over flat ground, from 120 kt at `knots`
+/// asked (the helicopter's maximum in a hold-off or a break), level.
+pub fn low_turn(aircraft: &Aircraft, knots: f64) -> Option<Turn> {
+    let mut s = moving(aircraft, 0., 120., [0.; 3])?;
+    s.position[1] = 200. + clearance(&s);
+    let start = wheel_height(&s);
+    let mut adapter = RotorAdapter::new();
+    let intent = steer(180., 0., knots * KT);
+    let mut out = Turn {
+        lowest_ft: start,
+        ..Turn::default()
+    };
+    for _ in 0..ticks(60.) {
+        let request = RotorRequest::Steer {
+            intent: &intent,
+            terrain_pitch_floor_deg: None,
+        };
+        tick(&mut s, &mut adapter, request, [0.; 3]);
+        out.lowest_ft = out.lowest_ft.min(wheel_height(&s));
+        if s.crashed {
+            break;
+        }
+    }
+    out.lost_ft = start - out.lowest_ft;
+    out.heading_off_deg = wrap_deg(180. - s.yaw.to_degrees()).abs();
+    out.crashed = s.crashed;
+    Some(out)
+}
+
 /// Slowing to a hover: the result.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Slow {
@@ -530,6 +570,15 @@ pub fn report(aircraft: &Aircraft) -> Vec<String> {
                         ));
                     }
                 }
+            }
+            if let Some(t) = low_turn(aircraft, 160.) {
+                lines.push(format!(
+                    "ROTOR {name} turn200: lost={:.1}ft lowest={:.1}ft heading_off={:.1}deg {}",
+                    t.lost_ft,
+                    t.lowest_ft,
+                    t.heading_off_deg,
+                    fate(t.crashed)
+                ));
             }
             if let Some(w) = slow_to_hover(aircraft) {
                 lines.push(format!(

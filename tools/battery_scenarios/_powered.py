@@ -374,7 +374,7 @@ def easy_physics_scenarios() -> list[Scenario]:
 ROTOR_LINE = re.compile(r"^ROTOR (\S+) (.+?): (.*)$", re.M)
 ROTOR_FLIGHTS = (["hold calm", "hold wind15", "move500", "climb500"]
                  + [f"forward {k}kt {c}fpm" for k in (40, 80, 120) for c in ("+1000", "-1000")]
-                 + ["slow120"])
+                 + ["turn200", "slow120"])
 
 
 def _rotor_values(text: str) -> dict[str, str]:
@@ -411,6 +411,8 @@ def check_rotor_probe(output: str) -> list[str]:
             want = float(flight.split()[2].replace("fpm", ""))
             if not (abs(_number(v["climb"]) - want) < 150 and _number(v["speed_off"]) < 5 and _number(v["heading_off"]) < 3):
                 problems.append(f"{label} missed its speed, climb or heading: {rest}")
+        elif flight == "turn200" and not (_number(v["lost"]) < 50 and _number(v["heading_off"]) < 5):
+            problems.append(f"{label} sank or did not turn round at 200 ft: {rest}")
         elif flight == "slow120" and not (_number(v["lost"]) < 50 and _number(v["off"]) < 10 and v["hover"] == "true"):
             problems.append(f"{label} did not slow to a hover: {rest}")
         elif flight == "convert":
@@ -432,7 +434,8 @@ def ai_probe_scenarios() -> list[Scenario]:
         check=check_rotor_probe, timeout=600,
         notes="The AI's rotorcraft and jet-lift control (slice H1) on each imported powered-lift PT over flat "
               "ground: hover holds in calm air and a 15 kt wind, a 500 ft move, the 25 ft/s climb to 500 ft, "
-              "40/80/120 kt climbing and descending 1,000 ft/min, slowing from 120 kt to a hover, the V-22's "
+              "40/80/120 kt climbing and descending 1,000 ft/min, a 180 degree turn at 200 ft asking more than full speed, "
+              "slowing from 120 kt to a hover, the V-22's "
               "conversion both ways, and the jets' hover and vertical landing.",
     )]
 

@@ -83,6 +83,18 @@ fn the_ai_flies_forty_eighty_and_a_hundred_twenty_knots_climbing_and_descending(
     }
 }
 
+/// A 180 degree turn at 200 ft asking for 160 kt, more than these
+/// helicopters make (the hold-off circle and the break ask for the maximum):
+/// it turns round losing under 50 ft and does not touch the ground.
+#[test]
+fn the_ai_turns_low_at_full_speed_without_sinking() {
+    for id in ROTORCRAFT {
+        let t = rotor_probe::low_turn(&aircraft(id), 160.).unwrap();
+        assert!(!t.crashed && t.lost_ft < 50., "{id:?}: {t:?}");
+        assert!(t.heading_off_deg < 5., "{id:?}: {t:?}");
+    }
+}
+
 /// Slowing from 120 kt to a hover over a point 3,000 ft ahead: it loses
 /// under 50 ft on the way and ends holding the point.
 #[test]
@@ -182,7 +194,7 @@ fn the_rotor_adapter_is_deterministic_and_restores_mid_hover() {
 fn the_rotor_probe_reports_each_powered_lift_aircraft() {
     for id in ROTORCRAFT {
         let lines = rotor_probe::report(&aircraft(id));
-        let expected = if id == AircraftId::V22 { 12 } else { 11 };
+        let expected = if id == AircraftId::V22 { 13 } else { 12 };
         assert_eq!(lines.len(), expected, "{id:?}: {lines:#?}");
         assert!(lines.iter().all(|l| !l.contains("CRASHED")), "{lines:#?}");
     }
