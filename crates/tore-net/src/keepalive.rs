@@ -172,6 +172,149 @@ fn run<S: Datagrams>(
     }
 }
 
+/// When and for how long a host's loading thread speaks (protocol 28,
+/// slice NET2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoadingConfig {
+    /// The first loading keepalive goes out once the build has run this
+    /// long, so a quick build sends none. 250 ms by default.
+    pub quiet: Duration,
+    /// Then one goes to every player at most once per this interval. 500 ms
+    /// by default, so a player hears the host well inside the 1.5 seconds
+    /// after which it would race a migration.
+    pub interval: Duration,
+    /// None goes out once the build has run this long: a host stuck in a
+    /// build is then dropped by its players (5 seconds later) and its
+    /// standbys take over, as before. 180 seconds by default.
+    pub bound: Duration,
+    /// How often the thread looks. 50 ms by default.
+    pub check: Duration,
+}
+
+/// The default quiet time before a host's first loading keepalive: 250 ms
+/// (agent decision, NET2).
+pub const LOADING_QUIET: Duration = Duration::from_millis(250);
+/// The default interval between a host's loading keepalives: 500 ms (agent
+/// decision, NET2).
+pub const LOADING_INTERVAL: Duration = Duration::from_millis(500);
+/// The default bound on a host's mission build: 3 minutes (fitted, NET2:
+/// John, 2026-10-13, "other games take a minute or two to load"; the
+/// longest measured build is 7.5 s in debug on a loaded machine, so this
+/// leaves room for a slow machine and a large theater).
+pub const LOADING_BOUND: Duration = Duration::from_secs(180);
+/// How often the loading thread looks by default.
+pub const LOADING_CHECK: Duration = Duration::from_millis(50);
+
+impl Default for LoadingConfig {
+    fn default() -> Self {
+        Self {
+            quiet: LOADING_QUIET,
+            interval: LOADING_INTERVAL,
+            bound: LOADING_BOUND,
+            check: LOADING_CHECK,
+        }
+    }
+}
+
+impl LoadingConfig {
+    /// Whether a loading keepalive is due, `since_start` after the build
+    /// began and `since_sent` after the last (`None` for none).
+    pub fn due(&self, since_start: Duration, since_sent: Option<Duration>) -> bool {
+        since_start >= self.quiet
+            && since_start < self.bound
+            && since_sent.is_none_or(|since| since >= self.interval)
+    }
+}
+
+/// A host's loading thread (protocol 28, slice NET2): while the host's own
+/// loop builds a mission, it sends each player's loading Keepalive
+/// ([`crate::Server::loading_datagrams`]) on a clone of the host's socket,
+/// as [`LoadingConfig`] says. Every player then keeps the connection and
+/// holds off a migration however long the build takes, up to the bound.
+/// Made just before the build and dropped right after it; dropping it
+/// stops the thread and waits for it, which takes no longer than one round
+/// of sends.
+///
+/// The thread only sends; it never reads the socket and never touches the
+/// host's state. The build itself stays on the host's loop (John,
+/// 2026-10-13: keepalives during the build, not a worker thread).
+pub struct Loading {
+    shared: Arc<Shared>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Loading {
+    /// Starts the thread: it sends each of `targets` (address and
+    /// datagram) on `socket`. The build counts as begun now.
+    pub fn start<S>(
+        socket: S,
+        targets: Vec<(SocketAddr, Vec<u8>)>,
+        config: LoadingConfig,
+    ) -> io::Result<Self>
+    where
+        S: Datagrams + Send + 'static,
+    {
+        let shared = Arc::new(Shared {
+            origin: Instant::now(),
+            turned: AtomicU64::new(0),
+            stop: AtomicBool::new(false),
+            sent: AtomicU64::new(0),
+        });
+        let theirs = Arc::clone(&shared);
+        let thread = thread::Builder::new()
+            .name("tore-loading".into())
+            .spawn(move || run_loading(socket, &targets, config, &theirs))?;
+        Ok(Self {
+            shared,
+            thread: Some(thread),
+        })
+    }
+
+    /// Rounds of loading keepalives sent so far (one round reaches every
+    /// player).
+    pub fn sent(&self) -> u64 {
+        self.shared.sent.load(Ordering::Relaxed)
+    }
+}
+
+impl Drop for Loading {
+    fn drop(&mut self) {
+        self.shared.stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            thread.thread().unpark();
+            let _ = thread.join();
+        }
+    }
+}
+
+/// The loading thread: look every `check`, send a round when due, until
+/// stopped.
+fn run_loading<S: Datagrams>(
+    mut socket: S,
+    targets: &[(SocketAddr, Vec<u8>)],
+    config: LoadingConfig,
+    shared: &Shared,
+) {
+    let mut last_sent: Option<u64> = None;
+    loop {
+        thread::park_timeout(config.check);
+        if shared.stop.load(Ordering::Relaxed) {
+            return;
+        }
+        let now = shared.micros();
+        let since_sent = last_sent.map(|at| Duration::from_micros(now.saturating_sub(at)));
+        if config.due(Duration::from_micros(now), since_sent) {
+            for (to, datagram) in targets {
+                // As the network might drop it; the next is half a second
+                // away.
+                let _ = socket.send_datagram(*to, datagram);
+            }
+            last_sent = Some(now);
+            shared.sent.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,6 +334,57 @@ mod tests {
         assert!(config.due(59_999 * MS, Some(1000 * MS)));
         assert!(!config.due(60_000 * MS, Some(1000 * MS)));
         assert!(!config.due(600_000 * MS, None));
+    }
+
+    #[test]
+    fn loading_is_due_after_a_quarter_second_twice_a_second_until_three_minutes() {
+        let config = LoadingConfig::default();
+        assert!(!config.due(249 * MS, None));
+        assert!(config.due(250 * MS, None));
+        assert!(!config.due(600 * MS, Some(350 * MS)));
+        assert!(config.due(750 * MS, Some(500 * MS)));
+        assert!(config.due(179_999 * MS, Some(500 * MS)));
+        assert!(!config.due(180_000 * MS, Some(500 * MS)));
+    }
+
+    /// Every player gets a round of loading keepalives about once an
+    /// interval from the quiet time on, none past the bound, and dropping
+    /// the handle stops the thread at once.
+    #[test]
+    fn the_loading_thread_speaks_to_every_player_until_the_bound() {
+        let mut a = bind_udp("127.0.0.1:0".parse().unwrap()).unwrap();
+        let mut b = bind_udp("127.0.0.1:0".parse().unwrap()).unwrap();
+        let host = bind_udp("127.0.0.1:0".parse().unwrap()).unwrap();
+        let config = LoadingConfig {
+            quiet: 50 * MS,
+            interval: 100 * MS,
+            bound: 600 * MS,
+            check: 10 * MS,
+        };
+        let targets = vec![
+            (a.local_addr().unwrap(), vec![1; 10]),
+            (b.local_addr().unwrap(), vec![2; 10]),
+        ];
+        let loading = Loading::start(host.try_clone().unwrap(), targets, config).unwrap();
+        thread::sleep(1200 * MS);
+        let rounds = loading.sent();
+        // From 50 ms to 600 ms, one about every 100 ms (a slow runner may
+        // send fewer).
+        assert!((2..=6).contains(&rounds), "{rounds} rounds");
+        thread::sleep(200 * MS);
+        assert_eq!(loading.sent(), rounds, "none past the bound");
+        let stopping = Instant::now();
+        drop(loading);
+        assert!(stopping.elapsed() < 1000 * MS, "{:?}", stopping.elapsed());
+        let mut buf = [0u8; 64];
+        for (socket, byte) in [(&mut a, 1), (&mut b, 2)] {
+            let mut received = 0;
+            while let Some((len, _)) = socket.recv_datagram(&mut buf).unwrap() {
+                assert_eq!((len, buf[0]), (10, byte));
+                received += 1;
+            }
+            assert_eq!(received, rounds);
+        }
     }
 
     /// A keepalive comes about once a quiet interval while the loop is

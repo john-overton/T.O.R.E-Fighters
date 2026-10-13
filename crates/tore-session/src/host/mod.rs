@@ -57,6 +57,7 @@ mod king;
 #[cfg(test)]
 mod king_tests;
 mod lineage_take;
+mod loading;
 mod lobby;
 mod observe;
 #[cfg(test)]
@@ -80,6 +81,7 @@ mod state;
 mod succession;
 
 pub use config::{AfterEnd, BuildId, CrownRule, HostConfig, HostError, OpenPlanes, StartMode};
+pub use loading::LoadingSocket;
 pub use lobby::LobbyEvent;
 pub use resume::{
     DROP_AFTER, FAST_FORWARD_TICKS, Present, RESUME_WINDOW, ResumeNote, Resumption, hosting_answer,
@@ -296,6 +298,15 @@ pub enum HostLog {
         callsign: String,
         stalled_for: Duration,
     },
+    /// A mission build long enough for the loading thread to speak: it
+    /// kept `players` connected through it with `rounds` rounds of loading
+    /// keepalives (protocol 28, slice NET2).
+    Loaded {
+        tick: u64,
+        players: usize,
+        took: Duration,
+        rounds: u64,
+    },
 }
 
 impl HostLog {
@@ -317,7 +328,8 @@ impl HostLog {
             | Self::Lobby { tick, .. }
             | Self::Chat { tick, .. }
             | Self::Stalled { tick, .. }
-            | Self::Resumed { tick, .. } => *tick,
+            | Self::Resumed { tick, .. }
+            | Self::Loaded { tick, .. } => *tick,
         }
     }
 
@@ -352,6 +364,27 @@ impl HostLog {
             )),
             _ => None,
         }
+    }
+
+    /// The line a long mission build prints in a log, the same in the
+    /// dedicated server's, a hosting game's and a hosting bot's: "loaded the
+    /// mission in 15.0 s; 3 players kept through it (30 rounds of loading
+    /// keepalives)". `None` for any other entry.
+    pub fn loading_text(&self) -> Option<String> {
+        let Self::Loaded {
+            players,
+            took,
+            rounds,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        Some(format!(
+            "loaded the mission in {:.1} s; {players} {} kept through it ({rounds} rounds of loading keepalives)",
+            took.as_secs_f64(),
+            if *players == 1 { "player" } else { "players" },
+        ))
     }
 }
 
@@ -613,6 +646,8 @@ pub struct Host {
     /// The host's content, the players' gaps and their words (stage L,
     /// `content`).
     compat: content::Compat,
+    /// The loading thread's socket and timing (protocol 28, `loading`).
+    loader: loading::Loader,
     /// What each seat's game could not foresee, by tick (tests only).
     #[cfg(test)]
     unforeseen_log: Vec<(u64, SeatId, Unforeseen)>,
@@ -920,6 +955,7 @@ impl Host {
             succession: succession::Succession::default(),
             listing: None,
             compat,
+            loader: loading::Loader::default(),
             court,
             settings,
             config,
@@ -2465,11 +2501,10 @@ impl Host {
         if let Some(why) = self.mission_gap_refusal(&spec) {
             return Err(why);
         }
-        let (world, manifest) =
-            build_world(&spec, &self.resources).map_err(|error| match error {
-                HostError::Mission(text) => text,
-                other => other.to_string(),
-            })?;
+        let (world, manifest) = self.build(&spec).map_err(|error| match error {
+            HostError::Mission(text) => text,
+            other => other.to_string(),
+        })?;
         let old = self.spec.open_planes();
         self.spec = spec;
         self.spec_text = self.spec.to_text();
@@ -2862,7 +2897,7 @@ impl Host {
             }
         }
         if !spec.plane_loadouts.is_empty() || self.world.tick() != 0 || self.ticks_run != 0 {
-            match build_world(&spec, &self.resources) {
+            match self.build(&spec) {
                 Ok((world, manifest)) => {
                     self.world = world;
                     self.manifest = manifest;
@@ -3606,7 +3641,8 @@ impl Host {
     /// A fresh copy of the lobby's mission, from its spec: back to the
     /// lobby, or flying again for `start now`.
     fn next_mission(&mut self) {
-        match build_world(&self.spec, &self.resources) {
+        let spec = self.spec.clone();
+        match self.build(&spec) {
             Ok((world, manifest)) => {
                 self.world = world;
                 self.manifest = manifest;

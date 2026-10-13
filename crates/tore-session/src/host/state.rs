@@ -536,6 +536,9 @@ impl Host {
             succession: _,
             // The listing part, opaque bytes of its own.
             listing: _,
+            // The loading thread's socket: the program's, which a new host
+            // is given again (protocol 28).
+            loader: _,
             journal: _,
             // The flying clock: the journal's tick is the mission's time,
             // and the takeover keeps the old host's pace (slice K4).

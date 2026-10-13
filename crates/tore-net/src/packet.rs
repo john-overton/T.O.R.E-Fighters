@@ -84,10 +84,12 @@ pub enum PacketKind {
     /// Host to the asker, `TORE-HELLO` id, never longer than the query: the
     /// game's summary.
     DiscoverAnswer = 9,
-    /// Client to host once connected, 9 bytes: "my game is stalled, not
-    /// gone" (slice EF-K, protocol 5). Sent by the joined game's keepalive
-    /// thread while its own loop is held up; the host only notes that it
-    /// heard from the connection.
+    /// Either way once connected, 10 bytes: "my game is stalled, not gone"
+    /// (slice EF-K, protocol 5). Sent by the joined game's keepalive thread
+    /// while its own loop is held up; the host only notes that it heard
+    /// from the connection. Since protocol 28 (slice NET2) a host sends it
+    /// too, marked loading, while it builds a mission: its players keep the
+    /// connection and hold off a migration.
     Keepalive = 10,
     /// Host to a joining player, 13 bytes: the introduction id the master
     /// gave (stage J, slice J2, protocol 9). Going out, it opens the host's
@@ -363,14 +365,24 @@ pub struct Disconnect {
 }
 
 /// Keepalive: the connection is alive though its game's loop is stalled.
-/// 9 bytes, smaller than the empty Payload it stands in for, and never
-/// answered.
+/// 10 bytes, smaller than the empty Payload it stands in for, and never
+/// answered. A player's game sends it while its loop is held up (slice
+/// EF-K); a host sends it, marked loading, while it builds a mission
+/// (protocol 28, slice NET2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Keepalive {
     /// The connection id from Accepted: the same identity every Payload
     /// carries, accepted only from the connection's own address.
     pub connection: u32,
+    /// The host is building a mission (protocol 28): its players keep the
+    /// connection and do not race a migration while it says so. A
+    /// player's keepalive never sets it. On the wire, bit 0 of a flags byte;
+    /// the other bits are 0.
+    pub loading: bool,
 }
+
+/// The Keepalive flags byte's loading bit (protocol 28).
+pub const KEEPALIVE_LOADING: u8 = 1;
 
 /// Punch: the host's packet to a player the master introduced (stage J,
 /// protocol 9). 13 bytes.
@@ -698,6 +710,8 @@ impl Packet {
             }
             Self::Keepalive(p) => {
                 w.write_bits(u64::from(p.connection), 32).ok();
+                let flags = if p.loading { KEEPALIVE_LOADING } else { 0 };
+                w.write_bits(u64::from(flags), 8).ok();
             }
             Self::Punch(p) => {
                 w.write_bits(p.introduction, 64).ok();
@@ -1033,8 +1047,15 @@ pub fn decode_disconnect(body: &[u8]) -> Result<Disconnect, PacketError> {
 pub fn decode_keepalive(body: &[u8]) -> Result<Keepalive, PacketError> {
     let mut r = BitReader::new(body);
     let connection = u32_of(&mut r)?;
+    let flags = u8_of(&mut r)?;
     end(&r)?;
-    Ok(Keepalive { connection })
+    if flags & !KEEPALIVE_LOADING != 0 {
+        return Err(PacketError::Malformed);
+    }
+    Ok(Keepalive {
+        connection,
+        loading: flags & KEEPALIVE_LOADING != 0,
+    })
 }
 
 /// Decodes a Punch's body.
@@ -1216,6 +1237,7 @@ mod tests {
             Packet::DiscoverAnswer(answer(&["Viper", "Maverick 1"])),
             Packet::Keepalive(Keepalive {
                 connection: 0xDEAD_BEEF,
+                loading: true,
             }),
             Packet::Punch(Punch {
                 introduction: 0x0123_4567_89AB_CDEF,
@@ -1282,7 +1304,7 @@ mod tests {
         assert_eq!(sizes[7], DISCOVER_LEN);
         assert!(sizes[8] < DISCOVER_LEN);
         // A keepalive is smaller than the empty Payload it stands in for.
-        assert_eq!(sizes[9], 9);
+        assert_eq!(sizes[9], 10);
         assert!(sizes[9] < PAYLOAD_HEADER_LEN);
         // A punch is its header and the introduction id.
         assert_eq!(sizes[10], 13);
@@ -1646,17 +1668,30 @@ mod tests {
         assert_eq!(decode_sections(&[0, 0, 0]), Err(PacketError::Malformed));
         assert_eq!(decode_sections(&[2, 0]), Err(PacketError::Malformed));
         assert_eq!(decode_sections(&[]), Ok(vec![]));
-        // A keepalive is exactly its connection id: shorter or longer is
-        // malformed.
+        // A keepalive is exactly its connection id and its flags: shorter,
+        // longer or an unknown flag is malformed.
         assert_eq!(decode_keepalive(&[1, 2, 3]), Err(PacketError::Malformed));
+        assert_eq!(decode_keepalive(&[1, 2, 3, 4]), Err(PacketError::Malformed));
         assert_eq!(
-            decode_keepalive(&[1, 2, 3, 4, 0]),
+            decode_keepalive(&[1, 2, 3, 4, 0, 0]),
             Err(PacketError::Malformed)
         );
         assert_eq!(
-            decode_keepalive(&[0xEF, 0xBE, 0xAD, 0xDE]),
+            decode_keepalive(&[1, 2, 3, 4, 2]),
+            Err(PacketError::Malformed)
+        );
+        assert_eq!(
+            decode_keepalive(&[0xEF, 0xBE, 0xAD, 0xDE, 0]),
             Ok(Keepalive {
-                connection: 0xDEAD_BEEF
+                connection: 0xDEAD_BEEF,
+                loading: false,
+            })
+        );
+        assert_eq!(
+            decode_keepalive(&[0xEF, 0xBE, 0xAD, 0xDE, 1]),
+            Ok(Keepalive {
+                connection: 0xDEAD_BEEF,
+                loading: true,
             })
         );
         // A punch is exactly its introduction id.

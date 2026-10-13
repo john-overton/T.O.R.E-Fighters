@@ -1934,3 +1934,173 @@ fn a_takeover_carries_a_dropped_bombers_kept_cockpit() {
     assert_eq!(own.sensors.air_ground(), left.sensors.air_ground());
     assert!(at_t.combat.state.kept(plane).is_none());
 }
+
+/// The original host, stalled in a mission build for `stall` of simulated
+/// time with its players and two standbys in the lobby: its loading thread
+/// is stood in for by its players' loading keepalives every half second
+/// when `loading` (protocol 28, slice NET2). Returns whether a standby took
+/// over, the players still joined, and the players that heard the host
+/// say it was loading.
+fn host_build_stall(stall: Duration, loading: bool) -> (bool, usize, usize) {
+    let mut rig = Rig::new(crowd_spec(20));
+    for (callsign, plane) in [("Viper", 1), ("Cobra", 2), ("Hawk", 3)] {
+        rig.join(callsign, plane, true);
+    }
+    assert!(
+        rig.run_until(Duration::from_secs(40), |r| r.host().ready_standbys().len()
+            == 2),
+        "two standbys ready in the lobby"
+    );
+    assert!(rig.run_until(Duration::from_secs(3), |r| {
+        r.games[1..]
+            .iter()
+            .all(|g| g.client.succession().is_some_and(|s| s.standbys.len() == 2))
+    }));
+    let start = rig.net.now();
+    let mut next = start + Duration::from_millis(250);
+    let mut heard = BTreeSet::new();
+    while rig.net.now() < start + stall {
+        rig.net.advance(MS);
+        let now = rig.net.now();
+        if loading && now >= next {
+            next += Duration::from_millis(500);
+            for (to, datagram) in rig.host().server.loading_datagrams() {
+                if to != LINK_ADDRESS {
+                    rig.games[0].socket.send_datagram(to, &datagram).unwrap();
+                }
+            }
+        }
+        for index in 1..rig.games.len() {
+            rig.step_game(index, now);
+            rig.maybe_take_over(index, now);
+            if rig.games[index].client.host_loading() {
+                heard.insert(index);
+            }
+        }
+        if !rig.takeovers.is_empty() {
+            break;
+        }
+    }
+    // The build is done: the host's loop turns again.
+    rig.run(Duration::from_secs(2));
+    let joined = (1..rig.games.len())
+        .filter(|&g| {
+            let client = &rig.games[g].client;
+            client.phase() != ClientPhase::Closed
+                && client.migration() == MigrationState::Steady
+                && client.server() == host_address()
+                && !client.host_loading()
+        })
+        .count();
+    (!rig.takeovers.is_empty(), joined, heard.len())
+}
+
+/// A host that builds a mission for 20 seconds with its players and two
+/// standbys in the lobby keeps every one of them through it, and no
+/// standby takes over, when its loading keepalives say it is loading
+/// (protocol 28, slice NET2).
+#[test]
+fn a_loading_host_keeps_its_players_and_standbys_through_a_long_build() {
+    let (took_over, joined, heard) = host_build_stall(Duration::from_secs(20), true);
+    assert!(
+        !took_over,
+        "a standby took the game over from a loading host"
+    );
+    assert_eq!((joined, heard), (3, 3));
+}
+
+/// Without the loading keepalives the same build is a lost host: standby 1
+/// takes over after 1.5 seconds, as before protocol 28.
+#[test]
+fn a_host_silent_in_a_build_is_taken_over() {
+    let (took_over, _, heard) = host_build_stall(Duration::from_secs(5), false);
+    assert!(took_over);
+    assert_eq!(heard, 0);
+}
+
+/// A host that said it was loading and then fell silent (it died in its
+/// build) is still taken over, after the 4 seconds of loading silence.
+#[test]
+fn a_loading_host_that_dies_in_its_build_is_taken_over() {
+    let mut rig = Rig::new(crowd_spec(20));
+    for (callsign, plane) in [("Viper", 1), ("Cobra", 2), ("Hawk", 3)] {
+        rig.join(callsign, plane, true);
+    }
+    assert!(
+        rig.run_until(Duration::from_secs(40), |r| r.host().ready_standbys().len()
+            == 2)
+    );
+    assert!(rig.run_until(Duration::from_secs(3), |r| {
+        r.games[1..]
+            .iter()
+            .all(|g| g.client.succession().is_some_and(|s| s.standbys.len() == 2))
+    }));
+    for (to, datagram) in rig.host().server.loading_datagrams() {
+        if to != LINK_ADDRESS {
+            rig.games[0].socket.send_datagram(to, &datagram).unwrap();
+        }
+    }
+    let said = rig.net.now();
+    rig.games[0].gone = true;
+    assert!(rig.run_until(Duration::from_secs(10), |r| !r.takeovers.is_empty()));
+    let after = rig.takeovers[0].1.saturating_sub(said);
+    assert!(
+        after >= Duration::from_secs(4) && after < Duration::from_millis(4_500),
+        "taken over {after:?} after the last loading keepalive"
+    );
+}
+
+/// The host's own build sends each player's loading keepalive on the
+/// socket the program gave it, a quarter second into the build and twice a
+/// second after, and logs how long it took (protocol 28, slice NET2).
+#[test]
+fn a_slow_build_sends_loading_keepalives_and_logs_the_build() {
+    use std::sync::Mutex as StdMutex;
+    type Sent = Vec<(SocketAddr, Vec<u8>)>;
+    #[derive(Clone, Default)]
+    struct Captured(Arc<StdMutex<Sent>>);
+    impl Datagrams for Captured {
+        fn send_datagram(&mut self, to: SocketAddr, datagram: &[u8]) -> io::Result<()> {
+            self.0.lock().unwrap().push((to, datagram.to_vec()));
+            Ok(())
+        }
+        fn recv_datagram(&mut self, _: &mut [u8]) -> io::Result<Option<(usize, SocketAddr)>> {
+            Ok(None)
+        }
+    }
+    let mut rig = Rig::new(crowd_spec(20));
+    rig.join("Viper", 1, true);
+    rig.join("Cobra", 2, true);
+    let captured = Captured::default();
+    let theirs = captured.clone();
+    let host = rig.host_mut();
+    host.set_loading_socket(Box::new(move || {
+        Ok(Box::new(theirs.clone()) as Box<dyn Datagrams + Send>)
+    }));
+    host.set_loading_config(tore_net::LoadingConfig {
+        quiet: 20 * MS,
+        interval: 100 * MS,
+        ..tore_net::LoadingConfig::default()
+    });
+    host.set_slow_build(Some(Duration::from_millis(600)));
+    while host.poll_log().is_some() {}
+    let spec = host.spec.clone();
+    host.build(&spec).unwrap();
+    let sent = captured.0.lock().unwrap().clone();
+    let players: BTreeSet<SocketAddr> = sent.iter().map(|(to, _)| *to).collect();
+    // The two players and the house's own player over the link.
+    assert_eq!(players.len(), 3, "{players:?}");
+    assert!(players.contains(&LINK_ADDRESS));
+    for (_, datagram) in &sent {
+        let (kind, body) = tore_net::packet::open(datagram, crate::wire::PROTOCOL_VERSION).unwrap();
+        assert_eq!(kind, tore_net::packet::PacketKind::Keepalive);
+        assert!(tore_net::packet::decode_keepalive(body).unwrap().loading);
+    }
+    let rounds = sent.len() / 3;
+    assert!((2..=7).contains(&rounds), "{rounds} rounds");
+    let logged: Vec<String> = std::iter::from_fn(|| rig.host_mut().poll_log())
+        .filter_map(|entry| entry.loading_text())
+        .collect();
+    assert_eq!(logged.len(), 1, "{logged:?}");
+    assert!(logged[0].contains("3 players kept"), "{}", logged[0]);
+}

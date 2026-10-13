@@ -64,6 +64,9 @@ pub struct LinkEnd {
     /// Datagrams this end could not send because the other end's queue was
     /// full.
     dropped: u64,
+    /// False for a send-only copy ([`LinkEnd::sender`]): it reads nothing
+    /// and its drop leaves the link open.
+    reads: bool,
 }
 
 /// A new link: two ends, each the other's peer, with [`LINK_QUEUE`] datagrams
@@ -83,12 +86,14 @@ pub fn pair_with_capacity(capacity: usize) -> (LinkEnd, LinkEnd) {
             outgoing: Arc::clone(&a_to_b),
             capacity,
             dropped: 0,
+            reads: true,
         },
         LinkEnd {
             incoming: a_to_b,
             outgoing: b_to_a,
             capacity,
             dropped: 0,
+            reads: true,
         },
     )
 }
@@ -104,6 +109,20 @@ impl LinkEnd {
         self.dropped
     }
 
+    /// A send-only copy of this end, for another thread: what it sends
+    /// reaches the other end as this end's sends do, it reads nothing, and
+    /// dropping it leaves the link open (a host's loading thread, protocol
+    /// 28, slice NET2).
+    pub fn sender(&self) -> LinkEnd {
+        LinkEnd {
+            incoming: Arc::clone(&self.incoming),
+            outgoing: Arc::clone(&self.outgoing),
+            capacity: self.capacity,
+            dropped: 0,
+            reads: false,
+        }
+    }
+
     /// Datagrams waiting at this end.
     pub fn waiting(&self) -> usize {
         lock(&self.incoming).datagrams.len()
@@ -112,6 +131,9 @@ impl LinkEnd {
 
 impl Drop for LinkEnd {
     fn drop(&mut self) {
+        if !self.reads {
+            return;
+        }
         // Nothing more will be read here; the other end's sends are dropped.
         let mut incoming = lock(&self.incoming);
         incoming.closed = true;
@@ -135,6 +157,9 @@ impl Datagrams for LinkEnd {
     }
 
     fn recv_datagram(&mut self, buf: &mut [u8]) -> io::Result<Option<(usize, SocketAddr)>> {
+        if !self.reads {
+            return Ok(None);
+        }
         let Some(datagram) = lock(&self.incoming).datagrams.pop_front() else {
             return Ok(None);
         };
@@ -235,6 +260,19 @@ mod tests {
         assert!(!a.peer_alive());
         a.send_datagram(LINK_ADDRESS, b"y").unwrap();
         assert_eq!(receive(&mut a), None);
+    }
+
+    #[test]
+    fn a_send_only_copy_sends_as_its_end_reads_nothing_and_leaves_the_link_open() {
+        let (mut a, mut b) = pair();
+        let mut copy = a.sender();
+        copy.send_datagram(LINK_ADDRESS, b"loading").unwrap();
+        assert_eq!(receive(&mut b).unwrap().0, b"loading".to_vec());
+        b.send_datagram(LINK_ADDRESS, b"for a").unwrap();
+        assert_eq!(receive(&mut copy), None);
+        drop(copy);
+        assert!(b.peer_alive());
+        assert_eq!(receive(&mut a).unwrap().0, b"for a".to_vec());
     }
 
     #[test]

@@ -664,6 +664,13 @@ impl Rendezvous {
         }
     }
 
+    /// The relay channels open now, as `(channel, key, master)`: what a
+    /// host's loading thread frames its keepalives to relayed players with
+    /// ([`crate::master::RelayFramings`], protocol 28).
+    pub fn relay_channels(&self) -> Vec<(u32, u32, SocketAddr)> {
+        self.relays.channels.list()
+    }
+
     /// The socket as the transport should see it, for one receive or one
     /// transmit.
     pub fn over<'a, D: Datagrams + ?Sized>(
@@ -1544,6 +1551,11 @@ impl HostListing {
         now: Duration,
     ) -> Routed<'a, D> {
         self.rendezvous.over(socket, now)
+    }
+
+    /// See [`Rendezvous::relay_channels`].
+    pub fn relay_channels(&self) -> Vec<(u32, u32, SocketAddr)> {
+        self.rendezvous.relay_channels()
     }
 
     /// See [`Rendezvous::set_listed`].

@@ -957,6 +957,11 @@ fn turn(
     now: Duration,
     reports: &Sender<Report>,
 ) {
+    // A build's loading keepalives reach relayed players through the
+    // channels open now (protocol 28).
+    if let Some(listing) = listing.as_ref() {
+        host.set_relay_channels(listing.relay_channels());
+    }
     let received = match listing.as_mut() {
         Some(listing) => host.receive_from(now, &mut listing.over(transport, now)),
         None => host.receive_from(now, transport),
@@ -1095,6 +1100,15 @@ fn serve(
     // Stage K: a game a player hosts keeps standbys, so it can be taken
     // over when it is lost or leaves.
     host.set_standbys_enabled(true);
+    // Protocol 28 (slice NET2): while the host builds a mission its loading
+    // thread keeps every player connected, this game's own over the link.
+    if let Ok(base) = transport.socket.socket.try_clone() {
+        let link = transport.link.sender();
+        host.set_loading_socket(Box::new(move || {
+            Ok(Box::new(Linked::new(base.try_clone()?, link.sender()))
+                as Box<dyn Datagrams + Send>)
+        }));
+    }
     if took_over {
         let tick = host.world().tick();
         resume_listing(host, listings, clock.now());
@@ -1610,6 +1624,7 @@ pub fn log_line(entry: &HostLog) -> String {
             tore_session::wire::chat::receiver_label(*receiver).to_ascii_lowercase()
         ),
         HostLog::Stalled { .. } | HostLog::Resumed { .. } => entry.stall_text().unwrap_or_default(),
+        HostLog::Loaded { .. } => entry.loading_text().unwrap_or_default(),
     };
     format!("tick {}: {text}", entry.tick())
 }

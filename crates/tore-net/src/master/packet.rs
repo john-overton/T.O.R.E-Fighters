@@ -2685,9 +2685,12 @@ mod tests {
         }
         // Any other program's datagram, the game's own packets included,
         // fails the checksum.
-        let game = crate::packet::Packet::Keepalive(crate::packet::Keepalive { connection: 1 })
-            .encode(7)
-            .unwrap();
+        let game = crate::packet::Packet::Keepalive(crate::packet::Keepalive {
+            connection: 1,
+            loading: false,
+        })
+        .encode(7)
+        .unwrap();
         let mut padded = game.clone();
         padded.resize(15, 0);
         for datagram in [&game[..], &padded[..]] {

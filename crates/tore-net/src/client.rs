@@ -349,6 +349,7 @@ impl Client {
         };
         Packet::Keepalive(packet::Keepalive {
             connection: connection.id,
+            loading: false,
         })
         .encode(self.config.protocol_version)
         .ok()
@@ -514,11 +515,11 @@ impl Client {
             PacketKind::Refuse => self.on_refuse(body, target),
             PacketKind::Payload => self.on_payload(now, datagram.len(), body, check),
             PacketKind::Disconnect => self.on_disconnect(body),
+            PacketKind::Keepalive => self.on_keepalive(now, from, body),
             PacketKind::ConnectRequest
             | PacketKind::ChallengeAnswer
             | PacketKind::Discover
             | PacketKind::DiscoverAnswer
-            | PacketKind::Keepalive
             | PacketKind::Punch
             | PacketKind::Reach
             | PacketKind::ReachAnswer => {
@@ -694,6 +695,30 @@ impl Client {
             return;
         }
         connection.peer_closed(DisconnectReason::from_code(disconnect.reason));
+    }
+
+    /// The host's Keepalive (protocol 28, slice NET2): it is building a
+    /// mission. Taken only from the host's own address with the
+    /// connection's id; it keeps the connection and, marked loading, tells
+    /// the game the host is loading until its next Payload.
+    fn on_keepalive(&mut self, now: Duration, from: SocketAddr, body: &[u8]) {
+        let Ok(keepalive) = packet::decode_keepalive(body) else {
+            self.counters.malformed += 1;
+            return;
+        };
+        let State::Connected(connection) = &mut self.state else {
+            self.counters.unexpected += 1;
+            return;
+        };
+        if canonical(self.server) != from {
+            self.counters.unknown_address += 1;
+            return;
+        }
+        if keepalive.connection != connection.id {
+            self.counters.stale += 1;
+            return;
+        }
+        connection.kept_alive(now, keepalive.loading);
     }
 
     fn collect(&mut self) {
