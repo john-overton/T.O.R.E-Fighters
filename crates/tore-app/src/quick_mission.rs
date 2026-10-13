@@ -681,16 +681,19 @@ impl QuickMission {
         self.wing_files.iter().position(|n| n == id.selection_key())
     }
     /// Why no AI wingman can share friendly wing 1 with the player: the
-    /// player's aircraft is one the AI cannot fly, or a helicopter on a
-    /// ground start (the AI starts and flies a helicopter in the air, but
-    /// cannot lift one off the ground yet, slice ST-H). The words end
-    /// "so friendly wing 1 ...".
+    /// player's aircraft is one the AI cannot fly, or a helicopter, tiltrotor
+    /// or vectored-thrust jet on a ground start (the AI starts and flies
+    /// these in the air, but cannot lift one off the ground yet: slice ST-H
+    /// for the helicopters, slice H3 for the V-22, the AV-8 and the Yak-141,
+    /// whose second wingman never left the taxiway; slice H2 builds the
+    /// vertical and short takeoffs and lifts this). The words end "so
+    /// friendly wing 1 ...".
     fn wingmen_refusal(&self) -> Option<String> {
         let player = self.player()?;
         if !player.ai_flyable() {
             return Some(format!("The AI cannot fly the {} yet", player.label()));
         }
-        if player.is_helicopter() && self.ground_start() {
+        if player.is_powered_lift() && self.ground_start() {
             return Some(format!(
                 "The AI cannot take a {} off the ground yet",
                 player.label()
@@ -3080,36 +3083,41 @@ mod tests {
         q
     }
     #[test]
-    fn the_ais_wing_choices_leave_out_what_it_cannot_fly_but_the_player_keeps_them() {
+    fn the_ais_wing_choices_list_every_aircraft_the_player_can_fly() {
         let q = full_catalog();
-        let kept: Vec<AircraftId> = AircraftId::SELECTABLE
-            .into_iter()
-            .filter(|id| !id.ai_flyable())
-            .collect();
-        assert_eq!(kept.len(), 4);
         for field in AI_AIRCRAFT_FIELDS {
-            assert_eq!(q.values(field).len(), AircraftId::SELECTABLE.len() - 4);
-            for id in &kept {
+            assert_eq!(q.values(field).len(), AircraftId::SELECTABLE.len());
+            for id in AircraftId::SELECTABLE {
                 assert!(
-                    !q.values(field).contains(&id.label().to_string()),
-                    "{id:?} in field {field}"
+                    q.values(field).contains(&id.label().to_string()),
+                    "{id:?} missing from field {field}"
                 );
             }
         }
-        assert!(q.ai_choice(AircraftId::Ch47).is_none());
-        // The armed helicopters are offered since slice ST-H.
-        assert!(q.ai_choice(AircraftId::Ah64).is_some());
-        assert!(q.ai_choice(AircraftId::Mi24).is_some());
-        assert!(q.ai_choice(AircraftId::Mig29).is_some());
+        // The armed helicopters since slice ST-H, the transport, the tiltrotor
+        // and the vectored-thrust jets since slice H3.
+        for id in [
+            AircraftId::Ah64,
+            AircraftId::Mi24,
+            AircraftId::Ch47,
+            AircraftId::V22,
+            AircraftId::Av8,
+            AircraftId::Yak141,
+            AircraftId::Mig29,
+        ] {
+            assert!(q.ai_choice(id).is_some(), "{id:?}");
+        }
         // The player's list is whole.
         assert_eq!(q.values(6).len(), AircraftId::SELECTABLE.len());
-        for id in kept {
-            assert!(q.values(6).contains(&id.label().to_string()));
-        }
     }
     #[test]
     fn a_wing_field_names_the_aircraft_of_the_ais_list_not_the_players() {
         let mut q = full_catalog();
+        // Every aircraft is the AI's since slice H3, so its list is cut here
+        // (the first entry gone) to make it differ from the player's, as it
+        // does whenever `AircraftId::ai_flyable` keeps something back.
+        q.wing_files.remove(0);
+        q.wing_names.remove(0);
         for field in [9, 12, 23, 26, 29] {
             let index = q.ai_choice(AircraftId::Mig17).unwrap();
             q.apply(field, index);
@@ -3124,15 +3132,21 @@ mod tests {
         assert_eq!(spec.wings[5].aircraft, AircraftId::Mig17);
     }
     #[test]
-    fn a_player_in_an_aircraft_the_ai_cannot_fly_leads_friendly_wing_1_alone() {
+    fn the_vertical_lifters_lead_wingmen_in_the_air_but_not_off_the_ground() {
+        // The CH-47, the V-22, the AV-8 and the Yak-141 are offered to the AI
+        // (slice H3); on a ground start their wingmen would sit on the
+        // taxiway (slice H2 builds the vertical takeoffs), so the creator
+        // leaves the player alone there, as for the AH-64 and the Mi-24.
         let mut q = full_catalog();
-        q.apply(4, 3);
+        q.airport_names[0] = vec!["First Field".into()];
+        q.airport_objects[0] = vec![0x4000_0000];
         for id in [
             AircraftId::Ch47,
             AircraftId::V22,
             AircraftId::Av8,
             AircraftId::Yak141,
         ] {
+            q.apply(33, 0);
             q.apply(6, 0);
             q.apply(4, 3);
             let index = q
@@ -3142,22 +3156,25 @@ mod tests {
                 .unwrap();
             q.apply(6, index);
             assert_eq!(q.player(), Some(id));
-            assert_eq!(q.draft.values[4], 1, "{id:?}");
-            assert!(q.notice.as_deref().is_some_and(|n| n.contains("just you")));
+            q.apply(4, 3);
+            assert_eq!(q.draft.values[4], 3, "{id:?} airborne");
             assert!(q.unsupported().is_none());
-            // The count cannot be raised again while they fly it.
-            q.apply(4, 2);
-            assert_eq!(q.draft.values[4], 1);
-            assert_eq!(q.wing_launches(None).unwrap()[0].count(), 0);
+            q.apply(33, 1);
+            assert_eq!(q.draft.values[4], 1, "{id:?} ground");
+            assert!(
+                q.notice
+                    .as_deref()
+                    .is_some_and(|n| n.contains("off the ground") && n.contains("just you")),
+                "{:?}",
+                q.notice
+            );
+            // The lobby's wing 1 is for people, so it keeps its size.
+            q.lobby = true;
+            q.draft.values[4] = 3;
+            assert!(q.unsupported().is_none());
+            q.lobby = false;
+            q.draft.values[4] = 1;
         }
-        // A draft that slipped through is refused with the reason.
-        q.draft.values[4] = 2;
-        assert!(q.unsupported().unwrap().contains("cannot fly the"));
-        // The lobby's wing 1 is for people, so it keeps its size.
-        q.lobby = true;
-        assert!(q.unsupported().is_none());
-        q.apply(4, 3);
-        assert_eq!(q.draft.values[4], 3);
     }
     #[test]
     fn a_helicopter_leads_ai_wingmen_in_the_air_but_not_off_the_ground() {

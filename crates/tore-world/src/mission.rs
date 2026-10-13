@@ -972,8 +972,8 @@ impl MissionSpec {
             }
         }
         // Friendly wing 1 is flown by people; every other wing is the AI's,
-        // and the AI cannot fly the CH-47, the V-22, the AV-8 or the Yak-141
-        // yet (`AircraftId::ai_flyable`).
+        // and it flies whatever `AircraftId::ai_flyable` allows (every
+        // selectable aircraft since slice H3).
         for (index, wing) in self.wings.iter().enumerate().skip(1) {
             if wing.count > 0 && !wing.aircraft.ai_flyable() {
                 return refuse(format!(
@@ -3005,23 +3005,22 @@ mod tests {
     }
 
     #[test]
-    fn the_ai_is_not_given_aircraft_it_cannot_fly_yet() {
+    fn every_selectable_aircraft_may_fill_a_wing_the_ai_flies() {
+        // Slice H3: the CH-47, the V-22, the AV-8 and the Yak-141 joined the
+        // AH-64 and the Mi-24 as aircraft the AI flies, so a mission file or a
+        // lobby spec may put any of them in a wing other than friendly wing 1.
         for id in AircraftId::SELECTABLE {
             // A person may fly any aircraft, alone or leading friendly wing 1.
             let mut spec = MissionSpec::new("UKR", id);
             spec.validate().unwrap();
             spec.wings[3].count = 0;
             spec.wings[0].count = 1;
-            // A wing the AI flies holds only what the AI can fly.
             spec.wings[1].aircraft = id;
             spec.wings[1].count = 2;
             spec.wings[4].aircraft = id;
             spec.wings[4].count = 1;
-            let verdict = spec.validate();
-            assert_eq!(verdict.is_ok(), id.ai_flyable(), "{id:?}");
-            if let Err(error) = verdict {
-                assert!(error.to_string().contains("AI cannot fly"), "{error}");
-            }
+            assert!(id.ai_flyable(), "{id:?}");
+            spec.validate().unwrap();
             // An empty wing names no aircraft that matters.
             spec.wings[1].count = 0;
             spec.wings[4].count = 0;

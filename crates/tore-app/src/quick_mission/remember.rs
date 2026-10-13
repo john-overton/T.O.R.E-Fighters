@@ -460,22 +460,25 @@ mod tests {
     }
 
     #[test]
-    fn a_pilot_the_ai_cannot_fly_still_opens_with_wing_one_just_him() {
+    fn a_vertical_lifter_on_a_ground_start_still_opens_with_wing_one_just_him() {
         // Whatever the player's slot draws, the creator stays valid: wing 1
-        // is alone when the AI cannot fly the pilot's aircraft.
+        // is alone when the AI cannot yet take the pilot's aircraft off the
+        // ground (slices ST-H and H3).
         let mut q = full_catalog();
-        let hand = q
+        q.airport_names[0] = vec!["First Field".into()];
+        q.airport_objects[0] = vec![0x4000_0000];
+        q.apply(33, 1);
+        let at = q
             .aircraft_files
             .iter()
-            .position(|key| AircraftId::parse(key).is_ok_and(|id| !id.ai_flyable()));
-        if let Some(at) = hand {
-            q.draft.values[4] = 3;
-            q.apply(6, at);
-            q.notice = None;
-            q.randomize_aircraft(1, true);
-            assert_eq!(q.draft.values[4], 1);
-            assert!(q.notice.is_none());
-        }
+            .position(|key| AircraftId::parse(key).is_ok_and(AircraftId::is_powered_lift))
+            .unwrap();
+        q.draft.values[4] = 3;
+        q.apply(6, at);
+        q.notice = None;
+        q.randomize_aircraft(1, true);
+        assert_eq!(q.draft.values[4], 1);
+        assert!(q.notice.is_none());
     }
 
     #[test]
