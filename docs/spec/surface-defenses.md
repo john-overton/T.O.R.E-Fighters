@@ -1682,20 +1682,26 @@ not static scenery), engines off, and they never take off. The templates'
   nothing runs, so there are no critical (pilot) gun kills, no system faults
   and no jammer (agent decision).
 - **Destroyed**, it explodes as every FA aircraft does (type 30, with its
-  usual variety), leaves the ground-crash crater and a fire with its smoke
-  column for 15 minutes, without the crash explosion (it did not fall), and
-  throws one fragment. On a carrier deck there is no crater. The kill carries
-  its PT class word (0x8000 fighter, 0x4000 bomber), so it lands in the
-  Fighter or Bomber debrief row; it is a ground kill, not an aircraft of the
-  roster.
-- **Fragment** (fitted). A destroyed parked aircraft whose last hits broke a
-  section throws that section's piece, tossed 45 ft/s up and 25 ft/s outward.
-  For a type the game flies it is the type's own reviewed piece where one
-  exists (the Rafale's wing and tail pieces) from the real attachment point;
-  otherwise piece 0 for a break forward and piece 1 aft or at a wing, from the
-  attachment point the type's own `_A` to `_D` shapes give (types the game
-  flies) or from the OBJECT block's `dstDebrisPos` and `dmgDebrisPos` (types it
-  does not).
+  usual variety) and stays where it stood as a **burnt hulk** (John,
+  2026-10-13: "a destroyed parked aircraft leaves a burnt hulk"): no crash
+  site, no crater and no flying piece. It may burn (agent decision, "may
+  still burn"): a fire with its smoke column for 15 minutes on a small
+  scorch under it (crater size 2, 32 ft of half width; none on a carrier's
+  deck), the same however it died, a hit or splash. The kill carries its PT
+  class word (0x8000 fighter, 0x4000 bomber), so it lands in the Fighter or
+  Bomber debrief row; it is a ground kill, not an aircraft of the roster.
+- **The hulk** (fitted, agent decision, 2026-10-13). The picture swaps the
+  standing aircraft for its own shape broken down: every face split into
+  small triangles, every point sunk toward the aircraft's lowest point so it
+  keeps 30 to 60 percent of its height (a fixed function of where the point
+  is, so shared corners stay joined), a tenth of the skin torn away and 85
+  percent of the rest charred, in dark greys that differ face by face; the
+  remaining skin keeps its camouflage texture. It is built when the scenery
+  is, from the same shape as the standing aircraft, so every machine and
+  every replay of the mission draws the same hulk; nothing reaches the
+  simulation or the wire. The `_B` and `_D` piece shapes are no longer
+  drawn, and the sim throws no fragment (a crashed or shot-down aircraft in
+  flight still sheds its piece).
 - **Not roster planes.** No plane id, no AI actor, no lineage. Retail writes
   template aircraft as `$4017` (not targets) unless flagged 0x80, and roster
   planes would join "every enemy aircraft is a target".
@@ -1794,7 +1800,7 @@ John accepted the recommended looks (12.4).
 | Buildings whose shape holds a damage branch (57 types: hangars, towers, fuel tanks, factories, stores, bunkers, masts, bridge spans; [the survey](../formats/objects-and-shapes.md#destroyed-looks-of-buildings-and-bridges-2026-10-12)) | The shape's own damaged copy (`shape::DAMAGED_WORD`), on its own lowest point; burns, except a bridge, whose span breaks or drops | retail shapes (B16, 2026-10-12); the condition the original draws it on is unknown, here destruction |
 | Other buildings (city and town blocks, houses, apartments, industry without a branch, sites, tents, crates) | A ruin generated from the intact shape: split, sunk to 6 to 30 percent of its height, its fallen roof partly charred; burns | fitted, agent decision (B16, 2026-10-12) |
 | Runways, roads, lots, crops, bridge ends, rocks | Stay as they stood; a runway keeps the craters of every weapon that hit it | runway B15; the rest agent decision (B16) |
-| Parked aircraft | The aircraft look: type 30 explosion, the crash crater (none on a deck), fire and smoke for 15 minutes, one fragment drawn with the type's own `_B` or `_D` shape | existing aircraft path |
+| Parked aircraft | A burnt hulk: its own shape sunk, torn and charred ([parked aircraft](#parked-aircraft)), after the type 30 explosion; a scorch (none on a deck), fire and smoke for 15 minutes; no crater, no crash site and no flying piece | John, 2026-10-13 (hulk); the hulk's numbers and the fire: agent decision |
 | Men, barrage zones | Removed | |
 
 The explosion uses the unit's own type (21 ground, 35 ship, 15 men) and crater
@@ -1802,13 +1808,13 @@ size on land, rather than one fitted value for all ground objects.
 
 - **The fire.** However a burning wreck died (a hit, splash, the host's
   destroyed event), it gets one fire with its smoke column, the crash site's
-  look, at the foot of its hit box, for 15 minutes; the oldest fire goes out
-  when 64 burn at once, as for crash sites (fitted). See [wreck
+  look, at the foot of its hit box: for the whole mission for a building or
+  fixed object, 15 minutes for a vehicle, ship or parked aircraft. See [wreck
   fires](#wreck-fires).
 - **Nothing vanishes** (B16, John 2026-10-12): every destroyed building and
   fixed object stays drawn in its destroyed look, in live flight, online
   and in replays. Only men and the invisible barrage zones go, and a parked
-  aircraft explodes as an aircraft does (its crash site and pieces).
+  aircraft becomes a burnt hulk (John, 2026-10-13).
 - **What destruction does in play is unchanged**: the same explosion, the
   same splash, objectives, scoring and debrief; a destroyed object's
   contact is as before.
@@ -1838,17 +1844,73 @@ B16 (John, 2026-10-12): destroyed objects stay on fire.
   reaching a tenth past the larger half of its plan (16 ft of half width a
   size unit, sizes 2 to 16; the type's own crater word when larger): the
   burnt ground the ruin stands on. On water, none.
-- **How long.** 15 minutes, as a crash site, fading over the last minute
-  (agent decision: the fire is the crash site's, so it keeps its life; the
-  ruin and the scorch stay for the mission).
-- **The cap.** Fires share the crash sites' 64: past it the oldest goes
-  out. Craters keep their 256. A whole airfield of about 30 buildings and its
-  vehicles fits.
+- **How long** (John, 2026-10-13: "building fires burn the whole
+  mission"). A destroyed building's or fixed object's fire burns for the
+  rest of the mission, at full strength (no fade). A vehicle's, ship's or
+  parked aircraft's fire keeps the crash site's 15 minutes, fading over the
+  last minute (agent decision: a fuel fire burns out; the same code path
+  lights both, so the whole-mission class is one flag on the object's
+  `GroundLook`, `lasting`). The ruin and the scorch stay for the mission
+  either way.
+- **The cap** (agent decision). The crash sites' cap of 64 fires, the oldest
+  going out, now counts only fires of limited life (crash sites, vehicles,
+  ships, aircraft hulks). A whole-mission fire is outside it: it is never
+  put out and never counted, so a bombed airfield keeps every fire and the
+  crash sites keep their 64. At most as many whole-mission fires burn as the
+  mission has destroyable buildings and fixed objects. Craters and pock
+  marks have no cap (since 2026-10-12).
+- **The smoke budget** (agent decision). Every fire's column puffs ten times
+  a second for about 44 seconds, 438 puffs, out of the simulation's 8,192.
+  Up to 16 burning columns smoke at that full rate, as before; with more,
+  each column lets a puff go less often (a whole number of 12 tick steps,
+  staggered from column to column), so 100 fires smoke 6,300 puffs between
+  them and 500 smoke 7,000, with every column standing and thinner, instead
+  of the oldest puffs of all of them being thrown away
+  (`combat/smoke.rs`, `FULL_COLUMNS`). Up to 16 fires change nothing.
 - **Simulation data.** The fire and scorch are ordinary combat marks, so
   they are deterministic, travel online as the crash sites' do and are
   recorded and replayed with no format change; a ground object's look
-  (`GroundLook`) gained the pavement flag, carried in checkpoints. No protocol
-  change. Fire widths and the ruins are presentation only.
+  (`GroundLook`) gained the pavement flag (B16) and the whole-mission flag
+  (nr-fx2), carried in checkpoints. No protocol change. A networked client
+  keeps every fire it is told of for the rest of the game (it was never
+  told when one ends), so it shows a crash site's fire past 15 minutes; a
+  recording of a networked game likewise records every fire for good and
+  its viewer applies no cap to them. A wire message that says which fires
+  last would need a protocol bump and is left to the lead. Fire widths and
+  the ruins are presentation only.
+
+#### City fill buildings
+
+John, 2026-10-13: "city fill buildings burn too, no cap". A background city
+building a ground burst knocked flat ([the city
+fill](../formats/objects-and-shapes.md), `CityFill::flatten`) burns for the
+rest of the mission, however many fall.
+
+- **The set that burns is the fill's flattened set**, which the host already
+  tells every player and the world checkpoint carries, so every machine of a
+  networked game and every restart shows the same fires with no new message.
+  There are no simulation marks for them (the fill is scenery, never a
+  combat target) and nothing reaches the wire or a recording. A replay does
+  not record the fill's flattened set (it never did), so it shows its city
+  whole and unburnt.
+- **How it looks.** A fire on each knocked-down building's base, a building
+  fire's width (0.6 of the smaller plan side, 24 to 90 ft; the fill's piece
+  sizes), its flames looping once a second, each out of step with its
+  neighbours, and a smoke column of the wrecks' own shape.
+- **Cheap with thousands burning** (agent decisions): only the nearest 1,024
+  fires within 2,000 of their widths become fire sprites in the explosions'
+  instanced pass, and only the nearest 32 within 8 nmi get a smoke column,
+  computed from the fire's age, not simulated, at half the density of a
+  wreck column (a puff every 0.8 s; 38 puffs a column). That is at most
+  about 1,200 puffs a frame, a budget of its own beside the simulation's. A
+  fire farther off than 8 nmi shows its flame only. The burning set is
+  rebuilt only when the fill's version changes; a frame scans it once and
+  selects the nearest (`city_fires.rs`). `--city-fires` measures it: 563
+  burning cost 0.04 ms of CPU a frame, and all 49,311 buildings of Ukraine's
+  Town 1 0.7 ms, about a millisecond (500) to two (49,000) on the whole frame
+  ([measurements](../baselines/surface-defenses.md#city-fill-fires-nr-fx2-2026-10-13)).
+- **Presentation only.** Fires and smoke here are not sounds: the fire loop
+  is the simulation's marks' (a city fire is silent).
 
 ### Craters on pavement
 
@@ -1856,7 +1918,7 @@ A weapon that hits a runway or airstrip leaves its own crater there, as it
 would on open ground (B16, John 2026-10-12): bombing a runway pocks it
 whether or not it is destroyed, and a destroyed runway keeps its pavement and
 every crater (B15). Other objects leave a crater only when destroyed (their
-scorch). Craters last the mission; past 256 the oldest goes.
+scorch). Craters last the mission (no cap since 2026-10-12).
 
 ### Drawing
 
@@ -1882,10 +1944,10 @@ scorch). Craters last the mission; past 256 the oldest goes.
   cycling his 11 signal frames four times a second (fitted: the native frame
   choice is untraced). A carrier with aircraft on its deck keeps its template
   spot (no jitter), so its deck aircraft stay on it.
-- **Parked aircraft** stand gear down as scenery; a destroyed one's fragment
-  is drawn in flight and where it lands, and a parked aircraft at half its hit
-  points or less smokes as a damaged aircraft in the air does (dark puffs
-  every 12 ticks) until it is destroyed.
+- **Parked aircraft** stand gear down as scenery; a destroyed one is drawn as
+  its burnt hulk ([parked aircraft](#parked-aircraft)), and a parked aircraft
+  at half its hit points or less smokes as a damaged aircraft in the air does
+  (dark puffs every 12 ticks) until it is destroyed.
 - Battery radars and trucks are ordinary NT shapes (SA6SFR, KING, MISTRK,
   TRUCK); the HAWK element draws SRDR2 (John, 2026-10-10).
 

@@ -902,7 +902,7 @@ flowchart LR
 | `tore-world` `surface::{movement, supply, parked}` | Routed units (integer `Mover` state), supply truck resupply, parked aircraft poses and deck spots |
 | `tore-sim` `ai::surface` | The engagement controller (Idle, Search, Prepare, Track, Fire, Pause, Reload, Empty, Blind) and the experience table, renderer-free and checkpointed |
 | `tore-sim` `combat::surface_guns`, `combat/live/{surface, collateral, parked}` | The AAA tuning table; `State::fire_surface` and surface rounds (flak time fuze, capacity reserve); splash damage for every weapon; parked aircraft rows |
-| `tore-app` `scenery/surface_art.rs`, `surface_fx.rs` | Wreck swaps, launcher rails, carrier parts and sprites; flak, gunfire and launch effects and wreck smoke |
+| `tore-app` `scenery/surface_art.rs`, `scenery/rubble.rs`, `surface_fx.rs`, `city_fires.rs` | Wreck swaps (a destroyed parked aircraft's burnt hulk too), launcher rails, carrier parts and sprites; flak, gunfire and launch effects and wreck smoke; the burning city fill's fires and smoke (presentation from the fill's flattened set) |
 
 **One tick.** `World::step` moves routed units (`Combat::step_surface`) right
 before the combat step, so this tick's fire meets units where they are. After

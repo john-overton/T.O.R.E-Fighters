@@ -560,6 +560,37 @@ branch is drawn with `Shape::with_export_state`; it stands on its own lowest
 point like the variants. What a player sees is in
 [destroyed looks](../spec/surface-defenses.md#destroyed-looks).
 
+**A destroyed parked aircraft** gets the same generated treatment from
+`scenery/rubble.rs` (`hulk`, nr-fx2, John 2026-10-13): its own gear-down
+shape split, sunk to 30 to 60 percent of its height, a tenth of the faces
+torn away and 85 percent of the rest charred. Built beside the standing
+aircraft in the scenery build and swapped in by the same look rule as any
+wreck, so a replay draws it from the recorded destruction.
+
+### Ground shadow decals (2026-10-13)
+
+Research and implementation, slice FX2. A magenta patch under the Ukraine
+suspension bridge (and under the crane) in the B16 renders was not a
+missing texture. `--surface-dump --faces TYPE ...` lists every face of a
+type's main shape with its texture, colour slots and extent: `BRDMID`'s
+face 22 (`BRDEND`'s 23, `CRANE`'s 2) is a flat quad on the shape's lowest
+plane (the water, or the foot of the crane), record kind `0x41` (solid
+colour, no texture coordinates), with palette colour **6** in all four
+corners; the damaged copies keep it. The weather palette holds a magenta at
+index 6, so drawn as a colour it is a magenta rectangle at the bridge's
+water level. It is a ground shadow polygon (the bridge's span on the water,
+the crane's footprint); the retail renderer's treatment of colour 6 is not
+traced (unknown; next step: the shape interpreter's solid face path).
+
+**Use**: `surface_art::is_shadow_decal` skips a face that is solid (`0x41`),
+all colour 6, flat and within 1.5 shape units of its shape's lowest point,
+when building a scene object's geometry (the intact shape, its damage
+branch and the generated ruins, `rubble::collapse` too). Shadows come from
+the lighting pass (see [surface lighting](../spec/surface-lighting.md)), so
+the decal is not drawn rather than approximated (agent decision). A scan of
+the OT shapes the dump can read found colour 6 faces only in `BRDMID`,
+`BRDEND` and `CRANE`; aircraft shapes use another path and are untouched.
+
 ## Surface unit shapes: envelopes and sprites (2026-10-10)
 
 Research and implementation, slice S1 of the surface objectives round. Shapes
