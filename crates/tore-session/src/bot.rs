@@ -704,14 +704,20 @@ pub struct SurfaceSeen {
     pub launches: u64,
     /// Flak bursts in the air.
     pub flak: u64,
-    /// Frames whose readout had a surface radar painting the plane.
+    /// Frames whose readout had a surface radar painting the plane, of
+    /// either side.
     pub painted: u64,
+    /// Of those, frames with a radar of the plane's own side among the
+    /// painters: a unit never tracks its own side's aircraft, so this stays
+    /// 0 (slice NET2: `net-surface-pvp` counted the other side's M163 as
+    /// Red's own).
+    pub painted_own: u64,
     /// The surface rounds one frame drew at most.
     pub rounds: usize,
 }
 
 impl SurfaceSeen {
-    fn see(&mut self, frame: &ClientFrame) {
+    fn see(&mut self, frame: &ClientFrame, own_side: &dyn Fn(u32) -> bool) {
         let unit = |id: u32| (0x4000_0000..0x6000_0000).contains(&id);
         self.moving = self.moving.max(frame.picture.surface.len());
         self.wrecks = self
@@ -726,12 +732,13 @@ impl SurfaceSeen {
                 .filter(|p| p.gun && unit(p.owner))
                 .count(),
         );
-        if frame
-            .readout
-            .as_ref()
-            .is_some_and(|r| !r.rwr.painting.is_empty())
+        if let Some(readout) = frame.readout.as_ref()
+            && !readout.rwr.painting.is_empty()
         {
             self.painted += 1;
+            if readout.rwr.painting.iter().any(|&e| own_side(e)) {
+                self.painted_own += 1;
+            }
         }
         for event in &frame.events {
             match &event.event {
@@ -752,7 +759,7 @@ impl SurfaceSeen {
     pub fn line(&self) -> String {
         format!(
             "moving {}, wrecks {}, bursts {}, ends {}, states {}, told {}, launches {}, flak {}, \
-             painted {}, rounds {}",
+             painted {}, own {}, rounds {}",
             self.moving,
             self.wrecks,
             self.bursts,
@@ -762,9 +769,33 @@ impl SurfaceSeen {
             self.launches,
             self.flak,
             self.painted,
+            self.painted_own,
             self.rounds
         )
     }
+}
+
+/// Whether surface unit `emitter` fights for the side of the plane `client`
+/// flies: the unit's side in the client's mission against the plane's wing
+/// in the roster. False before the mission or the seat, or for an emitter
+/// that is no surface unit.
+fn own_side_emitter(client: &Client, emitter: u32) -> bool {
+    let (Some(world), Some((_, plane))) = (client.mission(), client.seat()) else {
+        return false;
+    };
+    let Some(wing) = world.roster.plane(plane).map(|p| p.slot.wing.side) else {
+        return false;
+    };
+    let side = if wing.is_enemy() {
+        tore_world::ai_wings::ENEMY_SIDE
+    } else {
+        tore_world::ai_wings::FRIENDLY_SIDE
+    };
+    world
+        .terrain
+        .surface
+        .unit(tore_world::surface::UnitId(emitter))
+        .is_some_and(|unit| unit.side == side)
 }
 
 /// What a bot's frames showed of the other aircraft's stores (protocol 27,
@@ -1429,7 +1460,9 @@ impl Bot {
                 self.pilot.arm(&frame.config);
                 self.picture = Some(frame.picture.clone());
                 self.hear(&frame);
-                self.surface.see(&frame);
+                let client = &self.client;
+                self.surface
+                    .see(&frame, &|emitter| own_side_emitter(client, emitter));
                 self.stores.see(&frame);
                 drawn = Some(frame);
             } else if let Some(frame) = self.client.observer_frame(now) {
