@@ -1301,7 +1301,9 @@ impl Controller {
                 id
             });
             let (speed_request, speed) = if defense.rotorcraft {
-                (SpeedRequest::Maximum, frame.own.limits.maximum)
+                // A helicopter's break keeps its strike speed (slice HF1).
+                let speed = super::helicopter_defense::strike_speed(&frame.own.limits);
+                (SpeedRequest::Explicit(speed), speed)
             } else {
                 (SpeedRequest::Corner, frame.own.limits.corner)
             };
@@ -4260,9 +4262,11 @@ mod tests {
     }
 
     #[test]
-    fn a_defence_flies_corner_speed_but_a_helicopters_flies_maximum() {
+    fn a_defence_flies_corner_speed_but_a_helicopters_flies_its_strike_speed() {
         let scene = Scene::new();
-        for (rotorcraft, speed) in [(false, own().limits.corner), (true, own().limits.maximum)] {
+        let strike = super::super::helicopter_defense::strike_speed(&own().limits);
+        assert!(strike.0 < own().limits.maximum.0 && strike.0 >= own().limits.minimum.0);
+        for (rotorcraft, speed) in [(false, own().limits.corner), (true, strike)] {
             let mut c = controller(Experience::Average);
             c.set_defense_motion(Some(DefenseMotion {
                 source: DefenseSource::Missile,

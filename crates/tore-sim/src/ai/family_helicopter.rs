@@ -9,7 +9,9 @@
 //!   or it is no longer ahead. Retail's pull asks for minimum speed by an
 //!   operand slip; T.O.R.E keeps its speed through it (John, 2026-10-11:
 //!   "maintain proper speed for defense and quick exfil"), and every leg
-//!   asks for the helicopter's maximum speed.
+//!   asks for the helicopter's strike speed, 80% of its maximum (John,
+//!   2026-10-13: "about 120 kt"; [`crate::ai::helicopter_defense::strike_speed`]).
+//!   Until slice HF1 every leg asked for the maximum.
 //! - **Stand-off** ([`Pass::StandOff`], fitted, agent): with an AT-2 (or any
 //!   guided or seeker store) under threat Missiles, it runs in low and
 //!   masked (200 ft above the ground) to 60% of the weapon's zone-1 range
@@ -28,9 +30,17 @@
 //!   then holds its nose on the target until the missile has hit or is gone
 //!   (the launcher sight rule: command guidance needs the target in the
 //!   launcher's cone every tick).
-//! - **Exit** (retail): 5 degrees up at maximum speed, levelling at the
-//!   pass's height, to max(20,000 ft, 2R) from the target (a stand-off
-//!   attack turns away and stays low), then turn back and choose again.
+//! - **Exit**: retail's is 5 degrees up at maximum speed straight ahead,
+//!   levelling at the pass's height, to max(20,000 ft, 2R) from the target,
+//!   then turn back and choose again. A helicopter flying it after a
+//!   pop-up crossed the target area at 1,800 ft, where a site it had not
+//!   seen shot an AH-64 down (slice HF1). T.O.R.E's helicopter leaves the
+//!   target area instead (opinionated, John 2026-10-13: "the helicopter
+//!   leaves after its run"; the shape is fitted, agent): it turns away from
+//!   the target, round every ring it knows and the ambush ring of a threat
+//!   that engaged it, and masks at 200 ft over the highest ground ahead at
+//!   its strike speed, to the same distance, then turns back and chooses
+//!   again.
 //!
 //! Defence, the safe test and going home are the fighters'.
 use super::{
@@ -53,8 +63,8 @@ pub const POPUP_PULL_AT_FT: f64 = 10_000.;
 pub const POPUP_PULL_DEG: f64 = 30.;
 pub const POPUP_PULL_TICKS: u64 = 6 * 120;
 pub const POPUP_EXIT_FT: f64 = 1_500.;
-/// Exit (retail): the climb and the distance the turn back waits for.
-pub const EXIT_CLIMB_DEG: f64 = 5.;
+/// Exit (retail): the distance the turn back waits for. (Retail's 5 degree
+/// climb is not flown since slice HF1: the helicopter masks.)
 pub const EXIT_TURN_MIN_FT: f64 = 20_000.;
 /// Pitch requests are held within this (fitted, agent: a helicopter flies
 /// its pass by its flight path, not by an 80 degree fighter dive).
@@ -264,7 +274,7 @@ pub(super) fn step(s: &mut Strike, cx: &Context<'_>) -> Order {
         Phase::Ingress | Phase::Wait | Phase::TurnBack => Order {
             steer: target_at
                 .or_else(|| objective_point(cx.picture))
-                .map(|p| toward(p, SpeedRequest::Maximum, s)),
+                .map(|p| toward(p, strike_speed(cx), s)),
             activity: Some(Activity::Pursuing),
             ..order
         },
@@ -288,7 +298,7 @@ pub(super) fn step(s: &mut Strike, cx: &Context<'_>) -> Order {
 
 /// While a threat is up and the controller is not flying a helicopter break
 /// (a warning not yet answered, or the ten quiet seconds after one): hold the
-/// course at maximum speed and settle to the masking height over the highest
+/// course at its strike speed and settle to the masking height over the highest
 /// ground ahead, which `helicopter_defense` does for the break itself. The
 /// fighters' air logic would otherwise fly this time at corner speed, which
 /// sinks a helicopter (slice ST-H, docs/spec/ai-strike.md, "Helicopter
@@ -309,7 +319,7 @@ fn mask_run(cx: &Context<'_>, order: Order, rings: &[threat::Ring]) -> Order {
         steer: Some(Steer {
             heading_deg: heading,
             pitch_deg: hold_pitch_deg(own.position[1], floor),
-            speed: SpeedRequest::Maximum,
+            speed: strike_speed(cx),
             afterburner: false,
             bank_deg: None,
             handling: Handling::PLAIN,
@@ -317,6 +327,12 @@ fn mask_run(cx: &Context<'_>, order: Order, rings: &[threat::Ring]) -> Order {
         activity: Some(Activity::Defending),
         ..order
     }
+}
+
+/// The speed every strike leg, the hold-off and the exit ask for (slice
+/// HF1): the helicopter's strike speed.
+fn strike_speed(cx: &Context<'_>) -> SpeedRequest {
+    SpeedRequest::Explicit(crate::ai::helicopter_defense::strike_speed(&cx.own.limits))
 }
 
 /// The height the helicopter cruises and turns back at: the pop-up's
@@ -442,13 +458,14 @@ fn choose(s: &mut Strike, cx: &Context<'_>) {
 }
 
 fn exit(s: &mut Strike, cx: &Context<'_>) {
-    s.exit_heading_deg = cx.own.heading_deg;
-    if s.pass == Some(Pass::StandOff)
-        && let Some(target) = s.target.and_then(|id| known_position(cx.picture, id))
-    {
-        // A stand-off attack turns away from the target and stays masked.
-        s.exit_heading_deg = bearing_deg(target, cx.own.position);
-    }
+    // Away from the target, whichever pass (slice HF1; a stand-off attack
+    // always did).
+    s.exit_heading_deg = s
+        .target
+        .and_then(|id| known_position(cx.picture, id))
+        .map_or(cx.own.heading_deg, |target| {
+            bearing_deg(target, cx.own.position)
+        });
     s.holding = None;
     s.enter(Phase::Exit, cx.tick);
 }
@@ -467,20 +484,16 @@ fn exit_distance(s: &Strike, cx: &Context<'_>) -> f64 {
     }
 }
 
-/// Retail's exit: 5 degrees up at maximum speed on the exit heading,
-/// levelling at the pass's height; a stand-off attack's exit stays masked.
-fn exit_steer(s: &Strike, cx: &Context<'_>, target_at: Option<Vector>) -> Steer {
+/// The exit (slice HF1, see the module notes): away from the target on the
+/// exit heading, round the rings it knows, masked at [`MASK_AGL_FT`] over
+/// the highest ground under and ahead of it, at the strike speed.
+fn exit_steer(s: &Strike, cx: &Context<'_>, _target_at: Option<Vector>) -> Steer {
     let own = cx.own;
-    let level = target_at.map_or(own.position[1], |t| cruise_altitude(s, cx, t));
-    let pitch = if s.pass == Some(Pass::StandOff) || own.position[1] >= level {
-        hold_pitch_deg(own.position[1], level)
-    } else {
-        EXIT_CLIMB_DEG
-    };
+    let ground = (own.position[1] - own.agl_ft).max(own.terrain_ahead_ft);
     Steer {
         heading_deg: clear_heading(&rings(s, cx), own.position, s.exit_heading_deg),
-        pitch_deg: pitch,
-        speed: SpeedRequest::Maximum,
+        pitch_deg: hold_pitch_deg(own.position[1], ground + MASK_AGL_FT),
+        speed: strike_speed(cx),
         afterburner: false,
         bank_deg: None,
         handling: Handling::PLAIN,
@@ -627,7 +640,7 @@ fn hold_check(s: &mut Strike, cx: &Context<'_>) {
 /// The hold-off circle: on the way there the heading turns round any ring
 /// across it; there, retail's circle law about `centre` at the hold
 /// radius (as the gunship's orbit, with the adapter's own bank), at
-/// maximum speed, down at the masked height over the highest ground under
+/// its strike speed, down at the masked height over the highest ground under
 /// and ahead of it.
 fn hold_steer(cx: &Context<'_>, centre: Vector, rings: &[threat::Ring]) -> Steer {
     let own = cx.own;
@@ -648,7 +661,7 @@ fn hold_steer(cx: &Context<'_>, centre: Vector, rings: &[threat::Ring]) -> Steer
     Steer {
         heading_deg: heading,
         pitch_deg: hold_pitch_deg(own.position[1], ground + MASK_AGL_FT),
-        speed: SpeedRequest::Maximum,
+        speed: strike_speed(cx),
         afterburner: false,
         bank_deg: None,
         handling: Handling::PLAIN,
@@ -825,7 +838,7 @@ fn attack(s: &mut Strike, cx: &Context<'_>, target: Vector, solution: Option<Sol
     // Every leg at the helicopter's best speed (John, 2026-10-11: "maintain
     // proper speed for defense and quick exfil"): asked for corner, the
     // adapter slows a helicopter until it sinks.
-    let corner = SpeedRequest::Maximum;
+    let corner = strike_speed(cx);
     let steer = match (pass, s.segment) {
         (Pass::PopUp, Segment::Approach) => {
             let (heading, pitch) = point_at([target[0], target[1] + POPUP_OFFSET_FT, target[2]]);

@@ -225,6 +225,7 @@ fn options() -> AppResult<Options> {
             "--offset" => o.ai.offset_ft = next()?.parse()?,
             "--sead-at" => o.ai.sead_at = Some(next()?.parse()?),
             "--follow-threat" => o.ai.follow_threat = true,
+            "--follow-egress" => o.ai.follow_egress = true,
             other if other.starts_with("--") => return Err(format!("unknown {other}").into()),
             other => positional.push(other.to_owned()),
         }

@@ -17,7 +17,7 @@
 //!     [--choose-store] [--buddy ID]
 //!     [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG]
 //!     [--defenses AAA SAM] [--surface-seed N] [--seconds S] [--sead-at S]
-//!     [--follow-threat]
+//!     [--follow-threat] [--follow-egress]
 //! ```
 //!
 //! - `--aircraft`, `--load`, `--station`, `--count`: the striker and its store,
@@ -300,6 +300,10 @@ pub(crate) struct Config {
     /// `--seconds`) while a helicopter keeps out of a ring it means to come
     /// back from, to see whether it resumes (slice H2).
     pub follow_threat: bool,
+    /// `--follow-egress`: after the last impact the run goes on (within
+    /// `--seconds`) until the striker egresses, and settles from there, so
+    /// what happens on the way out is seen (slice HF1).
+    pub follow_egress: bool,
 }
 
 impl Config {
@@ -640,6 +644,8 @@ struct Watch {
     last_impact: Option<f64>,
     closest: Option<(f64, f64)>,
     egress: bool,
+    /// When the striker egressed (`--follow-egress`).
+    egress_at: Option<f64>,
     lost: Option<f64>,
     activity: Option<Activity>,
     profile: Option<Profile>,
@@ -713,6 +719,7 @@ impl Watch {
             last_impact: None,
             closest: None,
             egress: false,
+            egress_at: None,
             lost: None,
             activity: None,
             profile: None,
@@ -1185,6 +1192,7 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
             && !w.busy()
         {
             w.egress = true;
+            w.egress_at = Some(t);
             println!(
                 "ai-strike: EGRESS t={t:.3} range_ft={range:.0} alt_ft={:.0}",
                 p[1] - scene.ground(p[0], p[2])
@@ -2030,9 +2038,12 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         // striker has had time to leave.
         let over = [
             watch.lost,
-            watch
-                .last_impact
-                .filter(|_| !(watch.busy() || (cfg.follow_threat && watch.keeping_out()))),
+            watch.last_impact.filter(|_| {
+                !(watch.busy()
+                    || (cfg.follow_threat && watch.keeping_out())
+                    || (cfg.follow_egress && !watch.egress))
+            }),
+            watch.egress_at.filter(|_| cfg.follow_egress),
         ]
         .into_iter()
         .flatten()

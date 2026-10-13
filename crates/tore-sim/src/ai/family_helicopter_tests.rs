@@ -51,6 +51,13 @@ fn heli_world(store: Store) -> World {
     }
 }
 
+/// The strike speed every leg asks for (slice HF1).
+fn strike_speed(world: &World) -> SpeedRequest {
+    SpeedRequest::Explicit(crate::ai::helicopter_defense::strike_speed(
+        &world.own.limits,
+    ))
+}
+
 fn steer(order: &Order) -> super::super::Steer {
     order.steer.expect("the helicopter steers")
 }
@@ -85,14 +92,14 @@ fn the_at2_popup_keeps_its_speed_and_holds_the_line_to_impact() {
     assert_eq!(strike.phase(), Phase::Attack);
     assert_eq!(strike.pass(), Some(Pass::PopUp));
     assert_eq!(strike.segment(), Segment::Approach);
-    assert_eq!(steer(&order).speed, SpeedRequest::Maximum);
+    assert_eq!(steer(&order).speed, strike_speed(&world));
     // Inside 10,000 ft: the pull, 30 degrees over the line of sight, at
     // its speed (no retail bleed).
     world.own.position = [0., 1_500., TARGET_AT[2] - 9_000.];
     let order = strike.step(&world.context(2));
     assert_eq!(strike.segment(), Segment::Pull);
     let pull = steer(&order);
-    assert_eq!(pull.speed, SpeedRequest::Maximum);
+    assert_eq!(pull.speed, strike_speed(&world));
     let line = -(1_500_f64).atan2(9_000.).to_degrees();
     assert!(
         (pull.pitch_deg - (line + 30.)).abs() < 1e-6,
@@ -118,12 +125,21 @@ fn the_at2_popup_keeps_its_speed_and_holds_the_line_to_impact() {
         let bearing = bearing_deg(world.own.position, TARGET_AT);
         assert!((steer(&order).heading_deg - bearing).abs() < 1e-9);
     }
-    // Gone: the exit, at maximum speed.
+    // Gone: the exit, at its strike speed, turning away from the target
+    // and down to the masking height (slice HF1), not on over it.
     world.inputs.solution = Some(solution(TARGET_AT, TARGET_AT, false));
     strike.step(&world.context(400));
     let order = strike.step(&world.context(401));
     assert_eq!(strike.phase(), Phase::Exit);
-    assert_eq!(steer(&order).speed, SpeedRequest::Maximum);
+    let exit = steer(&order);
+    assert_eq!(exit.speed, strike_speed(&world));
+    let away = bearing_deg(TARGET_AT, world.own.position);
+    assert!(
+        angle_difference(exit.heading_deg, away).abs() < 1e-6,
+        "{} vs {away}",
+        exit.heading_deg
+    );
+    assert!(exit.pitch_deg < 0., "masking: {}", exit.pitch_deg);
 }
 
 #[test]
@@ -157,7 +173,7 @@ fn under_a_sam_it_attacks_from_low_at_the_weapons_range() {
     assert_eq!(strike.segment(), Segment::Pull);
     let unmask = steer(&order);
     assert!(unmask.pitch_deg > 0.);
-    assert_eq!(unmask.speed, SpeedRequest::Maximum);
+    assert_eq!(unmask.speed, strike_speed(&world));
     // It fires there and holds the line.
     world.inputs.solution = Some(solution(TARGET_AT, TARGET_AT, true));
     assert!(strike.step(&world.context(3)).release.is_some());
@@ -218,7 +234,7 @@ fn under_threat_it_holds_course_at_speed_and_settles_to_the_masking_height() {
     assert_eq!(strike.phase(), Phase::Defend);
     let hold = steer(&order);
     assert_eq!(hold.heading_deg, 20., "course held");
-    assert_eq!(hold.speed, SpeedRequest::Maximum);
+    assert_eq!(hold.speed, strike_speed(&world));
     assert!(
         hold.pitch_deg < 0. && hold.pitch_deg >= -10.,
         "{}",
@@ -315,7 +331,7 @@ fn aware_of_a_ring_it_holds_off_outside_it_and_resumes_once_sead_kills_the_site(
     assert_eq!(since, 1);
     assert!(horizontal(SAM_AT, centre) >= 32_000. + HOLD_RADIUS_FT - 1.);
     let hold = steer(&order);
-    assert_eq!(hold.speed, SpeedRequest::Maximum);
+    assert_eq!(hold.speed, strike_speed(&world));
     assert!((hold.heading_deg - bearing_deg(world.own.position, centre)).abs() < 1e-9);
     // No call for a moment, then "holding off", naming the SAM.
     assert_eq!(call(&strike), None);

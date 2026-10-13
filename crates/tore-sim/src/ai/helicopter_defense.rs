@@ -15,16 +15,33 @@
 //!    heading as in retail. Retail turns toward the target instead when it is
 //!    ahead; there is no "target" for a launch warning here, so the beam
 //!    stands (opinionated, John 2026-10-11).
-//! 2. **Speed and height are kept**: the break asks for maximum speed (the
-//!    adapter flies a helicopter at that speed; at corner it settles nose down)
-//!    and a flight path no steeper than 10 degrees either way, so it neither
-//!    dives nor zooms (opinionated, John 2026-10-11).
+//! 2. **Speed and height are kept**: the break asks for the helicopter's
+//!    strike speed ([`strike_speed`], 80% of its maximum: about 120 kt for the
+//!    Mi-24; John 2026-10-13, before which it was the maximum) and a flight
+//!    path no steeper than 10 degrees either way, so it neither dives nor
+//!    zooms (opinionated, John 2026-10-11). Asked for corner speed the
+//!    adapter would slow a helicopter until it settled nose down.
 //! 3. **Terrain masking**: it settles to 200 ft above the highest ground in the
 //!    next six seconds and, of the breaks near the beam (60, 90 and 120
 //!    degrees), takes the one that puts the most terrain between it and the
 //!    threat's site over the next ten seconds, where there is any. The
 //!    candidate set, the horizon and the weights are fitted (agent).
+use crate::ai::{ScalarSpeed, SpeedLimits};
 use crate::attitude::Vector;
+
+/// The share of its envelope's maximum speed a helicopter flies its strike
+/// legs, its exit and its break at (slice HF1; opinionated, John
+/// 2026-10-13: "about 120 kt", which is 80% of the Mi-24's 150 kt; the
+/// share is the agent's way of scaling it to each type, fitted). The
+/// margin left under the maximum is the break's to use, and at the maximum
+/// the passes came too fast for the threats' warnings (slice H1).
+pub const STRIKE_SPEED_FRACTION: f64 = 0.8;
+
+/// The speed a helicopter strikes and breaks at: [`STRIKE_SPEED_FRACTION`]
+/// of its maximum, never under its minimum.
+pub fn strike_speed(limits: &SpeedLimits) -> ScalarSpeed {
+    ScalarSpeed((limits.maximum.0 * STRIKE_SPEED_FRACTION).max(limits.minimum.0))
+}
 
 /// Retail's break off the threat's bearing, degrees.
 pub const BREAK_DEG: f64 = 90.;
