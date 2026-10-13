@@ -783,7 +783,18 @@ impl AiWings {
         };
         let (aim, velocity) = (row.position, row.velocity);
         let flight = actor.flight();
-        let origin = flight.position;
+        // From its own side of its station (B3).
+        let origin = self
+            .release_mount(event.actor, station)
+            .map_or(flight.position, |mount| {
+                let basis = tore_sim::attitude::Basis::new(flight.yaw, flight.pitch, flight.bank);
+                std::array::from_fn(|i| {
+                    flight.position[i]
+                        + basis.right[i] * mount[0]
+                        + basis.up[i] * mount[1]
+                        + basis.forward[i] * mount[2]
+                })
+            });
         let direction = missiles::sub(aim, origin);
         let length = missiles::length(direction);
         if !length.is_finite() || length <= 0. {

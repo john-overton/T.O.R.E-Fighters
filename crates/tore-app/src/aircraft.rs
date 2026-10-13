@@ -34,6 +34,10 @@ pub struct Airframe {
     pub hud: tore_formats::hud::Hud,
     pub flight_menu: Vec<tore_formats::ui::MenuNode>,
     pub poses: Vec<Shape>,
+    /// How far above each source hardpoint's position the clean model's
+    /// underside is, feet, in hardpoint order: where a drawn pylon ends
+    /// (B3). Worked out the first time a store is drawn.
+    pylon_tops: std::sync::OnceLock<Vec<Option<f64>>>,
 }
 impl Deref for Airframe {
     type Target = AircraftType;
@@ -248,6 +252,7 @@ impl Airframe {
             flight_menu,
             poses,
             streamer,
+            pylon_tops: std::sync::OnceLock::new(),
         })
     }
     /// The stored daytime cockpit palette, before weather, sunlight or HUD
@@ -420,6 +425,33 @@ impl Airframe {
                 scale,
             )
         })
+    }
+    /// How far above source hardpoint `hardpoint`'s position the clean
+    /// model's underside is, feet: the lowest face straight above it (or up
+    /// to 3 ft inboard of it), or `None` when nothing of the model is within
+    /// 12 ft above it (a wingtip rail beside the wing).
+    pub fn pylon_top(&self, hardpoint: usize) -> Option<f64> {
+        self.pylon_tops
+            .get_or_init(|| {
+                let scale = f64::from(self.animation_scale());
+                self.profile
+                    .hardpoints
+                    .iter()
+                    .map(|h| {
+                        let [right, up, forward] = h.position.map(|v| f64::from(v) / 3.);
+                        let shape = self.poses.first()?;
+                        // Straight above, else a little inboard (a pod
+                        // under the gap between a body and a nacelle).
+                        (0..=6).find_map(|step| {
+                            let inboard = f64::from(step) * 0.5 * right.signum();
+                            underside(shape, scale, right - inboard, forward, up)
+                        })
+                    })
+                    .collect()
+            })
+            .get(hardpoint)
+            .copied()
+            .flatten()
     }
     pub fn fragment_vertices(
         &self,
@@ -814,6 +846,7 @@ impl Airframe {
         };
         let contrail_offsets = contrail_offsets(id, &poses[0], rig.as_ref(), engines);
         Self {
+            pylon_tops: std::sync::OnceLock::new(),
             kind: Arc::new(AircraftType::synthetic(id, contrail_offsets)),
             nozzle_bounds: nozzle_bounds(id, &poses[0]),
             engine_material,
@@ -873,6 +906,40 @@ fn streamer_world_points(
         });
     }
     Some(points)
+}
+
+/// The height above `from` (feet up) of the lowest face of `shape` straight
+/// above the point `right` and `forward` feet from the reference point, up
+/// to 12 ft above it. Shape positions are right, forward and up in source
+/// units; `scale` turns them into feet.
+fn underside(shape: &Shape, scale: f64, right: f64, forward: f64, from: f64) -> Option<f64> {
+    let mut lowest: Option<f64> = None;
+    for face in &shape.faces {
+        let p: Vec<[f64; 3]> = face
+            .positions
+            .iter()
+            .map(|q| [q[0], q[1], q[2]].map(|v| f64::from(v) * scale))
+            .collect();
+        for i in 1..p.len().saturating_sub(1) {
+            let [a, b, c] = [p[0], p[i], p[i + 1]];
+            // Barycentric weights of the point in the triangle's plan view.
+            let d = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
+            if d.abs() < 1e-9 {
+                continue;
+            }
+            let u = ((b[1] - c[1]) * (right - c[0]) + (c[0] - b[0]) * (forward - c[1])) / d;
+            let v = ((c[1] - a[1]) * (right - c[0]) + (a[0] - c[0]) * (forward - c[1])) / d;
+            let w = 1. - u - v;
+            if u < 0. || v < 0. || w < 0. {
+                continue;
+            }
+            let height = u * a[2] + v * b[2] + w * c[2] - from;
+            if (0. ..=12.).contains(&height) && lowest.is_none_or(|l| height < l) {
+                lowest = Some(height);
+            }
+        }
+    }
+    lowest
 }
 
 #[cfg(test)]

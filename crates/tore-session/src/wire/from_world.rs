@@ -254,6 +254,7 @@ fn targets_picture(world: &World) -> RenderSnapshot {
                 airborne: t.airborne,
                 wreck: t.wreck.as_ref().map(|wreck| wreck.phase),
                 crashed: t.hp <= 0,
+                stores: Vec::new(),
             })
             .collect(),
         projectiles: state

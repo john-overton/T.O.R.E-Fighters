@@ -43,6 +43,7 @@ fn station(weapon: Weapon) -> Station {
         mount: [0.; 3],
         count: 4,
         internal: false,
+        rack: Default::default(),
     }
 }
 

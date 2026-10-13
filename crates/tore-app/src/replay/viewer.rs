@@ -11,6 +11,7 @@ use crate::aircraft::Airframe;
 use crate::flight;
 use crate::flight_canvas::FlightCanvas;
 use crate::flight_views::{self, Body, Reference, Rig, Scene};
+use crate::pylons;
 use crate::render_snapshot::{self, CombatArt};
 use crate::renderer::Renderer;
 use crate::replay::clock::{self, Clock, Direction};
@@ -3087,6 +3088,7 @@ impl Viewer {
         renderer.dummies(render_snapshot::aircraft_batches(
             &picture,
             &self.models,
+            &self.art,
             &camera,
             &self.world,
             &self.scenery,
@@ -3124,6 +3126,13 @@ impl Viewer {
         renderer.aircraft(
             &self.ownship,
             &player,
+            &pylons::for_flown(
+                &picture.player.stores,
+                &player,
+                &self.ownship,
+                &self.art,
+                &self.scenery,
+            ),
             self.player != convert::NO_PLAYER && camera.hidden_target != Some(self.player),
             &camera,
             &self.world,

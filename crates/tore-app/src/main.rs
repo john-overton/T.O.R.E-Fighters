@@ -101,6 +101,7 @@ mod performance;
 mod powered_hud;
 mod preferences;
 mod probe_invariants;
+mod pylons;
 mod quick_mission;
 mod rafale_animation;
 mod reel;
@@ -120,6 +121,7 @@ mod sound_prefs;
 mod sound_screen;
 mod startup;
 mod static_art;
+mod stores_preview;
 mod su25_animation;
 mod su27_animation;
 mod su35_animation;
@@ -4698,6 +4700,7 @@ impl ApplicationHandler for App {
                                     renderer.dummies(render_snapshot::aircraft_batches(
                                         &picture,
                                         &self.combat_view.models,
+                                        &self.combat_view.art,
                                         &camera,
                                         &self.world.terrain,
                                         &self.scenery,
@@ -4719,6 +4722,13 @@ impl ApplicationHandler for App {
                                     renderer.aircraft(
                                         &self.hornet,
                                         presented,
+                                        &pylons::for_flown(
+                                            &picture.player.stores,
+                                            presented,
+                                            &self.hornet,
+                                            &self.combat_view.art,
+                                            &self.scenery,
+                                        ),
                                         page == 3 && self.view_rig.other_shows_player(),
                                         &camera,
                                         &self.world.terrain,
@@ -4818,6 +4828,7 @@ impl ApplicationHandler for App {
                         renderer.dummies(render_snapshot::aircraft_batches(
                             &picture,
                             &self.combat_view.models,
+                            &self.combat_view.art,
                             &self.camera,
                             &self.world.terrain,
                             &self.scenery,
@@ -4839,6 +4850,13 @@ impl ApplicationHandler for App {
                         renderer.aircraft(
                             &self.hornet,
                             presented,
+                            &pylons::for_flown(
+                                &picture.player.stores,
+                                presented,
+                                &self.hornet,
+                                &self.combat_view.art,
+                                &self.scenery,
+                            ),
                             self.view_rig.shows_player(self.flight_view),
                             &self.camera,
                             &self.world.terrain,
@@ -5411,6 +5429,7 @@ impl ApplicationHandler for App {
                     renderer.aircraft(
                         &self.hornet,
                         &self.world.cockpits[OWN].flight,
+                        &[],
                         false,
                         &self.camera,
                         &self.world.terrain,
@@ -9349,6 +9368,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     }
     if std::env::args().nth(1).as_deref() == Some("--dome-sheet") {
         cockpit_sheet::domes()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--stores-preview") {
+        stores_preview::run()?;
         return Ok(Outcome::Done);
     }
     if std::env::args().nth(1).as_deref() == Some("--gun-flash-preview") {

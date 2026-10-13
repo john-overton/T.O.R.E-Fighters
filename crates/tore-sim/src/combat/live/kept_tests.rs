@@ -62,6 +62,7 @@ fn scene() -> State {
             mount: [0.; 3],
             count: 4,
             internal: false,
+            rack: Default::default(),
         },
     ];
     config.sight = Some(pave_spike());

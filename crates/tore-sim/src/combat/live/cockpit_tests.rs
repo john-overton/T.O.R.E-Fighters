@@ -36,6 +36,7 @@ fn config(weapon: Weapon, designator: bool) -> Configuration {
         mount: [2., -3., 1.],
         count: 4,
         internal: false,
+        rack: Default::default(),
     }];
     config.sight = designator.then(pave_spike);
     config
@@ -139,6 +140,7 @@ fn ai_release(s: &mut State, config: &Configuration) -> std::result::Result<Vec<
             station: 0,
             launcher: launcher(),
             incoming: None,
+            rounds_after: 0,
         },
         || {
             let id = next;
@@ -419,6 +421,7 @@ fn an_ai_with_no_laze_support_drops_a_laser_bomb_by_hand_like_a_dumb_bomb() {
                     station: 0,
                     launcher: launcher(),
                     incoming: None,
+                    rounds_after: 0,
                 },
                 || {
                     next += 1;
@@ -627,4 +630,73 @@ fn ai_cockpits_survive_a_checkpoint_and_go_with_a_lost_aircraft() {
     s.targets.iter_mut().find(|t| t.id == 0).unwrap().hp = 0;
     tick(&mut s, false);
     assert!(s.strike_cockpit(0).is_none());
+}
+
+/// B3 (docs/spec/stores-on-pylons.md): a paired station's stores leave from
+/// the record's position and its mirror in turn, left first, a human's
+/// presses and the AI's releases alike; the pack stagger and the height stay.
+#[test]
+fn a_paired_station_alternates_sides_for_a_human_and_the_ai() {
+    let paired = |mut c: Configuration| {
+        c.stations[0].rack = crate::combat::hardpoints::Rack {
+            location: 4,
+            paired: true,
+        };
+        c
+    };
+    let config = paired(config(mk82(), false));
+    let origin_x = |s: &State, id: u32| s.bomb_motion(id).expect("a bomb").origin[0];
+
+    let mut person = with_tank(State::new(config.clone(), true).unwrap());
+    person.own_mut().armed = true;
+    person.own_mut().selected = 0;
+    designate(&mut person, &config);
+    tick(&mut person, false);
+    tick(&mut person, false);
+    let mut human = Vec::new();
+    for _ in 0..4 {
+        let before: Vec<u32> = person.projectiles.iter().map(|p| p.id).collect();
+        tick(&mut person, true);
+        for _ in 0..60 {
+            tick(&mut person, false);
+        }
+        let fresh: Vec<u32> = person
+            .projectiles
+            .iter()
+            .map(|p| p.id)
+            .filter(|id| !before.contains(id))
+            .collect();
+        assert_eq!(fresh.len(), 1, "one bomb a press");
+        human.push(origin_x(&person, fresh[0]));
+        assert!((person.bomb_motion(fresh[0]).unwrap().origin[1] - (8_000. - 3.)).abs() < 1e-9);
+    }
+    assert_eq!(human, [-2., 2., -2., 2.]);
+
+    let mut robot = ai(mk82(), false);
+    designate(&mut robot, &config);
+    tick(&mut robot, false);
+    tick(&mut robot, false);
+    let mut machine = Vec::new();
+    for rounds_after in [3, 2, 1, 0] {
+        let mut next = 1u32 << 24 | rounds_after;
+        let ids = robot
+            .release_strike(
+                StrikeRelease {
+                    aircraft: 0,
+                    config: &config,
+                    station: 0,
+                    launcher: launcher(),
+                    incoming: None,
+                    rounds_after,
+                },
+                || {
+                    next += 16;
+                    next
+                },
+                &|_, _| 0.,
+            )
+            .expect("the AI's release is ready");
+        machine.push(origin_x(&robot, ids[0]));
+    }
+    assert_eq!(machine, human);
 }

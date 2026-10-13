@@ -729,7 +729,20 @@ impl App {
         ) {
             ours.copy_flattened(told);
         }
-        self.combat_view.show_picture(frame.picture.clone());
+        // The seat's own pylons and stores (B3): its loadout from the
+        // session's copy of the mission, the rounds left from its readout.
+        // The wire carries neither for the other aircraft, so they draw none.
+        let mut picture = frame.picture.clone();
+        if let Some(readout) = &frame.readout
+            && let Some(own) = self.world.combat.state.ownship(readout.plane)
+        {
+            picture.player.stores = tore_world::snapshot::store_poses(
+                own.configuration(),
+                |station| u32::from(readout.stores.rounds(station)),
+                |station| station < 32 && readout.stores.loaded & (1 << station) != 0,
+            );
+        }
+        self.combat_view.show_picture(picture);
 
         // The weather clock follows the host's tick.
         let behind = frame.tick.saturating_sub(flight.weather_steps);

@@ -502,6 +502,7 @@ pub fn aircraft_pose(
         airborne: state.status.airborne,
         wreck: state.status.wreck,
         crashed: state.status.crashed,
+        stores: Vec::new(),
     }
 }
 
