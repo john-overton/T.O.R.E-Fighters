@@ -17,6 +17,7 @@
 //!     [--choose-store] [--buddy ID]
 //!     [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG]
 //!     [--defenses AAA SAM] [--surface-seed N] [--seconds S] [--sead-at S]
+//!     [--follow-threat]
 //! ```
 //!
 //! - `--aircraft`, `--load`, `--station`, `--count`: the striker and its store,
@@ -295,6 +296,10 @@ pub(crate) struct Config {
     /// destroyed `S` seconds into the run, a stand-in for a SEAD flight
     /// (slice H4: a helicopter holding off resumes once the ring is gone).
     pub sead_at: Option<f64>,
+    /// `--follow-threat`: after the last impact the run goes on (within
+    /// `--seconds`) while a helicopter keeps out of a ring it means to come
+    /// back from, to see whether it resumes (slice H2).
+    pub follow_threat: bool,
 }
 
 impl Config {
@@ -733,6 +738,16 @@ impl Watch {
     /// Rounds still flying, or a burst whose impact is not out yet.
     fn busy(&self) -> bool {
         !self.flying.is_empty() || self.bursts.values().any(|b| !b.reported)
+    }
+
+    /// A helicopter keeping out of a ring it means to come back from: its
+    /// latest threat decision is "leave", or it is holding off (slice H2,
+    /// `--follow-threat`).
+    fn keeping_out(&self) -> bool {
+        self.phase == Some(tore_sim::ai::strike::Phase::HoldOff)
+            || self.threat_call.is_some_and(|(decision, _)| {
+                decision == tore_sim::ai::helicopter_threat::Decision::Leave
+            })
     }
 }
 
@@ -2013,10 +2028,15 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         }
         // Done when the striker is gone or the last round has landed and the
         // striker has had time to leave.
-        let over = [watch.lost, watch.last_impact.filter(|_| !watch.busy())]
-            .into_iter()
-            .flatten()
-            .fold(None, |a: Option<f64>, b| Some(a.map_or(b, |a| a.max(b))));
+        let over = [
+            watch.lost,
+            watch
+                .last_impact
+                .filter(|_| !(watch.busy() || (cfg.follow_threat && watch.keeping_out()))),
+        ]
+        .into_iter()
+        .flatten()
+        .fold(None, |a: Option<f64>, b| Some(a.map_or(b, |a| a.max(b))));
         if over.is_some_and(|at| t > at + SETTLE_SECONDS) {
             break;
         }

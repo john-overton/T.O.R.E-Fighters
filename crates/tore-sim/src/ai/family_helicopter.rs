@@ -169,11 +169,11 @@ pub(super) fn step(s: &mut Strike, cx: &Context<'_>) -> Order {
             s.enter(Phase::Defend, cx.tick);
             s.released = 0;
         }
-        return mask_run(cx, order);
+        return mask_run(cx, order, &threat::known_rings(cx.picture, cx.side));
     }
     if s.phase == Phase::Defend {
         if !s.quiet(cx) {
-            return mask_run(cx, order);
+            return mask_run(cx, order, &threat::known_rings(cx.picture, cx.side));
         }
         // The threat has gone quiet: back to the ingress, where the rings it
         // knows (and the ring it was ambushed in) decide whether it attacks
@@ -292,8 +292,9 @@ pub(super) fn step(s: &mut Strike, cx: &Context<'_>) -> Order {
 /// ground ahead, which `helicopter_defense` does for the break itself. The
 /// fighters' air logic would otherwise fly this time at corner speed, which
 /// sinks a helicopter (slice ST-H, docs/spec/ai-strike.md, "Helicopter
-/// defence").
-fn mask_run(cx: &Context<'_>, order: Order) -> Order {
+/// defence"). Inside a ring it knows it leaves by the shortest way out
+/// instead of holding a course deeper in (slice H2, the H4 follow-up).
+fn mask_run(cx: &Context<'_>, order: Order, rings: &[threat::Ring]) -> Order {
     if cx.defending {
         // The controller's defence flies, and overrides a steer.
         return order;
@@ -301,9 +302,12 @@ fn mask_run(cx: &Context<'_>, order: Order) -> Order {
     let own = cx.own;
     let ground = (own.position[1] - own.agl_ft).max(own.terrain_ahead_ft);
     let floor = ground + MASK_AGL_FT;
+    let heading = threat::inside(rings, own.position).map_or(own.heading_deg, |ring| {
+        bearing_deg(ring.centre, own.position)
+    });
     Order {
         steer: Some(Steer {
-            heading_deg: own.heading_deg,
+            heading_deg: heading,
             pitch_deg: hold_pitch_deg(own.position[1], floor),
             speed: SpeedRequest::Maximum,
             afterburner: false,
@@ -630,8 +634,11 @@ fn hold_steer(cx: &Context<'_>, centre: Vector, rings: &[threat::Ring]) -> Steer
     let radius = threat::HOLD_RADIUS_FT;
     let distance = horizontal(own.position, centre);
     let offset = (90. - 45. * (distance - radius) / radius).clamp(0., 135.);
-    let heading = if distance > threat::HOLD_REACHED_FT {
-        // On the way there, round any ring across the line (slice H4).
+    let inside = threat::inside(rings, own.position).is_some();
+    let heading = if distance > threat::HOLD_REACHED_FT || inside {
+        // On the way there, round any ring across the line (slice H4); inside
+        // a ring, the shortest way out first, even near the hold point
+        // (slice H2).
         clear_heading(rings, own.position, bearing_deg(own.position, centre))
     } else {
         // A left-hand circle.

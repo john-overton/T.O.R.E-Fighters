@@ -1476,6 +1476,13 @@ impl Coverage {
                     crate::ai::airfield::Phase::Rollout => "rollout",
                     crate::ai::airfield::Phase::TaxiClear => "taxi clear",
                     crate::ai::airfield::Phase::Parked => "parked",
+                    crate::ai::airfield::Phase::VerticalHold => "vertical hold",
+                    crate::ai::airfield::Phase::VerticalClimb => "vertical climb",
+                    crate::ai::airfield::Phase::Transition => "transition",
+                    crate::ai::airfield::Phase::HoverApproach => "hover approach",
+                    crate::ai::airfield::Phase::VerticalDescent => "vertical descent",
+                    crate::ai::airfield::Phase::Settle => "settle",
+                    crate::ai::airfield::Phase::AirTaxi => "air taxi",
                 });
             }
         }

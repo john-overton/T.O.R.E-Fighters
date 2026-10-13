@@ -148,18 +148,23 @@ AV8, YAK141) included. Slice ST-H brought in the AH-64 and the Mi-24; slice H3 t
 CH-47, the V-22, the AV-8 and the Yak-141, once the AI could hover, climb and
 descend a rotorcraft (slice H1). On the legacy adapter the rotorcraft start at
 zero speed, drop about 400 feet and fly like airplanes (the CH-47 pitches to 69
-degrees), which is why they were kept out. A headless probe of the AV-8 and the
-Yak-141 shows they fly an airborne fight and land, but on a ground start the
-second wingman never leaves the taxiway (333 seconds checked, against a takeoff at
-66 seconds for the F/A-18D and 54 seconds for the F-15): slice H2 builds the
-vertical and short takeoffs.
+degrees), which is why they were kept out. A 2026-10-08 headless probe of the
+AV-8 and the Yak-141 found a ground-started second wingman that never left the
+taxiway. Slice H2 traced it: on the powered-lift model of that day a turning jet
+on its wheels kept sliding along its old track (no tyre side force or nosewheel
+steering), so the wingman circled at 13 kt turning 0.4 degrees a second where the
+taxi law expects about 9, and never reached the line-up point. The continuous jet
+physics of the same day (nosewheel steering and tyre forces) fixed it; on the
+2026-10-12 base every AV-8 and Yak-141 wingman of a wing of three or four takes
+off at seven Blue fields. Since slice H2 they take off vertically or, too heavy
+to hover, by the retail short takeoff ([vertical takeoff and
+landing](ai-airfield.md#vertical-takeoff-and-landing)).
 
 - Quick Mission's five AI wing fields (friendly wings 2 and 3, enemy wings 1 to 3)
   list every aircraft the player's field lists. Friendly wing 1 shares the
   player's list. A player in a helicopter, the V-22, the AV-8 or the Yak-141 has AI
-  wingmen on an airborne start; on a ground start the wing is the player alone
-  (notice "The AI cannot take a ... off the ground yet"), because the AI cannot
-  lift one off the ground yet. The multiplayer lobby's wing 1 is for people and
+  wingmen on either start; on a ground start they take off vertically (or by the
+  short takeoff) since slice H2. The multiplayer lobby's wing 1 is for people and
   keeps its size; its other wings list and accept all six (the same check,
   `AircraftId::ai_flyable`, guards a mission file).
 - **The CH-47 is an AI wing choice only** (John, 2026-10-12: Quick Mission has

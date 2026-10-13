@@ -52,7 +52,7 @@ mod ai_lift_tests;
 #[cfg(test)]
 mod easy_physics_tests;
 #[cfg(test)]
-mod hover_hold_tests;
+pub(crate) mod hover_hold_tests;
 #[cfg(test)]
 mod touchdown_tests;
 

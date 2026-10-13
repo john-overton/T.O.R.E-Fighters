@@ -5805,6 +5805,13 @@ fn apply_probe_cheat(cheats: &mut tore_sim::cheats::Cheats, name: &str) {
 /// `--probe-player-lock`). Development harness only.
 #[derive(Clone, Debug, Default)]
 struct ProbeScript {
+    /// `--probe-render DIR` with `--probe-render-at TICK,...`,
+    /// `--probe-render-plane ID` and `--probe-render-view chase|wide|ground`
+    /// (slice H2): offscreen frames of the world around one AI plane.
+    render: Option<std::path::PathBuf>,
+    render_at: Vec<u64>,
+    render_plane: u32,
+    render_view: String,
     enemy_aircraft: Option<tore_formats::aircraft::AircraftId>,
     enemy_skill: Option<usize>,
     geometry: ProbeGeometry,
@@ -6112,7 +6119,20 @@ enum ProbePhase {
 struct ProbePilot {
     phase: ProbePhase,
     terrain: ProbeTerrain,
+    /// A helicopter or V-22 leader's controls (slice H2): the AI's own
+    /// rotor laws fly the scripted liftoff and cruise.
+    rotor: tore_sim::ai::rotor_adapter::RotorAdapter,
+    /// Where a rotorcraft leader lifted off, world X/Z.
+    lift_point: Option<[f64; 2]>,
 }
+
+/// A rotorcraft leader's scripted flight (slice H2): straight up to this
+/// wheel height over its spot at 25 ft/s, then on along the runway heading
+/// at [`PROBE_ROTOR_KT`], [`PROBE_ROTOR_AGL_FT`] over the highest ground
+/// ahead.
+const PROBE_ROTOR_LIFT_FT: f64 = 500.;
+const PROBE_ROTOR_KT: f64 = 100.;
+const PROBE_ROTOR_AGL_FT: f64 = 1_500.;
 
 /// What the terrain along the heading ahead asks of the scripted leader.
 #[derive(Clone, Copy, Debug, Default)]
@@ -6263,7 +6283,69 @@ impl ProbePilot {
         Self {
             phase: ProbePhase::Roll,
             terrain: ProbeTerrain::default(),
+            rotor: tore_sim::ai::rotor_adapter::RotorAdapter::new(),
+            lift_point: None,
         }
+    }
+
+    /// A helicopter or V-22 leader (slice H2): the rotor adapter lifts it
+    /// straight up, then flies it on along the runway heading. The wing
+    /// orders and the rest of the script are as for an aeroplane.
+    fn fly_rotor(
+        &mut self,
+        tick: u64,
+        flight: &flight::State,
+        keys: &mut flight::PilotInput,
+        world: &terrain::Terrain,
+        ground: Option<&mission_layout::GroundLayout>,
+    ) {
+        use tore_sim::ai::rotor_adapter::{HoverGuidance, RotorRequest};
+        let [x, y, z] = flight.position;
+        let here = world.surface(x, z);
+        let clearance = flight.model().configuration().equipment.ground_clearance_ft;
+        let wheel = y - here.height - clearance;
+        let course = ground.map_or(flight.yaw, |g| g.heading).to_degrees();
+        let point = *self.lift_point.get_or_insert([x, z]);
+        let (input, _) = if self.phase == ProbePhase::Roll {
+            if wheel >= PROBE_ROTOR_LIFT_FT - 25. {
+                println!("t={tick} player: up {wheel:.0} ft, flying on");
+                self.phase = ProbePhase::Cruise;
+            }
+            let hover = HoverGuidance {
+                point,
+                velocity_fps: [0.; 2],
+                height_agl_ft: PROBE_ROTOR_LIFT_FT,
+                heading_deg: course,
+                max_climb_fps: 25.,
+                max_descent_fps: 10.,
+                max_speed_fps: 10.,
+            };
+            self.rotor.controls(
+                flight,
+                RotorRequest::Hover(hover),
+                here.height,
+                here.wind,
+                30.,
+            )
+        } else {
+            self.look(tick, flight, world);
+            let wanted = self.terrain.highest_ft.max(here.height) + PROBE_ROTOR_AGL_FT;
+            let path = ((wanted - y) / 3_000.).atan().to_degrees().clamp(-5., 10.);
+            let intent = tore_sim::ai::rotor_probe::steer(course, path, PROBE_ROTOR_KT * 1.687_81);
+            self.rotor.controls(
+                flight,
+                RotorRequest::Steer {
+                    intent: &intent,
+                    terrain_pitch_floor_deg: None,
+                },
+                here.height,
+                here.wind,
+                30.,
+            )
+        };
+        let commands = std::mem::take(&mut keys.commands);
+        *keys = input;
+        keys.commands = commands;
     }
 
     /// Read the terrain along the heading, four times a second.
@@ -6348,6 +6430,10 @@ impl ProbePilot {
         script: &ProbeScript,
     ) {
         use flight::{PilotCommand::*, Switch};
+        if tore_sim::ai::rotor_adapter::flies(flight) {
+            self.fly_rotor(tick, flight, keys, world, ground);
+            return;
+        }
         let [x, y, z] = flight.position;
         let agl = y - world.surface(x, z).height;
         if !matches!(self.phase, ProbePhase::Roll | ProbePhase::Home) {
@@ -6486,6 +6572,9 @@ struct ProbeWatch {
     /// Distance past each final's aim point last tick, to catch the
     /// threshold crossing.
     final_past: std::collections::BTreeMap<u32, f64>,
+    /// A vertical type's wheels last tick (slice H2): on the ground, sink
+    /// ft/s and ground speed kt, for its `TOUCHDOWN` line.
+    wheels: std::collections::BTreeMap<u32, (bool, f64, f64)>,
     /// `--probe-redfor`: the player's wing is Enemy Wing 1 and the player
     /// flies this plane, not plane 0.
     redfor: Option<u32>,
@@ -6648,6 +6737,47 @@ impl ProbeWatch {
                 } else {
                     self.final_past.remove(&slot.id);
                 }
+            }
+            // A vertical type's touchdowns (slice H2): the sink and ground
+            // speed it came down at, and whether the gear was damaged.
+            if let Some(sequence) = actor
+                .airfield()
+                .filter(|s| s.lift() != tore_sim::ai::airfield::Lift::Conventional)
+            {
+                let wheels = f.research.as_ref().is_some_and(|r| r.on_ground);
+                let now = (
+                    wheels,
+                    -f.velocity[1],
+                    f.velocity[0].hypot(f.velocity[2]) / 1.68781,
+                );
+                if !self.wheels.contains_key(&slot.id) && !sequence.is_departure() {
+                    println!(
+                        "t={tick} ({seconds:.1}s) VERTICAL LANDING {} lift={:?} phase={:?} kt={:.0} nacelle={:.0} nozzle={:.0}",
+                        slot.label(),
+                        sequence.lift(),
+                        sequence.phase(),
+                        f.speed / 1.68781,
+                        f.nacelle_degrees(),
+                        f.nozzle_degrees()
+                    );
+                }
+                if let Some((false, sink, knots)) = self.wheels.get(&slot.id).copied()
+                    && wheels
+                    && !sequence.is_departure()
+                {
+                    println!(
+                        "t={tick} ({seconds:.1}s) TOUCHDOWN {} sink_fps={sink:.1} ground_kt={knots:.1} phase={:?} lift={:?} nacelle={:.0} gear_damaged={} crashed={}",
+                        slot.label(),
+                        sequence.phase(),
+                        sequence.lift(),
+                        f.nacelle_degrees(),
+                        f.systems.has(16),
+                        f.crashed
+                    );
+                }
+                self.wheels.insert(slot.id, now);
+            } else {
+                self.wheels.remove(&slot.id);
             }
             if !actor.alive() || f.crashed {
                 continue;
@@ -8110,6 +8240,57 @@ fn redfor_probe_run(
 /// What the AI probe's tick loop flies, set up by [`ai_probe_run`]: the
 /// single-player probe's own mission, or the Redfor seat's open one
 /// ([`redfor_probe_run`]).
+/// One offscreen frame of the probe's world around the AI plane
+/// `--probe-render-plane` (slice H2's renders): `chase` just behind and
+/// beside it, `wide` well back and to the side, `ground` from the ground
+/// beside it looking up.
+fn probe_render(
+    mission: &mut world::World,
+    script: &ProbeScript,
+    dir: &std::path::Path,
+    tick: u64,
+) -> AppResult<()> {
+    let flight = mission
+        .ai_wings
+        .as_ref()
+        .expect(PROBE_BRIDGE)
+        .mission()
+        .actor(script.render_plane)
+        .ok_or("--probe-render-plane is not an AI aircraft")?
+        .flight()
+        .clone();
+    let p = flight.position;
+    let (sin, cos) = flight.yaw.sin_cos();
+    let forward = [sin, 0., cos];
+    let right = [cos, 0., -sin];
+    let (back, side, up) = match script.render_view.as_str() {
+        "wide" => (420., 330., 90.),
+        "ground" => (500., 350., 0.),
+        _ => (260., 140., 40.),
+    };
+    let mut eye: tore_sim::attitude::Vector =
+        std::array::from_fn(|i| p[i] - forward[i] * back + right[i] * side);
+    let ground = mission.terrain.surface(eye[0], eye[2]).height;
+    eye[1] = if script.render_view == "ground" {
+        ground + 15.
+    } else {
+        (p[1] + up).max(ground + 15.)
+    };
+    let view = if script.render_view.is_empty() {
+        "chase"
+    } else {
+        script.render_view.as_str()
+    };
+    let path = dir.join(format!(
+        "t{tick:06}-plane{}-{view}.png",
+        script.render_plane
+    ));
+    let observer = mission.cockpits[OWN].plane;
+    a2g_run::ai_render::render_world(mission, observer, eye, p, &path)?;
+    println!("t={tick} probe: RENDER {}", path.display());
+    Ok(())
+}
+
 struct ProbeFlight {
     mission: world::World,
     /// The probe wing's parked start: the scripted takeoff's runway.
@@ -8413,6 +8594,11 @@ fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<
             &mission.cockpits[OWN].flight,
             &mission.terrain,
         );
+        if let Some(dir) = &script.render
+            && script.render_at.contains(&tick)
+        {
+            probe_render(&mut mission, script, dir, tick)?;
+        }
         invariants.observe(
             tick,
             mission.ai_wings.as_ref().expect(PROBE_BRIDGE),
@@ -9748,6 +9934,27 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 separation_nm = Some(nm);
             }
             "--probe-wing-only" => probe_script.wing_only = true,
+            "--probe-render" => {
+                probe_script.render = Some(args.next().ok_or("--probe-render needs DIR")?.into())
+            }
+            "--probe-render-at" => {
+                probe_script.render_at = args
+                    .next()
+                    .ok_or("--probe-render-at needs TICK,...")?
+                    .split(',')
+                    .map(str::parse)
+                    .collect::<Result<_, _>>()
+                    .map_err(|_| "--probe-render-at needs TICK,...")?
+            }
+            "--probe-render-plane" => {
+                probe_script.render_plane = args
+                    .next()
+                    .and_then(|v| v.parse().ok())
+                    .ok_or("--probe-render-plane needs an aircraft id")?
+            }
+            "--probe-render-view" => {
+                probe_script.render_view = args.next().ok_or("--probe-render-view needs a view")?
+            }
             "--probe-pavement" => probe_script.pavement = true,
             "--probe-track" => probe_script.track = Some(PathBuf::from(args.next().ok_or("--probe-track needs an output file")?)),
             "--probe-redfor" => probe_script.redfor = true,

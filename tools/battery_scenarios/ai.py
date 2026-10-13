@@ -17,7 +17,7 @@ import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 
-from battery import ROOT, Scenario
+from battery import ROOT, Scenario, Step
 
 from battery_scenarios import _ai_fuzz
 from battery_scenarios._debrief import kill_hit_problems
@@ -628,6 +628,172 @@ def recordings_match(args: list[str]) -> Callable[[str], list[str]]:
     return check
 
 
+TOUCHDOWN = re.compile(
+    r"^t=(\d+) \(([\d.]+)s\) TOUCHDOWN (\S+ \d-\d) sink_fps=([\d.-]+) ground_kt=([\d.-]+) phase=(\w+) "
+    r"lift=(\w+) nacelle=([\d.-]+) gear_damaged=(true|false) crashed=(true|false)$",
+    re.M,
+)
+VERTICAL_LANDING = re.compile(
+    r"^t=(\d+) \(([\d.]+)s\) VERTICAL LANDING (\S+ \d-\d) lift=(\w+) phase=(\w+) kt=(\d+) nacelle=([\d.-]+)",
+    re.M,
+)
+# The shared touchdown rule's clean limits (crates/tore-sim/src/touchdown.rs): sink, and the ground
+# speed of a helicopter or the V-22 and of a hovering jet.
+TOUCHDOWN_SINK_FPS = 10.0
+TOUCHDOWN_KT = {"Rotor": 20.0, "Jet": 10.0}
+ROTOR_CYCLE = ["VerticalHold", "VerticalClimb", "Airborne", "HoverApproach", "VerticalDescent", "Settle", "AirTaxi",
+               "Parked"]
+ROTOR_LANDING = ["HoverApproach", "VerticalDescent", "Settle", "AirTaxi", "Parked"]
+
+
+def vertical_problems(output: str, runs_wanted: list[dict]) -> list[str]:
+    """The vertical takeoff and landing scenarios (slice H2): each probe run (split at its `AI probe:`
+    line) passes the probe's own checks, and each wingman named in `members` went through the wanted
+    airfield phases in order (`phases`), never through the `forbid` ones, and touched down at most
+    `touchdowns` times (or exactly, with `touchdowns_exact`) within the shared touchdown rule's clean
+    limits for its lift (a jet's runway landing is judged by its runway rule), without gear damage.
+    `converted` asks that each landing began with the V-22's nacelles at or under that angle (in
+    aeroplane mode) and ended at 75 or more."""
+    parts = re.split(r"(?m)^(?=AI probe: aircraft=)", output)
+    runs = [part for part in parts if part.startswith("AI probe: aircraft=")]
+    if len(runs) != len(runs_wanted):
+        return [f"{len(runs)} probe runs finished, want {len(runs_wanted)}"]
+    problems: list[str] = []
+    for run, want in zip(runs, runs_wanted):
+        label = want["label"]
+        problems += [f"{label}: {p}" for p in probe_problems(run, ground=want.get("ground", True),
+                                                               need_takeoff=want.get("takeoff", True))]
+        phases = {member: [p.split("@")[0] for p in line.split()] for member, line in PHASES.findall(run)}
+        for member in want["members"]:
+            names = phases.get(member)
+            if names is None:
+                problems.append(f"{label}: no phases for {member}")
+                continue
+            rest = iter(names)
+            if not all(any(w == n for n in rest) for w in want.get("phases", [])):
+                problems.append(f"{label}: {member} flew {names}, want {want['phases']} in that order")
+            for bad in want.get("forbid", []):
+                if bad in names:
+                    problems.append(f"{label}: {member} went through {bad}: {names}")
+            downs = [m for m in TOUCHDOWN.finditer(run) if m.group(3) == member]
+            need = want.get("touchdowns", 0)
+            if want.get("touchdowns_exact") and len(downs) != need:
+                problems.append(f"{label}: {member} touched down {len(downs)} times, want {need}")
+            elif len(downs) < need:
+                problems.append(f"{label}: {member} touched down {len(downs)} times, want at least {need}")
+            for m in downs:
+                at = f"{label}: {member} touchdown at t={m.group(2)}s"
+                sink, knots, lift = float(m.group(4)), float(m.group(5)), m.group(7)
+                if m.group(10) == "true" or m.group(9) == "true":
+                    problems.append(f"{at} crashed={m.group(10)} gear_damaged={m.group(9)}")
+                if lift in TOUCHDOWN_KT and not (sink <= TOUCHDOWN_SINK_FPS and knots <= TOUCHDOWN_KT[lift]):
+                    problems.append(f"{at}: {sink} ft/s at {knots} kt, over the touchdown rule's {lift} limits")
+                if "converted" in want and float(m.group(8)) < 75.0:
+                    problems.append(f"{at} with the nacelles at {m.group(8)} degrees, not in helicopter mode")
+            if "converted" in want:
+                starts = [m for m in VERTICAL_LANDING.finditer(run) if m.group(3) == member]
+                if not starts or float(starts[0].group(7)) > want["converted"]:
+                    got = starts[0].group(7) if starts else "none"
+                    problems.append(f"{label}: {member} began its landing with the nacelles at {got}, want "
+                                    f"{want['converted']} or less (aeroplane mode)")
+    return problems
+
+
+def vertical_scenario(name: str, runs: list[tuple[list[str], int, dict]], notes: str) -> Scenario:
+    """Probe runs (args, ticks, wanted) checked by [`vertical_problems`], the first as the scenario's
+    command and the rest as its steps."""
+    def command(args: list[str], ticks: int) -> list[str]:
+        return ["--ai-probe-ticks", str(ticks), *args, "--no-audio"]
+
+    (first, ticks, _), rest = runs[0], runs[1:]
+    return Scenario(
+        name=name,
+        lane="ai",
+        args=command(first, ticks),
+        timeout=2400,
+        then=[Step(command(args, t), timeout=2400) for args, t, _ in rest],
+        expect=[r"AI probe totals:"],
+        check=lambda output: vertical_problems(output, [want for _, _, want in runs]),
+        notes=notes,
+    )
+
+
+def vertical_scenarios() -> list[Scenario]:
+    """Slice H2: vertical takeoffs and landings (docs/spec/ai-airfield.md, "Vertical takeoff and
+    landing")."""
+    wing = ["--ground-start", GROUND_AIRPORT, "--probe-wing-size", "3", "--maneuver", "takeoff", "--separation",
+            "200", "--probe-wing-only"]
+    members = ["Friendly 1-2", "Friendly 1-3"]
+    out = []
+    # A ground-started wing of three of each helicopter type: the player lifts off on the probe's
+    # rotor script, the two AI wingmen lift off one by one where they stand (no taxi), fly out, are
+    # ordered to land at the departure field, come in, land vertically, sit 5 s, air taxi to a slot,
+    # set down and shut down.
+    out.append(vertical_scenario(
+        "ai-heli-ground-start-wing",
+        [([*wing, "--aircraft", kind, "--probe-wing-order", "6000:land-selected"], 108000,
+          dict(label=kind, members=members, phases=ROTOR_CYCLE, forbid=["Taxi", "TakeoffRoll"], touchdowns=2,
+               touchdowns_exact=True))
+         for kind in ("ah64", "mi24", "ch47", "v22")],
+        notes="Each helicopter type (AH-64, Mi-24, CH-47, V-22) as a ground-started wing of three at "
+              "Simferopol: vertical takeoffs one by one from where they stand, a land order at 50 s, the "
+              "helicopter approach and vertical landing at the landing point, the air taxi to a parking "
+              "slot; every touchdown within the shared touchdown rule.",
+    ))
+    # Home: an airborne helicopter wing bugs out and goes home to land (the ST-H stopgap made "home"
+    # a heading and a hold).
+    out.append(vertical_scenario(
+        "ai-heli-land-home",
+        [(["--aircraft", kind, "--probe-wing-size", "3", "--probe-wing-only", "--separation", "200",
+           "--probe-wing-order", "600:bug-out"], 108000,
+          dict(label=kind, members=members, phases=ROTOR_LANDING, ground=False, takeoff=False, touchdowns=2,
+               touchdowns_exact=True))
+         for kind in ("mi24", "ah64")],
+        notes="An airborne Mi-24 wing, then an AH-64 wing, bugs out and goes home: each wingman flies "
+              "the vertical landing at its home field and parks; the second comes in once the first is "
+              "down.",
+    ))
+    # The V-22 converts from aeroplane mode for the landing.
+    out.append(vertical_scenario(
+        "ai-v22-conversion-land",
+        [(["--aircraft", "v22", "--probe-wing-size", "2", "--probe-wing-only", "--separation", "200",
+           "--probe-wing-order", "600:bug-out"], 90000,
+          dict(label="v22", members=["Friendly 1-2"], phases=ROTOR_LANDING, ground=False, takeoff=False,
+               touchdowns=2, touchdowns_exact=True, converted=30.0))],
+        notes="An airborne V-22 wingman cruising in aeroplane mode (nacelles down) bugs out 5 s in: it "
+              "converts to helicopter mode on the way, lands vertically with the nacelles at 75 degrees "
+              "or more and parks.",
+    ))
+    # The AV-8 and Yak-141: light enough to hover (guns only), the AV-8 taxis to the spot and takes off
+    # vertically, comes home and lands vertically; the Yak-141 on full fuel needs 99% thrust to hover,
+    # so it makes the short takeoff and lands on the runway; the AV-8 with its stores makes the short
+    # takeoff too. The 2026-10-08 finding (a second wingman that never left the taxiway) is the
+    # take-off part of every run.
+    out.append(vertical_scenario(
+        "ai-stovl-ground-start-wing",
+        [
+            ([*wing, "--aircraft", "av8", "--probe-ai-guns-only", "--probe-wing-order", "18000:land-selected"],
+             126000,
+             dict(label="av8 light", members=members,
+                  phases=["Taxi", "LineUp", "VerticalHold", "VerticalClimb", "Transition", "Airborne",
+                          "HoverApproach", "VerticalDescent", "Settle", "TaxiClear"],
+                  forbid=["TakeoffRoll", "Final"], touchdowns=1)),
+            ([*wing, "--aircraft", "yak141", "--probe-ai-guns-only", "--probe-wing-order", "18000:land-selected"],
+             126000,
+             dict(label="yak141 full fuel", members=members,
+                  phases=["Taxi", "LineUp", "TakeoffRoll", "ClimbOut", "Airborne", "Approach", "Final", "Rollout"],
+                  forbid=["VerticalHold", "HoverApproach"], touchdowns=1)),
+            ([*wing, "--aircraft", "av8"], 24000,
+             dict(label="av8 with stores", members=members,
+                  phases=["Taxi", "LineUp", "TakeoffRoll", "ClimbOut", "Airborne"], forbid=["VerticalHold"])),
+        ],
+        notes="AV-8 and Yak-141 ground-started wings of three at Simferopol: a light AV-8 takes off and "
+              "lands vertically, a full Yak-141 and a loaded AV-8 make the retail short takeoff (nozzles "
+              "60, 40, 20) and the Yak-141 lands on the runway; every wingman leaves the taxiway.",
+    ))
+    return out
+
+
 def probe(name: str, args: list[str], *, ticks: int = 7200, timeout: float = 900, check=None, expect=None, outputs=None, notes: str = "") -> Scenario:
     return Scenario(
         name=f"ai-{name}",
@@ -667,7 +833,8 @@ def rotorcraft_fuel_check(aircraft: str, *, bingo: bool) -> Callable[[str], list
     At the first line none of them is bingo or critical (with the probe's full tanks every one is
     within reach of its home) and each has a time home at its own cruise; with `bingo` (a probe given
     little fuel by `--probe-fuel`) the friendly ones start on caution, then turn bingo, head home
-    (`ReturningToBase`) and are not lost."""
+    (`ReturningToBase`, or since slice H2 the landing: `HoldingMarshal`, `Landing`, `Landed`) and are
+    not lost."""
 
     def check(output: str) -> list[str]:
         problems = probe_problems(output)
@@ -681,7 +848,10 @@ def rotorcraft_fuel_check(aircraft: str, *, bingo: bool) -> Callable[[str], list
             if tick == first and home == "none":
                 problems.append(f"actor {actor} ({aircraft}) had no time home at the start")
         if bingo:
-            homeward = [l for l in lines if l[5] == "Bingo" and l[6] == "ReturningToBase"]
+            # Home: the way home, or (slice H2) the landing there, which a wing close to home
+            # starts at once at its marshal.
+            landing = ("ReturningToBase", "HoldingMarshal", "Landing", "Landed")
+            homeward = [l for l in lines if l[5] == "Bingo" and l[6] in landing]
             if not homeward:
                 problems.append(f"no {aircraft} turned bingo and headed home: " + ", ".join(sorted({l[5] + "/" + l[6] for l in lines})))
         return problems
@@ -867,7 +1037,9 @@ def scenarios() -> list[Scenario]:
                      ticks=9600, notes="A player in an AH-64 with two AI AH-64 wingmen on an airborne start."))
     out.append(probe("rtb-heli-land-order", ["--aircraft", "mi24", "--probe-wing-size", "3", "--separation", "100",
                                           "--probe-wing-order", "2000:land-selected"], ticks=14000,
-                     notes="Told to land, AI helicopters do not enter the airfield sequence."))
+                     notes="The land order to an airborne helicopter wing: with no airport selected it is "
+                           "refused, and the wing flies on. Helicopters landing are ai-heli-land-home and "
+                           "ai-heli-ground-start-wing (slice H2)."))
 
     # 9y. The CH-47, V-22, AV-8 and Yak-141 as the AI's aircraft (slice H3, John 2026-10-12): as the
     # player's AI wingmen, as friendly wings 2 (with fuel lines: the rotorcraft keep a fuel schedule
@@ -1272,6 +1444,7 @@ def scenarios() -> list[Scenario]:
     for s in out:
         if s.name in KNOWN_FAILURES:
             s.known_failure = KNOWN_FAILURES[s.name]
+    out.extend(vertical_scenarios())
     return out
 
 

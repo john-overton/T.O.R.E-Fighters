@@ -24,34 +24,53 @@ pub(super) fn render(
     target: Vector,
     path: &Path,
 ) -> AppResult<()> {
-    // The headless run keeps no picture: take one now, from the seat's
-    // companion plane (the picture needs a seat's plane to present).
-    let seen_from = scene
+    let flight = scene
         .world
-        .cockpits
-        .iter()
-        .find(|c| c.plane == observer)
-        .ok_or("no seat plane to present the picture from")?
-        .flight
-        .clone();
-    let world = &mut scene.world;
-    world
-        .combat
-        .refresh_render(observer.0, &seen_from, world.ai_wings.as_ref());
-    let flight = world
         .ai_wings
         .as_ref()
         .and_then(|w| w.mission().actor(plane.0))
         .ok_or("the striker is not AI-flown")?
         .flight()
         .clone();
-    let world = &scene.world;
-    let actor = world
-        .ai_wings
-        .as_ref()
-        .and_then(|w| w.mission().actor(plane.0))
-        .ok_or("the striker is not AI-flown")?;
-    let flight = &flight;
+    // Off the striker's right wing and a little behind, looking past it at
+    // the target, so the dive's angle and the target are both in frame.
+    let p = flight.position;
+    let v = flight.velocity;
+    let speed = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1.);
+    let forward = v.map(|c| c / speed);
+    let horizontal = forward[0].hypot(forward[2]).max(1e-6);
+    let right = [forward[2] / horizontal, 0., -forward[0] / horizontal];
+    let eye: Vector = std::array::from_fn(|i| {
+        p[i] - forward[i] * BEHIND_FT + right[i] * BESIDE_FT + if i == 1 { ABOVE_FT } else { 0. }
+    });
+    render_world(&mut scene.world, observer, eye, target, path)?;
+    println!("ai-strike: RENDER path={}", path.display());
+    Ok(())
+}
+
+/// One frame of `world` as the game draws it, offscreen at 1080p, from a
+/// camera at `eye` looking at `target`, the picture presented from the seat
+/// plane `observer`. The AI probe's `--probe-render` uses it too (slice H2).
+pub(crate) fn render_world(
+    world: &mut tore_world::world::World,
+    observer: PlaneId,
+    eye: Vector,
+    target: Vector,
+    path: &Path,
+) -> AppResult<()> {
+    // The headless run keeps no picture: take one now, from the seat's
+    // plane (the picture needs a seat's plane to present).
+    let seen_from = world
+        .cockpits
+        .iter()
+        .find(|c| c.plane == observer)
+        .ok_or("no seat plane to present the picture from")?
+        .flight
+        .clone();
+    world
+        .combat
+        .refresh_render(observer.0, &seen_from, world.ai_wings.as_ref());
+    let world = &*world;
     // Retail art and the weather module, as the reel and the surface scene load them.
     let mut resources = crate::reel::load_assets()?.theater_resources;
     crate::surface_dump::with_retail_surface(&mut resources)?;
@@ -70,22 +89,10 @@ pub(super) fn render(
             .map(|o| o.configuration().aircraft)
             .ok_or("the seat plane has no ownship")?,
     )?;
-    let _ = actor;
     let mut scenery = Scenery::build(&resources, &world.terrain)?;
     let art = render_snapshot::CombatArt::load(&resources)?;
     let mut gpu = pollster::block_on(Gpu::new(&scenery))?;
 
-    // Off the striker's right wing and a little behind, looking past it at
-    // the target, so the dive's angle and the target are both in frame.
-    let p = flight.position;
-    let v = flight.velocity;
-    let speed = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1.);
-    let forward = v.map(|c| c / speed);
-    let horizontal = forward[0].hypot(forward[2]).max(1e-6);
-    let right = [forward[2] / horizontal, 0., -forward[0] / horizontal];
-    let eye: Vector = std::array::from_fn(|i| {
-        p[i] - forward[i] * BEHIND_FT + right[i] * BESIDE_FT + if i == 1 { ABOVE_FT } else { 0. }
-    });
     let look = [target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]];
     let mut camera = Camera::new();
     camera.position = eye;
@@ -159,6 +166,5 @@ pub(super) fn render(
         path,
         crate::replay::png::encode_rgba(crate::reel::WIDTH, crate::reel::HEIGHT, &pixels)?,
     )?;
-    println!("ai-strike: RENDER path={}", path.display());
     Ok(())
 }

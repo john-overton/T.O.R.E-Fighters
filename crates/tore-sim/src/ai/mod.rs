@@ -53,6 +53,7 @@ pub mod tactics;
 pub mod targeting;
 pub mod thought;
 pub mod threat;
+pub mod threat_route;
 pub mod weapon_service;
 pub mod wing;
 

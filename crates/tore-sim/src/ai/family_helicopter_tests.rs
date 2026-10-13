@@ -436,3 +436,45 @@ fn a_hold_off_is_deterministic_and_round_trips_through_a_checkpoint() {
         );
     }
 }
+
+/// Slice H2 (the H4 follow-up): inside a ring it knows, after a break it
+/// leaves by the shortest way out, straight away from the site, instead of
+/// holding its course deeper in; outside every ring it holds its course.
+#[test]
+fn inside_a_known_ring_after_a_break_it_leaves_by_the_shortest_way_out() {
+    let mut world = defended_world();
+    world.own.heading_deg = 20.;
+    let world = world;
+    let mut strike = Strike::new(3);
+    let defending = Context {
+        defending: true,
+        warnings: crate::ai::awareness::ground::RecentWarnings {
+            air_to_air: false,
+            surface_to_air: true,
+        },
+        ..world.context(1)
+    };
+    strike.step(&defending);
+    assert_eq!(strike.phase(), Phase::Defend);
+    let out = steer(&strike.step(&world.context(2)));
+    let away = bearing_deg(SAM_AT, world.own.position);
+    assert!(
+        (out.heading_deg - away).abs() < 1e-9,
+        "{} vs {away}",
+        out.heading_deg
+    );
+    // The same after a break outside every ring: course held.
+    let mut clear = heli_world(at2(4));
+    clear.picture = sam_picture(false);
+    clear.own.heading_deg = 20.;
+    let mut strike = Strike::new(3);
+    strike.step(&Context {
+        defending: true,
+        warnings: crate::ai::awareness::ground::RecentWarnings {
+            air_to_air: false,
+            surface_to_air: true,
+        },
+        ..clear.context(1)
+    });
+    assert_eq!(steer(&strike.step(&clear.context(2))).heading_deg, 20.);
+}

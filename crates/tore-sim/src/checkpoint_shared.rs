@@ -169,6 +169,13 @@ crate::checkpoint_enum!(Phase {
     Rollout = 9,
     TaxiClear = 10,
     Parked = 11,
+    VerticalHold = 12,
+    VerticalClimb = 13,
+    Transition = 14,
+    HoverApproach = 15,
+    VerticalDescent = 16,
+    Settle = 17,
+    AirTaxi = 18,
 });
 
 crate::checkpoint_enum!(LandingReason {

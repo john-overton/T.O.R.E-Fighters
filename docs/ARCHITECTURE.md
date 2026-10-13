@@ -544,6 +544,8 @@ the state.
 | `autopilot.rs` | Hover hold and the A modes on the powered-lift aircraft (`Mode::Hover`, `Loops`) |
 | `autopilot/rotor_law.rs` | The hover cascade and the coupled forward-flight law as pure functions of a commanded target (`HoverTarget`, `ForwardTarget`) and the `Loops` memory, shared by the player's modes and the AI (slice H1) |
 | `ai/rotor_adapter.rs` | The AI's control of the helicopters and the V-22: steer and hover requests (`RotorRequest`, `HoverGuidance`) flown on the rotor laws, the V-22 nacelle schedule, its regime and loops coded with the actor (`ai/rotor_checkpoint.rs`) |
+| `ai/airfield_vertical.rs` | The vertical phases of the airfield sequence (slice H2): the hold, the vertical climb, a jet's transition, the hover approach, the vertical descent under the shared touchdown rule, the settle and a helicopter's air taxi to parking |
+| `ai/threat_route.rs` | A helicopter's way home past the threat rings it knows (slice H2): out of a ring first, then round the rings across the way home |
 | `ai/jet_lift.rs` | The AI's jetborne law for the AV-8 and Yak-141 hover, vertical climb and descent (`JetLift`) |
 | `ai/rotor_probe.rs` | Scripted flights of the two AI laws over flat ground: the unit tests' measurements and `--rotor-probe` |
 | `cheats.rs` | `easy_physics`, read through `State::rotor_hazards()` and `State::jet_hazards()` |

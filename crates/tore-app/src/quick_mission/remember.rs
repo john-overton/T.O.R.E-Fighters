@@ -460,10 +460,11 @@ mod tests {
     }
 
     #[test]
-    fn a_vertical_lifter_on_a_ground_start_still_opens_with_wing_one_just_him() {
-        // Whatever the player's slot draws, the creator stays valid: wing 1
-        // is alone when the AI cannot yet take the pilot's aircraft off the
-        // ground (slices ST-H and H3).
+    fn a_vertical_lifter_on_a_ground_start_keeps_its_wingmen() {
+        // Whatever the player's slot draws, the creator stays valid: since
+        // slice H2 the AI takes a vertical lifter's wingmen off the ground
+        // too, so wing 1 keeps its size (it was the player alone, slices
+        // ST-H and H3).
         let mut q = full_catalog();
         q.airport_names[0] = vec!["First Field".into()];
         q.airport_objects[0] = vec![0x4000_0000];
@@ -477,8 +478,9 @@ mod tests {
         q.apply(6, at);
         q.notice = None;
         q.randomize_aircraft(1, true);
-        assert_eq!(q.draft.values[4], 1);
+        assert_eq!(q.draft.values[4], 3);
         assert!(q.notice.is_none());
+        assert!(q.unsupported().is_none());
     }
 
     #[test]

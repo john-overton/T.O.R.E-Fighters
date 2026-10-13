@@ -278,9 +278,9 @@ Family binding and catalog counts remain in the experience spec.
 A helicopter does not fly the fighter reactions of B47 below: its break, its
 speed and height and its use of terrain are in
 [AI strike](ai-strike.md#helicopter-defence), a helicopter has a fuel schedule of
-its own ([rotorcraft fuel](#rotorcraft-fuel-slice-h3)) and is not yet put through the
-airfield sequences (B48; see
-[AI helicopters in Quick Mission](ai-strike.md#ai-helicopters-in-quick-mission)).
+its own ([rotorcraft fuel](#rotorcraft-fuel-slice-h3)) and since slice H2 takes off
+and lands vertically through the airfield sequences
+([vertical takeoff and landing](ai-airfield.md#vertical-takeoff-and-landing)).
 
 For the T.O.R.E strike behaviour of these families (heavies level-bomb from a
 minimum of 5,000 ft AGL raised by threat, helicopters pop up, the AC-130
@@ -661,7 +661,8 @@ through the ordinary landing sequence ([AI airfield sequences](ai-airfield.md));
 its wingmen join the leader's landing as for any ordered landing. A wing with
 no home runway has its leader fly the B48 return-to-base path to its home
 position (the launch point) and hold there by flying back over it, the
-wingmen staying in formation. Nothing changes while any hostile aircraft is
+wingmen staying in formation. Helicopters, the V-22 and the hovering jets land
+too since slice H2, by the [vertical landing](ai-airfield.md#vertical-takeoff-and-landing). Nothing changes while any hostile aircraft is
 alive or any aircraft on the side is still waiting or taking off (its landing
 traffic would hold the runway), and a mission that never had a hostile
 aircraft does not end this way.
@@ -1322,7 +1323,7 @@ through `Controller::fallbacks`.
 | `threat` | B47 warning delay, receiver gates, countermeasure gate and dispenser selection, decoy roll, script fallback reversal, reason ranking | Decoyed-missile time shortening, restart effect on an in-flight move |
 | `helicopter_defense` | B20 helicopter break: plus or minus 90 degrees to the threat's bearing, the side by the smaller turn, terrain-masking search, speed and height kept ([AI strike](ai-strike.md#helicopter-defence)) | Retail's turn toward a target that is ahead; the threat's site when no site is known |
 | `route` | B48 waypoint completion by octant, route command with landing hand-off, leader jitter and floors, join-landing, cruise speed, fuel states, wingman bingo route (also flown by leaders and singletons, fitted) | Original damage-triggered disengagement policy; authored response is in `damage` |
-| `airfield` | [AI airfield sequences](ai-airfield.md): hold, turn and runway-free gates, taxi-out, line-up, roll, climb-out, marshal square, approach gates, final, rollout, taxi-back and parking slots; bug-out, bingo, ordered and join landings; player landing priority | Vertical, STOVL and carrier variants; retail nose attitudes on final and rollout and the stopped pivot have fitted substitutes |
+| `airfield` | [AI airfield sequences](ai-airfield.md): hold, turn and runway-free gates, taxi-out, line-up, roll, climb-out, marshal square, approach gates, final, rollout, taxi-back and parking slots; bug-out, bingo, ordered and join landings; player landing priority | Carrier variants; retail nose attitudes on final and rollout and the stopped pivot have fitted substitutes; the [vertical and STOVL variants](ai-airfield.md#vertical-takeoff-and-landing) (slice H2) fit the descent rate, the helicopter marshal height and the air taxi |
 | `wing` | B43 spacing clamps, formation table and names, player spacing values, mode 9 speed, control side effects, target sharing cap; B46 receiver outcomes, player break/approach values, reply rules | Approach steering point, mode 9 negative-band entry |
 | `fitted` | One named, documented fitted rule per unresolved branch a fighter/strike actor can reach, with its constants | Nothing; this file exists because the branches are unresolved |
 | `controller` | `Controller::new` and `Controller::step`, persistent state, seeded draws at documented decision points only, reason ranking, target selection, tactical choice, motion resolution, weapon cadence, wing requests, fuel | Families other than fighter/strike are rejected, not served fighter behavior |
@@ -1568,7 +1569,10 @@ PT records, clean, both hold a point exactly in calm air and set down at a
 commanded 5 ft/s sink: the AV-8 touches at 4.9 ft/s, the Yak-141 at 7.5 ft/s
 (the jets lose lift to suck-down near the ground). A loaded AV-8 cannot hover
 (the manual's "never be able to fully hover"); the law then sinks at full
-throttle and the caller must choose a runway.
+throttle and the caller must choose a runway: the airfield sequence takes the
+retail short takeoff and the runway landing for a jet that needs more than 90%
+throttle to hover (slice H2, [vertical takeoff and
+landing](ai-airfield.md#vertical-takeoff-and-landing)).
 
 ## Live integration and authored boundaries
 
