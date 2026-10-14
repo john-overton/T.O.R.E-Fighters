@@ -432,7 +432,9 @@ pub fn take_combat(
 /// change nothing.
 pub fn take_event(flight: &mut flight::State, plane: u32, event: &Event) {
     match event {
-        Event::Jolt(jolt) if jolt.target == plane => flight.jolt_from(jolt.from, jolt.strength),
+        Event::Jolt(jolt) if jolt.target == plane => {
+            flight.jolt_scaled(jolt.from, jolt.strength, jolt.share)
+        }
         Event::OwnshipDestroyed { aircraft } if *aircraft == plane => flight.crashed = true,
         _ => {}
     }

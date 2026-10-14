@@ -29,10 +29,14 @@
 //! - Search returns to Idle after 30 s with no hostile in detection range.
 //! - Gun bursts spread their rounds evenly over the burst time; the opening
 //!   barrage (`startupShots`) of a controller's first burst spaces its rounds
-//!   by the burst's round spacing, at least one quarter second apart.
-//! - Flak (a controller with a retarget period) moves to the nearest eligible
-//!   target every retarget period; every other controller keeps its target
-//!   while it stays eligible.
+//!   by the burst's round spacing, at least one quarter second apart, or by
+//!   the gun's own opening gap (flak: 0.75 s, John 2026-10-14).
+//! - Flak (a controller with a retarget period) moves to the first eligible
+//!   target (the host's order) every retarget period; every other controller
+//!   keeps its target while it stays eligible.
+//! - A controller told to hold ([`Inputs::hold`], a flak team waiting for a
+//!   group) keeps its lock in Track and fires nothing; the launch gates'
+//!   15 s window does not run meanwhile.
 //!
 //! A target may be an aircraft or, since surface units fight each other
 //! (John, 2026-10-11), a ground object or ship of the other side: the host
@@ -204,13 +208,15 @@ pub enum Arm {
     /// next salvo (`gameRoundsInBurst`, `gameBurstT`, `reloadT`).
     Missile { salvo: u32, gap: u64, spacing: u64 },
     /// `burst` rounds over `burst_ticks`, then `pause` ticks; the first
-    /// burst of the first engagement is `opening` rounds when that is not 0;
-    /// an empty magazine is swapped in `swap` ticks.
+    /// burst of the first engagement is `opening` rounds when that is not 0,
+    /// `opening_gap` ticks apart (0: the burst's round spacing, at least a
+    /// quarter second); an empty magazine is swapped in `swap` ticks.
     Gun {
         burst: u32,
         burst_ticks: u64,
         pause: u64,
         opening: u32,
+        opening_gap: u64,
         swap: u64,
     },
 }
@@ -266,6 +272,10 @@ pub struct Inputs<'a> {
     pub blind: bool,
     /// Preparation takes twice as long (a blind battery's optical backup).
     pub slow: bool,
+    /// Hold fire on the current target: the controller keeps its lock in
+    /// Track, ready, without counting the launch gates' failure, and fires
+    /// nothing (a flak team that has not yet engaged the target's group).
+    pub hold: bool,
 }
 
 /// Rounds the host must fire this tick.
@@ -428,11 +438,16 @@ impl Controller {
                 burst,
                 burst_ticks,
                 opening,
+                opening_gap,
                 ..
             } => {
                 let burst = burst.max(1);
                 if !self.opened && opening > 0 {
-                    let spacing = (burst_ticks / u64::from(burst)).max(QUARTER_SECOND_TICKS);
+                    let spacing = if opening_gap > 0 {
+                        opening_gap
+                    } else {
+                        (burst_ticks / u64::from(burst)).max(QUARTER_SECOND_TICKS)
+                    };
                     (opening, spacing * u64::from(opening), true)
                 } else {
                     (burst, burst_ticks.max(1), false)
@@ -522,6 +537,9 @@ impl Controller {
                         self.enter_search(tick);
                     } else if inputs.stock.loaded == 0 {
                         self.out_of_rounds(profile, inputs);
+                    } else if inputs.hold {
+                        // Locked and ready; the gates' clock does not run.
+                        self.gates_failed_since = None;
                     } else if !inputs.gates {
                         let since = *self.gates_failed_since.get_or_insert(tick);
                         if tick >= since + GATES_WINDOW_TICKS {
@@ -543,9 +561,10 @@ impl Controller {
                         self.enter_search(tick);
                     } else if inputs.stock.loaded == 0 {
                         self.out_of_rounds(profile, inputs);
-                    } else if !inputs.gates {
-                        // The target left the gates mid-burst: the rest of
-                        // the burst is not fired.
+                    } else if !inputs.gates || inputs.hold {
+                        // The target left the gates mid-burst (or the unit
+                        // holds its fire): the rest of the burst is not
+                        // fired.
                         self.burst = None;
                         self.phase = Phase::Track;
                         self.gates_failed_since = Some(tick);

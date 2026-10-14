@@ -537,7 +537,14 @@ Reload class | Reserve magazines | Muzzle ft/s | Tracer | Damage per round | Dam
                 format!("{} (single shot)", tag(row.burst.to_string(), o.burst))
             },
             tag(seconds_with_point(u64::from(row.pause_quarters)), o.pause),
-            tag(row.opening_shots.to_string(), o.opening),
+            match row.opening_gap_quarters() {
+                0 => tag(row.opening_shots.to_string(), o.opening),
+                gap => format!(
+                    "{}, {} s apart O",
+                    tag(row.opening_shots.to_string(), o.opening),
+                    seconds_with_point(u64::from(gap))
+                ),
+            },
             tag(thousands(u64::from(row.magazine)), o.magazine),
             tag(row.magazine_reload_s.to_string(), o.reload),
             row.mount.label().to_string(),

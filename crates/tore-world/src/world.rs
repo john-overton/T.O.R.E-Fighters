@@ -1012,7 +1012,7 @@ impl World {
                     {
                         plane::take_event(&mut cockpit.flight, cockpit.plane.0, event);
                     } else if let Some(wings) = &mut self.ai_wings {
-                        wings.jolt(jolt.target, jolt.from, jolt.strength);
+                        wings.jolt(jolt.target, jolt.from, jolt.strength, jolt.share);
                     }
                 }
                 Event::OwnshipDamaged { .. }

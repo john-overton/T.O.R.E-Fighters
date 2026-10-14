@@ -420,6 +420,8 @@ struct Fixture {
     state: SurfaceState,
     live: live::State,
     jet: Aircraft,
+    /// More aircraft beside the jet (a flight).
+    others: Vec<Aircraft>,
     tick: u64,
     ridge: Option<Ridge>,
     daylight: bool,
@@ -470,6 +472,7 @@ impl Fixture {
         surface.units.sort_by_key(|u| u.id);
         arms.sort_by_key(|a| a.unit);
         surface.batteries = batteries;
+        surface.arsenal.flak_teams = flak_teams(&arms);
         surface.arsenal.units = arms;
         for (index, battery) in surface.batteries.iter().enumerate() {
             let lead = surface.arsenal.arms(battery.launchers[0]).unwrap();
@@ -516,6 +519,7 @@ impl Fixture {
                 airborne: true,
                 jammer: false,
             },
+            others: Vec::new(),
             tick: 0,
             ridge: None,
             daylight: true,
@@ -530,7 +534,9 @@ impl Fixture {
             Some(r) if (r.x.0..=r.x.1).contains(&x) && (r.z.0..=r.z.1).contains(&z) => r.height,
             _ => 0.,
         };
-        let aircraft = [self.jet];
+        let aircraft: Vec<Aircraft> = std::iter::once(self.jet)
+            .chain(self.others.iter().copied())
+            .collect();
         let scene = Scene {
             tick: self.tick,
             aircraft: &aircraft,
@@ -1367,4 +1373,177 @@ fn aim_tracks_follow_the_locked_controllers_and_batteries() {
         .map(|t| (t.unit.0, t.target))
         .collect();
     assert_eq!(held, vec![(NEAR, JET), (FAR, JET)]);
+}
+
+/// The heavy flak guns' teams (John, 2026-10-14): chained within a nautical
+/// mile, one side each; other guns never join.
+#[test]
+fn flak_guns_within_a_mile_form_a_team_and_chain() {
+    let ks = |id: u32, x: f64, z: f64| {
+        placed(id, "KS19.NT", 0x0800, x, z, 1).with_gun(ks19(), "KS19", arc(0, FREE, [0., 90.]), 0)
+    };
+    let mut blue = ks(0x4000_0010, 2_000., 0.);
+    blue.arms.side = BLUE;
+    let units = [
+        ks(0x4000_0001, 0., 0.),
+        ks(0x4000_0002, 5_000., 0.),
+        // A mile from the second, two from the first: the chain holds.
+        ks(0x4000_0003, 10_000., 0.),
+        ks(0x4000_0004, 40_000., 0.),
+        blue,
+        placed(0x4000_0005, "ZSU23.NT", 0x0800, 1_000., 0., 1).with_gun(
+            zsu23(),
+            "ZSU23",
+            arc(0, FREE, [0., 90.]),
+            0,
+        ),
+    ];
+    let mut arms: Vec<Arms> = units.iter().map(|p| p.arms.clone()).collect();
+    arms.sort_by_key(|a| a.unit);
+    let teams = flak_teams(&arms);
+    let ids: Vec<Vec<u32>> = teams
+        .iter()
+        .map(|t| t.guns.iter().map(|g| g.0 & 0xff).collect())
+        .collect();
+    assert_eq!(ids, vec![vec![1, 2, 3], vec![4], vec![0x10]]);
+    assert_eq!(teams[2].side, BLUE);
+}
+
+const FLAK_A: u32 = 0x4000_0021;
+const FLAK_B: u32 = 0x4000_0022;
+
+/// Two KS-19s 3,000 ft apart, ace crews (short preparation).
+fn flak_pair() -> Fixture {
+    let ks = |id: u32, x: f64| {
+        placed(id, "KS19.NT", 0x0800, x, 0., 3)
+            .with_gun(ks19(), "KS19", arc(0, FREE, [0., 90.]), 0)
+            .radar(false, None)
+    };
+    Fixture::new(vec![ks(FLAK_A, 0.), ks(FLAK_B, 3_000.)], Vec::new())
+}
+
+/// A flight of `n` at 15,000 ft strung north at 4,000 ft intervals, the
+/// first just inside the guns' reach and the rest beyond it, flying along
+/// `velocity`.
+fn strung_flight(f: &mut Fixture, n: u32, velocity: [f64; 3]) {
+    let reach = f.surface.arsenal.units[0].weapons[0].launch.max_range;
+    let altitude = 15_000.;
+    let first = ((reach - 2_000.).powi(2) - altitude * altitude).sqrt();
+    let at = |k: u32| [0., altitude, first + 4_000. * f64::from(k)];
+    f.jet.position = at(0);
+    f.jet.velocity = velocity;
+    f.others = (1..n)
+        .map(|k| Aircraft {
+            id: JET + k,
+            position: at(k),
+            ..f.jet
+        })
+        .collect();
+}
+
+fn flak_group(f: &Fixture) -> Vec<FlakGroup> {
+    f.traces
+        .iter()
+        .rev()
+        .find_map(|(_, t)| match t {
+            Trace::FlakTeam { groups, .. } => Some(groups.clone()),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_team_holds_its_fire_on_a_group_skirting_its_reach() {
+    // Five aircraft, one in reach of both guns (20 percent), flying east,
+    // across the line to the team: the team holds, even on the one it could
+    // reach (the ambush rule; John, 2026-10-14).
+    let mut f = flak_pair();
+    strung_flight(&mut f, 5, [760., 0., 0.]);
+    f.run(60 * TPS);
+    assert_eq!(f.rounds(), 0, "holds fire");
+    let groups = flak_group(&f);
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].members.len(), 5);
+    assert_eq!(groups[0].in_range, 1);
+    assert!(!groups[0].heading_in && !groups[0].engaged);
+    // The guns are locked on and ready meanwhile: a group that turns in is
+    // fired at at once.
+    assert!(f.phase(FLAK_A) == Phase::Track && f.phase(FLAK_B) == Phase::Track);
+    f.jet.velocity = [0., 0., -760.];
+    for other in &mut f.others {
+        other.velocity = f.jet.velocity;
+    }
+    let turned = f.tick;
+    f.run(2 * TPS);
+    assert!(flak_group(&f)[0].heading_in && flak_group(&f)[0].engaged);
+    let first = f.fired.first().expect("fires once the group heads in").0;
+    assert!(
+        first - turned <= 2,
+        "fires within a tick or two: {}",
+        first - turned
+    );
+}
+
+#[test]
+fn a_quarter_of_the_group_in_range_of_the_whole_team_opens_fire() {
+    // Four aircraft, one in reach of both guns: 25 percent, flying east.
+    let mut f = flak_pair();
+    strung_flight(&mut f, 4, [760., 0., 0.]);
+    f.run(60 * TPS);
+    let groups = flak_group(&f);
+    assert_eq!((groups[0].in_range, groups[0].heading_in), (1, false));
+    assert!(groups[0].engaged);
+    assert!(f.rounds() > 0);
+}
+
+#[test]
+fn a_team_spreads_its_fire_over_the_group() {
+    // Two aircraft in trail heading at the guns, both in reach, the lead the
+    // nearer to both guns: the first gun takes the lead, the second the
+    // wingman instead of the nearer lead.
+    let mut f = flak_pair();
+    f.jet.position = [1_500., 15_000., 20_000.];
+    f.jet.velocity = [0., 0., -760.];
+    f.others = vec![Aircraft {
+        id: JET + 1,
+        position: [1_500., 15_000., 22_000.],
+        ..f.jet
+    }];
+    f.run(30 * TPS);
+    let targets: Vec<(u32, u32)> = f
+        .fired
+        .iter()
+        .filter_map(|(_, t)| match t {
+            Trace::Shot { unit, target, .. } => Some((unit.0, *target)),
+            _ => None,
+        })
+        .collect();
+    let of = |gun: u32| -> BTreeSet<u32> {
+        targets
+            .iter()
+            .filter(|(u, _)| *u == gun)
+            .map(|(_, t)| *t)
+            .collect()
+    };
+    assert!(!of(FLAK_A).is_empty() && !of(FLAK_B).is_empty());
+    assert!(
+        of(FLAK_A).is_disjoint(&of(FLAK_B)),
+        "{:?} {:?}",
+        of(FLAK_A),
+        of(FLAK_B)
+    );
+}
+
+#[test]
+fn a_team_detects_at_twice_its_guns_range() {
+    // The KS-19 sees 100,000 ft; the team 200,000 ft.
+    let mut f = flak_pair();
+    f.jet.position = [0., 15_000., 150_000.];
+    f.jet.velocity = [0., 0., -760.];
+    f.run(TPS);
+    assert_eq!(flak_group(&f)[0].members, vec![JET]);
+    assert_ne!(f.phase(FLAK_A), Phase::Idle);
+    f.jet.position = [0., 15_000., 210_000.];
+    f.run(TPS);
+    assert!(flak_group(&f).is_empty());
 }

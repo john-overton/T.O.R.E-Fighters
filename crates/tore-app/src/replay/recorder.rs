@@ -1898,7 +1898,7 @@ fn trace_unit(trace: &tore_world::surface::fire::Trace) -> Option<u32> {
         | Trace::Refill { unit, .. }
         | Trace::Radar { unit, .. }
         | Trace::Shutdown { unit, .. } => Some(unit.0),
-        Trace::Battery { .. } => None,
+        Trace::Battery { .. } | Trace::FlakTeam { .. } => None,
     }
 }
 

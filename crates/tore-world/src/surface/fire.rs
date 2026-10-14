@@ -355,6 +355,9 @@ pub struct BatteryArms {
 pub struct Arsenal {
     pub units: Vec<Arms>,
     pub batteries: Vec<BatteryArms>,
+    /// The heavy flak guns' teams ([`flak_teams`]), in order of their first
+    /// gun's id.
+    pub flak_teams: Vec<FlakTeam>,
     /// Records that could not be read, with why: the unit fights without them.
     pub unreadable: Vec<(UnitId, String)>,
 }
@@ -498,6 +501,7 @@ impl Arsenal {
             arsenal.units.push(arms);
         }
         arsenal.units.sort_by_key(|arms| arms.unit);
+        arsenal.flak_teams = flak_teams(&arsenal.units);
         // Each battery fights with its first live launcher's missile, at the
         // battery's best skill.
         for (index, battery) in surface.batteries.iter().enumerate() {
@@ -691,6 +695,7 @@ impl WeaponArms {
                         burst_ticks: u64::from(record.burst.game_burst_t.max(1)) * 30,
                         pause: u64::from(record.burst.reload_t) * 30,
                         opening: u32::from(record.burst.startup_shots),
+                        opening_gap: u64::from(row.opening_gap_quarters()) * 30,
                         swap: u64::from(row.magazine_reload_s) * 120,
                     },
                 },
@@ -980,6 +985,14 @@ pub enum Trace {
         phase: Phase,
         target: Option<u32>,
         optical: bool,
+    },
+    /// A flak team's detected groups, or what it does about them, changed
+    /// ([`flak_teams`]).
+    FlakTeam {
+        team: usize,
+        /// Its live guns.
+        guns: Vec<UnitId>,
+        groups: Vec<FlakGroup>,
     },
 }
 
@@ -1340,6 +1353,7 @@ pub fn step(
                 },
                 blind,
                 slow: optical,
+                hold: false,
             },
         );
         let phase = slot.controller.phase();
@@ -1424,6 +1438,14 @@ pub fn step(
         }
     }
 
+    // Flak teams: what each team sees, and which groups it fires at.
+    let plans = plan_teams(arsenal, state, &|id| alive(live, id), &contacts, scene);
+    let team_of: BTreeMap<UnitId, usize> = plans
+        .iter()
+        .enumerate()
+        .flat_map(|(team, plan)| plan.guns.iter().map(move |g| (g.unit, team)))
+        .collect();
+
     // Every unit's own controllers.
     for arms in &arsenal.units {
         if arms.weapons.iter().all(|w| w.battery) || !alive(live, arms.unit) {
@@ -1448,6 +1470,14 @@ pub fn step(
                     contacts: &contacts,
                     by_id: &aircraft_by_id,
                     prefer_surface,
+                    team: team_of
+                        .get(&arms.unit)
+                        .map(|team| &plans[*team])
+                        .filter(|plan| {
+                            plan.guns
+                                .iter()
+                                .any(|g| g.unit == arms.unit && g.index == index)
+                        }),
                 },
                 radar_on,
                 &in_flight,
@@ -1474,6 +1504,8 @@ struct View<'a> {
     contacts: &'a [Contact],
     by_id: &'a BTreeMap<u32, Contact>,
     prefer_surface: bool,
+    /// The flak team the unit fights in, with its picture this tick.
+    team: Option<&'a TeamPlan>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1516,18 +1548,26 @@ fn step_weapon(
             line_of_sight_needed: false,
         }
         .sees(seen.contacts, scene),
-        None => Look {
-            from: muzzle,
-            side: arms.side,
-            react: arms.react,
-            weapon,
-            band: weapon.detection,
-            range: weapon.detection.max_range,
-            search_limit: arms.search_limit,
-            prefer_surface: seen.prefer_surface,
-            line_of_sight_needed: true,
-        }
-        .sees(seen.contacts, scene),
+        None => match seen.team {
+            // A flak team's gun: the team's shared picture, ordered so the
+            // team's fire spreads over the group.
+            Some(plan) => (
+                !plan.detected.is_empty(),
+                plan.order(arms.unit, aircraft_by_id),
+            ),
+            None => Look {
+                from: muzzle,
+                side: arms.side,
+                react: arms.react,
+                weapon,
+                band: weapon.detection,
+                range: weapon.detection.max_range,
+                search_limit: arms.search_limit,
+                prefer_surface: seen.prefer_surface,
+                line_of_sight_needed: true,
+            }
+            .sees(seen.contacts, scene),
+        },
     };
     let Some(unit) = state.unit(arms.unit) else {
         return;
@@ -1556,6 +1596,11 @@ fn step_weapon(
                 && arc.covers_elevation(elevation)
                 && line_of_sight(muzzle, aircraft.position, scene.ground)
         }
+    };
+    // A flak team holds its fire until it engages the target's group.
+    let hold = match (seen.team, target) {
+        (Some(plan), Some(target)) => !plan.engaged.contains(&target),
+        _ => false,
     };
     let (loaded, reserve) = match weapon.kind {
         Kind::Missile => (state.rails(arms, weapon), Reserve::Magazines(0)),
@@ -1589,6 +1634,7 @@ fn step_weapon(
             },
             blind: false,
             slow: false,
+            hold,
         },
     );
     let after = (engager.controller.phase(), engager.controller.target());
@@ -2058,6 +2104,15 @@ fn fire_gun(
         });
     }
 }
+
+#[path = "flak_team.rs"]
+mod flak_team;
+pub use flak_team::{
+    FLAK_GROUP_IN_RANGE_PERCENT, FLAK_GROUP_RADIUS_FT, FLAK_HEADING_CONE_DEG,
+    FLAK_HEADING_MIN_SPEED_FPS, FLAK_REACH_MARGIN_FT, FLAK_ROTATION_TICKS,
+    FLAK_TEAM_DETECTION_FACTOR, FLAK_TEAM_RADIUS_FT, FlakGroup, FlakTeam, flak_teams,
+};
+use flak_team::{TeamPlan, plan_teams};
 
 #[cfg(test)]
 #[path = "fire_tests.rs"]
