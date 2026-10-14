@@ -702,6 +702,49 @@ fn a_burst_just_outside_the_box_still_hurts_the_launcher() {
 }
 
 #[test]
+fn a_ground_burst_inside_the_box_still_hurts_the_launcher() {
+    // John, 2026-10-13: the grace is for airbursts only. A store that goes
+    // off on the terrain or on a ground object or ship gives its launcher the
+    // normal ground share, even with the burst inside the 28 ft box.
+    for ai in [false, true] {
+        for (weapon, on_object) in [
+            (sparrow(), false),
+            (mk84(), false),
+            (sparrow(), true),
+            (mk84(), true),
+        ] {
+            let low = [0., 24., 0.];
+            let mut s = scene();
+            let (own, id) = if ai {
+                s.targets.push(aircraft(SHOOTER, low, RED));
+                (far(), SHOOTER)
+            } else {
+                (at(low), 0)
+            };
+            if on_object {
+                // A truck's box with its top 8 ft under the launcher's centre.
+                ground_object(&mut s, 0x4000_0001, [0., 8., 0.], 1000, BLUE);
+            }
+            let mut w = weapon.clone();
+            w.damage.fuze_radius = 0;
+            w.damage.fuze_arm_t = 0;
+            // The store starts at the launcher's centre, heading straight down.
+            s.projectiles
+                .push(round(70, id, &w, low, [low[0], low[1] - 1., low[2]]));
+            let before = launcher_hp(&s, id);
+            let events = run_from(&mut s, 60, own);
+            // It went off close enough to be inside the launcher's box.
+            assert!(
+                launcher_hp(&s, id) < before,
+                "ai {ai} {} object {on_object}: {events:?}",
+                w.source
+            );
+            assert!(s.ledger.kills().iter().all(|k| k.victim != id));
+        }
+    }
+}
+
+#[test]
 fn the_grace_is_only_for_the_launchers_own_stores() {
     // Another aircraft's missile bursting on a third aircraft inside the
     // player's box still hurts the player.

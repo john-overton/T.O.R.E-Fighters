@@ -714,10 +714,18 @@ What a player sees:
   aircraft, however close or deep its mount sits.
 - A proximity fuze does not fire on the launcher while the store is inside
   the box widened by the fuze radius (an AIM-7's 100 ft makes that 128 ft).
-- A store that goes off while still inside the box (it struck another
-  aircraft or the ground there) hurts everything its splash reaches except its
-  own launcher. A burst even one foot outside the box is the normal own blast
+- A store that goes off in the air while still inside the box (it struck
+  another aircraft there) hurts everything its splash reaches except its own
+  launcher. A burst even one foot outside the box is the normal own blast
   described above.
+- A burst on the ground is not covered (John, 2026-10-13: ground bursts damage
+  aircraft with splash regardless of initial proximity). A store that goes off
+  on the terrain, the sea, a ground object, a ship or a parked aircraft gives
+  its launcher the normal ground share even when the burst point is inside the
+  box, so a bomb dropped too low, or a rocket fired into the runway under a
+  parked aircraft, still hurts it. Ground objects and ships count as ground
+  bursts (agent decision, matching the rule that already gives them the ground
+  share).
 - Once the store has left the box the grace is over: a missile that turns back
   and re-enters hits the launcher as any other target (its fuze fires at the
   widened box edge, before it is inside), and its blast outside the box still
@@ -729,12 +737,13 @@ What a player sees:
 How it is built (agent decision, no new state): the direct-hit and fuze test
 ignores the launcher for a store whose position at the start of the tick was
 inside the box widened by its fuze radius, and the splash step skips the
-launcher when the burst point is inside the box. Both read positions only, so
+launcher when an airburst's point is inside the box. Both read positions only, so
 there is nothing to store in a checkpoint or a replay and nothing on the wire.
 The arming time of a bomb or missile (`fuze_arm_t`) is unchanged and still
 keeps an unarmed store from exploding on anything. A store that leaves the box
-and returns to burst on a different target inside it counts as inside the box
-(the grace follows the burst point, not the store's history).
+and returns to burst in the air on a different target inside it counts as
+inside the box (the grace follows the burst point, not the store's history;
+John, 2026-10-13: leave it that way).
 
 ### Splash unknowns
 
