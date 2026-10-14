@@ -238,6 +238,15 @@ as on the wire. A cockpit's `previous_flight` is per-tick scratch: the next
 step overwrites it before reading it, so a restored cockpit starts with it
 equal to `flight`, as a decoded own plane does.
 
+The exact coding includes the autopilot, whose mode gained `Orbit` 4 and
+which gained, after its `loops`, the AC-130 orbit hold's `orbit`
+(`Option<Orbit>`: the point, the centre, the radius, height, speed and reach,
+and the slewed bank, climb and throttle terms; slice nr-orbit, 2026-10-13).
+That changes the wire's own-state bytes too
+([the sensor console](net-protocol.md#protocol-29-the-sensor-console)).
+The seat command `SensorConsole` is 15 in a checkpoint's queued seat
+commands.
+
 One field follows the exact coding: a two-seater's second chute
 (`crew_escape`, an `Option<Escape>` by the trait, one bit when there is
 none). The wire's exact state leaves it out, since a client's prediction

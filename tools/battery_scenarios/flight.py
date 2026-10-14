@@ -2176,9 +2176,59 @@ def gunsight_scenarios() -> list[Scenario]:
     ]
 
 
+# The AC-130's sensor console and orbit hold (slice nr-orbit,
+# crates/tore-app/src/a2g_run/orbit.rs): the console opens over the Ukraine
+# armoured column and the autopilot flies the attack orbit with no stick or
+# throttle. name -> (extra arguments, notes).
+ORBIT_RUNS = {
+    "orbit-pin": (
+        ["--orbit-sight", "pin", "--seconds", "300"],
+        "The console opens on a pin at the column: enters the orbit, never inside the minimum radius or "
+        "below the minimum height after entry, every gun and the camera bear 90% of the time, smooth bank "
+        "and pitch, no stall.",
+    ),
+    "orbit-slew": (
+        ["--orbit-sight", "free", "--orbit-slew", "150", "--seconds", "330"],
+        "A free sight is pinned under its crosshair when the console opens; at 150 s the pin is slewed "
+        "right for 4 s and the orbit re-centres on it without exceeding the bank and pitch rates.",
+    ),
+    "orbit-track": (
+        ["--orbit-sight", "track", "--seconds", "300"],
+        "The console opens on the tracked lead tank of the moving column and follows it.",
+    ),
+    "orbit-close": (
+        ["--orbit-sight", "pin", "--orbit-close", "120", "--seconds", "130"],
+        "Ctrl+9 again at 120 s closes the console and hands the aircraft back, flying, with no snap.",
+    ),
+}
+
+
+def check_orbit(output: str) -> list[str]:
+    problems = [line.strip()[:200] for line in output.splitlines() if line.startswith("FAIL ")]
+    if "orbit probe: PASS" not in output:
+        problems.append("the orbit probe did not finish with PASS")
+    return problems
+
+
+def orbit_scenarios() -> list[Scenario]:
+    return [
+        Scenario(
+            name=f"flight-ac130-{name}",
+            lane="flight",
+            args=["--a2g-run", "UKR", "QUCOL", "--aircraft", "ac130", "--load", "C_25.JT", "--attack", "orbit",
+                  "--altitude", "4000", "--speed", "200", "--from", "3", *extra],
+            check=check_orbit,
+            timeout=600,
+            notes=notes,
+        )
+        for name, (extra, notes) in ORBIT_RUNS.items()
+    ]
+
+
 def scenarios() -> list[Scenario]:
     return (
         takeoff_scenarios()
+        + orbit_scenarios()
         + landing_scenarios()
         + maneuver_scenarios()
         + spin_scenarios()

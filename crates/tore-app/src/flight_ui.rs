@@ -75,6 +75,8 @@ pub enum Command {
     RadioSilence,
     /// Alt+N: monitor the battle net, or stop (stage G).
     BattleNet,
+    /// Ctrl+9: open or close the AC-130's sensor console (orbit hold).
+    SensorConsole,
     /// Ctrl+V: the Valkyries situation score.
     Valkyries,
     /// Ctrl+B: mark this moment in the mission recording.

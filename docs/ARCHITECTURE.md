@@ -141,7 +141,9 @@ aircraft can be the reference. [Behavior and fitted constants](spec/flight-views
 `flight_canvas.rs` now composes the flight-only overlay at an aspect-responsive size (physical drawable, proportionally capped at 1920×1080). The separate GPU cockpit pass preserves uniform cover-fit in the centered forward view, and instrument layout rectangles anchor to actual edges. Native instrument rasters go directly to their destination sizes instead of passing through a reduced 640×480 composite. The original cockpit texture is uploaded once; unchanged scaled panel rasters are cached. Alpha-aware filtering prevents dark transparent borders. `renderer.rs` recreates its UI texture when dimensions change and uses the full viewport for flight; menus/viewer overlays retain their existing canvas. Pointer conversion uses the same responsive panel rectangles, while the centered pause menu retains menu coordinates. HUD metadata uses a 0.7225 layout scale, including the requested additional 15% reduction. Projection compensation preserves angular cues through resizing and portrait aspect.
 
 `tore_sim::autopilot` owns captured heading/altitude, mode and an optional
-world-space navigation target. `State::step_surface` consumes mode switches,
+world-space navigation target, and the AC-130's orbit hold (`autopilot::orbit`:
+its plan, slewed commands and the point it circles, which the world sets each
+tick from the gunsight in `World::feed_orbits` before the flight steps). `State::step_surface` consumes mode switches,
 applies pilot override and generates control deflections before the selected
 flight adapter runs. The HUD reads this state. See the
 [autopilot specification](spec/autopilot.md).
@@ -547,6 +549,7 @@ the state.
 | `flight/powered/trim.rs` | Airborne starts in trimmed forward flight and ground starts |
 | `flight/powered/readout.rs` | Pure cockpit readings (NR, TQ, nacelle, hover display, buffet) for the HUD, sound and camera |
 | `autopilot.rs` | Hover hold and the A modes on the powered-lift aircraft (`Mode::Hover`, `Loops`) |
+| `autopilot/orbit.rs` | Orbit hold for the AC-130's sensor console (`Mode::Orbit`, `Orbit`, `OrbitStatus`): the AI gunship's orbit flown through stick and throttle (slice nr-orbit) |
 | `autopilot/rotor_law.rs` | The hover cascade and the coupled forward-flight law as pure functions of a commanded target (`HoverTarget`, `ForwardTarget`) and the `Loops` memory, shared by the player's modes and the AI (slice H1) |
 | `ai/rotor_adapter.rs` | The AI's control of the helicopters and the V-22: steer and hover requests (`RotorRequest`, `HoverGuidance`) flown on the rotor laws, the V-22 nacelle schedule, its regime and loops coded with the actor (`ai/rotor_checkpoint.rs`) |
 | `ai/airfield_vertical.rs` | The vertical phases of the airfield sequence (slice H2): the hold, the vertical climb, a jet's transition, the hover approach, the vertical descent under the shared touchdown rule, the settle and a helicopter's air taxi to parking |
@@ -3420,6 +3423,9 @@ functions in `tore-world`, `world::plane`, that `World::step` calls for every
 cockpit in the tick's order and a client calls for its own plane with no
 `World`, `Combat` or `AiWings`:
 
+0. (Host only.) `World::feed_orbits` gives every cockpit flying the AC-130's
+   orbit hold the point its gunsight holds now; a client's prediction keeps
+   the last point its exact state brought.
 1. `fly`: the flight at the start of the tick is kept, the flight steps with
    the pilot's input over the terrain's surface, and building contact is
    tested against the ground objects still standing (a crash, or a rebound

@@ -44,6 +44,32 @@ choices. The AC-130's guns leave no crater marks, so impacts are read from the
 ground explosions the combat state shows. Round dispersion is the fitted
 0.25-degree cone, which is why impacts spread by tens of feet.
 
+## The sensor console and the orbit
+
+2026-10-13, Linux x86_64, debug build of branch `nr-orbit` (on multiplayer
+`5749aaa8`), profile a copy of `.local/surface-data`. The four battery
+scenarios `flight-ac130-orbit-pin`, `-slew`, `-track` and `-close` run
+`--a2g-run UKR QUCOL --aircraft ac130 --load C_25.JT --attack orbit --altitude
+4000 --speed 200 --from 3` (`crates/tore-app/src/a2g_run/orbit.rs`): the
+aircraft starts 3 nm south of the Ukraine armoured column at 4,000 ft and 200
+kt, the console opens half a second in, and nothing touches the stick or the
+throttle after. Entry is the first tick on the circle within 500 ft of the
+orbit's height. [Spec](../spec/ac130-linked-guns.md#the-sensor-console-and-the-orbit).
+
+Plan on every run: radius 8,519 ft, 5,965 ft above the centre, 191 kt;
+minimum 6,144 ft out and 4,302 ft up.
+
+| Scenario | Sight | After entry | Distance from the centre | Height above it | Bank, bank rate, pitch rate | All guns and camera bear |
+| --- | --- | --- | --- | --- | --- | --- |
+| `orbit-pin` | Pin on the lead tank's ground | 59 s to 300 s | 8,727 to 9,134 ft | 5,465 to 5,992 ft | at most 20.8 deg, 5.1 deg/s, 2.1 deg/s | 100% |
+| `orbit-slew` | Free; the console pins the crosshair's ground 8,500 ft west of the start; at 150 s the pin is slewed 4 s and moves 4,517 ft | 59 s to 330 s | 8,146 ft at least | 5,465 ft at least | at most 22.1 deg, 5.1, 2.1 | 100% |
+| `orbit-track` | The lead tank tracked; it drives 14,129 ft in the run | 59 s to 300 s | 7,710 ft at least | 5,465 ft at least | at most 26.8 deg, 5.1, 2.1 | 100% |
+| `orbit-close` | Pin; Ctrl+9 again at 120 s | 59 s to 120 s | 9,010 ft at least | 5,465 ft at least | at most 20.4 deg, 5.1, 2.1 | 100%; handed back flying, autopilot off |
+
+No stall warning in any run. Steady orbits settle 3 to 7% outside the planned
+radius, the circle law's own offset (the AI gunship's measured 8,800 to 10,600
+ft about the moving tank shows the same). A run takes about 50 s.
+
 ## Pose evidence
 
 - **Animation probe sight poses.** `--aircraft ac130 --animation-probe DIR`

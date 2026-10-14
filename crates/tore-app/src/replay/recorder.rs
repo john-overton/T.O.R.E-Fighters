@@ -378,6 +378,9 @@ pub struct Recorder {
     ground: ground::Watch,
     /// The quarter-second clock of the step that has just run, for fuzes.
     state_clock: Option<u16>,
+    /// The sensor console's orbit as last written: the tick and the point
+    /// (nr-orbit), `None` while it is closed.
+    orbit: Option<(u64, [f64; 3])>,
 }
 
 /// Comms and audio entries kept for live flight between its looks.
@@ -458,6 +461,7 @@ impl Recorder {
             dispensers: devices::Dispensers::new(),
             ground: ground::Watch::default(),
             state_clock: None,
+            orbit: None,
         };
         for info in roster {
             recorder.register(info.clone());
@@ -971,6 +975,7 @@ impl Recorder {
         self.surface_watch.events(&tick, &lost, &mut events);
         self.aircraft_events(&tick, &frame, &mut events);
         self.cue_events(&tick, player_ground, &mut events);
+        self.orbit_event(&tick, number, &mut events);
         self.ground.events(
             &ground::Context {
                 tick: &tick,
@@ -988,6 +993,38 @@ impl Recorder {
         frame.events.extend(events);
         self.frames += 1;
         self.frame = Some(frame);
+    }
+
+    /// `player.orbit`: the AC-130's sensor console opening or closing, and
+    /// the point its orbit circles when it has moved more than 50 ft, at
+    /// most once a second (slice nr-orbit).
+    fn orbit_event(&mut self, tick: &Tick<'_>, number: u64, events: &mut Vec<Event>) {
+        const MOVED_FT: f64 = 50.;
+        let status = tick.flight.orbit_status();
+        let due = match (self.orbit, status) {
+            (None, None) => false,
+            (Some(_), None) | (None, Some(_)) => true,
+            (Some((at, was)), Some(now)) => {
+                number.saturating_sub(at) >= replay::TICKS_PER_SECOND
+                    && (now.point[0] - was[0]).hypot(now.point[2] - was[2]) > MOVED_FT
+            }
+        };
+        if !due {
+            return;
+        }
+        let mut event = Event::new(kind::PLAYER_ORBIT)
+            .with_subject(self.player)
+            .with(field::ON, status.is_some());
+        if let Some(now) = status {
+            for (name, value) in field::POSITION.into_iter().zip(now.point) {
+                event = event.with(name, value);
+            }
+            event = event
+                .with(field::RADIUS_FT, now.radius_ft)
+                .with(field::HEIGHT_FT, now.height_ft);
+        }
+        self.orbit = status.map(|now| (number, now.point));
+        events.push(event);
     }
 
     /// The city fill buildings knocked down since the last tick (nr-fx3,

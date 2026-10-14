@@ -800,6 +800,8 @@ impl World {
         }
         out.commanded = out.cues.len();
         commands_applied(self, out)?;
+        // Orbit hold circles what the AC-130's gunsight holds now.
+        self.feed_orbits();
         // Each human-flown plane's step: docs/ARCHITECTURE.md, "One step for
         // a human's plane".
         for (cockpit, input) in self.cockpits.iter_mut().zip(&inputs) {
