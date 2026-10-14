@@ -95,6 +95,15 @@ class Scenario:
     # The binaries a driver starts besides the game: "server" and "bot". Checked before the run starts.
     uses: tuple[str, ...] = ()
 
+    @property
+    def windowed(self) -> bool:
+        """Opens a game window anywhere: the main run (`window`) or any follow-up step (`Step.window`).
+
+        Selection, listing and the `--with-windows no` filter read this. The runner's slot logic still reads
+        `window` and `Step.window` separately: a scenario holds a window slot for its whole run only when
+        `window` is set, and a window step takes one just for that step."""
+        return self.window or any(step.window for step in self.then)
+
 
 @dataclasses.dataclass
 class Step:
@@ -743,7 +752,7 @@ def main(argv: list[str]) -> int:
                 return 1
     if opts.list:
         for s in scenarios:
-            print(f"{s.lane:8} {'window' if s.window else '      '} {s.name}")
+            print(f"{s.lane:8} {'window' if s.windowed else '      '} {s.name}")
         print(f"{len(scenarios)} scenarios")
         return 0
     if not scenarios:

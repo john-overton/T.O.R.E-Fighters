@@ -163,3 +163,9 @@ mouse events through the game's own handlers with focus assumed, and the driver 
 replay viewer and for quitting with Alt+F4. The driver's scenarios set `TORE_PERF_ACTIVE=1`
 with a large `TORE_PERF_FRAMES` (which keeps a timing run unpaused) and `TORE_RECORD_MISSIONS=1`
 (which makes it record); the script ones need neither.
+
+The driver starts its keys only once Hyprland lists the game's window (then waits `DRIVE_SETTLE`, 4 s by
+default), for up to 90 s. Before 2026-10-13 it counted from the game's process start, and on a loaded machine
+the window opened 5 to 8 s later (1.7 s on an idle one), so the first keys were dropped with
+`send_shortcut: window not found` and `replay-keys-bookmarks` recorded 2 or 3 bookmarks instead of 4. The
+driver prints `driver: window up after N s`.
