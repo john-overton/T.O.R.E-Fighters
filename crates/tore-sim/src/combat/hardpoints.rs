@@ -11,10 +11,13 @@
 //! successive releases alternate sides. The same rule says how many stores
 //! each side still holds, which is what the drawn pylons show.
 //!
-//! Every store hangs [`PYLON_DEPTH`] below the model's underside over its
-//! pylon (John 2026-10-13: pylons 2 ft deep), not at the record's height,
-//! and leaves from exactly where it hangs ([`Rack::store_point`]), so the
-//! simulation and the drawing place a store at one point.
+//! Every store's top hangs [`PYLON_DEPTH`] below the model's underside over
+//! its pylon (John 2026-10-13: pylons about 1 ft deep, half of PY2's 2 ft),
+//! not at the record's height, and leaves from exactly where it hangs
+//! ([`Rack::store_point`]), so the simulation and the drawing place a store
+//! at one point. Two stores on one pylon hang either side of a small bar at
+//! its foot, alongside it as a wingtip missile sits on the tip
+//! ([`slot_offset`]).
 use super::store_sizes::StoreSize;
 use crate::attitude::Vector;
 use tore_formats::aircraft::Hardpoint;
@@ -29,22 +32,31 @@ pub const PAIRED_FLAG: i32 = 0x4;
 /// apart clears a Maverick's 2.4 ft fins; fitted (agent decision).
 pub const DUAL_PYLON_SPREAD: f64 = 1.4;
 
-/// A pylon's depth, feet, from the model's underside over it to the top of
-/// the store (or rack beam) it carries: real pylons are 15 to 30 inches
-/// (opinionated, John 2026-10-13: 2 ft on every aircraft).
-pub const PYLON_DEPTH: f64 = 2.0;
+/// A wing pylon's depth, feet, from the model's underside over it to the
+/// top of the stores it carries (opinionated, John 2026-10-13: "pylons need
+/// to be about half the size they are now", from PY2's 2 ft).
+pub const PYLON_DEPTH: f64 = 1.0;
 
 /// How deep a fuselage or centreline station's launcher rail is, feet,
-/// from the body's underside to the top of the store (or rack beam): about
-/// 4 inches (opinionated, John 2026-10-13: fuselage and centreline stations
-/// use short rails and launchers, not 2 ft pylons).
-pub const RAIL_DEPTH: f64 = 4. / 12.;
+/// from the body's underside to the top of the stores: about 2 inches
+/// (opinionated, John 2026-10-13: half of PY2's 4 inch rails).
+pub const RAIL_DEPTH: f64 = 2. / 12.;
 
 /// How far fore and aft of a wingtip record the tip's edge is read, feet.
 pub const TIP_REACH: f64 = 2.5;
 
-/// A rack beam's depth under its pylon, feet (fitted).
-pub const RACK_DEPTH: f64 = 0.3;
+/// How deep the small bar at the foot of a pylon carrying two or more
+/// stores side by side is, feet; their centre lines lie at its middle
+/// (fitted, agent decision).
+pub const RACK_DEPTH: f64 = 0.25;
+
+/// How far a store hung beside a rack's bar keeps clear of the pylon,
+/// feet, body to pylon side (fitted, agent decision).
+pub const BAR_CLEAR: f64 = 0.1;
+
+/// Half a pylon's thickness, feet: the drawn pylon is twice this
+/// (`tore-app` `pylons`), and a store hung beside a bar clears it.
+pub const PYLON_HALF_WIDTH: f64 = 0.14;
 
 /// The clear gap between two fuselage stores one behind another, feet
 /// (fitted, agent decision).
@@ -60,9 +72,20 @@ pub const TANDEM_SAMPLE: f64 = 7.0;
 /// retail records at x 0 (fitted, agent decision).
 pub const FUSELAGE_WELL: f64 = 3.0;
 
-/// How far either side of a pylon the model's underside is read, feet: the
-/// store hangs under the lowest surface across its body (fitted).
+/// How far either side of a pylon the model is checked for a part lower
+/// than the store's top (a nacelle or a body's flank beside it), feet: a
+/// typical store's half width (fitted, agent decision).
 pub const CLEARANCE: f64 = 0.6;
+
+/// How far a part beside a store may reach below the store's top before
+/// the store counts as cutting through it, feet (fitted, agent decision).
+pub const CUT_TOLERANCE: f64 = 0.25;
+
+/// The furthest a station is nudged sideways to clear a part beside it,
+/// feet, in [`NUDGE_STEP`] steps (agent decision, 2026-10-13: John wants
+/// short pylons, so a store moves aside rather than hanging deeper).
+pub const MAX_NUDGE: f64 = 2.0;
+pub const NUDGE_STEP: f64 = 0.25;
 
 /// Where the model's underside is sampled over a station's pylons, by index
 /// into [`Rack::over`].
@@ -138,7 +161,7 @@ pub struct Rack {
     /// underside over the station's pylons, at the [`sample`] points; `None`
     /// where nothing of the model is above (a wingtip rail), and all `None`
     /// when the model was not read. A store under a known surface hangs
-    /// [`PYLON_DEPTH`] below it; otherwise at the record's height.
+    /// [`Self::depth`] below it; otherwise at the record's height.
     pub over: [Option<f32>; 5],
     /// A wingtip station's tip edge: [how far right (feet) the model's
     /// outermost edge beside the record is, the height of that edge's
@@ -238,8 +261,8 @@ impl Rack {
             .collect()
     }
     /// How deep the pylon or rail is from the surface over it to its
-    /// stores' lugs (or rack beam): [`RAIL_DEPTH`] at a fuselage or
-    /// centreline station, [`PYLON_DEPTH`] on a wing.
+    /// stores' tops (lugs): [`RAIL_DEPTH`] at a fuselage or centreline
+    /// station, [`PYLON_DEPTH`] on a wing.
     pub fn depth(self) -> f64 {
         match self.location() {
             Location::Fuselage | Location::Centerline => RAIL_DEPTH,
@@ -273,9 +296,10 @@ impl Rack {
     /// The pylons of one side (0 right, 1 left) of a station at `mount`
     /// loaded with `per_side` stores of `size` on that side: where each
     /// hangs its stores and which slots it carries. A pylon under a known
-    /// surface hangs its stores' lugs (or its rack beam) [`PYLON_DEPTH`]
-    /// below it; a wingtip rail or an unknown surface keeps the record's
-    /// height. Internal stations have one place, the record's.
+    /// surface hangs its stores' tops (lugs) [`Self::depth`] below it,
+    /// those beside a rack's bar included; a wingtip rail or an unknown
+    /// surface keeps the record's height. Internal stations have one place,
+    /// the record's.
     pub fn side_pylons(
         self,
         mount: Vector,
@@ -295,7 +319,6 @@ impl Rack {
                 } else {
                     0.
                 };
-                let rack = if slots.len() >= 2 { RACK_DEPTH } else { 0. };
                 if let (Location::Wingtip, Some([edge, middle])) = (self.location(), self.tip) {
                     // On the tip's edge, centred on it: no pylon or rail.
                     let edge = if mount[0].abs() > 1e-9 {
@@ -312,7 +335,7 @@ impl Rack {
                     Some(surface)
                         if self.location().external() && self.location() != Location::Wingtip =>
                     {
-                        surface - self.depth() - rack - size.top
+                        surface - self.depth() - size.top
                     }
                     _ => mount[1],
                 };
@@ -354,13 +377,14 @@ impl Rack {
         };
         let k = place.slots.iter().position(|s| *s == slot).unwrap_or(0);
         let on = place.slots.len() as u16;
-        let offset = slot_offset(k as u16, on, size.length, size.width);
+        let offset = slot_offset(k as u16, on, size);
         std::array::from_fn(|i| place.point[i] + offset[i])
     }
     /// How far the model's underside over store `slot`'s pylon is above
-    /// the store's lugs, feet ([`Self::depth`], plus [`RACK_DEPTH`] on a
-    /// rack), or `None` for a store on a wingtip rail, inside the aircraft
-    /// or under no known surface. The battery's release scenario reports it.
+    /// the store's lugs, feet ([`Self::depth`], on a rack too; a store under
+    /// a rack's bar is lower by the bar and its neighbour's half body), or
+    /// `None` for a store on a wingtip rail, inside the aircraft or under no
+    /// known surface. The battery's release scenario reports it.
     pub fn store_depth(
         self,
         mount: Vector,
@@ -373,13 +397,10 @@ impl Rack {
             return None;
         }
         let per_side = self.sides(mount, loaded)[side.min(1)].max(1);
-        let (pylon, offset) = self.pylon(per_side, slot.min(per_side - 1), size.length);
+        let (_, offset) = self.pylon(per_side, slot.min(per_side - 1), size.length);
         let surface = self.surface(offset)?;
-        let place = self
-            .side_pylons(mount, side.min(1), per_side, size)
-            .into_iter()
-            .nth(usize::from(pylon))?;
-        Some(surface - (place.point[1] + size.top))
+        let point = self.store_point(mount, loaded, side, slot, size);
+        Some(surface - (point[1] + size.top))
     }
     /// Where the next store leaves, relative to the aircraft (feet right, up
     /// and forward): where it hangs ([`Self::store_point`]) on the side
@@ -417,25 +438,39 @@ pub fn rack_group(on: u16) -> u16 {
     if on == 4 { 2 } else { 3 }
 }
 
-/// Where the `k`th store of a pylon carrying `on` stores of `length` and
-/// `width` (across its fins) sits against the pylon's point: feet right, up
-/// and forward. One sits at the point; two side by side, 0.55 widths either
-/// side; three as a triple ejector rack, the third 0.95 widths below; more
-/// as such racks ([`rack_group`]) one behind another, 1.05 lengths apart
-/// (fitted, agent decision).
-pub fn slot_offset(k: u16, on: u16, length: f64, width: f64) -> Vector {
+/// How far either side of its pylon a store of `size` hung beside a rack's
+/// bar has its centre line, feet: its body clear of the pylon by
+/// [`BAR_CLEAR`], and at least 0.36 of its width across the fins, so the
+/// two stores' fins (set at 45 degrees) clear each other (fitted, agent
+/// decision). The bar reaches out to it.
+pub fn shoulder(size: StoreSize) -> f64 {
+    (PYLON_HALF_WIDTH + BAR_CLEAR + size.top).max(0.36 * size.width)
+}
+
+/// Where the `k`th store of a pylon carrying `on` stores of `size` sits
+/// against the pylon's point (where a lone store's origin is): feet right,
+/// up and forward. One sits at the point. Two hang off the sides of a
+/// small bar at the pylon's foot, one each side, their centre lines at the
+/// bar's middle and [`shoulder`] out, as a wingtip missile sits on the tip
+/// (John 2026-10-13: "the panel should be a small bar on the pylon and
+/// ordnance hangs to the side"); their tops stay the pylon's depth under the
+/// surface, so the bar's middle is at the point's height. Three as a triple
+/// ejector rack: the two beside the bar and the third under it. More as such
+/// racks ([`rack_group`]) one behind another, 1.05 lengths apart (fitted,
+/// agent decision).
+pub fn slot_offset(k: u16, on: u16, size: StoreSize) -> Vector {
     if on <= 1 {
         return [0.; 3];
     }
-    let spread = 0.55 * width;
     let per = rack_group(on);
     let groups = on.div_ceil(per);
     let group = k / per;
-    let forward = (f64::from(group) - f64::from(groups - 1) / 2.) * 1.05 * length;
+    let forward = (f64::from(group) - f64::from(groups - 1) / 2.) * 1.05 * size.length;
+    let out = shoulder(size);
     let [right, up] = match k % per {
-        0 => [-spread, 0.],
-        1 => [spread, 0.],
-        _ => [0., -0.95 * width],
+        0 => [-out, 0.],
+        1 => [out, 0.],
+        _ => [0., -(RACK_DEPTH / 2. + size.top)],
     };
     [right, up, forward]
 }
@@ -482,7 +517,22 @@ pub fn placed(h: &Hardpoint, model: Option<&Underside>) -> (Vector, Rack) {
         && rack.location().external()
         && rack.location() != Location::Wingtip
     {
-        let right = mount[0].abs();
+        let depth = rack.depth();
+        let from = mount[1];
+        let mut right = mount[0].abs();
+        // A store beside a deeper part (a nacelle, a body's flank) moves
+        // aside until it clears it; failing that it hangs under that part,
+        // as PY2 hung every store.
+        let mut lowest = false;
+        if right > 1e-9 && model.cuts(right, mount[2], from, depth) {
+            match model.nudge(right, mount[2], from, depth) {
+                Some(nudge) => {
+                    right += nudge;
+                    mount[0] = right * mount[0].signum();
+                }
+                None => lowest = true,
+            }
+        }
         let points = [
             (right, mount[2]),
             ((right - DUAL_PYLON_SPREAD).max(0.), mount[2]),
@@ -490,17 +540,52 @@ pub fn placed(h: &Hardpoint, model: Option<&Underside>) -> (Vector, Rack) {
             (right, mount[2] + TANDEM_SAMPLE),
             (right, mount[2] - TANDEM_SAMPLE),
         ];
-        // The lowest surface across the store's body, so a store beside a
-        // nacelle or a body's flank hangs clear of it.
         let surface = |r: f64, f: f64| {
-            [-CLEARANCE, 0., CLEARANCE]
-                .iter()
-                .filter_map(|o| model.height((r + o).max(0.), f, mount[1], 6))
-                .reduce(f64::min)
+            if lowest {
+                model.lowest(r, f, from)
+            } else {
+                model.height(r, f, from, 6)
+            }
         };
         rack.over = points.map(|(r, f)| surface(r, f).map(|h| h as f32));
     }
     (mount, rack)
+}
+
+/// The hardpoint records an aircraft's default load is built from: the
+/// source records, except the A-4E's, whose default load is the real
+/// aircraft's three tanks (John 2026-10-13: "A-4E: the real three tanks
+/// (centreline + inner wings)"). Retail loads four 150 gallon tanks on the
+/// inner wing row (5.7 ft out) and four Mk 82s on a one-sided row by the
+/// fuselage, which [`placed`] hangs on the centreline. Here the inner row
+/// holds two (one a wing, the most it can then take, as the real inner
+/// pylons do) and the centreline row one tank in place of the Mk 82s, which
+/// stay loadable there. About 1,000 lb less fuel than retail's four.
+pub fn default_records(a: &tore_formats::aircraft::Aircraft) -> Vec<Hardpoint> {
+    let mut records = a.hardpoints.clone();
+    if a.id == tore_formats::aircraft::AircraftId::A4E {
+        let tank = records
+            .iter()
+            .find(|h| h.store.as_deref().is_some_and(|s| s.ends_with(".GAS")))
+            .and_then(|h| h.store.clone());
+        for h in &mut records {
+            let x = (f64::from(h.position[0]) / 3.).abs();
+            match (h.location, h.store.as_deref()) {
+                // The inner wing row's tanks: one a wing.
+                (4, Some(s)) if s.ends_with(".GAS") => h.count = 2,
+                // The one-sided row by the fuselage (the centreline station):
+                // a tank instead of its Mk 82s.
+                (4, Some(s)) if s.ends_with(".JT") && h.flags & PAIRED_FLAG == 0 && x < 3. => {
+                    if let Some(tank) = &tank {
+                        h.store = Some(tank.clone());
+                        h.count = 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    records
 }
 
 /// An aircraft model's faces in feet, for finding its underside over a
@@ -593,6 +678,46 @@ impl Underside {
             .filter(|q| near(q) && q[0] >= edge - 0.3)
             .fold((f64::MAX, f64::MIN), |(l, h), q| (l.min(q[2]), h.max(q[2])));
         Some([edge, low, high])
+    }
+    /// Whether a store hung `depth` under the surface over `right`,
+    /// `forward` would cut through a part of the model beside it: some face
+    /// within [`CLEARANCE`] either side reaches more than [`CUT_TOLERANCE`]
+    /// below the store's top.
+    pub fn cuts(&self, right: f64, forward: f64, from: f64, depth: f64) -> bool {
+        let Some(surface) = self.height(right, forward, from, 6) else {
+            return false;
+        };
+        let top = surface - depth;
+        [-1., -0.5, 0.5, 1.].iter().any(|k| {
+            let r = right + k * CLEARANCE;
+            r >= 0.
+                && self
+                    .over(r, forward, from)
+                    .is_some_and(|h| h < top - CUT_TOLERANCE)
+        })
+    }
+    /// The smallest sideways move, feet (outboard positive, outboard first
+    /// at equal distance), up to [`MAX_NUDGE`] that keeps a store at
+    /// `right`, `forward` hung `depth` under the surface over it from
+    /// cutting through the model ([`Self::cuts`]), or `None`.
+    pub fn nudge(&self, right: f64, forward: f64, from: f64, depth: f64) -> Option<f64> {
+        let steps = (MAX_NUDGE / NUDGE_STEP).round() as i32;
+        (1..=steps)
+            .flat_map(|n| [f64::from(n) * NUDGE_STEP, -f64::from(n) * NUDGE_STEP])
+            .find(|d| {
+                let r = right + d;
+                r > CLEARANCE
+                    && self.height(r, forward, from, 0).is_some()
+                    && !self.cuts(r, forward, from, depth)
+            })
+    }
+    /// The lowest underside across a store's body, [`CLEARANCE`] either
+    /// side of `right`: where a store that cannot move aside hangs from.
+    pub fn lowest(&self, right: f64, forward: f64, from: f64) -> Option<f64> {
+        [-CLEARANCE, 0., CLEARANCE]
+            .iter()
+            .filter_map(|o| self.height((right + o).max(0.), forward, from, 6))
+            .reduce(f64::min)
     }
     /// [`Self::over`] at `right` (the model is mirror symmetric, so a
     /// left-hand point is looked up on the right) and, when nothing is
@@ -722,7 +847,7 @@ mod tests {
     }
 
     #[test]
-    fn a_store_hangs_two_feet_below_the_surface_over_its_pylon() {
+    fn a_store_hangs_a_foot_below_the_surface_over_its_pylon() {
         // The surface over the record is 1 ft up, 1.5 ft inboard and 0.5 ft
         // outboard of it (a wing's dihedral).
         let wing = Rack {
@@ -730,7 +855,7 @@ mod tests {
             ..rack(4)
         };
         let mount = [10., -6., 0.];
-        // One a side: the store's top (its lugs) 2 ft under the record's
+        // One a side: the store's top (its lugs) 1 ft under the record's
         // surface, whatever the record's own height.
         let one = wing.store_point(mount, 2, 0, 0, SIZE);
         assert!((one[1] + SIZE.top - (1. - PYLON_DEPTH)).abs() < 1e-9);
@@ -740,10 +865,19 @@ mod tests {
         assert!((inboard[1] + SIZE.top - (1.5 - PYLON_DEPTH)).abs() < 1e-9);
         assert!((outboard[1] + SIZE.top - (0.5 - PYLON_DEPTH)).abs() < 1e-9);
         assert!(inboard[0] < 0. && outboard[0] < inboard[0], "left side");
-        // Three on one pylon: the rack beam sits between the stores and the
-        // pylon, and the shoulders hang under it.
-        let three = wing.store_point(mount, 6, 0, 0, SIZE);
-        assert!((three[1] + SIZE.top - (1. - PYLON_DEPTH - RACK_DEPTH)).abs() < 1e-9);
+        // Three on one pylon: the two beside the bar keep their tops 1 ft
+        // under the surface, either side of the pylon; the third hangs
+        // under the bar.
+        let three: Vec<Vector> = (0..3)
+            .map(|k| wing.store_point(mount, 6, 0, k, SIZE))
+            .collect();
+        for side in &three[..2] {
+            assert!((side[1] + SIZE.top - (1. - PYLON_DEPTH)).abs() < 1e-9);
+        }
+        assert!((three[0][0] - (10. - shoulder(SIZE))).abs() < 1e-9);
+        assert!((three[1][0] - (10. + shoulder(SIZE))).abs() < 1e-9);
+        assert!((three[2][1] - (three[0][1] - RACK_DEPTH / 2. - SIZE.top)).abs() < 1e-9);
+        assert!((three[2][0] - 10.).abs() < 1e-9);
         // A wingtip rail, or no surface found, keeps the record's height.
         let tip = Rack {
             location: 5,
@@ -759,7 +893,7 @@ mod tests {
         assert_eq!(on_tip.store_point(mount, 2, 0, 0, SIZE), [9.5, 0.25, 0.]);
         assert_eq!(on_tip.store_point(mount, 2, 1, 0, SIZE), [-9.5, 0.25, 0.]);
         assert_eq!(on_tip.store_depth(mount, 2, 0, 0, SIZE), None);
-        // A centreline or fuselage store hangs on a 4 inch rail.
+        // A centreline or fuselage store hangs on a 2 inch rail.
         let belly = Rack {
             location: 0,
             paired: false,
@@ -767,7 +901,8 @@ mod tests {
         };
         let under = belly.store_point([0., -6., 0.], 1, 0, 0, SIZE);
         assert!((under[1] + SIZE.top - (1. - RAIL_DEPTH)).abs() < 1e-9);
-        assert!((RAIL_DEPTH - 1. / 3.).abs() < 1e-12, "4 inches");
+        assert!((RAIL_DEPTH - 1. / 6.).abs() < 1e-12, "2 inches");
+        assert!((PYLON_DEPTH - 1.).abs() < 1e-12, "a foot");
     }
 
     #[test]
@@ -793,7 +928,7 @@ mod tests {
         }
         // Spaced by the store's length and the gap: they do not touch.
         assert!((points[0][2] - points[2][2]).abs() - SIZE.length >= TANDEM_GAP - 1e-9);
-        // Each hangs on a 4 inch rail under the surface over it,
+        // Each hangs on a 2 inch rail under the surface over it,
         // interpolated between the samples 7 ft ahead and behind.
         let surface = |forward_of_record: f64| -3. + forward_of_record / TANDEM_SAMPLE;
         for point in &points {
@@ -804,14 +939,59 @@ mod tests {
 
     #[test]
     fn a_centreline_rack_of_four_is_two_pairs_one_behind_another() {
-        let offsets: Vec<Vector> = (0..4).map(|k| slot_offset(k, 4, 8., 1.)).collect();
+        let size = StoreSize {
+            length: 8.,
+            top: 0.45,
+            width: 1.27,
+        };
+        let offsets: Vec<Vector> = (0..4).map(|k| slot_offset(k, 4, size)).collect();
         assert!(offsets[0][0] < 0. && offsets[1][0] > 0. && offsets[0][2] < 0.);
         assert!(offsets[2][0] < 0. && offsets[3][0] > 0. && offsets[2][2] > 0.);
         assert!(offsets.iter().all(|o| o[1] == 0.));
-        // Three: a triple rack, the third below.
-        assert!(slot_offset(2, 3, 8., 1.)[1] < -0.9);
+        // Three: a triple rack, the third under the bar.
+        assert!((slot_offset(2, 3, size)[1] + RACK_DEPTH / 2. + size.top).abs() < 1e-9);
         // Six: two triple racks, one ahead of the other.
-        assert!(slot_offset(0, 6, 8., 1.)[2] < 0. && slot_offset(3, 6, 8., 1.)[2] > 0.);
+        assert!(slot_offset(0, 6, size)[2] < 0. && slot_offset(3, 6, size)[2] > 0.);
+    }
+
+    #[test]
+    fn two_on_one_pylon_hang_beside_its_bar_like_a_wingtip_missile() {
+        // A pair of AIM-9s: each body clears the pylon and the two sets of
+        // fins (at 45 degrees) clear each other.
+        let aim9 = StoreSize {
+            length: 9.35,
+            top: 0.21,
+            width: 2.07,
+        };
+        let [left, right] = [0, 1].map(|k| slot_offset(k, 2, aim9));
+        assert_eq!(left[0], -right[0]);
+        assert_eq!(
+            [left[1], right[1]],
+            [0., 0.],
+            "centre lines level with the bar"
+        );
+        assert!(right[0] - aim9.top >= PYLON_HALF_WIDTH + BAR_CLEAR - 1e-9);
+        assert!(2. * right[0] >= 0.72 * aim9.width - 1e-9);
+        // Mk 82s, fat for their fins: spaced by their bodies.
+        let mk82 = StoreSize {
+            length: 7.3,
+            top: 0.45,
+            width: 1.27,
+        };
+        assert!((shoulder(mk82) - (PYLON_HALF_WIDTH + BAR_CLEAR + 0.45)).abs() < 1e-9);
+        // On a centreline rail their tops stay 2 inches under the belly.
+        let belly = Rack {
+            location: 0,
+            paired: false,
+            over: [Some(-2.); 5],
+            tip: None,
+        };
+        for slot in 0..2 {
+            let p = belly.store_point([0., -6., 0.], 2, 0, slot, mk82);
+            assert!((p[1] + mk82.top - (-2. - RAIL_DEPTH)).abs() < 1e-9);
+            let depth = belly.store_depth([0., -6., 0.], 2, 0, slot, mk82).unwrap();
+            assert!((depth - RAIL_DEPTH).abs() < 1e-9);
+        }
     }
 
     #[test]
@@ -883,5 +1063,102 @@ mod tests {
         let (_, tip) = placed(&tip, Some(&model));
         assert_eq!(tip.over, [None; 5]);
         assert_eq!(tip.tip, Some([20., -1.]), "a wingtip reads the tip's edge");
+    }
+
+    #[test]
+    fn the_a4e_defaults_to_its_real_three_tanks() {
+        let row = |flags, x, store: &str, count| Hardpoint {
+            location: 4,
+            flags,
+            position: [x, -16, -6],
+            store: Some(store.into()),
+            count,
+            weight_class: 32,
+        };
+        let aircraft = |id| tore_formats::aircraft::Aircraft {
+            id,
+            name: String::new(),
+            shape: String::new(),
+            fields: Default::default(),
+            object: Default::default(),
+            hardpoints: vec![
+                row(0x1781, 8, "MK82.JT", 4),
+                row(0x1785, 17, "F150.GAS", 4),
+                row(0x1585, 26, "LAU61.JT", 2),
+            ],
+            envelopes: Vec::new(),
+            sounds: Default::default(),
+        };
+        let a4e = default_records(&aircraft(tore_formats::aircraft::AircraftId::A4E));
+        // A tank on the centreline row instead of the Mk 82s, one a wing on
+        // the inner row, the rockets as retail.
+        assert_eq!(a4e[0].store.as_deref(), Some("F150.GAS"));
+        assert_eq!(a4e[0].count, 1);
+        assert_eq!(a4e[1].count, 2);
+        assert_eq!(a4e[2].store.as_deref(), Some("LAU61.JT"));
+        assert_eq!(a4e[2].count, 2);
+        // Every other aircraft keeps its records.
+        let other = aircraft(tore_formats::aircraft::AircraftId::F4B);
+        let kept = default_records(&other);
+        assert!(
+            kept.iter()
+                .zip(&other.hardpoints)
+                .all(|(a, b)| a.store == b.store && a.count == b.count)
+        );
+    }
+
+    /// A model of a flat wing 1 ft below the reference out to 20 ft, with a
+    /// nacelle hanging 3 ft below it from 3 to 5 ft out.
+    fn nacelle_wing() -> Underside {
+        let quad = |x0: f32, x1: f32, z: f32| tore_formats::shape::Face {
+            positions: vec![
+                [x0 * 3., -60., z * 3.],
+                [x1 * 3., -60., z * 3.],
+                [x1 * 3., 60., z * 3.],
+                [x0 * 3., 60., z * 3.],
+            ],
+            colors: vec![1; 4],
+            fog: Default::default(),
+            uv: Vec::new(),
+            texture: String::new(),
+            subtype: 0x20,
+            normal: None,
+            address: 0,
+        };
+        let shape = Shape {
+            lines: Vec::new(),
+            faces: vec![quad(0., 20., -1.), quad(3., 5., -4.)],
+            billboards: Vec::new(),
+            state_words: Default::default(),
+        };
+        Underside::of(&shape, 1. / 3.)
+    }
+
+    #[test]
+    fn a_store_beside_a_nacelle_moves_aside_rather_than_hanging_deeper() {
+        let model = nacelle_wing();
+        let wing = |x: i32| Hardpoint {
+            location: 4,
+            flags: 0x4,
+            position: [x, -15, 0],
+            store: Some("AGM65G.JT".into()),
+            count: 2,
+            weight_class: 0,
+        };
+        // 5.5 ft out, half a foot past the nacelle's edge: the store's
+        // inboard side would cut into it, so the station moves out until
+        // the nacelle is beyond its body, and hangs a foot under the wing.
+        assert!(model.cuts(5.5, 0., -5., PYLON_DEPTH));
+        let (mount, rack) = placed(&wing(16), Some(&model));
+        assert!(mount[0] > 5.5 && mount[0] <= 5.5 + MAX_NUDGE, "{mount:?}");
+        assert!(!model.cuts(mount[0], 0., -5., PYLON_DEPTH));
+        assert_eq!(rack.over[sample::RECORD], Some(-1.));
+        // Clear of it already: not moved.
+        let (mount, _) = placed(&wing(30), Some(&model));
+        assert_eq!(mount[0], 10.);
+        // Under the nacelle itself: nothing cuts, it hangs under it.
+        let (mount, rack) = placed(&wing(12), Some(&model));
+        assert_eq!(mount[0], 4.);
+        assert_eq!(rack.over[sample::RECORD], Some(-4.));
     }
 }

@@ -674,12 +674,12 @@ impl Configuration {
         a: &Aircraft,
         mut read: impl FnMut(&str) -> Result<Vec<u8>>,
     ) -> Result<Self> {
+        let hardpoints = &a.hardpoints;
         let mut stations = Vec::new();
         let mut gun_pods = Vec::new();
         let mut external_equipment_lbs = 0i32;
         let mut external_fuel_lbs = [0.; 9];
-        for (index, h) in a
-            .hardpoints
+        for (index, h) in hardpoints
             .iter()
             .enumerate()
             .filter(|(_, h)| h.flags & 8 == 0)
@@ -725,7 +725,7 @@ impl Configuration {
         let place =
             |h: &tore_formats::aircraft::Hardpoint| super::hardpoints::placed(h, model.as_ref());
         let mut tanks = Vec::new();
-        for (index, h) in a.hardpoints.iter().enumerate().take(9) {
+        for (index, h) in hardpoints.iter().enumerate().take(9) {
             let default = h.store.as_deref().filter(|name| name.ends_with(".GAS"));
             let retained_equipment = h
                 .store
@@ -763,7 +763,7 @@ impl Configuration {
         let fixed_external_equipment_lbs =
             i32::try_from(i64::from(external_equipment_lbs) - tank_mass)
                 .map_err(|_| super::invalid("invalid fixed external hardware mass"))?;
-        for h in &a.hardpoints {
+        for h in hardpoints {
             let Some(name) = h.store.as_deref().filter(|n| n.ends_with(".JT")) else {
                 continue;
             };
@@ -855,9 +855,9 @@ impl Configuration {
         }
         // Preserve every existing default-JT index. Additional source rows
         // retain a real compatible selection at zero quantity, never a fake store.
-        let mut hardpoint_slots = vec![None; a.hardpoints.len()];
+        let mut hardpoint_slots = vec![None; hardpoints.len()];
         let mut slot = 0;
-        for (hardpoint, h) in a.hardpoints.iter().enumerate() {
+        for (hardpoint, h) in hardpoints.iter().enumerate() {
             if h.store.as_deref().is_some_and(|name| name.ends_with(".JT")) {
                 hardpoint_slots[hardpoint] = Some(slot);
                 slot += 1;
@@ -867,7 +867,7 @@ impl Configuration {
             .iter()
             .map(|station| station.weapon.clone())
             .collect();
-        for (hardpoint, h) in a.hardpoints.iter().enumerate() {
+        for (hardpoint, h) in hardpoints.iter().enumerate() {
             if hardpoint_slots[hardpoint].is_some() || h.flags & 8 != 0 {
                 continue;
             }
@@ -921,7 +921,7 @@ impl Configuration {
         let sight = super::sight::fixed_sight(a, &mut read)?;
         let station = |record: Option<&String>| {
             record.and_then(|record| {
-                a.hardpoints.iter().position(|h| {
+                hardpoints.iter().position(|h| {
                     h.store
                         .as_deref()
                         .is_some_and(|n| n.eq_ignore_ascii_case(record))
@@ -932,18 +932,17 @@ impl Configuration {
         let visual_hardpoint = station(profiles.visual.as_ref().map(|v| &v.record))
             .ok_or_else(|| super::invalid("missing reviewed visual sensor"))?;
         let infrared_hardpoint = station(profiles.infrared.as_ref().map(|i| &i.record));
-        let ecm_hardpoint = a
-            .hardpoints
+        let ecm_hardpoint = hardpoints
             .iter()
             .position(|h| h.store.as_deref().is_some_and(|n| n.ends_with(".ECM")));
         let ecm = if let Some(index) = ecm_hardpoint {
-            let name = a.hardpoints[index].store.as_deref().unwrap();
+            let name = hardpoints[index].store.as_deref().unwrap();
             tore_formats::weapons::Countermeasures::parse(name, &read(name)?)?
         } else {
             tore_formats::weapons::Countermeasures::NONE
         };
         let mut rwr_hardpoint = None;
-        for (index, h) in a.hardpoints.iter().enumerate() {
+        for (index, h) in hardpoints.iter().enumerate() {
             if let Some(name) = h.store.as_deref().filter(|name| name.ends_with(".SEE")) {
                 let equipment = tore_formats::aircraft::Equipment::parse(name, &read(name)?)?;
                 if equipment
@@ -1003,7 +1002,7 @@ impl Configuration {
             a.number("thrust") * 0.7 / mass.max(1.) * 32.174,
             fuel / (a.number("fuelConsumption") * 0.7).max(0.001),
         );
-        Ok(Self {
+        Self {
             fragment_offsets: [
                 super::debris::attachment(a.id, 0, &mut read)?,
                 super::debris::attachment(a.id, 1, &mut read)?,
@@ -1042,7 +1041,51 @@ impl Configuration {
                 .get("obj_class")
                 .ok_or_else(|| super::invalid("missing object category"))?
                 .number()? as u16,
-        })
+        }
+        .with_default_load(a, &mut read)
+    }
+    /// The aircraft's default quantities where T.O.R.E's default load
+    /// differs from the source records' ([`super::hardpoints::default_records`]:
+    /// the A-4E's real three tanks): the rows' weapons and capacities stay the
+    /// source's, only what starts loaded changes.
+    fn with_default_load(
+        mut self,
+        a: &Aircraft,
+        read: &mut impl FnMut(&str) -> Result<Vec<u8>>,
+    ) -> Result<Self> {
+        let records = super::hardpoints::default_records(a);
+        let mut changed = false;
+        for (hardpoint, (source, record)) in a.hardpoints.iter().zip(&records).enumerate() {
+            if source.store == record.store && source.count == record.count {
+                continue;
+            }
+            changed = true;
+            let weapon = record.store.as_deref().filter(|n| n.ends_with(".JT"));
+            if let Some(Some(slot)) = self.hardpoint_slots.get(hardpoint) {
+                self.stations[*slot].count = if weapon.is_some() {
+                    u16::try_from(record.count).map_err(|_| super::invalid("invalid count"))?
+                } else {
+                    0
+                };
+            }
+            if let Some(tank) = self.tanks.iter_mut().find(|t| t.hardpoint == hardpoint) {
+                match record.store.as_deref().filter(|n| n.ends_with(".GAS")) {
+                    Some(name) => {
+                        tank.store = Some(TankStore::parse(name, &read(name)?)?);
+                        tank.quantity = u16::try_from(record.count)
+                            .map_err(|_| super::invalid("invalid tank count"))?;
+                    }
+                    None => {
+                        tank.store = None;
+                        tank.quantity = 0;
+                    }
+                }
+            }
+        }
+        if changed {
+            self.refresh_tanks()?;
+        }
+        Ok(self)
     }
 }
 #[derive(Clone, Debug, PartialEq)]

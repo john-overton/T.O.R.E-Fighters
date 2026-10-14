@@ -601,10 +601,37 @@ fn fit_store(
             .iter()
             .position(|s| s.weapon.source.eq_ignore_ascii_case(name))
     });
-    let station = match (carried, o.station) {
-        (_, Some(station)) => station,
-        (Some(station), None) => station,
-        (None, None) => config
+    // The row retail loads this store on by default (the A-4E's Mk 82s,
+    // whose centreline row carries a tank in T.O.R.E's default load since
+    // PY3): there, with retail's count, in place of the tank.
+    let retail = o.load.as_ref().and_then(|name| {
+        let record =
+            tore_formats::aircraft::Aircraft::parse(resources.get(o.aircraft.pt())?).ok()?;
+        let (hardpoint, h) = record.hardpoints.iter().enumerate().find(|(_, h)| {
+            h.store
+                .as_deref()
+                .is_some_and(|s| s.eq_ignore_ascii_case(name))
+        })?;
+        let station = (*config.hardpoint_slots.get(hardpoint)?)?;
+        Some((hardpoint, station, u16::try_from(h.count).ok()?))
+    });
+    let mut retail_row = false;
+    if let Some((hardpoint, station, count)) = retail
+        && o.station.is_none_or(|s| s == station)
+        && config.stations[station].count == 0
+    {
+        for tank in config.tanks.iter_mut().filter(|t| t.hardpoint == hardpoint) {
+            tank.quantity = 0;
+        }
+        config.refresh_tanks()?;
+        config.stations[station].count = count;
+        retail_row = true;
+    }
+    let station = match (carried, o.station, retail) {
+        (_, Some(station), _) => station,
+        (_, None, Some((_, station, _))) if retail_row => station,
+        (Some(station), None, _) => station,
+        (None, None, _) => config
             .stations
             .iter()
             .position(|s| {
@@ -655,7 +682,7 @@ fn fit_store(
     if let Some(count) = o.count {
         config.stations[station].count = count;
     }
-    if fitted || added || o.count.is_some() {
+    if fitted || added || retail_row || o.count.is_some() {
         let (side, friendlies) = (own.side, own.friendlies.clone());
         state.remove_ownship(owner);
         let mut own = Ownship::new(owner, side, config, true)?;
