@@ -8,6 +8,13 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
+**Since 2026-10-14** (slice nr-flak2, [flak teams](flak-teams.md)): the
+eight-shell opening barrage leaves 0.75 s a shell (it was a quarter second, so
+a pass now sees fewer of its shells in the first seconds), a flak burst knocks
+an aircraft half as hard, and the guns fight in teams that hold their fire and
+spread it over a flight. The figures below are the 2026-10-13 build's: one gun
+against one aircraft, before those changes.
+
 Implementation mode, slice nr-flak, 2026-10-13, on multiplayer 5749aaa8
 (protocol 28, unchanged). Contract: [flak](../spec/surface-defenses.md#flak),
 [muzzles](../spec/surface-defenses.md#muzzles) and [flak

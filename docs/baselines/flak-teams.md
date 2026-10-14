@@ -1,5 +1,13 @@
 # Flak teams
 
+> **T.O.R.E: Tasteful Opinionated Reverse Engineered.**
+> The thing being reverse engineered is the *experience*, not the executable. We
+> trace what a player does and what the game does back, down to the numbers they
+> would notice. How the original code achieved it is history: useful evidence,
+> never a blueprint. If a sentence below reads like an instruction to reproduce
+> the original's internals, it is out of date.
+> <!-- tore-header v2 -->
+
 Implementation mode, slice nr-flak2, 2026-10-14, on multiplayer 81593406
 (protocol 29, unchanged). Contract: [flak teams](../spec/surface-defenses.md#flak-teams)
 and [flak](../spec/surface-defenses.md#flak). John's requests of 2026-10-14:
