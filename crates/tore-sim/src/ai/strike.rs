@@ -731,9 +731,10 @@ pub struct Strike {
     recovery_until: u64,
     /// The trim across the aim's line, feet (see [`CUE_TRACK_INTEGRAL`]).
     cue_across_sum: f64,
-    /// Last tick's cue: its distance from the drawn aim, feet, and whether
-    /// it lay inside the circle the draw allows around the led target.
-    cue_last: Option<(f64, bool)>,
+    /// Last tick's cue against the drawn aim: where the cue lay from it,
+    /// feet along x and z, and whether the cue was still closing on it then
+    /// (see [`Strike::cue_passing`]).
+    cue_last: Option<([f64; 2], bool)>,
     /// The striker's height above the ground when it was first tasked: a
     /// heavy's "mission airborne height" when the host gives none.
     tasked_agl_ft: Option<f64>,
@@ -1979,7 +1980,7 @@ impl Strike {
             // The release test (slice ST-T2): the shared gate around the
             // drawn aim, or the cue's closest pass by the aim inside John's
             // circle around the (led) target.
-            let passing = self.cue_passing(cx, s.impact, aim, offset, target);
+            let passing = self.cue_passing(cx, s.impact, aim);
             let due = s.due || passing;
             let fire = in_zone
                 && match kind {
@@ -2074,39 +2075,47 @@ impl Strike {
         wrap_deg(base + correction.clamp(-30., 30.))
     }
 
-    /// Whether the cue is passing the drawn aim point at its closest now
-    /// (slice ST-T2, fitted, agent): its distance from the aim grew this tick
-    /// after shrinking, and last tick it lay inside John's circle around the
-    /// led target (the ring's outer edge, 2R, for a ring draw), give or take
-    /// the release gate. A cue that
-    /// sweeps by the aim faster than the gate can catch it is released at
-    /// its best, never outside the circle the draw allows.
-    fn cue_passing(
-        &mut self,
-        cx: &Context<'_>,
-        impact: Option<Vector>,
-        aim: Vector,
-        offset: [f64; 2],
-        target: Vector,
-    ) -> bool {
+    /// Whether the cue passed the drawn aim point at its closest during this
+    /// tick (slice nr-cue, John's answer 12 of 2026-10-13; fitted, agent):
+    /// the release the shared gate misses when the cue sweeps by the aim a
+    /// few feet outside it. The cue's position against the aim is a straight
+    /// line between two ticks, so the time of its closest approach inside
+    /// the tick is solved exactly ([`closest_approach`]) and the two tests
+    /// are made there, not on the tick's samples: the closest point lies
+    /// inside John's circle around the aim, and the cue there lies inside
+    /// John's circle around the led target (the ring's outer edge, 2R, for a
+    /// ring draw), give or take the release gate. The answer is the same
+    /// whatever the tick rate and wherever the ticks fall on the cue's
+    /// path; the old test read the one sample before the closest point and
+    /// flipped on one tick (the cue 125.2 ft off on one sample, 128.3 ft
+    /// on the next, with a 126 ft circle). The first sample counts as a
+    /// possible closest point (a cue that appears inside the circle and
+    /// leaves is released as before).
+    fn cue_passing(&mut self, cx: &Context<'_>, impact: Option<Vector>, aim: Vector) -> bool {
         let Some(impact) = impact else {
             self.cue_last = None;
             return false;
         };
-        let distance = horizontal(impact, aim);
-        let led = [
-            target[0] + offset[0] - self.aim_ft[0],
-            target[1],
-            target[2] + offset[1] - self.aim_ft[1],
+        let now = [impact[0] - aim[0], impact[2] - aim[2]];
+        let Some((before, closing)) = self.cue_last else {
+            self.cue_last = Some((now, true));
+            return false;
+        };
+        let (found, closing_now) = closest_approach(before, now, closing);
+        self.cue_last = Some((now, closing_now));
+        let Some(closest) = found else {
+            return false;
+        };
+        // The led target lies the drawn offset behind the aim (the lead on a
+        // moving target cancels): the cue's offset from it there.
+        let from_led = [
+            closest.at[0] + self.aim_ft[0],
+            closest.at[1] + self.aim_ft[1],
         ];
+        let circle = release_circle_ft(cx.experience);
         // The circle the draw allows, with the release gate's own tolerance.
-        let radius =
-            release_circle_ft(cx.experience) * if self.inside { 1. } else { 2. } + self.gate_ft;
-        let passing = self.cue_last.is_some_and(|(last, inside)| {
-            distance > last && inside && last <= release_circle_ft(cx.experience)
-        });
-        self.cue_last = Some((distance, horizontal(impact, led) <= radius));
-        passing
+        let radius = circle * if self.inside { 1. } else { 2. } + self.gate_ft;
+        closest.distance <= circle && from_led[0].hypot(from_led[1]) <= radius
     }
 
     /// The pull-out after a dive: wings level, nose up 25 degrees (retail),
@@ -2791,6 +2800,62 @@ pub fn depression_deg(own: Vector, point: Vector) -> f64 {
     (own[1] - point[1])
         .atan2(horizontal(own, point).max(1e-6))
         .to_degrees()
+}
+
+/// The closest point of a cue's path to the aim, found inside one tick
+/// (slice nr-cue).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Closest {
+    /// Where the cue lies from the aim at that moment, feet along x and z.
+    pub at: [f64; 2],
+    /// Its distance from the aim, feet.
+    pub distance: f64,
+    /// When, as a share of the tick that ended with this sample: 0 is the
+    /// previous sample (the cue turned back there), 1 the new one.
+    pub fraction: f64,
+}
+
+/// Whether the cue's closest approach to the aim fell inside the tick that
+/// took it from `before` to `now` (both: where the cue lies from the aim,
+/// feet along x and z), and where. Between two ticks the cue's position
+/// against the aim is taken as a straight line, so the closest point is
+/// exact whatever the tick rate; an approach is counted in exactly one tick:
+///
+/// - inside the tick, when the cue was closing at its start and is not at
+///   its end (`fraction` in (0, 1]);
+/// - at the tick's start, when the cue was still closing at the end of the
+///   tick before and is opening from the first moment of this one (a cue
+///   path that bends at a sample; `fraction` 0).
+///
+/// `closing` says the cue was still closing on the aim at the end of the
+/// tick before; the second answer is the same flag for the end of this tick.
+/// A cue that has not moved has no closest point.
+pub fn closest_approach(before: [f64; 2], now: [f64; 2], closing: bool) -> (Option<Closest>, bool) {
+    let step = [now[0] - before[0], now[1] - before[1]];
+    let span = step[0] * step[0] + step[1] * step[1];
+    if span <= 0. {
+        return (None, false);
+    }
+    let start = before[0] * step[0] + before[1] * step[1];
+    let end = now[0] * step[0] + now[1] * step[1];
+    let fraction = if start >= 0. {
+        // Opening from the first moment: the closest point is the sample
+        // before, if the cue was closing when it got there.
+        closing.then_some(0.)
+    } else if end >= 0. {
+        Some(-start / span)
+    } else {
+        None
+    };
+    let found = fraction.map(|f| {
+        let at = [before[0] + step[0] * f, before[1] + step[1] * f];
+        Closest {
+            at,
+            distance: at[0].hypot(at[1]),
+            fraction: f,
+        }
+    });
+    (found, end < 0.)
 }
 
 pub fn horizontal(a: Vector, b: Vector) -> f64 {
