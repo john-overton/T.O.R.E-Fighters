@@ -256,6 +256,7 @@ fn dust_ring(
                 tint,
                 glow: 0.,
                 heat: 0.,
+                fresh: 0.,
                 ember: 0.,
             });
         }
@@ -297,6 +298,7 @@ fn spray_ring(position: [f64; 3], width: f64, elapsed: u16, duration: u16, out: 
             tint: PLAIN,
             glow: 0.,
             heat: 0.,
+            fresh: 0.,
             ember: 0.,
         });
     }
@@ -385,6 +387,20 @@ struct Sprite {
     heat: f32,
     /// Sustained fireball light, in flares, excluding the initial flash.
     ember: f32,
+    /// A crater's freshness for the thermal picture, 1 new to 0 cold
+    /// ([`thermal_freshness`]); 0 for everything else.
+    fresh: f32,
+}
+
+/// A crater cools in the thermal picture over this many seconds (agent
+/// decision, nr-fltv: long enough to see where the rounds went on the next
+/// pass of an orbit).
+pub const CRATER_COOLS_S: f64 = 180.;
+
+/// A crater's freshness after `age` ticks: 1 new, falling to 0 over
+/// [`CRATER_COOLS_S`].
+fn thermal_freshness(age: u64) -> f32 {
+    (1. - age as f64 / (CRATER_COOLS_S * 120.)).clamp(0., 1.) as f32
 }
 
 /// Drawn in the art's own colours.
@@ -434,6 +450,7 @@ fn sprites(
                     tint: PLAIN,
                     glow: 0.,
                     heat: 0.,
+                    fresh: thermal_freshness(mark.age),
                     ember: 0.,
                 }
             }
@@ -457,6 +474,7 @@ fn sprites(
                     // Refit to the unit's width in `update`.
                     glow: (crate::night_glow::fire_light(width) * f64::from(mark.strength)) as f32,
                     heat: 0.,
+                    fresh: 0.,
                     ember: 0.,
                 }
             }
@@ -549,6 +567,7 @@ fn sprites(
             tint: PLAIN,
             glow,
             heat,
+            fresh: 0.,
             ember: if crate::impact_fx::detonation(effect).is_some()
                 || matches!(effect.kind, EffectKind::Flak)
             {
@@ -600,6 +619,7 @@ fn bomblets(art: &Art, effect: &EffectPose, elapsed: u16, out: &mut Vec<Sprite>)
                 * (1. - f64::from(played) / f64::from(cluster::FLASH_TICKS)).powi(2))
                 as f32,
             heat: 0.5,
+            fresh: 0.,
             ember: 0.,
         });
     }
@@ -760,6 +780,7 @@ fn city_sprites(fires: &[crate::city_fires::CityFire], tick: u64) -> Vec<Sprite>
                 tint: PLAIN,
                 glow: crate::night_glow::fire_light(fire.width) as f32,
                 heat: 0.,
+                fresh: 0.,
                 ember: 0.,
             }
         })
@@ -993,7 +1014,8 @@ impl EffectRenderer {
                 s.cell[3],
                 s.layer as f32,
                 s.opacity,
-                if s.emissive { 1. } else { 0. },
+                // The thermal picture reads minus a crater's freshness here.
+                if s.emissive { 1. } else { -s.fresh },
                 s.tint[0],
                 s.tint[1],
                 s.tint[2],

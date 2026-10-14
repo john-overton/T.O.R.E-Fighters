@@ -26,6 +26,10 @@ pub struct Camera {
     /// Near clipping distance in feet; target magnification fits it to the subject.
     pub near_clip: f32,
     pub keys: BTreeSet<String>,
+    /// Draw the world as a thermal sensor sees it: every surface writes its
+    /// apparent temperature as grey (the AC-130 sensor console,
+    /// `crate::sensor_console`).
+    pub thermal: bool,
 }
 impl Camera {
     pub fn new() -> Self {
@@ -41,6 +45,7 @@ impl Camera {
             zoom: 1.,
             near_clip: 1.,
             keys: BTreeSet::new(),
+            thermal: false,
         }
     }
     pub fn for_world(world: &Terrain) -> Self {

@@ -162,6 +162,7 @@ and a gamepad's View+stick defaults avoid the problem.
 | Sight: pin ground point | Shift+Backslash | - | View + A (hold half a second) |
 | Sight: zoom in | Shift+Apostrophe | - | - |
 | Sight: zoom out | Shift+Semicolon | - | - |
+| Sight: white hot / black hot (AC-130 console) | Ctrl+Backslash | - | - |
 | Sight: slew left/right | - | - | View + Right stick X |
 | Sight: slew up/down | - | - | View + Right stick Y |
 | Sight: slew left | Alt+Left | - | - |

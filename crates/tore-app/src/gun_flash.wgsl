@@ -89,5 +89,5 @@ struct FlashOut {
  // The fireball is thick: it covers what is behind it (premultiplied), so
  // its orange rim reads against a bright sky as well as at night.
  let cover=outer*0.85*i*(in.light.x+in.light.y+in.light.z)/3.0;
- return vec4<f32>(color*(0.35+0.65*i)*in.light.xyz,cover);
+ return thermal_light(vec4<f32>(color*(0.35+0.65*i)*in.light.xyz,cover),1.0);
 }

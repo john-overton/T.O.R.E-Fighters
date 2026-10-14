@@ -51,5 +51,5 @@ struct AirfieldLightOut {
 @fragment fn airfield_light_fragment(in:AirfieldLightOut)->@location(0) vec4<f32> {
  let r2=dot(in.local,in.local);
  let core=exp(-r2*2.5)*3.0+exp(-r2*0.5)*0.45;
- return vec4<f32>(in.radiance.rgb*core,0.0);
+ return thermal_light(vec4<f32>(in.radiance.rgb*core,0.0),0.3);
 }

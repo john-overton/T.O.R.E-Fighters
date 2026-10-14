@@ -172,6 +172,13 @@ pub(super) fn run(scene: &mut Scene, o: &Options) -> AppResult<()> {
             scene.queue(SeatCommand::SensorConsole);
         }
         step(scene, slewing)?;
+        // `--console-scene DIR --console-at S,...`: the sensor console's
+        // frames from this seat (slice nr-fltv).
+        if let Some(dir) = &o.ai.console_scene
+            && o.ai.console_at.iter().any(|at| (t - at).abs() < 0.5 / 120.)
+        {
+            super::console_render::render_seat(scene, t, dir)?;
+        }
         let flight = &scene.world.cockpits[0].flight;
         report.fatal(!flight.crashed, "the aircraft did not crash")?;
         let Some(s) = flight.orbit_status() else {

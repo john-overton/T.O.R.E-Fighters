@@ -61,5 +61,5 @@ struct GlowOut {
  // Resolved art supplies its own core. Only distant, unresolved lights
  // need the bright point, otherwise it bleaches the fire's animation.
  let core=(exp(-r2*2.5)*2.0*in.radiance.a+exp(-r2*0.6)*0.35)*window*window;
- return vec4<f32>(in.radiance.rgb*core,0.0);
+ return thermal_light(vec4<f32>(in.radiance.rgb*core,0.0),0.8);
 }

@@ -39,6 +39,7 @@ mod combat_smoke;
 mod combat_view;
 mod controls_editor;
 mod countermeasure_renderer;
+mod crt;
 mod damage_art;
 mod debrief;
 mod diagnostics;
@@ -120,6 +121,7 @@ mod rwr_tone;
 mod scenery;
 mod scope;
 mod seeker_view;
+mod sensor_console;
 mod sim_renderer;
 mod smoke_renderer;
 mod sound_prefs;
@@ -313,6 +315,8 @@ struct App {
     flight_clock: flight::Clock,
     /// The AC-130 gunsight camera's look smoothing and framing zoom.
     sight: gunsight_view::Sight,
+    /// The AC-130 sensor console's polarity and static (presentation only).
+    console: sensor_console::Console,
     /// The target camera's seeker view of the player's last seeker weapon.
     seeker: seeker_view::SeekerCam,
     /// AC-130 muzzle flashes: the gunship rounds each picture showed.
@@ -1395,6 +1399,8 @@ impl App {
             // The laser and the targeting sight's next object (slice T1).
             "laze" => return self.laze_key(),
             "sight-next" => return self.sight_next_key(),
+            // The sensor console's white hot / black hot (presentation).
+            "sight-polarity" => return self.sight_polarity_key(),
             // Tab is a hold: `queue_gun_key` reads it every tick.
             "fire-gun" => Command::None,
             "sight-zoom-in" => Command::SightZoom(1),
@@ -2169,6 +2175,16 @@ impl App {
         ));
         self.flight_ui
             .message(if on { "Laser off" } else { "Laser on" });
+        Action::None
+    }
+    /// Ctrl+Backslash: the AC-130 sensor console's white hot / black hot.
+    /// Only the console shows it; elsewhere the key does nothing.
+    fn sight_polarity_key(&mut self) -> Action {
+        let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
+        if !sensor_console::console_active(&frame.readout, frame.flight) {
+            return Action::Click;
+        }
+        self.console.polarity = self.console.polarity.toggled();
         Action::None
     }
     /// `/`: the sight tracks the next visible ground object.
@@ -4517,6 +4533,22 @@ impl ApplicationHandler for App {
                             }
                         }
                         self.camera.zoom = self.flight_ui.zoom;
+                        // The AC-130 sensor console takes the whole screen: the
+                        // world seen thermally from the sensor dome, along the
+                        // sight's line at its zoom step (sensor_console.rs).
+                        let console_on = sensor_console::console_active(&frame.readout, presented);
+                        if console_on && let Some(sight_frame) = &sight_frame {
+                            let view = gunsight_view::free_view(
+                                &combat::launcher(presented),
+                                sight_frame.look,
+                                self.input.sight().1,
+                            );
+                            self.camera = gunsight_view::camera(&view);
+                            self.camera.weather_slot = 0;
+                            self.camera.thermal = true;
+                            self.camera.near_clip = 1.;
+                        }
+                        let console_on = console_on && sight_frame.is_some();
                         // One resolved instant per frame, shared by the main view,
                         // the mirrors and the camera panels.
                         self.scenery
@@ -4888,7 +4920,7 @@ impl ApplicationHandler for App {
                                 &self.combat_view.art,
                                 &self.scenery,
                             ),
-                            self.view_rig.shows_player(self.flight_view),
+                            self.view_rig.shows_player(self.flight_view) && !console_on,
                             &self.camera,
                             &self.world.terrain,
                             &self.scenery,
@@ -5177,9 +5209,11 @@ impl ApplicationHandler for App {
                             presented,
                             &self.camera,
                             self.flight_ui.cockpit
+                                && !console_on
                                 && !presented.wreck_gone()
                                 && self.view_rig.cockpit(self.flight_view),
                             self.flight_ui.hud
+                                && !console_on
                                 && !presented.wreck_gone()
                                 && self.view_rig.cockpit(self.flight_view),
                             &self.menu.pixels,
@@ -5235,6 +5269,39 @@ impl ApplicationHandler for App {
                                     aim_color,
                                 );
                             }
+                        }
+                        // The sensor console replaces the cockpit, the HUD and the
+                        // instrument windows with its own symbology; the map,
+                        // menus and messages still draw over it below.
+                        if console_on
+                            && let Some(page) = self
+                                .instruments
+                                .combat
+                                .as_ref()
+                                .and_then(|c| c.gunsight.as_ref())
+                        {
+                            let seconds = self.console.seconds();
+                            let symbology = sensor_console::Symbology::live(
+                                page,
+                                self.instruments
+                                    .combat
+                                    .as_ref()
+                                    .and_then(|c| c.target.as_ref()),
+                                &frame.readout,
+                                frame.config,
+                                presented,
+                                self.world.terrain.air_data(presented).ok().as_ref(),
+                                f64::from(self.world.terrain.height(
+                                    presented.position[0] as f32,
+                                    presented.position[2] as f32,
+                                )),
+                                self.console.polarity,
+                                seconds,
+                            );
+                            let size = self.flight_canvas.size;
+                            let overlay = sensor_console::draw(&symbology, &self.camera, size);
+                            renderer.set_console(self.console.crt_frame(seconds), overlay, size);
+                            self.flight_canvas.blank(size);
                         }
                         use tore_sim::g_effects::GEffects;
                         // The canvas shader veils the finished frame on the GPU.
@@ -13962,6 +14029,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         native_tables,
         flight_clock: flight::Clock { remainder: 0. },
         sight: gunsight_view::Sight::default(),
+        console: sensor_console::Console::default(),
         seeker: seeker_view::SeekerCam::default(),
         gun_flash: Default::default(),
         flight_music: Default::default(),

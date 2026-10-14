@@ -91,6 +91,13 @@ pub struct Renderer {
     graphics: crate::graphics::Options,
     /// MSAA sample counts the adapter supports for the surface and depth.
     sample_counts: Vec<u32>,
+    /// The AC-130 sensor console (`crate::sensor_console`): its CRT pass,
+    /// the world picture it reads, the symbology overlay, and this frame's
+    /// request (set by [`Renderer::set_console`], taken by the next draw).
+    crt: crate::crt::Crt,
+    console_scene: Option<(wgpu::Texture, [u32; 2])>,
+    console_overlay: Option<(wgpu::Texture, [u32; 2])>,
+    console: Option<(crate::crt::Frame, Vec<u8>, [u32; 2])>,
     // Fields drop in declaration order; keep the window alive through GPU cleanup.
     pub window: Arc<Window>,
 }
@@ -419,7 +426,12 @@ impl Renderer {
         let cockpit = crate::cockpit_renderer::CockpitRenderer::new(&device, config.format);
         let ui_text = crate::ui_text_renderer::UiTextRenderer::new(&device, &queue, config.format);
         crate::diagnostics::stage_done();
+        let crt = crate::crt::Crt::new(&device, &queue, config.format);
         Ok(Self {
+            crt,
+            console_scene: None,
+            console_overlay: None,
+            console: None,
             first_frame: Default::default(),
             mirror_camera: crate::camera::Camera::new(),
             mirror_vertices: Vec::new(),
@@ -655,6 +667,41 @@ impl Renderer {
             ),
         })
     }
+    /// The next flight draw shows the world through the sensor console's CRT
+    /// pass with `overlay` (straight-alpha sRGB RGBA of `size`) on it; the
+    /// world camera should be thermal. Taken by that draw.
+    pub fn set_console(&mut self, frame: crate::crt::Frame, overlay: Vec<u8>, size: [u32; 2]) {
+        self.console = Some((frame, overlay, size));
+    }
+    /// The console's world picture and overlay textures at these sizes.
+    fn console_targets(&mut self, scene: [u32; 2], overlay: [u32; 2]) {
+        if self.console_scene.as_ref().is_none_or(|(_, s)| *s != scene) {
+            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Sensor console world"),
+                size: wgpu::Extent3d {
+                    width: scene[0],
+                    height: scene[1],
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.config.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            self.console_scene = Some((texture, scene));
+        }
+        if self
+            .console_overlay
+            .as_ref()
+            .is_none_or(|(_, s)| *s != overlay)
+        {
+            self.console_overlay =
+                Some((crate::crt::overlay_texture(&self.device, overlay), overlay));
+        }
+    }
     /// Levels for the flight canvas veil (redout, blackout); the next flight
     /// draw applies them on the GPU.
     pub fn set_veil(&mut self, levels: [f32; 2]) {
@@ -800,7 +847,40 @@ impl Renderer {
         }
         let view = frame.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        if let Some((camera, world, scenery)) = scene {
+        let console = self.console.take().filter(|_| flight_size.is_some());
+        if let (Some((crt, overlay, overlay_size)), Some((camera, world, scenery))) =
+            (&console, scene)
+        {
+            // The sensor console: the world into its own picture, then the
+            // CRT pass with the symbology onto the frame.
+            let size = [s.width, s.height];
+            self.console_targets(size, *overlay_size);
+            let (picture, _) = self.console_scene.as_ref().expect("made above");
+            let (layer, _) = self.console_overlay.as_ref().expect("made above");
+            crate::crt::write_overlay(&self.queue, layer, *overlay_size, overlay);
+            let picture = picture.create_view(&Default::default());
+            let layer = layer.create_view(&Default::default());
+            self.sim.draw(
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                &picture,
+                size,
+                camera,
+                world,
+                scenery,
+            );
+            self.crt.draw(
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                &picture,
+                Some(&layer),
+                &view,
+                size,
+                crt,
+            );
+        } else if let Some((camera, world, scenery)) = scene {
             self.sim.draw(
                 &self.device,
                 &self.queue,
@@ -812,7 +892,7 @@ impl Renderer {
                 scenery,
             );
         }
-        if flight_size.is_some() {
+        if flight_size.is_some() && console.is_none() {
             self.cockpit.draw(&mut encoder, &view);
         }
         {

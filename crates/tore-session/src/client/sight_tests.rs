@@ -462,6 +462,7 @@ fn the_sensor_console_flies_the_same_orbit_on_the_host_and_the_client() {
         }),
     );
     assert!(rig.run_until(Duration::from_secs(5), |r| r.seated(gunner_player)));
+    rig.players[gunner_player].keep_frames = true;
     rig.run(Duration::from_secs(1));
     open.set(true);
     rig.run(Duration::from_secs(3));
@@ -498,6 +499,18 @@ fn the_sensor_console_flies_the_same_orbit_on_the_host_and_the_client() {
         .expect("the client flies the orbit");
     assert_eq!(status.point, pin);
     assert_eq!(host_flight(&rig).orbit_status().unwrap().point, pin);
+    // The client's sensor console screen (tore-app `sensor_console::
+    // console_active`, slice nr-fltv) shows while its readout has the
+    // gunsight and its own prediction flies orbit hold: both hold here, and
+    // the mode is off again on both sides once the console closes below.
+    let readout = rig.players[gunner_player]
+        .frames
+        .iter()
+        .rev()
+        .find_map(|f| f.readout.as_ref())
+        .expect("the gunner has a readout");
+    assert!(readout.gunsight.is_some());
+    assert_eq!(predicted.autopilot.mode(), Mode::Orbit);
     close.set(true);
     rig.run(Duration::from_secs(2));
     assert_eq!(host_flight(&rig).autopilot.mode(), Mode::Off);

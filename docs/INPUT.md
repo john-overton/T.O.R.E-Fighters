@@ -216,6 +216,7 @@ targeting sight". The gamepad gestures stay the AC-130's.
 | Zoom in / out | Shift+' / Shift+; | None | Retail's bomb camera zoom keys; six steps |
 | Next gun / link gun | Ctrl+7 / Ctrl+8 | Select + D-pad up / down | Moved from the right stick |
 | Sensor console and orbit hold | Ctrl+9 | Select + Guide (Xbox) | AC-130 only (`sensor-console`): opens the console and the autopilot circles the sight's point; again hands the aircraft back ([the sensor console](spec/ac130-linked-guns.md#the-sensor-console-and-the-orbit)). Agent choice of keys, 2026-10-13: next to the gun keys; Select + Guide was the range's incoming-missile fixture, which is off on the AC-130 |
+| White hot / black hot | Ctrl+Backslash | None | The AC-130 sensor console only (Ctrl+9; [sensor console](spec/target-window.md#sensor-console)); does nothing elsewhere. Action `sight-polarity`; agent's key choice beside the other Backslash sight keys (2026-10-13) |
 
 A held slew key or button starts at a quarter of full deflection for a quarter
 second, so a short press nudges, then runs at full rate; an analog axis is

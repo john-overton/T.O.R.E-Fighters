@@ -656,36 +656,27 @@ fn seeker_crosshair() -> Pixels {
     p
 }
 
-/// Video static over the whole picture: the seeker's feed is lost. Grey snow
-/// that changes with `seed`, with a few bright tearing lines. Self-contained
-/// (it reads only the raster and the seed) so a shared sensor-screen effect
-/// can replace it. Presentation only; opinionated, John 2026-10-13.
+/// Video static over the whole picture: the seeker's feed is lost. Grey
+/// snow that changes with `seed`, with tearing lines, from the CRT module
+/// the AC-130 sensor console shares (`crate::crt::apply_cpu` at full
+/// static over a dark picture). Presentation only; opinionated, John
+/// 2026-10-13.
 fn feed_static(r: &mut Raster, seed: u64) {
-    // A splitmix-style hash of the seed and a coordinate.
-    let hash = |a: u64, b: u64| {
-        let mut z = seed
-            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-            .wrapping_add(a.wrapping_mul(0xBF58_476D_1CE4_E5B9))
-            .wrapping_add(b.wrapping_mul(0x94D0_49BB_1331_11EB));
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
-    };
-    for y in 0..H {
-        // One row in twenty tears: brighter, and the snow slides sideways.
-        let tear = hash(1_000_003, y as u64) % 20 == 0;
-        let slide = if tear { hash(7, y as u64) % 40 } else { 0 };
-        for x in 0..W {
-            let n = hash(x as u64 + slide, y as u64) & 0xFF;
-            // Snow leans dark with white flecks: squaring the noise.
-            let grey = ((n * n) >> 8) as u8;
-            let v = if tear {
-                grey.saturating_add(70)
-            } else {
-                grey / 2 + 40
-            };
-            r.rect(x, y, 1, 1, [v, v, v, 255]);
-        }
+    let (w, h) = (W as usize, H as usize);
+    let mut pixels: Vec<u8> = std::iter::repeat_n([40, 40, 40, 255], w * h)
+        .flatten()
+        .collect();
+    let mut frame = crate::crt::Frame::new(crate::crt::SENSOR, seed as f64 / 60., 1.);
+    frame.seed = (seed as u32) ^ 0x5eed_0f1e;
+    crate::crt::apply_cpu(&mut pixels, w, h, &frame);
+    for (i, p) in pixels.chunks_exact(4).enumerate() {
+        r.rect(
+            (i % w) as i32,
+            (i / w) as i32,
+            1,
+            1,
+            [p[0], p[1], p[2], 255],
+        );
     }
 }
 

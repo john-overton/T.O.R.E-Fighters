@@ -247,6 +247,7 @@ impl Action {
                 | "sensor-console"
                 | "sight-zoom-in"
                 | "sight-zoom-out"
+                | "sight-polarity"
                 | "sight-left"
                 | "sight-right"
                 | "sight-up"

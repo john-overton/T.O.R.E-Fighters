@@ -53,7 +53,8 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
   designations, guided weapons and bomb landings drawn in the 3D view) shares
   that key's cap as its first row, in the display colour.
 - The sight keys are on Fly & Fight: Backslash and Shift+Backslash
-  (designate, pin ground), `/` (next visible ground object), Alt with the
+  (designate, pin ground; Ctrl+Backslash is the AC-130 sensor console's
+  white hot / black hot, `W/B HOT`), `/` (next visible ground object), Alt with the
   arrows (slew), Shift+' and Shift+; (zoom), L and ; (drop) and Ctrl+L (the
   laser). They were the AC-130 gunsight's keys (John, 2026-10-09) and serve
   every aircraft with a laser designator or a FLIR since air-to-ground slice T1,
