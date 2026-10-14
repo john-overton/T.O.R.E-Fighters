@@ -629,6 +629,37 @@ repeats):
 | 1 to 5 | The speed at 0, 25, 50, 75 and 100% of the band from corner to maximum speed at the aircraft's height; 3 is the orbit's planned speed |
 | 6 | The top of the band |
 | 7 and 8 | The speed 5 kt slower or faster (on whole 5 kt) |
+| Shift+P | The gun lock, on and off ([below](#the-gun-lock)) |
+| Ctrl+Insert / Ctrl+Delete | Chaff / flare: the console's own countermeasure actions, bound apart from Insert and Delete so a player can move them on their own (John, 2026-10-14; keys *agent*). They work outside the console too, on the same dispensers |
+
+**The gamepad in the console** (John, 2026-10-14, his layout). While the
+console is open these replace the buttons' flight meanings; closed, the
+flight layout is back. Menu navigation on A, B and the D-pad stays for the
+menus over the console.
+
+| Gamepad | In the console | Flight meaning it replaces |
+| --- | --- | --- |
+| View + Xbox | Open and close the console | (the same) |
+| Left stick | Slew the sight | Pitch and roll |
+| Left stick press (L3) | Pin or release (ORBIT or SEARCH) | Front view |
+| Right stick left / right | Step the search heading | Look |
+| Right stick up / down | Step the altitude, or the orbit's height | Look |
+| D-pad up / down | Speed up / down 5 kt | Instrument controls 1 and 2 |
+| A (held) | Fire | Gear |
+| Y | Next target (`designate`, T) | Afterburner |
+| View + Y | Drop the target (`clear-designation`, L) | Jammer |
+| View + D-pad right | Previous target (`designate-previous`, Shift+T) | Flare |
+| X | Select gun: the next candidate (Ctrl+7) | Flaps |
+| B | Link gun: link or unlink the candidate (Ctrl+8) | Airbrake |
+| LB / RB | Zoom out / in | Throttle down / up |
+| D-pad right | Sensor radar range 5 / 10 / 25 nm (`console-range`, Ctrl+0) | Next instrument page |
+| D-pad left | Camera mode: white hot, black hot, TV, night vision (`sight-polarity`, Ctrl+Backslash) | Previous instrument page |
+| View + A / View + B | Flare / chaff (`console-flare`, `console-chaff`) | Designate (tap) and pin (held) / clear designation |
+| View + right stick press (R3) | Gun lock on and off (`gun-lock`, Shift+P) | Jettison |
+
+The other View chords keep their flight meanings in the console (View + RB
+fires, View + right stick slews, View + D-pad up and down pick and link
+guns).
 
 A held heading or altitude key steps at once, then repeats after 0.3 s every
 0.15 s; a look axis past half deflection counts as held. Each key answers
@@ -645,10 +676,48 @@ and throttle as the orbit:
 
 | Part | Rule |
 | --- | --- |
-| Heading | Opening the console, or letting a point go, takes the heading the roll-out reaches: the heading now plus the turn the bank still makes while it rolls out at 5 degrees a second, g (-ln cos bank) / (v x 5 deg/s), about 4 degrees from the orbit's 21. So the aircraft rolls wings level without turning back |
+| Heading | Opening the console, or letting a point go, takes the aircraft's current heading as the commanded one (John, 2026-10-14: "reset to the aircraft's current heading, speed and altitude"). Released from the orbit's 21 degrees of bank, the roll-out still turns about 4 degrees (g (-ln cos bank) / (v x 5 deg/s)) and the search then turns gently back onto the heading |
 | Bank | Toward the commanded heading: the bank whose roll-out at 5 degrees a second turns exactly the error left (cos bank = exp(-error v r / g)), at most 1.5 times the error near the heading and never past 25 degrees; the command moves at most 5 degrees a second. A heading change rolls in, holds the bank, and rolls out onto the heading |
-| Altitude | Opening or letting go takes the altitude now; the climb law is the orbit's (15 s, 1,500 ft/min, 3 ft/s each second), never lower than 1,000 ft above the ground |
-| Speed | One commanded speed for the search and the orbit, held on the throttle as the orbit's; it starts at the orbit's planned speed |
+| Altitude | Opening or letting go takes the altitude now (John, 2026-10-14); the climb law is the orbit's (15 s, 1,500 ft/min, 3 ft/s each second), never lower than 1,000 ft above the ground |
+| Speed | One commanded speed for the search and the orbit, held on the throttle as the orbit's. Opening the console with the sight free, or letting a point go, takes the current speed (John, 2026-10-14; the opening *agent*, to match); opening on a pin or a track takes the orbit's planned speed. A pin keeps the commanded speed, within the orbit's cap |
+
+**Moving the point** (John, 2026-10-14; thresholds *agent*, fitted):
+
+- A slew of the pin moves the sight's point with it, but the orbit's centre
+  stays put while the pin moves and for 5 s after it stops; then the centre
+  slides to it at 200 ft/s. So slewing around never drags the aircraft.
+- A tracked object is followed at once.
+- A point more than 1,000 ft from the last one in a single step (the next
+  target, a new pin elsewhere, the guns let go onto a far sight) is a new
+  point: the orbit is joined about it at once, as from the search, rather
+  than slid to. A full-rate slew at the widest zoom moves a pin some tens of
+  feet a step and a ground vehicle a foot or two, so neither counts.
+- In the console a slew off a tracked object drops the track to a pin on the
+  ground under the object, which the slew then moves (*agent*); outside the
+  console a slew while tracking still says L TO DROP.
+- The phase reads ORBIT only on the circle about the centre with the centre
+  on the point; while the centre waits or slides, or the aircraft is still
+  far out, it reads ORBIT JOIN (nr-conb saw ORBIT with the target 5 nm out).
+
+### The gun lock
+
+Opinionated (John, 2026-10-14: "separate guns from sensor slew: pin guns to
+target or location, and allow the player to slew away to look for other
+targets or for situational awareness"). Shift+P, or View + right stick press
+in the console, locks the guns on what the sight holds: its tracked object,
+its pin, or the ground under its crosshair. While locked:
+
+- the linked guns stay laid on the locked object (followed as it moves) or
+  point, and the trigger fires them there; the sight slews, pins and tracks
+  freely;
+- the console's orbit circles the locked point, not the sight's;
+- the console shows GUNS LOCKED under its autopilot block and a square with a
+  diamond where the guns lie (`GunsightReadout::gun_lock`).
+
+Shift+P again, dropping the target (L, P's release), or the locked object's
+destruction lets the guns go: they slew back to the sight at their normal
+rate, with no snap. It works on the AC-130 inside and outside the console
+(*agent*), and online through the console's seat command.
 
 ### The orbit
 
@@ -731,8 +800,9 @@ gun's pivot against its arcs, its airframe and the reach). The console screen
 and the HUD read it; it is the same in single player, on a client and in a
 check.
 
-**Online and replays.** Multiplayer needs protocol 29, and the search and
-the console's keys protocol 30. The host owns
+**Online and replays.** Multiplayer needs protocol 29, the search and the
+console's keys protocol 30, and the gun lock and the centre's pause the next
+one (pending, numbered by the lead). The host owns
 it. The console key is a seat command (code 28 on the wire), the console's
 keys another (code 29, protocol 30); the host engages the console's autopilot
 and, before each flight step, gives it the sight's point, or lets it search
@@ -764,7 +834,8 @@ client's barrels follow, and the headless battery scenarios `ac130-pin-orbit`,
 `ac130-fire-no-target` and `ac130-track-out-of-arc`
 ([baseline](../baselines/ac130-gunsight.md)); for the sensor console,
 `flight-ac130-orbit-pin`, `-slew`, `-track` and `-close`, and for its search
-and keys `flight-ac130-console-search` and `-console-pin-release`.
+and keys `flight-ac130-console-search`, `-console-pin-release` and
+`-console-gun-lock`.
 The unavailable retail comparison does not establish retail parity. Original
 mount slew, the arc interpretation, gun geometry hinges and muzzle-to-art scale
 remain approximate. The next research step is the reviewed bounded hardpoint

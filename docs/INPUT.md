@@ -232,6 +232,34 @@ controls take console meanings, with no new bindings to learn:
 | Shift + Left / Right (the look keys), the look axes | Step the search heading 5 degrees |
 | Shift + Up / Down, the look axes | Step the search altitude, or the orbit's height above its point, 500 ft |
 | 1 to 6, 7 and 8 (and their bound buttons) | The autopilot's speed: 0 to 100% of the corner-to-maximum band, then 5 kt steps |
+| P | Pin or release: ORBIT or SEARCH |
+| Shift+P (`gun-lock`) | Gun lock: the guns stay on the target or point while the sensor slews free; again lets them follow the sensor. Agent's key choice, 2026-10-14, beside P (Shift+P is free in the original) |
+| Ctrl+Insert / Ctrl+Delete (`console-chaff` / `console-flare`) | Chaff / flare: the console's own actions, bound apart from Insert and Delete (John, 2026-10-14); the keys are an agent choice, the Ctrl versions of the retail chaff and flare keys. They work outside the console too |
+
+**The gamepad in the console** is John's layout (2026-10-14). It applies only
+while the console is open, on the stock gamepad defaults (`CONSOLE_PAD` in
+`crates/tore-app/src/input.rs`), and puts the buttons' flight meanings aside
+until it closes; menu navigation stays. A joystick or HOTAS keeps its own
+bindings.
+
+| Gamepad | In the console |
+| --- | --- |
+| View + Xbox | Open and close the console |
+| Left stick | Slew |
+| Left stick press (L3) | Pin or release |
+| Right stick | Left and right: heading; up and down: altitude or orbit height |
+| D-pad up / down | Speed up / down |
+| A (held) | Fire |
+| Y | Next target |
+| View + Y | Drop the target |
+| View + D-pad right | Previous target |
+| X | Select gun (next candidate) |
+| B | Link gun (link or unlink the candidate) |
+| LB / RB | Zoom out / in |
+| D-pad right | Sensor radar range 5 / 10 / 25 nm |
+| D-pad left | Camera mode: white hot, black hot, TV, night vision |
+| View + A / View + B | Flare / chaff |
+| View + right stick press (R3) | Gun lock |
 
 A held heading or altitude key steps at once, then every 0.15 s after 0.3 s.
 The view does not turn in the console. Each key reaches the host as the seat

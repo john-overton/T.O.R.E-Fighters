@@ -51,6 +51,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [Protocol 28 (host loading)](#protocol-28-host-loading) (built under protocol 28)
 - [Protocol 29 (the sensor console)](#protocol-29-the-sensor-console) (built under protocol 29)
 - [Protocol 30 (the console's search and keys)](#protocol-30-the-consoles-search-and-keys) (built under protocol 30)
+- [The gun lock and the centre's pause (pending protocol)](#the-gun-lock-and-the-centres-pause-pending-protocol)
 - [Limits](#limits)
 - [Captures](#captures)
 - [Versions](#versions)
@@ -2879,6 +2880,26 @@ while nothing is pinned ([spec](../spec/ac130-linked-guns.md#the-consoles-keys))
   the longer own-plane state. The wire golden changes in the Inputs command
   sample (five Console commands), the version line and the packets sealed
   with the version.
+
+## The gun lock and the centre's pause (pending protocol)
+
+*Built (slice nr-cona follow-up, 2026-10-14); the lead numbers the protocol
+(31 most likely).* John asked for a gun lock in the AC-130 console and for a
+slewed pin to move the orbit only after a 5 s pause
+([spec](../spec/ac130-linked-guns.md#the-gun-lock)).
+
+- **Seat command 29, Console:** sub-code 5, GunLock (value 0; any other
+  value is refused). Sub-codes 6 and 7 are refused.
+- **The exact own-plane state:** the autopilot's `Orbit` gained `still_s`
+  (f64 against the baseline's) after `altitude`: the seconds the pin has
+  stood still.
+- **The readout's gunsight group** gained four values after the zoom step:
+  the gun lock flag and its point as an offset from the aim point (1/8 ft).
+  The group is 41 values.
+- **Why a bump.** An older game refuses sub-code 5, reads the gunsight group
+  as the wrong length, and cannot read the longer own-plane state. The wire
+  golden changes in the Inputs sample (one GunLock) and the readout sample
+  (a gun lock), with the version line. `wire_golden` fails until the bump.
 
 ## Limits
 

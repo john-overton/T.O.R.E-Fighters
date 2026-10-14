@@ -49,7 +49,9 @@ the stick does not fly, so the arrows, the stick and mouse look slew the
 sight; = and - and the mouse wheel zoom it; Shift with Left and Right steps the
 search heading and Shift with Up and Down the altitude (or the orbit's
 height); the throttle keys 1 to 8 set the autopilot's speed; P pins or
-releases the point (orbit or search). See
+releases the point (orbit or search); Shift+P locks the guns. The gamepad
+cells marked "(in the AC-130 console)" are John's console layout, which
+replaces those buttons' flight meanings only while the console is open. See
 [input](INPUT.md#ac-130-gunsight-controls) and the
 [console's keys](spec/ac130-linked-guns.md#the-consoles-keys).
 
@@ -137,8 +139,8 @@ and a gamepad's View+stick defaults avoid the problem.
 | Throttle 75% | 4 | - | - |
 | Throttle 100% | 5 | - | - |
 | Throttle afterburner | 6 | - | - |
-| Throttle down 5% | 7 | - | - |
-| Throttle up 5% | 8 | - | - |
+| Throttle down 5% | 7 | - | D-pad down (in the AC-130 console) |
+| Throttle up 5% | 8 | - | D-pad up (in the AC-130 console) |
 | Afterburner | Shift+B | - | Y |
 | Autopilot (heading/altitude) | A | - | - |
 | Waypoint autopilot | Ctrl+A | - | - |
@@ -161,29 +163,30 @@ and a gamepad's View+stick defaults avoid the problem.
 
 | Action | Keyboard | Mouse | Gamepad (Xbox) |
 | --- | --- | --- | --- |
-| Fire / release weapon | Space | - | View + RB |
+| Fire / release weapon | Space | - | A (in the AC-130 console) or View + RB |
 | Next weapon / NAV | ] | - | View + LB |
 | Previous weapon / NAV | [ | - | View + X |
-| Next gun candidate (AC-130) | Ctrl+7 | - | View + D-pad up |
-| Link/unlink candidate gun (AC-130) | Ctrl+8 | - | View + D-pad down |
+| Next gun candidate (AC-130) | Ctrl+7 | - | X (in the AC-130 console) or View + D-pad up |
+| Link/unlink candidate gun (AC-130) | Ctrl+8 | - | B (in the AC-130 console) or View + D-pad down |
 | Sensor console and orbit hold (AC-130) | Ctrl+9 | - | View + Xbox |
 | Sight: designate under crosshair | Backslash | - | View + A (tap) |
 | Sight: pin ground point | Shift+Backslash | - | View + A (hold half a second) |
-| Sight: pin or release (AC-130 console: orbit or search) | P | - | - |
-| Sight: zoom in | Shift+Apostrophe | - | - |
-| Sight: zoom out | Shift+Semicolon | - | - |
-| Sight: white hot / black hot / TV / night vision (AC-130 console) | Ctrl+Backslash | - | - |
-| Sensor console radar range 5 / 10 / 25 nm (AC-130 console) | Ctrl+0 | - | - |
+| Sight: pin or release (AC-130 console: orbit or search) | P | - | Left stick press (in the AC-130 console) |
+| Gun lock: guns stay on the target, the sensor slews free (AC-130) | Shift+P | - | View + Right stick press (in the AC-130 console) |
+| Sight: zoom in | Shift+Apostrophe | - | RB (in the AC-130 console) |
+| Sight: zoom out | Shift+Semicolon | - | LB (in the AC-130 console) |
+| Sight: white hot / black hot / TV / night vision (AC-130 console) | Ctrl+Backslash | - | D-pad left (in the AC-130 console) |
+| Sensor console radar range 5 / 10 / 25 nm (AC-130 console) | Ctrl+0 | - | D-pad right (in the AC-130 console) |
 | Sight: slew left/right | - | - | View + Right stick X |
 | Sight: slew up/down | - | - | View + Right stick Y |
 | Sight: slew left | Alt+Left | - | - |
 | Sight: slew right | Alt+Right | - | - |
 | Sight: slew up | Alt+Up | - | - |
 | Sight: slew down | Alt+Down | - | - |
-| Next radar target | T | - | View + A |
-| Previous radar target | Shift+T | - | - |
+| Next radar target | T | - | Y (in the AC-130 console) or View + A |
+| Previous radar target | Shift+T | - | View + D-pad right (in the AC-130 console) |
 | Select visual target | Enter or Apostrophe | - | - |
-| Clear designation | Semicolon or L | - | View + B |
+| Clear designation | Semicolon or L | - | View + Y (in the AC-130 console) or View + B |
 | Delivery mode (CCIP/LVL, bore/cued) | Ctrl+M | - | - |
 | Sight: next visible object | / | - | - |
 | Laser on or off | Ctrl+L | - | - |
@@ -191,6 +194,8 @@ and a gamepad's View+stick defaults avoid the problem.
 | Nearest ground target (Easy targeting) | Ctrl+X | - | - |
 | Release chaff | Insert | - | View + D-pad left |
 | Release flare | Delete | - | View + D-pad right |
+| Release chaff (AC-130 console) | Ctrl+Insert | - | View + B (in the AC-130 console) |
+| Release flare (AC-130 console) | Ctrl+Delete | - | View + A (in the AC-130 console) |
 | Jettison selected stores | Shift+K | - | View + Right stick press |
 | Reset range target | Ctrl+Shift+Backslash | - | View + D-pad up |
 | IFF squawk on the target | U | - | - |

@@ -256,6 +256,11 @@ followed by two varints: its variant (0 Pin, 1 Heading, 2 Altitude, 3 Speed,
 4 SpeedStep) and its value as a byte (the steps in two's complement, the
 speed's percentage as is). Same-build checkpoints only, as before.
 
+Pending protocol (slice nr-cona follow-up): `Orbit` gained `still_s` (f64)
+after `altitude`, the `Console` variant 5 is GunLock (value 0), and the
+gunship state (`GunshipState`) gained `gun_lock` after `notice`
+(`Option<GunLock>`: the object, an `Option<u32>`, then the point).
+
 One field follows the exact coding: a two-seater's second chute
 (`crew_escape`, an `Option<Escape>` by the trait, one bit when there is
 none). The wire's exact state leaves it out, since a client's prediction
