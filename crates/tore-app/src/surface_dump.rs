@@ -86,6 +86,13 @@ pub(crate) fn world_without_front(
 /// directory remembers, else the checkout's `gameassets/fighters-anthology`
 /// link. Returns how many were added.
 pub(crate) fn with_retail_surface(resources: &mut BTreeMap<String, Vec<u8>>) -> AppResult<usize> {
+    with_retail_records(resources, false)
+}
+
+fn with_retail_records(
+    resources: &mut BTreeMap<String, Vec<u8>>,
+    missions: bool,
+) -> AppResult<usize> {
     let data = crate::assets::data_directory()?;
     let candidates = std::env::var_os("TORE_GAME_DIR")
         .map(std::path::PathBuf::from)
@@ -107,6 +114,7 @@ pub(crate) fn with_retail_surface(resources: &mut BTreeMap<String, Vec<u8>>) -> 
         };
         for entry in archive.entries.keys() {
             let wanted = (entry.starts_with("~Q") && entry.ends_with(".M"))
+                || (missions && (entry.ends_with(".M") || entry.ends_with(".MM")))
                 || [".NT", ".OT", ".PT", ".SH", ".PIC"]
                     .iter()
                     .any(|ext| entry.ends_with(ext));
@@ -165,6 +173,7 @@ pub fn run() -> AppResult<()> {
     let mut starts = false;
     let mut classes = false;
     let mut grounding = false;
+    let mut grounding_sites = false;
     let mut damage = false;
     let mut faces = false;
     let mut seeds = None;
@@ -190,6 +199,7 @@ pub fn run() -> AppResult<()> {
             "--starts" => starts = true,
             "--classes" => classes = true,
             "--grounding" => grounding = true,
+            "--grounding-sites" => grounding_sites = true,
             "--damage" => damage = true,
             "--faces" => faces = true,
             "--no-jitter" => variation.jitter = false,
@@ -204,7 +214,10 @@ pub fn run() -> AppResult<()> {
             other => positional.push(other.to_owned()),
         }
     }
-    let resources = resources()?;
+    let mut resources = resources()?;
+    if grounding_sites {
+        with_retail_records(&mut resources, true)?;
+    }
     if all {
         return resolve_all(&resources, seeds.unwrap_or(3));
     }
@@ -219,6 +232,9 @@ pub fn run() -> AppResult<()> {
     }
     if area_sweep {
         return area_sweep_run(&resources, seeds.unwrap_or(3), png.as_deref(), &positional);
+    }
+    if grounding_sites {
+        return grounding_sites_survey(&resources);
     }
     if grounding {
         return grounding_survey(&resources, &positional);
@@ -480,6 +496,287 @@ fn grounding_survey(resources: &BTreeMap<String, Vec<u8>>, named: &[String]) -> 
         problems.len()
     );
     Ok(())
+}
+
+/// Project only placement fields from a full mission. Unlike MM layouts,
+/// missions repeat loadout and command fields within an object. They have no
+/// bearing on footing and are not interpreted or passed to the strict layout
+/// reader. The latter still validates every retained field and record bound.
+fn mission_placements(name: &str, bytes: &[u8]) -> AppResult<tore_formats::mission::Layout> {
+    if bytes.len() > 4 * 1024 * 1024 {
+        return Err("mission exceeds placement audit limit".into());
+    }
+    let text = tore_formats::text::decode_cp437(bytes);
+    if !text.starts_with("textFormat") {
+        return Err("mission has no textFormat header".into());
+    }
+    let mut filtered = String::from("textFormat\n");
+    let mut object: Option<String> = None;
+    for line in text.lines() {
+        let field = line.trim();
+        if field == "obj" {
+            object = Some(String::from("obj\n"));
+        } else if field == "." && object.is_some() {
+            let record = object.take().unwrap_or_default();
+            // `<selected>` is the player's own aircraft, airborne at the
+            // start: no ground object, and no resource name to look up.
+            if !record.lines().any(|l| l.trim() == "type <selected>") {
+                filtered.push_str(&record);
+                filtered.push_str(".\n");
+            }
+        } else if let Some(record) = object.as_mut() {
+            let key = field.split_whitespace().next().unwrap_or("");
+            if [
+                "type",
+                "pos",
+                "angle",
+                "nationality",
+                "nationality2",
+                "nationality3",
+                "flags",
+                "speed",
+                "alias",
+            ]
+            .contains(&key)
+            {
+                record.push_str(line);
+                record.push('\n');
+            }
+        } else if field.starts_with("map ") {
+            filtered.push_str(field);
+            filtered.push('\n');
+        }
+    }
+    if let Some(record) = object {
+        filtered.push_str(&record); // An unterminated record stays an error.
+    }
+    Ok(tore_formats::mission::Layout::parse(
+        name,
+        filtered.as_bytes(),
+    )?)
+}
+
+/// Audit actual authored placements and resolved Quick Mission sites. The old
+/// origin-only rule is measured alongside the live rule, using the same mesh.
+fn grounding_sites_survey(resources: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
+    use tore_world::terrain::{Placements, SurfaceSite};
+    let types = resources
+        .keys()
+        .filter(|n| n.ends_with(".OT") || n.ends_with(".NT"));
+    let shapes = Placements::of_types(resources, types.map(String::as_str));
+    let mut layouts = Vec::new();
+    let mut unread = 0;
+    let mut binary = 0;
+    for (name, bytes) in resources
+        .iter()
+        .filter(|(n, _)| (n.ends_with(".M") || n.ends_with(".MM")) && !n.starts_with("~Q"))
+    {
+        // Compiled campaign missions: the game has no campaign runtime and
+        // never reads them (docs/formats/coverage.md), so nothing stands there.
+        if !bytes.starts_with(b"textFormat") {
+            binary += 1;
+            continue;
+        }
+        match mission_placements(name, bytes) {
+            Ok(layout) => layouts.push(layout),
+            Err(error) => {
+                unread += 1;
+                println!("sites-unread: {name}: {error}");
+            }
+        }
+    }
+    let mut total_problems = 0;
+    for (index, theater) in tables::THEATERS.iter().enumerate() {
+        let terrain = Terrain::for_mission(
+            resources,
+            theater,
+            Some(0),
+            &Overrides {
+                city_fill: false,
+                ..overrides()?
+            },
+        )?;
+        let mut audit = SiteAudit::default();
+        let mut missions = 0;
+        for layout in &layouts {
+            let map = layout.map.as_deref().unwrap_or(&layout.resource);
+            if tore_formats::theater::base_theater(map) != Some(*theater) {
+                continue;
+            }
+            missions += 1;
+            for p in &layout.placements {
+                audit.placement(theater, &shapes, p, &terrain);
+            }
+        }
+        // Check redrawn airfield pieces too, through exactly the scenery source.
+        let drawn = Placements::for_terrain(resources, &terrain, theater)?;
+        for p in drawn.placed() {
+            audit.placement(theater, &drawn, p?.1, &terrain);
+        }
+        let site = SurfaceSite::load(resources, theater)?;
+        let mut stems = tables::TEMPLATES[index].to_vec();
+        if *theater == "UKR" {
+            // The three unoffered Ukraine templates, documented in quick-templates.md.
+            stems.extend(["QFACT", "QUBUNK", "QURADAR"]);
+        }
+        for stem in &stems {
+            for variation in [Variation::OFF, Variation::ON] {
+                let mut target = heavy(stem, index, 1);
+                target.variation = variation;
+                let surface = site.place(resources, &terrain.theater, Some(&target))?;
+                let mut sources = Placements::of_types(resources, std::iter::empty());
+                sources.add_surface(resources, &surface)?;
+                for (_, p) in &surface.placements {
+                    audit.placement(theater, &sources, p, &terrain);
+                }
+            }
+        }
+        println!(
+            "grounding-sites: {theater} missions {missions} templates {} placements {} exceptions {} unavailable {} before {} problems {}",
+            stems.len(),
+            audit.placements,
+            audit.exceptions,
+            audit.unavailable,
+            audit.before,
+            audit.problems
+        );
+        total_problems += audit.problems;
+    }
+    println!("grounding-sites: {binary} compiled campaign missions not read (no campaign runtime)");
+    println!(
+        "grounding-sites: {} theaters, {unread} unread resources, {total_problems} problems",
+        tables::THEATERS.len()
+    );
+    if total_problems != 0 || unread != 0 {
+        return Err(
+            format!("{total_problems} grounding site problems, {unread} unread resources").into(),
+        );
+    }
+    Ok(())
+}
+
+#[derive(Default)]
+struct SiteAudit {
+    placements: usize,
+    exceptions: usize,
+    unavailable: usize,
+    before: usize,
+    problems: usize,
+}
+
+impl SiteAudit {
+    fn placement(
+        &mut self,
+        theater: &str,
+        sources: &tore_world::terrain::Placements,
+        p: &tore_formats::mission::Placement,
+        terrain: &Terrain,
+    ) {
+        use tore_world::grounding::{Footing, footing};
+        if p.object_type.ends_with(".PT") {
+            return;
+        } // Airborne mission aircraft are not ground objects.
+        let (Some(definition), Some(shape)) = (
+            sources.definitions.get(&p.object_type),
+            sources.shapes.get(&p.object_type),
+        ) else {
+            self.unavailable += 1;
+            println!(
+                "site-unavailable: {theater} {} #{} {}",
+                p.key.layout, p.key.ordinal, p.object_type
+            );
+            return;
+        };
+        if footing(definition) != Footing::Bottom {
+            self.exceptions += 1; // Pavement, map-tied bridges/roads, and waterlines keep authored support.
+            return;
+        }
+        if p.position[1] != 0 {
+            println!(
+                "site-authored-height: {theater} {} #{} {} height {}",
+                p.key.layout, p.key.ordinal, p.object_type, p.position[1]
+            );
+        }
+        let height = |x: f64, z: f64| f64::from(terrain.height(x as f32, z as f32));
+        let Some(stand) = sources.stance_on_terrain(p, height) else {
+            self.unavailable += 1;
+            return;
+        };
+        // Independent geometry measurement, including drawn line endpoints.
+        let clearance = |origin: [f64; 3]| {
+            tore_world::grounding::points(shape)
+                .map(|point| {
+                    let at: [f64; 3] = std::array::from_fn(|i| {
+                        origin[i]
+                            + stand.scale
+                                * (stand.basis.right[i] * f64::from(point[0])
+                                    + stand.basis.forward[i] * f64::from(point[1])
+                                    + stand.basis.up[i] * f64::from(point[2]))
+                    });
+                    at[1] - height(at[0], at[2]) - f64::from(p.position[1])
+                })
+                .reduce(f64::min)
+        };
+        let old_bottom = shape
+            .faces
+            .iter()
+            .flat_map(|f| &f.positions)
+            .map(|p| f64::from(p[2]))
+            .chain(
+                shape
+                    .billboards
+                    .iter()
+                    .map(|s| f64::from(s.center[2] - s.size[1] * 0.5)),
+            )
+            .reduce(f64::min)
+            .unwrap_or(0.);
+        let old_origin = std::array::from_fn(|i| {
+            stand.support_origin[i] - stand.basis.up[i] * old_bottom * stand.scale
+        });
+        let before = clearance(old_origin).unwrap_or(0.);
+        let after = clearance(stand.origin).unwrap_or(0.);
+        // The largest air gap under the shape's bottom (points within one
+        // shape unit of its lowest point): what a rigid lift leaves downhill.
+        let low = tore_world::grounding::bottom(shape).unwrap_or(0.);
+        let gap = tore_world::grounding::points(shape)
+            .filter(|point| f64::from(point[2]) <= low + 1.)
+            .map(|point| {
+                let at: [f64; 3] = std::array::from_fn(|i| {
+                    stand.origin[i]
+                        + stand.scale
+                            * (stand.basis.right[i] * f64::from(point[0])
+                                + stand.basis.forward[i] * f64::from(point[1])
+                                + stand.basis.up[i] * f64::from(point[2]))
+                });
+                at[1] - height(at[0], at[2]) - f64::from(p.position[1])
+            })
+            .fold(0., f64::max);
+        // How far the shape reaches from its origin across the ground.
+        let reach = tore_world::grounding::points(shape)
+            .map(|point| stand.scale * f64::from(point[0]).hypot(f64::from(point[1])))
+            .fold(0., f64::max);
+        self.placements += 1;
+        if before.abs() > GROUNDING_TOLERANCE_FT {
+            self.before += 1;
+            println!(
+                "site-correction: {theater} {} #{} {} at {} {} height {} angles {:?} before {before:.2} after {after:.2} gap {gap:.2} reach {reach:.0}",
+                p.key.layout,
+                p.key.ordinal,
+                p.object_type,
+                p.position[0],
+                p.position[2],
+                p.position[1],
+                p.angles
+            );
+        }
+        if !after.is_finite() || after.abs() > GROUNDING_TOLERANCE_FT {
+            self.problems += 1;
+            println!(
+                "site-problem: {theater} {} #{} {} clearance {after:.2}",
+                p.key.layout, p.key.ordinal, p.object_type
+            );
+        }
+    }
 }
 
 /// `--surface-dump --faces TYPE [...]`: every face of each named object
@@ -1829,4 +2126,41 @@ fn area_map(
         crate::replay::png::encode_rgba(w as u32, h as u32, &rgba)?,
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod grounding_tests {
+    use super::mission_placements;
+
+    #[test]
+    fn campaign_loadouts_do_not_hide_object_placements_from_the_audit() {
+        let bytes = b"textFormat\nmap UKR.T2\nobj\n type TEST.OT\n pos 10 7 20\n angle 90 0 0\n hardpoint 1 2\n hardpoint 2 3\n .\n";
+        let layout = mission_placements("TEST.M", bytes).unwrap();
+        assert_eq!(layout.placements.len(), 1);
+        assert_eq!(layout.placements[0].position, [10, 7, 20]);
+        assert_eq!(layout.placements[0].angles, [90, 0, 0]);
+        assert_eq!(layout.map.as_deref(), Some("UKR.T2"));
+    }
+
+    #[test]
+    fn the_players_selected_aircraft_is_not_a_ground_placement() {
+        let bytes = b"textFormat\nobj\n type <selected>\n pos 1 10000 2\n .\nobj\n type TEST.OT\n pos 3 0 4\n .\n";
+        let layout = mission_placements("TEST.M", bytes).unwrap();
+        assert_eq!(layout.placements.len(), 1);
+        assert_eq!(layout.placements[0].position, [3, 0, 4]);
+    }
+
+    #[test]
+    fn audited_placement_fields_remain_strict() {
+        assert!(
+            mission_placements(
+                "TEST.M",
+                b"textFormat\nobj\n type TEST.OT\n pos 0 0 0\n pos 0 1 0\n .\n"
+            )
+            .is_err()
+        );
+        assert!(
+            mission_placements("TEST.M", b"textFormat\nobj\n type TEST.OT\n pos 0 0 0\n").is_err()
+        );
+    }
 }
