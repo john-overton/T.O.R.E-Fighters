@@ -414,7 +414,7 @@ rest is the game's own data.
 
 | Where | Shows |
 | --- | --- |
-| Top left | The sight's mode (MAN free slew, RTN returning, PNT pinned, TRK tracked), the field of view by name (WFOV, MFOV and NFOV for zoom steps 1 to 3, then NFOV E2, E4 and E8: the narrow field's electronic zoom) and the sensor, IR or TV; the field in degrees; the orbit: ORBIT JOIN while the aircraft is still joining the circle, ORBIT GUNS on it with every gun and the camera bearing on the point, ORBIT NO BEAR on it when one cannot; then the planned radius and height above the point (`flight::State::orbit_status`) |
+| Top left | The sight's mode (MAN free slew, RTN returning, PNT pinned, TRK tracked), the field of view by name (WFOV, MFOV and NFOV for zoom steps 1 to 3, then NFOV E2, E4 and E8: the narrow field's electronic zoom) and the sensor, IR or TV; the field in degrees with a zoom ladder beside it (six boxes, widest on the left, filled up to the current step; agent decision so the zoom reads at a glance); the orbit: ORBIT JOIN while the aircraft is still joining the circle, ORBIT GUNS on it with every gun and the camera bearing on the point, ORBIT NO BEAR on it when one cannot; then the planned radius and height above the point (`flight::State::orbit_status`) |
 | Top right | True heading, height above the ground, true airspeed, the picture mode (WHOT, BHOT, TV, NVG) |
 | Left, middle | The sensor's azimuth (from the nose, clockwise), its elevation, and the true bearing of its line of sight (LOS) |
 | Right, middle | With a tracked target: its name, range, true bearing and clock bearing with HI or LO |
@@ -479,11 +479,12 @@ with no current one T takes the nearest. The selection is a designation by
 the seat's existing command (as a scope click), so the gunsight tracks it,
 the camera snaps onto it and the TARGET CAM page, the HUD and the weapons
 show the same target, and a target designated in flight is the console's
-current one: the two are linked both ways. The sight then zooms so the
-target fills the picture: the narrowest zoom step whose field still holds
-the target's largest side within 60 percent of the picture's height at its
-slant range from the dome (the object's own box; 60 ft for an aircraft),
-the widest step when none does. A tank at 2 nm takes the narrowest step. With
+current one: the two are linked both ways. The sight then zooms to the
+target: one step wider (John, 2026-10-14, for context) than the narrowest
+zoom step whose field still holds the target's largest side within 60
+percent of the picture's height at its slant range from the dome (the
+object's own box; 60 ft for an aircraft), the widest step when none does.
+A tank at 2 nm takes NFOV E4. With
 A-G off, T turns it on; with nothing in view it says "Sensor: no radar
 target in view". Outside the console T keeps its flight meaning.
 

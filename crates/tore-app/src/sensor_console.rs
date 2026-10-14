@@ -475,14 +475,15 @@ pub const DEFAULT_EXTENT_FT: f64 = 60.;
 /// How much of the picture's height a selected target fills at most when
 /// the console zooms to it (agent decision).
 pub const FILL: f64 = 0.6;
-/// The zoom step that makes a target `extent_ft` across at `slant_ft` fill
-/// the picture: the narrowest step whose field still holds it within
-/// [`FILL`] of the height, the widest when none does.
+/// The zoom step the console's T leaves a target at: one step wider than
+/// the narrowest step whose field still holds the target (`extent_ft`
+/// across at `slant_ft`) within [`FILL`] of the picture's height, for some
+/// context round it (John, 2026-10-14); the widest when none does.
 pub fn fill_zoom(extent_ft: f64, slant_ft: f64) -> u8 {
     (1..=tore_sim::combat::sight::ZOOM_STEPS)
         .rev()
         .find(|&step| 2. * slant_ft * (gunship::field_of_view(step) / 2.).tan() * FILL >= extent_ft)
-        .unwrap_or(1)
+        .map_or(1, |step| step.saturating_sub(1).max(1))
 }
 
 /// The designated target's box: half its side as a share of the picture's
@@ -1016,7 +1017,15 @@ pub fn draw(sym: &Symbology, camera: &Camera, size: [u32; 2]) -> Vec<u8> {
         s,
         1,
     );
-    m.text(&format!("FOV {:.1}*", sym.fov_deg), left, top + row, s, 1);
+    let fov = format!("FOV {:.1}*", sym.fov_deg);
+    m.text(&fov, left, top + row, s, 1);
+    zoom_ladder(
+        &mut m,
+        left + text_width(&fov, s) + 4 * s,
+        top + row,
+        s,
+        sym.zoom,
+    );
     // MERGE HOOK (nr-cona): the console's flight status (SEARCH, ORBIT JOIN,
     // ORBIT and the commanded heading, altitude and speed) belongs in these
     // rows, from top + 2 * row down; today they show orbit hold's status.
@@ -1210,6 +1219,27 @@ pub fn draw(sym: &Symbology, camera: &Camera, size: [u32; 2]) -> Vec<u8> {
     gimbal(&mut m, sym, (w * 0.86, h * 0.72), h * GIMBAL_RADIUS, t, s);
 
     m.pixels(o)
+}
+
+/// The zoom ladder beside the field of view: one box for each of the six
+/// zoom steps, widest on the left, the boxes up to the current step filled
+/// (agent decision, John 2026-10-14: the zoom state must be legible).
+fn zoom_ladder(m: &mut Mask, x: i32, y: i32, s: i32, zoom: u8) {
+    let step = tore_sim::combat::sight::zoom_step(zoom);
+    for i in 1..=tore_sim::combat::sight::ZOOM_STEPS {
+        let bx = x + i32::from(i - 1) * 5 * s;
+        let size = 2 * s + i32::from(i) * s * 2 / 3;
+        let by = y + 7 * s - size;
+        if i <= step {
+            m.rect(bx, by, 4 * s, size, 1);
+        } else {
+            let t = (s / 2).max(1);
+            m.rect(bx, by, 4 * s, t, 1);
+            m.rect(bx, by + size - t, 4 * s, t, 1);
+            m.rect(bx, by, t, size, 1);
+            m.rect(bx + 4 * s - t, by, t, size, 1);
+        }
+    }
 }
 
 /// An open crosshair: four arms with a clear centre, ticks along each arm
@@ -1619,16 +1649,26 @@ mod tests {
     #[test]
     fn a_selected_target_is_zoomed_to_fill_within_the_ladder() {
         // A 30 ft tank at 9,000 ft: the narrowest field (0.94 degrees, 147
-        // ft tall) holds it.
-        assert_eq!(fill_zoom(30., 9_000.), 6);
+        // ft tall) holds it, and T stops one step wider, NFOV E4.
+        assert_eq!(fill_zoom(30., 9_000.), 5);
         // A 250 ft hangar at the same range needs the field twice as wide
-        // or more.
+        // or more; again one step wider than the one that fills.
         let step = fill_zoom(250., 9_000.);
-        assert!(step < 6);
+        assert!(step < 5);
         let field = |step| 2. * 9_000. * (gunship::field_of_view(step) / 2.).tan();
-        assert!(field(step) * FILL >= 250. && field(step + 1) * FILL < 250.);
+        assert!(field(step + 1) * FILL >= 250. && field(step + 2) * FILL < 250.);
         // Nothing fits closer than the widest field: the widest.
         assert_eq!(fill_zoom(5_000., 1_000.), 1);
+    }
+
+    #[test]
+    fn the_zoom_ladder_fills_up_to_the_step() {
+        let ink = |zoom| {
+            let mut m = Mask::new([200, 60]);
+            zoom_ladder(&mut m, 2, 2, 2, zoom);
+            m.cells.iter().filter(|c| **c == 1).count()
+        };
+        assert!(ink(1) < ink(3) && ink(3) < ink(6));
     }
 
     #[test]
