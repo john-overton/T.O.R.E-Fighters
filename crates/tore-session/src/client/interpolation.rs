@@ -786,6 +786,63 @@ mod tests {
         assert!(pilot_id(5, true) & CREW_PILOT_BIT != 0);
     }
 
+    fn missile(position: [f64; 3]) -> EntityState {
+        EntityState::Projectile(crate::wire::entity::ProjectileState {
+            owner: 0,
+            weapon: NameIndex(0),
+            shape: None,
+            target: None,
+            aimed_at_player: false,
+            motion: Motion::of(position, [0., 0., 1_000.]),
+            direction: [0, 0],
+        })
+    }
+
+    /// The seeker view starts its static when a weapon leaves the picture.
+    /// Online, a flying weapon never leaves it for want of an update: lost
+    /// or late snapshots (and the host's budget and priority, which only
+    /// delay a record) leave the weapon drawn, extrapolated, until the host
+    /// sends its removal (the weapon ended).
+    #[test]
+    fn an_own_missile_stays_drawn_through_lost_snapshots_until_its_removal() {
+        let mut interp = Interpolator::new(4);
+        let z = |t: f64| [0., 5_000., 1_000. * t / 120.];
+        for tick in [0, 4, 8] {
+            interp.receive(&snapshot(tick, &[(9, missile(z(f64::from(tick))))]));
+        }
+        // Snapshots 12 to 44 lost (eight in a row), then one arrives late.
+        for render in (8..=44).map(f64::from) {
+            let drawn = interp.draw(render, 0, &no_names);
+            assert_eq!(drawn.projectiles.len(), 1, "gone at tick {render}");
+        }
+        interp.receive(&snapshot(48, &[(9, missile(z(48.)))]));
+        assert_eq!(interp.draw(48., 0, &no_names).projectiles.len(), 1);
+        // Only the removal ends it, at the tick the host removed it.
+        interp.receive(&ReceivedSnapshot {
+            tick: 60,
+            removed: vec![EntityKey {
+                kind: EntityKind::Projectile,
+                id: 9,
+            }],
+            ..ReceivedSnapshot::default()
+        });
+        assert_eq!(interp.draw(59., 0, &no_names).projectiles.len(), 1);
+        assert!(interp.draw(60., 0, &no_names).projectiles.is_empty());
+        // A removal that arrives before an older state does not end it.
+        let mut early = Interpolator::new(4);
+        early.receive(&snapshot(0, &[(9, missile(z(0.)))]));
+        early.receive(&snapshot(8, &[(9, missile(z(8.)))]));
+        early.receive(&ReceivedSnapshot {
+            tick: 4,
+            removed: vec![EntityKey {
+                kind: EntityKind::Projectile,
+                id: 9,
+            }],
+            ..ReceivedSnapshot::default()
+        });
+        assert_eq!(early.draw(10., 0, &no_names).projectiles.len(), 1);
+    }
+
     #[test]
     fn a_removed_entity_is_drawn_until_the_removal_and_then_not() {
         let mut interp = Interpolator::new(4);

@@ -921,7 +921,9 @@ beyond them.
   (how many were knocked down, in how many changes, from which tick). A
   raid that flattens 500 buildings costs about 4 KB. `TORE_REPLAY_CITY=0`
   replays a recording as an older build would, without them (a developer
-  aid).
+  aid). Each entry's tick is also when its buildings began to burn: the
+  viewer ages every burning building's smoke column from the tick it fell
+  on (nr-fx4, below), so no extra data is stored.
 - The air-to-ground round (slice RA) adds events and a weapon class and **no
   format change**: a recording is still format 3 with surface content and
   format 2 without, and both versions open unchanged. See
@@ -1513,7 +1515,10 @@ under the playhead:
 - The city fill as the recording left it at the tick shown (nr-fx3): its
   knocked-down buildings flat and burning, read once from the city section
   when the recording opens; seeking or playing backwards stands them up
-  again. At night every explosion and fire also glows, to the limit of the
+  again. Each burning building's smoke column is as tall and dense as it
+  was at that tick, however the playhead got there: its age is the tick
+  shown less the tick the building fell on, so a seek, a jump back and a
+  play-through draw the same smoke (nr-fx4, John 2026-10-13). At night every explosion and fire also glows, to the limit of the
   night scene, as in flight ([night glow](spec/explosions.md#night-glow)).
 - Chaff clouds and burning flares with their smoke trails and glare,
   flown again from their recorded releases
@@ -1798,11 +1803,20 @@ about 1,200 ticks a frame, frames take about 2 ms more.
   recording never named (one that never fired and was not destroyed) is not
   in the registry, and a recording of a world from before format 3 has none
   of this: its columns stay where the scenery put them.
-- A burning city fill building's smoke column runs on the viewer's own
-  clock, as in flight (nr-fx2): after a seek the buildings knocked down at
-  that point burn at once, but their columns start again from the ground
-  and take about 44 seconds to stand. Their fires and glow are there at
-  once.
+- A burning city fill building's smoke column is computed from the tick
+  its building fell on (nr-fx4; it ran on the viewer's own clock before),
+  so after any seek every burning block shows the column it would have had
+  playing straight through, at the same height and density. The same holds
+  for a destroyed unit's wreck column (from its recorded death tick) and
+  for crash-site, building, vehicle and hulk fire columns (puffs rebuilt
+  from their recorded release ticks). Where a recording has no tick to
+  start from, the column starts warm: a unit that was already dead when the
+  recording began (its column starts at the first recorded tick), and a
+  building that was already flat when a network seat joined (it stands flat
+  from the replay's first tick, so a seek within the first minute after
+  that shows a young column the live game would have shown grown). A flame
+  still flickers on the viewer's clock, so two stills of one tick differ in
+  about a hundred flame pixels.
 
 ## Debug panels
 

@@ -1894,7 +1894,13 @@ plan is the reel director's (`--reel-render`, one frame a line: tick,
 anchor, eye, target, field of view, visual time in minutes or -1, view,
 rate, fixed-eye tick or -1); anchor 4294967294 puts the eye and target in
 world feet. A plan's rows may jump backwards, which is how the stills check a
-seek.
+seek. When the city fill has burning buildings a frame also prints a `Replay
+city smoke: tick T burning N fires F puffs P tallest H ft digest D` line: what
+the burning city drew in numbers (the digest covers every puff), so a seek and
+a play-through can be compared as text (nr-fx4, scenario
+`replay-city-smoke-seek`). `TORE_REPLAY_CITY_CLOCK=0` ages the columns on the
+wall clock from the moment each is first seen, as before nr-fx4 (a developer
+aid for before pictures).
 
 The per-theater acceptance run ([baseline](baselines/surface-defenses.md)) adds
 `--shuttle` (fly the line back and forth across the site for the whole run, so

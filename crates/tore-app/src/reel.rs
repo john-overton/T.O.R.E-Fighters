@@ -406,6 +406,13 @@ pub fn stills() -> AppResult<()> {
     for (index, frame) in plan.iter().enumerate() {
         let previous = index.checked_sub(1).map(|i| &plan[i]);
         let pixels = viewer.director_frame(&mut gpu, frame, previous, &audio)?;
+        let city = gpu.sim.city_report();
+        if city.burning > 0 {
+            println!(
+                "Replay city smoke: tick {} burning {} fires {} puffs {} tallest {:.1} ft digest {:016x}",
+                frame.tick, city.burning, city.fires, city.puffs, city.tallest_ft, city.digest
+            );
+        }
         let path = out.join(format!("still-{index:02}-t{}.png", frame.tick));
         std::fs::write(
             &path,

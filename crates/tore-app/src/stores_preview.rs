@@ -24,7 +24,7 @@ use tore_sim::{
 const HEIGHT_FT: f64 = 4000.;
 
 /// The aircraft drawn, with a short file name each.
-const AIRCRAFT: [(AircraftId, &str); 12] = [
+const AIRCRAFT: [(AircraftId, &str); 13] = [
     (AircraftId::F18, "f18d"),
     (AircraftId::F16C, "f16c"),
     (AircraftId::F14, "f14"),
@@ -37,6 +37,7 @@ const AIRCRAFT: [(AircraftId, &str); 12] = [
     (AircraftId::F4J, "f4j"),
     (AircraftId::F4E, "f4e"),
     (AircraftId::Rafale, "rafale"),
+    (AircraftId::F4B, "f4b"),
 ];
 
 /// Camera eye and look point, feet right, up and forward of the aircraft,
@@ -87,12 +88,23 @@ pub fn run() -> AppResult<()> {
     {
         let airframe = crate::aircraft::Airframe::load(resources, id)?;
         let profile = Aircraft::parse(resources.get(id.pt()).ok_or("missing aircraft record")?)?;
-        let config = live::Configuration::from_source(&profile, |name| {
+        let mut config = live::Configuration::from_source(&profile, |name| {
             resources
                 .get(name)
                 .cloned()
                 .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
         })?;
+        // `TORE_STORES_PREVIEW_COUNTS=f18d:2=8,a10:1=6` loads those
+        // stations with that many stores (a rack close-up); the output
+        // names carry `-n<station>x<count>` for each.
+        let mut short = short.to_owned();
+        for (station, count) in counts(&short) {
+            if let Some(s) = config.stations.get_mut(station) {
+                s.count = count;
+                short = format!("{short}-n{station}x{count}");
+            }
+        }
+        let short = short.as_str();
         for (index, h) in profile.hardpoints.iter().enumerate() {
             println!(
                 "Stores preview: {short} hardpoint {index} at {:?} pylon top {:?}",
@@ -133,6 +145,10 @@ pub fn run() -> AppResult<()> {
                 points.join("; ")
             );
         }
+        println!(
+            "Stores preview: {short} external fuel {:.0} lb",
+            config.external_fuel_lbs.iter().sum::<f64>()
+        );
         for t in &config.tanks {
             println!(
                 "Stores preview: {short} tank hardpoint {} x{} record {:.2?} over {:?}",
@@ -214,16 +230,43 @@ pub fn run() -> AppResult<()> {
             })
             .max_by_key(|s| s.count)
             .map(|s| s.release_point(0));
-        let close = [("tip", tip), ("wing", wing), ("fuselage", fuselage)];
+        // The station with the most stores on one pylon (a rack).
+        let rack = external
+            .iter()
+            .filter(|s| s.rack.location() != tore_sim::combat::hardpoints::Location::Wingtip)
+            .map(|s| {
+                let per_side = s.rack.sides(s.mount, s.count)[0].max(1);
+                (per_side / s.rack.pylons(per_side), s)
+            })
+            .filter(|(on, _)| *on >= 2)
+            .max_by_key(|(on, _)| *on)
+            .map(|(_, s)| s.release_point(0));
+        let close = [
+            ("tip", tip),
+            ("wing", wing),
+            ("fuselage", fuselage),
+            ("rack", rack),
+        ];
         for (name, target) in close {
             let Some(t) = target else { continue };
             let t = [t[0].abs(), t[1], t[2]];
-            for (view, eye) in [
-                ("front", [t[0] + 7., t[1] - 6., t[2] + 22.]),
-                ("rear", [t[0] + 5., t[1] - 7., t[2] - 22.]),
-                ("ahead", [t[0] + 0.5, t[1] - 0.5, t[2] + 30.]),
-                ("side", [t[0] + 18., t[1] - 5., t[2]]),
-            ] {
+            let views = if name == "rack" {
+                // Close in on the bar: straight ahead, behind and below.
+                [
+                    ("front", [t[0] + 2., t[1] - 4., t[2] + 18.]),
+                    ("rear", [t[0] + 2.5, t[1] - 4.5, t[2] - 18.]),
+                    ("ahead", [t[0] + 0.2, t[1] - 1., t[2] + 22.]),
+                    ("side", [t[0] + 5., t[1] - 13., t[2] + 1.]),
+                ]
+            } else {
+                [
+                    ("front", [t[0] + 7., t[1] - 6., t[2] + 22.]),
+                    ("rear", [t[0] + 5., t[1] - 7., t[2] - 22.]),
+                    ("ahead", [t[0] + 0.5, t[1] - 0.5, t[2] + 30.]),
+                    ("side", [t[0] + 18., t[1] - 5., t[2]]),
+                ]
+            };
+            for (view, eye) in views {
                 render(
                     &mut gpu,
                     &mut scenery,
@@ -297,6 +340,20 @@ pub fn run() -> AppResult<()> {
         }
     }
     Ok(())
+}
+
+/// The `TORE_STORES_PREVIEW_COUNTS` entries for aircraft `short`:
+/// (station index, store count).
+fn counts(short: &str) -> Vec<(usize, u16)> {
+    std::env::var("TORE_STORES_PREVIEW_COUNTS")
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|entry| {
+            let (aircraft, load) = entry.split_once(':')?;
+            let (station, count) = load.split_once('=')?;
+            (aircraft == short).then_some((station.parse().ok()?, count.parse().ok()?))
+        })
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -391,6 +448,11 @@ pub fn sizes() -> AppResult<()> {
             let f = crate::store_sizes::body(&fitted);
             println!("fit\t{key}\t{shape_name}\tretail {b:.2?}\tfitted {f:.2?}");
         }
+        println!(
+            "fins\t{key}\t{shape_name}\tclock {:.1?}\troll {:.1}",
+            crate::store_sizes::fin_clock(&shape),
+            crate::store_sizes::carried_roll(&shape)
+        );
         let [low, high] = bounds(
             shape
                 .faces

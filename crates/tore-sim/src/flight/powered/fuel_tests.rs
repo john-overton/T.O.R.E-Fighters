@@ -55,7 +55,10 @@ fn a_hover_burns_what_the_rotor_draws_not_the_records_flow() {
             (burned / 5. / flow - 1.).abs() < 0.05,
             "{id:?} burned {burned} lb in 5 s at {flow} lb/s"
         );
-        assert!(flow < 1., "{id:?} hover flow {flow}");
+        // The V-22 is three times the helicopters' size since slice HF3 (the
+        // MV-22B's weights and 11,316 hp): about 1.4 lb/s at a hover.
+        let most = if id == AircraftId::V22 { 2. } else { 1. };
+        assert!(flow < most, "{id:?} hover flow {flow}");
     }
 }
 
@@ -114,17 +117,41 @@ fn every_rotorcraft_lasts_over_an_hour_at_a_hover_and_cruise_beats_hover() {
     }
 }
 
+/// Slice HF3 (John, 2026-10-13): the AI plans with the level flow at its
+/// cruise home, 80 percent of the envelope's top speed (the V-22 on its
+/// downstops), at sea level, whatever the moment's power.
 #[test]
-fn planning_uses_a_steady_hover_flow() {
+fn planning_uses_a_steady_cruise_flow() {
     for id in ROTORCRAFT {
         let s = burning(id);
         let plan = s.endurance_flow_lbs_per_second();
-        let hover_flow = s.rotorcraft_fuel_flow().unwrap();
-        // The planning figure is the hover flow, whatever the moment's power.
-        assert!((plan / hover_flow - 1.).abs() < 0.05, "{id:?}");
+        let c = s.model().configuration();
+        let top = c
+            .aerodynamics
+            .envelopes
+            .iter()
+            .filter_map(|e| e.speeds(0.))
+            .map(|(_, high)| high)
+            .fold(0_f64, f64::max);
+        let speed = top * crate::ai::route::ROTORCRAFT_CRUISE_FRACTION;
+        let mut level = s.clone();
+        level.position[1] = 0.;
+        let trimmed = if level.model().powered_lift().unwrap().tiltrotor.is_some() {
+            level.trim_tiltrotor(speed, 0.)
+        } else {
+            level.trim_single_rotor(speed) || level.trim_tandem(speed)
+        };
+        assert!(trimmed, "{id:?} trims at {speed} ft/s");
+        let cruise_flow = level.rotorcraft_fuel_flow().unwrap();
+        assert!(
+            (plan / cruise_flow - 1.).abs() < 0.02,
+            "{id:?} plan {plan} against cruise {cruise_flow}"
+        );
+        assert!(s.rotor_fuel().unwrap().cruise_power.is_some(), "{id:?}");
+        // Steady: the same at a hover and in level flight at 100 kt.
         let fast = cruising(id, 100.);
         assert!(
-            (fast.endurance_flow_lbs_per_second() / plan - 1.).abs() < 0.05,
+            (fast.endurance_flow_lbs_per_second() / plan - 1.).abs() < 0.01,
             "{id:?}"
         );
     }

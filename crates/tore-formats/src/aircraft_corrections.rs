@@ -1,8 +1,8 @@
 //! Corrections to retail aircraft records that are plainly copied from another
-//! aircraft (slice HF3, John's request of 2026-10-13: "V-22 tank: fix (real
-//! fuel)"; slice nr-rec added the Su-25, MiG-17F and C-130 rows for "Su-25
-//! record: fix, and check every other record for copying",
-//! docs/spec/aircraft-records.md). See [aircraft records](../../../docs/formats/aircraft.md#rotorcraft-fuel-records).
+//! aircraft (slice HF3, John's requests of 2026-10-13: "V-22 tank: fix (real
+//! fuel)", and "check other records for copying issues as well", which gave
+//! the CH-47 its own weights; slice nr-rec added the Su-25, MiG-17F and C-130
+//! rows, docs/spec/aircraft-records.md). See [aircraft records](../../../docs/formats/aircraft.md#rotorcraft-fuel-records).
 //!
 //! A correction applies only when every value it replaces still holds the
 //! copied retail number, so a different or edited record is read as it is.
@@ -52,9 +52,23 @@ pub const V22_MAX_TAKEOFF_LB: i32 = 52_600;
 /// the flight watch).
 pub const V22_THRUST_LBF: i32 = 58_057;
 
+/// The CH-47's empty weight, lb: the CH-47F's 24,578 lb (Pub, Wikipedia
+/// "Boeing CH-47 Chinook", specifications). The record carries the Mi-24
+/// record's 18,078 lb.
+pub const CH47_EMPTY_LB: i32 = 24_578;
+/// The CH-47's internal fuel, lb: the CH-47F's 1,080 US gallons (Pub,
+/// Wikipedia) at 6.8 lb a gallon (JP-5). The record carries the Mi-24's
+/// 3,307 lb (1,500 kg).
+pub const CH47_INTERNAL_FUEL_LB: i32 = 7_340;
+/// The CH-47's maximum takeoff weight, lb: the CH-47F's 54,000 lb gross
+/// weight (Pub, Wikipedia; the rotor model already scaled its power by it).
+/// The record carries the Mi-24's 28,660 lb.
+pub const CH47_MAX_TAKEOFF_LB: i32 = 54_000;
+
 // About 12,000 lb of fuel, and empty plus fuel within the maximum.
 const _: () = assert!(V22_INTERNAL_FUEL_LB > 11_000 && V22_INTERNAL_FUEL_LB < 12_500);
 const _: () = assert!(V22_EMPTY_LB + V22_INTERNAL_FUEL_LB < V22_MAX_TAKEOFF_LB);
+const _: () = assert!(CH47_EMPTY_LB + CH47_INTERNAL_FUEL_LB < CH47_MAX_TAKEOFF_LB);
 
 /// Su-25 Frogfoot-A (slice nr-rec): SU25.PT carries SU24.PT's empty weight,
 /// fuel, maximum takeoff weight, thrust and dry flow word for word. Published
@@ -113,6 +127,29 @@ pub const CORRECTIONS: &[Correction] = &[
         key: "thrust",
         retail: 26_280,
         corrected: V22_THRUST_LBF,
+    },
+    // The CH-47's own thrust (135,795 lbf, implausible and set aside by the
+    // rotor model) is not a copy and stays.
+    Correction {
+        id: AircraftId::Ch47,
+        block: Block::Object,
+        key: "weight",
+        retail: 18_078,
+        corrected: CH47_EMPTY_LB,
+    },
+    Correction {
+        id: AircraftId::Ch47,
+        block: Block::Plane,
+        key: "internalFuel",
+        retail: 3_307,
+        corrected: CH47_INTERNAL_FUEL_LB,
+    },
+    Correction {
+        id: AircraftId::Ch47,
+        block: Block::Plane,
+        key: "maxTakeoffWeight",
+        retail: 28_660,
+        corrected: CH47_MAX_TAKEOFF_LB,
     },
     Correction {
         id: AircraftId::Su25,
@@ -247,6 +284,34 @@ mod tests {
     }
 
     #[test]
+    fn the_ch47_record_with_the_mi24s_weights_gets_the_ch47fs_but_the_mi24_keeps_its_own() {
+        let mi24 = || {
+            let object = BTreeMap::from([("weight".to_string(), token(18_078))]);
+            let plane = BTreeMap::from([
+                ("internalFuel".to_string(), token(3_307)),
+                ("maxTakeoffWeight".to_string(), token(28_660)),
+                ("thrust".to_string(), token(135_795)),
+            ]);
+            (object, plane)
+        };
+        let (mut object, mut plane) = mi24();
+        assert!(apply(AircraftId::Ch47, &mut object, &mut plane));
+        assert_eq!(object["weight"].number().unwrap(), CH47_EMPTY_LB);
+        assert_eq!(
+            plane["internalFuel"].number().unwrap(),
+            CH47_INTERNAL_FUEL_LB
+        );
+        assert_eq!(
+            plane["maxTakeoffWeight"].number().unwrap(),
+            CH47_MAX_TAKEOFF_LB
+        );
+        assert_eq!(plane["thrust"].number().unwrap(), 135_795);
+        let (mut object, mut plane) = mi24();
+        assert!(!apply(AircraftId::Mi24, &mut object, &mut plane));
+        assert_eq!(object["weight"].number().unwrap(), 18_078);
+    }
+
+    #[test]
     fn a_record_that_differs_from_the_copy_is_left_as_it_is() {
         let (mut object, mut plane) = v22(2_001);
         assert!(!apply(AircraftId::V22, &mut object, &mut plane));
@@ -257,6 +322,7 @@ mod tests {
         assert!(!apply(AircraftId::Ah64, &mut object, &mut plane));
         assert_eq!(plane["thrust"].number().unwrap(), 26_280);
     }
+
     #[test]
     fn the_su25_loses_the_su24s_numbers() {
         let object = BTreeMap::from([("weight".to_string(), token(41_885))]);

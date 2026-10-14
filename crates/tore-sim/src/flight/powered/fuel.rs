@@ -17,14 +17,28 @@
 //! hover, a cruise less, a flare more, and an engine on the ground with the
 //! collective down only the idle share.
 //!
-//! The AI and the crew voice plan with one steady figure instead (the flow in
-//! a hover at the aircraft's weight): a planning figure that follows the
-//! moment's power would move the bingo line with every climb and descent.
+//! The AI and the crew voice plan with one steady figure instead: a planning
+//! figure that follows the moment's power would move the bingo line with
+//! every climb and descent. Since slice HF3 (John, 2026-10-13: "helicopter
+//! bingo planned at cruise flow") that figure is the flow at the AI's cruise
+//! home, [`crate::ai::route::ROTORCRAFT_CRUISE_FRACTION`] of the envelope's
+//! top speed, level at sea level, worked out once when the model is built
+//! ([`cruise_power`]) and scaled with the weight. Slice HF2 planned at the
+//! hover flow, which sent helicopters home early.
 
-use super::{helicopter::SingleRotor, tandem::Tandem, tiltrotor::Tiltrotor};
+use super::{
+    helicopter::SingleRotor,
+    rotor::{self, Hazards},
+    tandem::Tandem,
+    tiltrotor::Tiltrotor,
+};
 use crate::{
     flight::State,
-    models::{FlightModel, variety::LiftKind},
+    models::{
+        FlightModel,
+        config::Configuration,
+        variety::{LiftKind, PoweredLift},
+    },
 };
 
 /// Specific fuel consumption at rated power, pounds an hour per shaft
@@ -52,6 +66,9 @@ pub struct RotorFuel {
     pub hover_power: f64,
     /// Empty plus full internal fuel, lb.
     pub reference_weight: f64,
+    /// Level cruise power at the reference weight, ft·lbf/s
+    /// ([`cruise_power`]); none when no level trim was found there.
+    pub cruise_power: Option<f64>,
 }
 
 impl RotorFuel {
@@ -72,6 +89,74 @@ impl RotorFuel {
         let ratio = (weight / self.reference_weight.max(1.)).max(0.);
         self.flow(self.hover_power * ratio.powf(1.5))
     }
+
+    /// Pounds a second the AI plans with at `weight` lb (slice HF3): the
+    /// level cruise flow, its power in proportion to the weight (**fitted**:
+    /// at cruise most of the power is profile and parasite drag, which the
+    /// weight barely moves, so this errs high for a heavy aircraft and low
+    /// for a light one by a few percent), or the hover flow when the model
+    /// has no cruise trim.
+    pub fn planning_flow(&self, weight: f64) -> f64 {
+        match self.cruise_power {
+            Some(power) => {
+                let ratio = (weight / self.reference_weight.max(1.)).max(0.);
+                self.flow(power * ratio)
+            }
+            None => self.hover_flow(weight),
+        }
+    }
+}
+
+/// The power a helicopter or the V-22 draws flying level at the AI's cruise
+/// home ([`crate::ai::route::ROTORCRAFT_CRUISE_FRACTION`] of its envelope's
+/// top speed at sea level, the V-22 with its nacelles on the downstops) at
+/// empty plus full internal fuel, sea level, ft·lbf/s; none for any other
+/// aircraft or when the trim finds no level flight there. Sea level, where a
+/// rotorcraft's cruise costs most, keeps the planning on the safe side.
+pub fn cruise_power(lift: &PoweredLift, c: &Configuration) -> Option<f64> {
+    lift.rotor?;
+    if lift.kind == LiftKind::VectorJet {
+        return None;
+    }
+    let top = c
+        .aerodynamics
+        .envelopes
+        .iter()
+        .filter_map(|e| e.speeds(0.))
+        .map(|(_, high)| high)
+        .fold(f64::NEG_INFINITY, f64::max);
+    if !top.is_finite() || top <= 0. {
+        return None;
+    }
+    let speed = top * crate::ai::route::ROTORCRAFT_CRUISE_FRACTION;
+    let weight = c.mass.empty_lbs + c.mass.internal_fuel_lbs;
+    let density = rotor::sea_level_density();
+    let level = tore_input::StabilityLevel::Off;
+    let power = if let Some(heli) = SingleRotor::new(lift, c) {
+        heli.trim_with(Hazards::ALL, weight, 0., speed, density, 1., level)?
+            .engine_power
+    } else if let Some(model) = Tandem::new(lift, c) {
+        model
+            .trim_with(Hazards::ALL, weight, 0., speed, density, 1., level)?
+            .engine_power
+    } else {
+        let model = Tiltrotor::new(lift, c)?;
+        let available = model.drive.available_power(density, 1., 1.);
+        model
+            .trim(
+                Hazards::ALL,
+                weight,
+                0.,
+                speed,
+                0.,
+                0.,
+                1.,
+                level,
+                available,
+            )?
+            .engine_power
+    };
+    (power.is_finite() && power > 0.).then_some(power)
 }
 
 impl State {
@@ -96,6 +181,7 @@ impl State {
             rated_power: drive.rated_power,
             hover_power: drive.hover_power,
             reference_weight,
+            cruise_power: self.model().rotor_cruise_power(),
         })
     }
 
@@ -112,12 +198,12 @@ impl State {
 
     /// The flow the AI and the crew voice plan endurance with, pounds a
     /// second: the throttle times the military flow for an aeroplane (the
-    /// B48 host rule, floored at 10 percent throttle), the hover flow at the
-    /// aircraft's weight now for a rotorcraft (**fitted**, steady, and a
-    /// pessimistic planning figure: cruise burns less).
+    /// B48 host rule, floored at 10 percent throttle), the level cruise flow
+    /// at the aircraft's weight now for a rotorcraft
+    /// ([`RotorFuel::planning_flow`], **fitted**, steady).
     pub fn endurance_flow_lbs_per_second(&self) -> f64 {
         let flow = match self.rotor_fuel() {
-            Some(fuel) => fuel.hover_flow(
+            Some(fuel) => fuel.planning_flow(
                 self.model().configuration().mass.empty_lbs + self.fuel + self.carried_lbs(),
             ),
             None => {
@@ -137,7 +223,7 @@ impl State {
     pub fn full_tank_endurance_flow_lbs_per_second(&self) -> f64 {
         let c = self.model().configuration();
         let flow = match self.rotor_fuel() {
-            Some(fuel) => fuel.hover_flow(c.mass.empty_lbs + c.mass.internal_fuel_lbs),
+            Some(fuel) => fuel.planning_flow(c.mass.empty_lbs + c.mass.internal_fuel_lbs),
             None => c.propulsion.military_fuel_lbs_per_second * self.throttle.max(0.1),
         };
         flow.max(crate::ai::mission::MINIMUM_FUEL_FLOW_LBS_PER_S)
@@ -152,6 +238,7 @@ mod tests {
         rated_power: 1_000_000.,
         hover_power: 600_000.,
         reference_weight: 20_000.,
+        cruise_power: Some(400_000.),
     };
 
     #[test]
@@ -162,6 +249,21 @@ mod tests {
         assert!(FUEL.flow(0.) < FUEL.flow(400_000.));
         assert!(FUEL.flow(400_000.) < FUEL.flow(600_000.));
         assert!(FUEL.flow(600_000.) < rated);
+    }
+
+    #[test]
+    fn planning_takes_the_cruise_flow_scaled_by_weight_or_else_the_hover() {
+        assert!((FUEL.planning_flow(20_000.) - FUEL.flow(400_000.)).abs() < 1e-12);
+        assert!((FUEL.planning_flow(10_000.) - FUEL.flow(200_000.)).abs() < 1e-12);
+        assert!(FUEL.planning_flow(20_000.) < FUEL.hover_flow(20_000.));
+        let hover_only = RotorFuel {
+            cruise_power: None,
+            ..FUEL
+        };
+        assert_eq!(
+            hover_only.planning_flow(18_000.),
+            hover_only.hover_flow(18_000.)
+        );
     }
 
     #[test]

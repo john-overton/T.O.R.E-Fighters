@@ -537,9 +537,9 @@ live in `crates/tore-sim/src/models/variety/lift.rs`.
 
 | | AV-8 | Yak-141 | V-22 | AH-64 | Mi-24 | CH-47 |
 | --- | --- | --- | --- | --- | --- | --- |
-| Empty / internal fuel / max takeoff, lb (PT) | 13,968 / 7,759 / 31,000 | 25,685 / 9,700 / 42,990 | 18,298 / 2,000 / 23,810 | 18,298 / 2,000 / 23,810 | 18,078 / 3,307 / 28,660 | 18,078 / 3,307 / 28,660 |
-| PT thrust, lbf | 33,800 | 19,840 dry, 34,170 burner | 26,280 | 26,280 | 35,691 | 135,795 (implausible, set aside) |
-| Thrust or power used | PT thrust, vertical efficiency 0.75 (Fit) | PT thrust, efficiency 0.92 (Fit), lift engines 18,000 lbf | 5,122 hp: 2 x 6,150 shp (Pub) x 0.92 x 23,810 / 52,600 (Fit) | Hover-thrust rule from the PT: 3,668 hp (Derived) | 3,315 hp: 2 x 2,225 shp (Pub) x 0.745 (Fit to the 4,915 ft hover ceiling) | 3,001 hp: 2 x 4,733 shp (Pub) x 0.82 (Fit) x (28,660 / 54,000)^1.5 |
+| Empty / internal fuel / max takeoff, lb (PT) | 13,968 / 7,759 / 31,000 | 25,685 / 9,700 / 42,990 | 31,818 / 11,700 / 52,600 (Pub, slice HF3: the PT's 18,298 / 2,000 / 23,810 are the AH-64's, corrected at the reader) | 18,298 / 2,000 / 23,810 | 18,078 / 3,307 / 28,660 | 24,578 / 7,340 / 54,000 (Pub, slice HF3: the PT's 18,078 / 3,307 / 28,660 are the Mi-24's, corrected at the reader) |
+| PT thrust, lbf | 33,800 | 19,840 dry, 34,170 burner | 58,057 (the PT's 26,280 scaled with the maximum weight; not used by the rotors) | 26,280 | 35,691 | 135,795 (implausible, set aside) |
+| Thrust or power used | PT thrust, vertical efficiency 0.75 (Fit) | PT thrust, efficiency 0.92 (Fit), lift engines 18,000 lbf | 11,316 hp: 2 x 6,150 shp (Pub) x 0.92 x the maximum weight over 52,600 lb (Fit; 1 with the corrected record, 5,122 hp before slice HF3) | Hover-thrust rule from the PT: 3,668 hp (Derived) | 3,315 hp: 2 x 2,225 shp (Pub) x 0.745 (Fit to the 4,915 ft hover ceiling) | 7,762 hp: 2 x 4,733 shp (Pub) x 0.82 (Fit) x (maximum weight / 54,000)^1.5, 1 with the corrected record (3,001 hp before slice HF3) |
 | Rotor radius, ft | | | 19.04, two (Pub) | 24.0 (Pub) | 28.4 (Pub) | 30.0, two (Pub) |
 | Rotor speed, rpm | | | 397, 84 percent on the downstops (Pub) | 289 (Derived from 727 ft/s) | 240 (Pub) | 225 (Fit) |
 | Solidity | | | 0.105 (Pub) | 0.0928 (Pub) | 0.078 (Fit) | 0.062 (Fit) |
@@ -558,20 +558,70 @@ for the AH-64, V-22, Mi-24 and CH-47) is not read. The burn is the turboshaft li
 the rated power and the power the drive delivers (0.22 of full flow at idle, full flow
 at rated power, 0.6 lb/(hp h) at rated), specified with its numbers in the
 [flight model](../FLIGHT-MODEL.md#rotorcraft-fuel). Results: hover 0.35 to 0.54 lb/s, a
-cruise at 100 kt 20 to 40 percent less; tanks last 62 to 156 minutes at a hover. The
-V-22 keeps the PT's AH-64 clone tank (2,000 lb, the real aircraft carries about six
-times that). The AV-8 and Yak-141 keep the record's flow.
+cruise at 100 kt 20 to 40 percent less; tanks last 62 to 156 minutes at a hover. The AV-8 and Yak-141 keep the record's flow.
+
+**V-22 at its real weight (slice HF3, John 2026-10-13: "V-22 tank: fix (real fuel) and
+retune its rotor model").** The PT's tank and weights were the AH-64's; the reader now
+gives the V-22 the MV-22B's (table above,
+[record correction](../formats/aircraft.md#rotorcraft-fuel-records)). The rotor model
+was retuned for it (agent decisions, fitted): the full power of the two engines (the
+power share no longer shrinks with the copied weight), the collective range widened to
+20 degrees so the gross weight hovers near 77 percent lever, and the forward flat-plate
+area refitted to the published 275 knot top speed. Measured with `powered_probe` on the
+retail record ([baseline](../baselines/rotorcraft-fuel.md#v-22-at-its-real-weight-slice-hf3)):
+
+| | Before (AH-64 copy) | Slice HF3 | Published (MV-22B) |
+| --- | --- | --- | --- |
+| Gross weight (empty plus full fuel), lb | 20,298 | 43,518 | |
+| Hover power at gross, sea level, share of rated | 52 percent | 64 percent | |
+| Hover lever at gross | 73 percent | 77 percent | |
+| Hover ceiling out of ground effect at gross / 47,000 lb / 52,600 lb, ft | 13,900 / none / 8,900 | 11,000 / 8,500 / 4,800 | 5,700 at 47,000 lb ISA (Bell), 14,200 light (Navy) |
+| Full-lever climb from a hover | 1,500 to 3,000 ft/min band | about 3,600 ft/min | 2,320 to 4,000 ft/min |
+| Conversion, keys held at 85 percent lever: downstops / 200 KCAS | 15.9 / 27.0 s | 16.8 / 27.1 s | |
+| Airplane-mode level top speed, sea level | 273 kt | 272 kt | 275 kt |
+| Slowest wingborne level flight (nose under 10 degrees) | 117 kt | 122 kt | |
+| Fuel: hover / 220 kt at 1,000 ft / 240 kt at 15,000 ft | 62 min at a hover | 142 / 168 / 187 min | about 3.5 h over the 879 nmi range |
+
+The hover ceiling at 47,000 lb is higher than Bell's 5,700 ft (Bell's figure may assume
+a lower rating or a warmer day); the model keeps the engines' published takeoff rating.
+The Easy flight physics cheat now stops a vortex ring sink at full lever in about 5
+seconds, not 3 (the heavier V-22 sinks faster and has less spare power).
+
+**CH-47 at its real weight (slice HF3, John 2026-10-13: "check other records for
+copying issues as well").** `CH47.PT` carried the Mi-24's empty weight, fuel and
+maximum weight; the reader now gives the CH-47F's (table above). The rotor model gets
+the engines' full power (the weight ratio in its power rule is now 1) and was retuned
+only as far as needed (agent decisions, fitted): collective to 17 degrees so it still
+hovers out of ground effect at 54,000 lb, the pitch's differential collective 1.32
+degrees (was 1.2) for the design's 25 deg/s hover pitch rate at the heavier inertia,
+and the forward flat plate 70 ft² for the published 170 kt.
+
+| | Before (Mi-24 copy) | Slice HF3 | Published (CH-47F) |
+| --- | --- | --- | --- |
+| Gross weight, lb | 21,385 | 31,918 | |
+| Hover at gross: share of rated power, collective | 63 percent, 45 percent | 38 percent, 51 percent | |
+| Hover ceiling out of ground effect at gross / maximum, ft | 15,700 / 4,600 | 23,800 / 7,700 | service ceiling 20,000 |
+| Level top speed, sea level, gross | 165 kt | 170 kt | 170 kt |
+| Vertical climb at full collective | 2,925 ft/min | 4,881 ft/min | 1,522 ft/min (at an unstated weight) |
+| Fuel: hover / 100 kt / planning cruise (156 kt) | 156 / 201 / 119 min | 182 / 232 / 148 min | 400 nmi range at 157 kt, about 2.5 h |
+
+With no cargo the CH-47F is a light aircraft for its engines (its gross weight is 59
+percent of its maximum), so it climbs hard and half its power still holds a hover, as
+one engine does in the real aircraft at that weight. Tests that assumed the old margin
+changed: full collective now climbs within 1,500 to 5,000 ft/min, the reduced-power
+test cuts to 30 percent, and with the Easy flight physics cheat (no retreating blade
+stall) power alone sets a top speed under 200 kt (the hazard's is 170).
 
 ### Fitted rotor constants
 
 | Constant | AH-64 | Mi-24 | CH-47 | V-22 |
 | --- | --- | --- | --- | --- |
-| Collective range, degrees | 1 to 15 | 1 to 16 | 1 to 14 | 0 to 12 (plus scheduled pitch) |
+| Collective range, degrees | 1 to 15 | 1 to 16 | 1 to 17 (1 to 14 before slice HF3) | 0 to 20 (plus scheduled pitch; 0 to 12 before slice HF3) |
 | Cyclic range, longitudinal / lateral, degrees | 12 / 22 | 9 / 20 | 8 / 9 | 8 / 8 |
 | Blowback | 0.05 | 0.05 | 0.12 | 0.1 |
 | Lock number | 2.4 | 3.5 | 4 | 4 |
 | Hub height above the centre of gravity, ft | 6.5 | 7.5 | 8 | 8 (mast) |
-| Forward flat-plate drag area, ft² | 65 | 34 | 38 | 22.5 |
+| Forward flat-plate drag area, ft² | 65 | 34 | 70 (38 before slice HF3) | 52 (22.5 before slice HF3) |
 | Tail rotor arm, ft | 30 | 34 | none | none |
 | Ground effect constant `k` | 2.7 | 2.7 | 2.7 | 2.7 |
 | Vortex ring rise | 1.3 | 1.3 | 2 | 1.3 |
@@ -582,8 +632,9 @@ inertias, the Harrier's real nozzle rate, the V-22's wing download and the
 vortex ring curve's coefficients (the commonly quoted quartic could not be traced;
 the curve is shaped after Castles and Gray). The ground effect form is the
 image-source model of Cheeseman and Bennett (ARC R&M 3021); its coefficient is
-fitted. The PT records of the V-22 and AH-64 carry identical flight fields and the
-CH-47's thrust is 4.7 times its maximum weight, so the overhaul sets the power
+fitted. The PT records of the V-22 and AH-64 carry identical flight fields, the CH-47's weights
+are the Mi-24's (both corrected at the reader since slice HF3) and the CH-47's thrust
+is 4.7 times its maximum weight, so the overhaul sets the power
 from published engines where the PT is implausible (above) and records each
 choice. The sources, with the verification table, are in the
 [overhaul baseline](../baselines/vtol-overhaul.md#sources).
