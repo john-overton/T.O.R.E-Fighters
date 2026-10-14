@@ -131,6 +131,26 @@ fn keyboard_binding_enabled(
     }
     airframes.contains(airframe) && !custom_keys.contains(&binding.control)
 }
+/// A hash of everything the aircraft filter reads from a profile: its
+/// bindings and device aliases. Any change to the binding set (a new
+/// resolver, a saved profile, gamepad defaults added) changes it, unlike the
+/// binding count it replaced, which two different profiles can share. It
+/// hashes the bindings' debug text straight into the hasher, with no
+/// allocation, as the filter check runs every frame.
+fn binding_set_hash(profile: &Profile) -> u64 {
+    use std::fmt::Write as _;
+    use std::hash::Hasher as _;
+    struct Feed(std::collections::hash_map::DefaultHasher);
+    impl std::fmt::Write for Feed {
+        fn write_str(&mut self, text: &str) -> std::fmt::Result {
+            self.0.write(text.as_bytes());
+            Ok(())
+        }
+    }
+    let mut feed = Feed(std::collections::hash_map::DefaultHasher::new());
+    let _ = write!(feed, "{:?}{:?}", profile.bindings, profile.aliases);
+    feed.0.finish()
+}
 pub const AUTO_GAMEPAD_PREFIX: &str = "auto-gamepad:";
 
 fn gamepad_binding_enabled(binding: &tore_input::Binding, roles: [bool; 4]) -> bool {
@@ -200,7 +220,9 @@ pub struct Input {
     pub resolver: Resolver,
     automatic: bool,
     gamepad_roles: [bool; 4],
-    filter_signature: Option<([bool; 4], usize)>,
+    /// The roles and the binding set ([`binding_set_hash`]) the aircraft
+    /// filter last ran for: it runs again when either changes.
+    filter_signature: Option<([bool; 4], u64)>,
     pub observed: Vec<Event>,
     profile_path: Option<std::path::PathBuf>,
     pub devices: BTreeMap<String, Device>,
@@ -648,7 +670,7 @@ impl Input {
     ) {
         self.gamepad_roles = [vectoring, conversion, collective, gunship];
         let roles = self.gamepad_roles;
-        let signature = (roles, self.resolver.profile.bindings.len());
+        let signature = (roles, binding_set_hash(&self.resolver.profile));
         if self.filter_signature == Some(signature) {
             return;
         }
@@ -1891,15 +1913,36 @@ mod tests {
         assert_eq!(i.frame(&BTreeSet::new(), 0.7).0.throttle, None);
         assert_eq!(i.frame(&BTreeSet::new(), 0.1).0.throttle, None);
     }
+    /// The aircraft filter runs again for a different binding set of the
+    /// same size: its cache once keyed on the binding count, so a new
+    /// resolver whose profile had as many bindings as the old one (the
+    /// gamepad defaults against the stock keys, once P was bound) kept every
+    /// binding unfiltered.
+    #[test]
+    fn the_aircraft_filter_reruns_for_a_new_binding_set_of_the_same_size() {
+        let a = "tore-input 1\nbind keyboard Ctrl-ArrowUp vector-pitch-rate negative\nbind keyboard Ctrl-ArrowUp trim-pitch-rate negative";
+        let b = "tore-input 1\nbind keyboard Ctrl-ArrowUp trim-pitch-rate negative\nbind keyboard Ctrl-ArrowUp vector-pitch-rate negative";
+        let (a, b) = (Profile::parse(a).unwrap(), Profile::parse(b).unwrap());
+        assert_eq!(a.bindings.len(), b.bindings.len());
+        assert_ne!(binding_set_hash(&a), binding_set_hash(&b));
+        assert_eq!(binding_set_hash(&a), binding_set_hash(&a.clone()));
+        let mut i = input("");
+        i.aircraft_controls(false, false, false, false);
+        let before = i.filter_signature;
+        let count = i.resolver.profile.bindings.len();
+        // Another profile with exactly as many bindings, swapped in.
+        let mut other = i.resolver.profile.clone();
+        other.bindings.reverse();
+        assert_eq!(other.bindings.len(), count);
+        i.resolver = Resolver::new(other);
+        i.aircraft_controls(false, false, false, false);
+        assert_ne!(i.filter_signature, before, "the filter ran again");
+    }
     #[test]
     fn aircraft_context_keeps_old_look_rudder_and_scopes_added_engine_neutral_commands() {
         let device = crate::controls_editor::preview_device();
         let mut i = input("");
         i.resolver = Resolver::new(gamepad_defaults(&device));
-        // A new resolver: the role filter must run again. Its cache keys on
-        // the roles and the binding count, which the gamepad profile could
-        // share with the stock one by chance (it did once P was bound).
-        i.filter_signature = None;
         i.devices.insert(device.id.clone(), device.clone());
         let event = |i: &mut Input, control: &str, value: f64| {
             i.resolver.event(Event {
