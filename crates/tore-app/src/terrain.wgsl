@@ -1,7 +1,8 @@
 struct Band { info:vec4<f32>, ramp:vec4<f32> }
 struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32>, ocean:vec4<f32>, cloud_reflection:vec4<f32>, view:vec4<f32>, quality:vec4<f32>, viewport:vec4<f32>, origin:vec4<f32>, local_eye:vec4<f32> }
-// quality: spotting aid strength (0 off), terrain filtering (0/1), reserved,
-// reserved. viewport: world image width and height in pixels, MSAA
+// quality: spotting aid strength (0 off), terrain filtering (0/1), thermal
+// sensor picture (0/1, see "Thermal sensor picture" at the end), the thermal
+// picture's reference brightness (sim_renderer.rs `thermal_reference`). viewport: world image width and height in pixels, MSAA
 // samples, render scale. See graphics.rs.
 // origin: the frame's render origin, a whole-foot point near the camera that
 // moving objects' vertices are relative to; local_eye: the camera relative to
@@ -103,7 +104,11 @@ struct VertexOut {
  @builtin(position) @invariant clip:vec4<f32>, @location(0) uv:vec2<f32>,
  @location(1) @interpolate(flat) layer:f32, @location(2) color:vec3<f32>, @location(3) distance:f32, @location(4) @interpolate(flat) own_color:f32, @location(5) altitude:f32, @location(6) direction:vec3<f32>, @location(7) @interpolate(flat) fog_enabled:u32, @location(8) @interpolate(flat) light_row:i32, @location(9) terrain_normal:vec3<f32>,
  // Color before the weather's shade remaps, for flare light.
- @location(10) albedo:vec3<f32>
+ @location(10) albedo:vec3<f32>,
+ // What the thermal picture takes the surface for: 0 the ground, a building
+ // or the airfield; 1 something running warm (aircraft, vehicles, men,
+ // weapons and debris: everything built relative to the render origin).
+ @location(11) @interpolate(flat) heat:f32
 }
 // Exact sRGB decoding includes the dark linear segment; source black stays zero.
 fn linear(c:vec3<f32>)->vec3<f32>{return select(pow((c+vec3<f32>(0.055))/1.055,vec3<f32>(2.4)),c/12.92,c<=vec3<f32>(0.04045));}
@@ -345,7 +350,9 @@ fn placed_vertex(position:vec3<f32>,p:vec3<f32>,uv:vec2<f32>,layer:f32,color:vec
 }
 // Aircraft, pilots, weapons and debris: `position` is relative to the origin.
 @vertex fn object_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32)->VertexOut {
- return placed_vertex(position+scene.origin.xyz,position-scene.local_eye.xyz,uv,layer,color,index);
+ var out=placed_vertex(position+scene.origin.xyz,position-scene.local_eye.xyz,uv,layer,color,index);
+ out.heat=1.0;
+ return out;
 }
 // City fill: a kit piece drawn per instance. `place.xyz` is the base
 // relative to the render origin and `place.w` the building's fixed hash;
@@ -419,12 +426,19 @@ fn fill_shadow(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,size:vec4<f32>,
  let grad=vec4<f32>(dpdx(in.uv),dpdy(in.uv));
  let receiver=surface_normal(in.direction);
  let normal=select(receiver,normalize(in.terrain_normal),dot(in.terrain_normal,in.terrain_normal)>0.1 && smooth_weather());
- if in.layer<0.0 {return scenery(aerial_perspective(surface_color(in.color,in.direction,normal,false,receiver,in.albedo),in.direction,in.altitude));}
+ if in.layer<0.0 {
+  if thermal_on() {return scenery(thermal_grey(thermal_ground(in.albedo,normal,in.direction,in.distance)));}
+  return scenery(aerial_perspective(surface_color(in.color,in.direction,normal,false,receiver,in.albedo),in.direction,in.altitude));
+ }
  var remaps=vec2<f32>(-1.0);
  if in.fog_enabled!=0u {remaps=ray_rows(in.distance,in.altitude);}
  let tex=filtered_tile(in.uv,grad,i32(in.layer),-1,in.light_row,remaps);
  // Fitted bilinear coverage boundary; discarded water writes no depth.
  if tex.a<0.5 {discard;}
+ if thermal_on() {
+  let bare=sample_tile(in.uv,i32(in.layer),base_row(),-1,-1,vec2<f32>(-1.0)).rgb;
+  return scenery(thermal_grey(thermal_ground(bare,normal,in.direction,in.distance)));
+ }
  var albedo=tex.rgb;
  if flares_burning() {albedo=sample_tile(in.uv,i32(in.layer),base_row(),-1,in.light_row,vec2<f32>(-1.0)).rgb;}
  return scenery(aerial_perspective(surface_color(tex.rgb,in.direction,normal,false,receiver,albedo),in.direction,in.altitude));
@@ -469,6 +483,7 @@ fn aircraft_color(in:VertexOut,normal:vec3<f32>)->vec4<f32>{
    color=mix(color,vec3<f32>(0.95,0.45,0.08)*(0.3+0.7*luminance),0.75);
   }
  }
+ if thermal_on() {return vec4<f32>(thermal_grey(thermal_object(in,albedo,normal)),1.0);}
  if textureDimensions(palette).y<=1u || (in.own_color>0.0 && in.layer<0.0 && in.layer != -2.0 && in.layer != -5.0) { color=mix(color,linear(scene.sky.rgb),haze(in.distance)); }
  if in.layer != -6.0 && in.layer != -7.0 && !(in.layer < -3.0 && in.layer >= -4.0) {color=surface_color(color,in.direction,normal,true,normal,albedo);}
  if in.fog_enabled!=0u {color=aerial_perspective(color,in.direction,in.altitude);}
@@ -495,7 +510,7 @@ fn aircraft_color(in:VertexOut,normal:vec3<f32>)->vec4<f32>{
  // The vertex color carries the gun's tracer brightness (1 for most guns,
  // 1.5 for the AC-130's 105 mm), already decoded to linear.
  let radiance=(core*vec3<f32>(1.0,0.92,0.68)+halo*vec3<f32>(1.0,0.25,0.025))*edge*ends*visibility*cloud*in.color.g;
- return vec4<f32>(radiance,0.0);
+ return thermal_light(vec4<f32>(radiance,0.0),1.0);
 }
 // Static world textures use index255/mask cutouts without opaque backing color.
 @fragment fn airport_solid_fragment(in:VertexOut)->@location(0) vec4<f32>{
@@ -530,6 +545,7 @@ fn aircraft_color(in:VertexOut,normal:vec3<f32>)->vec4<f32>{
 }
 fn fill_far_color(in:VertexOut)->vec4<f32>{
  let normal=surface_normal(in.direction);
+ if thermal_on() {return vec4<f32>(thermal_grey(thermal_object(in,in.albedo,normal)),1.0);}
  var color=in.color;
  if surface.sun.w>0.0 {
   let day=smoothstep(-0.104528,0.0348995,surface.reserved.y);
@@ -931,6 +947,7 @@ fn cloud_solar_glow(color:vec3<f32>,ray:vec3<f32>,visibility:f32)->vec3<f32> {
  var cloud_distance=2000000.0;
  if ray.y< -0.000001 {cloud_distance=min(cloud_distance,max(scene.eye.y,0.0)/(-ray.y));}
  color=cloud_occlusion(color,ray*cloud_distance,scene.eye.y+ray.y*cloud_distance);
+ if thermal_on() {return scenery(thermal_grey(thermal_sky(ray)));}
  return scenery(color);
 }
 struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32>, @location(1) distance:f32 }
@@ -943,6 +960,7 @@ struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32
  out.color=color;out.distance=length(p);return out;
 }
 @fragment fn vapor_fragment(in:VaporOut)->@location(0) vec4<f32>{
+ if thermal_on() {return vec4<f32>(thermal_grey(0.34),in.color.a*0.2*(1.0-haze(in.distance)));}
  // Vapor sits in the same atmosphere as everything else, so haze thins it too.
  // Resolve the fitted sky-entry material in this camera palette.
  return vec4<f32>(shade(254u,0).rgb*in.color.rgb,in.color.a*(1.0-haze(in.distance)));
@@ -955,7 +973,7 @@ struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32
  out.light_row=-1;out.fog_enabled=0u;out.uv=uv;out.layer=layer;out.color=shade(u32(index),0).rgb;out.distance=position.y;out.own_color=0.;out.altitude=position.y;out.direction=position;return out;
 }
 @fragment fn celestial_fragment(in:VertexOut)->@location(0) vec4<f32>{
- if celestial_occluded(normalize(in.direction)) {discard;}
+ if celestial_occluded(normalize(in.direction)) || thermal_on() {discard;}
  if in.layer>=0.0 {let tex=weather_tile(in.uv,i32(in.layer),0,-1,-1,vec2<f32>(-1.0));if tex.a<0.01 {discard;}return tex;}
  return vec4<f32>(in.color,1.0);
 }
@@ -971,6 +989,7 @@ fn cloud_lighting(color:vec3<f32>,direction:vec3<f32>,altitude:f32)->vec3<f32> {
  let tex=weather_tile(in.uv,i32(in.layer),0,-1,-1,ray_rows(in.distance,in.altitude));
  if tex.a<0.5 {discard;}
  var flares=vec3<f32>(0.0);
+ if thermal_on() {return scenery(thermal_grey(thermal_air(0.27,in.distance*0.5)));}
  if flares_burning() {flares=weather_tile(in.uv,i32(in.layer),base_row(),-1,-1,vec2<f32>(-1.0)).rgb*flare_light(in.direction,vec3<f32>(0.0));}
  return scenery(cloud_lighting(tex.rgb+flares,in.direction,in.altitude));
 }
@@ -1004,6 +1023,13 @@ struct SmokeOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, 
  // Glow lights the puff's own undarkened art, as flare light does elsewhere.
  var bare=color.rgb;
  if any(in.glow>vec3<f32>(0.0)) {bare=sample_tile(in.uv,0,base_row(),-1,-1,vec2<f32>(-1.0)).rgb*in.tint;}
+ if thermal_on() {
+  // A thermal camera sees through most smoke and dust; a puff lit by fire
+  // is warm.
+  let thin=alpha*0.35;
+  let v=thermal_air(0.30+min(thermal_luma(in.glow),0.2),in.distance);
+  return vec4<f32>(thermal_grey(v)*thin,thin);
+ }
  let lit=cloud_lighting(color.rgb,in.direction,in.altitude)+bare*in.glow*(1.0-clamp(haze(in.distance),0.0,1.0));
  return vec4<f32>(lit*alpha,alpha);
 }
@@ -1039,6 +1065,7 @@ struct EffectOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>,
 }
 @fragment fn effect_fragment(in:EffectOut)->@location(0) vec4<f32> {
  let clear=1.0-clamp(haze(in.distance),0.0,1.0);
+ if thermal_on() {return thermal_effect(in);}
  if in.emissive>0.5 {
   let color=sample_tile(in.uv,in.layer,base_row(),-1,-1,vec2<f32>(-1.0));
   let alpha=color.a*in.opacity*clear;
@@ -1052,5 +1079,104 @@ struct EffectOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>,
 
 // Source scenery lines are one-pixel strokes with the shared live palette/haze.
 @fragment fn scenery_line_fragment(in:VertexOut)->@location(0) vec4<f32> {
+ if thermal_on() {return scenery(thermal_grey(thermal_object(in,in.albedo,surface_normal(in.direction))));}
  return scenery(aerial_perspective(in.color,in.direction,in.altitude));
+}
+
+// ---- Thermal sensor picture (AC-130 sensor console, nr-fltv) -------------
+// With scene.quality.z set (`Camera::thermal`) every world fragment writes
+// its apparent temperature as a grey level: 0 coldest, 1 hottest, as the
+// display shows it in white-hot (the console's CRT pass inverts it for
+// black-hot). The levels are agent decisions (nr-fltv, 2026-10-13), fitted
+// on offscreen renders for a readable picture by day and by night: the
+// sky coldest; the ground and buildings cool with the texture's own
+// brightness as contrast, warmer where the sun falls by day; water cooler
+// than the land by day and warmer by night; anything running (aircraft,
+// vehicles, men) warm; engines, fires, explosions, muzzle flashes, tracers
+// and flares hot; a fresh crater warm, cooling over three minutes.
+fn thermal_on()->bool {return scene.quality.z>0.5;}
+// 0 at night, 1 by day, from the sun's height.
+fn thermal_day()->f32 {return smoothstep(-0.08,0.20,scene.sun.y);}
+fn thermal_luma(c:vec3<f32>)->f32 {return dot(c,vec3<f32>(0.2126,0.7152,0.0722));}
+// An art colour's brightness against the weather's daylight palette, so a
+// night weather's darker art keeps its contrast: 0.18 is the palette's
+// mean; the ground's art sits near 0.13 on this scale.
+fn thermal_albedo(c:vec3<f32>)->f32 {
+ return pow(clamp(0.18*thermal_luma(c)/max(scene.quality.w,0.0001),0.0,1.0),0.45);
+}
+// A level as the colour the target stores: the display grey, decoded so
+// the sRGB target shows it as written.
+fn thermal_grey(v:f32)->vec3<f32> {return linear(vec3<f32>(clamp(v,0.0,1.0)));}
+// The air in between: a thermal camera sees far through haze, but the
+// picture flattens toward the air's own level with distance.
+fn thermal_air(v:f32,distance:f32)->f32 {
+ let air=mix(0.30,0.36,thermal_day());
+ return mix(v,air,0.6*(1.0-exp(-distance/80000.0)));
+}
+// Patches a few hundred feet across (fields, soil, damp ground), -1..1:
+// value noise on the world position, so the ground reads as ground even
+// where its texture is plain.
+fn thermal_patches(direction:vec3<f32>)->f32 {
+ let p=(scene.eye.xz+direction.xz)/900.0;
+ let i=floor(p);let f=fract(p);let u=f*f*(3.0-2.0*f);
+ let h=vec4<f32>(water_hash(i),water_hash(i+vec2<f32>(1.0,0.0)),water_hash(i+vec2<f32>(0.0,1.0)),water_hash(i+vec2<f32>(1.0,1.0)));
+ return mix(mix(h.x,h.y,u.x),mix(h.z,h.w,u.x),u.y)*2.0-1.0;
+}
+// Open ground: the daylight texture's brightness as contrast (stretched:
+// a thermal camera's gain is set to the scene), patches, the sunny side
+// warmer by day, flatter at night.
+fn thermal_ground(albedo:vec3<f32>,normal:vec3<f32>,direction:vec3<f32>,distance:f32)->f32 {
+ let day=thermal_day();
+ let l=thermal_albedo(albedo);
+ let sun=max(dot(normal,normalize(scene.sun.xyz)),0.0)*day;
+ let patches=thermal_patches(direction)*mix(0.02,0.035,day);
+ let v=mix(0.33+0.8*(l-0.13),0.28+1.3*(l-0.13)+0.05*(sun-0.5),day)+patches;
+ return thermal_air(clamp(v,0.08,0.62),distance);
+}
+// Shapes: the warm class (see VertexOut.heat) and the cool one, with the
+// engines' own heat, flames and glass.
+fn thermal_object(in:VertexOut,albedo:vec3<f32>,normal:vec3<f32>)->f32 {
+ if in.layer == -6.0 || in.layer == -7.0 {return 1.0;}
+ if in.layer<=-3.0 && in.layer>=-4.0 {return thermal_air(0.86+0.14*clamp(-in.layer-3.0,0.0,1.0),in.distance);}
+ if in.layer == -5.0 {return thermal_air(0.40,in.distance);}
+ let day=thermal_day();
+ let l=thermal_albedo(albedo);
+ let sun=max(dot(normal,normalize(scene.sun.xyz)),0.0)*day;
+ var v=mix(0.33+0.5*(l-0.13),0.32+0.7*(l-0.13)+0.08*(sun-0.5),day);
+ if in.heat>0.5 {v=0.68+0.3*(l-0.13)+0.05*sun;}
+ return thermal_air(v,in.distance);
+}
+// The sky cold, warmer toward the horizon; water below it.
+fn thermal_sky(ray:vec3<f32>)->f32 {
+ let day=thermal_day();
+ if ray.y<0.0 {
+  let distance=max(scene.eye.y,1.0)/max(-ray.y,0.00001);
+  return thermal_air(mix(0.30,0.17,day),distance);
+ }
+ return 0.06+0.26*pow(1.0-clamp(ray.y,0.0,1.0),8.0);
+}
+// Light that adds to the picture (tracers, glows, flashes, flares): its
+// brightness, as heat.
+fn thermal_light(c:vec4<f32>,scale:f32)->vec4<f32> {
+ if !thermal_on() {return c;}
+ return vec4<f32>(thermal_grey(min(thermal_luma(c.rgb)*scale,1.0)),c.a);
+}
+// Explosions and fires hot; a crater warm while fresh (the instance's
+// emissive slot carries minus its freshness, effect_renderer.rs); dust
+// thin and cool.
+fn thermal_effect(in:EffectOut)->vec4<f32> {
+ if in.emissive>0.5 {
+  let color=sample_tile(in.uv,in.layer,base_row(),-1,-1,vec2<f32>(-1.0));
+  let alpha=color.a*in.opacity;
+  let v=thermal_air(0.80+0.20*thermal_luma(color.rgb),in.distance);
+  return vec4<f32>(thermal_grey(v)*alpha,alpha);
+ }
+ let color=sample_tile(in.uv,in.layer,base_row(),-1,-1,vec2<f32>(-1.0));
+ if in.emissive<0.0 {
+  let alpha=color.a*in.opacity;
+  let v=thermal_air(0.30+0.10*thermal_luma(color.rgb)+0.18*min(-in.emissive,1.0),in.distance);
+  return vec4<f32>(thermal_grey(v)*alpha,alpha);
+ }
+ let alpha=color.a*in.opacity*0.4;
+ return vec4<f32>(thermal_grey(thermal_air(0.34,in.distance))*alpha,alpha);
 }

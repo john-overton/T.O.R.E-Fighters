@@ -75,7 +75,7 @@ struct FlareOut {
  let flame_color=mix(vec3<f32>(1.0,0.32,0.04),vec3<f32>(1.0,0.78,0.22),heat);
  let core=1.0-smoothstep(0.55*in.sizes.x,in.sizes.x,r);
  let radiance=(core*vec3<f32>(1.0,0.96,0.86)*4.0+flame*flame_color*2.4)*in.light.w*in.light.xyz;
- return vec4<f32>(radiance,0.0);
+ return thermal_light(vec4<f32>(radiance,0.0),1.5);
 }
 
 // ---- Glare: drawn over the finished image, visible while the core is -----
@@ -160,7 +160,7 @@ fn core_inside(texel:vec2<i32>,size:vec2<u32>)->bool {
  let streaks=(exp(-d.y*40.0)*exp(-d.x*2.6)+exp(-d.x*40.0)*exp(-d.y*2.6))*0.35*in.glare.z;
  let fade=1.0-smoothstep(0.85,1.0,max(abs(in.local.x),abs(in.local.y))/(in.glare.x*mix(1.0,1.8,in.glare.z)));
  let radiance=vec3<f32>(1.0,0.86,0.66)*(halo+streaks)*fade*in.glare.y*in.glare.w;
- return vec4<f32>(radiance,0.0);
+ return thermal_light(vec4<f32>(radiance,0.0),0.6);
 }
 
 // ---- Chaff: hundreds of tumbling foil strips per cartridge ---------------
@@ -215,5 +215,6 @@ struct ChaffOut {
  return out;
 }
 @fragment fn chaff_fragment(in:ChaffOut)->@location(0) vec4<f32> {
+ if thermal_on() {return vec4<f32>(thermal_grey(0.3)*in.color.a*0.5,in.color.a*0.5);}
  return in.color;
 }

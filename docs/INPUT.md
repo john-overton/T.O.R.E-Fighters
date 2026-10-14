@@ -215,6 +215,7 @@ targeting sight". The gamepad gestures stay the AC-130's.
 | Slew the sight | Alt + arrows (or Alt + keypad 4, 6, 8, 2) | Select + right stick | Actions `sight-left`, `sight-right`, `sight-up`, `sight-down` for keys and buttons; `sight-x` and `sight-y` for sticks and HOTAS axes (right and up positive) |
 | Zoom in / out | Shift+' / Shift+; | None | Retail's bomb camera zoom keys; six steps |
 | Next gun / link gun | Ctrl+7 / Ctrl+8 | Select + D-pad up / down | Moved from the right stick |
+| White hot / black hot | Ctrl+Backslash | None | The AC-130 sensor console only ([sensor console](spec/target-window.md#sensor-console)); does nothing elsewhere. Action `sight-polarity`; agent's key choice beside the other Backslash sight keys (2026-10-13) |
 
 A held slew key or button starts at a quarter of full deflection for a quarter
 second, so a short press nudges, then runs at full rate; an analog axis is

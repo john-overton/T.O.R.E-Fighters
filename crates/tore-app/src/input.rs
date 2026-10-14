@@ -42,6 +42,7 @@ bind keyboard \\ sight-designate press\n\
 bind keyboard Shift-\\ sight-pin press\n\
 bind keyboard Shift-' sight-zoom-in press\n\
 bind keyboard Shift-; sight-zoom-out press\n\
+bind keyboard Ctrl-\\ sight-polarity press\n\
 bind keyboard Alt-ArrowLeft sight-left hold\n\
 bind keyboard Alt-ArrowRight sight-right hold\n\
 bind keyboard Alt-ArrowUp sight-up hold\n\
@@ -1585,6 +1586,7 @@ mod tests {
             ("\\", M::SHIFT, "sight-pin"),
             ("'", M::SHIFT, "sight-zoom-in"),
             (";", M::SHIFT, "sight-zoom-out"),
+            ("\\", M::CONTROL, "sight-polarity"),
         ] {
             assert!(i.key(key, true, modifiers), "{key}");
             assert_eq!(

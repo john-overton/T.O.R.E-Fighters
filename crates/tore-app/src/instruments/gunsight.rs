@@ -252,7 +252,7 @@ impl Page {
 
     /// The gun whose pipper is the centre one and whose status the status
     /// row reports: the candidate, else the first linked gun.
-    fn lead(&self) -> Option<usize> {
+    pub(crate) fn lead(&self) -> Option<usize> {
         self.candidate
             .filter(|slot| self.guns[*slot].fitted)
             .or_else(|| (0..3).find(|slot| self.guns[*slot].fitted && self.guns[*slot].linked))

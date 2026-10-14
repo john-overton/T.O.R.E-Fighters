@@ -636,6 +636,7 @@ fn gunsight_names_parse_name_and_roundtrip_through_profiles() {
         ("sight-pin", Action::Ui("sight-pin".into())),
         ("sight-zoom-in", Action::Ui("sight-zoom-in".into())),
         ("sight-zoom-out", Action::Ui("sight-zoom-out".into())),
+        ("sight-polarity", Action::Ui("sight-polarity".into())),
         ("sight-left", Action::Ui("sight-left".into())),
         ("sight-right", Action::Ui("sight-right".into())),
         ("sight-up", Action::Ui("sight-up".into())),

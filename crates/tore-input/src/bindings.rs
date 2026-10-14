@@ -246,6 +246,7 @@ impl Action {
                 | "sight-pin"
                 | "sight-zoom-in"
                 | "sight-zoom-out"
+                | "sight-polarity"
                 | "sight-left"
                 | "sight-right"
                 | "sight-up"

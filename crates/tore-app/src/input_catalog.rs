@@ -568,6 +568,12 @@ pub const ENTRIES: &[Entry] = &[
     ),
     cmd("sight-zoom-in", "Sight: zoom in", Weapons, &["Shift-'"]),
     cmd("sight-zoom-out", "Sight: zoom out", Weapons, &["Shift-;"]),
+    cmd(
+        "sight-polarity",
+        "Sight: white hot / black hot (AC-130 console)",
+        Weapons,
+        &["Ctrl-\\"],
+    ),
     e("sight-x", "Sight: slew left/right", Weapons, Axis, &[]),
     e("sight-y", "Sight: slew up/down", Weapons, Axis, &[]),
     e(
@@ -1595,6 +1601,7 @@ mod tests {
         assert_eq!(owners("\\"), ["sight-designate"]);
         assert_eq!(owners("Shift-\\"), ["sight-pin"]);
         assert_eq!(owners("Ctrl-Shift-\\"), ["range-target"]);
+        assert_eq!(owners("Ctrl-\\"), ["sight-polarity"]);
         assert_eq!(owners("Shift-'"), ["sight-zoom-in"]);
         assert_eq!(owners("Shift-;"), ["sight-zoom-out"]);
         for (key, action) in [

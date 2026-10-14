@@ -33,6 +33,25 @@ fn pack_world_pages(indices: &[u8]) -> Vec<u8> {
     }
     packed
 }
+/// The thermal picture's reference brightness: the mean linear luminance of
+/// the weather's daylight palette. A night weather darkens its art itself,
+/// so the thermal shading divides by this to keep the ground's texture
+/// contrast the same by night and by day (`thermal_luma_of` in terrain.wgsl).
+pub(crate) fn thermal_reference(palette: &[[u8; 3]; 256]) -> f32 {
+    let linear = |v: u8| {
+        let c = f32::from(v) / 255.;
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let sum: f32 = palette
+        .iter()
+        .map(|c| 0.2126 * linear(c[0]) + 0.7152 * linear(c[1]) + 0.0722 * linear(c[2]))
+        .sum();
+    (sum / 256.).max(1e-4)
+}
 pub(crate) fn bytes(values: &[f32]) -> Vec<u8> {
     values.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
@@ -1586,13 +1605,18 @@ impl SimRenderer {
             0.,
             0.,
         ]);
-        // Graphics options: spotting aid strength, terrain filtering and a
-        // reserved slot; then the world image size in pixels, samples and scale.
+        // Graphics options: spotting aid strength, terrain filtering and the
+        // thermal sensor picture (`Camera::thermal`); then the world image
+        // size in pixels, samples and scale.
         uniform.extend([
             self.options.spotting_aid.strength(),
             f32::from(self.options.terrain_filtering),
-            0.,
-            0.,
+            f32::from(u8::from(camera.thermal)),
+            if camera.thermal {
+                thermal_reference(&world.weather.daylight_palette())
+            } else {
+                0.
+            },
             size[0] as f32,
             size[1] as f32 * camera.view_fraction,
             self.samples as f32,
@@ -1673,15 +1697,20 @@ impl SimRenderer {
             queue.write_buffer(&self.cloud_vertices, 0, &bytes(&cloud_data));
         }
         let linear = |v: u8| ((v as f64 / 255.0 + 0.055) / 1.055).powf(2.4);
-        let flare_target = self.lens_flare.prepare(
-            device,
-            queue,
-            world,
-            scenery,
-            camera,
-            output,
-            &weather.palette,
-        );
+        // A thermal picture has no lens flare: the sun is just a hot spot.
+        let flare_target = if camera.thermal {
+            None
+        } else {
+            self.lens_flare.prepare(
+                device,
+                queue,
+                world,
+                scenery,
+                camera,
+                output,
+                &weather.palette,
+            )
+        };
         // The fill's cull runs first: its lists feed the shadow maps too.
         if let Some(fill) = &mut self.fill {
             fill.prepare(queue, encoder, camera, scenery.origin, size);
@@ -1717,7 +1746,9 @@ impl SimRenderer {
         // The spotting aid covers other aircraft in the main view and the
         // mirrors, not the instrument camera panels. The ownship batch is
         // excluded; combat targets share its airframe when no dummies load.
-        let rim = camera.weather_slot <= 1 && self.options.spotting_aid.strength() > 0.;
+        let rim = camera.weather_slot <= 1
+            && !camera.thermal
+            && self.options.spotting_aid.strength() > 0.;
         let mut others: Vec<(&wgpu::BindGroup, &wgpu::Buffer, &[Contact])> = Vec::new();
         if rim {
             if let (Some((bind, _, _)), Some((buffer, _))) = (&self.aircraft, &self.battle) {

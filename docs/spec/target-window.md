@@ -322,6 +322,108 @@ bloomN (the tracked page N ticks after a 105 mm shot, N 0 to 40: the sensor
 picture whited out by the [bloom](ac130-linked-guns.md#muzzle-flash), the
 overlay untouched).
 
+### Sensor console
+
+Opinionated, requested by John on 2026-10-13: "a mode that lets the player go
+into a black/white optical vision screen ... flight information, target info if
+relevant, azimuth, range, etc. ... a gimbal animation to represent visible
+gimbal limits on the thermals, and switch between white hot and black hot ...
+nice static occasionally and a bit of chromatic aberration and pixelation to
+make it look like a CRT display", after the AC-130 mission of Call of Duty 4,
+"semi realistic". Later the same evening he made it the console the player
+works the guns from while the aircraft flies its orbit by itself: entering the
+console engages the orbit autopilot, leaving it hands the aircraft back (slice
+nr-orbit owns that key and the engaged flag; this section covers the picture).
+The TARGET CAM page above is unchanged. Everything else here (layout, wording,
+heat levels, the CRT numbers) is an agent decision (nr-fltv, 2026-10-13),
+fitted on offscreen renders. Retail has nothing like it. Presentation only:
+nothing reaches the simulation or the wire, so it works the same in single
+player and on an online client flying its own AC-130.
+
+**The picture.** The whole screen is the sensor's view from dome D along the
+sight's look at the sight's zoom step (the same eye, look and zoom ladder as
+the page's camera). A tracked object is followed by the sight's own look
+rather than the page's framing camera, so the picture never jumps closer than
+the sensor really is (agent decision). The cockpit, HUD and instrument windows
+are hidden; messages, the map and the menus still draw over it. The gunsight
+works unchanged: Alt+arrows slew, Backslash designates, Shift+Backslash pins,
+L drops, Shift+' and Shift+; zoom, Ctrl+7 and Ctrl+8 pick and link guns, and
+the trigger fires.
+
+**Thermal.** The world draws as a thermal camera sees it, in grey: in white hot
+the hotter the whiter, and **Ctrl+Backslash** turns it to black hot and back
+(the key does nothing outside the console). Levels (agent decision, display
+grey 0 to 1, white hot):
+
+| What | Level | Notes |
+| --- | --- | --- |
+| Clear sky | 0.06, rising to 0.32 at the horizon | Coldest |
+| Open ground | About 0.33 at night, 0.28 by day, plus the art's contrast | The art's brightness against the weather's daylight palette (so a night weather's darker art keeps its contrast), 0.8 times the difference at night and 1.3 by day; soft patches a few hundred feet across (2 percent at night, 3.5 by day); the sunny side a little warmer by day; kept between 0.08 and 0.62 |
+| Water | 0.30 at night, 0.17 by day | Warmer than land at night, cooler by day |
+| Buildings, the airfield | About 0.33 | Like the ground, with less contrast |
+| Aircraft, vehicles, men, weapons, debris | About 0.68 | Everything drawn as a moving object runs warm |
+| Engines, afterburner flames | 0.86 to 1.0 | |
+| Fires, explosions | 0.8 to 1.0 | Their art's brightness, as heat |
+| Muzzle flashes, tracers, flares, fire glow | Their own brightness | Flares half as bright again |
+| A crater | Up to 0.18 over the ground when new | Cooling over three minutes, so one pass's hits still show on the next |
+| Smoke, dust | 35 percent of their usual cover | A thermal camera sees through most of it; fire-lit smoke is a little warmer |
+| Clouds | 0.27 | Opaque |
+
+Distance flattens everything toward the air's own level (0.30 at night, 0.36
+by day; about a third of the way at 10 nm), whatever the weather. The sun and
+moon are not drawn and there is no lens flare or spotting aid. The display
+then stretches the levels as a camera's automatic gain would (times 1.5, less
+0.2), and black hot shows the inverse at 85 percent of full scale, so a cool
+scene is light grey rather than a white page.
+
+**Symbology.** Pale grey block letters (the console's own 5 by 7 font) with a
+two pixel dark outline, so they read in
+white hot and black hot. The labels follow real sensor conventions where they
+are known (WHOT and BHOT, wide, medium and narrow fields of view, AGL); the
+rest is the game's own data.
+
+| Where | Shows |
+| --- | --- |
+| Top left | The sight's mode (MAN free slew, RTN returning, PNT pinned, TRK tracked), the field of view by name (WFOV, MFOV and NFOV for zoom steps 1 to 3, then NFOV E2, E4 and E8: the narrow field's electronic zoom) and IR; the field in degrees; the orbit autopilot's state, radius and height when it is flying (from nr-orbit) |
+| Top right | True heading, height above the ground, true airspeed, WHOT or BHOT |
+| Left, middle | The sensor's azimuth (from the nose, clockwise), its elevation, and the true bearing of its line of sight (LOS) |
+| Right, middle | With a tracked target: its name, range, true bearing and clock bearing with HI or LO |
+| Bottom left | The guns: a mark for each linked gun, the name and the rounds left; the candidate in a filled box; a gun the aircraft does not carry struck through |
+| Bottom centre | The lead gun's state (RDY, SLEW, NO ARC, MAX RNG, MIN RNG, MASKED, BLOCKED, EMPTY) or GIMBAL LIMIT, flashing; under it the slant range from the sensor to the aim point in feet and nautical miles |
+| Centre | An open crosshair: four arms with a clear centre, ticks along them and a bar across each end |
+| Over the picture | The pipper (ring, range arc and centre dot, dashed when the gun cannot bear or is out of range, parked at the screen edge when off it), the other linked guns' impacts as diamonds, a square on a tracked target and corner marks on a pinned point |
+| Bottom right | The gimbal (below) |
+
+**Gimbal.** The camera's lower hemisphere seen from above, the nose up: the rim
+is its limit (the aircraft's horizontal plane), the centre straight down, a
+dashed ring 45 degrees down, a small cross the aircraft. A dashed sector shows
+where the lead gun can bear, dots the linked guns' trains, and an arm from the
+centre ends in a square at the sensor's line, so the graphic moves as the
+sensor slews. Over the last 10 degrees before the limit the rim beside the
+sensor thickens; at the limit it flashes and LIMIT shows under it, with GIMBAL
+LIMIT on the status line.
+
+**CRT.** The picture and the symbology are shown on a small monochrome monitor
+(`crt.rs`, a module the seeker view may share: a GPU pass, and the same
+look for a small page drawn on the CPU): the picture in 2 pixel blocks with a
+slight soft focus, red and blue pulled 1.3 pixels apart toward the edges,
+scanlines of 12 percent every 3 rows with a faint band rolling down, a
+vignette, fine noise of 4.5 percent, and every 7 to 18 seconds a burst of
+static 0.08 to 0.3 seconds long and 35 to 80 percent strong (snow over up to
+60 percent of the picture, sideways tearing and the odd bright or dark line).
+The symbology goes through the same monitor, without the blocks. Sizes are
+for 1080 rows and scale with the screen.
+
+**Previews.** `--a2g-run UKR QUCOL --pilot ai --aircraft ac130 --load C_25.JT
+--console-scene DIR --console-at S,...` (with `--condition night` for the dark)
+draws the console offscreen from an AI gunship's own sensor at those seconds:
+white hot and black hot on its target, the free wide field, the narrow field,
+near and at the gimbal limit, and a burst of static. The AI flies without the
+player's gunsight, so these frames build the symbology from the same geometry
+(arcs and reach); they are a picture check, not a gunsight check. Until slice
+nr-orbit merges, `TORE_SENSOR_CONSOLE=1` shows the console in flight whenever
+the AC-130's gunsight exists (a temporary development switch).
+
 ## Targeting page
 
 Opinionated, requested by John on 2026-10-10 (the target display shows when it
