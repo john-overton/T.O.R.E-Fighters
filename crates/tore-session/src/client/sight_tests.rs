@@ -436,7 +436,7 @@ fn a_pin_above_the_hemisphere_leaves_the_predicted_camera_at_the_limit() {
 }
 
 /// The sensor console online (slices nr-orbit, protocol 29, and nr-cona,
-/// pending protocol): a gunner opens it with its seat command and the host
+/// protocol 31): a gunner opens it with its seat command and the host
 /// searches straight and level (the sight is free); the console keys step
 /// the commanded heading, altitude and speed; P pins the ground and the host
 /// orbits it; P again lets it go and the host searches again. The client's

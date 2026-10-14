@@ -805,7 +805,7 @@ fn option_pair(value: Option<i64>) -> [i64; 2] {
 /// seconds and range) as offsets from the aim point; the impacts' tick and
 /// the notice's tick as ticks before the readout's; the three readiness
 /// codes; the notice (0 none, 1 no ground point, 2 drop to slew); the
-/// zoom step; and (pending protocol, slice nr-cona) the gun lock, a flag and
+/// zoom step; and (protocol 31, slice nr-cona) the gun lock, a flag and
 /// its point as an offset. Empty when the plane has no gunsight.
 fn gunsight_values(g: &GunsightReadout, tick: u64) -> Vec<i64> {
     let origin = g.aim.unwrap_or([0.; 3]);
