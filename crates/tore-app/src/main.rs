@@ -4959,13 +4959,16 @@ impl ApplicationHandler for App {
                         if let (Some(combat), Some(seeker)) =
                             (self.instruments.combat.as_mut(), &seeker_shot)
                         {
-                            combat.targeting = Some(instruments::targeting::Page::seeker(
-                                &seeker.weapon,
-                                seeker.target,
-                                seeker.range_ft,
-                                frame.readout.tick,
-                                seeker.view,
-                            ));
+                            combat.targeting = Some(
+                                instruments::targeting::Page::seeker(
+                                    &seeker.weapon,
+                                    seeker.target,
+                                    seeker.range_ft,
+                                    frame.readout.tick,
+                                    seeker.view,
+                                )
+                                .closing(seeker.closing),
+                            );
                         } else if let (Some(combat), Some(seed)) =
                             (self.instruments.combat.as_mut(), self.seeker.lost_feed())
                         {
