@@ -153,6 +153,26 @@ impl CityTrack {
         out
     }
 
+    /// Where the buildings flat at `tick` stand, each with the tick it fell
+    /// on (nr-fx4): the first change since the last stand-again that names
+    /// it. A burning building's smoke column grows from that tick, so a
+    /// viewer shows the column at the height it had, however the playhead
+    /// got to `tick`. Sorted by place, each once.
+    pub fn fell_ticks_at(&self, tick: u64) -> Vec<([i32; 2], u64)> {
+        let upto = self.changes_at(tick);
+        let from = self.changes[..upto]
+            .iter()
+            .rposition(|(_, stood, _)| *stood)
+            .unwrap_or(0);
+        let mut out = std::collections::BTreeMap::new();
+        for (when, _, fell) in &self.changes[from..upto] {
+            for place in fell {
+                out.entry(*place).or_insert(*when);
+            }
+        }
+        out.into_iter().collect()
+    }
+
     /// Every building the recording ever knocked down, each once.
     pub fn all(&self) -> Vec<[i32; 2]> {
         let mut all: Vec<[i32; 2]> = self
@@ -187,6 +207,15 @@ mod tests {
         assert_eq!(track.flattened_at(10_000), [[7, 7], [9, 1]]);
         assert_eq!(track.changes_at(250), 2);
         assert_eq!(track.all().len(), 4);
+        // Each building's fall tick is its first change since the last
+        // stand-again, so a seek and a play-through agree.
+        assert_eq!(
+            track.fell_ticks_at(250),
+            [([2, 0], 200), ([5, 1], 100), ([9, 1], 100)]
+        );
+        assert_eq!(track.fell_ticks_at(300), [([7, 7], 300)]);
+        assert_eq!(track.fell_ticks_at(450), [([7, 7], 300), ([9, 1], 400)]);
+        assert!(track.fell_ticks_at(99).is_empty());
     }
 
     #[test]
