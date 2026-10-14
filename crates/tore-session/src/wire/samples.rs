@@ -38,6 +38,7 @@ use tore_net::master::{Candidate, CandidateKind, MappingType};
 use tore_sim::acoustics;
 use tore_sim::ai::launch::{Side, WingId};
 use tore_sim::ai::wing::{Formation, PlayerBreak, PlayerOrder};
+use tore_sim::autopilot::orbit::ConsoleCommand;
 use tore_sim::combat::blast::MarkKind;
 use tore_sim::combat::ledger::Tally;
 use tore_sim::combat::live::{self, DamageSection, EffectKind};
@@ -92,6 +93,12 @@ pub fn commands() -> Vec<Command> {
         Command::Seat(S::BattleNet),
         // Wave 6 (nr-orbit): the AC-130's sensor console (28).
         Command::Seat(S::SensorConsole),
+        // Wave 7 (nr-cona): the sensor console's keys (29).
+        Command::Seat(S::Console(ConsoleCommand::Pin)),
+        Command::Seat(S::Console(ConsoleCommand::Heading(-1))),
+        Command::Seat(S::Console(ConsoleCommand::Altitude(2))),
+        Command::Seat(S::Console(ConsoleCommand::Speed(100))),
+        Command::Seat(S::Console(ConsoleCommand::SpeedStep(-1))),
         Command::Seat(S::WingFormationCycle),
         Command::Seat(S::TriggerKey {
             down: true,

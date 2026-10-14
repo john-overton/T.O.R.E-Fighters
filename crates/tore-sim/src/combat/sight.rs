@@ -27,7 +27,7 @@ pub const DEFAULT_ZOOM: u8 = 3;
 const WIDEST_FIELD: f64 = 30. * PI / 180.;
 /// Full deflection slews this fraction of the vertical field per second
 /// (fitted).
-const SLEW_FIELDS_PER_SECOND: f64 = 0.75;
+pub const SLEW_FIELDS_PER_SECOND: f64 = 0.75;
 /// The return to the default view travels at the fastest sight slew, full
 /// deflection at the widest zoom step: 22.5 degrees a second, whatever the
 /// zoom (agent choice; John, 2026-10-09: it never snaps).

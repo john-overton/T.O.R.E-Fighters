@@ -541,25 +541,44 @@ Opinionated (John, 2026-10-13: "an AI autopilot mode that circles the plane at
 least the minimum optimum altitude and radius for attacking where the
 targeting pod is centered, making smooth flight adjustments to keep the
 optics, and all three guns available to bear"; then "the console mode just
-automatically has the plane go into optimal circle AI mode"). Parts marked
-*agent* are agent decisions of 2026-10-13. Retail has none of it.
+automatically has the plane go into optimal circle AI mode"). The search, the
+pin and release and the console's keys are opinionated too (John,
+2026-10-14: "in console it needs slew controls. In console it needs zoom
+controls. The console needs a view snap/release similar to the flight target
+instrument: in release mode show a status that the view isn't pinned and the
+autopilot just flies straight as a search mode; pinning will tell autopilot
+to gracefully circle that point of aim; unpinned the aircraft just flies
+straight. Maybe have keys to tell the aircraft heading, altitude, and control
+throttle"). Parts marked *agent* are agent decisions of 2026-10-13 (the
+orbit) or 2026-10-14 (the search and the keys, slice nr-cona). Retail has
+none of it.
 
 **What the player does.** On the AC-130, Ctrl+9 (gamepad View + Xbox) opens the
-sensor console: the autopilot takes the aircraft and flies the attack orbit
-about the point the gunsight is centred on, and the player works the sight and
-the guns (slew, pin, designate, zoom, select, link, fire) without flying. The
-full-screen black and white sensor screen is a separate presentation slice
-(nr-fltv) that draws while the console is open; the TARGET CAM gunsight page is
-unchanged. The HUD's autopilot label reads `AUTO` / `ORBIT`. Ctrl+9 again
-closes the console. Any other aircraft says "No sensor console on this
-aircraft".
+sensor console: the autopilot takes the aircraft and the player works the
+sight and the guns (slew, pin, designate, zoom, select, link, fire) without
+flying. With the sight free the autopilot **searches**: it flies straight and
+level on a commanded heading, altitude and speed, which the console's keys
+step. Pinning a point (P, Shift+Backslash, Backslash) or tracking an object
+makes it **orbit**: it joins and circles that point. Letting the point go (P
+again, or L) returns it to the search, rolling out wings level. The full-screen
+black and white sensor screen is a separate presentation slice (nr-fltv, with
+nr-conb's additions) that draws while the console is open; the TARGET CAM
+gunsight page is unchanged. The HUD's autopilot label reads `AUTO` / `SEARCH`
+or `AUTO` / `ORBIT`. Ctrl+9 again closes the console. Any other aircraft says
+"No sensor console on this aircraft".
 
 ```mermaid
 stateDiagram-v2
     direction LR
     state "Flying by hand<br/>(or A / Ctrl+A modes)" as Hand
-    state "Sensor console open<br/>orbit hold flies the aircraft<br/>stick and throttle ignored" as Console
-    Hand --> Console: Ctrl+9 / View + Xbox<br/>(airborne, autopilot healthy)
+    state "Sensor console open<br/>stick and throttle do not fly" as Console {
+        state "SEARCH<br/>straight and level on the<br/>commanded heading, altitude, speed" as Search
+        state "ORBIT JOIN, then ORBIT<br/>circling the pinned or tracked point" as Orbit
+        Search --> Orbit: P, Shift+Backslash or Backslash pins,<br/>or a target is tracked
+        Orbit --> Search: P or L lets the point go:<br/>rolls out wings level
+    }
+    Hand --> Search: Ctrl+9 / View + Xbox with the sight free<br/>(airborne, autopilot healthy)
+    Hand --> Orbit: Ctrl+9 with a pin or a track
     Console --> Hand: Ctrl+9 again: handed back as it flies
     Console --> Hand: A or Ctrl+A: that mode takes over
     Console --> Hand: crash, ground contact,<br/>autopilot or airframe damage
@@ -571,22 +590,62 @@ stateDiagram-v2
 | --- | --- |
 | A pin | The pin. A new pin (Shift+Backslash, Backslash on bare ground, a slew of the pin) moves the orbit to it |
 | A tracked object, ground or air | The ground under the object, followed as it moves |
-| Nothing (free slew) when the console opens | The ground under the crosshair, which the console pins so the camera stays on the orbit's centre. With sky under the crosshair, the ground 8,000 ft abeam left is pinned (fitted) |
-| Nothing, after L inside the console | The last point: the orbit stays where it is while the camera slews freely |
+| Nothing (free slew), when the console opens or after P or L | Nothing: the autopilot searches (below). Until 2026-10-14 the console pinned the ground under the crosshair as it opened and kept the last point after L; John's request replaced both |
 
 The centre the autopilot flies about slides toward a new point at 200 ft/s
 (about 120 kt, faster than any ground vehicle), so a pin moved miles away
 becomes a gentle turn, never a snap (*agent*, fitted).
 
-**Controls in the console** (*agent*). The stick, pedals and throttle are
-ignored while the console is open: a bumped stick neither moves the aircraft
-nor drops the player out (the other autopilot modes let go at 0.15 of stick;
-this one does not). A or Ctrl+A select those modes and close the console. On
-closing, the autopilot lets go and the aircraft is handed back exactly as it
-flies, in its orbit bank and with the throttle the autopilot left, so nothing
-jumps; the pilot rolls out by hand. The console refuses to open on the
-ground, after a crash, or with the autopilot's systems or the airframe
+Joining from the search, the orbit's centre is the new point at once; the
+bank and climb commands' slews (below) make the join a gentle turn.
+
+**Controls in the console** (*agent*). The stick, pedals and throttle do not
+fly the aircraft while the console is open: a bumped stick neither moves the
+aircraft nor drops the player out (the other autopilot modes let go at 0.15
+of stick; this one does not). A or Ctrl+A select those modes and close the
+console. On closing, the autopilot lets go and the aircraft is handed back
+exactly as it flies, in its bank and with the throttle the autopilot left, so
+nothing jumps; the pilot rolls out by hand. The console refuses to open on
+the ground, after a crash, or with the autopilot's systems or the airframe
 damaged, with a message.
+
+### The console's keys
+
+Opinionated (John, 2026-10-14, above). Since the stick does not fly in the
+console, the flight controls take console meanings there; the gunsight's own
+keys keep working everywhere (*agent*: which keys, the steps and the
+repeats):
+
+| Key (gamepad, joystick, mouse) | In the console |
+| --- | --- |
+| Arrows; the stick (left stick); the mouse with the right button held (mouse look) | Slew the sight, as Alt+arrows and View + right stick do. The arrows ramp like Alt+arrows (a quarter rate for a quarter second, then full); the mouse slews one field of view per 1,000 pixels at sensitivity 1, at most at the full slew rate. Up slews up |
+| Mouse wheel, = and - | Zoom the sight one step, as Shift+' and Shift+; do |
+| P | Pin the ground under the crosshair (ORBIT); with a pin or a track, let it go (SEARCH). Outside the console P pins and releases the gunsight too |
+| Shift+Left and Shift+Right (the look keys; the look axes, a gamepad's right stick) | Step the search heading 5 degrees. In the orbit they do nothing and say so |
+| Shift+Up and Shift+Down | Step the search altitude 500 ft (on whole 500 ft), within 1,000 to 25,000 ft above sea level; in the orbit, its height above the point 500 ft, from the camera's lowest (35 degrees of depression at its radius) to the guns' highest (a slant range of 90% of their reach: about 8,000 ft at the planned radius) |
+| 1 to 5 | The speed at 0, 25, 50, 75 and 100% of the band from corner to maximum speed at the aircraft's height; 3 is the orbit's planned speed |
+| 6 | The top of the band |
+| 7 and 8 | The speed 5 kt slower or faster (on whole 5 kt) |
+
+A held heading or altitude key steps at once, then repeats after 0.3 s every
+0.15 s; a look axis past half deflection counts as held. Each key answers
+with a message: "Search heading 275", "Search altitude 9500 ft", "Orbit
+height 6500 ft above the point", "Speed 195 kt". While a point is held the
+speed stays where the orbit's minimum (the 30 degree turn seen at 35 degrees)
+is still within 90% of the guns' reach, about 250 kt; a faster orbit grows its
+radius and height to that minimum.
+
+### The search
+
+The search (*agent*, fitted) flies straight and level through the same stick
+and throttle as the orbit:
+
+| Part | Rule |
+| --- | --- |
+| Heading | Opening the console, or letting a point go, takes the heading the roll-out reaches: the heading now plus the turn the bank still makes while it rolls out at 5 degrees a second, g (-ln cos bank) / (v x 5 deg/s), about 4 degrees from the orbit's 21. So the aircraft rolls wings level without turning back |
+| Bank | Toward the commanded heading: the bank whose roll-out at 5 degrees a second turns exactly the error left (cos bank = exp(-error v r / g)), at most 1.5 times the error near the heading and never past 25 degrees; the command moves at most 5 degrees a second. A heading change rolls in, holds the bank, and rolls out onto the heading |
+| Altitude | Opening or letting go takes the altitude now; the climb law is the orbit's (15 s, 1,500 ft/min, 3 ft/s each second), never lower than 1,000 ft above the ground |
+| Speed | One commanded speed for the search and the orbit, held on the throttle as the orbit's; it starts at the orbit's planned speed |
 
 ### The orbit
 
@@ -656,8 +715,12 @@ it is still climbing in), every gun and the camera bear 100% of the time, bank
 under 27 degrees, bank rate under 5.1 degrees a second and pitch rate under 2.1, no
 stall warning; a pin slewed 4,500 ft and a tank moving 14,000 ft are followed.
 
-**Status for the screens.** `flight::State::orbit_status()` returns an
-`OrbitStatus` while the console is open: the point and the centre, the
+**Status for the screens.** `flight::State::console_status()` returns a
+`ConsoleStatus` while the console is open: the phase (`SEARCH`, `ORBIT JOIN`
+or `ORBIT`), the commanded heading, altitude and speed, the orbit's commanded
+height above its point, and, holding a point, the orbit's status.
+`flight::State::orbit_status()` returns that `OrbitStatus` while a point is
+held: the point and the centre, the
 planned radius, height and speed, the minimum radius and height, the current
 distance, height and slant range, whether the aircraft is on the circle, and
 whether each gun and the camera bear on the point (the plain line from each
@@ -665,17 +728,24 @@ gun's pivot against its arcs, its airframe and the reach). The console screen
 and the HUD read it; it is the same in single player, on a client and in a
 check.
 
-**Online and replays.** Multiplayer needs protocol 29. The host owns it. The
-console key is a seat command (code 28 on the wire); the host engages orbit hold and, before each flight
-step, gives it the sight's point. The orbit's plan and memory ride in the
+**Online and replays.** Multiplayer needs protocol 29, and the search and
+the console's keys protocol 30. The host owns
+it. The console key is a seat command (code 28 on the wire), the console's
+keys another (code 29, protocol 30); the host engages the console's autopilot
+and, before each flight step, gives it the sight's point, or lets it search
+when the sight is free. The orbit's plan and memory ride in the
 exact own-plane state, so a client's prediction flies the same law from the
 last point it was given and agrees with the host while the point stands
 still; following a moving track it differs a little each tick and is
 corrected as any prediction is. Wire changes are listed under
 [the sensor console](../formats/net-protocol.md#protocol-29-the-sensor-console).
+The search's commanded heading, altitude and speed ride in the same exact
+state, so a client searches exactly as the host; a key's change reaches the
+client's prediction with the host's next exact state (about one round trip).
 A mission recording keeps the flight as flown, the autopilot's "orbit mode"
-in the flight telemetry, and a `player.orbit` event when the console opens or
-closes and when its point moves ([replays](../REPLAYS.md)).
+in the flight telemetry, and a `player.orbit` event when the orbit starts
+(the console opens on a point, or a point is pinned) or ends (closed, or the
+point let go) and when its point moves ([replays](../REPLAYS.md)).
 
 ## Acceptance and known limits
 
@@ -690,7 +760,8 @@ a checkpoint restored mid-slew, a client that slews and pins while a second
 client's barrels follow, and the headless battery scenarios `ac130-pin-orbit`,
 `ac130-fire-no-target` and `ac130-track-out-of-arc`
 ([baseline](../baselines/ac130-gunsight.md)); for the sensor console,
-`flight-ac130-orbit-pin`, `-slew`, `-track` and `-close`.
+`flight-ac130-orbit-pin`, `-slew`, `-track` and `-close`, and for its search
+and keys `flight-ac130-console-search` and `-console-pin-release`.
 The unavailable retail comparison does not establish retail parity. Original
 mount slew, the arc interpretation, gun geometry hinges and muzzle-to-art scale
 remain approximate. The next research step is the reviewed bounded hardpoint

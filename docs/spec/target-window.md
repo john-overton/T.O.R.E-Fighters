@@ -335,7 +335,7 @@ make it look like a CRT display", after the AC-130 mission of Call of Duty 4,
 works the guns from while the aircraft flies its orbit by itself: entering the
 console engages the orbit autopilot, leaving it hands the aircraft back.
 **Ctrl+9** (gamepad Select + Guide) opens and closes it: the screen shows
-exactly while orbit hold flies ([the sensor console and the
+exactly while the console's autopilot flies, searching or orbiting ([the sensor console and the
 orbit](ac130-linked-guns.md#the-sensor-console-and-the-orbit) covers the key and
 the autopilot; this section covers the picture). Online, a client's screen
 follows its own prediction of the plane, which carries the host's orbit mode,
@@ -354,7 +354,11 @@ the sensor really is (agent decision). The cockpit, HUD and instrument windows
 are hidden; messages, the map and the menus still draw over it. The gunsight
 works unchanged: Alt+arrows slew, Backslash designates, Shift+Backslash pins,
 L drops, Shift+' and Shift+; zoom, Ctrl+7 and Ctrl+8 pick and link guns, and
-the trigger fires.
+the trigger fires. Since the stick does not fly in the console, the arrows,
+the stick and mouse look also slew, the view zoom keys (= and -) and the
+mouse wheel zoom, P pins and releases, and Shift with the arrows and the
+throttle keys command the autopilot (opinionated, John 2026-10-14; the keys
+are [the console's keys](ac130-linked-guns.md#the-consoles-keys)).
 
 **Thermal.** The world draws as a thermal camera sees it, in grey: in white hot
 the hotter the whiter, and **Ctrl+Backslash** turns it to black hot and back
@@ -390,7 +394,7 @@ rest is the game's own data.
 
 | Where | Shows |
 | --- | --- |
-| Top left | The sight's mode (MAN free slew, RTN returning, PNT pinned, TRK tracked), the field of view by name (WFOV, MFOV and NFOV for zoom steps 1 to 3, then NFOV E2, E4 and E8: the narrow field's electronic zoom) and IR; the field in degrees; the orbit: ORBIT JOIN while the aircraft is still joining the circle, ORBIT GUNS on it with every gun and the camera bearing on the point, ORBIT NO BEAR on it when one cannot; then the planned radius and height above the point (`flight::State::orbit_status`) |
+| Top left | The sight's mode (MAN free slew, RTN returning, PNT pinned, TRK tracked), the field of view by name (WFOV, MFOV and NFOV for zoom steps 1 to 3, then NFOV E2, E4 and E8: the narrow field's electronic zoom) and IR; the field in degrees; searching (nothing pinned): SEARCH P PINS, then the commanded heading, altitude and speed (HDG 275 ALT 9500 191KT; slice nr-cona, `flight::State::console_status`); holding a point, the orbit: ORBIT JOIN while the aircraft is still joining the circle, ORBIT GUNS on it with every gun and the camera bearing on the point, ORBIT NO BEAR on it when one cannot; then the planned radius and height above the point (`flight::State::orbit_status`) |
 | Top right | True heading, height above the ground, true airspeed, WHOT or BHOT |
 | Left, middle | The sensor's azimuth (from the nose, clockwise), its elevation, and the true bearing of its line of sight (LOS) |
 | Right, middle | With a tracked target: its name, range, true bearing and clock bearing with HI or LO |

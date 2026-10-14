@@ -282,7 +282,14 @@ impl App {
         let lever = self
             .input
             .throttle_reference(flight.throttle, flight.lift_controls.collective);
+        self.input.console.open = self.console_open();
         let (pilot, _) = self.input.frame(&self.camera.keys, lever);
+        for command in self.input.console.take() {
+            crate::queue_command(
+                &mut self.seat_commands,
+                seats::SeatCommand::Console(command),
+            );
+        }
         let (sight, sight_zoom) = self.input.sight();
         Controls {
             pilot,

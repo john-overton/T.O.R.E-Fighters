@@ -50,6 +50,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [Protocol 27 (stores)](#protocol-27-stores) (built under protocol 27)
 - [Protocol 28 (host loading)](#protocol-28-host-loading) (built under protocol 28)
 - [Protocol 29 (the sensor console)](#protocol-29-the-sensor-console) (built under protocol 29)
+- [Protocol 30 (the console's search and keys)](#protocol-30-the-consoles-search-and-keys) (built under protocol 30)
 - [Limits](#limits)
 - [Captures](#captures)
 - [Versions](#versions)
@@ -2855,6 +2856,30 @@ orbit autopilot ([spec](../spec/ac130-linked-guns.md#the-sensor-console-and-the-
   sample (one SensorConsole), the version line and the packets sealed with
   the version.
 
+## Protocol 30 (the console's search and keys)
+
+*Built (slice nr-cona, 2026-10-14); the lead numbered it 30.* John asked for slew, zoom, pin and release and heading, altitude and
+throttle keys in the sensor console, with the autopilot searching straight
+while nothing is pinned ([spec](../spec/ac130-linked-guns.md#the-consoles-keys)).
+
+- **Seat command 29, Console**: a sensor console key, then a 3-bit sub-code
+  and an 8-bit value. Sub-codes: 0 Pin (value 0; any other value is
+  refused), 1 Heading (signed steps), 2 Altitude (signed steps), 3 Speed
+  (percentage 0 to 100; above 100 is refused), 4 SpeedStep (signed steps);
+  5 to 7 are refused. The 5-bit command code has two codes left (30 and 31).
+- **The exact own-plane state**: the autopilot's `Orbit` gained three fields
+  after its throttle: `pinned` (a bool: a point is held, else the search),
+  `heading` and `altitude` (f64 against the baseline's: the search's
+  commanded heading, radians, and altitude, ft). The orbit's `speed_fps` is
+  now also the commanded speed of the search. The client predicts the search
+  exactly; a key's change and a pin or release reach it with the host's next
+  exact state, one small correction about a round trip later, as the
+  console's opening does.
+- **Why a bump.** An older game reads command 29 as invalid and cannot read
+  the longer own-plane state. The wire golden changes in the Inputs command
+  sample (five Console commands), the version line and the packets sealed
+  with the version.
+
 ## Limits
 
 Decoders check every count and length against these before reading on.
@@ -3021,7 +3046,10 @@ again with an observer; the capture format did not change for it.
   the Keepalive's flags byte, sent by a host building a mission.
   29 since the AC-130 sensor console (slice nr-orbit,
   [the sensor console](#protocol-29-the-sensor-console)): seat command 28,
-  and the orbit hold in the exact own-plane state's autopilot.
+  and the orbit hold in the exact own-plane state's autopilot;
+  30 since the console's search and keys (slice nr-cona,
+  [protocol 30](#protocol-30-the-consoles-search-and-keys)): seat command 29,
+  and the orbit's `pinned`, `heading` and `altitude`.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

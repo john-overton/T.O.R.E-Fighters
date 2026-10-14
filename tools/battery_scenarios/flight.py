@@ -2192,13 +2192,30 @@ ORBIT_RUNS = {
         "and pitch, no stall.",
     ),
     "orbit-slew": (
-        ["--orbit-sight", "free", "--orbit-slew", "150", "--seconds", "330"],
-        "A free sight is pinned under its crosshair when the console opens; at 150 s the pin is slewed "
-        "right for 4 s and the orbit re-centres on it without exceeding the bank and pitch rates.",
+        ["--orbit-sight", "pin", "--orbit-slew", "150", "--seconds", "330"],
+        "The console opens on a pin; at 150 s the pin is slewed right for 4 s and the orbit re-centres on "
+        "it without exceeding the bank and pitch rates.",
     ),
     "orbit-track": (
         ["--orbit-sight", "track", "--seconds", "300"],
         "The console opens on the tracked lead tank of the moving column and follows it.",
+    ),
+    # Slice nr-cona (John, 2026-10-14): the console opens with a free sight and
+    # searches straight and level; its keys step the heading, altitude and
+    # speed; P pins the ground under the crosshair (orbit) and lets it go
+    # (search again).
+    "console-search": (
+        ["--orbit-sight", "free", "--seconds", "220", "--console-keys",
+         "10:heading+6,10:altitude+4,10:speed+2,90:heading-18,90:altitude-2,90:speed=25"],
+        "Opens searching with nothing pinned; a 30 degree right turn with a 2,000 ft climb, then a 90 degree "
+        "left turn, each settling on its heading without turning back, holding altitude, speed and wings "
+        "level, with smooth bank and pitch rates and no stall.",
+    ),
+    "console-pin-release": (
+        ["--orbit-sight", "free", "--seconds", "330", "--console-keys", "15:pin,240:pin"],
+        "Opens searching; P at 15 s pins the ground under the crosshair and the autopilot joins and enters "
+        "the orbit (guns and camera bear 90% after entry); P at 240 s lets it go and the search rolls out "
+        "wings level on the roll-out heading without turning back.",
     ),
     "orbit-close": (
         ["--orbit-sight", "pin", "--orbit-close", "120", "--seconds", "130"],

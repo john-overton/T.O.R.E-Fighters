@@ -9,29 +9,13 @@ use crate::{
 };
 use tore_sim::{
     ai::wing::PlayerOrder,
+    autopilot::orbit::ConsoleCommand,
     cheats::Cheats,
     combat::{
         live::{self, Command as Live},
         missiles::TargetRole,
     },
 };
-
-/// With sky under the free sight's crosshair, the sensor console pins the
-/// ground this far abeam left of the aircraft, ft (fitted, agent decision
-/// 2026-10-13: about the orbit's radius).
-pub const CONSOLE_FALLBACK_FT: f64 = 8_000.;
-
-/// The ground [`CONSOLE_FALLBACK_FT`] abeam left of the aircraft.
-fn console_fallback(
-    flight: &tore_sim::flight::State,
-    ground: &impl Fn(f64, f64) -> f64,
-) -> [f64; 3] {
-    // Left of the nose: the heading less a quarter turn.
-    let (sin, cos) = (flight.yaw - std::f64::consts::FRAC_PI_2).sin_cos();
-    let x = flight.position[0] + CONSOLE_FALLBACK_FT * sin;
-    let z = flight.position[2] + CONSOLE_FALLBACK_FT * cos;
-    [x, ground(x, z), z]
-}
 
 /// A change to the mission itself, applied at the start of the tick before
 /// any seat's commands. In single player the player gives them, from the
@@ -289,17 +273,22 @@ impl World {
                         text: message.into(),
                     });
                 }
+                SeatCommand::Console(command) => {
+                    if let Some(text) = self.console_key(cockpit, command) {
+                        out.cues.push(Cue::Message { seat, text });
+                    }
+                }
             }
         }
     }
 
     /// The AC-130's sensor console: closing it hands the aircraft back as it
-    /// flies; opening it engages orbit hold about the point the gunsight is
-    /// centred on (docs/spec/ac130-linked-guns.md, "The sensor console and
-    /// the orbit"). A free-slewing sight first pins the ground under its
-    /// crosshair, so the camera stays on the orbit's centre; with sky under
-    /// the crosshair it pins the ground abeam left at
-    /// [`CONSOLE_FALLBACK_FT`]. Returns the message for the seat.
+    /// flies; opening it engages the console's autopilot
+    /// (docs/spec/ac130-linked-guns.md, "The sensor console and the orbit"):
+    /// orbiting the sight's pin or the ground under its tracked object, or,
+    /// with the sight free, searching straight and level (John, 2026-10-14:
+    /// the console no longer pins under the crosshair as it opens). Returns
+    /// the message for the seat.
     fn sensor_console(&mut self, cockpit: usize) -> &'static str {
         use tore_sim::autopilot::Mode;
         use tore_sim::combat::gunship::Sight;
@@ -321,38 +310,76 @@ impl World {
                 .filter(|r| *r > 0.)
                 .fold(f64::INFINITY, f64::min)
         });
-        let Some(guns) = own.gunship.as_mut() else {
+        let Some(guns) = own.gunship.as_ref() else {
             return "No sensor console on this aircraft";
         };
         if let Some(refusal) = flight.orbit_refusal() {
             return refusal;
         }
+        let reach = reach.filter(|r| r.is_finite()).unwrap_or(0.);
         let terrain = &self.terrain;
-        let ground = |x: f64, z: f64| f64::from(terrain.height(x as f32, z as f32));
         let point = match guns.sight {
-            Sight::Pinned(point) => point,
-            Sight::Tracked(_) => match guns.aim {
-                Some([x, _, z]) => [x, ground(x, z), z],
-                None => console_fallback(flight, &ground),
-            },
-            Sight::Free => {
-                let point = guns
-                    .aim
-                    .filter(|[x, y, z]| (y - ground(*x, *z)).abs() < 5.)
-                    .unwrap_or_else(|| console_fallback(flight, &ground));
-                guns.sight = Sight::Pinned(point);
-                guns.returning = false;
-                point
-            }
+            Sight::Pinned(point) => Some(point),
+            Sight::Tracked(_) => guns
+                .aim
+                .map(|[x, _, z]| [x, f64::from(terrain.height(x as f32, z as f32)), z]),
+            Sight::Free => None,
         };
-        flight.engage_orbit(point, reach.filter(|r| r.is_finite()).unwrap_or(0.));
-        "Sensor console: orbit hold on"
+        match point {
+            Some(point) => {
+                flight.engage_orbit(point, reach);
+                "Sensor console: orbit"
+            }
+            None => {
+                flight.engage_console(reach);
+                "Sensor console: search (P pins)"
+            }
+        }
     }
 
-    /// Orbit hold follows the gunsight: before each flight step, every
-    /// aircraft flying it takes the sight's pin or the ground under its
-    /// tracked object as the point to circle. A free sight (after L) leaves
-    /// the orbit where it is. Orbit hold off on an aircraft with no gunsight.
+    /// A sensor console key (slice nr-cona). P pins the ground under the
+    /// gunsight's crosshair with the sight free, else lets the pin or the
+    /// track go, as L does (the console then searches); it works on the
+    /// AC-130 with the console closed too. The others step the console
+    /// autopilot's commanded values. Returns the message for the seat.
+    fn console_key(&mut self, cockpit: usize, command: ConsoleCommand) -> Option<String> {
+        use tore_sim::combat::gunship::Sight;
+        let plane = self.cockpits[cockpit].plane.0;
+        if command == ConsoleCommand::Pin {
+            let Some(sight) = self
+                .combat
+                .state
+                .ownship(plane)
+                .and_then(|own| own.gunship.as_ref())
+                .map(|guns| guns.sight)
+            else {
+                return Some("Pin: no gunsight on this aircraft".into());
+            };
+            let live = if sight == Sight::Free {
+                Live::SightPinGround
+            } else {
+                Live::ClearDesignation
+            };
+            self.combat.command_for(
+                plane,
+                live,
+                combat::launcher(&self.cockpits[cockpit].flight),
+            );
+            return None;
+        }
+        Some(
+            self.cockpits[cockpit]
+                .flight
+                .console_command(command)
+                .unwrap_or_else(|| "Sensor console is closed (Ctrl+9 opens it)".into()),
+        )
+    }
+
+    /// The console's autopilot follows the gunsight: before each flight
+    /// step, every aircraft with the console open orbits the sight's pin or
+    /// the ground under its tracked object, and searches once the sight is
+    /// free (after L or P). The console closes on an aircraft with no
+    /// gunsight.
     pub(super) fn feed_orbits(&mut self) {
         use tore_sim::autopilot::Mode;
         use tore_sim::combat::gunship::Sight;
@@ -370,15 +397,15 @@ impl World {
                 cockpit.flight.autopilot.disengage();
                 continue;
             };
-            let point = match guns.sight {
-                Sight::Pinned(point) => Some(point),
-                Sight::Tracked(_) => guns
-                    .aim
-                    .map(|[x, _, z]| [x, f64::from(terrain.height(x as f32, z as f32)), z]),
-                Sight::Free => None,
-            };
-            if let Some(point) = point {
-                cockpit.flight.autopilot.set_orbit_point(point);
+            match guns.sight {
+                Sight::Pinned(point) => cockpit.flight.autopilot.set_orbit_point(point),
+                Sight::Tracked(_) => {
+                    if let Some([x, _, z]) = guns.aim {
+                        let ground = f64::from(terrain.height(x as f32, z as f32));
+                        cockpit.flight.autopilot.set_orbit_point([x, ground, z]);
+                    }
+                }
+                Sight::Free => cockpit.flight.release_orbit(),
             }
         }
     }

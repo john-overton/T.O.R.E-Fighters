@@ -183,7 +183,10 @@ pub fn path_words(path: Path) -> &'static str {
 /// 29 since the AC-130 sensor console (slice nr-orbit): seat command 28
 /// (SensorConsole), and the exact own-plane state's autopilot carries the
 /// orbit hold (mode Orbit 4 and its plan and memory).
-pub const PROTOCOL_VERSION: u16 = 29;
+/// 30 since the sensor console's search and keys (slice nr-cona): seat
+/// command 29 (Console, a sub-code and a value), and the orbit in the exact
+/// own-plane state carries `pinned`, `heading` and `altitude`.
+pub const PROTOCOL_VERSION: u16 = 30;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
