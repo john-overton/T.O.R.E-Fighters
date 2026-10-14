@@ -444,6 +444,7 @@ names are in `tore_replay::vocab`; the layout is an agent decision.
 | `weapon.cluster` | the shooter | A cluster bomb burst on the ground: `projectile`, `weapon`, where, and the burst's `explosion` type. The submunition flashes are drawn from that burst's explosion, so a replay shows what the flight showed. |
 | `weapon.guided` | the shooter, then the object an AT-2 or JDAM follows | A laser weapon, JDAM or AT-2 at its release (`released` true) and at each change of mode: `mode` is `waiting` (a laser weapon released with no spot, which may lock one), `guiding` or `blind` (guidance lost for good, or never had), with `from`, `guidance` (`laser`, `coordinate` or `command`), `spot_owner` and `own` (a laser weapon on its own aircraft's spot or a buddy's), the JDAM's stored point as `x_ft`, `y_ft`, `z_ft` with `stored` true, and a `reason` in words. Event kinds of the same family as the `weapon.guidance` display tree, but a separate log of what changed. |
 | `player.laser` | the lasing aircraft, then the object under the spot | An aircraft's laser designator changed state or mask: `state` (`ready`, `lasing`, `masked`, `off`), `how` (automatic or by hand), `mask` (range, gimbal or terrain), `range_ft`, and the spot's position while it lases. While the AI flies an aircraft whose human gave it back (a drop, a leave, away, a kick), the cockpit the human left keeps its laser and designation, and the entries go on for that aircraft with `kept` true (slice FX-K). When the aircraft is destroyed or leaves the mission with its laser on, one `off` entry (`reason` "its aircraft is gone") ends it. |
+| `player.orbit` | the recording's player | The AC-130's sensor console (slice nr-orbit, 2026-10-13): `on` true when it opens, with the point the orbit circles as `x_ft`, `y_ft`, `z_ft` and the planned `radius_ft` and `height_ft` above it, again whenever that point has moved more than 50 ft (at most once a second), and `on` false when it closes ([the sensor console](spec/ac130-linked-guns.md#the-sensor-console-and-the-orbit)). |
 | `player.laser_spot` | the lasing aircraft, then the object under the spot | Where the spot is while the laser is on (slice FX-R, 2026-10-11): `x_ft`, `y_ft`, `z_ft`. Written when the spot has moved more than 5 ft since the last entry and at least 12 ticks (a tenth of a second) after it, so a spot on a standing target makes none beyond the `player.laser` that turned it on, and one on a moving truck makes ten a second. The viewer follows the spot with them. It also follows the spot of a kept cockpit (`kept` true), so a laser bomb that goes on guiding after its pilot dropped out shows its spot. |
 | `weapon.aim` | the shooter | Where a guided weapon in the guiding mode steers (FX-R): `projectile`, `spot_owner` for a laser weapon, `x_ft`, `y_ft`, `z_ft`; written like `player.laser_spot`. The last one before a weapon goes blind is the point it was homing on then. A JDAM's stored point is in its `weapon.guided`; it makes none. |
 | `weapon.impact` | the shooter, then the ground target it had designated | A bomb or guided weapon reached the ground (FX-R), one for each bomb, duds included: `projectile`, `weapon`, `x_ft`, `y_ft`, `z_ft` (where it landed), `guided`, `mode` (a guided weapon's mode at the end), `aim_x_ft`, `aim_y_ft`, `aim_z_ft` and `miss_ft` (the point it was steering for and the distance from it, when it had one), `target_ft` (distance from the designated target) and a `reason` in words (`it landed 940 ft from the point it was steering for before it went blind, 950 ft from the designated target`). For a shooter whose human gave the aircraft back, `target_ft` reads the designation the human left and a laser weapon's `reason` for going blind reads the kept laser (FX-K). |
@@ -921,7 +922,9 @@ beyond them.
   (how many were knocked down, in how many changes, from which tick). A
   raid that flattens 500 buildings costs about 4 KB. `TORE_REPLAY_CITY=0`
   replays a recording as an older build would, without them (a developer
-  aid).
+  aid). Each entry's tick is also when its buildings began to burn: the
+  viewer ages every burning building's smoke column from the tick it fell
+  on (nr-fx4, below), so no extra data is stored.
 - The air-to-ground round (slice RA) adds events and a weapon class and **no
   format change**: a recording is still format 3 with surface content and
   format 2 without, and both versions open unchanged. See
@@ -1513,7 +1516,10 @@ under the playhead:
 - The city fill as the recording left it at the tick shown (nr-fx3): its
   knocked-down buildings flat and burning, read once from the city section
   when the recording opens; seeking or playing backwards stands them up
-  again. At night every explosion and fire also glows, to the limit of the
+  again. Each burning building's smoke column is as tall and dense as it
+  was at that tick, however the playhead got there: its age is the tick
+  shown less the tick the building fell on, so a seek, a jump back and a
+  play-through draw the same smoke (nr-fx4, John 2026-10-13). At night every explosion and fire also glows, to the limit of the
   night scene, as in flight ([night glow](spec/explosions.md#night-glow)).
 - Chaff clouds and burning flares with their smoke trails and glare,
   flown again from their recorded releases
@@ -1798,11 +1804,20 @@ about 1,200 ticks a frame, frames take about 2 ms more.
   recording never named (one that never fired and was not destroyed) is not
   in the registry, and a recording of a world from before format 3 has none
   of this: its columns stay where the scenery put them.
-- A burning city fill building's smoke column runs on the viewer's own
-  clock, as in flight (nr-fx2): after a seek the buildings knocked down at
-  that point burn at once, but their columns start again from the ground
-  and take about 44 seconds to stand. Their fires and glow are there at
-  once.
+- A burning city fill building's smoke column is computed from the tick
+  its building fell on (nr-fx4; it ran on the viewer's own clock before),
+  so after any seek every burning block shows the column it would have had
+  playing straight through, at the same height and density. The same holds
+  for a destroyed unit's wreck column (from its recorded death tick) and
+  for crash-site, building, vehicle and hulk fire columns (puffs rebuilt
+  from their recorded release ticks). Where a recording has no tick to
+  start from, the column starts warm: a unit that was already dead when the
+  recording began (its column starts at the first recorded tick), and a
+  building that was already flat when a network seat joined (it stands flat
+  from the replay's first tick, so a seek within the first minute after
+  that shows a young column the live game would have shown grown). A flame
+  still flickers on the viewer's clock, so two stills of one tick differ in
+  about a hundred flame pixels.
 
 ## Debug panels
 

@@ -436,6 +436,13 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
         ),
         kind::WEAPON_AIM => format!("{shot} from {s} steering point moved"),
         kind::PLAYER_LASER_SPOT => format!("{s} laser spot moved"),
+        kind::PLAYER_ORBIT => {
+            if event.flag(field::ON) == Some(true) {
+                format!("{s} sensor console: orbit hold circling its point")
+            } else {
+                format!("{s} sensor console closed")
+            }
+        }
         kind::WEAPON_GUIDED => {
             let mode = opt(event, field::MODE).unwrap_or_else(|| "?".into());
             let follows = event

@@ -25,6 +25,9 @@ use tore_sim::{
 
 const KT: f64 = 1.687_81;
 const HP: f64 = 550.;
+/// A typical V-22 mission weight, lb: Bell's published out-of-ground-effect
+/// hover ceiling, 5,700 ft ISA, is quoted at 47,000 lb (slice HF3).
+const MISSION_LB: f64 = 47_000.;
 
 /// A level trim, as the probe reports it.
 struct LevelTrim {
@@ -463,7 +466,7 @@ fn fuel_rows(a: &Aircraft) {
     let c = hover.model().configuration();
     let tank = c.mass.internal_fuel_lbs;
     let record = c.propulsion.military_fuel_lbs_per_second;
-    println!("== fuel, {} (slice HF2)", a.name);
+    println!("== fuel, {} (slices HF2, HF3)", a.name);
     println!(
         "tank {tank:.0} lb; PT flow {record:.0} lb/s = {:.0} min (not read); full flow {:.3} lb/s at {:.0} hp rated",
         tank / record / 60.,
@@ -482,9 +485,42 @@ fn fuel_rows(a: &Aircraft) {
             tank / flow / 60.
         );
     }
+    // The V-22 in airplane mode (slice HF3): its cruise, low and high.
+    if nacelle.is_some() {
+        for (altitude, kt) in [
+            (1_000., 180.),
+            (1_000., 220.),
+            (1_000., 240.),
+            (15_000., 240.),
+        ] {
+            let mut s = hover.clone();
+            s.position[1] = altitude;
+            if !s.trim_tiltrotor(kt * KT, 0.) {
+                println!("{kt:>4.0} kt airplane mode at {altitude:.0} ft: no trim");
+                continue;
+            }
+            let flow = s.rotorcraft_fuel_flow().unwrap();
+            println!(
+                "{kt:>4.0} kt airplane mode at {altitude:.0} ft: power {:.0} percent of rated, {flow:.3} lb/s, endurance {:.0} min",
+                100. * s.lift_controls.drive.engine_output[0] / fuel.rated_power,
+                tank / flow / 60.
+            );
+        }
+    }
+    let top = c
+        .aerodynamics
+        .envelopes
+        .iter()
+        .filter_map(|e| e.speeds(0.))
+        .map(|(_, high)| high)
+        .fold(0_f64, f64::max);
     println!(
-        "planning flow (hover at this weight) {:.3} lb/s",
-        hover.endurance_flow_lbs_per_second()
+        "planning flow (level at {:.0} kt, 80 percent of the {:.0} kt envelope top, sea level, slice HF3) {:.3} lb/s, a full tank {:.0} min; hover flow {:.3} lb/s",
+        0.8 * top / KT,
+        top / KT,
+        hover.endurance_flow_lbs_per_second(),
+        tank / hover.full_tank_endurance_flow_lbs_per_second() / 60.,
+        fuel.hover_flow(c.mass.empty_lbs + tank)
     );
 }
 
@@ -548,10 +584,19 @@ fn tiltrotor_probe(a: &Aircraft, path: &str) -> Result<bool, Box<dyn std::error:
             .unwrap_or(0.)
     };
     println!(
-        "hover ceiling OGE: {:.0} ft at gross, {:.0} ft at maximum",
+        "hover ceiling OGE: {:.0} ft at gross, {:.0} ft at {MISSION_LB:.0} lb, {:.0} ft at maximum",
         ceiling(gross),
+        ceiling(MISSION_LB),
         ceiling(maximum)
     );
+    if let Some(mission) = hover(MISSION_LB, 0.) {
+        println!(
+            "hover OGE at {MISSION_LB:.0} lb, sea level: {:.0} hp, margin {:.0} percent, lever {:.0} percent",
+            mission.engine_power / HP,
+            100. * (available(0.) / mission.engine_power - 1.),
+            100. * mission.lever
+        );
+    }
     // Hover rates and the engine cut.
     for level in [StabilityLevel::Off, StabilityLevel::Damper] {
         let rates: Vec<_> = (0..3)

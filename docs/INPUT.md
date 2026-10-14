@@ -215,6 +215,7 @@ targeting sight". The gamepad gestures stay the AC-130's.
 | Slew the sight | Alt + arrows (or Alt + keypad 4, 6, 8, 2) | Select + right stick | Actions `sight-left`, `sight-right`, `sight-up`, `sight-down` for keys and buttons; `sight-x` and `sight-y` for sticks and HOTAS axes (right and up positive) |
 | Zoom in / out | Shift+' / Shift+; | None | Retail's bomb camera zoom keys; six steps |
 | Next gun / link gun | Ctrl+7 / Ctrl+8 | Select + D-pad up / down | Moved from the right stick |
+| Sensor console and orbit hold | Ctrl+9 | Select + Guide (Xbox) | AC-130 only (`sensor-console`): opens the console and the autopilot circles the sight's point; again hands the aircraft back ([the sensor console](spec/ac130-linked-guns.md#the-sensor-console-and-the-orbit)). Agent choice of keys, 2026-10-13: next to the gun keys; Select + Guide was the range's incoming-missile fixture, which is off on the AC-130 |
 
 A held slew key or button starts at a quarter of full deflection for a quarter
 second, so a short press nudges, then runs at full rate; an analog axis is
@@ -231,7 +232,8 @@ actions, because a slew is held, not pressed.
 Select + A stays the radar `designate` on every other aircraft; the AC-130
 swaps in the sight's designate and pin. The Select + D-pad uses that belong to
 the vectoring jets, the range reset and the damage test are off on the AC-130,
-where the D-pad picks and links guns. The live-fire range reset, which took
+where the D-pad picks and links guns, and so is Select + Guide's incoming-missile
+fixture, where Guide opens the sensor console. The live-fire range reset, which took
 Backslash, is now Ctrl+Shift+Backslash.
 
 On [the keyboard map](tore-keyboard-map.html) the sight keys are on the Fly &
@@ -491,6 +493,7 @@ Deliberate differences from FA:
 | Shift+B | Afterburner switch, alongside 6 | Unused | Gamepad Y uses the same switch |
 | Backslash | Designate what is under the sight's crosshair (the AC-130's gunsight, or the targeting sight of an aircraft with a laser designator or a FLIR); elsewhere "no targeting sight" | IR/laser designation, only with advanced targeting on | The AC-130 gunsight is that targeting, John 2026-10-09; every sight aircraft since A2G slice T1. The live-fire range reset moved to Ctrl+Shift+Backslash (kept its key, gained Ctrl+Shift) |
 | Shift+Backslash | Pin the sight on the ground under the crosshair | Unused | T.O.R.E addition, John 2026-10-09 |
+| Ctrl+9 | AC-130 sensor console and orbit hold (`sensor-console`); elsewhere "No sensor console on this aircraft" | Unused | T.O.R.E addition, John 2026-10-13 (the console); the key is an agent choice |
 | Shift+' / Shift+; | Zoom the sight in / out; elsewhere a message | Zoom the high-altitude bombing window in / out | The gunsight is the target camera, John 2026-10-09 |
 | Alt + arrows | Slew the sight | Unused | T.O.R.E addition, John 2026-10-09 |
 | Tab | Fire the gun while held, whatever is selected (`fire-gun`, a hold action like the trigger; [the gun key](spec/air-to-ground.md#the-gun-key)) | Fire the gun (no default pad button) | Retail key, bound by A2G slice K1, built by FX-T |
@@ -620,7 +623,7 @@ UI actions: `pause`, `menu`, `end-flight`, `restart`, `bookmark`, `view-front`, 
 `view-target`, `view-target-player`, `view-fly-by`, `view-missile`, `store-view`,
 `view-target-track`, `center-look`, `cockpit`, `hud`, `zoom-in`, `zoom-out`,
 `range-down`, `range-up`, `radar-mode`, `sensor-channel`, `sensor-infrared`,
-`sensor-history`, the AC-130 gunsight's `sight-designate`, `sight-pin`,
+`sensor-history`, the AC-130 gunsight's `sight-designate`, `sight-pin`, `sensor-console`,
 `sight-zoom-in`, `sight-zoom-out` and the holds `sight-left`, `sight-right`,
 `sight-up`, `sight-down`, `page-0` through `page-9`, instrument
 commands below, and `menu-up/down/left/right/accept/back`. `sensor-channel` is an
@@ -856,7 +859,7 @@ new bindings or regenerate a profile deliberately. No saved file is overwritten.
 | D-pad left | Insert: release one chaff cartridge |
 | D-pad right | Delete: release one flare |
 | Start | Shift-Y: target jammer fixture |
-| Guide | Ctrl-Shift-I: one incoming selected source weapon fixture |
+| Guide | Ctrl-Shift-I: one incoming selected source weapon fixture; on the AC-130, Ctrl-9 (the sensor console) |
 
 Chaff and flare took D-pad left and right from the damage-class and
 station-failure fixtures on 2026-09-26, an agent decision. Both fixtures remain

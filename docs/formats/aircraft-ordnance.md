@@ -251,6 +251,9 @@ What the table shows, by inspection:
   Wingtip row (agent decision, [stores on pylons](../spec/stores-on-pylons.md#rules)),
   except a one-sided wing row less than 3 ft out, the A-4E's, which it hangs as a
   centreline rack (slice PY2, [the A-4E](../spec/stores-on-pylons.md#the-a-4e)).
+  T.O.R.E's default A-4E load puts one 150 gallon tank on that row in place of the
+  Mk 82s and two (not four) on row 5, the real aircraft's three tanks; the rows'
+  capacities stay the source's (slice PY3).
 - `F4E.PT` and `F4.PT` (F-4G) row 5 records their four Sparrows at x 0 with flag
   0x4: retail releases them from the centreline. T.O.R.E hangs them 3 ft either side,
   in the Sparrow wells (fitted, slice PY2).

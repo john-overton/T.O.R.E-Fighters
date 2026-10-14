@@ -110,6 +110,16 @@ player flies changed: a tick-by-tick state comparison of hover hold, A and Ctrl+
 on the four rotorcraft at every stability level is identical before and after.
 How the AI uses them is in [rotorcraft control](ai.md#rotorcraft-and-jet-lift-control).
 
+## Orbit hold (the AC-130's sensor console)
+
+John asked on 2026-10-13 for an autopilot that circles the AC-130's target at
+the attack orbit while the player works the guns from the sensor console. It
+is a fourth mode, `Mode::Orbit`, engaged only by the console key (Ctrl+9 on
+the AC-130), never by A or Ctrl+A, and it ignores the stick and the throttle
+instead of letting go at 0.15 (agent decision). It is the only mode with an
+autothrottle. The HUD's second line reads `ORBIT`. Its rules, numbers and
+provenance are in [the sensor console and the orbit](ac130-linked-guns.md#the-sensor-console-and-the-orbit).
+
 ## Numbers and provenance
 
 The interaction and 30 degree commanded-bank / 20 m/s commanded-climb limits

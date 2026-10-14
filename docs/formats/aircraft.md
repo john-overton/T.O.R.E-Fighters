@@ -45,7 +45,7 @@ The app calls the same resolver against FA_1/FA_2, builds its runtime cache, and
 
 ## PT and equipment
 
-BRF is a bounded textual data language: byte/word/dword, caret-marked scaled integers, pointers, symbols, strings and labels. Rust validates statement kinds and counts before applying the recovered schema. Hex words are sign-folded; bytes are retained unsigned. Unsupported aircraft identities/layouts, bad pointers, malformed polygons and mass bounds fail. Original fields, including unknown semantics, remain in raw files and export reports.
+BRF is a bounded textual data language: byte/word/dword, caret-marked scaled integers, pointers, symbols, strings and labels. Rust validates statement kinds and counts before applying the recovered schema. Hex words are sign-folded; bytes are retained unsigned. Unsupported aircraft identities/layouts, bad pointers, malformed polygons and mass bounds fail. Original fields, including unknown semantics, remain in raw files and export reports. `Aircraft::parse` then applies the reviewed record corrections (`aircraft_corrections.rs`: the V-22, CH-47, Su-25, MiG-17F and C-130, see [aircraft records](../spec/aircraft-records.md)) only while every replaced value still holds its copied retail number. The imported files are never changed.
 
 | F18.PT fact | Retail value / use |
 | --- | --- |
@@ -307,7 +307,7 @@ checked below against real aircraft, not against retail play.
 | PT | Engines | Empty lb | Internal fuel lb | `fuelConsumption` | `aftFuelConsumption` | Full tank at the record's flow |
 | --- | --- | --- | --- | --- | --- | --- |
 | AH64.PT | 2 | 18,298 | 2,000 | 1 | 0 | 33 min |
-| V22.PT | 2 | 18,298 | 2,000 | 1 | 0 | 33 min |
+| V22.PT (as stored; corrected below) | 2 | 18,298 | 2,000 | 1 | 0 | 33 min |
 | MI24.PT | 2 | 18,078 | 3,307 | 3 | 0 | 18 min |
 | CH47.PT | 2 | 18,078 | 3,307 | 1 | 0 | 55 min |
 | AV8.PT | 1 | 13,968 | 7,759 | 2 | 0 | 65 min |
@@ -331,7 +331,7 @@ checked below against real aircraft, not against retail play.
   tied to the power their rotors draw.
 - **The rotorcraft records are copies.** `V22.PT` and `AH64.PT` carry the same
   empty weight, fuel, thrust and flow. `CH47.PT` carries the Mi-24's empty weight
-  and fuel (the real CH-47 is a 24,000 lb aircraft carrying several thousand pounds more fuel),
+  and fuel (the real CH-47 is a 24,000 lb aircraft carrying several thousand pounds more fuel; corrected below since slice HF3),
   an implausible thrust (135,795 lbf, set aside by the rotor overhaul) and a flow
   of 1 where the Mi-24 has 3. The flow of the Mi-24 and of the CH-47 therefore
   cannot both be a measurement of anything. Retail never makes a rotorcraft
@@ -341,13 +341,124 @@ checked below against real aircraft, not against retail play.
   Yak-141 (9,700 lb) carry a fighter's flow and a believable tank; the models add the
   lift engines' burn (docs/spec/powered-lift-flight.md). No change.
 
-**Decision (agent, 2026-10-13, John's request).** The reader keeps the retail
-numbers. The weights are kept (they size the rotor models and the mass checks). The
-**flow of a rotorcraft is not read**: the flight model burns by the power the rotor
-draws ([FLIGHT-MODEL](../FLIGHT-MODEL.md#rotorcraft-fuel), fitted). The V-22 keeps
-the AH-64's 2,000 lb tank, which is the weak number now (a real V-22 carries about
-12,000 lb); that is the clone, flagged for John rather than changed here. The
-measured result is in the [rotorcraft fuel baseline](../baselines/rotorcraft-fuel.md).
+**Decision (agent, 2026-10-13, John's request).** The **flow of a rotorcraft is not
+read**: the flight model burns by the power the rotor draws
+([FLIGHT-MODEL](../FLIGHT-MODEL.md#rotorcraft-fuel), fitted). The AH-64 and Mi-24
+weights are kept (they size the rotor models and the mass checks). The measured
+result is in the [rotorcraft fuel baseline](../baselines/rotorcraft-fuel.md).
+
+**V-22 record correction (slice HF3, opinionated: John, 2026-10-13, "V-22 tank: fix
+(real fuel)").** `V22.PT` is the AH-64 record with a new name: its empty weight,
+fuel, maximum takeoff weight and thrust are the AH-64's. The reader now replaces
+those four numbers, and only when every one of them still holds the copied value (an
+edited or different record is read as it is). The table lives in
+`crates/tore-formats/src/aircraft_corrections.rs` and applies inside
+`Aircraft::parse`, so every reader (flight model, loadout, live combat, wreck) sees
+the same aircraft. The choice of figures is an agent decision.
+
+| Field | Record (AH-64 copy) | Corrected | Source |
+| --- | --- | --- | --- |
+| `weight` (empty), lb | 18,298 | 31,818 | MV-22B empty weight (Pub, Wikipedia "Bell Boeing V-22 Osprey", specifications) |
+| `internalFuel`, lb | 2,000 | 11,700 | MV-22B 1,721 US gal (Pub, Bell Boeing V-22 brochure) at 6.8 lb/gal (JP-5) |
+| `maxTakeoffWeight`, lb | 23,810 | 52,600 | Vertical takeoff maximum (Pub, Wikipedia) |
+| `thrust`, lbf | 26,280 | 58,057 | The record's thrust-to-maximum-weight ratio kept (Derived) |
+
+`CH47.PT` carries the Mi-24 record's empty weight, fuel and maximum weight (John's
+answer of 2026-10-13: "check other records for copying issues as well"). The same
+table corrects them to the CH-47F's; its own thrust (135,795 lbf, implausible and
+already set aside by the rotor model) is not a copy and stays.
+
+| Field | Record (Mi-24 copy) | Corrected | Source |
+| --- | --- | --- | --- |
+| `weight` (empty), lb | 18,078 | 24,578 | CH-47F empty weight (Pub, Wikipedia "Boeing CH-47 Chinook", specifications) |
+| `internalFuel`, lb | 3,307 | 7,340 | CH-47F 1,080 US gal (Pub, Wikipedia) at 6.8 lb/gal (JP-5) |
+| `maxTakeoffWeight`, lb | 28,660 | 54,000 | CH-47F gross weight (Pub, Wikipedia; the rotor model already scaled its power by it) |
+
+Checked and left as they are (agent decision, 2026-10-13; no plain copy and no large
+factor in the fields the game uses):
+
+| PT | Record: empty / fuel / maximum, lb | Real | Verdict |
+| --- | --- | --- | --- |
+| MI24.PT | 18,078 / 3,307 / 28,660 | Mi-24V 8,500 kg (18,740 lb) empty, 1,500 to 1,720 kg fuel, 11,200 kg normal and 12,000 kg (26,455 lb) maximum takeoff | Right; the maximum is 8 percent high. Its thrust (1.67 times the gross weight) is set aside by the rotor model |
+| AH64.PT | 18,298 / 2,000 / 23,810 | AH-64A about 11,400 lb empty, 375 US gal (about 2,500 lb) fuel, 21,000 to 23,000 lb maximum | The record's own (the V-22 copied it). The empty weight is about 1.6 times the real one: empty plus fuel, 20,298 lb, is a loaded Apache's mission weight. The rotor model's power comes from the record's thrust at this weight (within 10 percent of the real 2 x 1,690 shp), so the aircraft flies as a loaded AH-64 does; not changed, listed for John. The fuel is 20 percent under the real tank |
+
+Sources disagree on the MV-22B's internal fuel (a fact sheet gives 1,448 gal with the
+aft sponson tank); 1,721 gal is the manufacturer's brochure figure. The rotor model's
+power scales with the corrected maximum weight, so it is the engines' full rating
+([powered-lift flight](../spec/powered-lift-flight.md#mass-power-and-rotors)).
+The fixed-wing records are slice nr-rec's audit.
+
+## Fixed-wing record audit
+
+Research, 2026-10-13, slice nr-rec, for John's request (opinionated, 2026-10-13)
+to fix the Su-25 record and check every other record for values copied from
+another aircraft. Build: the supplied Fighters Anthology `FA_2.LIB`, all 145 PT
+records read in the schema order of `aircraft_schema.rs`. "Record" columns are
+the retail values; "published" columns are rounded real-aircraft figures, from
+each aircraft's Wikipedia specifications section unless a source is named.
+The published figures of rows left as decoded were not individually re-checked
+(agent's reference figures); the three corrected rows name their sources in
+[aircraft records](../spec/aircraft-records.md). Thrust is all engines together,
+military / afterburner. Top speed is the decoded 1 G row's fast edge.
+
+Exact duplicates were found by comparing every PT's empty weight, internal fuel,
+maximum takeoff weight, military and afterburner thrust and envelope rows with
+every other PT. Variants of one aircraft (F18C, RAFALEE, F16E, MIG29M and the
+like) sharing values are expected and not listed.
+
+| PT (aircraft) | Empty lb, record / published | Internal fuel lb | Max takeoff lb | Thrust lbf | 1 G top kt | Finding |
+| --- | --- | --- | --- | --- | --- | --- |
+| SU25.PT (Su-25) | 41,885 / 21,605 | 22,664 / 6,614 | 90,390 / 42,549 | 35,270 / 0 against 19,860 | 604 / 526 at sea level | Mass, fuel, maximum weight, thrust and flow are SU24.PT's word for word. **Corrected.** Top speed 15 percent high and ceiling (23,812 ft, real 23,000) are its own: left. |
+| MIG17F.PT (MiG-17F) | 6,000 / 8,640 | 4,534 / 2,520 | 13,380 / 13,380 | 5,732 / 7,451, matches | 622 / 590 at sea level | Fuel is MIG21.PT's (also J7E, Q5), 1.8 times real; flows 3 / 20 lb/s are 4.7 and 5.3 times the fleet median per pound of thrust. **Fuel and flows corrected.** Empty weight 31 percent low, not a copy: left. |
+| C130.PT (C-130) | 76,469 / 75,800 (C-130H) | 45,012 / about 45,000 | 155,000 / 155,000 | 108,192 / 0; no static figure (4 x 4,590 shp) | 338 / 320 at 20,000 ft | Thrust 2.7 times AC130.PT's 40,000 for the same airframe and engines (thrust-to-weight near 0.9). **Corrected to 40,000.** |
+| F18.PT (F/A-18D) | 23,050 / 23,000 | 11,220 / 10,400 to 10,900 | 49,224 / 51,900 | 17,687 / 32,000 against 22,000 / 35,800 | 1,033 / 1,030 (Mach 1.8) | Thrust pair shared with F16C (and F16, M2000, F29, CMCHE): a template, dry 20 percent low. Left. |
+| RAFALE.PT (Rafale C) | 17,100 / 21,700 | 9,900 / 10,400 | 40,100 / 54,000 | 24,000 / 32,000 against 22,500 / 33,700 | 1,154 / 1,030 | Empty weight is M2000.PT's, 21 percent low; maximum weight 26 percent low. Left. |
+| F14.PT (F-14D) | 40,104 / 43,700 | 15,741 / 16,200 | 74,349 / 74,350 | 28,435 / 41,800 against 27,600 / 55,600 | 1,345 / 1,340 | Burner 25 percent low. Left. |
+| A4E.PT (A-4E) | 10,800 / 10,000 | 4,434 / 5,400 | 25,000 / 24,500 | 11,200 / 0 against 8,500 | 598 / 585 | Thrust is the A-4M's J52-P-408, 32 percent over the A-4E's J52-P-6A; not another record's. Left. |
+| F31.PT (X-31 EFM) | 16,225 / 11,410 | 9,975 / 4,136 | 40,200 / 15,935 | 21,000 / 32,000 against 10,600 / 16,000 | 1,481 / about 735 (Mach 1.28) | About twice the demonstrator throughout, not a copy: FA's X-31 is a notional armed fighter. Left as game design. |
+| MIG29.PT (Fulcrum-C) | 18,025 / 24,000 | 13,000 / 7,700 to 8,000 | 36,375 / 40,000 to 43,000 | 22,220 / 36,600, matches | 1,256 / 1,320 | Not a copy. Empty 25 percent low, fuel 1.6 times; empty plus fuel (31,025) is close to the real sum. Left. |
+| SU27.PT (Su-27) | 36,000 / 36,100 | 19,000 / 20,700 | 60,000 / 67,100 | 40,755 / 59,510 against 33,800 / 55,100 | 1,465 / 1,350 | Dry thrust 21 percent high, shared with SU33, SU34, SU35 (one engine family). Left. |
+| MIG23.PT (Flogger-B) | 23,589 / 22,500 | 11,704 / 10,000 | 41,556 / 39,000 | 17,310 / 24,728 against 18,300 / 27,600 | 1,351 / 1,350 | Within 15 percent. Left. |
+| SU35.PT (Su-27M) | 40,564 / 37,500 | 22,000 / 22,600 | 74,956 / 74,960 | 40,755 / 58,642 | 1,347 / 1,350 | Within 10 percent. Left. |
+| F22.PT, F22N.PT (F-22) | 30,000 / 43,340 | 25,000 / 18,000 | 72,000 / 83,500 | 64,000 / 78,000 against 52,000 / 70,000 | 1,315 / 1,300 | 1990s pre-production figures, not a copy (F22N is the same design in retail): empty 31 percent low, fuel 39 percent high, their sum within 10 percent. Left. |
+| AC130.PT (AC-130U) | 76,469 / C-130H airframe | 45,012 | 155,000 / 155,000 | 40,000 | 338, fitted 261 | Weights are C130.PT's: the same airframe. Left. |
+| E3.PT (E-3) | 169,552 / 185,000 | 157,839 / about 155,000 | 332,500 / 347,000 | 84,000 / 84,000 (4 x TF33) | 462, fitted VMO | Mass shared with IL76, E8, KC135, P3, ATL (a four-engine template); within 10 percent. Ceiling 30,000 against 41,000. Left. |
+| IL76.PT (A-50 Mainstay) | 169,552 / 204,000 (Il-76MD) | 157,839 / not checked | 332,500 / 418,900 | 84,000 against 105,800 (4 x D-30KP) | 462 / 460 | E3.PT's mass and thrust word for word, 20 to 25 percent low in proportion, so thrust-to-weight is right. Left. |
+| E2.PT (E-2C) | 39,373 / 40,200 | 12,400 / 12,400 | 53,267 / 53,000 | 16,000 (2 x 5,100 shp) | 326 / 350 | Matches. |
+| AV8.PT (AV-8B) | 13,968 / 13,968 | 7,759 / 7,759 | 31,000 / 31,000 | 33,800 / 0 against 23,500 | 581 / 585 | Mass exact; thrust 44 percent high, offset in the hover by the fitted 0.75 vertical efficiency ([powered lift](../spec/powered-lift-flight.md)). Left. |
+| YAK141.PT (Yak-141) | 25,685 / 25,684 | 9,700 / 9,700 | 42,990 / 42,990 | 19,840 / 34,170, burner matches | 972 / 975 | Matches. |
+| F4B.PT, F4J.PT (F-4B, F-4J) | 30,328 / 28,000 to 30,800 | 12,290 / 13,000 | 61,795 / 56,000 | 23,260 / 35,800 against 23,740 / 35,800 | 1,268 / 1,260 | Within 10 percent. Ceiling 42,000 against 56,000 to 60,000. Left. |
+| F4E.PT (F-4E) | 31,853 / 30,328 | 12,290 / 12,900 | 51,000 / 61,795 | 23,620 / 35,800 | 1,268 | The F-4E's published empty and maximum weights sit in F4B/F4J; within 20 percent. Left. |
+| F4.PT (F-4G) | 31,853 / about 30,300 | 10,790 / about 12,900 | 51,000 | 23,620 / 35,800 | 1,268 | Fuel is F8J.PT's, 16 percent low. Left. |
+| A7.PT (A-7E) | 19,127 / 19,127 | 9,900 / 9,300 to 10,200 | 42,000 / 42,000 | 15,000 / 15,000 | 604 / 600 | Matches. |
+| F15.PT (F-15C) | 28,600 / 28,000 | 13,662 / 13,450 | 68,000 / 68,000 | 32,558 / 47,860 against 29,200 / 47,500 | 1,434 / 1,435 | Envelope ceiling 100,000 against a 65,000 ft service ceiling. Left. |
+| F16C.PT (F-16C) | 14,567 / 18,900 (Block 50) | 6,972 / 7,000 | 33,000 / 42,300 | 17,687 / 32,000 against 17,155 / 29,500 | 1,145 / 1,150 | Mass is F16.PT's (F-16A): empty 23 and maximum 22 percent low for a Block 50. Left. |
+| F104.PT (F-104) | 14,082 / 14,000 | 4,924 / 5,800 | 28,779 / 29,000 | 12,177 / 17,900 against 10,000 / 15,600 | 1,256 / 1,150 | Envelope tops at +5 G against +7.33. Left. |
+| A10.PT (A-10A) | 25,600 / 24,960 | 10,700 / 11,000 | 50,000 / 50,000 | 18,130 / 18,130 | 450 / 381 (450 is Vne) | Envelope ceiling 22,812 against a 45,000 ft service ceiling. Left. |
+| B747.PT (747) | 399,000 / 394,000 | 331,880 / 383,000 | 800,000 / 875,000 | 227,000 / 230,000 to 252,000 | fitted VMO | Within 15 percent (AF1 shares it). Left. |
+| A310.PT (A310) | 157,975 / 176,000 | 92,240 / 108,000 | 313,050 / 313,000 (-200) | 96,000 / about 100,000 | fitted VMO | The A310-200's weights. Left. |
+
+The fleet's fuel flows are consistent with one another, not with real engines:
+over the 28 jets and transports above that were not corrected, the median is 1.12 lb/s of
+military flow per 10,000 lbf of military thrust (the A-7, the F-4 family and the
+F-104 are highest at 1.6 to 2.0; the C-130 lowest because of its thrust) and
+5.0 lb/s of burner flow per 10,000 lbf of burner thrust (4.4 to 7.6). The SU24 copy
+in SU25.PT (1.70) and MIG17F.PT (5.2 and 26.8) were the outliers.
+
+**Rotorcraft** (owned by slice nr-hf3, recorded here, not changed by this audit):
+AH64.PT and V22.PT are one template also used by AH1, GAZ, LYNX, TIGRE, UH60 and
+KA50 (18,298 / 2,000 / 23,810 lb, 26,280 lbf, the same envelope); a real AH-64A is
+about 11,400 lb empty, a real V-22 about 33,100 lb empty with about 12,000 lb of
+fuel. MI24.PT, CH47.PT, MI17.PT and SFR.PT share 18,078 / 3,307 / 28,660 lb and one
+envelope: right for the Mi-24 (8,500 kg empty, 1,500 kg fuel), not for a CH-47
+(about 23,400 lb empty, 7,000 lb fuel, 50,000 lb maximum); CH47's 135,795 lbf is
+SFR.PT's. Slice nr-hf3 corrects the V-22 and CH-47 records (see the record
+corrections above). See also [rotorcraft fuel records](#rotorcraft-fuel-records).
+
+**Not audited.** A PT carries no dimensions; the size comes from the shape, whose
+coordinate scale differs between files, so sizes need the renderer's host scale
+and are left for a separate pass. Hit points, damage and sensor fields were not
+compared with real figures.
 
 ## F-14 default external fuel
 

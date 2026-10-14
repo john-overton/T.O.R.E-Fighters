@@ -220,12 +220,12 @@ APPROACH_TARGET = {
 # exactly inside John's range, kept as a regression window of plus or minus 6
 # percent (docs/testing/lane-flight.md). All of them are within 10 percent of the
 # range, so the range's own window already holds them; these record the values.
-KNOWN_LIFTOFF = {"su27": 128.1, "su25": 123.0, "f22": 127.7, "f22n": 127.7, "faxx": 127.7}
+KNOWN_LIFTOFF = {"su27": 128.1, "su25": 120.2, "f22": 127.7, "f22n": 127.7, "faxx": 127.7}
 KNOWN_APPROACH = {"f18": 135.1, "su27": 142.2, "f22": 148.5, "f22n": 148.5, "faxx": 148.5}
 # Internal fuel of each aircraft's default load, pounds.
 INTERNAL_FUEL_LB = {
     "f18": 11220, "rafale": 9900, "f14": 15741, "a4e": 4434, "x31": 9975, "mig29": 13000, "su27": 19000,
-    "mig21": 4534, "su25": 22664, "mig23": 11704, "su35": 22000, "f22": 25000, "f22n": 25000, "faxx": 25000,
+    "mig21": 4534, "su25": 6614, "mig23": 11704, "su35": 22000, "f22": 25000, "f22n": 25000, "faxx": 25000,
 }
 
 
@@ -266,9 +266,11 @@ def check_approach_speed(output: str, ac: str) -> list[str]:
 # The G a held pull reaches at 450 knots and 5,000 ft with the imported speeds
 # (`--retail-stall-speeds`, 2026-09-29). The weight-scaled stall speed keeps the
 # combat-speed G: the scaling fades out by the 4 G row (docs/spec/takeoff-ground-contact.md).
+# The Su-25 was re-recorded on 2026-10-13 (4.99 to 5.41) when its record lost
+# the Su-24's mass and thrust (docs/spec/aircraft-records.md).
 PULL_G_RETAIL = {
     "f18": 7.64, "rafale": 7.39, "f14": 6.18, "a4e": 6.13, "x31": 7.25, "mig29": 7.15, "su27": 7.54,
-    "mig21": 6.47, "su25": 4.99, "mig23": 6.77, "su35": 6.96, "f22": 6.91, "f22n": 6.91, "faxx": 6.91,
+    "mig21": 6.47, "su25": 5.41, "mig23": 6.77, "su35": 6.96, "f22": 6.91, "f22n": 6.91, "faxx": 6.91,
 }
 
 
@@ -1514,8 +1516,10 @@ def capture_scenarios() -> list[Scenario]:
     for section in ("nose", "cockpit", "core", "left-wing", "right-wing", "tail"):
         for fraction in ("0.3", "0.7", "1"):
             add(f"damage-f18-{section}-{fraction}", ["--free-flight", "--aircraft", "f18", "--flight-view", "1", "--damage-preview", fraction, "--damage-preview-section", section])
+    # Odesa (UKR 9), a Blue field: Zaporizhzhya (UKR 1) is Redfor since slice
+    # AL1 and refuses a ground start ("an enemy airfield").
     for ac in AIRCRAFT:
-        add(f"groundstart-{ac}", ["--free-flight", "--aircraft", ac, "--theater", "UKR", "--ground-start", "1", "--flight-view", "1", "--flight-look", "150,-15", "--flight-zoom", "1.5"])
+        add(f"groundstart-{ac}", ["--free-flight", "--aircraft", ac, "--theater", "UKR", "--ground-start", "9", "--flight-view", "1", "--flight-look", "150,-15", "--flight-zoom", "1.5"])
     for bay in ("0", "0.5", "1"):
         add(f"bay-f22-{bay}", ["--free-flight", "--aircraft", "f22", "--flight-view", "1", "--flight-look", "150,-30", "--flight-bay", bay])
     return out
@@ -2176,9 +2180,59 @@ def gunsight_scenarios() -> list[Scenario]:
     ]
 
 
+# The AC-130's sensor console and orbit hold (slice nr-orbit,
+# crates/tore-app/src/a2g_run/orbit.rs): the console opens over the Ukraine
+# armoured column and the autopilot flies the attack orbit with no stick or
+# throttle. name -> (extra arguments, notes).
+ORBIT_RUNS = {
+    "orbit-pin": (
+        ["--orbit-sight", "pin", "--seconds", "300"],
+        "The console opens on a pin at the column: enters the orbit, never inside the minimum radius or "
+        "below the minimum height after entry, every gun and the camera bear 90% of the time, smooth bank "
+        "and pitch, no stall.",
+    ),
+    "orbit-slew": (
+        ["--orbit-sight", "free", "--orbit-slew", "150", "--seconds", "330"],
+        "A free sight is pinned under its crosshair when the console opens; at 150 s the pin is slewed "
+        "right for 4 s and the orbit re-centres on it without exceeding the bank and pitch rates.",
+    ),
+    "orbit-track": (
+        ["--orbit-sight", "track", "--seconds", "300"],
+        "The console opens on the tracked lead tank of the moving column and follows it.",
+    ),
+    "orbit-close": (
+        ["--orbit-sight", "pin", "--orbit-close", "120", "--seconds", "130"],
+        "Ctrl+9 again at 120 s closes the console and hands the aircraft back, flying, with no snap.",
+    ),
+}
+
+
+def check_orbit(output: str) -> list[str]:
+    problems = [line.strip()[:200] for line in output.splitlines() if line.startswith("FAIL ")]
+    if "orbit probe: PASS" not in output:
+        problems.append("the orbit probe did not finish with PASS")
+    return problems
+
+
+def orbit_scenarios() -> list[Scenario]:
+    return [
+        Scenario(
+            name=f"flight-ac130-{name}",
+            lane="flight",
+            args=["--a2g-run", "UKR", "QUCOL", "--aircraft", "ac130", "--load", "C_25.JT", "--attack", "orbit",
+                  "--altitude", "4000", "--speed", "200", "--from", "3", *extra],
+            check=check_orbit,
+            timeout=600,
+            notes=notes,
+        )
+        for name, (extra, notes) in ORBIT_RUNS.items()
+    ]
+
+
 def scenarios() -> list[Scenario]:
     return (
         takeoff_scenarios()
+        + orbit_scenarios()
         + landing_scenarios()
         + maneuver_scenarios()
         + spin_scenarios()

@@ -1271,6 +1271,46 @@ mod tests {
         );
     }
 
+    /// nr-fx4: a wreck's column in a replay is the same however the playhead
+    /// got there: played through from before the death, opened cold on a
+    /// later tick, or reached by a jump forward or back.
+    #[test]
+    fn a_replay_wreck_column_is_the_same_after_any_seek() {
+        let deaths = BTreeMap::from([(UNIT + 1, 4_000)]);
+        let alive = RenderSnapshot {
+            targets: vec![unit_pose(UNIT + 1, 100)],
+            ..picture(3_000)
+        };
+        let dead = |tick| RenderSnapshot {
+            targets: vec![unit_pose(UNIT + 1, 0)],
+            ..picture(tick)
+        };
+        let at = |tracker: &Tracker, tick: u64| drawn(tracker, tick as f64);
+        let mut through = Tracker::default();
+        through.set_deaths(deaths.clone());
+        through.observe(&alive, 3_000., false);
+        for tick in (4_000..=9_000).step_by(500) {
+            through.observe(&dead(tick), tick as f64, true);
+        }
+        let mut cold = Tracker::default();
+        cold.set_deaths(deaths.clone());
+        cold.observe(&dead(9_000), 9_000., false);
+        let mut back = Tracker::default();
+        back.set_deaths(deaths.clone());
+        back.observe(&dead(20_000), 20_000., false);
+        back.observe(&alive, 3_000., false);
+        back.observe(&dead(9_000), 9_000., false);
+        let mut jumped = Tracker::default();
+        jumped.set_deaths(deaths);
+        jumped.observe(&alive, 3_000., false);
+        jumped.observe(&dead(9_000), 9_000., true);
+        let want = at(&through, 9_000);
+        assert!(want.puffs.len() > 30);
+        assert_eq!(at(&cold, 9_000), want);
+        assert_eq!(at(&back, 9_000), want);
+        assert_eq!(at(&jumped, 9_000), want);
+    }
+
     #[test]
     fn a_fire_is_as_big_as_its_unit() {
         assert_eq!(fire_width(100), 30.);

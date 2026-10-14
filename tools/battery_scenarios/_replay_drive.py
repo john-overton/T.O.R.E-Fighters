@@ -11,12 +11,14 @@ TORE_PERF_ACTIVE=1 with a large TORE_PERF_FRAMES to keep it running. Named keys
 (Insert, Delete, Space, F1 to F12, arrows) and Ctrl combinations reach the game;
 plain letters and digits were seen to have no effect, so a script cannot rely on
 them for gameplay.
-The run ends with Alt+F4, the game's own exit. Exit status is the game's;
+The keys start once the window is mapped (plus DRIVE_SETTLE seconds, default 4), however
+long a loaded machine takes to open it. The run ends with Alt+F4, the game's own exit. Exit status is the game's;
 "driver:" lines say what was sent. Outside Hyprland the driver does nothing
 and exits 0 with a note.
 """
 from __future__ import annotations
 
+import json
 import os
 import random
 import subprocess
@@ -25,6 +27,8 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+# Longest wait for the game's window to appear before the keys go out anyway (seconds).
+WINDOW_WAIT = 90.0
 
 # Key names as xkb knows them. Alt+F4 and Ctrl+Q leave the run, so random sets omit them.
 FLIGHT_KEYS = (
@@ -57,6 +61,15 @@ def find_pid(marker: str) -> int | None:
         if marker.encode() in env and argv[0].endswith(b"tore-app"):
             return int(p)
     return None
+
+
+def has_window(pid: int) -> bool:
+    """True once the game's own window is mapped; key presses before that are dropped ("window not found")."""
+    try:
+        reply = subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True, timeout=10)
+        return any(c.get("pid") == pid and c.get("mapped", True) for c in json.loads(reply.stdout))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
 
 
 def cpu_share(pid: int, seconds: float = 1.5) -> str:
@@ -122,6 +135,13 @@ def main(argv: list[str]) -> int:
         print("driver: the game exited or never started")
         return proc.returncode if proc.returncode else 3
     print(f"driver: game pid {pid}")
+    # A loaded machine can take well over the settle time to open the window (a debug build took 8 s or more
+    # on 2026-10-13), and keys sent before it exists are dropped; wait for the window itself first.
+    waited = 0.0
+    while proc.poll() is None and not has_window(pid) and waited < WINDOW_WAIT:
+        time.sleep(0.25)
+        waited += 0.25
+    print(f"driver: window {'up' if waited < WINDOW_WAIT else 'still missing'} after {waited:.1f} s")
     time.sleep(float(os.environ.get("DRIVE_SETTLE", "4")))
     alive = True
     for step in steps:

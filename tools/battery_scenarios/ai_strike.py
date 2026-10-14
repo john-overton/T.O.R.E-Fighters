@@ -424,6 +424,12 @@ def quick_wing_problems(output: str) -> list[str]:
         released = bool(run.of("RELEASE"))
         if role == "strike" and not released:
             problems.append(f"{label}: the Strike wing never released")
+        # The wing picks its own target; the driver measures to the one it struck (nr-cue: it used to
+        # measure to the driver's, 1,830 ft away, and the bomb looked 1,800 ft off).
+        limit = MISS_FT_MAX.get(run.skill)
+        for impact in run.of("IMPACT") if role == "strike" and limit is not None else []:
+            if not number(impact.get("miss_ft")) <= limit:
+                problems.append(f"{label}: impact {impact.get('miss_ft')} ft from its target, want at most {limit:.0f}")
         if role == "cap" and released:
             problems.append(f"{label}: the CAP wing released on the ground")
     return problems

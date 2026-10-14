@@ -104,7 +104,9 @@ pub enum AircraftModel {
 /// The F-22, F-22N and F/A-XX share one model and so one value. Each value sits
 /// at least 0.02 clear of the liftoff jumps the model's G rows make at larger
 /// scales (docs/spec/takeoff-ground-contact.md). The X-31 has no figure from
-/// John and keeps 1.00.
+/// John and keeps 1.00. The Su-25's was refit from 0.55 to 0.51 when its record
+/// was corrected (2026-10-13, docs/spec/aircraft-records.md): the same stall
+/// scale at its default takeoff load, on the corrected empty weight.
 pub const STALL_REFERENCE_FRACTIONS: [(&str, f64); 12] = [
     ("F/A-18D", 1.33),
     ("Rafale C", 1.38),
@@ -114,7 +116,7 @@ pub const STALL_REFERENCE_FRACTIONS: [(&str, f64); 12] = [
     ("MiG-29", 1.20),
     ("Su-27", 0.86),
     ("MiG-21", 0.73),
-    ("Su-25", 0.55),
+    ("Su-25", 0.51),
     ("MiG-23", 0.78),
     ("Su-35", 0.95),
     ("F-22 family", 0.42),
@@ -149,6 +151,14 @@ impl AircraftModel {
     pub fn fixed_gear(&self) -> bool {
         matches!(self, Self::Variety(m) if matches!(m.id,
             tore_formats::aircraft::AircraftId::Ah64 | tore_formats::aircraft::AircraftId::Ch47))
+    }
+    /// A rotorcraft's level cruise power at full internal fuel, ft·lbf/s
+    /// (the AI's fuel planning figure, slice HF3).
+    pub fn rotor_cruise_power(&self) -> Option<f64> {
+        match self {
+            Self::Variety(m) => m.cruise_power,
+            _ => None,
+        }
     }
     pub fn powered_lift(&self) -> Option<variety::PoweredLift> {
         match self {
@@ -402,7 +412,7 @@ mod additional_tests {
             (AircraftId::Mig29, "MiG-29", "MIG29.SH", 1.20),
             (AircraftId::Su27, "Su-27", "SU27.SH", 0.86),
             (AircraftId::Mig21, "MiG-21", "MIG21.SH", 0.73),
-            (AircraftId::Su25, "Su-25", "SU25.SH", 0.55),
+            (AircraftId::Su25, "Su-25", "SU25.SH", 0.51),
             (AircraftId::Mig23, "MiG-23", "MIG23.SH", 0.78),
             (AircraftId::Su35, "Su-35", "SU35.SH", 0.95),
             (AircraftId::F22, "F-22", "F22.SH", 0.42),

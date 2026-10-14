@@ -90,6 +90,8 @@ pub fn commands() -> Vec<Command> {
         // Protocol 15: the sort (wing order 13) and the battle net (23).
         Command::Seat(S::WingOrder(PlayerOrder::Sort)),
         Command::Seat(S::BattleNet),
+        // Wave 6 (nr-orbit): the AC-130's sensor console (28).
+        Command::Seat(S::SensorConsole),
         Command::Seat(S::WingFormationCycle),
         Command::Seat(S::TriggerKey {
             down: true,

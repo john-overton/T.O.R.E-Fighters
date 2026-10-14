@@ -750,6 +750,9 @@ pub struct Viewer {
     city_shown: Option<(usize, usize)>,
     /// The fill's building at each place the recording knocks one down.
     city_index: std::collections::HashMap<[i32; 2], u32>,
+    /// The tick each flat building fell on, for the burning city's smoke
+    /// columns (nr-fx4); `None` while the city is not followed.
+    city_falls: Option<Arc<crate::city_fires::Falls>>,
     /// The plane the recording is for (`draw.player`, plane 0 in single
     /// player's), or [`convert::NO_PLAYER`] for an observer's.
     player: u32,
@@ -1047,6 +1050,7 @@ impl Viewer {
             playback,
             city_shown: None,
             city_index: std::collections::HashMap::new(),
+            city_falls: None,
             player,
             clock,
             info,
@@ -1420,6 +1424,31 @@ impl Viewer {
             .collect();
         ids.sort_unstable();
         fill.set_flattened(&ids);
+        // Each flat building burns from the tick it fell on, so a seek
+        // shows its smoke column as tall as playing through would have.
+        let fell = self
+            .playback
+            .city_falls_at(tick)
+            .into_iter()
+            .filter_map(|(at, when)| Some((*self.city_index.get(&at)?, when as f64)))
+            .collect();
+        self.city_falls = Some(Arc::new(crate::city_fires::Falls::new(fell)));
+    }
+
+    /// The burning city's clock at the playhead `now` (ticks): see
+    /// [`crate::city_fires::Clock`]. `None` while the city is not followed.
+    pub(super) fn city_clock(&self, now: f64) -> Option<crate::city_fires::Clock> {
+        // A developer aid: the columns age on the wall clock from the moment
+        // each is first seen, as they did before nr-fx4.
+        if std::env::var("TORE_REPLAY_CITY_CLOCK").as_deref() == Ok("0") {
+            return None;
+        }
+        self.city_falls
+            .as_ref()
+            .map(|falls| crate::city_fires::Clock {
+                tick: now,
+                falls: Arc::clone(falls),
+            })
     }
 
     pub(super) fn rails(&self, tick: u64) -> tore_world::surface::SurfaceState {
@@ -3085,6 +3114,7 @@ impl Viewer {
             None => Vec::new(),
         };
         renderer.vapor(&vapor);
+        renderer.set_city_clock(self.city_clock(tick as f64 + self.clock.alpha()));
         let [smoke, contrails] = self.playback.smoke(tick);
         // Chaff and flares flown again from their releases, lit and lighting
         // the scene with every lit afterburner, as live flight draws them.

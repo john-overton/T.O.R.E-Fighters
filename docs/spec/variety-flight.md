@@ -18,6 +18,11 @@ G envelopes, departure/contact limits and roll controls are decoded using the
 [aircraft schema](../formats/aircraft.md). Each aircraft owns its configuration.
 Sharing the integration law does not erase F-4 fuel, envelope or equipment
 differences. No autonomous pilot behavior is specified or changed.
+Two records are corrected before use (agent decisions on John's request of
+2026-10-13, [aircraft record corrections](aircraft-records.md)): the C-130's
+military thrust is the AC-130U record's 40,000 lbf instead of 108,192, and the
+MiG-17F's internal fuel is 2,520 lb instead of the MiG-21's 4,534, with fuel
+flows of 1 and 4 lb/s instead of 3 and 20.
 
 ## Conventional flight
 
@@ -356,7 +361,7 @@ rotor physics (the same rotor model as the AH-64 and Mi-24) and one
 cross-shafted drive with one governor.
 
 - **Controls.** Aft stick adds blade pitch to the front rotor and takes it
-  from the rear (differential collective, 1.2 degrees at full stick); lateral
+  from the rear (differential collective, 1.32 degrees at full stick since slice HF3, 1.2 before); lateral
   stick tilts both disks together; the pedals tilt them apart (front right,
   rear left, 0.85 of the lateral range at full pedal). The collective is
   common. There is no tail rotor.
@@ -381,8 +386,13 @@ cross-shafted drive with one governor.
   at the rotors. The design's first draft (1.25 times the maximum takeoff
   weight in thrust) corresponds to 3,270 hp, 9 percent more; the model's
   maximum static thrust is now what 3,001 hp hovers at, 1.17 times the PT
-  maximum takeoff weight. The PT mass, fuel and
-  stores are kept (the PT weights are 53 percent of the real aircraft's).
+  maximum takeoff weight. The PT stores are kept. The PT's mass and fuel were
+  the Mi-24's (53 percent of the real aircraft's); since slice HF3 the reader
+  gives the CH-47F's (24,578 lb empty, 7,340 lb fuel, 54,000 lb maximum,
+  [record correction](../formats/aircraft.md#rotorcraft-fuel-records)), so
+  the weight ratio is 1 and the power the full 7,762 hp. The results below
+  are the P3 figures at the old weights; the current ones are in
+  [powered-lift flight](powered-lift-flight.md#fuel-slice-hf2).
 - **Vne.** 190 kt, fitted: the published maximum speed is 170 kt but no Vne was
   found in a reliable source. The overspeed rule and the retreating blade
   stall onset both use it.
@@ -413,10 +423,12 @@ longer flies the fitted law above; the rules are in
 - **Rotors and drive.** Two 38 ft 1 in proprotors 46.5 ft apart (Pub,
   Derived) on nacelles, each the shared rotor model with the nacelle axis as
   its shaft, on one interconnected drive. Rated power is two AE 1107C at
-  6,150 shp (Pub) times 0.42, about 8 percent losses times the PT's maximum
-  takeoff weight over the published 52,600 lb vertical maximum, so the
-  aircraft, about 40 percent of the real one's weight, keeps its power
-  loading: 5,122 hp. Rotor speed 100 percent (397 rpm, Pub) with the nacelles
+  6,150 shp (Pub) less about 8 percent losses, times the record's maximum
+  takeoff weight over the published 52,600 lb vertical maximum, so any record
+  keeps the real aircraft's power loading. Since slice HF3 the reader gives
+  the V-22 the MV-22B's weights (the PT's were the AH-64's,
+  [record correction](../formats/aircraft.md#rotorcraft-fuel-records)), so the
+  share is 1: 11,316 hp (5,122 hp before). Rotor speed 100 percent (397 rpm, Pub) with the nacelles
   up and 84 percent on the downstops (Pub), moving at 6 percent a second.
 - **Nacelles.** 0 to 97.5 degrees at 8 degrees per second (Pub); the
   helicopter preset is 87. The conversion keys move the demand at the same

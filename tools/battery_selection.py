@@ -124,7 +124,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         (
             "ai-takeoff-*", "ai-theater-*", "ai-ground-*", "ai-rtb-*", "ai-ils-*",
             "ai-long-ground-land", "ai-lost-lead-*", "ai-airfield-taxi-*", "ai-enemy-ground-start-*",
-            "ai-heli-*", "ai-stovl-*", "ai-v22-*",
+            "ai-heli-*", "ai-stovl-*", "ai-v22-*", "ai-records-*",
         ),
     ),
     "ai-lead": (
@@ -177,7 +177,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     # Replay lane.
     "replay-recording": (
         "recording, reading and corrupting replay files",
-        ("replay-rec-*", "replay-surface", "replay-a2g", "replay-city-strike", "replay-corrupt-*", "replay-watch-*", "ai-record-*", "ai-determinism-recordings"),
+        ("replay-rec-*", "replay-surface", "replay-a2g", "replay-city-strike", "replay-city-smoke-seek", "replay-corrupt-*", "replay-watch-*", "ai-record-*", "ai-determinism-recordings"),
     ),
     "replay-cli": (
         "command-line errors, speeds, ticks, small tools",
@@ -907,7 +907,7 @@ def makespan(seconds: Sequence[float], workers: int) -> float:
 def estimate_wall(chosen: Sequence["Pick"], jobs: int, windows: int) -> float:
     """Estimated wall clock: every job shares `jobs` slots, and windowed ones also fit `windows` at once."""
     everything = makespan([p.seconds for p in chosen], jobs)
-    windowed = makespan([p.seconds for p in chosen if p.scenario.window], windows)
+    windowed = makespan([p.seconds for p in chosen if p.scenario.windowed], windows)
     return max(everything, windowed)
 
 
@@ -1033,7 +1033,7 @@ def choose(
     needs_window: list[str] = []
     for fam in families:
         matching = [s for s in scenarios if family_matches(fam, s.name)]
-        runnable = [s for s in matching if allow_windows or not s.window]
+        runnable = [s for s in matching if allow_windows or not s.windowed]
         if matching and not runnable:
             needs_window.append(fam)
         members[fam] = runnable
@@ -1188,13 +1188,13 @@ def format_plan(plan: Plan, names_per_family: Optional[int] = 8) -> str:
         if not chosen:
             continue
         chosen.sort(key=lambda p: p.scenario.name)
-        names = [f"{p.scenario.name}{'*' if p.scenario.window else ''} {p.seconds:.0f}" for p in chosen]
+        names = [f"{p.scenario.name}{'*' if p.scenario.windowed else ''} {p.seconds:.0f}" for p in chosen]
         more = ""
         if names_per_family is not None and len(names) > names_per_family:
             more = f", and {len(names) - names_per_family} more"
             names = names[:names_per_family]
         lines.append(f"    {fam} ({sum(p.seconds for p in chosen):.0f} s, {len(chosen)}): " + ", ".join(names) + more)
-    if any(p.scenario.window for p in plan.picks):
+    if any(p.scenario.windowed for p in plan.picks):
         lines.append("  * opens a window (through tools/agent-run.sh)")
     return "\n".join(lines)
 

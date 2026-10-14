@@ -885,10 +885,50 @@ def fuel_lines(output: str, aircraft: str) -> list[tuple[int, int, int, int, str
     ]
 
 
-# Slice HF2: the least a rotorcraft's planned endurance (seconds, at its hover flow) may be at the
-# start with a full tank. The record's flow gave 33 minutes (AH-64, V-22) to 18 (Mi-24); the rotor's
-# power gives 62 to 156 minutes at a hover.
-ROTORCRAFT_MIN_ENDURANCE_S = {"Ah64": 3600, "Mi24": 6000, "Ch47": 7200, "V22": 3000}
+# Slice HF2: the least a rotorcraft's planned endurance (seconds) may be at the start with a full tank.
+# The record's flow gave 33 minutes (AH-64, V-22) to 18 (Mi-24). Since slice HF3 the AI plans at its level
+# cruise flow (docs/baselines/rotorcraft-fuel.md: 64 to 148 minutes with a full tank and no stores; the
+# stores the wings carry take a few minutes off), and the V-22 and CH-47 carry their real tanks (11,700 lb, the
+# MV-22B's, and 7,340 lb, the CH-47F's; their records had copied the AH-64's and the Mi-24's): over two hours.
+ROTORCRAFT_MIN_ENDURANCE_S = {"Ah64": 3300, "Mi24": 6000, "Ch47": 7800, "V22": 7200}
+
+
+# One AI rotorcraft's flight and the rotor adapter's command (`--probe-rotor-trace`, slice HF1).
+ROTOR_LINE = re.compile(
+    r"^AI rotor: tick=(\d+) actor=(\d+) activity=(\w+) agl=\S+ kt=(\S+) vs=(\S+) .*? cmd_climb=(\S+) ",
+    re.M,
+)
+
+# Slice HF3 (John, 2026-10-13): a helicopter wingman is asked for at most 1,000 ft/min down while it chases its
+# formation slot, or its leader's own sink when that is more (tore_sim::ai::formation::
+# ROTORCRAFT_FORMATION_DESCENT_FPS, 16.7 ft/s). A little over for rounding.
+FORMATION_DESCENT_FPS = 1000 / 60 + 0.5
+
+
+def formation_descent_check(output: str) -> list[str]:
+    """Every `Formation` line's commanded climb is no steeper down than the limit or its wing's other
+    rotorcraft's sink at that tick (the leader's), and there are formation lines to judge."""
+    problems = probe_problems(output)
+    by_tick: dict[int, list[tuple[int, str, float, float]]] = {}
+    for tick, actor, activity, _kt, vs, climb in ROTOR_LINE.findall(output):
+        if climb == "-":
+            continue
+        by_tick.setdefault(int(tick), []).append((int(actor), activity, float(vs), float(climb)))
+    judged = 0
+    steepest = 0.0
+    for tick, lines in sorted(by_tick.items()):
+        for actor, activity, _vs, climb in lines:
+            if activity != "Formation":
+                continue
+            judged += 1
+            others = [v for a, act, v, _ in lines if a != actor and act != "Formation"]
+            allowed = max([FORMATION_DESCENT_FPS] + [-v + 0.5 for v in others])
+            steepest = min(steepest, climb)
+            if climb < -allowed:
+                problems.append(f"tick {tick} actor {actor} was asked for {-climb:.1f} ft/s down in formation (limit {allowed:.1f})")
+    if judged < 50:
+        problems.append(f"only {judged} formation lines: the scenario proves nothing")
+    return problems[:20]
 
 
 def rotorcraft_fuel_check(aircraft: str, *, bingo: bool) -> Callable[[str], list[str]]:
@@ -1137,6 +1177,21 @@ def scenarios() -> list[Scenario]:
                      notes="The AI's AH-64 wingmen with 250 lb (about 9 minutes at the hover flow of the rotor's power, "
                            "slice HF2) start on caution, turn bingo under the time home plus the five minute reserve "
                            "within a minute and head home."))
+
+    # Slice HF3: the V-22 with the MV-22B's fuel keeps a fuel schedule too: its AI wingmen with 700 lb (about nine
+    # minutes at its cruise flow) turn bingo and head home.
+    out.append(probe("fight-v22-fuel-bingo", ["--aircraft", "v22", "--probe-wing-size", "3", "--probe-enemy-aircraft", "su27",
+                                        "--separation", "10", "--probe-fuel", "700", "--probe-fuel-trace", "10"],
+                     ticks=16800, check=rotorcraft_fuel_check("V22", bingo=True),
+                     notes="The AI's V-22 wingmen with 700 lb (about nine minutes at the level cruise flow, slice HF3) "
+                           "turn bingo under the time home plus the five minute reserve and head home."))
+    # Slice HF3: the CH-47 enemy wing of slice CH47 (whose wingman was asked for 42 ft/s down chasing its slot behind
+    # a breaking lead) with the rotor trace: no formation request asks more than 1,000 ft/min down, or the leader's own sink.
+    out.append(probe("fight-ch47-formation-descent", fight(2, 2, "--aircraft", "f18", "--probe-enemy-aircraft", "ch47",
+                                                       "--separation", "5", *attack, "--probe-rotor-trace", "0.25"),
+                     ticks=9600, check=formation_descent_check,
+                     notes="Two CH-47s as the enemy wing: the wingman's formation descents stay at 1,000 ft/min or the "
+                           "leader's sink (John, 2026-10-13)."))
 
     # 10. Ground starts: takeoff, formation, landing orders.
     for size in [1, 2, 3, 4, 5]:
@@ -1425,6 +1480,18 @@ def scenarios() -> list[Scenario]:
                 "--probe-friendly-aircraft", aircraft, "--probe-wing-size", "2", "--maneuver", "takeoff",
                 "--separation", "100", "--probe-wing-only"],
                 ticks=18000, timeout=1800, check=checker(ground=True, need_takeoff=True, player_flies=True)))
+    # Corrected aircraft records (slice nr-rec, docs/spec/aircraft-records.md):
+    # an aircraft whose record the game corrects takes off from Odesa, flies on
+    # for 150 s and lands on a land order. The MiG-17F is not here: with its
+    # default drop tanks it cannot climb away after liftoff, on the retail
+    # record too (an open finding, not this correction).
+    for aircraft in ("su25", "c130"):
+        out.append(probe(f"records-land-{aircraft}", [
+            "--theater", "UKR", "--ground-start", "9", "--aircraft", aircraft,
+            "--probe-friendly-aircraft", aircraft, "--probe-wing-size", "2", "--maneuver", "takeoff",
+            "--probe-wing-order", "18000:land-selected", "--separation", "200", "--probe-wing-only"],
+            ticks=108000, timeout=2400,
+            check=checker(ground=True, need_takeoff=True, need_landing=True, player_flies=True)))
     for theater in ("PGU", "VLA"):
         out.append(probe(f"long-15v15-{theater.lower()}", ["--theater", theater, *fight(15, 15, "--separation", "20", *attack)],
                          ticks=216000, timeout=3600, check=checker(allow_anomalies=("outside the world",))))

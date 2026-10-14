@@ -555,6 +555,12 @@ pub const ENTRIES: &[Entry] = &[
         &["Ctrl-8"],
     ),
     cmd(
+        "sensor-console",
+        "Sensor console and orbit hold (AC-130)",
+        Weapons,
+        &["Ctrl-9"],
+    ),
+    cmd(
         "sight-designate",
         "Sight: designate under crosshair",
         Weapons,

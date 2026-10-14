@@ -215,3 +215,58 @@ fn jettison_works_without_the_range_and_leaves_the_gunships_guns_alone() {
     }
     assert!(world.combat.state.own().ammo != ammo, "the guns still fire");
 }
+
+fn said(out: &TickOutput, words: &str) -> bool {
+    out.cues
+        .iter()
+        .any(|cue| matches!(cue, Cue::Message { text, .. } if text.contains(words)))
+}
+
+/// Ctrl+9 (slice nr-orbit): the sensor console pins a free sight under its
+/// crosshair, engages orbit hold about the pin, follows a new pin, and a
+/// second press hands the aircraft back. A slew of the pin moves the orbit's
+/// point.
+#[test]
+fn the_sensor_console_flies_the_orbit_about_the_pin() {
+    use tore_sim::autopilot::Mode;
+    let mut world = gunship();
+    step(&mut world, false, Vec::new());
+    let sight = |world: &World| world.combat.state.own().gunship.as_ref().unwrap().sight;
+    assert_eq!(sight(&world), Sight::Free);
+    let out = step(&mut world, false, vec![SeatCommand::SensorConsole]);
+    assert!(said(&out, "orbit hold on"));
+    let Sight::Pinned(pin) = sight(&world) else {
+        panic!("the console pins a free sight");
+    };
+    let flight = &world.cockpits[0].flight;
+    assert_eq!(flight.autopilot.mode(), Mode::Orbit);
+    let status = flight.orbit_status().unwrap();
+    assert_eq!(status.point, pin);
+    assert!(status.radius_ft >= status.minimum_radius_ft);
+    // A new pin moves the point the orbit circles.
+    let moved = [pin[0] + 2_000., pin[1], pin[2]];
+    world.combat.state.own_mut().gunship.as_mut().unwrap().sight = Sight::Pinned(moved);
+    for _ in 0..120 {
+        step(&mut world, false, Vec::new());
+    }
+    let status = world.cockpits[0].flight.orbit_status().unwrap();
+    assert_eq!(status.point, moved);
+    assert!(status.centre != pin && status.centre != moved, "sliding");
+    let out = step(&mut world, false, vec![SeatCommand::SensorConsole]);
+    assert!(said(&out, "you have the aircraft"));
+    assert_eq!(world.cockpits[0].flight.autopilot.mode(), Mode::Off);
+}
+
+/// An aircraft with no gunsight refuses the console.
+#[test]
+fn the_sensor_console_is_the_ac130s() {
+    let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
+    spec.start = Start::Airborne { altitude_ft: 5_000 };
+    let mut world = World::new(&spec, &gunship_resources(), Seating::SinglePlayer).unwrap();
+    let out = step(&mut world, false, vec![SeatCommand::SensorConsole]);
+    assert!(said(&out, "No sensor console"));
+    assert_eq!(
+        world.cockpits[0].flight.autopilot.mode(),
+        tore_sim::autopilot::Mode::Off
+    );
+}
