@@ -872,6 +872,20 @@ impl World {
             self.combat
                 .state
                 .set_sight_input(cockpit.plane.0, input.sight, input.sight_zoom);
+            // In the AC-130's sensor console a slew off a track drops it to a
+            // pin (world/commands.rs, `drop_track_on_slew`).
+            if cockpit.flight.autopilot.mode() == tore_sim::autopilot::Mode::Orbit
+                && let Some(guns) = self
+                    .combat
+                    .state
+                    .ownship_mut(cockpit.plane.0)
+                    .and_then(|own| own.gunship.as_mut())
+            {
+                let terrain = &self.terrain;
+                commands::drop_track_on_slew(guns, input.sight, |x, z| {
+                    f64::from(terrain.height(x as f32, z as f32))
+                });
+            }
         }
         if self.combat.recording_tape()
             && let Some(own) = self.cockpits.first()

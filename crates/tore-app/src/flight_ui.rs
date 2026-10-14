@@ -80,6 +80,9 @@ pub enum Command {
     /// P: pin the AC-130 gunsight's point or let it go (in the console,
     /// ORBIT or SEARCH).
     SightPinToggle,
+    /// Shift+P: lock the AC-130's guns on what the sight holds and let the
+    /// sight slew away, or let them follow the sight again.
+    GunLock,
     /// Ctrl+V: the Valkyries situation score.
     Valkyries,
     /// Ctrl+B: mark this moment in the mission recording.

@@ -65,7 +65,9 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
   sensor console, `CONSOLE` on the 9 cap, and the legend's line with its
   View + Xbox gesture) sits beside Ctrl+7 and Ctrl+8, and Ctrl+0 (the
   console radar's range, `RDR RNG` on the 0 cap) beside it. P (`PIN/REL`, the
-  gunsight's pin or release: orbit or search in the console) has its own cap;
+  gunsight's pin or release: orbit or search in the console) has its own cap,
+  with Shift+P (`GUN LOCK`) under it; Ctrl+Insert and Ctrl+Delete (the
+  console's own chaff and flare, `CONSOLE`) sit under Insert and Delete;
   the legend's last two lines give the console's own meanings of the arrows,
   = and -, T (the next radar target), Shift with the arrows, 1 to 8, Ctrl+0
   (the radar's range) and Ctrl+Backslash (the picture: IR, TV, NVG) (slices

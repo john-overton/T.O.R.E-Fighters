@@ -88,7 +88,10 @@ crate::checkpoint_struct!(GunshipState {
     slew_held,
     request,
     notice,
+    gun_lock,
 });
+type GunLock = crate::combat::gunship::GunLock;
+crate::checkpoint_struct!(GunLock { object, point });
 
 type Sight = crate::combat::gunship::Sight;
 impl Checkpoint for Sight {

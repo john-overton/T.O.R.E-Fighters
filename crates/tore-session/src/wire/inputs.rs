@@ -731,6 +731,8 @@ const CONSOLE_HEADING: u64 = 1;
 const CONSOLE_ALTITUDE: u64 = 2;
 const CONSOLE_SPEED: u64 = 3;
 const CONSOLE_SPEED_STEP: u64 = 4;
+/// Pending protocol (31 most likely): the gun lock (value 0).
+const CONSOLE_GUN_LOCK: u64 = 5;
 
 // The powered-lift sub-codes (protocol 19). The numbers are the wire's; the
 // golden test pins them.
@@ -817,6 +819,7 @@ pub(crate) fn write_command(w: &mut BitWriter, command: &Command) {
                     ConsoleCommand::Altitude(steps) => (CONSOLE_ALTITUDE, steps as u8),
                     ConsoleCommand::Speed(percent) => (CONSOLE_SPEED, percent.min(100)),
                     ConsoleCommand::SpeedStep(steps) => (CONSOLE_SPEED_STEP, steps as u8),
+                    ConsoleCommand::GunLock => (CONSOLE_GUN_LOCK, 0),
                 };
                 let _ = w.write_bits(sub, CONSOLE_BITS);
                 let _ = w.write_bits(u64::from(value), 8);
@@ -991,6 +994,7 @@ pub(crate) fn read_command(r: &mut BitReader<'_>) -> WireResult<Command> {
                 CONSOLE_ALTITUDE => ConsoleCommand::Altitude(value as i8),
                 CONSOLE_SPEED if value <= 100 => ConsoleCommand::Speed(value),
                 CONSOLE_SPEED_STEP => ConsoleCommand::SpeedStep(value as i8),
+                CONSOLE_GUN_LOCK if value == 0 => ConsoleCommand::GunLock,
                 _ => return Err(WireError::Invalid("sensor console command")),
             }))
         }

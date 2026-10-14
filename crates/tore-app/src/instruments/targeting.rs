@@ -1229,6 +1229,7 @@ mod tests {
             status: [tore_sim::combat::live::Readiness::Ready; 3],
             notice: None,
             zoom: 3,
+            gun_lock: None,
         });
         assert_eq!(form(&ro, &config), None);
     }

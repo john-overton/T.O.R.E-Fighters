@@ -186,7 +186,10 @@ pub fn path_words(path: Path) -> &'static str {
 /// 30 since the sensor console's search and keys (slice nr-cona): seat
 /// command 29 (Console, a sub-code and a value), and the orbit in the exact
 /// own-plane state carries `pinned`, `heading` and `altitude`.
-pub const PROTOCOL_VERSION: u16 = 30;
+/// 31 since the gun lock and the centre's pause (slice nr-cona follow-up):
+/// Console sub-code 5 (GunLock), the orbit's `still_s` in the exact
+/// own-plane state, and the gun lock in the readout's gunsight group.
+pub const PROTOCOL_VERSION: u16 = 31;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

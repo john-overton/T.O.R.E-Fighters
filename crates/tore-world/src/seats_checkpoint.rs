@@ -414,6 +414,7 @@ fn save_console(s: &mut Saver, command: ConsoleCommand) {
         ConsoleCommand::Altitude(steps) => (2, steps as u8),
         ConsoleCommand::Speed(percent) => (3, percent),
         ConsoleCommand::SpeedStep(steps) => (4, steps as u8),
+        ConsoleCommand::GunLock => (5, 0),
     };
     put(s, variant);
     put(s, u64::from(value));
@@ -428,6 +429,7 @@ fn load_console(l: &mut Loader<'_>) -> Result<ConsoleCommand, CheckpointError> {
         2 => ConsoleCommand::Altitude(value as i8),
         3 => ConsoleCommand::Speed(value.min(100)),
         4 => ConsoleCommand::SpeedStep(value as i8),
+        5 => ConsoleCommand::GunLock,
         other => return invalid(format!("a console command has no variant {other}")),
     })
 }
@@ -711,6 +713,7 @@ mod tests {
             SeatCommand::Console(ConsoleCommand::Altitude(i8::MAX)),
             SeatCommand::Console(ConsoleCommand::Speed(75)),
             SeatCommand::Console(ConsoleCommand::SpeedStep(i8::MIN)),
+            SeatCommand::Console(ConsoleCommand::GunLock),
         ];
         commands.extend(live.iter().map(|&c| SeatCommand::Combat(c)));
         commands.extend(live.iter().map(|&c| SeatCommand::Manual(c)));

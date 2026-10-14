@@ -632,6 +632,7 @@ fn the_gunsight_group_stands_for_the_sight() {
             ],
             notice,
             zoom: 6,
+            gun_lock: Some([1_000., 20., -3_000.]),
         };
         readout.gunsight = Some(gunsight.clone());
         let q = QReadout::of(&readout, 400);
@@ -641,6 +642,8 @@ fn the_gunsight_group_stands_for_the_sight() {
         again.gunsight = Some(got.clone());
         assert_eq!(QReadout::of(&again, 400), q);
         let near = |a: [f64; 3], b: [f64; 3]| (0..3).all(|i| (a[i] - b[i]).abs() <= 0.125);
+        // The gun lock's point (slice nr-cona).
+        assert!(near(got.gun_lock.unwrap(), gunsight.gun_lock.unwrap()));
         match (got.sight, gunsight.sight) {
             (Sight::Pinned(a), Sight::Pinned(b)) => assert!(near(a, b)),
             (a, b) => assert_eq!(a, b),
