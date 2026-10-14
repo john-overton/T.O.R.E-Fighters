@@ -856,11 +856,29 @@ pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
             FLANKER_INTAKE[1],
             Hang::Lowest { half: 6. },
         ),
+        // The A-10: the twin-rail row recorded at the main gear pod moves
+        // out on the wing, just outboard of the pod, and the next row out
+        // halfway to the outermost pylon (John 2026-10-14).
+        (AircraftId::A10, 6) => at(Location::Wing, A10_WING[0], 0., Hang::AsRecorded),
+        (AircraftId::A10, 7) => at(Location::Wing, A10_WING[1], 0., Hang::AsRecorded),
         (AircraftId::Su27, 7) => at(Location::Wing, SU27_WING[0], SU27_WING[1], Hang::Separate),
         (AircraftId::Su35, 7) => at(Location::Wing, SU35_WING[0], SU35_WING[1], Hang::Separate),
         _ => None,
     }
 }
+
+/// The A-10's wing pylons for its rows 6 and 7, feet out (John 2026-10-14,
+/// on a head-on picture: "the double pylons are attached to the bottom of
+/// the gear/sensor things"; the spans are read from his marks). Retail
+/// records row 6 8.33 ft out, over the main gear pod (the station moved
+/// aside to 7.83 since nr-yak and hung under the pod, 2 ft below the other
+/// pylons), and row 7 13.33 ft out. The real A-10's stations 3 and 9 are
+/// just outboard of the gear pods, 2 and 10 between them and the outermost.
+/// Row 6 now hangs its twin rail 10.75 ft out, 1 ft under the wing, its
+/// Mavericks clear of the pod (which runs to about 8.5 ft out); row 7 its
+/// single Maverick 14.75 ft out; row 8 stays 18.33 ft out and row 5 inboard
+/// of the pod.
+const A10_WING: [f64; 2] = [10.75, 14.75];
 
 /// Where the Flankers' tunnel stations (between the engines, on the
 /// centreline) are centred, feet forward: two stores hang one behind the
@@ -1924,5 +1942,27 @@ mod tests {
                 pair.iter().all(|p| p[0] == 0.) && (pair[0][2] - pair[1][2]).abs() > aa11.length
             );
         }
+    }
+
+    #[test]
+    fn the_a10s_pylons_hang_from_the_wing_not_the_gear_pods() {
+        // Rows 6 and 7 move out on the wing; the others keep their records.
+        let row = |x| Hardpoint {
+            location: 4,
+            flags: 0x0585,
+            position: [x, -10, 0],
+            store: Some("AGM65G.JT".into()),
+            count: 4,
+            weight_class: 0,
+        };
+        let at = |index, x| placed_on(AircraftId::A10, index, &row(x), None).0;
+        assert_eq!(at(6, 25)[0], A10_WING[0]);
+        assert_eq!(at(7, 40)[0], A10_WING[1]);
+        assert_eq!(at(8, 55)[0], 55. / 3.);
+        assert!(station_move(AircraftId::A10, 5).is_none());
+        // Ordered out along the wing with room between: the twin rail
+        // (Mavericks 0.85 ft either side of its bar, fins 1.2 ft) clear of
+        // the single Maverick outboard of it.
+        const { assert!(A10_WING[1] - A10_WING[0] > 0.85 + 2.4 && 55. / 3. - A10_WING[1] > 2.4) };
     }
 }
