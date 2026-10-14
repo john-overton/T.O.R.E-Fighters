@@ -77,13 +77,13 @@ corrected it lifts off clean at 119 kt and climbs, as it did on the retail recor
 ## How it applies
 
 `tore_formats::aircraft::Aircraft::parse` applies the corrections
-(`aircraft_record_fit.rs`) to the decoded record, so the flight model, the
-loadout, the fuel gauge, the AI and the native research path all read the same
-numbers. A correction applies only while every listed field of that record holds
-its retail value: an edited or different record is left alone.
-`Aircraft::parse_decoded` reads the record as retail has it, and the imported
-files are not changed. Every peer applies the same table, so the wire format is
-unchanged, but a mixed-version session would disagree on these three aircraft.
+(`aircraft_corrections.rs`, the mechanism slice nr-hf3 added for the V-22's
+copied AH-64 record) to the decoded record, so the flight model, the loadout,
+the fuel gauge, the AI and the native research path all read the same numbers.
+A correction applies only while every value it replaces still holds its copied
+retail number: an edited or different record is left alone. The imported files
+are not changed. Every peer applies the same table, so the wire format is
+unchanged, but a mixed-version session would disagree on these aircraft.
 
 ## Open findings
 

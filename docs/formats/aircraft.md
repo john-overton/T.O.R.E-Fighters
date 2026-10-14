@@ -45,7 +45,7 @@ The app calls the same resolver against FA_1/FA_2, builds its runtime cache, and
 
 ## PT and equipment
 
-BRF is a bounded textual data language: byte/word/dword, caret-marked scaled integers, pointers, symbols, strings and labels. Rust validates statement kinds and counts before applying the recovered schema. Hex words are sign-folded; bytes are retained unsigned. Unsupported aircraft identities/layouts, bad pointers, malformed polygons and mass bounds fail. Original fields, including unknown semantics, remain in raw files and export reports. `Aircraft::parse` then applies the reviewed record corrections of [aircraft records](../spec/aircraft-records.md) (the Su-25, MiG-17F and C-130, only while the record holds its retail values); `Aircraft::parse_decoded` returns the record exactly as retail has it. The imported files are never changed.
+BRF is a bounded textual data language: byte/word/dword, caret-marked scaled integers, pointers, symbols, strings and labels. Rust validates statement kinds and counts before applying the recovered schema. Hex words are sign-folded; bytes are retained unsigned. Unsupported aircraft identities/layouts, bad pointers, malformed polygons and mass bounds fail. Original fields, including unknown semantics, remain in raw files and export reports. `Aircraft::parse` then applies the reviewed record corrections (`aircraft_corrections.rs`: the V-22, Su-25, MiG-17F and C-130, see [aircraft records](../spec/aircraft-records.md)) only while every replaced value still holds its copied retail number. The imported files are never changed.
 
 | F18.PT fact | Retail value / use |
 | --- | --- |

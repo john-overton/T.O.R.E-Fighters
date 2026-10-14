@@ -1,8 +1,8 @@
 //! Bounded BRF data recovery and aircraft dependency selection. Never executes modules.
 use crate::{Archive, Result, invalid};
 use std::collections::{BTreeMap, BTreeSet};
-#[path = "aircraft_record_fit.rs"]
-pub mod record_fit;
+#[path = "aircraft_corrections.rs"]
+pub mod corrections;
 #[path = "aircraft_schema.rs"]
 pub(crate) mod schema;
 #[derive(Clone, Debug)]
@@ -803,17 +803,7 @@ pub struct Aircraft {
     pub sounds: BTreeMap<String, String>,
 }
 impl Aircraft {
-    /// The record as the game uses it: decoded, with the reviewed
-    /// [`record_fit`] corrections applied (docs/spec/aircraft-records.md).
     pub fn parse(data: &[u8]) -> Result<Self> {
-        let mut a = Self::parse_decoded(data)?;
-        if record_fit::apply(a.id, &mut a.object, &mut a.fields) {
-            a.check_mass()?;
-        }
-        Ok(a)
-    }
-    /// The record exactly as the retail data holds it, without corrections.
-    pub fn parse_decoded(data: &[u8]) -> Result<Self> {
         let b = Brf::parse(data)?;
         let root = b.block("")?;
         let o = schema::OBJECT.len();
@@ -821,14 +811,16 @@ impl Aircraft {
         if root.len() != o + n + schema::PLANE.len() {
             return Err(invalid("unsupported aircraft BRF layout"));
         }
-        let object = fields(&root[..o], schema::OBJECT)?;
+        let mut object = fields(&root[..o], schema::OBJECT)?;
         let npc = fields(&root[o..o + n], schema::NPC)?;
-        let plane = fields(&root[o + n..], schema::PLANE)?;
+        let mut plane = fields(&root[o + n..], schema::PLANE)?;
         let names = b.strings("ot_names")?;
         if names.len() != 3 {
             return Err(invalid("invalid aircraft identity"));
         }
         let id = AircraftId::parse(&names[2])?;
+        // Plainly copied records get published figures (slice HF3).
+        corrections::apply(id, &mut object, &mut plane);
         let size = match id {
             AircraftId::F14 | AircraftId::F22 | AircraftId::F22n | AircraftId::Mig29 => 636,
             AircraftId::A4E | AircraftId::Mig21 => 612,
@@ -938,26 +930,11 @@ impl Aircraft {
                 sounds.insert(name.into(), s);
             }
         }
-        let a = Self {
-            id,
-            name: names[0].clone(),
-            shape: resolve(&object["shape"])?.ok_or_else(|| invalid("missing aircraft shape"))?,
-            fields: plane,
-            object,
-            hardpoints,
-            envelopes,
-            sounds,
-        };
-        a.check_mass()?;
-        Ok(a)
-    }
-    fn check_mass(&self) -> Result<()> {
-        let (object, plane) = (&self.object, &self.fields);
         for (map, key) in [
-            (object, "weight"),
-            (plane, "internalFuel"),
-            (plane, "thrust"),
-            (plane, "maxTakeoffWeight"),
+            (&object, "weight"),
+            (&plane, "internalFuel"),
+            (&plane, "thrust"),
+            (&plane, "maxTakeoffWeight"),
         ] {
             if map[key].number()? <= 0 {
                 return Err(invalid("nonpositive aircraft mass/thrust"));
@@ -968,7 +945,16 @@ impl Aircraft {
         {
             return Err(invalid("aircraft empty plus fuel exceeds MTOW"));
         }
-        Ok(())
+        Ok(Self {
+            id,
+            name: names[0].clone(),
+            shape: resolve(&object["shape"])?.ok_or_else(|| invalid("missing aircraft shape"))?,
+            fields: plane,
+            object,
+            hardpoints,
+            envelopes,
+            sounds,
+        })
     }
     pub fn number(&self, key: &str) -> f64 {
         self.fields
@@ -1623,63 +1609,6 @@ mod profile_tests {
         }
         assert!(AircraftId::parse("F31E.PT").is_err());
         assert!(AircraftId::parse("F14B.PT").is_err());
-    }
-    fn su25_fixture() -> String {
-        fixture()
-            .replace("F18.PT", "SU25.PT")
-            .replace("\"Synthetic\"", "\"Su-25\"")
-            .replace("Synthetic plane", "Su-25 Frogfoot-A")
-    }
-    #[test]
-    fn record_fits_apply_only_to_the_retail_record() {
-        // The synthetic record does not hold the retail values: left as decoded.
-        let a = Aircraft::parse(su25_fixture().as_bytes()).unwrap();
-        assert_eq!(a.number("weight"), 1000.);
-        // Give it the retail Su-25 values (the Su-24's) and it is corrected.
-        let mut d = Aircraft::parse_decoded(su25_fixture().as_bytes()).unwrap();
-        for f in record_fit::record_fits(AircraftId::Su25) {
-            let map = match f.block {
-                record_fit::Block::Object => &mut d.object,
-                record_fit::Block::Plane => &mut d.fields,
-            };
-            map.get_mut(f.key).unwrap().value = f.retail.to_string();
-        }
-        let (mut object, mut plane) = (d.object.clone(), d.fields.clone());
-        assert!(record_fit::apply(AircraftId::Su25, &mut object, &mut plane));
-        assert_eq!(object["weight"].number().unwrap(), 21_605);
-        assert_eq!(plane["internalFuel"].number().unwrap(), 6_614);
-        assert_eq!(plane["maxTakeoffWeight"].number().unwrap(), 42_549);
-        assert_eq!(plane["thrust"].number().unwrap(), 19_860);
-        assert_eq!(plane["fuelConsumption"].number().unwrap(), 2);
-        // One field that differs from retail leaves the whole record alone.
-        let (mut object, mut plane) = (d.object.clone(), d.fields.clone());
-        plane.get_mut("thrust").unwrap().value = "35271".into();
-        assert!(!record_fit::apply(
-            AircraftId::Su25,
-            &mut object,
-            &mut plane
-        ));
-        assert_eq!(object["weight"].number().unwrap(), 41_885);
-        // Aircraft without corrections are never touched.
-        assert!(!record_fit::apply(AircraftId::F18, &mut object, &mut plane));
-    }
-    #[test]
-    fn record_fits_keep_empty_plus_fuel_under_the_maximum_weight() {
-        // Retail maximum takeoff weights where the fit leaves it alone.
-        for (id, retail_mtow) in [
-            (AircraftId::Su25, 90_390),
-            (AircraftId::Mig17, 13_380),
-            (AircraftId::C130, 155_000),
-        ] {
-            let fits = record_fit::record_fits(id);
-            assert!(!fits.is_empty());
-            let get = |key: &str| fits.iter().find(|f| f.key == key).map(|f| f.fitted);
-            let mtow = get("maxTakeoffWeight").unwrap_or(retail_mtow);
-            if let (Some(empty), Some(fuel)) = (get("weight"), get("internalFuel")) {
-                assert!(empty + fuel <= mtow, "{id:?}");
-            }
-            assert!(fits.iter().all(|f| f.fitted > 0 && f.fitted != f.retail));
-        }
     }
     #[test]
     fn typed_profile_rejects_misalignment_and_wrong_identity() {
