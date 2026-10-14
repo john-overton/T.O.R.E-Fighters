@@ -642,6 +642,11 @@ struct Watch {
     target: u32,
     /// Rounds in flight: id to (last place, release number).
     flying: BTreeMap<u32, (Vector, usize)>,
+    /// The target the striker released at, by release number: a Quick
+    /// Mission wing picks its own target, which is not always the driver's
+    /// (the miss is measured to the one it struck at, where it stands when
+    /// the round ends).
+    struck: BTreeMap<usize, u32>,
     seen: std::collections::BTreeSet<u32>,
     releases: usize,
     impacts: usize,
@@ -717,6 +722,7 @@ impl Watch {
             plane,
             target,
             flying: BTreeMap::new(),
+            struck: BTreeMap::new(),
             seen: Default::default(),
             releases: 0,
             impacts: 0,
@@ -1070,6 +1076,13 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
         w.releases += 1;
         w.flying.insert(id, (position, w.releases));
         w.last_release = Some(t);
+        if let Some(struck) = scene
+            .actor(w.plane)
+            .and_then(|a| a.strike())
+            .and_then(|s| s.target())
+        {
+            w.struck.insert(w.releases, struck);
+        }
         let own = scene
             .world
             .combat
@@ -1147,7 +1160,12 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
             .map_or(last, |(_, at)| at);
         w.impacts += 1;
         w.last_impact = Some(t);
-        match target_at {
+        let struck_at = w
+            .struck
+            .get(&n)
+            .and_then(|id| state.targets.iter().find(|r| r.id == *id))
+            .map(|r| r.position);
+        match struck_at.or(target_at) {
             Some(tp) => println!(
                 "ai-strike: IMPACT t={t:.3} n={n} miss_ft={:.1} at={:.0},{:.0},{:.0}",
                 horizontal(burst, tp),
