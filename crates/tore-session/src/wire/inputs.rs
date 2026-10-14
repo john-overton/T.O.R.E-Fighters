@@ -714,6 +714,9 @@ const NEUTRAL_VECTOR: u64 = 26;
 /// [`LIFT_BITS`]-bit sub-code and its fields. The extension keeps the 5-bit
 /// code field, which has four codes left (28 to 31).
 const LIFT: u64 = 27;
+/// Wave 6 (slice nr-orbit; the lead numbers the protocol): open or close the
+/// AC-130's sensor console. No fields.
+const SENSOR_CONSOLE: u64 = 28;
 const COMMAND_BITS: u32 = 5;
 
 // The powered-lift sub-codes (protocol 19). The numbers are the wire's; the
@@ -792,6 +795,7 @@ pub(crate) fn write_command(w: &mut BitWriter, command: &Command) {
                 let _ = w.write_bits(reply_code(reply), 2);
             }
             SeatCommand::BattleNet => code(BATTLE_NET),
+            SeatCommand::SensorConsole => code(SENSOR_CONSOLE),
         },
         Command::Pilot(pilot) => match quantize_command(pilot) {
             PilotCommand::Eject => code(EJECT),
@@ -952,6 +956,7 @@ pub(crate) fn read_command(r: &mut BitReader<'_>) -> WireResult<Command> {
         }),
         WING_REPLY => seat(SeatCommand::WingReply(Reply::ALL[r.read_bits(2)? as usize])),
         BATTLE_NET => seat(SeatCommand::BattleNet),
+        SENSOR_CONSOLE => seat(SeatCommand::SensorConsole),
         EJECT => Ok(Command::Pilot(PilotCommand::Eject)),
         TOGGLE => Ok(Command::Pilot(PilotCommand::Toggle(read_switch(r)?))),
         SET => {
@@ -1312,6 +1317,7 @@ mod tests {
             ADJUST_FLIGHT_AXIS,
             NEUTRAL_VECTOR,
             LIFT,
+            SENSOR_CONSOLE,
         ];
         let unique: std::collections::BTreeSet<u64> = codes.iter().copied().collect();
         assert_eq!(unique.len(), codes.len(), "a command code is used twice");

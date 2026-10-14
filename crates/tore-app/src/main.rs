@@ -1387,6 +1387,7 @@ impl App {
             "range-target" => Command::RangeReset,
             "sight-designate" => Command::SightDesignate,
             "sight-pin" => Command::SightPinGround,
+            "sensor-console" => Command::SensorConsole,
             // The air-to-ground radar page and the Easy targeting cheat's
             // nearest ground target (slice G1).
             "a-g-radar" => return self.air_ground_key(),
@@ -1582,6 +1583,10 @@ impl App {
             }
             Command::BattleNet => {
                 self.queue(seats::SeatCommand::BattleNet);
+                Action::None
+            }
+            Command::SensorConsole => {
+                self.queue(seats::SeatCommand::SensorConsole);
                 Action::None
             }
             // Retail's IFF squawk: the answer comes from the flight's own copy
