@@ -410,17 +410,13 @@ const MI24_RATED_HP: f64 = 2. * 2_225. * MI24_ROTOR_POWER_SHARE;
 /// the gross weight) would have it hover to 17,700 ft. See the P2-fix
 /// notes and docs/spec/variety-flight.md.
 const MI24_ROTOR_POWER_SHARE: f64 = 0.745;
-/// The V-22's rated power at the proprotors, hp: two AE 1107C at 6,150 shp
-/// each (Pub W-V22) times the share the PT aircraft gets (slice P5).
-const V22_RATED_HP: f64 = 2. * 6_150. * V22_ROTOR_POWER_SHARE;
-/// Share of the published shaft power the PT V-22 gets (Fit): about 8
-/// percent transmission and installation losses, times the PT's maximum
-/// takeoff weight over the published 52,600 lb vertical takeoff maximum
-/// (23,810 / 52,600), so the PT aircraft, which weighs about 40 percent of
-/// the real one, keeps the real one's power loading. About 5,100 hp: the
-/// PT thrust's own power (about 3,200 hp) left it unable to accelerate
-/// from the conversion to 200 KCAS in 30 s (design T2).
-const V22_ROTOR_POWER_SHARE: f64 = 0.92 * 23_810. / 52_600.;
+/// The V-22's rated power at the proprotors at the published 52,600 lb
+/// vertical takeoff maximum, hp: two AE 1107C at 6,150 shp each (Pub W-V22)
+/// less about 8 percent transmission and installation losses (Fit, as for
+/// the Mi-24 and CH-47).
+const V22_RATED_HP_AT_MAX: f64 = 2. * 6_150. * 0.92;
+/// The published V-22 vertical takeoff maximum, lb (Pub W-V22).
+const V22_REAL_MAX_LB: f64 = 52_600.;
 
 /// The CH-47's rated power at the rotors per pound of maximum takeoff
 /// weight, hp/lb: the CH-47F's two T55-GA-714A at 4,733 shp each (Pub
@@ -591,7 +587,11 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
             rotor_speed_rpm: 397.,
             solidity: 0.105,
             max_thrust_lbf: pt_thrust,
-            rated_power_hp: Some(V22_RATED_HP),
+            // The power scales with the record's maximum weight, so the
+            // power loading is the real one's: the full 11,316 hp on the
+            // corrected record (slice HF3, the MV-22B's weights; before it,
+            // the AH-64 record's copied weights gave 5,122 hp).
+            rated_power_hp: Some(V22_RATED_HP_AT_MAX * c.mass.max_takeoff_lbs / V22_REAL_MAX_LB),
             energy_seconds: 1.6,
             never_exceed_kt: 280.,
             // Calibrated, not true, on the tiltrotor, and the conversion
@@ -606,7 +606,7 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
             // mast: from the centre of gravity, which the nacelle pivots sit
             // beside, out along the shaft to the hub. A gimballed hub, so
             // little stiffness of its own.
-            collective_degrees: [0., 12.],
+            collective_degrees: [0., 20.],
             cyclic_degrees: [8., 8.],
             blowback: 0.1,
             lock_number: 4.,
@@ -620,7 +620,7 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
             // (`powered/aero.rs`); the fuselage keeps only its flat-plate
             // drag, the forward area fitted to the published 275 kt.
             airframe: RotorcraftAirframe {
-                flat_plate_ft2: [22.5, 200., 400.],
+                flat_plate_ft2: [52., 200., 400.],
                 tail_pitch_ft3: 0.,
                 tail_trim_degrees: 0.,
                 fin_yaw_ft3: 0.,
@@ -845,10 +845,14 @@ mod tests {
             (hp - 2. * 4_733. * 0.82 * (15_000_f64 / 54_000.).powf(1.5)).abs() < 1e-6,
             "{hp}"
         );
-        // The V-22's two AE 1107C at 6,150 shp, at the PT aircraft's share
-        // (slice P5).
+        // The V-22's two AE 1107C at 6,150 shp less 8 percent, per pound of
+        // maximum weight against the published 52,600 lb (slice HF3): 15,000
+        // lb of maximum weight in the fixture.
         let hp = rotor(V22).rated_power_hp.unwrap();
-        assert!((0.3 * 12_300. ..0.5 * 12_300.).contains(&hp), "{hp}");
+        assert!(
+            (hp - 2. * 6_150. * 0.92 * 15_000. / 52_600.).abs() < 1e-6,
+            "{hp}"
+        );
         // The helicopters' overspeed rule uses their never-exceed speed
         // (197, 190 and 190 kt); the tiltrotor's 280 is calibrated (slice P5).
         for id in [Ah64, Mi24, Ch47] {

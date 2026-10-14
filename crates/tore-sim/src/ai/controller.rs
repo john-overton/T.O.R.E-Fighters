@@ -2723,7 +2723,16 @@ impl Controller {
         let dy = aim[1] - frame.own.position[1];
         let dz = aim[2] - frame.own.position[2];
         let heading_deg = dx.atan2(dz).to_degrees();
-        let pitch_deg = dy.atan2(dx.hypot(dz)).to_degrees();
+        let mut pitch_deg = dy.atan2(dx.hypot(dz)).to_degrees();
+        if frame.own.rotorcraft {
+            // A transport helicopter is not asked for a fighter's descent
+            // to its slot (slice HF3).
+            pitch_deg = super::formation::rotorcraft_formation_path_deg(
+                pitch_deg,
+                frame.own.speed.0,
+                leader.velocity[1],
+            );
+        }
         let speed = ScalarSpeed(guidance.speed);
         let duration = Duration::Timed(wing::FORMATION_REQUEST_SECONDS as u8);
         let request = MotionRequest::new(

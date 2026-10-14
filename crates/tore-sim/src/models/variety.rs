@@ -18,6 +18,10 @@ pub struct VarietyFlightModel {
     pub(super) configuration: Arc<Configuration>,
     /// Shared, so cloning the model each tick stays cheap.
     pub lift: Option<Arc<PoweredLift>>,
+    /// A helicopter's or the V-22's level cruise power, ft·lbf/s, the AI's
+    /// fuel planning figure (slice HF3,
+    /// [`crate::flight::powered::fuel::cruise_power`]): trimmed once here.
+    pub cruise_power: Option<f64>,
 }
 impl VarietyFlightModel {
     /// Exact reviewed PT identity, including shared F-4B/J shape references.
@@ -127,10 +131,14 @@ impl VarietyFlightModel {
         configuration.hook_available = a.fields["flags"].number()? & 0x02 != 0;
         configuration.controls = Some(super::handling::Profile::from_aircraft(a)?);
         let lift = PoweredLift::for_aircraft(a, &configuration).map(Arc::new);
+        let cruise_power = lift
+            .as_deref()
+            .and_then(|lift| crate::flight::powered::fuel::cruise_power(lift, &configuration));
         Ok(Self {
             id: a.id,
             configuration: Arc::new(configuration),
             lift,
+            cruise_power,
         })
     }
 }

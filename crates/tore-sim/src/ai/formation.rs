@@ -58,6 +58,29 @@ struct Reposition {
     hold: Option<[f64; 3]>,
 }
 
+/// The steepest sink a helicopter or V-22 wingman is asked for while it
+/// chases its formation slot, ft/s (slice HF3, John's request of 2026-10-13
+/// for a helicopter limit on formation descents; the figure is an agent
+/// decision, **fitted**): 1,000 ft/min, an ordinary helicopter descent,
+/// which the CH-47 still flies at 120 kt above the AI's collective floor
+/// (slice CH47). The fighters' formation geometry asked a CH-47 wingman for
+/// 42 ft/s (a 28 degree path at 59 kt), which wound its collective to the
+/// stop. A wingman whose leader sinks faster may follow the leader's sink.
+pub const ROTORCRAFT_FORMATION_DESCENT_FPS: f64 = 1_000. / 60.;
+
+/// A rotorcraft wingman's formation flight path, degrees: `path_deg` no
+/// steeper down than [`ROTORCRAFT_FORMATION_DESCENT_FPS`] (or the leader's
+/// own sink, `leader_climb_fps` negative, when that is more) at `speed_fps`
+/// (the rotor adapter's 40 kt floor, below which its hover cascade has its
+/// own descent limit). Climbs are left as they are.
+pub fn rotorcraft_formation_path_deg(path_deg: f64, speed_fps: f64, leader_climb_fps: f64) -> f64 {
+    let sink = ROTORCRAFT_FORMATION_DESCENT_FPS.max(-leader_climb_fps);
+    let speed = speed_fps
+        .max(crate::autopilot::HOVER_SPEED_KT * crate::runway_wind::FEET_PER_SECOND_PER_KNOT);
+    let steepest = -(sink / speed).min(1.).asin().to_degrees();
+    path_deg.max(steepest)
+}
+
 fn relative(point: [f64; 3], leader: LeaderView) -> [f64; 3] {
     let forward = velocity(leader.heading_deg, 0., 1.);
     let delta = sub(point, leader.position);
@@ -581,6 +604,27 @@ impl Guidance {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rotorcraft_wingman_is_asked_for_at_most_1000_ft_a_minute_down() {
+        let kt = crate::runway_wind::FEET_PER_SECOND_PER_KNOT;
+        let sink = |path: f64, speed: f64| -speed * path.to_radians().sin();
+        // The CH-47 case (slice CH47): 28 degrees down at 59 kt was 47 ft/s.
+        let path = rotorcraft_formation_path_deg(-28., 59. * kt, 0.);
+        assert!((sink(path, 59. * kt) - ROTORCRAFT_FORMATION_DESCENT_FPS).abs() < 1e-9);
+        // At 120 kt the same limit is under 5 degrees.
+        let path = rotorcraft_formation_path_deg(-12., 120. * kt, 0.);
+        assert!(path > -5. && path < -4.5, "{path}");
+        // Shallow descents and climbs pass unchanged.
+        assert_eq!(rotorcraft_formation_path_deg(-2., 120. * kt, 0.), -2.);
+        assert_eq!(rotorcraft_formation_path_deg(20., 120. * kt, 0.), 20.);
+        // A leader sinking 30 ft/s may be followed at its own sink.
+        let path = rotorcraft_formation_path_deg(-28., 120. * kt, -30.);
+        assert!((sink(path, 120. * kt) - 30.).abs() < 1e-9);
+        // Slower than the adapter's 40 kt floor, the floor's speed counts.
+        let slow = rotorcraft_formation_path_deg(-80., 5., 0.);
+        assert!((sink(slow, 40. * kt) - ROTORCRAFT_FORMATION_DESCENT_FPS).abs() < 1e-9);
+    }
     use crate::ai::{ScalarSpeed, SpeedLimits};
 
     fn own(position: [f64; 3], speed: f64) -> OwnState {

@@ -4899,7 +4899,7 @@ impl AiActor {
     ///
     /// Fitted host rule: fuel flow is the model's military flow scaled by the
     /// current throttle, floored so a shut-down engine does not report an
-    /// infinite endurance (a rotorcraft plans with its hover flow, see
+    /// infinite endurance (a rotorcraft plans with its level cruise flow, see
     /// `State::endurance_flow_lbs_per_second`). The spec's own definition
     /// needs the throttle search that holds cruise speed, which the host does
     /// not yet perform.

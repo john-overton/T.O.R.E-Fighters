@@ -93,8 +93,10 @@ def spec(kind: str, aircraft: str) -> tuple[int, list, dict]:
     if kind == "transition":
         if aircraft in TAPS:
             return 3600, [], {1: [ATTITUDE]} | _taps(60, TAPS[aircraft], FORWARD_TAP)
-        if aircraft == "v22":  # the conversion keys held toward airplane mode at 85 percent lever, nose a little down
-            holds = [(1, 5000, {"collective": 0.85}), (60, 4800, {"conversion": -1}), (60, 120, {"pitch": -0.1})]
+        if aircraft == "v22":  # the conversion keys held toward airplane mode at 90 percent lever, nose a little down
+            # (85 percent before slice HF3: at the MV-22B's weight a hover at 5,000 ft takes about 83 percent, so 85 left
+            # it climbing slowly at 90 kt after 40 s)
+            holds = [(1, 5000, {"collective": 0.9}), (60, 4800, {"conversion": -1}), (60, 120, {"pitch": -0.1})]
             return 4800, holds, {}
         if aircraft == "av8":  # the manual: nozzles three steps up, forward at 90 kt
             return 4800, [(1, 6000, {"throttle": 1})], {1: ["lift-command:nozzle-step-up"] * 3, 1000: ["lift-command:nozzle-preset-forward"]}
@@ -195,23 +197,35 @@ def check_hover(output: str) -> list[str]:
     return problems
 
 
-# Slice HF2: a rotorcraft burns by the power its rotor draws. In the 15 s hover it burns between 0.1 and 0.9 lb/s
-# (docs/baselines/rotorcraft-fuel.md: 0.35 to 0.54 lb/s at 5,000 ft); the record's flow, which the burn does not read,
-# is 1 to 3 lb/s (3 for the Mi-24: 45 lb in the 15 s).
+# Slice HF2: a rotorcraft burns by the power its rotor draws. In the 15 s hover a helicopter burns between 0.1 and
+# 0.9 lb/s (docs/baselines/rotorcraft-fuel.md: 0.35 to 0.47 lb/s at 5,000 ft); the record's flow, which the burn does
+# not read, is 1 to 3 lb/s (3 for the Mi-24: 45 lb in the 15 s). Slice HF3 gave the V-22 the MV-22B's weights and its
+# engines' full 11,316 hp: about 1.4 lb/s at a hover, so its band is 0.8 to 2.0 lb/s.
 HOVER_BURN_LB_PER_S = (0.1, 0.9)
+HOVER_BURN_BANDS = {"v22": (0.8, 2.0)}
+
+
+def check_hover_fuel_of(aircraft: str):
+    """The hover check plus the hover's fuel burn inside `aircraft`'s band."""
+
+    def check(output: str) -> list[str]:
+        problems = check_hover(output)
+        found = re.search(r"fuel_start_lb=(\S+) fuel_end_lb=(\S+)", output)
+        if not found:
+            return problems + ["the hover printed no fuel line"]
+        burned = float(found[1]) - float(found[2])
+        seconds = 1800 / 120
+        low, high = HOVER_BURN_BANDS.get(aircraft, HOVER_BURN_LB_PER_S)
+        if not low * seconds <= burned <= high * seconds:
+            problems.append(f"the hover burned {burned:.1f} lb in {seconds:.0f} s: {burned / seconds:.2f} lb/s, not {low} to {high}")
+        return problems
+
+    return check
 
 
 def check_hover_fuel(output: str) -> list[str]:
-    problems = check_hover(output)
-    found = re.search(r"fuel_start_lb=(\S+) fuel_end_lb=(\S+)", output)
-    if not found:
-        return problems + ["the hover printed no fuel line"]
-    burned = float(found[1]) - float(found[2])
-    seconds = 1800 / 120
-    low, high = HOVER_BURN_LB_PER_S
-    if not low * seconds <= burned <= high * seconds:
-        problems.append(f"the hover burned {burned:.1f} lb in {seconds:.0f} s: {burned / seconds:.2f} lb/s, not {low} to {high}")
-    return problems
+    """A helicopter's hover check (the default band)."""
+    return check_hover_fuel_of("")(output)
 
 
 def hover_scenarios() -> list[Scenario]:
@@ -219,7 +233,7 @@ def hover_scenarios() -> list[Scenario]:
         Scenario(
             name=f"flight-powered-hover-{ac}", lane="flight", args=["--version"],
             then=[_write_step(ac, "quiet"), _fly(ac, "quiet")],
-            check=check_hover if ac in JETS else check_hover_fuel, timeout=240,
+            check=check_hover if ac in JETS else check_hover_fuel_of(ac), timeout=240,
         )
         for ac in POWERED
     ]
