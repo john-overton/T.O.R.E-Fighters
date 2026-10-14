@@ -236,11 +236,21 @@ controls take console meanings, with no new bindings to learn:
 | Shift+P (`gun-lock`) | Gun lock: the guns stay on the target or point while the sensor slews free; again lets them follow the sensor. Agent's key choice, 2026-10-14, beside P (Shift+P is free in the original) |
 | Ctrl+Insert / Ctrl+Delete (`console-chaff` / `console-flare`) | Chaff / flare: the console's own actions, bound apart from Insert and Delete (John, 2026-10-14); the keys are an agent choice, the Ctrl versions of the retail chaff and flare keys. They work outside the console too |
 
-**The gamepad in the console** is John's layout (2026-10-14). It applies only
-while the console is open, on the stock gamepad defaults (`CONSOLE_PAD` in
-`crates/tore-app/src/input.rs`), and puts the buttons' flight meanings aside
-until it closes; menu navigation stays. A joystick or HOTAS keeps its own
-bindings.
+**The gamepad in the console** is John's layout (2026-10-14). While the
+console is open it owns every standard gamepad completely, whatever the
+profile (stock defaults on or off, the player's own gamepad bindings): the
+layout (`CONSOLE_PAD` in `crates/tore-app/src/input.rs`) is added for each
+connected gamepad and every other binding of that gamepad stands aside, the
+triggers' rudder, the throttle buttons and the flight switches included.
+Only menu navigation, Start (pause) and Xbox (the flight menu) keep working
+(John's bug of 2026-10-14: "make sure all sensor override controls take
+complete control of the controller"). A console action the player bound on
+their gamepad themselves wins: the layout's binding of that action, and the
+layout's binding on that control, stand aside. The triggers do nothing in
+the console (agent decision: John's layout fires on A). The layout is never
+saved into the player's controls file. Closed, the gamepad's flight bindings
+are back. A joystick or HOTAS keeps its own bindings, and the keyboard is
+unchanged.
 
 | Gamepad | In the console |
 | --- | --- |

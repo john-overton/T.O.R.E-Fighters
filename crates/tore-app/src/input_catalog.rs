@@ -1553,7 +1553,12 @@ mod tests {
     }
     /// The generated part of `docs/CONTROLS.md`.
     fn controls_markdown() -> String {
-        let pad = crate::input::gamepad_defaults(&crate::controls_editor::preview_device());
+        let preview = crate::controls_editor::preview_device();
+        let mut pad = crate::input::gamepad_defaults(&preview);
+        // The AC-130 console's layout, which owns the gamepad in the console.
+        let console =
+            tore_input::Profile::parse(&crate::input::console_pad_text(&preview)).unwrap();
+        pad.bindings.extend(console.bindings);
         let mut out = String::new();
         for group in Group::ALL {
             out.push_str(&format!(
@@ -1573,10 +1578,21 @@ mod tests {
                 if matches!(entry.kind, Kind::Axis) && entry.action.starts_with("look-") {
                     mouse.push("Hold right button and drag".into());
                 }
-                let buttons = pad
+                let matching: Vec<_> = pad
                     .bindings
                     .iter()
                     .filter(|b| entry.bindable() && entry.matches(b))
+                    .collect();
+                // The console layout's binding of a control the flight layout
+                // already gives this action says nothing new.
+                let buttons = matching
+                    .iter()
+                    .filter(|b| {
+                        !crate::input::console_pad_binding(b)
+                            || !matching.iter().any(|o| {
+                                !crate::input::console_pad_binding(o) && o.control == b.control
+                            })
+                    })
                     .map(|b| {
                         let mut label = control_label(&b.device, &b.control, b.mode, true);
                         if crate::input::console_pad_binding(b) {
