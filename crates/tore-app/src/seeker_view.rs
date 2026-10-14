@@ -14,6 +14,16 @@ use tore_world::snapshot::{ProjectilePose, RenderSnapshot};
 /// The seeker head looks at its target while the target stays within this
 /// angle of the nose (radians): the 45 degrees of the AGM records' zone 1.
 const GIMBAL: f64 = std::f64::consts::FRAC_PI_4;
+/// The feed stays lost for a second of snow when the weapon ends, in combat
+/// ticks (120 Hz; opinionated, John 2026-10-13).
+pub const STATIC_TICKS: u64 = 120;
+/// The grace an online client waits before a missing weapon counts as ended,
+/// combat ticks: 0.2 s, two snapshots at the slowest host rate (10 a second)
+/// and twelve at the default 60. It adds nothing to when the static ends
+/// and nothing in single player. The netcode cannot drop a flying weapon from
+/// a single snapshot (see docs/spec/target-window.md, "Seeker view"); this is
+/// a safeguard against anything that might, agent decision.
+pub const NET_GRACE_TICKS: u64 = 24;
 /// The eye stands this far ahead of the weapon's centre, feet, so a nose
 /// camera looks out of the body, not through it (fitted).
 const NOSE_FT: f64 = 4.;
@@ -22,8 +32,10 @@ const NOSE_FT: f64 = 4.;
 /// sent it back to the targeting pod.
 #[derive(Clone, Debug, Default)]
 pub struct SeekerCam {
-    /// The weapon being followed.
+    /// The weapon being followed (none during the static).
     followed: Option<u32>,
+    /// The newest seeker weapon in flight, followed or not.
+    newest: Option<u32>,
     /// The newest weapon the pilot sent back to the pod view: it stays off
     /// the page, and only a newer launch brings the seeker view again.
     dismissed: Option<u32>,
@@ -32,6 +44,18 @@ pub struct SeekerCam {
     launched: Option<u32>,
     /// A launch the host has not yet answered.
     new_launch: bool,
+    /// The followed weapon ended: its id and the combat tick the feed was
+    /// lost. The page shows static for [`STATIC_TICKS`] after it.
+    lost: Option<(u32, u64)>,
+    /// The picture's tick at the last [`Self::observe`].
+    now: u64,
+    /// The tick the followed weapon was first missing from the picture, while
+    /// the grace runs.
+    missing: Option<u64>,
+    /// Combat ticks a missing weapon is waited for ([`Self::set_grace`]).
+    grace: u64,
+    /// The last picture shown, held while the grace runs.
+    held: Option<Shot>,
 }
 
 /// One frame's seeker view.
@@ -50,37 +74,118 @@ pub struct Shot {
 
 impl SeekerCam {
     /// This frame's seeker view of the weapons `player` fired, if any is in
-    /// flight and the pilot has not sent it back to the pod.
+    /// flight and the pilot has not sent it back to the pod. `spot` is the
+    /// laser spot the plane's laser weapons home on, when there is one: a
+    /// laser bomb or missile with no object marks it.
     ///
     /// The weapon followed is the player's newest seeker weapon in the
-    /// picture (ids only grow); a weapon that has landed drops out of the
-    /// picture and the page returns to what it showed before. A later
-    /// weapon without a seeker picture (a bomb, a HARM) does not take the
-    /// page.
-    pub fn observe(&mut self, picture: &RenderSnapshot, player: u32, at: Vector) -> Option<Shot> {
+    /// picture (ids only grow). When it ends (it leaves the picture: it hit,
+    /// detonated or ran out) the feed is lost: no view for
+    /// [`STATIC_TICKS`] (the host shows static, [`Self::lost_feed`]), then the
+    /// page returns to what it showed before, or to an older seeker weapon
+    /// still flying. A weapon launched during the static takes the page at
+    /// once. A later weapon without a seeker picture (a bomb, a HARM) does
+    /// not take the page.
+    pub fn observe(
+        &mut self,
+        picture: &RenderSnapshot,
+        player: u32,
+        at: Vector,
+        spot: Option<Vector>,
+    ) -> Option<Shot> {
+        self.now = picture.tick;
         let newest = picture
             .projectiles
             .iter()
             .filter(|p| !p.gun && !p.incoming && p.owner == player)
             .filter(|p| missiles::has_seeker_view(&p.weapon))
             .max_by_key(|p| p.id);
-        self.followed = newest.map(|p| p.id);
+        // The weapon the page followed is gone, and the pilot had not sent
+        // it back to the pod: the feed is lost, once it has stayed gone for
+        // the grace (none in single player; see [`Self::set_grace`]). The
+        // grace holds the last picture, and the static still ends a second
+        // after the weapon left.
+        if let Some(id) = self.followed
+            && self.dismissed != Some(id)
+        {
+            let flying = picture.projectiles.iter().any(|p| p.id == id);
+            if flying || newest.is_some_and(|p| p.id > id) {
+                self.missing = None;
+            } else {
+                let since = *self.missing.get_or_insert(picture.tick);
+                if picture
+                    .tick
+                    .checked_sub(since)
+                    .is_none_or(|waited| waited >= self.grace)
+                {
+                    self.lost = Some((id, since));
+                    self.missing = None;
+                } else {
+                    self.newest = Some(id);
+                    return self.held.clone();
+                }
+            }
+        } else {
+            self.missing = None;
+        }
+        // The static lasts a second; a weapon launched since takes the page,
+        // and the weapon coming back ends it.
+        if let Some((id, since)) = self.lost
+            && (picture
+                .tick
+                .checked_sub(since)
+                .is_none_or(|d| d >= STATIC_TICKS)
+                || newest.is_some_and(|p| p.id >= id))
+        {
+            self.lost = None;
+        }
+        self.newest = newest.map(|p| p.id);
+        self.followed = newest.map(|p| p.id).filter(|_| self.lost.is_none());
         if let Some(p) = newest
             && self.launched.is_none_or(|seen| p.id > seen)
         {
             self.launched = Some(p.id);
             self.new_launch = true;
         }
-        let p = newest.filter(|p| self.dismissed != Some(p.id))?;
-        let target = p.target.and_then(|id| position_of(picture, id));
+        if self.lost.is_some() {
+            self.held = None;
+            return None;
+        }
+        let Some(p) = newest.filter(|p| self.dismissed != Some(p.id)) else {
+            self.held = None;
+            return None;
+        };
+        let target = p
+            .target
+            .and_then(|id| position_of(picture, id))
+            .or_else(|| spot.filter(|_| missiles::homes_on_spot(&p.weapon)));
         let view = view(p, target);
-        Some(Shot {
+        let shot = Shot {
             id: p.id,
             weapon: p.weapon.clone(),
             view,
             target,
             range_ft: distance(p.position, target.unwrap_or(at)),
-        })
+        };
+        self.held = Some(shot.clone());
+        Some(shot)
+    }
+
+    /// How many combat ticks a followed weapon may be missing from the
+    /// picture before it counts as ended. Single player leaves it at 0 (the
+    /// picture is the simulation's, and a weapon that is gone has ended); an
+    /// online client sets [`NET_GRACE_TICKS`] as a safeguard (see the
+    /// constant). While the grace runs the page holds the weapon's last
+    /// picture; the static is still timed from the tick the weapon left.
+    pub fn set_grace(&mut self, ticks: u64) {
+        self.grace = ticks;
+    }
+
+    /// The static is on: the followed weapon ended less than a second ago.
+    /// The value is the tick the page's snow is drawn from (it changes at the
+    /// 24 Hz picture refresh).
+    pub fn lost_feed(&self) -> Option<u64> {
+        self.lost.map(|_| self.now / 5)
     }
 
     /// Whether a seeker weapon of the player's has appeared since the last
@@ -104,16 +209,18 @@ impl SeekerCam {
     }
 
     /// Whether the seeker view has anything to show: a seeker weapon of the
-    /// player's in flight that the pilot has not sent back to the pod.
+    /// player's in flight that the pilot has not sent back to the pod, or the
+    /// second of static after one ended.
     pub fn showing(&self) -> bool {
-        self.followed.is_some() && self.followed != self.dismissed
+        self.lost.is_some() || (self.followed.is_some() && self.followed != self.dismissed)
     }
 
     /// The pilot sent the page back to the targeting pod (the clear
     /// designation key): the weapon being followed leaves the page.
     pub fn dismiss(&mut self) {
-        if self.followed.is_some() {
-            self.dismissed = self.followed;
+        self.lost = None;
+        if self.newest.is_some() {
+            self.dismissed = self.newest;
         }
     }
 }
@@ -192,8 +299,12 @@ mod tests {
     }
 
     fn picture(projectiles: Vec<ProjectilePose>) -> RenderSnapshot {
+        picture_at(projectiles, 0)
+    }
+
+    fn picture_at(projectiles: Vec<ProjectilePose>, tick: u64) -> RenderSnapshot {
         RenderSnapshot {
-            tick: 0,
+            tick,
             player: Default::default(),
             targets: vec![],
             projectiles,
@@ -211,16 +322,17 @@ mod tests {
     #[test]
     fn a_launched_maverick_takes_the_page_until_it_lands() {
         let mut cam = SeekerCam::default();
-        assert!(cam.observe(&picture(vec![]), 0, HERE).is_none());
+        assert!(cam.observe(&picture(vec![]), 0, HERE, None).is_none());
         let flying = picture(vec![missile(3, 0, "AGM65G.JT", [0., 4_900., 600.])]);
-        let shot = cam.observe(&flying, 0, HERE).unwrap();
+        let shot = cam.observe(&flying, 0, HERE, None).unwrap();
         assert_eq!(shot.weapon, "AGM65G.JT");
         // The eye is a few feet ahead of the weapon, looking along its nose.
         assert!((shot.view.position[2] - 604.).abs() < 1e-9);
         assert!(shot.view.yaw.abs() < 1e-6 && shot.view.pitch.abs() < 1e-6);
         assert!((shot.range_ft - (100f64.powi(2) + 600f64.powi(2)).sqrt()).abs() < 1e-6);
         // Landed: it drops out of the picture and the page is free again.
-        assert!(cam.observe(&picture(vec![]), 0, HERE).is_none());
+        assert!(cam.observe(&picture(vec![]), 0, HERE, None).is_none());
+        assert!(cam.lost_feed().is_some());
     }
 
     #[test]
@@ -234,9 +346,8 @@ mod tests {
             missile(1, 7, "AGM65G.JT", [0., 4_900., 600.]),
             incoming,
             gun,
-            // No seeker picture: HARM, a laser bomb, a dumb bomb, an AAM.
+            // No seeker picture: HARM, a dumb bomb, an AAM.
             missile(2, 0, "AGM88.JT", [0., 4_900., 600.]),
-            missile(3, 0, "GBU10.JT", [0., 4_900., 600.]),
             // The JDAMs fly to a point and carry no picture (John 2026-10-12).
             missile(10, 0, "GBU29.JT", [0., 4_900., 600.]),
             missile(11, 0, "GBU29P.JT", [0., 4_900., 600.]),
@@ -244,11 +355,11 @@ mod tests {
             missile(4, 0, "MK82.JT", [0., 4_900., 600.]),
             missile(8, 0, "AIM9M.JT", [0., 4_900., 600.]),
         ]);
-        assert!(cam.observe(&others, 0, HERE).is_none());
+        assert!(cam.observe(&others, 0, HERE, None).is_none());
         // Every record the list names is one.
         for weapon in missiles::SEEKER_VIEW {
             let one = picture(vec![missile(1, 0, weapon, [0., 4_900., 600.])]);
-            assert!(SeekerCam::default().observe(&one, 0, HERE).is_some());
+            assert!(SeekerCam::default().observe(&one, 0, HERE, None).is_some());
         }
     }
 
@@ -259,7 +370,9 @@ mod tests {
         let mut cam = SeekerCam::default();
         let at2 = missile(3, 0, "AT2.JT", [0., 4_900., 600.]);
         let jdam = missile(8, 0, "GBU30.JT", [0., 4_900., 700.]);
-        let shot = cam.observe(&picture(vec![at2, jdam]), 0, HERE).unwrap();
+        let shot = cam
+            .observe(&picture(vec![at2, jdam]), 0, HERE, None)
+            .unwrap();
         assert_eq!((shot.id, shot.weapon.as_str()), (3, "AT2.JT"));
         assert!(missiles::has_seeker_view("AT2.JT"));
         assert!(!missiles::has_seeker_view("GBU29.JT"));
@@ -270,30 +383,32 @@ mod tests {
         let mut cam = SeekerCam::default();
         assert!(!cam.take_launch() && !cam.showing());
         let one = missile(3, 0, "AGM65G.JT", [0., 4_900., 600.]);
-        cam.observe(&picture(vec![one.clone()]), 0, HERE);
+        cam.observe(&picture(vec![one.clone()]), 0, HERE, None);
         assert!(cam.take_launch() && cam.showing());
         // Seen again in flight: not a new launch.
-        cam.observe(&picture(vec![one.clone()]), 0, HERE);
+        cam.observe(&picture(vec![one.clone()]), 0, HERE, None);
         assert!(!cam.take_launch());
         // A second weapon is a launch; the first landing is not.
         let two = missile(4, 0, "AT2.JT", [0., 4_900., 700.]);
-        cam.observe(&picture(vec![one, two.clone()]), 0, HERE);
+        cam.observe(&picture(vec![one, two.clone()]), 0, HERE, None);
         assert!(cam.take_launch());
-        cam.observe(&picture(vec![two.clone()]), 0, HERE);
+        cam.observe(&picture(vec![two.clone()]), 0, HERE, None);
         assert!(!cam.take_launch() && cam.showing());
         // Clear sends the page to the pod: not showing until a new launch.
         cam.dismiss();
-        cam.observe(&picture(vec![two.clone()]), 0, HERE);
+        cam.observe(&picture(vec![two.clone()]), 0, HERE, None);
         assert!(!cam.showing() && !cam.take_launch());
         let three = missile(6, 0, "AS30.JT", [0., 4_900., 800.]);
-        cam.observe(&picture(vec![two, three.clone()]), 0, HERE);
+        cam.observe(&picture(vec![two, three.clone()]), 0, HERE, None);
         assert!(cam.take_launch() && cam.showing());
-        // Landed: the view ends.
-        cam.observe(&picture(vec![]), 0, HERE);
+        // Landed: a second of static, then the view ends.
+        cam.observe(&picture(vec![]), 0, HERE, None);
+        assert!(cam.showing() && !cam.take_launch());
+        cam.observe(&picture_at(vec![], STATIC_TICKS), 0, HERE, None);
         assert!(!cam.showing() && !cam.take_launch());
         // Weapons without a picture never announce anything.
         let bomb = missile(9, 0, "MK82.JT", [0., 4_900., 600.]);
-        cam.observe(&picture(vec![bomb]), 0, HERE);
+        cam.observe(&picture(vec![bomb]), 0, HERE, None);
         assert!(!cam.take_launch() && !cam.showing());
     }
 
@@ -303,8 +418,16 @@ mod tests {
         let mut windows = Instruments::new(Layout::Large, None);
         windows.pages = vec![7, 5, 9, 8];
         let mut cam = SeekerCam::default();
-        let frame = |cam: &mut SeekerCam, windows: &mut Instruments, p: Vec<ProjectilePose>| {
-            cam.observe(&picture(p), 0, HERE);
+        let mut now = 0;
+        // One frame, a tick after the last; `rest` is a pause the length of
+        // the static, so a landing's second of snow is over.
+        let mut frame = |cam: &mut SeekerCam, windows: &mut Instruments, p: Vec<ProjectilePose>| {
+            now += 1;
+            cam.observe(&picture_at(p, now), 0, HERE, None);
+            cam.sync_window(windows);
+        };
+        let rest = |cam: &mut SeekerCam, windows: &mut Instruments| {
+            cam.observe(&picture_at(vec![], 1_000_000), 0, HERE, None);
             cam.sync_window(windows);
         };
         frame(&mut cam, &mut windows, vec![]);
@@ -317,13 +440,16 @@ mod tests {
         windows.toggle(TARGET_PAGE);
         frame(&mut cam, &mut windows, vec![one.clone()]);
         assert_eq!(windows.pages, [7, 5, 9, 8]);
-        // The next launch opens it again; the landing of both closes it.
+        // The next launch opens it again; the landing of both closes it,
+        // after the static.
         let two = missile(4, 0, "AGM65G.JT", [0., 4_900., 700.]);
         frame(&mut cam, &mut windows, vec![one, two.clone()]);
         assert_eq!(windows.pages.last(), Some(&TARGET_PAGE));
         frame(&mut cam, &mut windows, vec![two.clone()]);
         assert_eq!(windows.pages.last(), Some(&TARGET_PAGE));
         frame(&mut cam, &mut windows, vec![]);
+        assert_eq!(windows.pages.last(), Some(&TARGET_PAGE), "static keeps it");
+        rest(&mut cam, &mut windows);
         assert_eq!(windows.pages, [7, 5, 9, 8]);
         // Clear designation keeps it as the player's own.
         let three = missile(6, 0, "AS14.JT", [0., 4_900., 800.]);
@@ -332,6 +458,7 @@ mod tests {
         windows.keep_seeker_window();
         frame(&mut cam, &mut windows, vec![three]);
         frame(&mut cam, &mut windows, vec![]);
+        rest(&mut cam, &mut windows);
         assert_eq!(windows.pages.last(), Some(&TARGET_PAGE));
         // A window the player already had open stays after the view.
         let mut open = Instruments::new(Layout::Large, None);
@@ -341,6 +468,7 @@ mod tests {
         let four = missile(8, 0, "AGM65A.JT", [0., 4_900., 600.]);
         frame(&mut cam, &mut open, vec![four]);
         frame(&mut cam, &mut open, vec![]);
+        rest(&mut cam, &mut open);
         assert_eq!(open.pages, before);
     }
 
@@ -351,11 +479,16 @@ mod tests {
         let second = missile(5, 0, "AS30.JT", [0., 4_800., 300.]);
         let bomb = missile(9, 0, "MK82.JT", [0., 4_990., 10.]);
         let shot = cam
-            .observe(&picture(vec![first.clone(), second, bomb]), 0, HERE)
+            .observe(&picture(vec![first.clone(), second, bomb]), 0, HERE, None)
             .unwrap();
         assert_eq!(shot.weapon, "AS30.JT");
-        // When the newest lands the older one is next.
-        let shot = cam.observe(&picture(vec![first]), 0, HERE).unwrap();
+        // When the newest lands, a second of static, then the older one.
+        assert!(
+            cam.observe(&picture(vec![first.clone()]), 0, HERE, None)
+                .is_none()
+        );
+        let after = picture_at(vec![first], STATIC_TICKS);
+        let shot = cam.observe(&after, 0, HERE, None).unwrap();
         assert_eq!(shot.weapon, "AGM65G.JT");
     }
 
@@ -363,20 +496,37 @@ mod tests {
     fn the_clear_key_sends_the_page_back_to_the_pod_until_the_next_launch() {
         let mut cam = SeekerCam::default();
         let one = missile(3, 0, "AGM65G.JT", [0., 4_900., 600.]);
-        assert!(cam.observe(&picture(vec![one.clone()]), 0, HERE).is_some());
+        assert!(
+            cam.observe(&picture(vec![one.clone()]), 0, HERE, None)
+                .is_some()
+        );
         cam.dismiss();
-        assert!(cam.observe(&picture(vec![one.clone()]), 0, HERE).is_none());
+        assert!(
+            cam.observe(&picture(vec![one.clone()]), 0, HERE, None)
+                .is_none()
+        );
         // Still flying, still off the page.
-        assert!(cam.observe(&picture(vec![one.clone()]), 0, HERE).is_none());
+        assert!(
+            cam.observe(&picture(vec![one.clone()]), 0, HERE, None)
+                .is_none()
+        );
         // A new launch brings the seeker view back.
         let two = missile(4, 0, "AGM65G.JT", [0., 4_900., 700.]);
-        assert!(cam.observe(&picture(vec![one, two]), 0, HERE).is_some());
+        assert!(
+            cam.observe(&picture(vec![one, two]), 0, HERE, None)
+                .is_some()
+        );
         // The key with nothing in flight does nothing.
         let mut idle = SeekerCam::default();
         idle.dismiss();
         assert!(
-            idle.observe(&picture(vec![missile(1, 0, "AS14.JT", HERE)]), 0, HERE)
-                .is_some()
+            idle.observe(
+                &picture(vec![missile(1, 0, "AS14.JT", HERE)]),
+                0,
+                HERE,
+                None
+            )
+            .is_some()
         );
     }
 
@@ -395,5 +545,163 @@ mod tests {
         let far = [5_000. * wide.sin(), 1_000., 5_000. * wide.cos()];
         assert!(view(&p, Some(far)).yaw.abs() < 1e-6);
         assert!(view(&p, None).yaw.abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_hit_shows_a_second_of_static_then_the_page_returns() {
+        // John 2026-10-13: 1 second of static once the weapon hits.
+        let mut cam = SeekerCam::default();
+        let one = missile(3, 0, "AGM65G.JT", [0., 4_900., 600.]);
+        let see = |cam: &mut SeekerCam, p: Vec<ProjectilePose>, t: u64| {
+            cam.observe(&picture_at(p, t), 0, HERE, None)
+        };
+        assert!(see(&mut cam, vec![one.clone()], 1_000).is_some());
+        assert!(cam.lost_feed().is_none());
+        // It hits: the picture is gone, the page shows snow.
+        assert!(see(&mut cam, vec![], 1_001).is_none());
+        assert!(cam.lost_feed().is_some() && cam.showing());
+        // The snow moves at the 24 Hz refresh and lasts exactly 120 ticks.
+        let first = cam.lost_feed();
+        see(&mut cam, vec![], 1_060);
+        assert_ne!(cam.lost_feed(), first);
+        see(&mut cam, vec![], 1_001 + STATIC_TICKS - 1);
+        assert!(cam.lost_feed().is_some());
+        see(&mut cam, vec![], 1_001 + STATIC_TICKS);
+        assert!(cam.lost_feed().is_none() && !cam.showing());
+    }
+
+    #[test]
+    fn an_older_weapon_waits_out_the_static_and_a_new_launch_cuts_it() {
+        let mut cam = SeekerCam::default();
+        let older = missile(3, 0, "AGM65G.JT", [0., 4_900., 600.]);
+        let newer = missile(5, 0, "AS30.JT", [0., 4_800., 300.]);
+        let see = |cam: &mut SeekerCam, p: Vec<ProjectilePose>, t: u64| {
+            cam.observe(&picture_at(p, t), 0, HERE, None)
+        };
+        assert!(see(&mut cam, vec![older.clone(), newer], 10).is_some());
+        // The newest hits while the older still flies: static first, not the
+        // older weapon's picture.
+        assert!(see(&mut cam, vec![older.clone()], 11).is_none());
+        assert!(cam.lost_feed().is_some());
+        assert!(see(&mut cam, vec![older.clone()], 100).is_none());
+        // Then the older weapon's view.
+        let shot = see(&mut cam, vec![older.clone()], 11 + STATIC_TICKS).unwrap();
+        assert_eq!(shot.weapon, "AGM65G.JT");
+        assert!(cam.lost_feed().is_none());
+        // It hitting too is a second of static of its own.
+        assert!(see(&mut cam, vec![], 300).is_none() && cam.lost_feed().is_some());
+        // A weapon launched during the static takes the page at once.
+        let fresh = missile(9, 0, "AT12.JT", [0., 4_900., 900.]);
+        let shot = see(&mut cam, vec![fresh], 310).unwrap();
+        assert_eq!(shot.weapon, "AT12.JT");
+        assert!(cam.lost_feed().is_none() && cam.take_launch());
+    }
+
+    #[test]
+    fn a_weapon_that_was_not_on_the_page_leaves_no_static() {
+        let mut cam = SeekerCam::default();
+        let older = missile(3, 0, "AGM65G.JT", [0., 4_900., 600.]);
+        let newer = missile(5, 0, "AS30.JT", [0., 4_800., 300.]);
+        cam.observe(&picture(vec![older, newer.clone()]), 0, HERE, None);
+        // The older one lands behind the page's back: nothing happens.
+        cam.observe(&picture(vec![newer.clone()]), 0, HERE, None);
+        assert!(cam.lost_feed().is_none());
+        // Sent back to the pod, the weapon landing is not a lost feed either.
+        cam.dismiss();
+        cam.observe(&picture(vec![newer]), 0, HERE, None);
+        cam.observe(&picture(vec![]), 0, HERE, None);
+        assert!(cam.lost_feed().is_none() && !cam.showing());
+        // The key during the static ends it.
+        let mut cam = SeekerCam::default();
+        let one = missile(3, 0, "AGM65G.JT", [0., 4_900., 600.]);
+        cam.observe(&picture(vec![one]), 0, HERE, None);
+        cam.observe(&picture_at(vec![], 5), 0, HERE, None);
+        assert!(cam.lost_feed().is_some());
+        cam.dismiss();
+        cam.observe(&picture_at(vec![], 6), 0, HERE, None);
+        assert!(cam.lost_feed().is_none() && !cam.showing());
+        // A clock that runs backwards does not leave the snow on.
+        let mut cam = SeekerCam::default();
+        cam.observe(
+            &picture_at(vec![missile(3, 0, "AS14.JT", HERE)], 900),
+            0,
+            HERE,
+            None,
+        );
+        cam.observe(&picture_at(vec![], 901), 0, HERE, None);
+        cam.observe(&picture_at(vec![], 50), 0, HERE, None);
+        assert!(cam.lost_feed().is_none());
+    }
+
+    #[test]
+    fn a_laser_bomb_has_a_view_that_marks_its_spot() {
+        let spot = [0., 0., 3_000.];
+        let bomb = missile(3, 0, "GBU10.JT", [0., 4_000., 0.]);
+        let shot = SeekerCam::default()
+            .observe(&picture(vec![bomb]), 0, HERE, Some(spot))
+            .unwrap();
+        assert_eq!(shot.target, Some(spot));
+        assert!((shot.range_ft - 5_000.).abs() < 1e-6);
+        // Looking at the spot: 53 degrees below a level nose is outside the
+        // 45 degree cone, so the head keeps to the nose.
+        assert!(shot.view.pitch.abs() < 1e-6);
+        // A Maverick does not mark a laser spot, whoever lased it.
+        let maverick = missile(4, 0, "AGM65G.JT", [0., 4_000., 0.]);
+        let shot = SeekerCam::default()
+            .observe(&picture(vec![maverick]), 0, HERE, Some(spot))
+            .unwrap();
+        assert_eq!(shot.target, None);
+        // A laser missile does.
+        let laser = missile(5, 0, "AT12.JT", [0., 1_000., 0.]);
+        let shot = SeekerCam::default()
+            .observe(&picture(vec![laser]), 0, HERE, Some(spot))
+            .unwrap();
+        assert_eq!(shot.target, Some(spot));
+        assert!(shot.view.pitch < -0.3);
+    }
+
+    #[test]
+    fn an_online_client_waits_out_a_short_gap_before_the_static() {
+        // The netcode does not drop a flying weapon from one snapshot, but
+        // if the picture ever did, the page holds its last picture for the
+        // grace and the static still ends a second after the weapon left.
+        let mut cam = SeekerCam::default();
+        cam.set_grace(NET_GRACE_TICKS);
+        let one = missile(3, 0, "AGM65G.JT", [0., 4_900., 600.]);
+        let see = |cam: &mut SeekerCam, p: Vec<ProjectilePose>, t: u64| {
+            cam.observe(&picture_at(p, t), 0, HERE, None)
+        };
+        let flying = see(&mut cam, vec![one.clone()], 100).unwrap();
+        // Gone for 10 ticks: the last picture is held, no static, and the
+        // weapon coming back carries on.
+        assert_eq!(see(&mut cam, vec![], 101), Some(flying.clone()));
+        assert_eq!(see(&mut cam, vec![], 110), Some(flying.clone()));
+        assert!(cam.lost_feed().is_none() && cam.showing());
+        assert!(see(&mut cam, vec![one.clone()], 111).is_some());
+        assert!(cam.lost_feed().is_none());
+        // Gone for good: held for the grace, then static timed from the tick
+        // it left, so the page is back STATIC_TICKS after it left.
+        let left = 200;
+        assert_eq!(see(&mut cam, vec![], left), Some(flying.clone()));
+        assert!(see(&mut cam, vec![], left + NET_GRACE_TICKS - 1).is_some());
+        assert!(see(&mut cam, vec![], left + NET_GRACE_TICKS).is_none());
+        assert!(cam.lost_feed().is_some() && cam.showing());
+        see(&mut cam, vec![], left + STATIC_TICKS - 1);
+        assert!(cam.lost_feed().is_some());
+        see(&mut cam, vec![], left + STATIC_TICKS);
+        assert!(cam.lost_feed().is_none() && !cam.showing());
+        // A weapon launched during the hold takes the page at once.
+        let mut cam = SeekerCam::default();
+        cam.set_grace(NET_GRACE_TICKS);
+        see(&mut cam, vec![one], 100);
+        let fresh = missile(9, 0, "AT12.JT", [0., 4_900., 900.]);
+        let shot = see(&mut cam, vec![fresh], 105).unwrap();
+        assert_eq!(shot.weapon, "AT12.JT");
+        // And a weapon that comes back during the static ends it.
+        let mut cam = SeekerCam::default();
+        let back = missile(3, 0, "AGM65G.JT", [0., 4_900., 600.]);
+        see(&mut cam, vec![back.clone()], 100);
+        assert!(see(&mut cam, vec![], 101).is_none() && cam.lost_feed().is_some());
+        assert!(see(&mut cam, vec![back], 110).is_some() && cam.lost_feed().is_none());
     }
 }
