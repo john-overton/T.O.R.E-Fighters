@@ -87,6 +87,11 @@ pub const CUT_TOLERANCE: f64 = 0.25;
 /// feet, in [`NUDGE_STEP`] steps (agent decision, 2026-10-13: John wants
 /// short pylons, so a store moves aside rather than hanging deeper).
 pub const MAX_NUDGE: f64 = 2.0;
+
+/// How far ahead and behind a wing station with nothing of the model above
+/// it the wing is looked for, feet ([`Underside::chord_middle`]; fitted,
+/// agent decision 2026-10-14).
+pub const CHORD_REACH: f64 = 12.0;
 pub const NUDGE_STEP: f64 = 0.25;
 
 /// How far outboard of its pylon's centre line a store on that pylon's
@@ -549,6 +554,17 @@ pub fn placed(h: &Hardpoint, model: Option<&Underside>) -> (Vector, Rack) {
         let depth = rack.depth();
         let from = mount[1];
         let mut right = mount[0].abs();
+        // A wing station with nothing of the model above it, where the
+        // wing is ahead of or behind it (the Yak-141's outer row, recorded
+        // ahead of its swept wing), slides to under the middle of the
+        // wing's chord at its distance out.
+        if rack.location() == Location::Wing
+            && right > 1e-9
+            && model.height(right, mount[2], from, 6).is_none()
+            && let Some(forward) = model.chord_middle(right, mount[2], from)
+        {
+            mount[2] = forward;
+        }
         // A store beside a deeper part (a nacelle, a body's flank) moves
         // aside until it clears it; failing that it hangs under that part,
         // as PY2 hung every store.
@@ -886,6 +902,24 @@ impl Underside {
                     && self.height(r, forward, from, 0).is_some()
                     && !self.cuts(r, forward, from, depth)
             })
+    }
+    /// The middle, feet forward, of the stretch of the model straight
+    /// above `right` (within 12 ft above `from`) nearest `forward`, looked
+    /// for up to [`CHORD_REACH`] ahead and behind in 0.25 ft steps; `None`
+    /// when there is none.
+    pub fn chord_middle(&self, right: f64, forward: f64, from: f64) -> Option<f64> {
+        let steps = (CHORD_REACH / 0.25).round() as i32;
+        let covered = |k: i32| {
+            self.over(right, forward + f64::from(k) * 0.25, from)
+                .is_some()
+        };
+        let near = (0..=steps).flat_map(|k| [k, -k]).find(|k| covered(*k))?;
+        let toward = if near >= 0 { 1 } else { -1 };
+        let mut far = near;
+        while (far + toward).abs() <= steps && covered(far + toward) {
+            far += toward;
+        }
+        Some(forward + f64::from(near + far) * 0.125)
     }
     /// The lowest underside across a store's body, [`CLEARANCE`] either
     /// side of `right`: where a store that cannot move aside hangs from.
@@ -1512,5 +1546,55 @@ mod tests {
                 assert!(SHOULDER_OUT.hypot(drop) > upper.top + lower.top);
             }
         }
+    }
+
+    #[test]
+    fn a_wing_station_ahead_of_a_swept_wing_slides_under_its_chord() {
+        // A wing 1 ft up swept back: its leading edge from 4 ft forward at
+        // the root to 7 ft back at 18 ft out, its trailing edge from 6 ft
+        // back to 11 ft back. At 16.67 ft out (the Yak-141's outer row,
+        // recorded at 0 ft forward) the chord runs from about -6 to -10.6 ft.
+        let wing = tore_formats::shape::Face {
+            positions: vec![
+                [0., 12., 3.],
+                [54., -21., 3.],
+                [54., -33., 3.],
+                [0., -18., 3.],
+            ],
+            colors: vec![1; 4],
+            fog: Default::default(),
+            uv: Vec::new(),
+            texture: String::new(),
+            subtype: 0x20,
+            normal: None,
+            address: 0,
+        };
+        let shape = Shape {
+            lines: Vec::new(),
+            faces: vec![wing],
+            billboards: Vec::new(),
+            state_words: Default::default(),
+        };
+        let model = Underside::of(&shape, 1. / 3.);
+        let outer = Hardpoint {
+            location: 4,
+            flags: 0x07e5,
+            position: [50, -10, 0],
+            store: Some("AA11.JT".into()),
+            count: 2,
+            weight_class: 0,
+        };
+        let (mount, rack) = placed(&outer, Some(&model));
+        let lead = 4. - 11. * 16.67 / 18.;
+        let trail = -6. - 5. * 16.67 / 18.;
+        assert!((mount[2] - (lead + trail) / 2.).abs() < 0.2, "{mount:?}");
+        assert_eq!(mount[0], 50. / 3.);
+        assert!((rack.over[sample::RECORD].unwrap() - 1.).abs() < 1e-6);
+        // Under the wing already: not moved.
+        let inner = Hardpoint {
+            position: [25, -10, 0],
+            ..outer
+        };
+        assert_eq!(placed(&inner, Some(&model)).0[2], 0.);
     }
 }

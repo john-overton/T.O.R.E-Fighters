@@ -24,7 +24,7 @@ use tore_sim::{
 const HEIGHT_FT: f64 = 4000.;
 
 /// The aircraft drawn, with a short file name each.
-const AIRCRAFT: [(AircraftId, &str); 13] = [
+const AIRCRAFT: [(AircraftId, &str); 22] = [
     (AircraftId::F18, "f18d"),
     (AircraftId::F16C, "f16c"),
     (AircraftId::F14, "f14"),
@@ -38,6 +38,15 @@ const AIRCRAFT: [(AircraftId, &str); 13] = [
     (AircraftId::F4E, "f4e"),
     (AircraftId::Rafale, "rafale"),
     (AircraftId::F4B, "f4b"),
+    (AircraftId::Yak141, "yak141"),
+    (AircraftId::X31, "x31"),
+    (AircraftId::Su27, "su27"),
+    (AircraftId::Su35, "su35"),
+    (AircraftId::F104, "f104"),
+    (AircraftId::Mig21, "mig21"),
+    (AircraftId::Mig23, "mig23"),
+    (AircraftId::A7, "a7"),
+    (AircraftId::F22, "f22"),
 ];
 
 /// Camera eye and look point, feet right, up and forward of the aircraft,
@@ -118,7 +127,7 @@ pub fn run() -> AppResult<()> {
             .map(|v| v.parse().unwrap_or(-12.))
         {
             for forward in (-12..=14).rev().map(|k| f64::from(k) * 2.) {
-                let row: Vec<String> = (0..=24)
+                let row: Vec<String> = (0..=60)
                     .map(|k| {
                         airframe
                             .underside(f64::from(k) * 0.5, forward, from, 0)
