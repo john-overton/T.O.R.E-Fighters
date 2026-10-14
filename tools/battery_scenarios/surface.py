@@ -59,7 +59,8 @@ gun, every other armed unit laid down: North Vietnam's storage template, whose f
 of four heading in is engaged by the whole team (heading-in trigger), the shells spread over every member, the
 lead lives, each gun's eight-shell opening barrage is 0.75 s a shell and spread round the flight, and every flak
 knock is half the old one. Eight aircraft grazing the team's longest reach with one of them in range (under a
-quarter) draw no fire; with two of them in range (a quarter) they are engaged. Two players in seats heading in
+quarter) draw no fire; with two of them in range (a quarter) they are engaged; a four-ship grazing it with one
+member in reach (a quarter, but under the minimum of two) draws none. Two players in seats heading in
 both draw fire, and a lone KS-19 (a team of one) still fires at a flight.
 
 The engagement scenarios run `--surface-trace`, which flies the player on a
@@ -632,7 +633,7 @@ def flak_team_problems(output: str) -> list[str]:
     """Flak teams (John, 2026-10-14): fire spread over the group, held at a
     group skirting the team, half the knock, a slower opening barrage."""
     problems: list[str] = []
-    heading_in, skirt, quarter, seats, lone = (runs(output) + ["", "", "", "", ""])[:5]
+    heading_in, skirt, quarter, small, seats, lone = (runs(output) + [""] * 6)[:6]
 
     # A flight of four heading at the four-gun team.
     team_lines = [m.group(2) for m in FLAK_PASS.finditer(heading_in) if m.group(2).startswith("flak-team ")]
@@ -681,6 +682,13 @@ def flak_team_problems(output: str) -> list[str]:
     quarter_lines = [m.group(2) for m in FLAK_PASS.finditer(quarter) if m.group(2).startswith("flak-team ")]
     if not any("in-range 2/8 engaged" in line for line in quarter_lines) or not flak_pass_shots(quarter):
         problems.append(f"a quarter of the group in range was not engaged: {quarter_lines[:4]}")
+
+    # A four-ship grazing the edge with one member in reach: a quarter, but
+    # under the minimum of two (John, 2026-10-14): held.
+    small_lines = [m.group(2) for m in FLAK_PASS.finditer(small) if m.group(2).startswith("flak-team ")]
+    if flak_pass_shots(small) or not any("in-range 1/4 holding" in line for line in small_lines) or \
+            any("engaged" in line for line in small_lines):
+        problems.append(f"a four-ship with one member in reach was not held: {small_lines[:4]}")
 
     # Two players in seats heading in: both draw fire.
     seat_shells = [int(m[2]) for m in FLAK_MEMBER.findall(seats)]
@@ -1090,6 +1098,7 @@ def scenarios() -> list[Scenario]:
             then=[
                 Step(flak_pass("--size", "4", "--flight", "4", "--second", "4", "--pass", "48300"), timeout=300),
                 Step(flak_pass("--size", "4", "--flight", "4", "--second", "4", "--pass", "46000"), timeout=300),
+                Step(flak_pass("--size", "4", "--flight", "4", "--pass", "45500"), timeout=300),
                 Step(flak_pass("--size", "4", "--flight", "2", "--seats"), timeout=300),
                 Step(flak_pass("--size", "1", "--flight", "2"), timeout=300),
             ],

@@ -1422,14 +1422,21 @@ fn flak_pair() -> Fixture {
     Fixture::new(vec![ks(FLAK_A, 0.), ks(FLAK_B, 3_000.)], Vec::new())
 }
 
-/// A flight of `n` at 15,000 ft strung north at 4,000 ft intervals, the
-/// first just inside the guns' reach and the rest beyond it, flying along
-/// `velocity`.
-fn strung_flight(f: &mut Fixture, n: u32, velocity: [f64; 3]) {
+/// A flight of `n` at 15,000 ft strung north, the first `inside` of them
+/// just inside the guns' reach (2,000 ft apart, coming nearer) and the rest
+/// beyond it at 4,000 ft intervals, flying along `velocity`.
+fn strung_flight(f: &mut Fixture, n: u32, inside: u32, velocity: [f64; 3]) {
     let reach = f.surface.arsenal.units[0].weapons[0].launch.max_range;
     let altitude = 15_000.;
     let first = ((reach - 2_000.).powi(2) - altitude * altitude).sqrt();
-    let at = |k: u32| [0., altitude, first + 4_000. * f64::from(k)];
+    let at = |k: u32| {
+        let z = if k < inside {
+            first - 2_000. * f64::from(k)
+        } else {
+            first + 4_000. * f64::from(k + 1 - inside)
+        };
+        [0., altitude, z]
+    };
     f.jet.position = at(0);
     f.jet.velocity = velocity;
     f.others = (1..n)
@@ -1458,7 +1465,7 @@ fn a_team_holds_its_fire_on_a_group_skirting_its_reach() {
     // across the line to the team: the team holds, even on the one it could
     // reach (the ambush rule; John, 2026-10-14).
     let mut f = flak_pair();
-    strung_flight(&mut f, 5, [760., 0., 0.]);
+    strung_flight(&mut f, 5, 1, [760., 0., 0.]);
     f.run(60 * TPS);
     assert_eq!(f.rounds(), 0, "holds fire");
     let groups = flak_group(&f);
@@ -1486,13 +1493,34 @@ fn a_team_holds_its_fire_on_a_group_skirting_its_reach() {
 
 #[test]
 fn a_quarter_of_the_group_in_range_of_the_whole_team_opens_fire() {
-    // Four aircraft, one in reach of both guns: 25 percent, flying east.
+    // Eight aircraft, two in reach: 25 percent and the minimum of two,
+    // flying east.
     let mut f = flak_pair();
-    strung_flight(&mut f, 4, [760., 0., 0.]);
+    strung_flight(&mut f, 8, 2, [760., 0., 0.]);
     f.run(60 * TPS);
     let groups = flak_group(&f);
-    assert_eq!((groups[0].in_range, groups[0].heading_in), (1, false));
+    assert_eq!((groups[0].in_range, groups[0].heading_in), (2, false));
     assert!(groups[0].engaged);
+    assert!(f.rounds() > 0);
+}
+
+#[test]
+fn one_aircraft_of_a_small_flight_in_range_is_not_enough() {
+    // John, 2026-10-14: "a minimum of 2 aircraft". One of four in reach is
+    // 25 percent but under the minimum: held. One of two likewise.
+    for n in [4, 2] {
+        let mut f = flak_pair();
+        strung_flight(&mut f, n, 1, [760., 0., 0.]);
+        f.run(60 * TPS);
+        let groups = flak_group(&f);
+        assert_eq!((groups[0].in_range, groups[0].engaged), (1, false), "{n}");
+        assert_eq!(f.rounds(), 0, "{n}");
+    }
+    // A lone aircraft in reach is the whole group: engaged.
+    let mut f = flak_pair();
+    strung_flight(&mut f, 1, 1, [760., 0., 0.]);
+    f.run(60 * TPS);
+    assert!(flak_group(&f)[0].engaged);
     assert!(f.rounds() > 0);
 }
 
@@ -1578,14 +1606,14 @@ fn a_team_detects_at_twice_its_guns_range() {
 #[test]
 fn a_mixed_team_counts_its_widest_reach() {
     // John, 2026-10-14: in range of the team is inside its longest reach.
-    // Gun B reaches only 10,000 ft: the first of four aircraft, inside gun
-    // A's reach alone, is a quarter of the group in range of the team.
+    // Gun B reaches only 10,000 ft: two of eight aircraft, inside gun A's
+    // reach alone, are a quarter of the group in range of the team.
     let mut f = flak_pair();
     f.surface.arsenal.units[1].weapons[0].launch.max_range = 10_000.;
-    strung_flight(&mut f, 4, [760., 0., 0.]);
+    strung_flight(&mut f, 8, 2, [760., 0., 0.]);
     f.run(60 * TPS);
     let groups = flak_group(&f);
-    assert_eq!((groups[0].in_range, groups[0].heading_in), (1, false));
+    assert_eq!((groups[0].in_range, groups[0].heading_in), (2, false));
     assert!(groups[0].engaged);
     assert!(f.shooters().contains(&FLAK_A));
 }

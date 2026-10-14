@@ -171,6 +171,24 @@ Fire starts as before (103.1 s over the team, 102.7 s for the lone KS-19,
   holding"), with two in reach (25 percent) they are engaged.
 - **Knock** still a quarter per jolt.
 
+## Follow-up: a minimum of two (nr-flak3, 2026-10-14 evening)
+
+John: "yeah let's add a minimum of 2 aircraft." The 25 percent rule also needs
+at least two of the group in range of the team (the whole group when it is a
+single aircraft); the heading-in rule is unchanged. Seed 1, the same probe;
+"before" is the follow-up above.
+
+| Case | Before | After |
+| --- | --- | --- |
+| Two-ship 43,500 ft to the side (only the lead ever in reach) | Engaged at 1 of 2 in range; 9 shells at the lead, 40 hit points | Held ("in-range 1/2 holding"); no shell |
+| Four-ship 45,500 ft to the side (only one member ever in reach) | Engaged at 1 of 4; no shell fired before it left | Held ("in-range 1/4 holding"); no shell |
+| Two-ship 35,000 ft to the side | Engaged at 1 of 2 in range; first shell 125.0 s; 24 shells, 185 hit points | Held while one is in reach, engaged when the second comes in (2 of 2); first shell 128.6 s; 23 shells, 167 hit points |
+| Four-ship 35,000 ft to the side | Engaged at 1 of 4; 25 shells, 198 hit points | Held at 1 of 4, engaged at 2 of 4 a moment later; first shell 125.0 s, the same 25 shells and 198 hit points |
+| Eight 48,300 ft to the side (one in reach) | Held | Held |
+| Eight 46,000 ft to the side (two in reach) | Engaged; 8 shells over members 5 and 7 | The same |
+| Four-ship (player and AI) over the team, heading in | 103.1 s, shells 18, 14, 9, 11, 395 hit points | Identical (heading-in) |
+| Lone KS-19, two-ship | 102.7 s, 9 and 5 shells, 92 hit points | Identical (heading-in) |
+
 ## Not run
 
 - A windowed or audio run; online play by eye. The team rules run on the host
