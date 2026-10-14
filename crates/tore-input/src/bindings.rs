@@ -252,6 +252,7 @@ impl Action {
                 | "sight-zoom-in"
                 | "sight-zoom-out"
                 | "sight-polarity"
+                | "console-range"
                 | "sight-left"
                 | "sight-right"
                 | "sight-up"

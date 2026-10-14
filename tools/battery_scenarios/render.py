@@ -20,7 +20,7 @@ def repeated_capture_problems(work: Path, _output: str) -> list[str]:
             for repeat, path in enumerate(paths[1:], 1) if path.read_bytes() != first]
 
 
-CONSOLE_FORMS = ("whot", "bhot", "free-wfov", "narrow-e4", "near-limit", "at-limit", "static")
+CONSOLE_FORMS = ("whot", "bhot", "tv", "nvg", "free-wfov", "narrow-e4", "near-limit", "at-limit")
 
 
 def console_problems(output: str) -> list[str]:
@@ -74,8 +74,8 @@ def scenarios() -> list[Scenario]:
             check=console_problems,
             timeout=300,
             notes="The AC-130 sensor console offscreen from an AI gunship's own sensor 45 s into its orbit on the "
-                  "Ukraine column (slice nr-fltv): white hot, black hot, wide and narrow fields, near and at the "
-                  "gimbal limit, and static. Inspect the PNGs; the symbology's rules are tore-app unit tests.",
+                  "Ukraine column (slice nr-fltv): white hot, black hot, TV, night vision (nr-conb), wide and "
+                  "narrow fields, near and at the gimbal limit. Inspect the PNGs; the symbology's rules are tore-app unit tests.",
         ),
         Scenario(
             name="render-night-effect-lights",

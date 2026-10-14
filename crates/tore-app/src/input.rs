@@ -48,6 +48,7 @@ bind keyboard Ctrl-Delete console-flare press\n\
 bind keyboard Shift-' sight-zoom-in press\n\
 bind keyboard Shift-; sight-zoom-out press\n\
 bind keyboard Ctrl-\\ sight-polarity press\n\
+bind keyboard Ctrl-0 console-range press\n\
 bind keyboard Alt-ArrowLeft sight-left hold\n\
 bind keyboard Alt-ArrowRight sight-right hold\n\
 bind keyboard Alt-ArrowUp sight-up hold\n\
@@ -163,7 +164,7 @@ pub const AUTO_GAMEPAD_PREFIX: &str = "auto-gamepad:";
 /// stick (the look axes) steps the heading and altitude in the console
 /// (`crate::console_keys`). View + Xbox opens and closes it as before.
 /// (control, action, mode).
-pub const CONSOLE_PAD: [(&str, &str, &str); 15] = [
+pub const CONSOLE_PAD: [(&str, &str, &str); 16] = [
     ("button:304", "fire", "hold"),
     ("button:305", "weapon-group-toggle", "press"),
     ("button:307", "weapon-group-next", "press"),
@@ -174,6 +175,7 @@ pub const CONSOLE_PAD: [(&str, &str, &str); 15] = [
     ("axis:17", "throttle-step=0.05", "position=-1"),
     ("axis:17", "throttle-step=-0.05", "position=1"),
     ("axis:16", "sight-polarity", "position=-1"),
+    ("axis:16", "console-range", "position=1"),
     ("button:317", "sight-pin-toggle", "press"),
     ("button:314+button:318", "gun-lock", "press"),
     ("button:314+button:304", "console-flare", "press"),
@@ -1457,6 +1459,7 @@ mod tests {
             "sight-zoom-in",
             "sight-zoom-out",
             "sight-polarity",
+            "console-range",
         ] {
             let entry = ENTRIES
                 .iter()
@@ -1856,6 +1859,7 @@ mod tests {
             ("'", M::SHIFT, "sight-zoom-in"),
             (";", M::SHIFT, "sight-zoom-out"),
             ("\\", M::CONTROL, "sight-polarity"),
+            ("0", M::CONTROL, "console-range"),
         ] {
             assert!(i.key(key, true, modifiers), "{key}");
             assert_eq!(
@@ -2042,6 +2046,7 @@ mod tests {
         assert_eq!(press(&mut i, "axis:17", -1.), ui("throttle-step=0.05"));
         assert_eq!(press(&mut i, "axis:17", 1.), ui("throttle-step=-0.05"));
         assert_eq!(press(&mut i, "axis:16", -1.), ui("sight-polarity"));
+        assert_eq!(press(&mut i, "axis:16", 1.), ui("console-range"));
         // A is the trigger, held.
         event(&mut i, "button:304", 1.);
         assert!(i.resolver.held("fire"));

@@ -217,7 +217,8 @@ targeting sight". The gamepad gestures stay the AC-130's.
 | Next gun / link gun | Ctrl+7 / Ctrl+8 | Select + D-pad up / down | Moved from the right stick |
 | Pin or release (console: orbit or search) | P | None | AC-130 only (`sight-pin-toggle`): pins the ground under the crosshair with the sight free, else lets the pin or track go, as L does. In the sensor console that is ORBIT or SEARCH. Agent's key choice, 2026-10-14 (P is free in the original, docs/spec/keyboard.md) |
 | Sensor console and orbit hold | Ctrl+9 | Select + Guide (Xbox) | AC-130 only (`sensor-console`): opens the console; the autopilot searches straight and level with the sight free, or circles the sight's pin or track; again hands the aircraft back ([the sensor console](spec/ac130-linked-guns.md#the-sensor-console-and-the-orbit)). Agent choice of keys, 2026-10-13: next to the gun keys; Select + Guide was the range's incoming-missile fixture, which is off on the AC-130 |
-| White hot / black hot | Ctrl+Backslash | None | The AC-130 sensor console only (Ctrl+9; [sensor console](spec/target-window.md#sensor-console)); does nothing elsewhere. Action `sight-polarity`; agent's key choice beside the other Backslash sight keys (2026-10-13) |
+| Sensor picture | Ctrl+Backslash | None | The AC-130 sensor console only (Ctrl+9; [sensor console](spec/target-window.md#sensor-console)): white hot, black hot, TV and night vision in turn; does nothing elsewhere. Action `sight-polarity`; agent's key choice beside the other Backslash sight keys (2026-10-13), the two further modes John's (2026-10-14) |
+| Console radar range | Ctrl+0 | None | The AC-130 sensor console only: the A-G radar's range, 5, 10 and 25 nm in turn; does nothing elsewhere. Action `console-range`; agent's key choice beside Ctrl+9 (2026-10-14). In the console T and Shift+T step through the radar contacts the sensor sees |
 
 **Inside the sensor console** (slice nr-cona; John asked for slew, zoom,
 pin/release and heading, altitude and throttle keys on 2026-10-14; which keys
@@ -516,6 +517,7 @@ Deliberate differences from FA:
 | Shift+Backslash | Pin the sight on the ground under the crosshair | Unused | T.O.R.E addition, John 2026-10-09 |
 | P | AC-130 gunsight: pin or release (`sight-pin-toggle`); in the sensor console ORBIT or SEARCH. Elsewhere "no gunsight" | Unused (free in the original) | T.O.R.E addition, John 2026-10-14 (pin/release); the key is an agent choice |
 | Ctrl+9 | AC-130 sensor console and orbit hold (`sensor-console`); elsewhere "No sensor console on this aircraft" | Unused | T.O.R.E addition, John 2026-10-13 (the console); the key is an agent choice |
+| Ctrl+0 | AC-130 sensor console's radar range, 5, 10 and 25 nm (`console-range`); nothing elsewhere | Unused (the retail manual lists no Ctrl+0) | T.O.R.E addition, John 2026-10-14 (the range selector); the key is an agent choice |
 | Shift+' / Shift+; | Zoom the sight in / out; elsewhere a message | Zoom the high-altitude bombing window in / out | The gunsight is the target camera, John 2026-10-09 |
 | Alt + arrows | Slew the sight | Unused | T.O.R.E addition, John 2026-10-09 |
 | Tab | Fire the gun while held, whatever is selected (`fire-gun`, a hold action like the trigger; [the gun key](spec/air-to-ground.md#the-gun-key)) | Fire the gun (no default pad button) | Retail key, bound by A2G slice K1, built by FX-T |
