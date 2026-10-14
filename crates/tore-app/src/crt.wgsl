@@ -4,6 +4,8 @@
 // slow rolling interlace band, a vignette, fine noise and, when the static
 // level is up, bursts of snow and line tearing. The CPU twin in crt.rs
 // (`apply_cpu`) follows the same rules for small instrument pages.
+// The share of the aberration's colour fringes kept (crt.rs).
+const ABERRATION_COLOUR:f32=0.4;
 struct Crt {
  // time (s), static level 0..1, aberration (output px at 1080 rows), pixel block (px at 1080 rows)
  a:vec4<f32>,
@@ -50,13 +52,16 @@ fn crt_picture(uv:vec2<f32>)->vec3<f32> {
  if crt.c.y>0.5 {c=(vec3<f32>(1.0)-c)*0.85;}
  return c;
 }
-// Source and overlay composed at `uv` (straight alpha overlay).
-fn crt_compose(uv:vec2<f32>)->vec3<f32> {
+// Source and overlay composed at `uv` moved by the aberration `shift`
+// (straight alpha overlay). The source's block is chosen from `uv` alone, so
+// all three colours read the same block: a block edge never splits into
+// colours, only the aberration's own sub-pixel shift does.
+fn crt_compose(uv:vec2<f32>,shift:vec2<f32>)->vec3<f32> {
  let block=max(crt.a.w*crt_unit(),1.0);
  let snapped=(floor(uv*crt.d.xy/block)+0.5)*block/crt.d.xy;
- var c=crt_picture(snapped);
+ var c=crt_picture(snapped+shift);
  if crt.d.w>0.5 {
-  let o=textureSampleLevel(crt_overlay,crt_sampler,uv,0.0);
+  let o=textureSampleLevel(crt_overlay,crt_sampler,uv+shift,0.0);
   c=mix(c,o.rgb,o.a);
  }
  return c;
@@ -77,7 +82,10 @@ fn crt_compose(uv:vec2<f32>)->vec3<f32> {
  // Chromatic aberration: red and blue pulled apart radially, more toward the edges.
  let from_centre=uv-vec2<f32>(0.5);
  let shift=from_centre*2.0*crt.a.z*unit/crt.d.xy*(0.35+length(from_centre)*1.3);
- var c=vec3<f32>(crt_compose(uv+shift).r,crt_compose(uv).g,crt_compose(uv-shift).b);
+ var c=vec3<f32>(crt_compose(uv,shift).r,crt_compose(uv,vec2<f32>(0.0)).g,crt_compose(uv,-shift).b);
+ // The fringes stay faint: a monochrome tube shows a hint of colour, not a
+ // rainbow (40 percent of their colour is kept).
+ c=mix(vec3<f32>(dot(c,vec3<f32>(0.2126,0.7152,0.0722))),c,ABERRATION_COLOUR);
  // Scanlines, a period of 3 rows at 1080, and a faint band rolling down.
  let line=0.5+0.5*cos(6.2831853*px.y/(3.0*unit));
  c*=1.0-crt.b.x*line;

@@ -44,7 +44,7 @@ pub struct Settings {
 
 /// The AC-130 sensor console's look (agent decision, nr-fltv).
 pub const SENSOR: Settings = Settings {
-    aberration_px: 1.3,
+    aberration_px: 1.1,
     pixel_px: 2.,
     scanline: 0.12,
     vignette: 0.42,
@@ -233,10 +233,12 @@ pub fn apply_cpu(pixels: &mut [u8], width: usize, height: usize, frame: &Frame) 
     let seed = frame.seed;
     let block = (s.pixel_px * height as f32 / 1080.).round().max(1.) as usize;
     let shift_px = (s.aberration_px * height as f32 / 1080.).max(0.);
-    let read = |x: f64, y: f64, channel: usize| -> f32 {
-        let xi = (x.round() as i64).clamp(0, width as i64 - 1) as usize;
-        let yi = (y.round() as i64).clamp(0, height as i64 - 1) as usize;
-        let (xi, yi) = (xi / block * block, yi / block * block);
+    // The block is chosen from the pixel itself, then the aberration's shift
+    // is added, so all three colours read the same block (`crt.wgsl`).
+    let read = |x: f64, y: f64, shift: (f64, f64), channel: usize| -> f32 {
+        let snap = |v: f64, n: usize| ((v.max(0.) as usize).min(n - 1) / block * block) as f64;
+        let xi = ((snap(x, width) + shift.0).round() as i64).clamp(0, width as i64 - 1) as usize;
+        let yi = ((snap(y, height) + shift.1).round() as i64).clamp(0, height as i64 - 1) as usize;
         let at = (yi * width + xi) * 4;
         let mut v = if s.monochrome {
             (0.2126 * f32::from(source[at])
@@ -267,9 +269,9 @@ pub fn apply_cpu(pixels: &mut [u8], width: usize, height: usize, frame: &Frame) 
             let (sx, sy) = (cx * k, cy * k);
             let fx = x as f64 + dx;
             let mut c = [
-                read(fx + sx, y as f64 + sy, 0),
-                read(fx, y as f64, 1),
-                read(fx - sx, y as f64 - sy, 2),
+                read(fx, y as f64, (sx, sy), 0),
+                read(fx, y as f64, (0., 0.), 1),
+                read(fx, y as f64, (-sx, -sy), 2),
             ];
             let line = 0.5 + 0.5 * (std::f32::consts::TAU * y as f32 / 3.).cos();
             let edge = (cx.hypot(cy * height as f64 / width as f64) * 1.6).min(1.4) as f32;
@@ -279,6 +281,11 @@ pub fn apply_cpu(pixels: &mut [u8], width: usize, height: usize, frame: &Frame) 
                 y as u32 / 2,
                 tick.wrapping_mul(31) ^ seed ^ 0x5bd1_e995,
             );
+            // Faint fringes, as `crt.wgsl`'s ABERRATION_COLOUR.
+            let luma = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+            for v in &mut c {
+                *v = luma + (*v - luma) * 0.4;
+            }
             for v in &mut c {
                 *v *= 1. - s.scanline * line;
                 *v *= 1. - s.vignette * edge.powf(2.4);

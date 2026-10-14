@@ -412,7 +412,9 @@ LIMIT on the status line.
 **CRT.** The picture and the symbology are shown on a small monochrome monitor
 (`crt.rs`, a module the seeker view may share: a GPU pass, and the same
 look for a small page drawn on the CPU): the picture in 2 pixel blocks with a
-slight soft focus, red and blue pulled 1.3 pixels apart toward the edges,
+slight soft focus, red and blue pulled 1.1 pixels apart toward the edges
+(only 40 percent of the fringes' colour is kept, so they are a hint; every
+colour reads the same 2 pixel block, so block edges never split into colour),
 scanlines of 12 percent every 3 rows with a faint band rolling down, a
 vignette, fine noise of 4.5 percent, and every 7 to 18 seconds a burst of
 static 0.08 to 0.3 seconds long and 35 to 80 percent strong (snow over up to
