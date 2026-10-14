@@ -8,7 +8,7 @@
 //!
 //! ```text
 //! tore-app --flak-pass THEATER [STEM] [--defenses AAA SAM] [--surface-seed N]
-//!     [--list] [--team K | --size N] [--flight N] [--seats] [--spacing FT] [--aircraft ID]
+//!     [--list] [--team K | --size N] [--flight N] [--second N] [--seats] [--spacing FT] [--aircraft ID]
 //!     [--altitude FT] [--speed KT] [--pass FT] [--from NM] [--heading DEG]
 //!     [--seconds S] [--rng N] [--solo-team] [--quiet]
 //! ```
@@ -17,7 +17,9 @@
 //! within a nautical mile) hostile to the flight and stops. `--team K` flies
 //! over the Kth of them (default 0), `--size N` over the first of N guns. The flight is Friendly Wing 1 with
 //! `--flight N` aircraft (default 2): the player and AI wingmen, or with
-//! `--seats` every member flown from a seat as players are online. Each
+//! `--seats` every member flown from a seat as players are online;
+//! `--second N` adds Friendly Wing 2's N aircraft flying on in the same
+//! formation (one group of up to eight). Each
 //! member flies the lead's line at its formation place (`--spacing`, 1,500 ft:
 //! member k sits k/2 spacings back and the same out to alternate sides) and
 //! is put back on it every tick, so a gun's choice cannot be dodged. The line
@@ -59,6 +61,7 @@ struct Options {
     team: usize,
     size: Option<usize>,
     flight: u8,
+    second: u8,
     seats: bool,
     spacing: f64,
     aircraft: AircraftId,
@@ -84,6 +87,7 @@ fn options() -> AppResult<Options> {
         team: 0,
         size: None,
         flight: 2,
+        second: 0,
         seats: false,
         spacing: 1_500.,
         aircraft: AircraftId::F18,
@@ -112,6 +116,7 @@ fn options() -> AppResult<Options> {
             "--team" => o.team = next()?.parse()?,
             "--size" => o.size = Some(next()?.parse()?),
             "--flight" => o.flight = next()?.parse()?,
+            "--second" => o.second = next()?.parse()?,
             "--seats" => o.seats = true,
             "--spacing" => o.spacing = next()?.parse()?,
             "--aircraft" => o.aircraft = AircraftId::parse(&next()?)?,
@@ -136,6 +141,9 @@ fn options() -> AppResult<Options> {
         }
         _ => return Err("--flak-pass THEATER [STEM] [options]; see flak_pass.rs".into()),
     }
+    if o.second > 4 {
+        return Err("--second is 0 to 4".into());
+    }
     if o.flight == 0 || o.flight > 4 {
         return Err("--flight is 1 to 4".into());
     }
@@ -146,6 +154,7 @@ fn spec(o: &Options) -> AppResult<MissionSpec> {
     use tore_formats::quick_template::tables;
     let mut spec = MissionSpec::new(&o.theater, o.aircraft);
     spec.wings[0].count = usize::from(o.flight);
+    spec.wings[1].count = usize::from(o.second);
     let index = tables::THEATERS
         .iter()
         .position(|t| t.eq_ignore_ascii_case(&o.theater))
@@ -356,18 +365,23 @@ pub fn run() -> AppResult<()> {
     if let Some(rng) = o.rng {
         world.combat.surface.rng = rng;
     }
-    // The flight: Friendly Wing 1, by member.
-    let mut members: Vec<(u8, u32)> = world
+    // The flight: Friendly Wing 1 by member, then Friendly Wing 2's
+    // (`--second`) flying on in the same formation.
+    let lead_wing = Slot::FRIENDLY_LEAD.wing;
+    let mut members: Vec<(u8, u8, u32)> = world
         .roster
         .planes()
         .iter()
-        .filter(|p| p.slot.wing == Slot::FRIENDLY_LEAD.wing)
-        .map(|p| (p.slot.member, p.id.0))
+        .filter(|p| {
+            p.slot.wing.side == lead_wing.side
+                && (p.slot.wing.index == 0 || (p.slot.wing.index == 1 && o.second > 0))
+        })
+        .map(|p| (p.slot.wing.index, p.slot.member, p.id.0))
         .collect();
     members.sort();
-    let ids: Vec<u32> = members.iter().map(|(_, id)| *id).collect();
+    let ids: Vec<u32> = members.iter().map(|(_, _, id)| *id).collect();
     if o.seats {
-        for (seat, (_, id)) in members.iter().enumerate() {
+        for (seat, (_, _, id)) in members.iter().enumerate() {
             world.take_plane(SeatId(seat as u8), tore_world::seats::PlaneId(*id))?;
         }
     }

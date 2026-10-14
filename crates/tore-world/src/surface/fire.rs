@@ -1671,6 +1671,29 @@ fn step_weapon(
                     fire_missiles(state, live, arms, weapon, rail, fire, observation, scene);
                 }
             }
+            Kind::Gun { flak: true, .. } if fire.opening && seen.team.is_some() => {
+                // A flak team's opening barrage: each shell at the next
+                // member it can reach, in turn (the mount's round number
+                // counts the gun's shells from its first, the opening's).
+                let plan = seen.team.expect("checked");
+                let members =
+                    plan.barrage(arms.unit, fire.target, muzzle, aircraft_by_id, scene.ground);
+                for _ in 0..fire.rounds {
+                    let shell = state
+                        .unit(arms.unit)
+                        .and_then(|u| u.mounts.get(weapon.mounts[0].index))
+                        .map_or(0, |m| m.ordinal);
+                    let at = members[(shell % members.len() as u64) as usize];
+                    if let Some(aircraft) = aircraft_by_id.get(&at) {
+                        let one = FireRequest {
+                            target: at,
+                            rounds: 1,
+                            ..fire
+                        };
+                        fire_gun(state, live, arms, index, weapon, one, aircraft, scene);
+                    }
+                }
+            }
             Kind::Gun { .. } | Kind::Barrage { .. } => {
                 if let Some(aircraft) = aircraft_by_id.get(&fire.target) {
                     fire_gun(state, live, arms, index, weapon, fire, aircraft, scene);

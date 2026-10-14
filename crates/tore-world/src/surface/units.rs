@@ -286,7 +286,7 @@ pub struct SurfaceState {
     /// Each flak team's groups and whether it engages them, as last traced
     /// (by team index). Presentation only: the trace's memory, never read by
     /// the fight, not checkpointed.
-    pub flak_teams: std::collections::BTreeMap<usize, Vec<(Vec<u32>, bool)>>,
+    pub flak_teams: std::collections::BTreeMap<usize, Vec<(Vec<u32>, u32, bool)>>,
 }
 
 /// Equal when the checkpointed state is: the per-tick trace, locks,

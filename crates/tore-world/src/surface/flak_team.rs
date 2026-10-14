@@ -24,8 +24,10 @@
 //!   apart are two.
 //! - **Holding and opening fire.** The team holds its fire at a group until
 //!   either at least [`FLAK_GROUP_IN_RANGE_PERCENT`] percent of the group's
-//!   aircraft are in range of the entire team (inside every live gun's fire
-//!   zone, range and altitude band), or the group heads at the team: the
+//!   aircraft are in range of the team (inside its widest fire zone: the
+//!   union of its live guns' fire zones, range and altitude band, so a mixed
+//!   team reaches as far as its KS-19s; John, 2026-10-14), or the group
+//!   heads at the team: the
 //!   mean ground track of its members lies within [`FLAK_HEADING_CONE_DEG`]
 //!   degrees of the bearing from the group's middle to the team's middle,
 //!   with at least one member inside some gun's fire zone. Once a gun of the
@@ -40,12 +42,17 @@
 //!   turn, round again when every member has one ([`assign`]); a team with
 //!   fewer guns than members moves the turn on one member every 10 s
 //!   ([`FLAK_ROTATION_TICKS`]), so a lone gun walks over a flight. A gun then
-//!   chooses ([`TeamPlan::order`]) its own member when it is within its
-//!   reach or [`FLAK_REACH_MARGIN_FT`] past it, else any member it can
-//!   reach, else its own, else any nearly in reach; the nearest, then the
-//!   lowest id, first among equals. It picks again
+//!   chooses ([`TeamPlan::order`]) its own member in its reach, else any
+//!   member in its reach, else its own when within [`FLAK_REACH_MARGIN_FT`]
+//!   past its reach, else any that near, else its own, else the rest; the
+//!   nearest, then the lowest id, first among equals. It picks again
 //!   when its target dies or leaves and at flak's retarget period (10 s), so
 //!   the fire stays spread over the group rather than on the lead.
+//! - **The opening barrage spreads** (John, 2026-10-14): a gun's eight
+//!   opening shells go round the members of the engaged groups it can reach
+//!   (fire zone and line of sight), its own target first, then ascending id,
+//!   one shell each in turn ([`TeamPlan::barrage`]); with a single target
+//!   all eight go to it.
 //!
 //! Everything is a function of this tick's positions and the controllers'
 //! checkpointed state, read in ascending unit id, so the player, the AI, a
@@ -106,7 +113,7 @@ pub struct FlakTeam {
 pub struct FlakGroup {
     /// The group's aircraft, ascending id.
     pub members: Vec<u32>,
-    /// How many are in range of every live gun of the team.
+    /// How many are in range of the team: inside some live gun's fire zone.
     pub in_range: u32,
     /// Its track points at the team.
     pub heading_in: bool,
@@ -206,18 +213,22 @@ impl PlanGun {
         let d = sub(at, self.eye);
         self.reach.contains(length(d), d[1])
     }
-    /// How much the gun wants a member at `at`, 0 most: its own member when
-    /// it nearly reaches it, any member it reaches, its own member, any
-    /// member it nearly reaches, the rest.
+    /// How much the gun wants a member at `at`, 0 most: its own member in
+    /// its reach, any member in its reach, its own member when it nearly
+    /// reaches it, any member it nearly reaches, its own member, the rest.
+    /// A gun fires at what it can reach now rather than wait for its own
+    /// member to come into reach (a group grazing the team's edge may never
+    /// bring it in); its retarget brings it back to its own.
     fn tier(&self, id: u32, at: Vector) -> u8 {
         let own = self.assigned == Some(id);
-        let near = self.nearly_reaches(at);
-        match (own && near, self.reaches(at), own, near) {
-            (true, ..) => 0,
-            (_, true, ..) => 1,
-            (_, _, true, _) => 2,
-            (_, _, _, true) => 3,
-            _ => 4,
+        let (reach, near) = (self.reaches(at), self.nearly_reaches(at));
+        match (own, reach, near) {
+            (true, true, _) => 0,
+            (false, true, _) => 1,
+            (true, false, true) => 2,
+            (false, false, true) => 3,
+            (true, false, false) => 4,
+            _ => 5,
         }
     }
 }
@@ -234,13 +245,37 @@ pub(super) struct TeamPlan {
 }
 
 impl TeamPlan {
+    /// The members an opening barrage of gun `unit` spreads over: `target`
+    /// first, then every other member of the engaged groups inside the gun's
+    /// fire zone with a clear line from `from`, ascending id (John,
+    /// 2026-10-14: the barrage is spread over the flight unless there is a
+    /// single target).
+    pub fn barrage(
+        &self,
+        unit: UnitId,
+        target: u32,
+        from: Vector,
+        by_id: &BTreeMap<u32, Contact>,
+        ground: &dyn Fn(f64, f64) -> f64,
+    ) -> Vec<u32> {
+        let Some(me) = self.guns.iter().find(|g| g.unit == unit) else {
+            return vec![target];
+        };
+        std::iter::once(target)
+            .chain(self.engaged.iter().copied().filter(|id| {
+                *id != target
+                    && by_id.get(id).is_some_and(|c| {
+                        me.reaches(c.position) && line_of_sight(from, c.position, ground)
+                    })
+            }))
+            .collect()
+    }
+
     /// The targets gun `unit` of the team may choose, best first: the
     /// engaged groups' aircraft while there are any, else every detected one
-    /// (so the guns choose and prepare while the team holds its fire): the
-    /// member the team gives it ([`assign`]) when it can nearly reach it
-    /// ([`FLAK_REACH_MARGIN_FT`]), then any it can reach, then its own, then
-    /// any it can nearly reach, then the rest; the nearest, then the lowest
-    /// id, first within each.
+    /// (so the guns choose and prepare while the team holds its fire), by
+    /// [`PlanGun::tier`] (its own member, [`assign`], in reach first), then
+    /// the nearest, then the lowest id.
     pub fn order(&self, unit: UnitId, by_id: &BTreeMap<u32, Contact>) -> Vec<u32> {
         let Some(me) = self.guns.iter().find(|g| g.unit == unit) else {
             return Vec::new();
@@ -432,7 +467,9 @@ pub(super) fn plan_teams(
                 let n = members.len();
                 let in_range = members
                     .iter()
-                    .filter(|c| guns.iter().all(|g| g.reaches(c)))
+                    // In range of the team: inside its widest fire zone, the
+                    // union of its live guns' zones (John, 2026-10-14).
+                    .filter(|c| guns.iter().any(|g| g.reaches(c)))
                     .count();
                 let any = members.iter().any(|c| guns.iter().any(|g| g.reaches(c)));
                 let middle = middle_of(&mut members.iter().map(|c| c.position), n as f64);
@@ -459,11 +496,11 @@ pub(super) fn plan_teams(
             plan.engaged.iter().copied().collect()
         };
         assign(&mut plan.guns, &pool, scene.tick / FLAK_ROTATION_TICKS);
-        // The trace: a line when the team's groups or what it does about
-        // them change (not when only the counts in range do).
-        let summary: Vec<(Vec<u32>, bool)> = groups_seen
+        // The trace: a line when the team's groups, how many of each are in
+        // range or what it does about them change.
+        let summary: Vec<(Vec<u32>, u32, bool)> = groups_seen
             .iter()
-            .map(|g| (g.members.clone(), g.engaged))
+            .map(|g| (g.members.clone(), g.in_range, g.engaged))
             .collect();
         let before = state.flak_teams.get(&team);
         if before.map_or(!summary.is_empty(), |b| *b != summary) {
@@ -546,10 +583,17 @@ mod tests {
         let mut me = gun(1, 26_200.);
         me.assigned = Some(5);
         let at = |range: f64| [0., 8_000., range];
-        // Its own member just past its reach beats another inside it.
-        assert!(me.tier(5, at(28_000.)) < me.tier(6, at(20_000.)));
-        // Far past the margin, a member it can reach comes first.
-        assert!(me.tier(6, at(20_000.)) < me.tier(5, at(40_000.)));
+        // Own in reach, any in reach, own just past it, any just past it,
+        // own far away (2026-10-14: fire at what it can reach now).
+        let order = [
+            me.tier(5, at(20_000.)),
+            me.tier(6, at(20_000.)),
+            me.tier(5, at(28_000.)),
+            me.tier(6, at(28_000.)),
+            me.tier(5, at(40_000.)),
+            me.tier(6, at(40_000.)),
+        ];
+        assert_eq!(order, [0, 1, 2, 3, 4, 5]);
         // The heading cone: at the team, across, too slow to judge.
         assert!(heads_at([0., 0., -760.], [0., 8_000., 50_000.], [0.; 3]));
         assert!(!heads_at([760., 0., 0.], [0., 8_000., 50_000.], [0.; 3]));

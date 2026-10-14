@@ -1509,15 +1509,42 @@ fn a_team_spreads_its_fire_over_the_group() {
         position: [1_500., 15_000., 22_000.],
         ..f.jet
     }];
-    f.run(30 * TPS);
+    f.run(60 * TPS);
+    // After the opening barrages (spread over both, below), each gun keeps
+    // to its own.
     let targets: Vec<(u32, u32)> = f
         .fired
         .iter()
         .filter_map(|(_, t)| match t {
-            Trace::Shot { unit, target, .. } => Some((unit.0, *target)),
+            Trace::Shot {
+                unit,
+                target,
+                opening: false,
+                ..
+            } => Some((unit.0, *target)),
             _ => None,
         })
         .collect();
+    for gun in [FLAK_A, FLAK_B] {
+        let opening: Vec<u32> = f
+            .fired
+            .iter()
+            .filter_map(|(_, t)| match t {
+                Trace::Shot {
+                    unit,
+                    target,
+                    opening: true,
+                    ..
+                } if unit.0 == gun => Some(*target),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(opening.len(), 8);
+        // Round the flight, its own target first.
+        let first = opening[0];
+        let other = if first == JET { JET + 1 } else { JET };
+        assert_eq!(opening, [first, other].repeat(4), "{gun:#x}");
+    }
     let of = |gun: u32| -> BTreeSet<u32> {
         targets
             .iter()
@@ -1546,4 +1573,41 @@ fn a_team_detects_at_twice_its_guns_range() {
     f.jet.position = [0., 15_000., 210_000.];
     f.run(TPS);
     assert!(flak_group(&f).is_empty());
+}
+
+#[test]
+fn a_mixed_team_counts_its_widest_reach() {
+    // John, 2026-10-14: in range of the team is inside its longest reach.
+    // Gun B reaches only 10,000 ft: the first of four aircraft, inside gun
+    // A's reach alone, is a quarter of the group in range of the team.
+    let mut f = flak_pair();
+    f.surface.arsenal.units[1].weapons[0].launch.max_range = 10_000.;
+    strung_flight(&mut f, 4, [760., 0., 0.]);
+    f.run(60 * TPS);
+    let groups = flak_group(&f);
+    assert_eq!((groups[0].in_range, groups[0].heading_in), (1, false));
+    assert!(groups[0].engaged);
+    assert!(f.shooters().contains(&FLAK_A));
+}
+
+#[test]
+fn a_lone_guns_barrage_stays_on_a_single_target() {
+    let mut f = flak_pair();
+    f.kill(FLAK_B);
+    f.jet.position = [1_500., 15_000., 20_000.];
+    f.jet.velocity = [0., 0., -760.];
+    f.run(30 * TPS);
+    let opening: Vec<u32> = f
+        .fired
+        .iter()
+        .filter_map(|(_, t)| match t {
+            Trace::Shot {
+                target,
+                opening: true,
+                ..
+            } => Some(*target),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(opening, vec![JET; 8]);
 }
