@@ -192,7 +192,7 @@ All 75 MM layouts parse. PGU.MM contains border placements (-4,244), (-4,248), (
 
 ## Runtime expansion to the 16 base theaters
 
-The viewer uses the selected base or variant MM, its referenced terrain and DAY2 palette, and paged indexed artwork. The numbered texture naming convention uses the first three code characters: TVIET therefore needs TVI0–41.PIC. The shared profile now includes TVI. Kurile has no numbered tmap placements; its 236 named placements now render with their original artwork. [Named-tile contract](terrain-materials.md#named-texture-placements). Other theaters have 29–68 numbered texture layers in this preview.
+The viewer uses the selected base or variant MM, its referenced terrain and theater-specific weather palette, and paged indexed artwork. The numbered texture naming convention uses the first three code characters: TVIET therefore needs TVI0–41.PIC. The shared profile now includes TVI. Kurile has no numbered tmap placements; its 236 named placements now render with their original artwork. [Named-tile contract](terrain-materials.md#named-texture-placements). Other theaters have 29–68 numbered texture layers in this preview.
 
 Signed out-of-grid border placements remain preserved; the mesh only queries patches intersecting actual fine-grid quads. Camera starts and fixed triangles are authored investigation behavior. All 16 passed Metal startup/render checks; native landmark/shoreline/atmosphere parity remains open. See [runtime validation](../baselines/all-theaters.md#runtime-and-typography-follow-up).
 

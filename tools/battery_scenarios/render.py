@@ -55,6 +55,14 @@ def scenarios() -> list[Scenario]:
         ))
     return stable + [
         Scenario(
+            name="render-terrain-colors",
+            lane="flight",
+            args=["--terrain-colors"],
+            timeout=180,
+            expect=["Ground colours validated against retail map palettes"],
+            notes="Headless RGB statistics and exact palette checks for every theater, six weather choices and three altitudes, against each retail MM's family.",
+        ),
+        Scenario(
             name="render-ac130-sensor-console",
             lane="flight",
             args=["--a2g-run", "UKR", "QUCOL", "--pilot", "ai", "--aircraft", "ac130", "--load", "C_25.JT",

@@ -42,6 +42,7 @@ from typing import Iterable, Optional, Sequence
 # --------------------------------------------------------------------------
 
 FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "terrain-colors": ("retail ground palette families in every theater", ("render-terrain-colors",)),
     "render-night-effect-lights": (
         "fire and flare comparisons and sustained explosion lighting at night",
         ("render-night-effect-lights",),
@@ -401,8 +402,8 @@ RULES: tuple[Rule, ...] = (
     # tore-sim: world.
     _r("crates/tore-sim/src/airport.rs", ("airports", "flight-takeoff", "flight-landing", "ai-airfield", "menus-creator"), "airports"),
     _r("crates/tore-sim/src/stol.rs", ("airports", "menus-creator"), "STOL runway labels"),
-    _r("crates/tore-sim/src/environment.rs", ("flight-environment", "flight-maneuvers"), "environment"),
-    _r("crates/tore-sim/src/environment/*", ("flight-environment", "flight-maneuvers"), "environment"),
+    _r("crates/tore-sim/src/environment.rs", ("flight-environment", "flight-maneuvers", "terrain-colors"), "environment"),
+    _r("crates/tore-sim/src/environment/*", ("flight-environment", "flight-maneuvers", "terrain-colors"), "environment"),
     _r("crates/tore-sim/src/clouds.rs", ("flight-environment",), "clouds"),
     _r("crates/tore-sim/src/vapor.rs", ("flight-environment",), "vapor"),
     _r("crates/tore-sim/src/acoustics.rs", ("replay-live",), "acoustics"),
@@ -714,6 +715,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/surface_battle.rs", ("surface",), "the surface battle drive and survey"),
     _r("crates/tore-app/src/surface_parked.rs", ("surface",), "the parked aircraft drive"),
     _r("crates/tore-app/src/city_fires.rs", ("surface", "replay-recording"), "the burning city fill buildings' fires and smoke (--city-fires); a replay's knocked-down buildings (nr-fx3)"),
+    _r("crates/tore-app/src/terrain_colors.rs", ("terrain-colors",), "headless theater palette regression"),
     _r("crates/tore-app/src/night_glow*", ("surface", "replay-recording", "render-night-effect-lights"), "the night glow of explosions and fires and their surface light", windowed=True),
     _r("crates/tore-app/src/city_fill_dump.rs", ("surface",), "the city fill dump, and --city-fires, which surface-city-fires runs"),
     _r("crates/tore-app/src/effect_renderer.rs", ("render-night-effect-lights",), "effect sprites and sustained light", windowed=True),
