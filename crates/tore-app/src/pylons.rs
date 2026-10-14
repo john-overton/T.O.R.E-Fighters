@@ -40,7 +40,7 @@ use std::sync::Mutex;
 use tore_formats::shape::Shape;
 use tore_sim::attitude::{Basis, Vector};
 use tore_sim::combat::hardpoints::{
-    Location, PylonPlace, SHOULDER_OUT, SHOULDER_UP, rack_group, shoulder, slot_offset,
+    Location, PylonPlace, SHOULDER_OUT, rack_group, shoulder, shoulder_rise, slot_offset,
 };
 use tore_sim::combat::store_sizes::StoreSize;
 use tore_world::snapshot::{StoreLook, StorePose};
@@ -427,10 +427,13 @@ fn hanger(
 
 /// What holds a store on a shoulder rail (the F-14's glove pylon
 /// Sidewinder): the pylon it rides beside, [`SHOULDER_OUT`] inboard of its
-/// centre line with its foot [`SHOULDER_UP`] below that line (the pylon
+/// centre line with its foot below the store's body by
+/// [`tore_sim::combat::hardpoints::SHOULDER_GAP`] (the pylon
 /// the station under it hangs from, drawn again so it stands when that
 /// station is empty), and an arm from the pylon's side out along the
-/// store's top, 0.6 of its length (3 to 6 ft), the rail it hangs from.
+/// store's top, 0.6 of its length (3 to 6 ft), the rail it hangs from:
+/// a jut off the pylon's side just above the store under the pylon (John
+/// 2026-10-14).
 fn shoulder_rail(
     out: &mut Vec<f32>,
     at: &impl Fn(Vector) -> Vector,
@@ -442,7 +445,7 @@ fn shoulder_rail(
     let p = pylon.point;
     let side = if p[0] < 0. { -1. } else { 1. };
     let inboard = p[0] - side * SHOULDER_OUT;
-    let foot = p[1] - SHOULDER_UP;
+    let foot = p[1] - shoulder_rise(size);
     hanger(
         out,
         at,
@@ -1064,7 +1067,8 @@ mod tests {
     }
 
     /// A store on a shoulder rail (the F-14's glove pylon Sidewinder)
-    /// hangs beside the pylon it shares, a little above that pylon's foot,
+    /// hangs beside the pylon it shares, its body just above that pylon's
+    /// foot (the top of the store under the pylon),
     /// with the pylon drawn (it stands when the station under it is empty)
     /// and an arm out over the store; nothing is drawn straight above it.
     #[test]
@@ -1074,7 +1078,7 @@ mod tests {
         let store = on_flat_wing(plain([8.75, -5., 0.], SHOULDER_BYTE, 2));
         assert_eq!(store.rack.location(), Location::Shoulder);
         let centres: Vec<Vector> = hung(&store).iter().map(|h| h.centre).collect();
-        let up = -PYLON_DEPTH + SHOULDER_UP;
+        let up = -PYLON_DEPTH + shoulder_rise(store.size());
         assert_eq!(centres, [[8.75, up, 0.], [-8.75, up, 0.]]);
         let out = draw(std::slice::from_ref(&store), &airframe);
         let grey = grey(&out);
@@ -1082,7 +1086,8 @@ mod tests {
         // The pylon, from its foot into the wing.
         let slab: Vec<&[f32; 3]> = grey
             .iter()
-            .filter(|v| (f64::from(v[0]) - pylon).abs() <= PYLON_WIDTH / 2. + 1e-4)
+            // Its inboard face: the arm juts off the outboard one.
+            .filter(|v| (f64::from(v[0]) - (pylon - PYLON_WIDTH / 2.)).abs() < 1e-4)
             .collect();
         let low = slab.iter().map(|v| v[1]).fold(f32::MAX, f32::min);
         let high = slab.iter().map(|v| v[1]).fold(f32::MIN, f32::max);
