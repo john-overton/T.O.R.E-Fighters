@@ -307,7 +307,7 @@ checked below against real aircraft, not against retail play.
 | PT | Engines | Empty lb | Internal fuel lb | `fuelConsumption` | `aftFuelConsumption` | Full tank at the record's flow |
 | --- | --- | --- | --- | --- | --- | --- |
 | AH64.PT | 2 | 18,298 | 2,000 | 1 | 0 | 33 min |
-| V22.PT | 2 | 18,298 | 2,000 | 1 | 0 | 33 min |
+| V22.PT (as stored; corrected below) | 2 | 18,298 | 2,000 | 1 | 0 | 33 min |
 | MI24.PT | 2 | 18,078 | 3,307 | 3 | 0 | 18 min |
 | CH47.PT | 2 | 18,078 | 3,307 | 1 | 0 | 55 min |
 | AV8.PT | 1 | 13,968 | 7,759 | 2 | 0 | 65 min |
@@ -341,13 +341,33 @@ checked below against real aircraft, not against retail play.
   Yak-141 (9,700 lb) carry a fighter's flow and a believable tank; the models add the
   lift engines' burn (docs/spec/powered-lift-flight.md). No change.
 
-**Decision (agent, 2026-10-13, John's request).** The reader keeps the retail
-numbers. The weights are kept (they size the rotor models and the mass checks). The
-**flow of a rotorcraft is not read**: the flight model burns by the power the rotor
-draws ([FLIGHT-MODEL](../FLIGHT-MODEL.md#rotorcraft-fuel), fitted). The V-22 keeps
-the AH-64's 2,000 lb tank, which is the weak number now (a real V-22 carries about
-12,000 lb); that is the clone, flagged for John rather than changed here. The
-measured result is in the [rotorcraft fuel baseline](../baselines/rotorcraft-fuel.md).
+**Decision (agent, 2026-10-13, John's request).** The **flow of a rotorcraft is not
+read**: the flight model burns by the power the rotor draws
+([FLIGHT-MODEL](../FLIGHT-MODEL.md#rotorcraft-fuel), fitted). The AH-64, Mi-24 and
+CH-47 weights are kept (they size the rotor models and the mass checks). The measured
+result is in the [rotorcraft fuel baseline](../baselines/rotorcraft-fuel.md).
+
+**V-22 record correction (slice HF3, opinionated: John, 2026-10-13, "V-22 tank: fix
+(real fuel)").** `V22.PT` is the AH-64 record with a new name: its empty weight,
+fuel, maximum takeoff weight and thrust are the AH-64's. The reader now replaces
+those four numbers, and only when every one of them still holds the copied value (an
+edited or different record is read as it is). The table lives in
+`crates/tore-formats/src/aircraft_corrections.rs` and applies inside
+`Aircraft::parse`, so every reader (flight model, loadout, live combat, wreck) sees
+the same aircraft. The choice of figures is an agent decision.
+
+| Field | Record (AH-64 copy) | Corrected | Source |
+| --- | --- | --- | --- |
+| `weight` (empty), lb | 18,298 | 31,818 | MV-22B empty weight (Pub, Wikipedia "Bell Boeing V-22 Osprey", specifications) |
+| `internalFuel`, lb | 2,000 | 11,700 | MV-22B 1,721 US gal (Pub, Bell Boeing V-22 brochure) at 6.8 lb/gal (JP-5) |
+| `maxTakeoffWeight`, lb | 23,810 | 52,600 | Vertical takeoff maximum (Pub, Wikipedia) |
+| `thrust`, lbf | 26,280 | 58,057 | The record's thrust-to-maximum-weight ratio kept (Derived) |
+
+Sources disagree on the MV-22B's internal fuel (a fact sheet gives 1,448 gal with the
+aft sponson tank); 1,721 gal is the manufacturer's brochure figure. The rotor model's
+power scales with the corrected maximum weight, so it is the engines' full rating
+([powered-lift flight](../spec/powered-lift-flight.md#mass-power-and-rotors)).
+Other records copied the same way are slice nr-rec's (fixed-wing) audit.
 
 ## F-14 default external fuel
 

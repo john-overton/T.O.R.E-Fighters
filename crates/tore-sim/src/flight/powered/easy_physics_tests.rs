@@ -1002,7 +1002,10 @@ fn tilt_vortex_ring(easy: bool, seconds: usize) -> (f64, Option<f64>) {
 }
 
 /// E1 / H10 for the V-22 in helicopter mode: the hazard keeps the sink
-/// beyond 3 s at full lever, the cheat arrests it.
+/// beyond 3 s at full lever, the cheat arrests it. Within 6 s since slice
+/// HF3 (3 before): at the MV-22B's real weight the sink is one hover induced
+/// velocity, 57 ft/s here, and full power leaves a smaller share to stop it
+/// than the record's copied AH-64 weight did (about 5 s).
 #[test]
 fn e1_h10_the_cheat_arrests_the_tiltrotors_vortex_ring_sink() {
     let (start, ring) = tilt_vortex_ring(false, 8);
@@ -1010,7 +1013,7 @@ fn e1_h10_the_cheat_arrests_the_tiltrotors_vortex_ring_sink() {
     println!("H10 V-22 {start} {ring:?} | {easy_start} {easy:?}");
     assert!(start < -15. && easy_start < -15.);
     assert!(ring.is_none_or(|t| t > 3.), "{ring:?}");
-    assert!(easy.expect("never arrested") <= 3.);
+    assert!(easy.expect("never arrested") <= 6.);
 }
 
 /// E1 / H2b for the CH-47 with the cheat: the attitude retention. Two taps
