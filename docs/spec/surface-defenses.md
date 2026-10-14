@@ -1974,6 +1974,9 @@ rest of the mission, however many fall.
   building by where it stands, so a replay shows the flattened blocks
   burning, seeking and playing backwards included; a recording from before
   it shows its city whole and unburnt ([replays](../REPLAYS.md#versions-and-damage)).
+  A replay ages each column from the tick its building fell on (nr-fx4), so
+  a seek shows the column as tall as playing through would have; live
+  flight ages it from the moment the fire was first seen.
 - **How it looks.** A fire on each knocked-down building's base, a building
   fire's width (0.6 of the smaller plan side, 24 to 90 ft; the fill's piece
   sizes), its flames looping once a second, each out of step with its
