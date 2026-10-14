@@ -17,13 +17,16 @@ belong in [the acceptance record](../baselines/aircraft-roster-expansion.md).
 Use the exact PT identities below, their own source mass, fuel, thrust,
 G envelopes, loading, controls, departure fields, stations and audio.
 These are game configuration values, not real-aircraft performance claims.
+The Su-25's retail record carries the Su-24's mass, fuel, thrust and flow; since
+2026-10-13 the game corrects them to published Su-25 figures (retail values in
+brackets, see [aircraft record corrections](aircraft-records.md)).
 
 | Aircraft / PT | Empty lb | Fuel lb | Max takeoff lb | Military lbf | Burner lbf | Roll limit / acceleration / release, degrees/s and degrees/s² |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
 | MiG-29 Fulcrum-C / MIG29.PT | 18025 | 13000 | 36375 | 22220 | 36600 | 270 / 362 / 724 |
 | Su-27 Flanker-B / SU27.PT | 36000 | 19000 | 60000 | 40755 | 59510 | 225 / 286 / 571 |
 | MiG-21 Fishbed / MIG21.PT | 12824 | 4534 | 20725 | 8598 | 13120 | 180 / 214 / 427 |
-| Su-25 Frogfoot-A / SU25.PT | 41885 | 22664 | 90390 | 35270 | 0 | 105 / 106 / 212 |
+| Su-25 Frogfoot-A / SU25.PT | 21605 (retail 41885) | 6614 (retail 22664) | 42549 (retail 90390) | 19860 (retail 35270) | 0 | 105 / 106 / 212 |
 | MiG-23 Flogger-B / MIG23.PT | 23589 | 11704 | 41556 | 17310 | 24728 | 225 / 286 / 571 |
 | Su-35 / SU35.PT | 40564 | 22000 | 74956 | 40755 | 58642 | 225 / 286 / 571 |
 | F-22A Raptor / F22.PT | 30000 | 25000 | 72000 | 64000 | 78000 | 360 / 526 / 1352 |

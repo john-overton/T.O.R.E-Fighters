@@ -1480,6 +1480,18 @@ def scenarios() -> list[Scenario]:
                 "--probe-friendly-aircraft", aircraft, "--probe-wing-size", "2", "--maneuver", "takeoff",
                 "--separation", "100", "--probe-wing-only"],
                 ticks=18000, timeout=1800, check=checker(ground=True, need_takeoff=True, player_flies=True)))
+    # Corrected aircraft records (slice nr-rec, docs/spec/aircraft-records.md):
+    # an aircraft whose record the game corrects takes off from Odesa, flies on
+    # for 150 s and lands on a land order. The MiG-17F is not here: with its
+    # default drop tanks it cannot climb away after liftoff, on the retail
+    # record too (an open finding, not this correction).
+    for aircraft in ("su25", "c130"):
+        out.append(probe(f"records-land-{aircraft}", [
+            "--theater", "UKR", "--ground-start", "9", "--aircraft", aircraft,
+            "--probe-friendly-aircraft", aircraft, "--probe-wing-size", "2", "--maneuver", "takeoff",
+            "--probe-wing-order", "18000:land-selected", "--separation", "200", "--probe-wing-only"],
+            ticks=108000, timeout=2400,
+            check=checker(ground=True, need_takeoff=True, need_landing=True, player_flies=True)))
     for theater in ("PGU", "VLA"):
         out.append(probe(f"long-15v15-{theater.lower()}", ["--theater", theater, *fight(15, 15, "--separation", "20", *attack)],
                          ticks=216000, timeout=3600, check=checker(allow_anomalies=("outside the world",))))

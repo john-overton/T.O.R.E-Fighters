@@ -74,5 +74,7 @@ launch, hit and kill calls, contact and waypoint reports, and who hears them.
 [countermeasures](countermeasures.md) specifies the player's chaff and flare
 release. [Sound/Music Prefs](sound-prefs.md) specifies the volume dialog: its
 layout, defaults, and which sounds and music each slider scales.
+[Aircraft record corrections](aircraft-records.md) lists the retail aircraft
+records the game corrects (the Su-25, MiG-17F and C-130) and why.
 Supporting research lives in [`../formats/`](../formats/), measured evidence in
 [`../baselines/`](../baselines/), and frozen archives in [`../research/`](../research/).
