@@ -20,6 +20,11 @@
 //!   the shooter included. With it on the shooter can be caught in its own
 //!   blast, as the manual warns (p. 126: a missile fired inside its minimum
 //!   range or a bomb dropped too low); that damage credits no one.
+//! - Launch grace (John, 2026-10-13): a round that goes off while it is still
+//!   inside its own launcher's hit volume (the aircraft's contact sphere)
+//!   hurts the launcher not at all. The hit test keeps the same promise for
+//!   a direct hit and a proximity fuze (the `owner` exemption in the round
+//!   search of `live.rs`).
 //! - A surface unit's round reaches aircraft and the other side's ground
 //!   objects and ships, never its own side's or neutral scenery, whatever
 //!   the friendly fire setting (surface units fight each other: John,
@@ -154,6 +159,13 @@ pub fn box_distance(bounds: &OrientedBox, point: Vector) -> f64 {
     dot(outside, outside).sqrt()
 }
 
+/// Whether `point` is inside the sphere of `radius` around `center`: the
+/// aircraft hit volume a round launched from that aircraft has not yet left.
+pub(super) fn inside_sphere(center: Vector, radius: f64, point: Vector) -> bool {
+    let delta = sub(point, center);
+    dot(delta, delta) < radius * radius
+}
+
 /// Feet from `point` to the surface of a sphere of `radius` around `center`
 /// (0 inside it).
 fn sphere_distance(center: Vector, radius: f64, point: Vector) -> f64 {
@@ -207,6 +219,11 @@ impl State {
                 if skipped(t.id, t.hp, t.body_present(), t.side) {
                     continue;
                 }
+                // Launch grace: a round still inside its own launcher's hit
+                // volume does the launcher no harm.
+                if t.id == burst.owner && inside_sphere(t.position, t.radius, burst.position) {
+                    continue;
+                }
                 let base = burst.nominal(
                     t.category,
                     sphere_distance(t.position, t.radius, burst.position),
@@ -252,6 +269,9 @@ impl State {
                     .surface
                     .is_some_and(|side| !aircraft && !super::opposed(side, t.side))
                     || skipped(t.id, t.hp, t.body_present(), t.side)
+                    || (aircraft
+                        && t.id == burst.owner
+                        && inside_sphere(t.position, t.radius, burst.position))
                 {
                     continue;
                 }

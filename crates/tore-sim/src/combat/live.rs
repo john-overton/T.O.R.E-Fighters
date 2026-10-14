@@ -5354,7 +5354,9 @@ impl State {
                         } else {
                             let radius = t.radius * hitbox + f64::from(w.damage.fuze_radius.max(0));
                             let start = sub(p.previous, r.previous);
-                            // A round leaving its own launcher's volume is not a hit.
+                            // Launch grace: a round still inside its own launcher's
+                            // volume (the aircraft sphere widened by the fuze)
+                            // neither hits nor fuzes on it.
                             if p.owner == t.id && dot(start, start) <= radius * radius {
                                 None
                             } else {
@@ -5419,7 +5421,9 @@ impl State {
                         };
                         let radius = t.radius * hitbox + f64::from(fuze);
                         let start = sub(p.previous, old_targets[i]);
-                        // A round leaving its own launcher's volume is not a hit.
+                        // Launch grace: a round still inside its own launcher's
+                        // volume (the aircraft sphere widened by the fuze)
+                        // neither hits nor fuzes on it.
                         if p.owner == t.id && dot(start, start) <= radius * radius {
                             None
                         } else {
