@@ -1516,8 +1516,10 @@ def capture_scenarios() -> list[Scenario]:
     for section in ("nose", "cockpit", "core", "left-wing", "right-wing", "tail"):
         for fraction in ("0.3", "0.7", "1"):
             add(f"damage-f18-{section}-{fraction}", ["--free-flight", "--aircraft", "f18", "--flight-view", "1", "--damage-preview", fraction, "--damage-preview-section", section])
+    # Odesa (UKR 9), a Blue field: Zaporizhzhya (UKR 1) is Redfor since slice
+    # AL1 and refuses a ground start ("an enemy airfield").
     for ac in AIRCRAFT:
-        add(f"groundstart-{ac}", ["--free-flight", "--aircraft", ac, "--theater", "UKR", "--ground-start", "1", "--flight-view", "1", "--flight-look", "150,-15", "--flight-zoom", "1.5"])
+        add(f"groundstart-{ac}", ["--free-flight", "--aircraft", ac, "--theater", "UKR", "--ground-start", "9", "--flight-view", "1", "--flight-look", "150,-15", "--flight-zoom", "1.5"])
     for bay in ("0", "0.5", "1"):
         add(f"bay-f22-{bay}", ["--free-flight", "--aircraft", "f22", "--flight-view", "1", "--flight-look", "150,-30", "--flight-bay", bay])
     return out
