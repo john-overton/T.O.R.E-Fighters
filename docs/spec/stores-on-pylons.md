@@ -20,7 +20,12 @@ list, items 7 and 9 and a follow-up) halved the pylons (1 ft wing pylons,
 2 inch rails), replaced the deeper pylons beside nacelles with a sideways
 move of the station, hung two stores on a pylon off the sides of a small
 bar, rolled the weapon shapes so their fins stand in an X, and gave the
-A-4E the real aircraft's three tanks.
+A-4E the real aircraft's three tanks. Slice F14 (2026-10-14, John's
+annotated picture of the F-14 from below) moved the F-14's stores to the
+real aircraft's stations: tanks under the intake nacelles, the Phoenixes
+closer together in the tunnel with the front pair back where the tanks
+hung, and the AIM-120 under the glove pylon beside the AIM-9 on its
+shoulder rail ([the F-14](#the-f-14)).
 
 ## What the player sees
 
@@ -44,6 +49,11 @@ A-4E the real aircraft's three tanks.
 - **Wingtip missiles sit on the tip.** No pylon or rail is drawn under the
   tip: the missile's centre line lies on the tip's edge, as an F-16's or
   F/A-18's tip AIM-9 does.
+- **The F-14 carries its stores at its real stations**: its tanks under
+  the intake nacelles, four Phoenixes close together in the tunnel between
+  them (two ahead, two behind), and on each glove pylon an AIM-120 (or
+  AIM-7 or AIM-54) under it with the AIM-9 on its shoulder rail beside it
+  ([the F-14](#the-f-14)).
 - **Fuselage pairs hang one behind another**, as the F-14's Phoenixes and
   the F-15's and F-4's Sparrows do, and the front pair leaves first.
 - **Paired stations alternate.** Two AIM-9s on the wingtips leave left, then
@@ -64,7 +74,10 @@ A-4E the real aircraft's three tanks.
 | --- | --- | --- |
 | Station position | The source hardpoint record's x (right) and z (forward), a third of a foot a unit, from the aircraft's reference point ([table](../formats/aircraft-ordnance.md#hardpoint-positions)); its height is the pylon's (below) | spec-derived (the height: opinionated, PY2) |
 | Pylon depth | A wing store's top (its lugs, the top of its body) hangs 1 ft under the model's underside over its pylon; a fuselage or centreline store's 2 inches (0.17 ft) under it, on a launcher rail. Stores beside a rack's bar keep the same depth; a triple rack's third hangs under the bar. The underside is the lowest face of the clean model up to 12 ft above the record, straight above the pylon or, where nothing is straight above, up to 3 ft inboard. A station with nothing of the model above it keeps the record's height | opinionated, John 2026-10-13 (morning: 2 ft wing pylons and 4 inch rails; evening: "pylons need to be about half the size they are now"); the samples are agent decisions |
-| Moved aside | A station whose store would cut through a part of the model beside it (a face within 0.6 ft either side of the pylon reaching more than 0.25 ft below the store's top: a nacelle, a gear pod, a body's flank) moves sideways in 0.25 ft steps, out before in at each distance, up to 2 ft, to the first place it clears with model straight above. A store that cannot clear within 2 ft hangs under the lowest surface across its body, as PY2 hung every store (no default load needs it). The move is part of the station's position, so it releases from there too. On the default loads: F/A-18D fuselage AIM-120s 0.25 ft in (3.08 ft out), Rafale fuselage Mavericks 0.25 ft in (3.08), F-14 Phoenixes 0.5 ft in (2.5), AV-8 fuselage Mavericks 0.25 ft out (3.25), Su-25 B-13 pods 0.5 ft out (5.5), A-10 middle wing row 0.5 ft out (8.83) | agent decision, 2026-10-13 (John: short pylons; a store inside the launching aircraft's hit box is not a reason to hang it deeper, slice SD) |
+| Moved aside | A station whose store would cut through a part of the model beside it (a face within 0.6 ft either side of the pylon reaching more than 0.25 ft below the store's top: a nacelle, a gear pod, a body's flank) moves sideways in 0.25 ft steps, out before in at each distance, up to 2 ft, to the first place it clears with model straight above. A store that cannot clear within 2 ft hangs under the lowest surface across its body, as PY2 hung every store (no default load needs it). The move is part of the station's position, so it releases from there too. On the default loads: F/A-18D fuselage AIM-120s 0.25 ft in (3.08 ft out), Rafale fuselage Mavericks 0.25 ft in (3.08), AV-8 fuselage Mavericks 0.25 ft out (3.25), Su-25 B-13 pods 0.5 ft out (5.5), A-10 middle wing row 0.5 ft out (8.83). The F-14's stations are placed by hand instead ([the F-14](#the-f-14)) | agent decision, 2026-10-13 (John: short pylons; a store inside the launching aircraft's hit box is not a reason to hang it deeper, slice SD) |
+| Under the chord | A wing station with nothing of the model straight above it (nor up to 3 ft inboard) slides forward or aft, up to 12 ft, to under the middle of the wing's chord at its distance out, nearest the record. Only the Yak-141's outer row needs it: retail records it 16.67 ft out at 0 ft forward, ahead of the swept wing's leading edge there, so its AA-11s hung 4 ft below and ahead of the wing in space (John 2026-10-14, "the Yak-141 wingtip location is not correct"); they now hang 1 ft under the outer wing, 8.9 ft back. On the default loads of the 22 aircraft the stores preview draws, every other wing station has the model above it and every wingtip station reads its tip edge, so none of them moves; the rule covers any other row that would need it | agent decision, 2026-10-14 (fitted) |
+| Real stations (F-14) | The F-14's four weapon and tank records hang at the real aircraft's stations, from a per-aircraft table, not the records' positions: no move aside there ([the F-14](#the-f-14)) | opinionated, John 2026-10-14; the positions are agent decisions read from the model |
+| Shoulder rail | A store on a pylon's shoulder rail (the F-14's AIM-9) hangs 1.25 ft outboard of that pylon's centre line, its centre line 0.1 ft above the pylon's foot (the lugs of the store under the pylon), and leaves from there. 1.25 ft keeps an AIM-9's fins (2.07 ft across at 45 degrees) clear of the pylon and of the fins of an AIM-120, AIM-7 or AIM-54 under it; 0.1 ft keeps its upper fins under the glove | agent decision, 2026-10-14 (fitted) |
 | Wingtip | A wingtip store's centre line lies on the tip's edge: as far out as the model's outermost point beside the record (within 4 ft inboard and 0.3 ft outboard of it, 2.5 ft fore and aft, 3 ft up or down), at the middle height of that edge. No pylon or rail is drawn. With no model read, the record's position | opinionated, John 2026-10-13 ("the missile's centre line sits on the wingtip geometry, no gap"); the search box is an agent decision |
 | Where the underside is read | When the loadout is built, from the aircraft shape the simulation already reads (`<ID>.SH`, at the debris scale): over the record, over a two-pylon wing's inboard and outboard pylons (1.4 ft either side), and 7 ft ahead of and behind the record; a tandem pylon's surface is interpolated between the record and the sample on its side. The heights travel with the station (`Rack::over`), into checkpoints and replays | agent decision |
 | Released from | The point the store hangs at: its side, its pylon, its place on the pylon's rack and the pylon's height (`Rack::store_point`), for the player, the AI, every network seat and replays. The bomb sight predicts from the same point | opinionated, John 2026-10-13 ("a store never jumps at release") |
@@ -120,6 +133,7 @@ Every number below is fitted (agent decision).
 | Rack | A bar 0.25 ft deep across the pylon's foot, reaching out to the centre lines of the stores beside it, 0.7 of the pylon's length (plus the racks one behind another) |
 | Fin roll | Every weapon shape is rolled about its body's centre line so its fins stand in an X, 45 degrees from straight out and straight up and down, so no fin points into the pylon, the wing or body above, or the store beside it (John 2026-10-13: "ordnance needs to be rotated 45 degrees to make sure fins don't clip and are perpendicular to pylons and the fuselage as best as possible"). The roll is measured per retail shape, not assumed: the fin tips' clock about the body (the corners more than 1.6 body half widths out, their angles averaged over a quarter turn). A "+" shape (clock 0) turns 45 degrees; a shape already in an X (clock about 45) is not turned; a shape whose tips agree on no clock (agreement under 0.5 of 1) is not turned. One roll serves every mount (under a pylon, beside a bar, on a wingtip, on a rail), since an X is the same seen from below or from the side. The rolled shape is the one drawn everywhere the store is: on the pylon, in flight after release (so it does not turn at release), for the player, AI aircraft, network peers, replays and previews. See [fin roll by shape](#fin-roll-by-shape). Opinionated, John 2026-10-13; the measuring rule and one roll per shape are agent decisions |
 | Wingtip | Nothing drawn under a wingtip store ([rules](#rules)) |
+| Shoulder rail | The pylon the store rides beside, from its foot into the surface above (drawn again for the shoulder store, so it stands when the station under it was left empty), and an arm 0.15 ft deep from the pylon's side out along the store's top to its centre line, 0.6 store lengths long (3 to 6 ft) |
 | Edge rail | A wing station's store with nothing of the model above it, beside a wing's edge less than 4 ft inboard, hangs on a rail from 0.3 ft inside the tip's edge out over the store, as deep as both the tip's edge and the store's upper half, 0.6 store lengths long (3 to 9 ft). With no tip beside it, a 0.35 ft rail |
 | Colours | Pylons and racks grey (0.5, 0.52, 0.54), tanks light grey, pods grey-green; weapon shapes keep their palette colours |
 | Lighting | Exactly the airframe's: every pylon, rack, fitted body and weapon face carries a palette entry (a fitted colour takes the aircraft palette's nearest entry) with its fog mode, so the weather's time-of-day palette darkens it at night and at dusk, fog and haze fall on it, and the same sun, moon and ambient light it, as they do the untextured faces of the aircraft it hangs on; a released weapon in flight is lit the same way. Before 2026-10-13 they carried fixed colours and showed bright at night (John's report, an A-10 at night). The stepped compatibility lighting (`TORE_WEATHER_SMOOTH=0`), which picks a light row per airframe face, is not applied to stores | opinionated, John 2026-10-13; the nearest-entry rule is an agent decision |
@@ -280,7 +294,8 @@ straight up to the drawn model, feet; default loads):
 PY2's deeper pylons (Su-25 B-13 pods 3.2 ft, AV-8 fuselage Mavericks 3.7 ft,
 F-14 front Phoenixes 3.4 ft) are gone: those stations moved aside instead
 ([moved aside](#rules)). The record's own fore and aft position is kept
-everywhere, and its lateral position except the moves listed there.
+everywhere, and its lateral position except the moves listed there and the
+F-14's stations ([the F-14](#the-f-14)).
 
 ## The A-4E
 
@@ -310,6 +325,59 @@ configuration). The development driver `--a2g-run --load MK82` still loads
 the four Mk 82s on the centreline row retail defaults them to, taking that
 row's tank off.
 
+## The F-14
+
+John, 2026-10-14, on a picture of the F-14 from below: "default tank
+pylons are actually under engine intake nacelles", "AIM-54s grouped closer
+together and front missiles tucked backward where tanks are", "AIM-120
+default pylon tucked under wing flaring next to AIM-9". Retail's records
+put the tanks and all four Phoenixes 3 ft either side of the centreline,
+the two tanks between the front and rear Phoenix pairs, and the AIM-120s
+6 ft out, beside the nacelles rather than under the glove.
+
+The real F-14's stations are the guide: 1A/1B and 8A/8B on the glove
+pylons (an AIM-9 on the pylon's shoulder rail, an AIM-7, AIM-54 or AIM-120
+under it), 2 and 7 under the intake nacelles (the tanks), 3 to 6 the
+tunnel pallets between the nacelles (two ahead, two behind). T.O.R.E's F-14
+model has its tunnel ceiling 2.7 ft under the reference out to 3 ft, the
+nacelles from 3.5 to 6.5 ft out (their bottom ramps from 2.7 ft down at the
+intake to 4 ft down from the reference point back), and the glove from
+6.5 ft out about 0.6 ft up.
+
+| Record (F14.PT row) | Retail position, ft out / forward | T.O.R.E station | How it hangs |
+| --- | --- | --- | --- |
+| 4, AIM-54 x4 (tunnel) | 3.0 / 8.0 (moved to 2.5 by PY3) | 1.25 / 0 | Tandem pairs on 2 inch rails: front pair 7 ft forward (0.5 to 13.5 ft, where the tanks hung), rear pair 7 ft back (-13.5 to -0.5 ft); 2.5 ft apart, so the two pairs' fins clear by about 0.4 ft |
+| 5, 250 gallon tanks x2 | 3.0 / 6.67 | 4.75 / 6.67 | Under the nacelles on 2 inch rails, under the lowest part of the intake ramp along the tank (6.5 ft either side of the record), so the tank does not cut into the ramp; the pylon is deeper at the front, where the ramp rises |
+| 6, AIM-120 x2 (glove pylon) | 6.0 / 4.67 | 7.5 / 4.67 | 1 ft under the glove, just outboard of the nacelle |
+| 7, AIM-9 x2 | 8.67 / 1.67 | 8.75 / 6.0 | On the glove pylon's shoulder rail ([rules](#rules)), its nose level with the AIM-120's |
+
+Every load the ordnance screen allows on these rows hangs at the same
+stations: the tunnel row's other stores (AIM-7s, bombs, AA-10s and the
+rest) as tandem pairs or single stores 1.25 ft out, the glove row's under
+the glove pylon, the AIM-9 row's (AIM-9B, AIM-9X, AA-2, AA-8, AA-11, R.550,
+AT-12) on the shoulder rail. The release, the bomb sight and the AI fire
+from those points, as everywhere ([released from](#rules)). Opinionated, John 2026-10-14;
+the positions, the tandem gap and the shoulder rail's spacing are agent
+decisions (fitted).
+
+What still touches, measured with `tore-app --stores-preview` (its `clip`
+lines: how far the deepest point of each drawn store reaches above the
+model's lowest face straight below it), default load:
+
+| Store | Before | After |
+| --- | ---: | ---: |
+| AIM-54 (tunnel) | 0.72 ft (into the nacelle beside it) | 0.27 ft (the tips of its upper fins into the tunnel ceiling) |
+| AIM-120 (glove) | 0.21 ft (into the nacelle) | 0 |
+| AIM-9 (shoulder) | 0 | 0 |
+| Tanks | 0 (but inside the Phoenixes, same place) | 0 |
+
+The Phoenix's fins are 3 ft across; turned to an X they reach 1.06 ft up
+from its centre line, which on a 2 inch rail is 0.27 ft more than its body
+radius and the rail together. Any finned missile on a 2 inch fuselage rail
+does the same where its fins are wider than its body by more than the rail.
+Bombs or tanks chosen for the glove pylon (beyond the real F-14's loads)
+can touch the shoulder AIM-9's fins.
+
 ## Performance
 
 The stores join their aircraft's existing vertex batch (no extra draw call or
@@ -325,6 +393,7 @@ vertices a frame.
 - Retail release position and the 0x4 mirror rule: [weapons formats](../formats/weapons.md#release-state)
   (FA.EXE 1.02F `HARDPos` `0x4532a0`, `HARDUnrotatedHardPos` `0x453220`).
 - Code: `tore_sim::combat::hardpoints` (the rule, two pylons a wing, tandem fuselage pairs,
+  `station_move` and `placed_on` (the F-14's stations, the shoulder rail),
   `Rack::store_point`, `slot_offset` and `shoulder` (the bar), `placed` and `Underside::nudge`
   (moving aside), the 1 ft pylon, `default_records` (the A-4E)), `tore-app/src/store_sizes.rs`
   (`fin_clock`, `carried_roll`, the fin roll in `variants`), `tore_sim::combat::store_sizes` (the sizes
