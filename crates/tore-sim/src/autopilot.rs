@@ -248,15 +248,16 @@ impl Autopilot {
         self.loops = Loops::default();
         self.orbit = Some(orbit);
     }
-    /// The point the console's autopilot circles: the pin or the tracked
-    /// object the sight holds now. From the search it joins the orbit about
-    /// it; already orbiting, the orbit slides there
-    /// ([`orbit::CENTRE_SPEED_FPS`]).
-    pub fn set_orbit_point(&mut self, point: [f64; 3]) {
+    /// The point the console's autopilot circles: the pin or (`tracked`)
+    /// the ground under the tracked object the sight holds now. From the
+    /// search it joins the orbit about it; already orbiting, the orbit
+    /// slides there ([`orbit::CENTRE_SPEED_FPS`]), a moved pin after
+    /// [`orbit::CENTRE_PAUSE_S`] standing still.
+    pub fn set_orbit_point(&mut self, point: [f64; 3], tracked: bool) {
         if self.mode == Mode::Orbit
             && let Some(orbit) = &mut self.orbit
         {
-            orbit.pin(point);
+            orbit.pin(point, tracked);
         }
     }
     /// Replace the console autopilot's plan and memory (its commands and a

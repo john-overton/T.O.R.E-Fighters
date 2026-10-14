@@ -151,6 +151,7 @@ pub(super) fn render(
         },
         plan: Plan::new(launcher, agl_ft, on_target, [on_target; 3], None, Some(2)),
         autopilot: None,
+        gun_lock: None,
         blink: true,
     };
     // The forms: name, look, zoom, polarity, tracking, static level.

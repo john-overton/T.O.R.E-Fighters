@@ -32,9 +32,12 @@
 //!   point of aim"): with the sight free the console's autopilot flies
 //!   straight and level on a commanded heading, altitude and speed
 //!   ([`Orbit::pinned`] false, [`ConsolePhase::Search`]); a pin or a track
-//!   joins the orbit about it; letting the sight go rolls out on the heading
-//!   the roll-out reaches ([`rollout_heading`]) and holds the altitude it is
-//!   at. The console's keys step the commanded values ([`ConsoleCommand`]).
+//!   joins the orbit about it; letting the sight go takes the aircraft's
+//!   current heading, altitude and speed as the commanded ones (John,
+//!   2026-10-14) and flies straight from there. The console's keys step the
+//!   commanded values ([`ConsoleCommand`]). A pin moved by a slew moves the
+//!   orbit's centre only after [`CENTRE_PAUSE_S`] with the pin standing
+//!   still (John, 2026-10-14); a tracked object is followed at once.
 //!
 //! All constants here are fitted (agent decisions, 2026-10-13 and, for the
 //! search and the console's keys, 2026-10-14) unless their notes say
@@ -59,6 +62,16 @@ pub const CLIMB_ACCEL_FPS2: f64 = 3.;
 /// faster than any ground vehicle, slow enough that a new pin miles away is
 /// a gentle turn rather than a snap).
 pub const CENTRE_SPEED_FPS: f64 = 200.;
+/// A pin that moved (a slew, or a new pin) moves the centre only after it
+/// has stood still this long, seconds (John, 2026-10-14: "after a 5 second
+/// pause with no slewing").
+pub const CENTRE_PAUSE_S: f64 = 5.;
+/// A point that moves further than this in one step is a new point (a new
+/// designation, a new pin, the next target), not a slew or a moving object:
+/// the orbit is joined about it at once instead of sliding there, ft
+/// (fitted, agent decision 2026-10-14: a full-rate slew at the widest zoom
+/// moves a pin some tens of feet a tick, a ground vehicle a foot or two).
+pub const NEW_POINT_FT: f64 = 1_000.;
 /// The orbit is never flown lower than this above the ground under the
 /// aircraft, ft (a terrain floor for a centre in a deep valley).
 pub const TERRAIN_FLOOR_FT: f64 = 1_000.;
@@ -121,6 +134,10 @@ pub struct Orbit {
     /// altitude (ft above sea level).
     pub heading: f64,
     pub altitude: f64,
+    /// Seconds the point has stood still (a pin); the centre moves toward
+    /// it from [`CENTRE_PAUSE_S`]. A track holds it at the pause, so the
+    /// centre follows the object at once.
+    pub still_s: f64,
 }
 
 /// A key of the sensor console (docs/spec/ac130-linked-guns.md, "The
@@ -141,6 +158,11 @@ pub enum ConsoleCommand {
     Speed(u8),
     /// The throttle steps 7 and 8: step the speed [`SPEED_STEP_KT`] a step.
     SpeedStep(i8),
+    /// The gun lock (John, 2026-10-14): lay the guns on what the sight holds
+    /// and let the sight slew away, or let the guns follow the sight again
+    /// (the world's to apply: it is the gunsight's). The orbit circles the
+    /// locked point while it holds.
+    GunLock,
 }
 
 /// What the console's autopilot is doing.
@@ -243,8 +265,9 @@ impl Orbit {
             climb: s.vertical_speed,
             throttle: s.throttle,
             pinned: false,
-            heading: rollout_heading(s),
+            heading: s.yaw.rem_euclid(std::f64::consts::TAU),
             altitude: s.position[1].clamp(SEARCH_ALTITUDE_FT[0], SEARCH_ALTITUDE_FT[1]),
+            still_s: CENTRE_PAUSE_S,
         };
         // Short guns can plan inside the anti-aircraft guns' reach: the
         // orbit grows to the minimum, keeping its depression.
@@ -306,10 +329,13 @@ impl Orbit {
     /// centre slides toward the sight's point, the bank is the AI's circle
     /// law, the height the orbit's over the centre.
     fn circle(&mut self, s: &State) -> (f64, f64) {
+        self.still_s = (self.still_s + DT).min(CENTRE_PAUSE_S);
         let to: Vector = std::array::from_fn(|i| self.point[i] - self.centre[i]);
         let gap = (to[0] * to[0] + to[1] * to[1] + to[2] * to[2]).sqrt();
         let step = CENTRE_SPEED_FPS * DT;
-        if gap <= step {
+        if self.still_s < CENTRE_PAUSE_S {
+            // The pin is still moving, or has just stopped: the centre waits.
+        } else if gap <= step {
             self.centre = self.point;
         } else {
             for (c, d) in self.centre.iter_mut().zip(to) {
@@ -337,28 +363,50 @@ impl Orbit {
             self.centre[1] + self.height_ft,
         )
     }
-    /// Hold `point` (a pin, or the ground under a tracked object): from the
-    /// search the orbit is joined about it at once (the bank and climb
-    /// commands' slews make the join gentle); holding one already, the
-    /// centre slides to the new point.
-    pub fn pin(&mut self, point: Vector) {
+    /// Hold `point` (a pin, or with `tracked` the ground under a tracked
+    /// object): from the search the orbit is joined about it at once (the
+    /// bank and climb commands' slews make the join gentle). Holding one
+    /// already, a moved pin waits [`CENTRE_PAUSE_S`] standing still before
+    /// the centre slides to it; a track's centre follows at once.
+    pub fn pin(&mut self, point: Vector, tracked: bool) {
         if !point.iter().all(|v| v.is_finite()) {
             return;
         }
+        let jump = (0..3)
+            .map(|i| (point[i] - self.point[i]).powi(2))
+            .sum::<f64>()
+            .sqrt();
         if !self.pinned {
             self.pinned = true;
             self.centre = point;
+            self.still_s = CENTRE_PAUSE_S;
             self.fit();
+        } else if jump > NEW_POINT_FT {
+            // A new point: join the orbit about it, as from the search.
+            self.centre = point;
+            self.still_s = CENTRE_PAUSE_S;
+        } else if tracked {
+            self.still_s = CENTRE_PAUSE_S;
+        } else if point != self.point {
+            self.still_s = 0.;
         }
         self.point = point;
     }
-    /// Let the point go: search on from here, rolling out on the heading
-    /// the roll-out reaches and holding the altitude the aircraft is at.
+    /// Let the point go: the aircraft's current heading, altitude and speed
+    /// become the commanded ones (John, 2026-10-14), and it flies straight
+    /// from there.
     pub fn release(&mut self, s: &State) {
         if self.pinned {
             self.pinned = false;
-            self.heading = rollout_heading(s);
-            self.altitude = s.position[1].clamp(SEARCH_ALTITUDE_FT[0], SEARCH_ALTITUDE_FT[1]);
+            self.take_current(s);
+        }
+    }
+    /// The search's commanded heading, altitude and speed: the aircraft's now.
+    fn take_current(&mut self, s: &State) {
+        self.heading = s.yaw.rem_euclid(std::f64::consts::TAU);
+        self.altitude = s.position[1].clamp(SEARCH_ALTITUDE_FT[0], SEARCH_ALTITUDE_FT[1]);
+        if s.speed.is_finite() && s.speed > 0. {
+            self.speed_fps = s.speed;
         }
     }
     /// The fastest orbit: its minimum slant range (the turn at 30 degrees of
@@ -404,7 +452,7 @@ impl Orbit {
             high
         };
         match command {
-            ConsoleCommand::Pin => "Sensor console: pin".into(),
+            ConsoleCommand::Pin | ConsoleCommand::GunLock => "Sensor console: pin".into(),
             ConsoleCommand::Heading(_) if self.pinned => {
                 "Orbiting: P lets the point go to steer".into()
             }
@@ -487,12 +535,15 @@ impl Orbit {
             distance_ft: dx.hypot(dz),
             height_now_ft: s.position[1] - self.centre[1],
             slant_ft: (to[0] * to[0] + to[1] * to[1] + to[2] * to[2]).sqrt(),
+            // On the circle about the centre, and the centre on the point
+            // (not still sliding or waiting toward it): JOIN until both.
             on_orbit: gunship::on_orbit(
                 s.position,
                 s.yaw.to_degrees(),
                 self.centre,
                 self.radius_ft,
-            ),
+            ) && (self.point[0] - self.centre[0]).hypot(self.point[2] - self.centre[2])
+                <= gunship::ON_ORBIT_SHARE * self.radius_ft,
             guns_bearing,
             sensor_bearing,
         }
@@ -514,13 +565,6 @@ pub fn rollout_turn(bank: f64, speed: f64) -> f64 {
     let rate = BANK_RATE_DEG_S.to_radians();
     let bank = bank.clamp(-1.4, 1.4);
     bank.signum() * GRAVITY * -bank.abs().cos().ln() / (speed.max(1.) * rate)
-}
-
-/// The heading a search takes from the aircraft as it flies now: its heading
-/// plus the turn the roll-out still makes, so letting go of a point rolls
-/// wings level on that heading without a turn back.
-pub fn rollout_heading(s: &State) -> f64 {
-    angle(s.yaw + rollout_turn(s.bank, s.speed)).rem_euclid(std::f64::consts::TAU)
 }
 
 /// The search's wanted bank toward `heading` (radians): the bank whose
@@ -601,7 +645,10 @@ impl State {
     /// that reach `reach_ft`. The host calls it when the AC-130's sensor
     /// console opens with a free sight, after [`Self::orbit_refusal`].
     pub fn engage_console(&mut self, reach_ft: f64) {
-        let orbit = Orbit::new(self, reach_ft);
+        let mut orbit = Orbit::new(self, reach_ft);
+        // The search starts on the aircraft's current heading, altitude and
+        // speed (agent decision, as a release does).
+        orbit.take_current(self);
         self.autopilot.engage_orbit(orbit);
     }
     /// Open the console's autopilot orbiting the ground `point` (world
@@ -609,7 +656,7 @@ impl State {
     /// or a track.
     pub fn engage_orbit(&mut self, point: Vector, reach_ft: f64) {
         let mut orbit = Orbit::new(self, reach_ft);
-        orbit.pin(point);
+        orbit.pin(point, false);
         self.autopilot.engage_orbit(orbit);
     }
     /// The sight let its point go: the console searches on from here.
@@ -659,6 +706,7 @@ crate::flight::exact::exact_struct!(Orbit {
     pinned,
     heading,
     altitude,
+    still_s,
 });
 
 #[cfg(test)]

@@ -267,9 +267,10 @@ What the table shows, by inspection:
   the Phoenixes in the tunnel 1.25 ft out, the tanks under the intake nacelles,
   the AIM-120 under the glove pylon and the AIM-9 on its shoulder rail
   (opinionated, John 2026-10-14; [the F-14](../spec/stores-on-pylons.md#the-f-14)).
-- `YAK141.PT` row 5 (16.7 ft out, 0 ft forward) lies ahead of the model's swept wing; T.O.R.E
-  hangs its stores under the wing's chord there, 8.65 ft back, the rail's front at the leading edge
-  ([under the chord](../spec/stores-on-pylons.md#rules)).
+- `YAK141.PT` rows 4 and 5 hang at the Yak-141's inner and outer underwing pylons, 7.5 ft out
+  2.8 ft back and 11 ft out 4.4 ft back, not at these positions (row 5's 16.7 ft at 0 ft forward is
+  ahead of the swept wing, by the tip) (opinionated, John 2026-10-14;
+  [the Yak-141](../spec/stores-on-pylons.md#the-yak-141)).
 
 Weapon and tank rows of the 36 registered identities (sensor, ECM and gun rows
 omitted; Count is the default quantity):

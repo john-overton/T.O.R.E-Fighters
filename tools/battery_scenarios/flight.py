@@ -2224,10 +2224,18 @@ ORBIT_RUNS = {
         "level, with smooth bank and pitch rates and no stall.",
     ),
     "console-pin-release": (
-        ["--orbit-sight", "free", "--seconds", "330", "--console-keys", "15:pin,240:pin"],
-        "Opens searching; P at 15 s pins the ground under the crosshair and the autopilot joins and enters "
+        ["--orbit-sight", "free", "--seconds", "330", "--console-keys", "20:pin,240:pin"],
+        "Opens searching; P at 20 s pins the ground under the crosshair and the autopilot joins and enters "
         "the orbit (guns and camera bear 90% after entry); P at 240 s lets it go and the search rolls out "
         "wings level on the roll-out heading without turning back.",
+    ),
+    "console-gun-lock": (
+        ["--orbit-sight", "free", "--seconds", "240", "--console-keys",
+         "20:pin,90:gunlock,100:slew,180:gunlock"],
+        "Gun lock (John, 2026-10-14): P at 20 s pins and the orbit is joined; the guns lock on the pin at "
+        "90 s and the sensor slews right for 4 s at 100 s; while locked every pipper stays within 300 ft of "
+        "the locked point, the sight looks over 1,000 ft away and the orbit keeps circling the locked point; "
+        "unlocked at 180 s the pippers go back to the sight within 20 s.",
     ),
     "orbit-close": (
         ["--orbit-sight", "pin", "--orbit-close", "120", "--seconds", "130"],

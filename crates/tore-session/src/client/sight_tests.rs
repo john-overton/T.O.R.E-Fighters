@@ -39,6 +39,7 @@ fn host_shows(look: [f64; 2], sight: Sight, returning: bool) -> GunsightReadout 
         status: [Readiness::NoTarget; 3],
         notice: None,
         zoom: 3,
+        gun_lock: None,
     }
 }
 
@@ -435,7 +436,7 @@ fn a_pin_above_the_hemisphere_leaves_the_predicted_camera_at_the_limit() {
 }
 
 /// The sensor console online (slices nr-orbit, protocol 29, and nr-cona,
-/// pending protocol): a gunner opens it with its seat command and the host
+/// protocol 31): a gunner opens it with its seat command and the host
 /// searches straight and level (the sight is free); the console keys step
 /// the commanded heading, altitude and speed; P pins the ground and the host
 /// orbits it; P again lets it go and the host searches again. The client's
@@ -542,6 +543,49 @@ fn the_sensor_console_flies_the_same_orbit_on_the_host_and_the_client() {
         .expect("the gunner has a readout");
     assert!(readout.gunsight.is_some());
     assert_eq!(predicted(&rig).autopilot.mode(), Mode::Orbit);
+    // The gun lock (slice nr-cona): the host lays the guns apart from the
+    // sight, the client's readout shows where, the orbit keeps its point
+    // and the prediction still agrees; again lets the guns go.
+    send(vec![SeatCommand::Console(ConsoleCommand::GunLock)]);
+    rig.run(Duration::from_secs(2));
+    let lock = rig
+        .host
+        .world()
+        .combat
+        .state
+        .ownship(0)
+        .unwrap()
+        .gunship
+        .as_ref()
+        .unwrap()
+        .gun_lock
+        .expect("the host locked the guns");
+    assert_eq!(lock.point, pin);
+    let shown = rig.players[gunner_player]
+        .frames
+        .iter()
+        .rev()
+        .find_map(|f| f.readout.as_ref())
+        .and_then(|r| r.gunsight.as_ref())
+        .and_then(|g| g.gun_lock)
+        .expect("the client's readout shows the gun lock");
+    assert!((0..3).all(|i| (shown[i] - pin[i]).abs() <= 0.125));
+    agrees(&mut rig, 5);
+    send(vec![SeatCommand::Console(ConsoleCommand::GunLock)]);
+    rig.run(Duration::from_secs(2));
+    assert!(
+        rig.host
+            .world()
+            .combat
+            .state
+            .ownship(0)
+            .unwrap()
+            .gunship
+            .as_ref()
+            .unwrap()
+            .gun_lock
+            .is_none()
+    );
     // P again: the pin goes and both search again.
     send(vec![SeatCommand::Console(ConsoleCommand::Pin)]);
     rig.run(Duration::from_secs(3));

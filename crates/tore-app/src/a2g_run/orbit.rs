@@ -65,7 +65,7 @@ struct Extra {
     fire: Option<(f64, f64)>,
     /// The run's clock (seconds after the console opened) for the step.
     clock: f64,
-    keys: Vec<(f64, tore_sim::autopilot::orbit::ConsoleCommand)>,
+    keys: console::Schedule,
 }
 
 fn extra() -> AppResult<Extra> {
@@ -79,7 +79,7 @@ fn extra() -> AppResult<Extra> {
         cycle: Vec::new(),
         fire: None,
         clock: -1.,
-        keys: Vec::new(),
+        keys: console::Schedule::default(),
     };
     for pair in args.windows(2) {
         let value = &pair[1];
@@ -581,6 +581,7 @@ fn search_then_t(scene: &mut Scene, o: &Options, e: &mut Extra) -> AppResult<()>
     );
     let mut pending: Option<(u32, f64)> = None;
     let mut first_t: Option<f64> = None;
+    let mut orbit_far = 0_u64;
     let ticks = (o.seconds * 120.) as u64;
     for tick in 0..ticks {
         let t = tick as f64 / 120.;
@@ -608,10 +609,30 @@ fn search_then_t(scene: &mut Scene, o: &Options, e: &mut Extra) -> AppResult<()>
             let tag = if first_t.is_some() { "t-" } else { "search-" };
             super::console_render::render_seat(scene, t, dir, e.range, tag)?;
         }
+        // ORBIT only on the circle about the target's point (nr-conb saw
+        // ORBIT while the target was 5 nm out; fixed in nr-cona).
+        let flight = &scene.world.cockpits[0].flight;
+        if let Some(status) = flight.console_status()
+            && status.phase == ConsolePhase::Orbit
+            && let Some(orbit) = status.orbit
+        {
+            let away =
+                (flight.position[0] - orbit.point[0]).hypot(flight.position[2] - orbit.point[2]);
+            if away > 1.5 * orbit.radius_ft {
+                orbit_far += 1;
+            }
+        }
         if tick % (120 * 10) == 0 {
             println!("orbit-run: t={t:.0} phase {:?}", phase(scene));
         }
     }
+    report.check(
+        orbit_far == 0,
+        format_args!(
+            "ORBIT shows only on the circle about the target ({:.1} s far)",
+            orbit_far as f64 / 120.
+        ),
+    );
     let last = phase(scene);
     println!("orbit-run: end phase {last:?}");
     report.check(

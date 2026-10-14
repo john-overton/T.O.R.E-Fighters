@@ -1403,6 +1403,7 @@ impl App {
             "sight-pin" => Command::SightPinGround,
             "sensor-console" => Command::SensorConsole,
             "sight-pin-toggle" => Command::SightPinToggle,
+            "gun-lock" => Command::GunLock,
             // The air-to-ground radar page and the Easy targeting cheat's
             // nearest ground target (slice G1).
             "a-g-radar" => return self.air_ground_key(),
@@ -1424,8 +1425,10 @@ impl App {
             "damage-player" => Command::Combat(tore_sim::combat::live::Command::DamagePlayer),
             "incoming" => Command::Combat(tore_sim::combat::live::Command::Incoming),
             "target-jammer" => Command::Combat(tore_sim::combat::live::Command::ToggleTargetJammer),
-            "chaff" => Command::Chaff,
-            "flare" => Command::Flare,
+            // The console's own countermeasure actions (John, 2026-10-14):
+            // bound apart from the main keys, the same dispensers.
+            "chaff" | "console-chaff" => Command::Chaff,
+            "flare" | "console-flare" => Command::Flare,
             "end-flight" => Command::End,
             "restart" => Command::Restart,
             "bookmark" => Command::Bookmark,
@@ -1606,6 +1609,17 @@ impl App {
             }
             Command::SensorConsole => {
                 self.queue(seats::SeatCommand::SensorConsole);
+                Action::None
+            }
+            Command::GunLock => {
+                if !self.input.gunsight() {
+                    self.flight_ui
+                        .message("Gun lock: no gunsight on this aircraft");
+                    return Action::Click;
+                }
+                self.queue(seats::SeatCommand::Console(
+                    tore_sim::autopilot::orbit::ConsoleCommand::GunLock,
+                ));
                 Action::None
             }
             Command::SightPinToggle => {

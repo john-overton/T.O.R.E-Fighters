@@ -51,13 +51,17 @@ const AIRCRAFT: [(AircraftId, &str); 22] = [
 
 /// Camera eye and look point, feet right, up and forward of the aircraft,
 /// and the vertical field of view in degrees.
-const VIEWS: [(&str, [f64; 3], [f64; 3], f64); 4] = [
+const VIEWS: [(&str, [f64; 3], [f64; 3], f64); 5] = [
     ("front-low", [-38., -16., 62.], [0., -3., 0.], 40.),
     ("below-side", [55., -40., -20.], [0., -3., -2.], 45.),
     ("rear-high", [-30., 18., -75.], [0., -2., 0.], 40.),
     // Straight up at the belly from a little ahead, as a pass overhead
     // shows it (John's F-14 picture, 2026-10-14).
     ("below", [0.5, -62., 14.], [0., -3., 2.], 50.),
+    // From the left, a little ahead and below, level with the wing: the
+    // pylons under the wing seen side on (John's Yak-141 reference,
+    // 2026-10-14).
+    ("side-front", [-48., -7., 30.], [0., -1.5, -3.], 38.),
 ];
 
 pub fn run() -> AppResult<()> {
