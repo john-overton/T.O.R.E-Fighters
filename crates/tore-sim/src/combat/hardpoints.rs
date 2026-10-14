@@ -17,10 +17,12 @@
 //! ([`Rack::store_point`]), so the simulation and the drawing place a store
 //! at one point. Two stores on one pylon hang either side of a small bar at
 //! its foot, alongside it as a wingtip missile sits on the tip
-//! ([`slot_offset`]).
+//! ([`slot_offset`]). The F-14's records hang at the real aircraft's
+//! stations instead of where the records put them ([`station_move`]),
+//! its AIM-9 on the glove pylon's shoulder rail ([`Location::Shoulder`]).
 use super::store_sizes::StoreSize;
 use crate::attitude::Vector;
-use tore_formats::aircraft::Hardpoint;
+use tore_formats::aircraft::{AircraftId, Hardpoint};
 use tore_formats::shape::Shape;
 
 /// Retail hardpoint type flag 0x4: the record is a left and right pair.
@@ -87,6 +89,18 @@ pub const CUT_TOLERANCE: f64 = 0.25;
 pub const MAX_NUDGE: f64 = 2.0;
 pub const NUDGE_STEP: f64 = 0.25;
 
+/// How far outboard of its pylon's centre line a store on that pylon's
+/// shoulder rail has its centre line, feet: an AIM-9's fins (2.07 ft
+/// across, at 45 degrees) clear the pylon and the fins of an AIM-120, AIM-7
+/// or AIM-54 hung under the same pylon (fitted, agent decision 2026-10-14).
+pub const SHOULDER_OUT: f64 = 1.25;
+
+/// How far above its pylon's foot (the lugs of the store under the pylon)
+/// a store on the shoulder rail has its centre line, feet: higher than the
+/// store below it, as the real F-14's glove pylon carries its Sidewinder,
+/// and its fins still clear of the glove above (fitted, agent decision).
+pub const SHOULDER_UP: f64 = 0.1;
+
 /// Where the model's underside is sampled over a station's pylons, by index
 /// into [`Rack::over`].
 pub mod sample {
@@ -113,9 +127,16 @@ pub enum Location {
     InternalBay,
     Wing,
     Wingtip,
+    /// T.O.R.E's own, never a source record's: a store on the shoulder rail
+    /// of another station's pylon, beside it ([`station_move`], the F-14's
+    /// glove pylon Sidewinder).
+    Shoulder,
     /// A byte outside the six reviewed names.
     Other(u8),
 }
+
+/// [`Location::Shoulder`]'s byte, outside the source's 0 to 5.
+pub const SHOULDER_BYTE: u8 = 0x80;
 
 impl Location {
     pub fn from_byte(byte: u8) -> Self {
@@ -126,6 +147,7 @@ impl Location {
             3 => Self::InternalBay,
             4 => Self::Wing,
             5 => Self::Wingtip,
+            SHOULDER_BYTE => Self::Shoulder,
             other => Self::Other(other),
         }
     }
@@ -137,6 +159,7 @@ impl Location {
             Self::InternalBay => 3,
             Self::Wing => 4,
             Self::Wingtip => 5,
+            Self::Shoulder => SHOULDER_BYTE,
             Self::Other(byte) => byte,
         }
     }
@@ -144,7 +167,7 @@ impl Location {
     pub fn external(self) -> bool {
         matches!(
             self,
-            Self::Centerline | Self::Fuselage | Self::Wing | Self::Wingtip
+            Self::Centerline | Self::Fuselage | Self::Wing | Self::Wingtip | Self::Shoulder
         )
     }
 }
@@ -262,7 +285,8 @@ impl Rack {
     }
     /// How deep the pylon or rail is from the surface over it to its
     /// stores' tops (lugs): [`RAIL_DEPTH`] at a fuselage or centreline
-    /// station, [`PYLON_DEPTH`] on a wing.
+    /// station, [`PYLON_DEPTH`] on a wing (and the pylon a shoulder rail
+    /// rides on).
     pub fn depth(self) -> f64 {
         match self.location() {
             Location::Fuselage | Location::Centerline => RAIL_DEPTH,
@@ -332,6 +356,11 @@ impl Rack {
                     };
                 }
                 let up = match self.surface(offset) {
+                    // On a shoulder rail: its centre line a little above
+                    // the foot of the pylon beside it.
+                    Some(surface) if self.location() == Location::Shoulder => {
+                        surface - self.depth() + SHOULDER_UP
+                    }
                     Some(surface)
                         if self.location().external() && self.location() != Location::Wingtip =>
                     {
@@ -533,13 +562,6 @@ pub fn placed(h: &Hardpoint, model: Option<&Underside>) -> (Vector, Rack) {
                 None => lowest = true,
             }
         }
-        let points = [
-            (right, mount[2]),
-            ((right - DUAL_PYLON_SPREAD).max(0.), mount[2]),
-            (right + DUAL_PYLON_SPREAD, mount[2]),
-            (right, mount[2] + TANDEM_SAMPLE),
-            (right, mount[2] - TANDEM_SAMPLE),
-        ];
         let surface = |r: f64, f: f64| {
             if lowest {
                 model.lowest(r, f, from)
@@ -547,7 +569,161 @@ pub fn placed(h: &Hardpoint, model: Option<&Underside>) -> (Vector, Rack) {
                 model.height(r, f, from, 6)
             }
         };
-        rack.over = points.map(|(r, f)| surface(r, f).map(|h| h as f32));
+        rack.over = sample_points(right, mount[2]).map(|(r, f)| surface(r, f).map(|h| h as f32));
+    }
+    (mount, rack)
+}
+
+/// Where the model's underside is read for a pylon `right` feet out and
+/// `forward` feet ahead, as [right, forward] in [`sample`] order.
+fn sample_points(right: f64, forward: f64) -> [(f64, f64); 5] {
+    [
+        (right, forward),
+        ((right - DUAL_PYLON_SPREAD).max(0.), forward),
+        (right + DUAL_PYLON_SPREAD, forward),
+        (right, forward + TANDEM_SAMPLE),
+        (right, forward - TANDEM_SAMPLE),
+    ]
+}
+
+/// How a moved station's stores hang ([`station_move`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Hang {
+    /// As the record's location hangs them, under the surface straight
+    /// above the pylon.
+    AsRecorded,
+    /// Under the lowest surface over the store's length, `half` feet either
+    /// side of the station, so a store under a part that slopes along it (an
+    /// F-14 tank under its intake ramp) does not cut into it.
+    Lowest { half: f64 },
+    /// On the shoulder rail of the pylon [`SHOULDER_OUT`] inboard of the
+    /// station ([`Location::Shoulder`]): its centre line [`SHOULDER_UP`]
+    /// above that pylon's foot, the pylon's surface read where the pylon's
+    /// own station is, `pylon_forward` feet forward, so the two share a
+    /// foot.
+    Shoulder { pylon_forward: f64 },
+}
+
+/// Where one aircraft type's source record hangs its stores in T.O.R.E,
+/// where the real aircraft's stations are not where the record is: feet
+/// right of the centreline (the right-hand side; a paired record mirrors
+/// it) and forward of the reference point, and how the stores hang there.
+/// The record's height, quantities and weapons are kept.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StationMove {
+    /// The source location the record must have; any other record keeps
+    /// its own position.
+    pub location: Location,
+    pub right: f64,
+    pub forward: f64,
+    pub hang: Hang,
+}
+
+/// The F-14's glove pylon, feet out: just outboard of the intake nacelle
+/// (the model's nacelle runs 3.5 to 6.5 ft out), under the glove.
+const F14_GLOVE: f64 = 7.5;
+/// Where the F-14's glove pylon's stores hang, feet forward: the AIM-120's
+/// record (source 14 units), under the middle of the glove.
+const F14_GLOVE_FORWARD: f64 = 14. / 3.;
+/// Where the F-14's shoulder rail AIM-9 hangs, feet forward: its nose
+/// level with the AIM-120's under the pylon (12 ft against 9.35 ft long),
+/// which also keeps its tail fins clear of the glove's trailing edge.
+const F14_SHOULDER_FORWARD: f64 = 6.0;
+
+/// Source record `hardpoint`'s station on aircraft `id`, where T.O.R.E
+/// moves it to the real aircraft's station (opinionated, John 2026-10-14:
+/// "default tank pylons are actually under engine intake nacelles", "AIM-54s
+/// grouped closer together and front missiles tucked backward where tanks
+/// are", "AIM-120 default pylon tucked under wing flaring next to AIM-9";
+/// the numbers are agent decisions read from the model). The F-14's real
+/// stations: 1A/1B and 8A/8B the glove pylons (an AIM-9 on the shoulder
+/// rail, an AIM-7, AIM-54 or AIM-120 under the pylon), 2 and 7 under the
+/// intake nacelles (the tanks), 3 to 6 the tunnel pallets between the
+/// nacelles (AIM-54s or AIM-7s, two ahead and two behind):
+///
+/// - record 4, the tunnel (AIM-54s): 1.25 ft either side of the centreline
+///   (was 3.0, and 2.5 after PY3's move aside), the pairs either side of
+///   0 ft forward, so the front pair hangs where the tanks hung and the rear
+///   pair behind it (front 0.5 to 13.5 ft, rear -13.5 to -0.5 ft forward);
+/// - record 5, the tanks: under the nacelles, 4.75 ft out (was 3.0, in the
+///   tunnel), at the record's 6.67 ft forward, their tops under the lowest
+///   part of the nacelle along them;
+/// - record 6, the glove pylon (AIM-120): 7.5 ft out (was 6.0, beside the
+///   nacelle), at the record's 4.67 ft forward;
+/// - record 7, the AIM-9: on that pylon's shoulder rail, [`SHOULDER_OUT`]
+///   outboard of it (8.75 ft out, was 8.67), its nose level with the
+///   AIM-120's (6.0 ft forward, was 1.67).
+pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
+    let at = |location, right, forward, hang| {
+        Some(StationMove {
+            location,
+            right,
+            forward,
+            hang,
+        })
+    };
+    match (id, hardpoint) {
+        (AircraftId::F14, 4) => at(Location::Fuselage, 1.25, 0., Hang::AsRecorded),
+        (AircraftId::F14, 5) => at(
+            Location::Fuselage,
+            4.75,
+            20. / 3.,
+            Hang::Lowest { half: 6.5 },
+        ),
+        (AircraftId::F14, 6) => at(
+            Location::Wing,
+            F14_GLOVE,
+            F14_GLOVE_FORWARD,
+            Hang::AsRecorded,
+        ),
+        (AircraftId::F14, 7) => at(
+            Location::Wing,
+            F14_GLOVE + SHOULDER_OUT,
+            F14_SHOULDER_FORWARD,
+            Hang::Shoulder {
+                pylon_forward: F14_GLOVE_FORWARD,
+            },
+        ),
+        _ => None,
+    }
+}
+
+/// [`placed`] for source record `hardpoint` of aircraft `id`: at the real
+/// station where [`station_move`] moves it (no move aside there: the
+/// station is placed by hand), otherwise where [`placed`] puts it.
+pub fn placed_on(
+    id: AircraftId,
+    hardpoint: usize,
+    h: &Hardpoint,
+    model: Option<&Underside>,
+) -> (Vector, Rack) {
+    let Some(moved) =
+        station_move(id, hardpoint).filter(|m| m.location == Location::from_byte(h.location))
+    else {
+        return placed(h, model);
+    };
+    let mut mount = h.position.map(|v| f64::from(v) / 3.);
+    mount[0] = moved.right;
+    mount[2] = moved.forward;
+    let mut rack = Rack::from_source(h);
+    let (pylon, forward) = match moved.hang {
+        Hang::Shoulder { pylon_forward } => {
+            rack.location = SHOULDER_BYTE;
+            (moved.right - SHOULDER_OUT, pylon_forward)
+        }
+        _ => (moved.right, mount[2]),
+    };
+    if let Some(model) = model {
+        let from = mount[1];
+        rack.over = sample_points(pylon, forward)
+            .map(|(r, f)| model.height(r, f, from, 6).map(|h| h as f32));
+        if let Hang::Lowest { half } = moved.hang {
+            let steps = (half / 0.5).round() as i32;
+            rack.over[sample::RECORD] = (-steps..=steps)
+                .filter_map(|k| model.height(pylon, mount[2] + f64::from(k) * 0.5, from, 6))
+                .reduce(f64::min)
+                .map(|h| h as f32);
+        }
     }
     (mount, rack)
 }
@@ -1160,5 +1336,181 @@ mod tests {
         let (mount, rack) = placed(&wing(12), Some(&model));
         assert_eq!(mount[0], 4.);
         assert_eq!(rack.over[sample::RECORD], Some(-4.));
+    }
+
+    /// A model shaped like the F-14's underside, feet: the tunnel ceiling
+    /// 2.7 ft down out to 3 ft, an intake nacelle from 3.5 to 6 ft out whose
+    /// bottom ramps from 2.7 ft down at 13 ft forward to 4 ft down at 0 and
+    /// behind, and the glove 0.6 ft up from 6.5 to 12 ft out.
+    fn f14_like() -> Underside {
+        let face = |positions: Vec<[f32; 3]>| tore_formats::shape::Face {
+            positions: positions.into_iter().map(|p| p.map(|v| v * 3.)).collect(),
+            colors: vec![1; 4],
+            fog: Default::default(),
+            uv: Vec::new(),
+            texture: String::new(),
+            subtype: 0x20,
+            normal: None,
+            address: 0,
+        };
+        let flat = |x0: f32, x1: f32, up: f32| {
+            face(vec![
+                [x0, -20., up],
+                [x1, -20., up],
+                [x1, 30., up],
+                [x0, 30., up],
+            ])
+        };
+        let shape = Shape {
+            lines: Vec::new(),
+            faces: vec![
+                flat(0., 3., -2.7),
+                flat(6.5, 12., 0.6),
+                // The nacelle: flat behind, then the intake ramp.
+                face(vec![
+                    [3.5, -20., -4.],
+                    [6., -20., -4.],
+                    [6., 0., -4.],
+                    [3.5, 0., -4.],
+                ]),
+                face(vec![
+                    [3.5, 0., -4.],
+                    [6., 0., -4.],
+                    [6., 13., -2.7],
+                    [3.5, 13., -2.7],
+                ]),
+            ],
+            billboards: Vec::new(),
+            state_words: Default::default(),
+        };
+        Underside::of(&shape, 1. / 3.)
+    }
+
+    /// The F-14's weapon and tank records, as F14.PT has them
+    /// (docs/formats/aircraft-ordnance.md).
+    fn f14_record(index: usize) -> Hardpoint {
+        let (location, flags, position, store, count) = match index {
+            4 => (1, 0x0155, [9, -23, 24], "AIM54C.JT", 4),
+            5 => (1, 0x0605, [9, -23, 20], "F250.GAS", 2),
+            6 => (4, 0x07f5, [18, -20, 14], "AIM120.JT", 2),
+            _ => (4, 0x0485, [26, -16, 5], "AIM9M.JT", 2),
+        };
+        Hardpoint {
+            location,
+            flags,
+            position,
+            store: Some(store.into()),
+            count,
+            weight_class: 0,
+        }
+    }
+
+    #[test]
+    fn the_f14_hangs_its_stores_at_its_real_stations() {
+        let model = f14_like();
+        let f14 = |index| placed_on(AircraftId::F14, index, &f14_record(index), Some(&model));
+        let phoenix = StoreSize::of_shape(Some("PHENX.SH"));
+        let tank = StoreSize::body(super::super::store_sizes::tank_body(1_675.));
+        // The tunnel: the Phoenixes 1.25 ft either side of the centreline,
+        // close enough that their fins (3 ft across, at 45 degrees) just
+        // clear, two ahead and two behind; the front pair hangs where the
+        // tanks hung (6.67 ft forward), the rear pair behind it.
+        let (mount, tunnel) = f14(4);
+        assert_eq!([mount[0], mount[2]], [1.25, 0.]);
+        let points: Vec<Vector> = (0..4)
+            .map(|slot: u16| tunnel.store_point(mount, 4, usize::from(slot % 2), slot / 2, phoenix))
+            .collect();
+        let front = points.iter().map(|p| p[2]).fold(f64::MIN, f64::max);
+        let rear = points.iter().map(|p| p[2]).fold(f64::MAX, f64::min);
+        assert!((front - (phoenix.length + TANDEM_GAP) / 2.).abs() < 1e-9);
+        assert!(front - phoenix.length / 2. > 0. && (front - 20. / 3.).abs() < 0.5);
+        assert!(rear + phoenix.length / 2. < 0.);
+        let fin = std::f64::consts::FRAC_1_SQRT_2 * phoenix.width / 2.;
+        assert!(
+            2. * 1.25 - 2. * fin > 0.25,
+            "the pairs' fins clear each other"
+        );
+        for p in &points {
+            assert!((p[1] + phoenix.top - (-2.7 - RAIL_DEPTH)).abs() < 1e-4);
+        }
+        // The tanks: under the nacelles, at the record's distance forward,
+        // their tops under the lowest part of the intake ramp above them.
+        let (mount, nacelle) = f14(5);
+        assert_eq!([mount[0], mount[2]], [4.75, 20. / 3.]);
+        for side in 0..2 {
+            let p = nacelle.store_point(mount, 2, side, 0, tank);
+            assert!((p[0].abs() - 4.75).abs() < 1e-9);
+            // The ramp's lowest point read: 6.5 ft behind the record.
+            let lowest = -4. + (20. / 3. - 6.5) * 1.3 / 13.;
+            assert!(
+                (p[1] + tank.top - (lowest - RAIL_DEPTH)).abs() < 1e-4,
+                "{p:?}"
+            );
+        }
+        // The glove pylon: 7.5 ft out, its AIM-120 1 ft under the glove.
+        let amraam = StoreSize::of_shape(Some("AMRAM.SH"));
+        let (mount, glove) = f14(6);
+        assert_eq!([mount[0], mount[2]], [7.5, 14. / 3.]);
+        assert_eq!(glove.location(), Location::Wing);
+        let under = glove.store_point(mount, 2, 0, 0, amraam);
+        assert!((under[1] + amraam.top - (0.6 - PYLON_DEPTH)).abs() < 1e-4);
+        // The AIM-9 on that pylon's shoulder rail: outboard of it, a little
+        // above its foot (the AIM-120's lugs), its nose level with the
+        // AIM-120's.
+        let aim9 = StoreSize::of_shape(Some("SIDEM.SH"));
+        let (mount, rail) = f14(7);
+        assert_eq!(rail.location(), Location::Shoulder);
+        assert!(rail.two_sided(mount));
+        let beside = rail.store_point(mount, 2, 1, 0, aim9);
+        assert!((beside[0] + 7.5 + SHOULDER_OUT).abs() < 1e-9, "left side");
+        assert!((beside[1] - (0.6 - PYLON_DEPTH + SHOULDER_UP)).abs() < 1e-4);
+        assert!(((beside[2] + aim9.length / 2.) - (under[2] + amraam.length / 2.)).abs() < 0.05);
+        assert_eq!(rail.release_point(mount, 2, 1, 0, aim9), beside);
+        // Every other aircraft, and an F-14 record not where F14.PT has it,
+        // hang where the general rule puts them.
+        let f18 = f14_record(6);
+        assert_eq!(
+            placed_on(AircraftId::F18, 6, &f18, Some(&model)),
+            placed(&f18, Some(&model))
+        );
+        let elsewhere = Hardpoint {
+            location: 0,
+            ..f14_record(6)
+        };
+        assert_eq!(
+            placed_on(AircraftId::F14, 6, &elsewhere, Some(&model)),
+            placed(&elsewhere, Some(&model))
+        );
+    }
+
+    /// A store on the shoulder rail clears the pylon, and its fins clear
+    /// those of the missiles the F-14's glove pylon carries under it, all
+    /// with fins at 45 degrees: no fin of one reaches across a fin of the
+    /// other, wherever along their lengths the fins are.
+    #[test]
+    fn a_shoulder_rail_sidewinder_clears_the_missile_under_its_pylon() {
+        let root2 = std::f64::consts::SQRT_2;
+        for upper in ["SIDEM.SH", "SIDEB.SH", "AM9X.SH"] {
+            let upper = StoreSize::of_shape(Some(upper));
+            let reach = upper.width / 2.;
+            // Its inner fins clear the pylon's side.
+            assert!(SHOULDER_OUT - reach / root2 > PYLON_HALF_WIDTH, "{upper:?}");
+            for lower in ["AMRAM.SH", "SPAR.SH", "PHENX.SH"] {
+                let lower = StoreSize::of_shape(Some(lower));
+                // The lower store's centre is its body's half depth under
+                // the foot; the upper's SHOULDER_UP above it. The facing
+                // fins (the upper's down and in, the lower's down and out)
+                // meet only if both reach the crossing point.
+                let drop = SHOULDER_UP + lower.top;
+                let to_crossing_upper = (SHOULDER_OUT + drop) / root2;
+                let to_crossing_lower = (SHOULDER_OUT - drop) / root2;
+                assert!(
+                    to_crossing_upper > reach || to_crossing_lower > lower.width / 2.,
+                    "{upper:?} over {lower:?}"
+                );
+                // Bodies apart.
+                assert!(SHOULDER_OUT.hypot(drop) > upper.top + lower.top);
+            }
+        }
     }
 }

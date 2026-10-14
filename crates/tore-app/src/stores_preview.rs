@@ -42,10 +42,13 @@ const AIRCRAFT: [(AircraftId, &str); 13] = [
 
 /// Camera eye and look point, feet right, up and forward of the aircraft,
 /// and the vertical field of view in degrees.
-const VIEWS: [(&str, [f64; 3], [f64; 3], f64); 3] = [
+const VIEWS: [(&str, [f64; 3], [f64; 3], f64); 4] = [
     ("front-low", [-38., -16., 62.], [0., -3., 0.], 40.),
     ("below-side", [55., -40., -20.], [0., -3., -2.], 45.),
     ("rear-high", [-30., 18., -75.], [0., -2., 0.], 40.),
+    // Straight up at the belly from a little ahead, as a pass overhead
+    // shows it (John's F-14 picture, 2026-10-14).
+    ("below", [0.5, -62., 14.], [0., -3., 2.], 50.),
 ];
 
 pub fn run() -> AppResult<()> {
@@ -105,6 +108,29 @@ pub fn run() -> AppResult<()> {
             }
         }
         let short = short.as_str();
+        // `TORE_STORES_PREVIEW_SECTIONS=FEET` prints the model's underside
+        // (feet up: the lowest face from FEET up to 12 ft above it, a
+        // number that does not parse reads from -12) every half foot out
+        // and every two feet along: where nacelles, a tunnel and a glove
+        // are when placing stations.
+        if let Some(from) = std::env::var("TORE_STORES_PREVIEW_SECTIONS")
+            .ok()
+            .map(|v| v.parse().unwrap_or(-12.))
+        {
+            for forward in (-12..=14).rev().map(|k| f64::from(k) * 2.) {
+                let row: Vec<String> = (0..=24)
+                    .map(|k| {
+                        airframe
+                            .underside(f64::from(k) * 0.5, forward, from, 0)
+                            .map_or("   .".into(), |h| format!("{h:5.1}"))
+                    })
+                    .collect();
+                println!(
+                    "Stores preview: {short} section fwd {forward:5.1}: {}",
+                    row.join("")
+                );
+            }
+        }
         for (index, h) in profile.hardpoints.iter().enumerate() {
             println!(
                 "Stores preview: {short} hardpoint {index} at {:?} pylon top {:?}",
@@ -173,6 +199,7 @@ pub fn run() -> AppResult<()> {
             ),
             ("empty", store_poses(&config, |_| 0, loaded)),
         ];
+        clip_report(short, &airframe, &art, &loads[1].1);
         let mut state = airframe.start(&world);
         let ground = f64::from(world.height(state.position[0] as f32, state.position[2] as f32));
         state.position[1] = ground.max(0.) + HEIGHT_FT;
@@ -257,6 +284,7 @@ pub fn run() -> AppResult<()> {
                     ("rear", [t[0] + 2.5, t[1] - 4.5, t[2] - 18.]),
                     ("ahead", [t[0] + 0.2, t[1] - 1., t[2] + 22.]),
                     ("side", [t[0] + 5., t[1] - 13., t[2] + 1.]),
+                    ("behind", [t[0] + 0.3, t[1] - 1.5, t[2] - 20.]),
                 ]
             } else {
                 [
@@ -264,6 +292,9 @@ pub fn run() -> AppResult<()> {
                     ("rear", [t[0] + 5., t[1] - 7., t[2] - 22.]),
                     ("ahead", [t[0] + 0.5, t[1] - 0.5, t[2] + 30.]),
                     ("side", [t[0] + 18., t[1] - 5., t[2]]),
+                    // Straight along the station from behind and a little
+                    // below, where a nacelle or intake hides it from ahead.
+                    ("behind", [t[0] + 0.5, t[1] - 1.5, t[2] - 24.]),
                 ]
             };
             for (view, eye) in views {
@@ -767,5 +798,65 @@ impl Sheet {
             crate::replay::png::encode_rgba(self.width as u32, self.height as u32, &rgba)?,
         )?;
         Ok(())
+    }
+}
+
+/// Prints, for each loaded store, how far its drawn shape reaches into the
+/// model: the deepest point of the weapon's shape (or a fitted body's
+/// surface) above the model's lowest face straight below it, feet, and
+/// where (aircraft frame). 0 means nothing of it is inside the airframe.
+fn clip_report(
+    short: &str,
+    airframe: &crate::aircraft::Airframe,
+    art: &CombatArt,
+    stores: &[StorePose],
+) {
+    use crate::snapshot::StoreLook;
+    for store in stores {
+        let shape = store
+            .shape
+            .as_deref()
+            .and_then(|name| art.shape(name))
+            .filter(|_| store.look == StoreLook::Store);
+        let points: Vec<[f64; 3]> = match shape {
+            Some(shape) => shape
+                .faces
+                .iter()
+                .filter(|f| !crate::pylons::texture_only(f))
+                .flat_map(|f| f.positions.iter())
+                .map(|q| [q[0], q[2], q[1]].map(|v| f64::from(v) / 3.))
+                .collect(),
+            None => {
+                let size = store.size();
+                let radius = size.top;
+                (0..16)
+                    .flat_map(|k| {
+                        let (s, c) = (f64::from(k) * std::f64::consts::TAU / 16.).sin_cos();
+                        [-0.3, 0., 0.3].map(|a| [c * radius, s * radius, a * size.length])
+                    })
+                    .collect()
+            }
+        };
+        let mut worst: (f64, [f64; 3]) = (0., [0.; 3]);
+        for place in crate::pylons::hung(store).iter().filter(|p| p.held) {
+            for q in &points {
+                let v: [f64; 3] = std::array::from_fn(|i| place.centre[i] + q[i]);
+                if let Some(face) = airframe.underside(v[0], v[2], v[1] - 12., 0)
+                    && v[1] - face > worst.0
+                {
+                    worst = (v[1] - face, v);
+                }
+            }
+        }
+        println!(
+            "Stores preview: {short} clip hardpoint {} {} {:?}: {:.2} ft at [{:.2} {:.2} {:.2}]",
+            store.hardpoint,
+            store.shape.as_deref().unwrap_or("body"),
+            store.rack.location(),
+            worst.0,
+            worst.1[0],
+            worst.1[1],
+            worst.1[2]
+        );
     }
 }

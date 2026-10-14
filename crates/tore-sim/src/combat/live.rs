@@ -722,8 +722,11 @@ impl Configuration {
             .ok()
             .and_then(|bytes| tore_formats::shape::Shape::parse(&bytes).ok())
             .map(|shape| super::hardpoints::Underside::of(&shape, super::debris::scale(a.id)));
-        let place =
-            |h: &tore_formats::aircraft::Hardpoint| super::hardpoints::placed(h, model.as_ref());
+        // Source record `index`'s station: where the stores hang, at the
+        // real aircraft's station where T.O.R.E moves it (the F-14's).
+        let place = |index: usize, h: &tore_formats::aircraft::Hardpoint| {
+            super::hardpoints::placed_on(a.id, index, h, model.as_ref())
+        };
         let mut tanks = Vec::new();
         for (index, h) in hardpoints.iter().enumerate().take(9) {
             let default = h.store.as_deref().filter(|name| name.ends_with(".GAS"));
@@ -735,7 +738,7 @@ impl Configuration {
                 && !retained_equipment
                 && (h.flags & 0x200 != 0 || default.is_some())
             {
-                let (mount, rack) = place(h);
+                let (mount, rack) = place(index, h);
                 tanks.push(TankStation {
                     hardpoint: index,
                     mount,
@@ -763,7 +766,7 @@ impl Configuration {
         let fixed_external_equipment_lbs =
             i32::try_from(i64::from(external_equipment_lbs) - tank_mass)
                 .map_err(|_| super::invalid("invalid fixed external hardware mass"))?;
-        for h in hardpoints {
+        for (index, h) in hardpoints.iter().enumerate() {
             let Some(name) = h.store.as_deref().filter(|n| n.ends_with(".JT")) else {
                 continue;
             };
@@ -842,7 +845,7 @@ impl Configuration {
             {
                 return Err(super::invalid("unreviewed live-fire station"));
             }
-            let (mount, rack) = place(h);
+            let (mount, rack) = place(index, h);
             stations.push(Station {
                 weapon,
                 mount,
@@ -897,7 +900,7 @@ impl Configuration {
             }
             if let Some(weapon) = selected {
                 hardpoint_slots[hardpoint] = Some(stations.len());
-                let (mount, rack) = place(h);
+                let (mount, rack) = place(hardpoint, h);
                 stations.push(Station {
                     weapon,
                     mount,
