@@ -1913,3 +1913,145 @@ fn a_no_laze_decision_round_trips_through_a_checkpoint() {
     assert_eq!(back, strike);
     assert_eq!(back.no_laze().map(|c| c.kind), Some(NoLaze::Manual));
 }
+
+// The cue passing its closest point to the aim (slice nr-cue, John's answer 12
+// of 2026-10-13): the release check solves the closest approach inside the
+// tick, so the answer does not depend on the tick rate or on where the ticks
+// fall on the cue's path.
+
+/// A cue flying straight past an aim at `cross_ft` to the side, at
+/// `speed_fps`, sampled `rate_hz` times a second from `phase` of a tick before
+/// the closest point's tick: where it lies from the aim (x across, z along),
+/// with the exact time (s) of the closest point, 1.5 s in.
+fn cue_path(cross_ft: f64, speed_fps: f64, rate_hz: f64, phase: f64) -> (Vec<[f64; 2]>, f64) {
+    let along = |t: f64| speed_fps * (1.5 - t);
+    let dt = 1. / rate_hz;
+    let first = 1.4 + phase * dt;
+    let samples = (0..40)
+        .map(|k| [cross_ft, along(first + k as f64 * dt)])
+        .collect();
+    (samples, 1.5)
+}
+
+#[test]
+fn the_closest_approach_is_found_once_and_exactly_at_any_tick_rate() {
+    for rate in [30., 60., 120., 240.] {
+        for phase in [0., 0.17, 0.5, 0.83, 0.999] {
+            let (samples, exact_s) = cue_path(126.4, 790., rate, phase);
+            let first_s = 1.4 + phase / rate;
+            let mut closing = true;
+            let mut found = Vec::new();
+            for (k, pair) in samples.windows(2).enumerate() {
+                let (answer, still) = closest_approach(pair[0], pair[1], closing);
+                closing = still;
+                if let Some(c) = answer {
+                    // The tick's start in seconds, and the closest point's.
+                    let at_s = first_s + (k as f64 + c.fraction) / rate;
+                    found.push((k, c, at_s));
+                }
+            }
+            assert_eq!(found.len(), 1, "{rate} Hz, phase {phase}: {found:?}");
+            let (_, c, at_s) = found[0];
+            assert!((c.distance - 126.4).abs() < 1e-9, "{rate} Hz: {c:?}");
+            assert!((at_s - exact_s).abs() < 1e-9, "{rate} Hz: {at_s} s");
+            assert!(c.fraction > 0. && c.fraction <= 1.);
+        }
+    }
+}
+
+#[test]
+fn a_bend_at_a_sample_and_a_cue_that_starts_opening_count_once() {
+    // Closing for two ticks, then the path bends at the second sample and
+    // opens: the closest point is that sample, found by the tick after it.
+    let a = [40., 100.];
+    let b = [40., 60.];
+    let c = [60., 70.];
+    let (first, closing) = closest_approach(a, b, true);
+    assert_eq!(first, None);
+    assert!(closing, "still closing at the end of the first tick");
+    let (second, closing) = closest_approach(b, c, closing);
+    let found = second.expect("the bend at b is the closest point");
+    assert_eq!(found.fraction, 0.);
+    assert_eq!(found.at, b);
+    assert!((found.distance - 40_f64.hypot(60.)).abs() < 1e-12);
+    assert!(!closing);
+    // Nothing more once it is opening.
+    assert_eq!(closest_approach(c, [80., 80.], closing).0, None);
+    // The first sample may be the closest (the cue appears and opens), a
+    // cue that has not moved has none.
+    let (start, _) = closest_approach([50., 0.], [60., 0.], true);
+    assert_eq!(start.map(|c| c.distance), Some(50.));
+    assert_eq!(closest_approach([50., 0.], [50., 0.], true), (None, false));
+    // A path that crosses the aim itself is zero away.
+    let (through, _) = closest_approach([0., 30.], [0., -10.], true);
+    let through = through.unwrap();
+    assert!(through.distance.abs() < 1e-12);
+    assert!((through.fraction - 0.75).abs() < 1e-12);
+}
+
+#[test]
+fn the_cue_passing_answer_does_not_depend_on_the_tick_rate() {
+    let world = quiet_world();
+    let circle = release_circle_ft(Experience::Average);
+    // The drawn aim lies 90 ft from the target along the track, so the cue's
+    // offset from the led target is not minimal where it is closest to the aim.
+    let aim_ft = [20., 88.];
+    let decide = |samples: &[[f64; 2]], strike: &mut Strike| {
+        let aim = [0., 0., 24_000.];
+        let cx = world.context(0);
+        samples.iter().any(|r| {
+            let impact = [aim[0] + r[0], 0., aim[2] + r[1]];
+            strike.cue_passing(&cx, Some(impact), aim)
+        })
+    };
+    for inside_by in [-1.5, 1.5] {
+        // The cue passes the aim at `cross` such that, at its closest point,
+        // it lies `inside_by` ft inside (positive) or outside the ring.
+        let radius = circle + (GATE_SHARE * circle).max(GATE_FLOOR_FT);
+        // r = (cross, 0) at the closest point; q = |r + aim_ft|.
+        let cross = |c: f64| (c + aim_ft[0]).hypot(aim_ft[1]);
+        let (mut low, mut high) = (0., circle);
+        for _ in 0..80 {
+            let mid = (low + high) / 2.;
+            if cross(mid) > radius - inside_by {
+                high = mid;
+            } else {
+                low = mid;
+            }
+        }
+        let want = inside_by > 0.;
+        for rate in [30., 60., 120., 240.] {
+            for phase in [0., 0.2, 0.4, 0.6, 0.8] {
+                let (samples, _) = cue_path(low, 790., rate, phase);
+                let mut strike = Strike::new(1);
+                strike.aim_ft = aim_ft;
+                strike.inside = true;
+                strike.gate_ft = (GATE_SHARE * circle).max(GATE_FLOOR_FT);
+                assert_eq!(
+                    decide(&samples, &mut strike),
+                    want,
+                    "{rate} Hz, phase {phase}, {inside_by} ft inside the ring"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_cue_strike_state_with_a_last_sample_round_trips_through_a_checkpoint() {
+    let world = quiet_world();
+    let mut strike = Strike::new(3);
+    strike.aim_ft = [10., -20.];
+    strike.inside = true;
+    let cx = world.context(5);
+    assert!(!strike.cue_passing(&cx, Some([100., 0., 24_300.]), [0., 0., 24_000.]));
+    assert!(strike.cue_last.is_some());
+    let models = Models::default();
+    let coded = to_bytes(&strike, &models).unwrap();
+    let back: Strike = from_bytes(&coded, &models).unwrap();
+    assert_eq!(back, strike);
+    // No cue, no last sample.
+    let mut cleared = back;
+    assert!(!cleared.cue_passing(&cx, None, [0., 0., 24_000.]));
+    assert_eq!(cleared.cue_last, None);
+}
