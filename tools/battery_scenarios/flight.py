@@ -220,12 +220,12 @@ APPROACH_TARGET = {
 # exactly inside John's range, kept as a regression window of plus or minus 6
 # percent (docs/testing/lane-flight.md). All of them are within 10 percent of the
 # range, so the range's own window already holds them; these record the values.
-KNOWN_LIFTOFF = {"su27": 128.1, "su25": 123.0, "f22": 127.7, "f22n": 127.7, "faxx": 127.7}
+KNOWN_LIFTOFF = {"su27": 128.1, "su25": 120.2, "f22": 127.7, "f22n": 127.7, "faxx": 127.7}
 KNOWN_APPROACH = {"f18": 135.1, "su27": 142.2, "f22": 148.5, "f22n": 148.5, "faxx": 148.5}
 # Internal fuel of each aircraft's default load, pounds.
 INTERNAL_FUEL_LB = {
     "f18": 11220, "rafale": 9900, "f14": 15741, "a4e": 4434, "x31": 9975, "mig29": 13000, "su27": 19000,
-    "mig21": 4534, "su25": 22664, "mig23": 11704, "su35": 22000, "f22": 25000, "f22n": 25000, "faxx": 25000,
+    "mig21": 4534, "su25": 6614, "mig23": 11704, "su35": 22000, "f22": 25000, "f22n": 25000, "faxx": 25000,
 }
 
 
@@ -266,9 +266,11 @@ def check_approach_speed(output: str, ac: str) -> list[str]:
 # The G a held pull reaches at 450 knots and 5,000 ft with the imported speeds
 # (`--retail-stall-speeds`, 2026-09-29). The weight-scaled stall speed keeps the
 # combat-speed G: the scaling fades out by the 4 G row (docs/spec/takeoff-ground-contact.md).
+# The Su-25 was re-recorded on 2026-10-13 (4.99 to 5.41) when its record lost
+# the Su-24's mass and thrust (docs/spec/aircraft-records.md).
 PULL_G_RETAIL = {
     "f18": 7.64, "rafale": 7.39, "f14": 6.18, "a4e": 6.13, "x31": 7.25, "mig29": 7.15, "su27": 7.54,
-    "mig21": 6.47, "su25": 4.99, "mig23": 6.77, "su35": 6.96, "f22": 6.91, "f22n": 6.91, "faxx": 6.91,
+    "mig21": 6.47, "su25": 5.41, "mig23": 6.77, "su35": 6.96, "f22": 6.91, "f22n": 6.91, "faxx": 6.91,
 }
 
 
