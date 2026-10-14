@@ -13,6 +13,8 @@
 //!   model's underside over its pylon, a fuselage or centreline store's
 //!   2 inches under the body on a short rail, and a wingtip store's centre
 //!   line on the tip's edge with nothing drawn under it (John 2026-10-13).
+//!   A store on a pylon's shoulder rail (the F-14's glove pylon AIM-9)
+//!   hangs beside that pylon on an arm ([`shoulder_rail`]).
 //!   A released store leaves from that same point, so it never jumps.
 //! - **Several on one pylon** hang off a small bar at the pylon's foot: two
 //!   alongside it, one each side, as a wingtip missile sits on the tip
@@ -37,7 +39,9 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use tore_formats::shape::Shape;
 use tore_sim::attitude::{Basis, Vector};
-use tore_sim::combat::hardpoints::{Location, PylonPlace, rack_group, shoulder, slot_offset};
+use tore_sim::combat::hardpoints::{
+    Location, PylonPlace, SHOULDER_OUT, SHOULDER_UP, rack_group, shoulder, slot_offset,
+};
 use tore_sim::combat::store_sizes::StoreSize;
 use tore_world::snapshot::{StoreLook, StorePose};
 
@@ -223,6 +227,14 @@ pub fn vertices(
         // Each pylon once, with what it carries.
         let mut drawn: Vec<&PylonPlace> = Vec::new();
         for place in &places {
+            // A store on a shoulder rail rides beside the pylon it shares.
+            if store.rack.location() == Location::Shoulder {
+                if !drawn.contains(&&place.pylon) {
+                    drawn.push(&place.pylon);
+                    shoulder_rail(out, &at, airframe, &place.pylon, &dims, size);
+                }
+                continue;
+            }
             // A wingtip store sits on the tip itself: no pylon or rail.
             if store.rack.location() != Location::Wingtip && !drawn.contains(&&place.pylon) {
                 drawn.push(&place.pylon);
@@ -413,6 +425,50 @@ fn hanger(
     }
 }
 
+/// What holds a store on a shoulder rail (the F-14's glove pylon
+/// Sidewinder): the pylon it rides beside, [`SHOULDER_OUT`] inboard of its
+/// centre line with its foot [`SHOULDER_UP`] below that line (the pylon
+/// the station under it hangs from, drawn again so it stands when that
+/// station is empty), and an arm from the pylon's side out along the
+/// store's top, 0.6 of its length (3 to 6 ft), the rail it hangs from.
+fn shoulder_rail(
+    out: &mut Vec<f32>,
+    at: &impl Fn(Vector) -> Vector,
+    airframe: Option<&Airframe>,
+    pylon: &PylonPlace,
+    dims: &Dims,
+    size: StoreSize,
+) {
+    let p = pylon.point;
+    let side = if p[0] < 0. { -1. } else { 1. };
+    let inboard = p[0] - side * SHOULDER_OUT;
+    let foot = p[1] - SHOULDER_UP;
+    hanger(
+        out,
+        at,
+        airframe,
+        &PylonPlace {
+            point: [inboard, foot - dims.top, p[2]],
+            slots: pylon.slots.clone(),
+        },
+        dims,
+        1,
+        size,
+    );
+    let inner = inboard + side * PYLON_WIDTH / 2.;
+    let top = p[1] + dims.top;
+    block(
+        out,
+        at,
+        [(inner + p[0]) / 2., top + ARM / 2., p[2] + dims.middle],
+        [(p[0] - inner).abs(), ARM, (0.6 * dims.length).clamp(3., 6.)],
+        PYLON,
+    );
+}
+
+/// A shoulder rail's arm's depth, feet (fitted).
+const ARM: f64 = 0.15;
+
 /// The back and front ends of a pylon `length` long centred at `middle`
 /// (feet forward) under `right`, as [forward, surface height]: as far as
 /// the model's underside over it reaches, at least 1.5 ft, and within
@@ -486,7 +542,7 @@ fn slab(
 
 /// The texture-only faces (the missile exhaust sheets) the flying store
 /// omits too.
-fn texture_only(face: &tore_formats::shape::Face) -> bool {
+pub(crate) fn texture_only(face: &tore_formats::shape::Face) -> bool {
     matches!(face.subtype, 0x4c | 0x5c | 0x6c | 0x7c)
 }
 
@@ -966,6 +1022,12 @@ mod tests {
             (1, [3., -6., 0.], 4, "PHENX.SH"),
             (0, [0., -6., 0.], 4, "MK82.SH"),
             (5, [16.2, 0.2, 0.], 2, "SIDEM.SH"),
+            (
+                tore_sim::combat::hardpoints::SHOULDER_BYTE,
+                [8.75, -5., 0.],
+                2,
+                "SIDEM.SH",
+            ),
         ] {
             let s = station(location, mount, count, shape);
             let pose = StorePose {
@@ -999,6 +1061,42 @@ mod tests {
                 assert_eq!(gone, [release], "{shape} on {location}, {rounds} left");
             }
         }
+    }
+
+    /// A store on a shoulder rail (the F-14's glove pylon Sidewinder)
+    /// hangs beside the pylon it shares, a little above that pylon's foot,
+    /// with the pylon drawn (it stands when the station under it is empty)
+    /// and an arm out over the store; nothing is drawn straight above it.
+    #[test]
+    fn a_shoulder_rail_store_hangs_beside_its_pylon() {
+        use tore_sim::combat::hardpoints::{PYLON_DEPTH, SHOULDER_BYTE};
+        let airframe = flat_wing();
+        let store = on_flat_wing(plain([8.75, -5., 0.], SHOULDER_BYTE, 2));
+        assert_eq!(store.rack.location(), Location::Shoulder);
+        let centres: Vec<Vector> = hung(&store).iter().map(|h| h.centre).collect();
+        let up = -PYLON_DEPTH + SHOULDER_UP;
+        assert_eq!(centres, [[8.75, up, 0.], [-8.75, up, 0.]]);
+        let out = draw(std::slice::from_ref(&store), &airframe);
+        let grey = grey(&out);
+        let pylon = 8.75 - SHOULDER_OUT;
+        // The pylon, from its foot into the wing.
+        let slab: Vec<&[f32; 3]> = grey
+            .iter()
+            .filter(|v| (f64::from(v[0]) - pylon).abs() <= PYLON_WIDTH / 2. + 1e-4)
+            .collect();
+        let low = slab.iter().map(|v| v[1]).fold(f32::MAX, f32::min);
+        let high = slab.iter().map(|v| v[1]).fold(f32::MIN, f32::max);
+        assert!((f64::from(low) + PYLON_DEPTH).abs() < 1e-4, "foot {low}");
+        assert!(f64::from(high) >= 0. && f64::from(high) <= SINK + 1e-4);
+        // The arm reaches out to the store's centre line, above it.
+        let reach = grey.iter().map(|v| v[0]).fold(f32::MIN, f32::max);
+        assert!((f64::from(reach) - 8.75).abs() < 1e-4, "arm to {reach}");
+        assert!(
+            grey.iter()
+                .filter(|v| f64::from(v[0]) > pylon + PYLON_WIDTH)
+                .all(|v| f64::from(v[1]) > up),
+            "the arm is above the store's centre line"
+        );
     }
 
     /// Every pylon, rack, fitted body and weapon face is lit as the
