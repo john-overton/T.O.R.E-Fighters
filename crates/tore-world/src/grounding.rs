@@ -2,7 +2,7 @@
 //! (docs/formats/objects-and-shapes.md, "Grounding").
 //!
 //! **The rule.** Every ground object, surface unit, man, wreck, ruin and
-//! parked aircraft stands with the lowest point of its drawn shape (faces and
+//! parked aircraft stands with the lowest point of its drawn shape (faces, lines and
 //! sprites, at the scale it is drawn) on the ground: [`lift_ft`] is how far
 //! its origin stands above the ground for that. Only three kinds keep their
 //! authored rule ([`Footing`]): runways and pavement stand on their pavement
@@ -12,7 +12,7 @@
 //!
 //! Every path that places or draws something on the ground goes through this
 //! module: the layout and ground target placements (`terrain::Placements::
-//! stance`, which also sets the contact, collision and hit box), moving
+//! stance_on_terrain`, which also sets the contact, collision and hit box), moving
 //! units, wrecks, ruins, the men's sprites, parked aircraft. Never ground an
 //! object any other way: before this module each path did its own grounding
 //! (faces only, sprites skipped, men exempt, the boost about the centre) and
@@ -66,24 +66,60 @@ pub fn footing(definition: &Definition) -> Footing {
 }
 
 /// The lowest and highest point of a drawn shape along its up axis, in shape
-/// units about its origin, or `None` for an empty shape. Faces count every
+/// units about its origin, or `None` for an empty shape. Faces and lines count every
 /// vertex; a viewer-facing sprite spans half its height either side of its
 /// centre, as `Billboard::face` draws it.
 pub fn height_range(shape: &Shape) -> Option<[f64; 2]> {
     let mut range = [f64::INFINITY, f64::NEG_INFINITY];
-    let faces = shape
-        .faces
-        .iter()
-        .flat_map(|face| face.positions.iter().map(|p| f64::from(p[2])));
-    let sprites = shape.billboards.iter().flat_map(|sprite| {
-        let h = f64::from(sprite.size[1]) * 0.5;
-        let c = f64::from(sprite.center[2]);
-        [c - h, c + h]
-    });
-    for v in faces.chain(sprites) {
+    for point in points(shape) {
+        let v = f64::from(point[2]);
         range = [range[0].min(v), range[1].max(v)];
     }
     range.iter().all(|v| v.is_finite()).then_some(range)
+}
+
+/// Geometry used for footing and contact bounds. Lines are physical geometry
+/// too: radar antenna frames can extend below their filled faces. Components
+/// retain their decoded offsets within the complete shape.
+pub fn points(shape: &Shape) -> impl Iterator<Item = [f32; 3]> + '_ {
+    shape
+        .faces
+        .iter()
+        .flat_map(|f| f.positions.iter().copied())
+        .chain(shape.lines.iter().flat_map(|l| l.positions))
+        .chain(shape.billboards.iter().flat_map(|sprite| {
+            let [w, h] = sprite.size.map(|v| v * 0.5);
+            let [x, y, z] = sprite.center;
+            [[x - w, y - w, z - h], [x + w, y + w, z + h]]
+        }))
+}
+
+/// Vertical correction for a complete placed shape on uneven terrain. Keep
+/// the authored orientation and internal mount offsets; translate the whole
+/// assembly until its nearest geometry touches the terrain. The caller adds
+/// any authored placement height after this correction. Fitted, agent choice.
+/// This measures vertices (including line ends and sprite bounds), not the
+/// interior of a face crossing a terrain ridge.
+pub fn terrain_correction_ft(
+    shape: &Shape,
+    scale: f64,
+    basis: tore_sim::attitude::Basis,
+    origin: [f64; 3],
+    height: impl Fn(f64, f64) -> f64,
+) -> f64 {
+    points(shape)
+        .map(|p| {
+            let at: [f64; 3] = std::array::from_fn(|i| {
+                origin[i]
+                    + scale
+                        * (basis.right[i] * f64::from(p[0])
+                            + basis.forward[i] * f64::from(p[1])
+                            + basis.up[i] * f64::from(p[2]))
+            });
+            height(at[0], at[2]) - at[1]
+        })
+        .reduce(f64::max)
+        .unwrap_or(0.)
 }
 
 /// The lowest point of viewer-facing sprites, in shape units about their
@@ -95,7 +131,7 @@ pub fn sprites_bottom(sprites: &[Billboard]) -> Option<f64> {
         .reduce(f64::min)
 }
 
-/// The bottom of a drawn shape: its lowest point (faces and sprites) in shape
+/// The bottom of a drawn shape: its lowest point (faces, lines and sprites) in shape
 /// units about its origin, or `None` for an empty shape.
 pub fn bottom(shape: &Shape) -> Option<f64> {
     height_range(shape).map(|[low, _]| low)
@@ -235,6 +271,65 @@ mod tests {
             ..upright(0., 1.)
         };
         assert_eq!(lift_ft(&empty, 1.), 0.);
+    }
+
+    #[test]
+    fn antenna_frame_and_complete_assembly_define_the_footing() {
+        let mut shape = upright(-13., 20.);
+        shape.lines.push(tore_formats::shape::Line {
+            positions: [[0., 0., -14.], [0., 0., 18.]],
+            color: 1,
+            fog: Default::default(),
+        });
+        assert_eq!(bottom(&shape), Some(-14.));
+        assert!((lift_ft(&shape, 4. / 3.) - 56. / 3.).abs() < 1e-12);
+        // The whole dish and frame move together, not separately onto the ground.
+        let basis = tore_sim::attitude::Basis::new(0., 0., 0.);
+        assert_eq!(
+            terrain_correction_ft(&shape, 1., basis, [0., 13., 0.], |_, _| 0.),
+            1.
+        );
+    }
+
+    #[test]
+    fn footing_samples_the_slope_under_the_geometry_not_only_the_origin() {
+        let shape = upright(0., 20.);
+        let basis = tore_sim::attitude::Basis::new(0., 0., 0.);
+        // One foot is ten feet east, where the ground rises five feet.
+        assert_eq!(
+            terrain_correction_ft(&shape, 1., basis, [0.; 3], |x, _| x * 0.5),
+            5.
+        );
+        // A floating complete assembly is lowered, not clamped to upward moves.
+        assert_eq!(
+            terrain_correction_ft(&shape, 1., basis, [0., 9., 0.], |_, _| 0.),
+            -9.
+        );
+    }
+
+    #[test]
+    fn placed_contact_and_draw_origin_rise_together_and_keep_authored_height() {
+        use crate::terrain::Placements;
+        use std::collections::BTreeMap;
+        let resources: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        let mut sources = Placements::of_types(&resources, std::iter::empty());
+        sources
+            .definitions
+            .insert("TEST.OT".into(), definition("TEST.OT", "_OBJProc", 0));
+        sources.shapes.insert("TEST.OT".into(), upright(0., 20.));
+        let layout = tore_formats::mission::Layout::parse(
+            "TEST.MM",
+            b"textFormat\nobj\n type TEST.OT\n pos 0 7 0\n.\n",
+        )
+        .unwrap();
+        let p = &layout.placements[0];
+        let flat = sources.stance(p, 0.).unwrap();
+        let slope = sources.stance_on_terrain(p, |x, _| x * 0.5).unwrap();
+        assert_eq!(flat.origin[1], 7.);
+        assert_eq!(slope.origin[1], 12.);
+        assert_eq!(slope.center[1] - flat.center[1], 5.);
+        assert_eq!(slope.support_origin, flat.support_origin);
+        assert_eq!(slope.half, flat.half);
     }
 
     #[test]

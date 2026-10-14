@@ -904,7 +904,7 @@ def grounding_problems(output: str) -> list[str]:
         if f2 != "-" and low < 0 and abs(float(f2) - low) > 3.0:
             problems.append(f"{name}: lowest point {low} ft is {abs(float(f2) - low):.1f} ft from its F2 offset {f2}")
     for name, want in [("FACTD.OT", 42.7), ("HANGR.OT", 26.7), ("FACT1.OT", 162.7), ("TROOPS.NT", 3.3),
-                       ("GCI.NT", 17.3)]:
+                       ("GCI.NT", 18.7)]:
         m = rows.get(name)
         if m is None or abs(float(m.group(7)) - want) > 0.11:
             problems.append(f"{name}: lift {m and m.group(7)}, want {want} ft")

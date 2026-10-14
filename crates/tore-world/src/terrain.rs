@@ -858,6 +858,34 @@ impl Placements {
         Ok(())
     }
 
+    /// The shared stance on actual terrain, used by both drawing and contact.
+    /// Whole assemblies keep their internal offsets and authored height.
+    pub fn stance_on_terrain(
+        &self,
+        placement: &tore_formats::mission::Placement,
+        height: impl Fn(f64, f64) -> f64,
+    ) -> Option<Stance> {
+        let ground = height(
+            f64::from(placement.position[0]),
+            f64::from(placement.position[2]),
+        );
+        let mut stance = self.stance(placement, ground)?;
+        let definition = self.definitions.get(&placement.object_type)?;
+        if crate::grounding::footing(definition) == crate::grounding::Footing::Bottom {
+            let shape = self.shapes.get(&placement.object_type)?;
+            let correction = crate::grounding::terrain_correction_ft(
+                shape,
+                stance.scale,
+                stance.basis,
+                stance.origin,
+                height,
+            ) + f64::from(placement.position[1]);
+            stance.origin[1] += correction;
+            stance.center[1] += correction;
+        }
+        Some(stance)
+    }
+
     /// Where `placement` stands on ground `ground` feet high, or `None` when it
     /// has no drawable shape or the shape has no finite extent.
     pub fn stance(
@@ -874,23 +902,7 @@ impl Placements {
         let support_height = ground;
         let mut min = [f64::INFINITY; 3];
         let mut max = [f64::NEG_INFINITY; 3];
-        // A viewer-facing sprite (the men) spans its width across either
-        // horizontal axis and half its height either side of its centre,
-        // as `Billboard::face` draws it.
-        let sprites = shape.billboards.iter().flat_map(|sprite| {
-            let [w, h] = sprite.size.map(|v| v * 0.5);
-            let c = sprite.center;
-            [
-                [c[0] - w, c[1] - w, c[2] - h],
-                [c[0] + w, c[1] + w, c[2] + h],
-            ]
-        });
-        for point in shape
-            .faces
-            .iter()
-            .flat_map(|face| face.positions.iter().copied())
-            .chain(sprites)
-        {
+        for point in crate::grounding::points(shape) {
             let mapped = [
                 f64::from(point[0]),
                 f64::from(point[2]),
@@ -1208,7 +1220,9 @@ impl Terrain {
             }
             let ground =
                 f64::from(self.height(placement.position[0] as f32, placement.position[2] as f32));
-            let Some(stance) = sources.stance(placement, ground) else {
+            let Some(stance) = sources
+                .stance_on_terrain(placement, |x, z| f64::from(self.height(x as f32, z as f32)))
+            else {
                 continue;
             };
             let Stance {

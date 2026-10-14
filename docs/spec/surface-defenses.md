@@ -75,6 +75,25 @@ The NT unit record layout is in
 Related specs: [AI](ai.md) (the B42 weapon service this reuses), [missiles](missiles.md),
 [RWR](rwr.md), [debrief](debrief.md), [Quick Mission menu](quick-mission-menu.md).
 
+### Grounded objective assemblies
+
+A ground objective's complete shape stands on the terrain with its dish,
+mast, antenna frame, base and other decoded components kept together.
+Faces, line endpoints and sprite bounds all count. On a slope, the whole
+shape moves vertically until its nearest geometry meets the ground, within
+0.05 ft in the audit, then keeps any authored placement height. Drawing and
+hit boxes use the same stance. Runways, bridges, roads and ships keep their
+existing pavement, map-height and waterline rules.
+
+This slope support is **fitted**, an agent decision on 2026-10-14 responding
+to John's buried-objective report. It preserves rigid shapes rather than
+flattening terrain; a downhill edge may remain above the slope. Terrain
+ridge crossings inside a face are not covered by vertex sampling. The
+original game's slope treatment remains unknown. The next research step
+is to recover how its placed-object contact point selects terrain support.
+See [the shared grounding rule](../formats/objects-and-shapes.md#grounding-every-object-stands-on-the-bottom-of-its-shape)
+for implementation and audit coverage.
+
 ## Provenance and how to read this
 
 Every number carries a basis, in a table column or in the sentence.

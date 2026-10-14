@@ -456,16 +456,15 @@ impl Scenery {
             let Some(shape) = sources.shapes.get(&placement.object_type) else {
                 continue;
             };
-            let ground = f64::from(
-                terrain.height(placement.position[0] as f32, placement.position[2] as f32),
-            );
             let Some(Stance {
                 scale,
                 basis,
                 origin,
                 support_origin,
                 ..
-            }) = sources.stance(placement, ground)
+            }) = sources.stance_on_terrain(placement, |x, z| {
+                f64::from(terrain.height(x as f32, z as f32))
+            })
             else {
                 continue;
             };

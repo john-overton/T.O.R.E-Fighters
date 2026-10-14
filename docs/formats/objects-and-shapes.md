@@ -456,7 +456,7 @@ after). Positions of every placed object are unchanged.
 ## Grounding: every object stands on the bottom of its shape
 
 **The rule.** Every ground object, surface unit, man, wreck, ruin and parked
-aircraft stands with the lowest point of its drawn shape (faces and sprites,
+aircraft stands with the lowest point of its drawn shape (faces, lines and sprites,
 at the size it is drawn) on the ground. Only runways and pavement (their
 pavement plane), bridges and roads (the map's height at their origin) and
 ships (their waterline, the origin) keep their authored rule. A presentation
@@ -469,6 +469,24 @@ also sets the contact, collision and hit box), moving units, wrecks and
 ruins, the men's sprites and parked aircraft. Never ground an object any
 other way. (The city fill cuts its kit pieces base-centred, at the lowest
 point of their faces, the same rule.)
+
+**Objective sites on slopes (nr-objg, 2026-10-14).** The complete shape,
+including line endpoints, supplies the footing and contact bounds. The GCI
+and KING antenna frames reach one shape unit below their filled faces,
+1.33 ft at their placed scale. Their origin now stands 18.67 ft above flat
+ground rather than 17.33 ft. The dish, mast and base keep their decoded
+relative positions; they are not grounded separately.
+
+`Placements::stance_on_terrain` uses the same rule for rendering and hit
+boxes. It samples terrain under the transformed geometry, then translates
+the complete assembly vertically until its minimum clearance is zero.
+Authored placement height is preserved above that support. This fixes an
+origin-only height sample burying the uphill side of a site. Runway planes,
+map-tied bridge/road origins and ship waterlines retain their existing rules.
+This is **fitted**, an agent decision, not a recovered retail slope rule.
+It does not flatten terrain or rotate buildings into a hillside. A rigid
+base can have a gap on its downhill side; interior face crossings over a
+terrain ridge are not measured by this vertex-based rule.
 
 **Why it kept coming back.** Until slice GROUND (2026-10-13) each path did
 its own grounding: the placement path stood land units and buildings on
@@ -487,11 +505,31 @@ data).
 **The audit.** `tore-app --surface-dump --grounding [TYPE ...]` stands every
 OT, NT and PT of the import and the retail media on flat ground through the
 placement path (or `surface::parked::place`) and draws it through the
-scenery's own code: its faces, its hit box, and a man (sprites or cards) at
+scenery's own code: its faces and lines, its hit box, and a man (sprites or cards) at
 300 ft and boosted (three times, the cap) at 6,000 ft. A type that stands on its bottom and draws more than
 0.05 ft below the ground or above it is listed as a problem; the battery
 scenario `surface-grounding` fails on any. On the retail data: 392 types,
 0 problems (on the base before this slice, 11: the five types above).
+
+The companion `--surface-dump --grounding-sites` checks authored M/MM
+placements in every theater (the text-format missions and layouts; the 246
+compiled campaign missions are counted but not read, as there is no campaign
+runtime), actual redrawn base-layout placements, and every offered Quick
+Mission template plus the three unused Ukraine templates, at its authored
+position and relocated with seed 1 and heavy defenses. A mission's
+`<selected>` object (the player's own aircraft, airborne) is skipped.
+It reports before/after minimum geometry clearance per changed placement,
+the largest gap left under the shape's bottom (`gap`) and how far it reaches
+from its origin (`reach`), and totals per theater. The tolerance is 0.05 ft
+relative to authored height. On 2026-10-14 the largest downhill gaps were on
+the big multi-building and flat-pad shapes: CITY2 (Ukraine `~UKRF.MM`, lifted
+167 ft, 265 ft gap), the city blocks (CTYBKC lifted 99 ft in `EGY.MM`, 202 ft
+gap), REACTB and LOT pads (95 and 49 ft); compact objectives stay small
+(GCI 1.3 ft, trucks about 5 ft lifted and 11 ft gap).
+Non-drawable types are counted as unavailable, and pavement, map-tied shapes
+and ships as exceptions, not silently counted as grounded solids. It uses the current runtime base-grid fallback for unavailable generated
+campaign terrain aliases. It does not claim original campaign terrain
+composition, campaign playthrough or every possible random seed.
 
 ### Building grounding (2026-10-12)
 
