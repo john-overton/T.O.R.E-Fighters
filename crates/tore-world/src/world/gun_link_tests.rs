@@ -15,6 +15,7 @@ use crate::{
     test_support::resources::{THEATER, gunship_resources},
 };
 use tore_formats::aircraft::AircraftId;
+use tore_sim::autopilot::orbit::ConsoleCommand;
 use tore_sim::combat::{gunship::Sight, live::Command as Live};
 
 /// A synthetic AC-130 over the synthetic ground, in the ordinary game: no
@@ -222,25 +223,41 @@ fn said(out: &TickOutput, words: &str) -> bool {
         .any(|cue| matches!(cue, Cue::Message { text, .. } if text.contains(words)))
 }
 
-/// Ctrl+9 (slice nr-orbit): the sensor console pins a free sight under its
-/// crosshair, engages orbit hold about the pin, follows a new pin, and a
-/// second press hands the aircraft back. A slew of the pin moves the orbit's
-/// point.
+/// Ctrl+9 (slices nr-orbit and nr-cona): with a free sight the console opens
+/// searching (no pin under the crosshair any more, John 2026-10-14); P pins
+/// the ground under the crosshair and the autopilot orbits it, a new pin
+/// moves the point, P again lets it go and the console searches again, and a
+/// second Ctrl+9 hands the aircraft back.
 #[test]
-fn the_sensor_console_flies_the_orbit_about_the_pin() {
-    use tore_sim::autopilot::Mode;
+fn the_sensor_console_searches_then_orbits_the_pin() {
+    use tore_sim::autopilot::{Mode, orbit::ConsolePhase};
     let mut world = gunship();
     step(&mut world, false, Vec::new());
     let sight = |world: &World| world.combat.state.own().gunship.as_ref().unwrap().sight;
+    let phase = |world: &World| world.cockpits[0].flight.console_status().map(|s| s.phase);
     assert_eq!(sight(&world), Sight::Free);
     let out = step(&mut world, false, vec![SeatCommand::SensorConsole]);
-    assert!(said(&out, "orbit hold on"));
+    assert!(said(&out, "Sensor console: search"));
+    assert_eq!(
+        sight(&world),
+        Sight::Free,
+        "opening the console pins nothing"
+    );
+    assert_eq!(world.cockpits[0].flight.autopilot.mode(), Mode::Orbit);
+    assert_eq!(phase(&world), Some(ConsolePhase::Search));
+    assert!(world.cockpits[0].flight.orbit_status().is_none());
+    // P: the sight pins the ground under its crosshair, the orbit follows.
+    step(
+        &mut world,
+        false,
+        vec![SeatCommand::Console(ConsoleCommand::Pin)],
+    );
+    step(&mut world, false, Vec::new());
     let Sight::Pinned(pin) = sight(&world) else {
-        panic!("the console pins a free sight");
+        panic!("P pins a free sight");
     };
-    let flight = &world.cockpits[0].flight;
-    assert_eq!(flight.autopilot.mode(), Mode::Orbit);
-    let status = flight.orbit_status().unwrap();
+    assert_eq!(phase(&world), Some(ConsolePhase::Join));
+    let status = world.cockpits[0].flight.orbit_status().unwrap();
     assert_eq!(status.point, pin);
     assert!(status.radius_ft >= status.minimum_radius_ft);
     // A new pin moves the point the orbit circles.
@@ -252,9 +269,71 @@ fn the_sensor_console_flies_the_orbit_about_the_pin() {
     let status = world.cockpits[0].flight.orbit_status().unwrap();
     assert_eq!(status.point, moved);
     assert!(status.centre != pin && status.centre != moved, "sliding");
+    // P again lets the pin go: the console searches on.
+    step(
+        &mut world,
+        false,
+        vec![SeatCommand::Console(ConsoleCommand::Pin)],
+    );
+    step(&mut world, false, Vec::new());
+    assert_eq!(sight(&world), Sight::Free);
+    assert_eq!(phase(&world), Some(ConsolePhase::Search));
     let out = step(&mut world, false, vec![SeatCommand::SensorConsole]);
     assert!(said(&out, "you have the aircraft"));
     assert_eq!(world.cockpits[0].flight.autopilot.mode(), Mode::Off);
+    // Opened on a pin, the console orbits from the start.
+    world.combat.state.own_mut().gunship.as_mut().unwrap().sight = Sight::Pinned(moved);
+    let out = step(&mut world, false, vec![SeatCommand::SensorConsole]);
+    assert!(said(&out, "Sensor console: orbit"));
+    assert!(world.cockpits[0].flight.orbit_status().is_some());
+}
+
+/// The console's heading, altitude and speed keys reach the autopilot
+/// through the seat command and answer with what they set; with the console
+/// closed they say so.
+#[test]
+fn the_console_keys_step_the_search() {
+    let mut world = gunship();
+    step(&mut world, false, Vec::new());
+    let out = step(
+        &mut world,
+        false,
+        vec![SeatCommand::Console(ConsoleCommand::Altitude(1))],
+    );
+    assert!(said(&out, "Sensor console is closed"));
+    step(&mut world, false, vec![SeatCommand::SensorConsole]);
+    let before = world.cockpits[0].flight.console_status().unwrap();
+    let out = step(
+        &mut world,
+        false,
+        vec![
+            SeatCommand::Console(ConsoleCommand::Heading(2)),
+            SeatCommand::Console(ConsoleCommand::Altitude(-2)),
+            SeatCommand::Console(ConsoleCommand::Speed(100)),
+        ],
+    );
+    assert!(said(&out, "Search heading"));
+    assert!(said(&out, "Search altitude"));
+    assert!(said(&out, "Speed"));
+    let after = world.cockpits[0].flight.console_status().unwrap();
+    let turned = (after.heading_deg - before.heading_deg).rem_euclid(360.);
+    assert!(turned > 5. && turned <= 15., "{turned}");
+    assert!(after.altitude_ft < before.altitude_ft);
+    assert!(after.speed_kt > before.speed_kt);
+}
+
+/// P on an aircraft without the gunsight says so.
+#[test]
+fn the_pin_key_is_the_gunships() {
+    let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
+    spec.start = Start::Airborne { altitude_ft: 5_000 };
+    let mut world = World::new(&spec, &gunship_resources(), Seating::SinglePlayer).unwrap();
+    let out = step(
+        &mut world,
+        false,
+        vec![SeatCommand::Console(ConsoleCommand::Pin)],
+    );
+    assert!(said(&out, "no gunsight"));
 }
 
 /// An aircraft with no gunsight refuses the console.

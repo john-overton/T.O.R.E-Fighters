@@ -434,75 +434,106 @@ fn a_pin_above_the_hemisphere_leaves_the_predicted_camera_at_the_limit() {
     assert!(from_eye[1] < 0.);
 }
 
-/// The sensor console online (slice nr-orbit, protocol 29): a gunner opens
-/// it with its seat command, the host flies orbit hold about the pin it
-/// makes, the client's prediction flies the same orbit from its exact
-/// state and, with the pin standing, agrees with the host at every snapshot;
-/// a second press hands the aircraft back on both.
+/// The sensor console online (slices nr-orbit, protocol 29, and nr-cona,
+/// pending protocol): a gunner opens it with its seat command and the host
+/// searches straight and level (the sight is free); the console keys step
+/// the commanded heading, altitude and speed; P pins the ground and the host
+/// orbits it; P again lets it go and the host searches again. The client's
+/// prediction flies the same search and orbit from its exact state and, with
+/// nothing changing, agrees with the host at every snapshot; a second
+/// Ctrl+9 hands the aircraft back on both.
 #[test]
 fn the_sensor_console_flies_the_same_orbit_on_the_host_and_the_client() {
+    use std::cell::RefCell;
     use tore_sim::autopilot::Mode;
+    use tore_sim::autopilot::orbit::{ConsoleCommand, ConsolePhase};
     let mut rig = gunships(80, 0.);
-    let open = Rc::new(Cell::new(false));
-    let close = Rc::new(Cell::new(false));
-    let (o, c) = (Rc::clone(&open), Rc::clone(&close));
-    let mut sent = (false, false);
+    let queue: Rc<RefCell<Vec<SeatCommand>>> = Rc::default();
+    let q = Rc::clone(&queue);
     let gunner_player = rig.join(
         |c| c.plane = Some(0),
-        Box::new(move |_, _, _| {
-            let mut controls = Controls::default();
-            if o.get() && !sent.0 {
-                sent.0 = true;
-                controls.commands = vec![SeatCommand::SensorConsole];
-            } else if c.get() && !sent.1 {
-                sent.1 = true;
-                controls.commands = vec![SeatCommand::SensorConsole];
-            }
-            controls
+        Box::new(move |_, _, _| Controls {
+            commands: std::mem::take(&mut *q.borrow_mut()),
+            ..Controls::default()
         }),
     );
+    let send = |commands: Vec<SeatCommand>| queue.borrow_mut().extend(commands);
     assert!(rig.run_until(Duration::from_secs(5), |r| r.seated(gunner_player)));
     rig.players[gunner_player].keep_frames = true;
     rig.run(Duration::from_secs(1));
-    open.set(true);
-    rig.run(Duration::from_secs(3));
     let host_flight = |rig: &Rig| rig.host.world().cockpits[0].flight.clone();
-    assert_eq!(host_flight(&rig).autopilot.mode(), Mode::Orbit);
-    let host_guns = rig
-        .host
-        .world()
-        .combat
-        .state
-        .ownship(0)
-        .unwrap()
-        .gunship
-        .clone()
-        .unwrap();
-    let Sight::Pinned(pin) = host_guns.sight else {
-        panic!("the console pins the free sight: {:?}", host_guns.sight);
+    let predicted = |rig: &Rig| {
+        rig.players[gunner_player]
+            .client
+            .prediction()
+            .unwrap()
+            .plane()
+            .flight
+            .clone()
     };
-    let settled = rig.players[gunner_player].client.stats();
-    rig.run(Duration::from_secs(10));
-    let stats = rig.players[gunner_player].client.stats();
-    assert!(stats.hashes_compared > settled.hashes_compared + 200);
-    assert_eq!(stats.mismatches, settled.mismatches, "{stats:#?}");
-    assert_eq!(stats.corrections, settled.corrections, "{stats:#?}");
-    let predicted = rig.players[gunner_player]
-        .client
-        .prediction()
-        .unwrap()
-        .plane()
-        .flight
-        .clone();
-    let status = predicted
+    let sight = |rig: &Rig| {
+        rig.host
+            .world()
+            .combat
+            .state
+            .ownship(0)
+            .unwrap()
+            .gunship
+            .as_ref()
+            .unwrap()
+            .sight
+    };
+    // Runs `seconds` once settled and checks the client never disagreed.
+    let agrees = |rig: &mut Rig, seconds: u64| {
+        let settled = rig.players[gunner_player].client.stats();
+        rig.run(Duration::from_secs(seconds));
+        let stats = rig.players[gunner_player].client.stats();
+        assert!(stats.hashes_compared > settled.hashes_compared + 20 * seconds);
+        assert_eq!(stats.mismatches, settled.mismatches, "{stats:#?}");
+        assert_eq!(stats.corrections, settled.corrections, "{stats:#?}");
+    };
+    // Ctrl+9 with a free sight: the search, nothing pinned.
+    send(vec![SeatCommand::SensorConsole]);
+    rig.run(Duration::from_secs(3));
+    assert_eq!(sight(&rig), Sight::Free);
+    let phase = |flight: &flight::State| flight.console_status().map(|s| s.phase);
+    assert_eq!(phase(&host_flight(&rig)), Some(ConsolePhase::Search));
+    assert_eq!(phase(&predicted(&rig)), Some(ConsolePhase::Search));
+    agrees(&mut rig, 5);
+    // The heading, altitude and speed keys reach the host's autopilot, and
+    // the client's prediction carries the same commanded values.
+    let before = host_flight(&rig).console_status().unwrap();
+    send(vec![
+        SeatCommand::Console(ConsoleCommand::Heading(2)),
+        SeatCommand::Console(ConsoleCommand::Altitude(1)),
+        SeatCommand::Console(ConsoleCommand::SpeedStep(1)),
+    ]);
+    rig.run(Duration::from_secs(2));
+    let after = host_flight(&rig).console_status().unwrap();
+    assert!((after.heading_deg - before.heading_deg).rem_euclid(360.) > 5.);
+    assert!(after.altitude_ft > before.altitude_ft);
+    assert!(after.speed_kt > before.speed_kt);
+    let client = predicted(&rig).console_status().unwrap();
+    assert_eq!(
+        (client.heading_deg, client.altitude_ft, client.speed_kt),
+        (after.heading_deg, after.altitude_ft, after.speed_kt)
+    );
+    agrees(&mut rig, 5);
+    // P: the ground under the crosshair is pinned and both fly the orbit.
+    send(vec![SeatCommand::Console(ConsoleCommand::Pin)]);
+    rig.run(Duration::from_secs(3));
+    let Sight::Pinned(pin) = sight(&rig) else {
+        panic!("P pins the free sight: {:?}", sight(&rig));
+    };
+    agrees(&mut rig, 10);
+    let status = predicted(&rig)
         .orbit_status()
         .expect("the client flies the orbit");
     assert_eq!(status.point, pin);
     assert_eq!(host_flight(&rig).orbit_status().unwrap().point, pin);
     // The client's sensor console screen (tore-app `sensor_console::
     // console_active`, slice nr-fltv) shows while its readout has the
-    // gunsight and its own prediction flies orbit hold: both hold here, and
-    // the mode is off again on both sides once the console closes below.
+    // gunsight and its own prediction flies the console's autopilot.
     let readout = rig.players[gunner_player]
         .frames
         .iter()
@@ -510,10 +541,17 @@ fn the_sensor_console_flies_the_same_orbit_on_the_host_and_the_client() {
         .find_map(|f| f.readout.as_ref())
         .expect("the gunner has a readout");
     assert!(readout.gunsight.is_some());
-    assert_eq!(predicted.autopilot.mode(), Mode::Orbit);
-    close.set(true);
+    assert_eq!(predicted(&rig).autopilot.mode(), Mode::Orbit);
+    // P again: the pin goes and both search again.
+    send(vec![SeatCommand::Console(ConsoleCommand::Pin)]);
+    rig.run(Duration::from_secs(3));
+    assert_eq!(sight(&rig), Sight::Free);
+    assert_eq!(phase(&host_flight(&rig)), Some(ConsolePhase::Search));
+    assert_eq!(phase(&predicted(&rig)), Some(ConsolePhase::Search));
+    agrees(&mut rig, 5);
+    // Ctrl+9 again hands the aircraft back on both.
+    send(vec![SeatCommand::SensorConsole]);
     rig.run(Duration::from_secs(2));
     assert_eq!(host_flight(&rig).autopilot.mode(), Mode::Off);
-    let predicted = rig.players[gunner_player].client.prediction().unwrap();
-    assert_eq!(predicted.plane().flight.autopilot.mode(), Mode::Off);
+    assert_eq!(predicted(&rig).autopilot.mode(), Mode::Off);
 }

@@ -21,6 +21,7 @@ use crate::world::replies::Reply;
 use tore_sim::ai::launch::{Side, WingId};
 use tore_sim::ai::wing::{PlayerApproach, PlayerBreak, PlayerOrder};
 use tore_sim::airport::Command as TowerCommand;
+use tore_sim::autopilot::orbit::ConsoleCommand;
 use tore_sim::checkpoint::{Checkpoint, CheckpointError, Loader, Saver, invalid};
 use tore_sim::combat::live::Command as Live;
 
@@ -404,6 +405,33 @@ fn load_reply(l: &mut Loader<'_>) -> Result<Reply, CheckpointError> {
     })
 }
 
+/// A sensor console key: its variant's number, then its step or percentage
+/// as one byte (two's complement for the steps).
+fn save_console(s: &mut Saver, command: ConsoleCommand) {
+    let (variant, value) = match command {
+        ConsoleCommand::Pin => (0, 0),
+        ConsoleCommand::Heading(steps) => (1, steps as u8),
+        ConsoleCommand::Altitude(steps) => (2, steps as u8),
+        ConsoleCommand::Speed(percent) => (3, percent),
+        ConsoleCommand::SpeedStep(steps) => (4, steps as u8),
+    };
+    put(s, variant);
+    put(s, u64::from(value));
+}
+
+fn load_console(l: &mut Loader<'_>) -> Result<ConsoleCommand, CheckpointError> {
+    let variant = take(l)?;
+    let value = u8::try_from(take(l)?).or_else(|_| invalid("a console command's value"))?;
+    Ok(match variant {
+        0 => ConsoleCommand::Pin,
+        1 => ConsoleCommand::Heading(value as i8),
+        2 => ConsoleCommand::Altitude(value as i8),
+        3 => ConsoleCommand::Speed(value.min(100)),
+        4 => ConsoleCommand::SpeedStep(value as i8),
+        other => return invalid(format!("a console command has no variant {other}")),
+    })
+}
+
 /// A command by its variant's number and its fields, with no baseline: a
 /// tick's commands are few, and most ticks have none.
 impl Checkpoint for SeatCommand {
@@ -455,6 +483,10 @@ impl Checkpoint for SeatCommand {
             }
             SeatCommand::BattleNet => put(s, 14),
             SeatCommand::SensorConsole => put(s, 15),
+            SeatCommand::Console(command) => {
+                put(s, 16);
+                save_console(s, command);
+            }
         }
         Ok(())
     }
@@ -483,6 +515,7 @@ impl Checkpoint for SeatCommand {
             13 => SeatCommand::WingReply(load_reply(l)?),
             14 => SeatCommand::BattleNet,
             15 => SeatCommand::SensorConsole,
+            16 => SeatCommand::Console(load_console(l)?),
             other => return invalid(format!("a seat command has no variant {other}")),
         })
     }
@@ -673,6 +706,11 @@ mod tests {
             SeatCommand::WingFormationCycle,
             SeatCommand::BattleNet,
             SeatCommand::SensorConsole,
+            SeatCommand::Console(ConsoleCommand::Pin),
+            SeatCommand::Console(ConsoleCommand::Heading(-3)),
+            SeatCommand::Console(ConsoleCommand::Altitude(i8::MAX)),
+            SeatCommand::Console(ConsoleCommand::Speed(75)),
+            SeatCommand::Console(ConsoleCommand::SpeedStep(i8::MIN)),
         ];
         commands.extend(live.iter().map(|&c| SeatCommand::Combat(c)));
         commands.extend(live.iter().map(|&c| SeatCommand::Manual(c)));
