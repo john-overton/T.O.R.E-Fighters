@@ -1640,6 +1640,9 @@ mod tests {
         assert_eq!(owners("\\"), ["sight-designate"]);
         assert_eq!(owners("Shift-\\"), ["sight-pin"]);
         assert_eq!(owners("p"), ["sight-pin-toggle"]);
+        assert_eq!(owners("Shift-p"), ["gun-lock"]);
+        assert_eq!(owners("Ctrl-Insert"), ["console-chaff"]);
+        assert_eq!(owners("Ctrl-Delete"), ["console-flare"]);
         assert_eq!(owners("Ctrl-Shift-\\"), ["range-target"]);
         assert_eq!(owners("Ctrl-\\"), ["sight-polarity"]);
         assert_eq!(owners("Shift-'"), ["sight-zoom-in"]);

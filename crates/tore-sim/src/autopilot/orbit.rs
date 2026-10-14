@@ -66,6 +66,12 @@ pub const CENTRE_SPEED_FPS: f64 = 200.;
 /// has stood still this long, seconds (John, 2026-10-14: "after a 5 second
 /// pause with no slewing").
 pub const CENTRE_PAUSE_S: f64 = 5.;
+/// A point that moves further than this in one step is a new point (a new
+/// designation, a new pin, the next target), not a slew or a moving object:
+/// the orbit is joined about it at once instead of sliding there, ft
+/// (fitted, agent decision 2026-10-14: a full-rate slew at the widest zoom
+/// moves a pin some tens of feet a tick, a ground vehicle a foot or two).
+pub const NEW_POINT_FT: f64 = 1_000.;
 /// The orbit is never flown lower than this above the ground under the
 /// aircraft, ft (a terrain floor for a centre in a deep valley).
 pub const TERRAIN_FLOOR_FT: f64 = 1_000.;
@@ -366,11 +372,19 @@ impl Orbit {
         if !point.iter().all(|v| v.is_finite()) {
             return;
         }
+        let jump = (0..3)
+            .map(|i| (point[i] - self.point[i]).powi(2))
+            .sum::<f64>()
+            .sqrt();
         if !self.pinned {
             self.pinned = true;
             self.centre = point;
             self.still_s = CENTRE_PAUSE_S;
             self.fit();
+        } else if jump > NEW_POINT_FT {
+            // A new point: join the orbit about it, as from the search.
+            self.centre = point;
+            self.still_s = CENTRE_PAUSE_S;
         } else if tracked {
             self.still_s = CENTRE_PAUSE_S;
         } else if point != self.point {
@@ -521,12 +535,15 @@ impl Orbit {
             distance_ft: dx.hypot(dz),
             height_now_ft: s.position[1] - self.centre[1],
             slant_ft: (to[0] * to[0] + to[1] * to[1] + to[2] * to[2]).sqrt(),
+            // On the circle about the centre, and the centre on the point
+            // (not still sliding or waiting toward it): JOIN until both.
             on_orbit: gunship::on_orbit(
                 s.position,
                 s.yaw.to_degrees(),
                 self.centre,
                 self.radius_ft,
-            ),
+            ) && (self.point[0] - self.centre[0]).hypot(self.point[2] - self.centre[2])
+                <= gunship::ON_ORBIT_SHARE * self.radius_ft,
             guns_bearing,
             sensor_bearing,
         }

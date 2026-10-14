@@ -260,9 +260,10 @@ fn the_sensor_console_searches_then_orbits_the_pin() {
     let status = world.cockpits[0].flight.orbit_status().unwrap();
     assert_eq!(status.point, pin);
     assert!(status.radius_ft >= status.minimum_radius_ft);
-    // A new pin moves the point the orbit circles; the centre waits 5 s
-    // with the pin standing still, then slides to it.
-    let moved = [pin[0] + 2_000., pin[1], pin[2]];
+    // A pin moved a little (as a slew does) moves the point the orbit
+    // circles; the centre waits 5 s with the pin standing still, then slides
+    // to it.
+    let moved = [pin[0] + 500., pin[1], pin[2]];
     world.combat.state.own_mut().gunship.as_mut().unwrap().sight = Sight::Pinned(moved);
     for _ in 0..120 {
         step(&mut world, false, Vec::new());
@@ -275,6 +276,11 @@ fn the_sensor_console_searches_then_orbits_the_pin() {
     }
     let status = world.cockpits[0].flight.orbit_status().unwrap();
     assert!(status.centre != pin && status.centre != moved, "sliding");
+    // A new pin far away is joined at once.
+    let far = [pin[0] + 20_000., pin[1], pin[2]];
+    world.combat.state.own_mut().gunship.as_mut().unwrap().sight = Sight::Pinned(far);
+    step(&mut world, false, Vec::new());
+    assert_eq!(world.cockpits[0].flight.orbit_status().unwrap().centre, far);
     // P again lets the pin go: the console searches on.
     step(
         &mut world,

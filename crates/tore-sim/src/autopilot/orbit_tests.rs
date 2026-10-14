@@ -85,11 +85,11 @@ fn it_settles_smoothly_and_ignores_the_stick() {
 fn a_mode_switch_or_the_ground_ends_it_and_the_point_moves() {
     let mut s = hybrid();
     s.engage_orbit([12_000., 0., 16_000.], 13_000.);
-    s.autopilot.set_orbit_point([12_000., 0., 18_000.], true);
+    s.autopilot.set_orbit_point([12_000., 0., 16_500.], true);
     s.autopilot.set_orbit_point([f64::NAN, 0., 0.], true);
     s.step(&PilotInput::default(), |_, _| 0.);
     let orbit = *s.autopilot.orbit().unwrap();
-    assert_eq!(orbit.point, [12_000., 0., 18_000.]);
+    assert_eq!(orbit.point, [12_000., 0., 16_500.]);
     // A track: the centre slides 200 ft/s toward the new point at once.
     assert!((orbit.centre[2] - (16_000. + CENTRE_SPEED_FPS / 120.)).abs() < 1e-6);
     s.step(
@@ -404,4 +404,48 @@ fn a_moved_pin_moves_the_centre_after_a_five_second_pause() {
         .set_orbit_point([pin[0] + 3_000., 0., pin[2]], true);
     s.step(&PilotInput::default(), |_, _| 0.);
     assert!(s.autopilot.orbit().unwrap().centre[0] > before[0]);
+}
+
+/// A new point far from the old one (the next target, a new pin) is joined
+/// at once rather than slid to, and the phase reads JOIN until the aircraft
+/// is on the circle about the centre and the centre is on the point
+/// (nr-conb saw ORBIT while a far target was still 5 nm out).
+#[test]
+fn a_far_new_point_is_joined_and_the_phase_waits_for_the_circle() {
+    let mut s = hybrid();
+    s.engage_orbit([12_000., 0., 16_000.], 13_000.);
+    fly(&mut s, 300., &PilotInput::default(), |_, _| {});
+    assert_eq!(s.console_status().unwrap().phase, ConsolePhase::Orbit);
+    // The next target, 5 nm away.
+    let far = [12_000. + 30_000., 0., 16_000.];
+    s.autopilot.set_orbit_point(far, true);
+    let orbit = *s.autopilot.orbit().unwrap();
+    assert_eq!(orbit.centre, far, "a new point is joined at once");
+    let mut seen_orbit_far = false;
+    fly(&mut s, 120., &PilotInput::default(), |_, s| {
+        let status = s.console_status().unwrap();
+        let away = (s.position[0] - far[0]).hypot(s.position[2] - far[2]);
+        if status.phase == ConsolePhase::Orbit && away > 2. * status.orbit.unwrap().radius_ft {
+            seen_orbit_far = true;
+        }
+    });
+    assert!(!seen_orbit_far, "ORBIT while still far from the new point");
+    // A track moving a little stays a slide: the centre is not snapped.
+    let mut s = hybrid();
+    s.engage_orbit([12_000., 0., 16_000.], 13_000.);
+    s.autopilot
+        .set_orbit_point([12_000., 0., 16_000. + NEW_POINT_FT / 2.], true);
+    assert_eq!(s.autopilot.orbit().unwrap().centre, [12_000., 0., 16_000.]);
+    // While the centre still slides toward the point the phase is JOIN even
+    // on the circle about the centre.
+    let mut s = hybrid();
+    s.engage_orbit([12_000., 0., 16_000.], 13_000.);
+    fly(&mut s, 300., &PilotInput::default(), |_, _| {});
+    let radius = s.autopilot.orbit().unwrap().radius_ft;
+    let mut moved = s.autopilot.orbit().unwrap().point;
+    for _ in 0..(radius / 600.) as u32 + 2 {
+        moved[0] += 600.;
+        s.autopilot.set_orbit_point(moved, true);
+    }
+    assert_eq!(s.console_status().unwrap().phase, ConsolePhase::Join);
 }

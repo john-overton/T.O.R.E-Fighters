@@ -543,6 +543,49 @@ fn the_sensor_console_flies_the_same_orbit_on_the_host_and_the_client() {
         .expect("the gunner has a readout");
     assert!(readout.gunsight.is_some());
     assert_eq!(predicted(&rig).autopilot.mode(), Mode::Orbit);
+    // The gun lock (slice nr-cona): the host lays the guns apart from the
+    // sight, the client's readout shows where, the orbit keeps its point
+    // and the prediction still agrees; again lets the guns go.
+    send(vec![SeatCommand::Console(ConsoleCommand::GunLock)]);
+    rig.run(Duration::from_secs(2));
+    let lock = rig
+        .host
+        .world()
+        .combat
+        .state
+        .ownship(0)
+        .unwrap()
+        .gunship
+        .as_ref()
+        .unwrap()
+        .gun_lock
+        .expect("the host locked the guns");
+    assert_eq!(lock.point, pin);
+    let shown = rig.players[gunner_player]
+        .frames
+        .iter()
+        .rev()
+        .find_map(|f| f.readout.as_ref())
+        .and_then(|r| r.gunsight.as_ref())
+        .and_then(|g| g.gun_lock)
+        .expect("the client's readout shows the gun lock");
+    assert!((0..3).all(|i| (shown[i] - pin[i]).abs() <= 0.125));
+    agrees(&mut rig, 5);
+    send(vec![SeatCommand::Console(ConsoleCommand::GunLock)]);
+    rig.run(Duration::from_secs(2));
+    assert!(
+        rig.host
+            .world()
+            .combat
+            .state
+            .ownship(0)
+            .unwrap()
+            .gunship
+            .as_ref()
+            .unwrap()
+            .gun_lock
+            .is_none()
+    );
     // P again: the pin goes and both search again.
     send(vec![SeatCommand::Console(ConsoleCommand::Pin)]);
     rig.run(Duration::from_secs(3));
