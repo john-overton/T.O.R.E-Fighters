@@ -724,7 +724,7 @@ const SENSOR_CONSOLE: u64 = 28;
 const CONSOLE: u64 = 29;
 const COMMAND_BITS: u32 = 5;
 
-// The sensor console's sub-codes (pending protocol).
+// The sensor console's sub-codes (protocol 30).
 const CONSOLE_BITS: u32 = 3;
 const CONSOLE_PIN: u64 = 0;
 const CONSOLE_HEADING: u64 = 1;

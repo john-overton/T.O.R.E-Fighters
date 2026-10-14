@@ -729,9 +729,9 @@ and the HUD read it; it is the same in single player, on a client and in a
 check.
 
 **Online and replays.** Multiplayer needs protocol 29, and the search and
-the console's keys a later one (pending, numbered by the lead). The host owns
+the console's keys protocol 30. The host owns
 it. The console key is a seat command (code 28 on the wire), the console's
-keys another (code 29, pending); the host engages the console's autopilot
+keys another (code 29, protocol 30); the host engages the console's autopilot
 and, before each flight step, gives it the sight's point, or lets it search
 when the sight is free. The orbit's plan and memory ride in the
 exact own-plane state, so a client's prediction flies the same law from the

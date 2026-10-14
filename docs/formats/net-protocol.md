@@ -50,7 +50,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [Protocol 27 (stores)](#protocol-27-stores) (built under protocol 27)
 - [Protocol 28 (host loading)](#protocol-28-host-loading) (built under protocol 28)
 - [Protocol 29 (the sensor console)](#protocol-29-the-sensor-console) (built under protocol 29)
-- [The console's search and keys (pending protocol)](#the-consoles-search-and-keys-pending-protocol)
+- [Protocol 30 (the console's search and keys)](#protocol-30-the-consoles-search-and-keys) (built under protocol 30)
 - [Limits](#limits)
 - [Captures](#captures)
 - [Versions](#versions)
@@ -2856,10 +2856,9 @@ orbit autopilot ([spec](../spec/ac130-linked-guns.md#the-sensor-console-and-the-
   sample (one SensorConsole), the version line and the packets sealed with
   the version.
 
-## The console's search and keys (pending protocol)
+## Protocol 30 (the console's search and keys)
 
-*Built (slice nr-cona, 2026-10-14); the lead numbers the protocol (30 most
-likely).* John asked for slew, zoom, pin and release and heading, altitude and
+*Built (slice nr-cona, 2026-10-14); the lead numbered it 30.* John asked for slew, zoom, pin and release and heading, altitude and
 throttle keys in the sensor console, with the autopilot searching straight
 while nothing is pinned ([spec](../spec/ac130-linked-guns.md#the-consoles-keys)).
 
@@ -2879,7 +2878,7 @@ while nothing is pinned ([spec](../spec/ac130-linked-guns.md#the-consoles-keys))
 - **Why a bump.** An older game reads command 29 as invalid and cannot read
   the longer own-plane state. The wire golden changes in the Inputs command
   sample (five Console commands), the version line and the packets sealed
-  with the version. Until the bump `wire_golden` fails on this branch.
+  with the version.
 
 ## Limits
 
@@ -3047,7 +3046,10 @@ again with an observer; the capture format did not change for it.
   the Keepalive's flags byte, sent by a host building a mission.
   29 since the AC-130 sensor console (slice nr-orbit,
   [the sensor console](#protocol-29-the-sensor-console)): seat command 28,
-  and the orbit hold in the exact own-plane state's autopilot.
+  and the orbit hold in the exact own-plane state's autopilot;
+  30 since the console's search and keys (slice nr-cona,
+  [protocol 30](#protocol-30-the-consoles-search-and-keys)): seat command 29,
+  and the orbit's `pinned`, `heading` and `altitude`.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
