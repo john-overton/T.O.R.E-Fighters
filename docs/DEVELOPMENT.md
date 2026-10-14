@@ -1772,7 +1772,10 @@ focused unit prints its aim (`aim ... body ... turrets ... holds ...`).
 The scene's other static objects are named `object:TYPE` (`object:HANGR.OT`)
 in `--focus` and `--kill` (and `within:FEET` takes them), `near:ITEM` frames
 only the one ITEM nearest the template, `--flatten FEET` knocks the city fill's buildings within FEET of the focus flat so they burn and `--frames N` times N more frames of each view (nr-fx2), `--bomb-runway N` drops N Mk 82s
-along the runway nearest the focus, and `--time HH:MM` sets the start time
+along the runway nearest the focus, `--until-flash` steps on after `--seconds` (up to five
+minutes) until a gun within 300 ft of the focus has just fired so the picture has its muzzle
+flash (nr-flak: `--focus 0 --distance 45 --until-flash --intruder 3000,6000,2000 --look 90,-8`
+shows where a KS-12's flash starts), and `--time HH:MM` sets the start time
 (night views); with no focus left the run lists every place by type (B16).
 `--surface-preview
 OUT_DIR destroyed` draws one unit of each class beside its destroyed look,

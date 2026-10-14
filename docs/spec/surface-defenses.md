@@ -965,8 +965,8 @@ zone range and altitude in feet. Damage and fuze as in the record.
 | ZSU57 | visual | 50 to 12,000 | 1,000 to 12,000 | 4 in 0.5 s, 3.0 s | 0 | 3,666 | 5 | 100 | 20 | ZSU57, ZIF31 |
 | M1939 | visual | 0 to 10,000 | to 6,000 | 4 in 0.5 s, 3.0 s | 0 | 3,960 | 5 | 100 | 30 | M1939 |
 | A_M1939 | visual | 0 to 10,000 | to 6,000 | 4 in 0.5 s, 3.0 s | 0 | 3,960 | 5 | 100 | 30 | barrage zone, random fire 33 percent |
-| KS12 | radar flak | 0 to 40,000 | **4,000 to 15,000** | 1 in 0.5 s, 4.0 s | 8 | 3,520 | 10 | **250** | 50 | KS12; collateral 750 ft at 35 percent |
-| KS19 | radar flak | 0 to 50,000 | **4,000 to 25,000** | 1 in 0.5 s, 4.0 s | 8 | 4,400 | 15 | **250** | 80 | KS19; collateral 750 ft at 35 percent |
+| KS12 | radar flak | 0 to 40,000 | **4,000 to 15,000** | 1 in 0.5 s, 4.0 s | 8 | 3,520 | 10 | **250** | 50 | KS12; collateral 750 ft at 35 percent (400 ft in the game, the fuze unused, [flak](#flak)) |
+| KS19 | radar flak | 0 to 50,000 | **4,000 to 25,000** | 1 in 0.5 s, 4.0 s | 8 | 4,400 | 15 | **250** | 80 | KS19; collateral 750 ft at 35 percent (400 ft in the game, the fuze unused, [flak](#flak)) |
 | M1, T72 | visual | 50 to 5,000 | to 3,000 | 1, 4.0 s | 0 | 5,866 | 5 | 100 | 200 x5 | main battle tanks |
 | BMP2, BTR80 | visual | 50 to 3,000 | to 3,000 | 2 in 0.5 s, 3.0 s | 0 | 3,666 | 5 | 100 | 5 | IFVs |
 | M113, M2 | visual | 50 to 3,000 | to 3,000 | 2 in 0.5 s, 3.0 s | 0 | 3,666 | 5 | 100 | 10 | APCs |
@@ -986,7 +986,8 @@ quarter seconds.
 
 | Gun kind | Aim | Lead | Basis |
 | --- | --- | --- | --- |
-| Radar guns (flag 0x4000: ZSU-23, 2S6, Phalanx, AAA30, KS-12, KS-19) | Observed target, refreshed every tick while tracking | Time of flight and drop from the existing gunsight solution, plus aim error by skill | retail (the flag); error fitted |
+| Radar guns (flag 0x4000: ZSU-23, 2S6, Phalanx, AAA30) | Observed target, refreshed every tick while tracking | Time of flight and drop from the existing gunsight solution, plus aim error by skill | retail (the flag); error fitted |
+| Flak (KS-12, KS-19, radar directed) | Observed target, refreshed every tick while tracking | The same lead point, then a burst point drawn inside an egg 300 m wide and 100 m tall around it, with no aim error by skill ([flak](#flak)) | retail (the flag); egg opinionated, John, 2026-10-13 |
 | Visual guns (ZSU-57, M1939, AAA30BAD, tank and APC guns) | Observation refreshed every 0.5 s | Lead from that stale velocity, larger aim error by skill | manual pp. 157 to 158; numbers fitted |
 | Small arms (a squad's SMLARMS) at an aircraft | The same stale observation as a visual gun, carried on at 30 percent of the target's velocity | Lead 30 percent of the gunsight solution and four times the visual guns' aim error by skill ([small arms](#small-arms)) | fitted, agent, 2026-10-12 |
 
@@ -1114,26 +1115,85 @@ and a ZSU-23 with and without the target flag.
 
 #### Flak
 
-KS-12 and KS-19 (fuze 250 ft, collateral 750 ft at 35 percent):
+KS-12 and KS-19 (retail fuze 250 ft, splash 750 ft at 35 percent). Reworked on
+2026-10-13 at John's request: "flak accuracy needs to be tuned a bit, right
+now it's super strong, it needs to be within a sphere around the target of
+about 300m wide and roughly 100m in altitude (not really a sphere but an egg
+around the target)", and "flak rate of fire needs to be cut to 1/3".
+
+```mermaid
+flowchart LR
+    T[Target and its predicted position] --> L[Lead point, as before]
+    L --> E["Egg: 300 m wide, 100 m tall,<br/>a point drawn per shell"]
+    E --> S[Shell aimed at the burst point]
+    S --> F[Time fuze set to the flight time to it]
+    F --> B[Burst: splash falls off to 400 ft]
+```
 
 - Fire zone floor 4,000 ft and ceilings 15,000 and 25,000 ft (retail).
-- Time fuze: each shell is set at launch to the director's predicted time of
-  flight to the lead point and bursts then, or earlier if it passes within the
-  250 ft fuze radius of a hostile aircraft. Fitted (the time fuze is not in the
-  data; the proximity radius is).
-- A burst deals collateral damage and plays an air flak explosion: the KS-12's
+- **Where a shell bursts (opinionated, John, 2026-10-13; the distribution is
+  an agent decision, fitted).** Each shell is aimed at its own burst point: a
+  point drawn at random inside an egg centred on the gun's lead point (the
+  target's predicted position). The egg is an ellipsoid 300 m (984 ft) wide in
+  the horizontal plane and 100 m (328 ft) tall, so 492 ft out sideways and
+  164 ft up and down at the most. Points are drawn uniformly through the
+  egg's volume, so bursts are as likely near its edge as anywhere (the middle
+  is not favoured): the average burst is about 0.75 of the way to the edge.
+  The draws come from the surface's seeded stream (three per shell), so a
+  flight, its replay and a networked host all see the same bursts, whoever
+  the target is, the player or an AI wing. Skill no longer widens the flak's
+  scatter and range does not either (the egg is the same at any range); a
+  jammer on the target still widens a radar gun's scatter two times, the egg
+  included (defined, John, 2026-10-10, kept).
+- **Time fuze.** Each shell's fuze is set at launch to the flight time to its
+  burst point and it bursts there. Fitted (the time fuze is not in the
+  data).
+- **No proximity fuze (agent decision, 2026-10-13).** A flak shell no longer
+  bursts early when it passes within the record's 250 ft fuze radius of an
+  aircraft: with the egg, that rule would have made most bursts happen near
+  the target whatever the egg said. A shell still bursts on striking an
+  aircraft or the ground, so one drawn through the target's own volume hits it.
+  The record's 250 ft is unused for flak.
+- **Splash falls off to 400 ft, not 750 (fitted, agent decision,
+  2026-10-13).** The record's splash (35 percent of the damage, falling in a
+  straight line to nothing at its edge) reached 750 ft, wider than the whole
+  egg, so every burst hurt the target, however far from it, and a single gun
+  did 70 percent of a jet's hit points in one pass. The splash edge is now 400
+  ft (122 m, a little more than the real fragment reach of an 85 to 100 mm
+  shell, about 100 m): the percent and the straight-line fall are unchanged.
+  Measured, 70 to 75 percent of bursts reach the aircraft at all and a
+  burst does on average a quarter of the damage one at the target's centre
+  would (4.2 hit points of a possible 17.5 for the KS-12).
+- **Rate of fire (opinionated, John, 2026-10-13): one third of before.** The
+  guns' pause between shells is 12.5 s (was 4.0 s, the retail record's); a
+  shell every 12.75 s is 4.7 a minute (was 14.1). The retail record's own
+  cycle is 4.5 s, 13.3 a minute; the real 85 mm 52-K and 100 mm KS-19 fire 15
+  to 20 rounds a minute at the most. The eight-shell opening barrage (retail
+  startup shots), fired once in a gun's life, is unchanged.
+- A burst deals splash damage and plays an air flak explosion: the KS-12's
   is the record's own type 27 (the original's air flak row: size 130, 2 s,
-  air explosion sounds; retail), the KS-19's is type 28 (size 170, 1 s, the
-  heavy flak sounds; both records name 27, so the larger calibre's type is
-  fitted). Each shows its sheet (FLAKA, FLAKB) with a dark puff that lingers
-  about 4 s and a point light
+  air explosion sounds; retail), the KS-19's is type 28 (size 170, 1 s;
+  both records name 27, so the larger calibre's sheet is fitted). Each shows its sheet
+  (FLAKA, FLAKB) with a dark puff that lingers about 4 s and a point light
   ([flak bursts, gunfire, launches and light](#flak-bursts-gunfire-launches-and-light)).
-  It has no tracer, and a shell is not drawn in flight.
-- Only a hostile aircraft in flight sets off the proximity fuze; a shell
-  passes friendly aircraft and aircraft on the ground.
+  Both are **heard as type 27**, the retail row, whichever sheet is drawn
+  (2026-10-13, [sound](sound.md#flak-bursts)). It has no tracer, and a shell
+  is not drawn in flight.
+- A shell passes friendly aircraft and aircraft on the ground (collateral
+  damage spares the gun's own side when friendly fire is off).
 - Startup shots 8: the first engagement opens with an eight-shell barrage
   (retail).
 - A shell reaching its life without bursting bursts there.
+
+What this does, measured with `--surface-trace ... --solo` (one gun, the
+player's F/A-18 on a straight line over it at 450 kt, four seeds;
+[measurements](../baselines/flak-egg.md)): a lone KS-12 took 168 of the
+jet's 232 hit points in a pass and now takes about 40; a lone KS-19 211 and
+now about 70; a helicopter that a lone gun destroyed now keeps most of its hit
+points. The whole North Vietnam emplacement killed the jet in 66 to 73 s and
+now leaves it with 31 to 68 hit points after a 150 s pass. Of the bursts
+measured 97 percent lie inside the egg and the rest within 5 percent of its
+edge.
 
 #### Barrage zone
 
@@ -1298,11 +1358,11 @@ radars to the rules above. Where the rules leave a choice, it chose as follows
 | Lost target, failing gates | A target no longer eligible returns to Search at once; launch gates that fail hold the lock up to 15 s, then Search (which may choose the same target again) | B42 window, fitted recovery |
 | Lock between salvos | The lock holds through the pause between bursts and salvos: the RWR lock tone and the painting state continue | defined (John, 2026-10-10) |
 | Gun bursts | A burst's rounds leave evenly over its burst time; the first engagement's opening barrage (`startupShots`) spaces its rounds by the burst's round spacing, at least a quarter second apart (KS-19: 8 shells in 2 s) | fitted |
-| Where rounds leave from | The mount: the unit's pose this tick (a moving unit fires from where it is, with its velocity) plus the hardpoint offset at real size (a third of the record's) turned by the unit's attitude, at least 5 ft above the terrain; radars and sights look from 10 ft above the unit's reference point. Nothing depends on the shape's extents | fitted |
+| Where rounds leave from | A **missile** leaves its rail: the unit's pose this tick (a moving unit fires from where it is, with its velocity) plus the hardpoint offset at real size (a third of the record's) turned by the unit's attitude, at least 5 ft above the terrain. A **land gun** leaves the end of its drawn barrel ([muzzles](#muzzles)), and a **ship's gun** its hardpoint, which sits at the gun. Radars and sights look from 10 ft above the unit's reference point | fitted |
 | RWR reception of a ground radar | The terrain test ends at least 10 ft above the ground under the radar (its antenna), so a unit whose contact volume sits low on a slope still shows its square | fitted |
 | Mount arcs | A half-arc of 0 is unrestricted on that axis (every land vehicle reads 0 for heading); otherwise the bearing (guns: and elevation) must lie inside the half-arc of the mount's rest direction, relative to the hull. A missile's launch pitch is the line to the target clamped between 10 degrees and the rail's arc | inference, fitted |
 | Altitude bands | Zone altitudes are the target's height above the unit, as the AI's envelopes take them | spec-derived (B45) |
-| Gun reach and range | A gun's launch range is its fire zone capped by its shells' reach; a round ends 15 percent (at least 500 ft) past the target; a flak shell's time fuze is its time of flight to the lead point | fitted |
+| Gun reach and range | A gun's launch range is its fire zone capped by its shells' reach; a round ends 15 percent (at least 500 ft) past the target; a flak shell's time fuze is its time of flight to its own burst point in the egg around the lead point ([flak](#flak)) | fitted |
 | Lead | A radar gun observes its target every tick; a visual gun every 0.5 s and leads from that stale track; both through the shared gunsight time-of-flight solution | spec-derived, fitted refresh |
 | Detection | Range, the weapon's `zone0` altitude band, the react class mask (0 attacks any class), `searchDist` read as 256 ft units, and a terrain line of sight sampled every 500 ft | retail plus fitted |
 | Radar guns | A gun is radar-directed when its record carries flag 0x4000 and a radar seeker; the barrage zone's record carries the flag without the seeker and is not | inference |
@@ -1718,8 +1778,8 @@ tracer, each marked retail or fitted. Tags: `R` retail record value, `F` fitted,
 | AK-230 class, twin 30 mm | AAA30BAD (TYPE69, KNOX, JIANC, JIANE, KRIVAK, CYCL, PMORN) | 4 in 0.25 s / 1.0 s / 0 / 3,666 | 2,000 F | 42 F (1.25 s) | 1.0 R | 0 R | 1,000 F | 120 O | ship | unlimited F | 3,440 F | every 3rd | 1/6 of retail F | 0.97 |
 | 61-K 37 mm M1939 | M1939 | 4 in 0.5 s / 3.0 s / 0 / 3,960 | 160 F | 6 F (2.25 s) | 3.0 R | 0 R | 200 F | 60 O | towed | 2 F | 2,890 F | every 3rd | retail R | 1.00 |
 | 61-K 37 mm M1939, barrage zone | A_M1939 | 4 in 0.5 s / 3.0 s / 0 / 3,960 | 160 F | 6 F (2.25 s) | 3.0 R | 0 R | 200 F | 60 O | towed | 2 F | 2,890 F | every 3rd | retail R | 1.00 |
-| 52-K 85 mm (KS-12) flak | KS12 | 1 in 0.5 s / 4.0 s / 8 / 3,520 | 14 F | 1 R (single shot) | 4.0 R | 8 R | 60 F | 60 O | towed | 2 F | 2,620 F | none | retail R | 1.06 |
-| KS-19 100 mm flak | KS19 | 1 in 0.5 s / 4.0 s / 8 / 4,400 | 14 F | 1 R (single shot) | 4.0 R | 8 R | 60 F | 60 O | towed | 2 F | 2,950 F | none | retail R | 1.06 |
+| 52-K 85 mm (KS-12) flak | KS12 | 1 in 0.5 s / 4.0 s / 8 / 3,520 | 5 F | 1 R (single shot) | 12.5 O | 8 R | 60 F | 60 O | towed | 2 F | 2,620 F | none | retail R | 0.35 |
+| KS-19 100 mm flak | KS19 | 1 in 0.5 s / 4.0 s / 8 / 4,400 | 5 F | 1 R (single shot) | 12.5 O | 8 R | 60 F | 60 O | towed | 2 F | 2,950 F | none | retail R | 0.35 |
 | M256 120 mm tank gun | M1 | 1 in 0.25 s / 4.0 s / 0 / 5,866 | 6 F | 1 R (single shot) | 9.75 F | 0 R | 34 F | 60 O | vehicle | 2 F | 5,866 R | none | retail R | 0.43 |
 | 2A46 125 mm tank gun | T72 (T72, T80, T90) | 1 in 0.25 s / 4.0 s / 0 / 5,866 | 8 F | 1 R (single shot) | 7.25 F | 0 R | 22 F | 60 O | vehicle | 2 F | 5,866 R | none | retail R | 0.57 |
 | 2A42 30 mm | BMP2 | 2 in 0.5 s / 3.0 s / 0 / 3,666 | 300 F | 20 F (4.0 s) | 3.0 R | 0 R | 500 F | 60 O | vehicle | 2 F | 3,150 F | every 3rd | 1/5 of retail F | 1.00 |
@@ -2096,6 +2156,48 @@ frame like a moving unit (its static copy hidden) and so casts a shadow as
 moving units do; one at rest stays in the static scenery. A shape's line
 art is not drawn on the every-frame path (as for moving units).
 
+### Muzzles
+
+John's report (2026-10-13): "the flash comes from the center of the gun
+instead of the end of the barrel, this is on the KS12 and 18 [KS-19] I
+noticed". Every land gun's NT puts its hardpoint at `[0, 30, 0]`, 10 ft (at
+real size) above the unit's middle, and a gun's shell and flash started
+there, inside the hull, whatever the shape looked like. The shape knows where
+its barrel ends, so from 2026-10-13 a **land gun's shell and flash start at
+the end of its drawn barrel** (`tore_world::surface::muzzle`, fitted, agent
+decision: the tips are read by eye from each shape's faces and kept in one
+table).
+
+Every land gun was wrong, by how far the barrel's end is from the unit's
+middle (forward, and up from the ground; the old point was 0 ft forward and
+10 ft up for all of them):
+
+| Gun (shape) | Used by | Forward (ft) | Up (ft) |
+| --- | --- | ---: | ---: |
+| KS-12 (AA85) | 85 mm flak | 22.7 | 28.0 |
+| KS-19 (AA105) | 100 mm flak | 27.7 | 32.3 |
+| M1939 (AA35) | 37 mm | 15.0 | 17.3 |
+| ZSU-57-2 (ZSU57) | 57 mm | 15.7 | 22.3 |
+| ZSU-23-4 (ZSU23) | 23 mm | 10.0 | 12.0 |
+| 2S6 (ZSU30) | 30 mm | 11.0 | 13.3 |
+| M163 (M3V) | 20 mm Vulcan | 6.7 | 18.0 |
+| M1 | 120 mm | 18.0 | 5.3 |
+| T-72, T-80, T-90 | 125 mm | 18.0, 19.3, 17.7 | 7.2, 6.2, 6.2 |
+| BMP-2 | 30 mm | 6.7 | 6.0 |
+| BTR-80 (BTR70) | 14.5 mm | 5.0 | 8.7 |
+| M113 | .50 cal | 6.0 | 7.2 |
+| M2 | 25 mm | 6.0 | 8.5 |
+
+Not changed: a squad's rifles (TROOPS, soldiers have no barrel to draw), ship
+guns and CIWS (their hardpoints are the gun mounts on the deck), the barrage
+zone (no shape) and every missile (the rail).
+
+A gun turns about its up axis toward its target (the drawn body turns; the
+barrel is fixed in the shape and does not elevate), so the tip is out along the
+bearing to the target. The shell leaves the drawn tip in the direction the gun
+aims. A networked client puts a remade burst's rounds at the tip along the
+burst's azimuth, the host's rule.
+
 ### Flak bursts, gunfire, launches and light
 
 John's request (2026-10-10): AAA and flak fire real shells, flak has no
@@ -2110,12 +2212,12 @@ light's units, one flare is 4,000).
 | What | Look | Basis |
 | --- | --- | --- |
 | Flak burst, 85 mm (KS-12) | Explosion type 27: the `FLAKA` sheet, 2 s, size 130 | retail row |
-| Flak burst, 100 mm (KS-19) | Explosion type 28: the larger `FLAKB` sheet, 1 s, size 170, heavy flak sounds | fitted (both records name 27) |
+| Flak burst, 100 mm (KS-19) | Explosion type 28: the larger `FLAKB` sheet, 1 s, size 170; heard as type 27 (the retail air flak recordings, [flak sound](sound.md#flak-bursts)) | the sheet fitted (both records name 27); the sound retail since 2026-10-13 |
 | Flak light | One point light at the burst: 10,000 (85 mm) or 14,000 (100 mm) at the peak, held 2 ticks, gone by 14 ticks | fitted |
 | Flak puff | Three dark puffs growing from 0.3 to 0.8 of the explosion's width, fading in over 0.2 s and out by 4 s, drifting up 3 ft/s | fitted |
 | Flak shell in flight | Not drawn; no tracer | John |
 | AAA tracers | The existing flag and drawing: every third round for guns whose tuning row has a tracer (Shilka, Tunguska, Vulcan, ship guns, 37 mm, 57 mm, IFV and APC guns, small arms), none for flak and tank guns | spec-derived ([AAA tuning](#aaa-tuning)); small arms added as opinionated, John, 2026-10-12 |
-| Muzzle flash and firing light | The gun-flash sprite at the muzzle, along the barrel, in three classes: light cannon (ZSU-23, 2S6, Vulcan and Phalanx, 30 mm ship guns, BMP-2, BTR-80, M113, M2: a flicker that never goes dark at any cadence, 8 ft, light 160), 37 mm and 57 mm (a distinct pop, 14 ft, light 340, one puff) and 85 mm to 125 mm guns (flak and tank guns: a big flash, 28 ft, light 700, three puffs). One flash per gun, its newest round. The barrage zone flashes nothing. A squad's small arms flash a spark (3 ft, light 50, 3 ticks, no smoke; opinionated, John, 2026-10-12, size by the agent) | fitted |
+| Muzzle flash and firing light | The gun-flash sprite at the muzzle (the end of the drawn barrel for a land gun, [muzzles](#muzzles)), along the barrel, in three classes: light cannon (ZSU-23, 2S6, Vulcan and Phalanx, 30 mm ship guns, BMP-2, BTR-80, M113, M2: a flicker that never goes dark at any cadence, 8 ft, light 160), 37 mm and 57 mm (a distinct pop, 14 ft, light 340, one puff) and 85 mm to 125 mm guns (flak and tank guns: a big flash, 28 ft, light 700, three puffs). One flash per gun, its newest round. The barrage zone flashes nothing. A squad's small arms flash a spark (3 ft, light 50, 3 ticks, no smoke; opinionated, John, 2026-10-12, size by the agent) | fitted |
 | SAM launch | When the motor lights (speed 30 ft/s; the SA-6 sits about 2 s on its rail first): a flash 40 ft long along its heading for 0.15 s, a point light of 2,800 fading over 40 ticks, and a white cloud of six puffs growing from 10 to 60 ft over 8 s. The missile's own smoke trail is the simulation's | fitted |
 | Wreck smoke | A destroyed unit whose wreck burns (ships, vehicles, launchers and guns) has the simulation's crash-site fire and its smoke column, 15 minutes, one column per wreck. The fire sprite is fitted to the unit: 30 ft wide for a 100 point vehicle, growing with the square root of its hit points, from 24 ft to 140 ft (a crash site's is 100 ft). A destroyed unit that does not burn (a building or bunker) sends up a smaller dark column of its own for 15 minutes, the last minute fading it out: a puff every 0.4 s rising 16 ft/s in a fixed 7 ft/s breeze, growing from 6 ft by 3 ft/s, living 30 s, sized by its hit points ((hp / 100) to the one quarter, from 0.6 to 2.4); the 24 newest draw. A wreck that lights its fire later gives up its own column | fitted |
 
@@ -2378,7 +2480,7 @@ so). Each row has a fitted stand-in above.
 | `damage[0..4]` = 255 on every NT | Mapping unresolved | Hit points only | Trace the damage-class table |
 | SA-19, SA-N-11 and ASROC roles | No support flag, or an unclear role | SA-19 and SA-N-11 supported radar, ASROC held | Trace the seeker role |
 | Whether retail surface units fight each other | The `react` DEFEND mask on tanks and armoured cars (`$3fff`) says they answer fire from surface classes; no shipped template stands opposing units in reach | John's rule: units in range shoot; target flags decide the weapons | Trace `Reaction` (0x464040) for the DEFEND word and the surface actors' ranking terms |
-| Flak time fuze | Not in the data; the 250 ft proximity radius is | Time fuze at predicted flight time | None planned |
+| Flak time fuze | Not in the data; the 250 ft proximity radius is | Time fuze at the flight time to the burst point; the proximity radius is unused for flak since 2026-10-13 ([flak](#flak)) | None planned |
 | Hardpoint `flags`, NPC `flags` | NT flags seen: 0x4000000 (SA2A), 0x2000000 (M1939, KS-12, KS-19), 0x801 (Mule), carrier values 0xc8331, 0x108331, 0x1c8131 | Not used | Trace the flag consumers |
 
 ## Decisions pending
@@ -2423,5 +2525,5 @@ Settled during the round:
 | Area defense two units a site, airfield sites 2 to 5 nm out (fields 0 to 100 nm deep), 10 to 120 nm fallback, 3 nm spacing, 150 to 600 ft unit ring, 2,000 ft object and 1 nm runway clearance, strengths kept when the target goes, no trucks for guns | fitted or defined (agent, 2026-10-12 and 2026-10-13) |
 | Weapon target flags (0x10000 air, 0x20000 surface) deciding what a surface weapon aims at; surface damage by class | retail |
 | Preference by unit class, nearest-first choice, units only (no buildings or parked aircraft), the SS-N-9 at ships only and its surface radar search, sides a surface round strikes, the quarter surface aim error, the column's halt | fitted or defined (agent, 2026-10-11) |
-| Relocation site rules and counts, battery caps and radar placement, truck counts and placement, the per-system SAM rearm timers within John's range, gun reserve, jitter numbers, emitter rule, radar on and off, HARM shutdown, experience effects, target choice, time fuze, surface splash reaching aircraft and the other side's ground objects only, barrage rule, movement rates, launch pitch, flak and gun-light looks | fitted or defined (agent) |
+| Relocation site rules and counts, battery caps and radar placement, truck counts and placement, the per-system SAM rearm timers within John's range, gun reserve, jitter numbers, emitter rule, radar on and off, HARM shutdown, experience effects, target choice, time fuze, the flak egg's distribution, the flak splash edge of 400 ft, barrel tips, surface splash reaching aircraft and the other side's ground objects only, barrage rule, movement rates, launch pitch, flak and gun-light looks | fitted or defined (agent) |
 | Unready flag producer, hit-chance rule, surface ranking terms, `zoneDist` and `maxVisDist` units, movement word units other than `w_speed`, whether retail Quick Missions activate base defenses | unknown, see [Unknowns](#unknowns) |

@@ -131,6 +131,38 @@ Agent decisions: the four-voice limit, the canopy muffling inside a cockpit
 (consistent with the other outside sounds) and starting at once with no travel
 delay (as the player's own external launch). Not heard by ear yet.
 
+## Flak bursts
+
+John asked on 2026-10-13 for a check that the flak explosion sound is the
+retail one. Checked against FA.EXE 1.02F (SHA-256 `e31560c2...e99244c`, the
+build in [the explosion notes](../formats/explosions.md)) and the user's
+FA_2.LIB, static reads only; nothing was played.
+
+- **Retail.** `KS12.JT` and `KS19.JT` both carry `expType` 27 (hit an
+  aircraft or object), 15 (land) and 17 (water), `maxSndDist` 15,000 ft and
+  `fireSound` `&expl3.5k`. A flak burst is explosion type 27, whose row of the
+  explosion table at `0x4f46c8` (read again from the executable on 2026-10-13)
+  names four recordings, `&AIREXP1.11K`, `&AIREXP2.11K`, `&EXPL3.5K` and
+  `&EXPL9.5K` (one drawn at random), full level within 1,000 ft and silent at
+  25,000 ft. Types 28 and 29 name `&AIREXP1`, `&AIREXP2`, `&AIREXP4` and
+  `&AIREXP5` instead; in retail they are only the variants that a gun hit on
+  an aircraft (18) or an aircraft kill (30) sometimes shows.
+- **Before 2026-10-13.** The KS-12's burst was type 27 and sounded exactly as
+  above. The KS-19's burst was type 28, an agent choice to draw a larger sheet
+  (`FLAKB`), and so played the type 28 recordings (`&AIREXP4` and `&AIREXP5`
+  in place of `&EXPL3` and `&EXPL9`): not what retail plays for that record.
+- **Now.** Both flak guns' bursts are heard as type 27, the retail row, with
+  its distances; the KS-19 still draws the larger `FLAKB` sheet. Same
+  recordings, distances and level for the player, AI aircraft, online and
+  replays (the sound is made by the simulation when the shell bursts and
+  carried as a sound event).
+- **Not changed, and where it may differ from retail:** the volume is the
+  generic explosion curve (straight line from full to silent), not measured;
+  the gun's own report (`fireSound` `&expl3.5k`, heard to 15,000 ft) is not
+  played, because surface guns keep their own audio, which today is none.
+  Whether the burst you heard as wrong was the KS-19's or the missing report
+  needs John's ear.
+
 ## Numbers and boundaries
 
 | Component | Established value |
