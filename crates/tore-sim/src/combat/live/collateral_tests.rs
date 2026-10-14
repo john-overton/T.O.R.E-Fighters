@@ -1,5 +1,7 @@
 //! Splash damage for every weapon (slice X1): the falloff, the ground share,
-//! who is spared, what is reached and who is credited.
+//! who is spared, what is reached and who is credited. Also the launch grace
+//! (slice nr-sd): a round inside its own launcher's hit volume harms neither
+//! the launcher nor, by its burst, anyone else's claim on it.
 use super::super::tests::{fixture, target};
 use super::super::*;
 use super::*;
@@ -527,4 +529,208 @@ fn an_aircraft_missile_splash_reaches_the_player() {
             .any(|e| matches!(e, Event::OwnshipDamaged { aircraft: 0, .. }))
     );
     assert!(s.own().hp < before);
+}
+
+// ---- Launch grace (John, 2026-10-13) ----------------------------------
+
+/// Where the launcher sits in the launch grace tests.
+const LAUNCH_AT: Vector = [0., 5000., 0.];
+
+fn at(position: Vector) -> Launcher {
+    Launcher {
+        position,
+        speed_fps: 0.,
+        velocity: [0.; 3],
+        ..far()
+    }
+}
+/// A scene with one launcher at [`LAUNCH_AT`]: the player (`ai` false, aircraft
+/// 0) or an AI aircraft (`ai` true, [`SHOOTER`]). Returns the scene, the
+/// ownship's launcher pose (the player's, or one far away) and the launcher's
+/// aircraft id.
+fn launch_scene(ai: bool) -> (State, Launcher, u32) {
+    let mut s = scene();
+    if ai {
+        s.targets.push(aircraft(SHOOTER, LAUNCH_AT, RED));
+        (s, far(), SHOOTER)
+    } else {
+        (s, at(LAUNCH_AT), 0)
+    }
+}
+fn launcher_hp(s: &State, id: u32) -> i32 {
+    if id == 0 { s.own().hp } else { hp(s, id) }
+}
+/// Steps the scene one tick at a time with the ownship at `own`.
+fn tick_once(s: &mut State, own: Launcher) -> Vec<Event> {
+    run_from(s, 1, own)
+}
+fn hurt(events: &[Event], id: u32) -> bool {
+    events.iter().any(|e| match e {
+        Event::OwnshipDamaged { aircraft, .. } => *aircraft == id,
+        Event::Hit(hit) => *hit == id,
+        _ => false,
+    })
+}
+
+#[test]
+fn a_store_spawned_inside_its_launchers_box_with_no_separation_does_no_harm() {
+    for ai in [false, true] {
+        for fuze in [0, 100, 400] {
+            for weapon in [sparrow(), mk84()] {
+                let (mut s, own, id) = launch_scene(ai);
+                let mut w = weapon.clone();
+                w.damage.fuze_radius = fuze;
+                w.damage.fuze_arm_t = 0;
+                // At the launcher's exact centre, heading along its nose.
+                s.projectiles.push(round(
+                    70,
+                    id,
+                    &w,
+                    LAUNCH_AT,
+                    [LAUNCH_AT[0], LAUNCH_AT[1], LAUNCH_AT[2] + 1.],
+                ));
+                let before = launcher_hp(&s, id);
+                let events = run_from(&mut s, 120, own);
+                assert_eq!(
+                    launcher_hp(&s, id),
+                    before,
+                    "ai {ai} fuze {fuze} {}: {events:?}",
+                    w.source
+                );
+                assert!(!hurt(&events, id), "ai {ai} fuze {fuze}: {events:?}");
+                assert!(s.take_strikes().iter().all(|k| k.victim != id));
+            }
+        }
+    }
+}
+
+#[test]
+fn a_store_that_leaves_the_box_and_comes_back_is_treated_normally() {
+    for ai in [false, true] {
+        let (mut s, own, id) = launch_scene(ai);
+        let mut w = sparrow();
+        w.damage.fuze_radius = 0;
+        s.projectiles.push(round(
+            70,
+            id,
+            &w,
+            LAUNCH_AT,
+            [LAUNCH_AT[0], LAUNCH_AT[1], LAUNCH_AT[2] + 1.],
+        ));
+        let before = launcher_hp(&s, id);
+        // Out of the box (28 ft) and well past it: nothing happens.
+        let mut events = Vec::new();
+        for _ in 0..300 {
+            events.extend(tick_once(&mut s, own));
+            let p = &s.projectiles[0];
+            if p.position[2] - LAUNCH_AT[2] > 300. {
+                break;
+            }
+        }
+        assert!(s.projectiles[0].position[2] - LAUNCH_AT[2] > 300.);
+        assert_eq!(launcher_hp(&s, id), before, "ai {ai}: {events:?}");
+        // It turns round (a missile that comes back) and flies into the box.
+        s.projectiles[0].direction = [0., 0., -1.];
+        let mut back = Vec::new();
+        for _ in 0..400 {
+            back.extend(tick_once(&mut s, own));
+            if hurt(&back, id) {
+                break;
+            }
+        }
+        assert!(hurt(&back, id), "ai {ai}: {back:?}");
+        assert!(launcher_hp(&s, id) < before, "ai {ai}");
+    }
+}
+
+#[test]
+fn a_store_bursting_inside_its_launchers_box_does_not_hurt_the_launcher() {
+    for ai in [false, true] {
+        // Another aircraft overlaps the launcher's box: the store is a hit on
+        // it at once, and its splash spares the launcher. 100 ft of fuze
+        // puts the burst at the store, inside the launcher's box.
+        let (mut s, own, id) = launch_scene(ai);
+        // (Overlapping aircraft would otherwise collide and die.)
+        s.cheats.ignore_midair_collisions = true;
+        s.targets.push(aircraft(
+            1,
+            [LAUNCH_AT[0], LAUNCH_AT[1], LAUNCH_AT[2] + 10.],
+            BLUE,
+        ));
+        s.projectiles.push(round(
+            70,
+            id,
+            &sparrow(),
+            LAUNCH_AT,
+            [LAUNCH_AT[0], LAUNCH_AT[1], LAUNCH_AT[2] + 1.],
+        ));
+        let before = launcher_hp(&s, id);
+        let events = run_from(&mut s, 60, own);
+        assert!(events.contains(&Event::Hit(1)), "ai {ai}: {events:?}");
+        assert_eq!(hp(&s, 1), 1000 - 170, "ai {ai}: still hittable");
+        assert_eq!(launcher_hp(&s, id), before, "ai {ai}: {events:?}");
+        assert!(!hurt(&events, id), "ai {ai}: {events:?}");
+    }
+}
+
+#[test]
+fn a_burst_just_outside_the_box_still_hurts_the_launcher() {
+    for ai in [false, true] {
+        // Target 1 is 200 ft ahead: the 100 ft fuze (120 ft with the body)
+        // fires the store at 80 ft, 52 ft beyond the launcher's 28 ft box.
+        let (mut s, own, id) = launch_scene(ai);
+        s.targets.push(aircraft(
+            1,
+            [LAUNCH_AT[0], LAUNCH_AT[1], LAUNCH_AT[2] + 200.],
+            BLUE,
+        ));
+        s.projectiles.push(round(
+            70,
+            id,
+            &sparrow(),
+            LAUNCH_AT,
+            [LAUNCH_AT[0], LAUNCH_AT[1], LAUNCH_AT[2] + 1.],
+        ));
+        let before = launcher_hp(&s, id);
+        let events = run_from(&mut s, 120, own);
+        assert!(events.contains(&Event::Hit(1)), "ai {ai}: {events:?}");
+        assert!(
+            launcher_hp(&s, id) < before,
+            "ai {ai}: caught in its own blast"
+        );
+    }
+}
+
+#[test]
+fn the_grace_is_only_for_the_launchers_own_stores() {
+    // Another aircraft's missile bursting on a third aircraft inside the
+    // player's box still hurts the player.
+    let mut s = scene();
+    s.cheats.ignore_midair_collisions = true;
+    s.targets.push(aircraft(SHOOTER, [0., 5000., -3000.], RED));
+    s.targets.push(aircraft(
+        1,
+        [LAUNCH_AT[0], LAUNCH_AT[1], LAUNCH_AT[2] + 10.],
+        BLUE,
+    ));
+    s.projectiles.push(round(
+        70,
+        SHOOTER,
+        &sparrow(),
+        [LAUNCH_AT[0], LAUNCH_AT[1], LAUNCH_AT[2] - 600.],
+        [LAUNCH_AT[0], LAUNCH_AT[1], LAUNCH_AT[2] + 10.],
+    ));
+    let before = s.own().hp;
+    let events = run_from(&mut s, 200, at(LAUNCH_AT));
+    assert!(events.contains(&Event::Hit(1)), "{events:?}");
+    assert!(s.own().hp < before, "{events:?}");
+}
+
+#[test]
+fn the_box_edge_is_the_aircraft_contact_sphere() {
+    let c = [10., 20., 30.];
+    assert!(inside_sphere(c, 28., c));
+    assert!(inside_sphere(c, 28., [10., 20., 57.9]));
+    assert!(!inside_sphere(c, 28., [10., 20., 58.]));
+    assert!(!inside_sphere(c, 28., [10., 20., 59.]));
 }
