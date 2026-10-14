@@ -719,6 +719,12 @@ const F14_SHOULDER_FORWARD: f64 = 6.0;
 /// - record 7, the AIM-9: on that pylon's shoulder rail, [`SHOULDER_OUT`]
 ///   outboard of it (8.75 ft out, was 8.67), its nose level with the
 ///   AIM-120's (6.0 ft forward, was 1.67).
+///
+/// The Yak-141 (John 2026-10-14: "the wingtip is actually a wing pylon,
+/// and both pylons are fully nestled under the wing"): its two wing rows
+/// are its inner and outer underwing pylons, both well inside the swept
+/// wing's chord, each rail's front at the leading edge, so the missiles'
+/// noses reach a little ahead of it ([`YAK141_INNER`], [`YAK141_OUTER`]).
 pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
     let at = |location, right, forward, hang| {
         Some(StationMove {
@@ -750,9 +756,39 @@ pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
                 pylon_forward: F14_GLOVE_FORWARD,
             },
         ),
+        // The Yak-141: two underwing pylons a side, both well inboard under
+        // the wing's chord, their rails' fronts at the leading edge.
+        (AircraftId::Yak141, 4) => at(
+            Location::Wing,
+            YAK141_INNER[0],
+            YAK141_INNER[1],
+            Hang::AsRecorded,
+        ),
+        (AircraftId::Yak141, 5) => at(
+            Location::Wing,
+            YAK141_OUTER[0],
+            YAK141_OUTER[1],
+            Hang::AsRecorded,
+        ),
         _ => None,
     }
 }
+
+/// The Yak-141's inner underwing pylon, [feet out, feet forward] (agent
+/// decision read from the model, John 2026-10-14: "both pylons are fully
+/// nestled under the wing"): 7.5 ft out, 2.3 ft outboard of the body's
+/// side, where the swept leading edge is about 0.8 ft forward and the
+/// trailing edge 11 ft back; its AA-10 (14.8 ft) centred 2.8 ft back puts
+/// its 6.7 ft rail's front 0.25 ft behind the leading edge and its nose
+/// 4.6 ft ahead of it. Retail records the row 8.33 ft out at 0 ft forward.
+const YAK141_INNER: [f64; 2] = [7.5, -2.8];
+/// The Yak-141's outer underwing pylon (retail's row 16.67 ft out, which
+/// is past two thirds of the model's 18.5 ft half span, by the tip): 11 ft
+/// out, where the leading edge is about 2 ft back; its AA-11 (9.5 ft)
+/// centred 4.4 ft back puts its 4.3 ft rail's front 0.25 ft behind the
+/// leading edge, its nose 2.35 ft ahead of it and its tail 1.8 ft ahead
+/// of the trailing edge.
+const YAK141_OUTER: [f64; 2] = [11.0, -4.4];
 
 /// [`placed`] for source record `hardpoint` of aircraft `id`: at the real
 /// station where [`station_move`] moves it (no move aside there: the
@@ -1656,8 +1692,25 @@ mod tests {
         // Under the wing already: not moved.
         let inner = Hardpoint {
             position: [25, -10, 0],
-            ..outer
+            ..outer.clone()
         };
         assert_eq!(placed(&inner, Some(&model)).0[2], 0.);
+        // The Yak-141's own rows hang at its two underwing pylons instead,
+        // both under the swept wing, so nothing needs to slide.
+        for (index, record, [right, forward]) in
+            [(4, inner, YAK141_INNER), (5, outer, YAK141_OUTER)]
+        {
+            let (mount, rack) = placed_on(AircraftId::Yak141, index, &record, Some(&model));
+            assert_eq!([mount[0], mount[2]], [right, forward]);
+            assert_eq!(rack.location(), Location::Wing);
+            assert!((rack.over[sample::RECORD].unwrap() - 1.).abs() < 1e-6);
+            let lead = 4. - 11. * right / 18.;
+            let trail = -6. - 5. * right / 18.;
+            assert!(
+                forward < lead && forward > trail,
+                "under the chord at {right}"
+            );
+        }
+        const { assert!(YAK141_OUTER[0] - YAK141_INNER[0] >= 3.) };
     }
 }

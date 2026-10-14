@@ -75,7 +75,8 @@ shoulder rail ([the F-14](#the-f-14)).
 | Station position | The source hardpoint record's x (right) and z (forward), a third of a foot a unit, from the aircraft's reference point ([table](../formats/aircraft-ordnance.md#hardpoint-positions)); its height is the pylon's (below) | spec-derived (the height: opinionated, PY2) |
 | Pylon depth | A wing store's top (its lugs, the top of its body) hangs 1 ft under the model's underside over its pylon; a fuselage or centreline store's 2 inches (0.17 ft) under it, on a launcher rail. Stores beside a rack's bar keep the same depth; a triple rack's third hangs under the bar. The underside is the lowest face of the clean model up to 12 ft above the record, straight above the pylon or, where nothing is straight above, up to 3 ft inboard. A station with nothing of the model above it keeps the record's height | opinionated, John 2026-10-13 (morning: 2 ft wing pylons and 4 inch rails; evening: "pylons need to be about half the size they are now"); the samples are agent decisions |
 | Moved aside | A station whose store would cut through a part of the model beside it (a face within 0.6 ft either side of the pylon reaching more than 0.25 ft below the store's top: a nacelle, a gear pod, a body's flank) moves sideways in 0.25 ft steps, out before in at each distance, up to 2 ft, to the first place it clears with model straight above. A store that cannot clear within 2 ft hangs under the lowest surface across its body, as PY2 hung every store (no default load needs it). The move is part of the station's position, so it releases from there too. On the default loads: F/A-18D fuselage AIM-120s 0.25 ft in (3.08 ft out), Rafale fuselage Mavericks 0.25 ft in (3.08), AV-8 fuselage Mavericks 0.25 ft out (3.25), Su-25 B-13 pods 0.5 ft out (5.5), A-10 middle wing row 0.5 ft out (8.83). The F-14's stations are placed by hand instead ([the F-14](#the-f-14)) | agent decision, 2026-10-13 (John: short pylons; a store inside the launching aircraft's hit box is not a reason to hang it deeper, slice SD) |
-| Under the chord | A wing station with nothing of the model straight above it (nor up to 3 ft inboard) slides forward or aft, up to 12 ft, to under the wing's chord at its distance out, nearest the record: 2.4 ft behind the leading edge, so a launch rail about as long as an AA-11's pylon (4.3 ft) starts at the leading edge and the missile's nose reaches ahead of it, as on real underwing launchers; on a chord shorter than 4.8 ft, at its middle (John 2026-10-14: "center the rail to the leading edge"). Only the Yak-141's outer row needs it: retail records it 16.67 ft out at 0 ft forward, ahead of the swept wing's leading edge there, so its AA-11s hung 4 ft below and ahead of the wing in space (John 2026-10-14, "the Yak-141 wingtip location is not correct"); they now hang 1 ft under the outer wing, 8.65 ft back: the chord there runs from about 6.25 to 11.5 ft back, the pylon from 6.5 to 10.8 ft back (its front 0.25 ft behind the leading edge), the missile's nose 3.9 ft back (2.35 ft ahead of the leading edge) and its tail 13.4 ft back. On the default loads of the 22 aircraft the stores preview draws, every other wing station has the model above it and every wingtip station reads its tip edge, so none of them moves; the rule covers any other row that would need it | agent decision, 2026-10-14 (fitted) |
+| Under the chord | A wing station with nothing of the model straight above it (nor up to 3 ft inboard) slides forward or aft, up to 12 ft, to under the wing's chord at its distance out, nearest the record: 2.4 ft behind the leading edge, so a launch rail about as long as an AA-11's pylon (4.3 ft) starts at the leading edge and the missile's nose reaches ahead of it, as on real underwing launchers; on a chord shorter than 4.8 ft, at its middle (John 2026-10-14: "center the rail to the leading edge"). A safety net: no default load of the 22 aircraft the stores preview draws needs it. It was first written for the Yak-141's outer row (retail records it 16.67 ft out at 0 ft forward, ahead of the swept wing, so its AA-11s hung in space), which now has its own stations ([the Yak-141](#the-yak-141)); it stays for any other row recorded off the wing | agent decision, 2026-10-14 (fitted) |
+| Real stations (Yak-141) | The Yak-141's two wing rows hang at its inner and outer underwing pylons, from the per-aircraft table, not the records' positions ([the Yak-141](#the-yak-141)) | opinionated, John 2026-10-14; the positions are agent decisions read from the model |
 | Real stations (F-14) | The F-14's four weapon and tank records hang at the real aircraft's stations, from a per-aircraft table, not the records' positions: no move aside there ([the F-14](#the-f-14)) | opinionated, John 2026-10-14; the positions are agent decisions read from the model |
 | Shoulder rail | A store on a pylon's shoulder rail (the F-14's AIM-9) hangs 1.25 ft outboard of that pylon's centre line, its body 0.05 ft above the pylon's foot (the lugs, the top, of whatever store hangs under the pylon), and leaves from there: the rail juts off the pylon's side just above the main store, so the shoulder store's body is above the whole body of any store under the pylon, real loads or not (AIM-120, AIM-7, AIM-54, bombs, tanks, GBU-10). 1.25 ft keeps an AIM-9's fins (2.07 ft across at 45 degrees) clear of the pylon and of the fins of an AIM-120, AIM-7 or AIM-54 under it | opinionated, John 2026-10-14 ("the AIM-9 rail in real life is a jut off the main pylon slightly elevated above the stores on the main wing pylon"); the spacing and the 0.05 ft gap are agent decisions (fitted) |
 | Wingtip | A wingtip store's centre line lies on the tip's edge: as far out as the model's outermost point beside the record (within 4 ft inboard and 0.3 ft outboard of it, 2.5 ft fore and aft, 3 ft up or down), at the middle height of that edge. No pylon or rail is drawn. With no model read, the record's position | opinionated, John 2026-10-13 ("the missile's centre line sits on the wingtip geometry, no gap"); the search box is an agent decision |
@@ -379,6 +380,33 @@ With bombs, tanks or a GBU-10 chosen for the glove pylon (beyond the real
 F-14's loads) the shoulder AIM-9's body stays above them, though its lower
 fins can touch a wide one. John accepts a little clipping (2026-10-14).
 
+## The Yak-141
+
+John, 2026-10-14, with a picture of a Yak-141 from the side: "the wingtip
+is actually a wing pylon, and both pylons are fully nestled under the
+wing." Retail's records put the AA-10s 8.33 ft out at 0 ft forward and the
+AA-11s 16.67 ft out at 0 ft forward. The model's wing is swept (its leading
+edge about 0.8 ft forward at 7.5 ft out, 2 ft back at 11 ft out, 6.3 ft back
+at 16.67 ft out; its trailing edge about 11 ft back; its tip about 18.5 ft
+out), so the outer row was ahead of the wing and near the tip.
+
+The real aircraft has two underwing pylons a wing, both well inboard under
+the chord, the missiles' noses a little ahead of the leading edge. T.O.R.E
+hangs the two rows there ([`station_move`](#source-notes)):
+
+| Record (YAK141.PT row) | Retail position, ft out / forward | T.O.R.E station | Default store |
+| --- | --- | --- | --- |
+| 4, inner pylon | 8.33 / 0 | 7.5 / -2.8 | AA-10 (14.8 ft): rail 0.25 ft behind the leading edge, nose 4.6 ft ahead of it, tail 0.8 ft ahead of the trailing edge |
+| 5, outer pylon | 16.67 / 0 | 11.0 / -4.4 | AA-11 (9.5 ft): rail 0.25 ft behind the leading edge, nose 2.35 ft ahead of it, tail 1.8 ft ahead of the trailing edge |
+
+Both hang 1 ft under the wing, 3.5 ft apart. Every store the ordnance screen
+allows on these rows (one a wing on each) hangs and leaves from the same
+stations, centred where the default store is. Nothing of the default load
+reaches into the airframe (the preview's `clip` lines read 0). Wide stores
+on both rows of one wing (two GBU-10s, 5.4 ft wings) would touch wing tip
+to wing tip. Opinionated, John 2026-10-14; the positions are agent decisions
+(fitted).
+
 ## Performance
 
 The stores join their aircraft's existing vertex batch (no extra draw call or
@@ -394,7 +422,7 @@ vertices a frame.
 - Retail release position and the 0x4 mirror rule: [weapons formats](../formats/weapons.md#release-state)
   (FA.EXE 1.02F `HARDPos` `0x4532a0`, `HARDUnrotatedHardPos` `0x453220`).
 - Code: `tore_sim::combat::hardpoints` (the rule, two pylons a wing, tandem fuselage pairs,
-  `station_move` and `placed_on` (the F-14's stations, the shoulder rail),
+  `station_move` and `placed_on` (the F-14's and Yak-141's stations, the shoulder rail),
   `Rack::store_point`, `slot_offset` and `shoulder` (the bar), `placed` and `Underside::nudge`
   (moving aside), the 1 ft pylon, `default_records` (the A-4E)), `tore-app/src/store_sizes.rs`
   (`fin_clock`, `carried_roll`, the fin roll in `variants`), `tore_sim::combat::store_sizes` (the sizes
