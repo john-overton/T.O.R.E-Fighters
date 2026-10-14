@@ -591,6 +591,20 @@ fn flak_bursts_at_its_time_fuze_as_a_flak_effect() {
     run_from(&mut s, 1, far());
     assert!(s.projectiles.is_empty());
     assert_eq!(s.surface_round(id), None);
+    // It is heard as the retail air flak, type 27, though it draws type 28.
+    let sounds = s.take_sound_events();
+    assert!(
+        sounds
+            .iter()
+            .any(|e| e.kind == crate::acoustics::Kind::Blast(27)),
+        "{sounds:?}"
+    );
+    assert!(
+        !sounds
+            .iter()
+            .any(|e| e.kind == crate::acoustics::Kind::Blast(28)),
+        "{sounds:?}"
+    );
     let bursts = flak_effects(&s);
     assert_eq!(bursts.len(), 1);
     assert_eq!(
@@ -631,43 +645,30 @@ fn the_85_mm_flak_keeps_the_records_small_flak_explosion() {
 }
 
 #[test]
-fn flak_bursts_near_a_hostile_aircraft_and_passes_a_friendly_one() {
-    for (side, bursts) in [(Side(1), true), (REDFOR, false)] {
+fn flak_has_no_proximity_fuze_and_bursts_only_at_its_time_fuze() {
+    for side in [Side(1), REDFOR] {
         let mut s = scene();
         unit(&mut s, UNIT, [0., 10., 0.], REDFOR);
-        // 200 ft beside the shell's path: inside its 250 ft fuze radius.
-        s.targets.push(aircraft(7, [200., 6000., 0.], 1000, side));
-        let id = s
-            .fire_surface(shot(ks19(), [0., 30., 0.], [0., 1000., 0.], None))
-            .unwrap();
-        // The shell reaches the fuze sphere at about tick 236, and the 100 mm
-        // burst's effect lasts one second: look while it shows.
-        run_from(&mut s, 300, far());
+        // 200 ft beside the shell's path, level with the point it is set
+        // to burst at: the old 250 ft proximity fuze would have fired here
+        // (John, 2026-10-13: flak bursts only where the gun set it to, in an
+        // egg around the target).
+        s.targets.push(aircraft(7, [200., 2980., 0.], 1000, side));
+        let mut fired = shot(ks19(), [0., 30., 0.], [0., 1000., 0.], None);
+        fired.end_tick = Some(120);
+        s.fire_surface(fired).unwrap();
+        run_from(&mut s, 100, far());
+        // Past the aircraft, before the time fuze: nothing has burst.
+        assert!(flak_effects(&s).is_empty(), "no proximity burst");
+        assert_eq!(hp(&s, 7), 1000);
+        run_from(&mut s, 60, far());
         let found = flak_effects(&s);
-        if bursts {
-            assert_eq!(found.len(), 1);
-            // It bursts as it enters the fuze sphere, below the aircraft.
-            let at = found[0].position;
-            // (The gun's dispersion moves it a few feet off the bore line.)
-            assert!(
-                at[0].abs() < 50. && at[1] < 6000. && at[1] > 5700.,
-                "{at:?}"
-            );
-            // The aircraft's surface is the 250 ft fuze radius from the
-            // burst: (35 - 11) percent of 80.
-            assert_eq!(hp(&s, 7), 1000 - 80 * 24 / 100);
-            assert!(matches!(
-                outcomes(&mut s, id).as_slice(),
-                [Outcome {
-                    resolution: Resolution::Hit(19),
-                    ..
-                }]
-            ));
-        } else {
-            assert!(found.is_empty());
-            assert_eq!(hp(&s, 7), 1000);
-            assert_eq!(s.projectiles.len(), 1, "still climbing");
-        }
+        assert_eq!(found.len(), 1, "one burst at the time fuze");
+        let at = found[0].position;
+        assert!(at[0].abs() < 50. && (at[1] - 2980.).abs() < 100., "{at:?}");
+        // Collateral still reaches an aircraft near the burst (a surface
+        // gun's friendly fire is on in this fixture).
+        assert!(hp(&s, 7) < 1000);
     }
 }
 
@@ -1073,7 +1074,7 @@ fn surface_rounds_and_looks_restore_from_a_checkpoint_and_fly_on_identically() {
     s.targets
         .push(aircraft(7, [200., 6000., 0.], 1000, Side(1)));
     let mut fired = shot(ks19(), [0., 30., 0.], [0., 1000., 0.], None);
-    fired.end_tick = Some(3000);
+    fired.end_tick = Some(250);
     s.fire_surface(fired).unwrap();
     s.fire_surface(shot(zsu23(), [0., 30., 0.], [0., 1000., 1000.], None))
         .unwrap();
@@ -1265,4 +1266,23 @@ fn a_buildings_fire_burns_for_the_whole_mission_outside_the_crash_fire_cap() {
     run(&mut s, 6);
     assert_eq!(kind(&s), (buildings as usize, 0));
     assert!(s.marks.iter().all(|m| m.strength() == 1.), "full strength");
+}
+
+#[test]
+fn flak_shells_have_no_dispersion_and_other_gun_rounds_keep_theirs() {
+    let direction = crate::attitude::unit([0.3, 1., 0.2]);
+    for id in 0..40 {
+        assert_eq!(
+            projectile_launch_direction(&ks19(), direction, id, UNIT, 0),
+            direction,
+            "a flak shell goes exactly at its burst point"
+        );
+    }
+    let mut spread = 0;
+    for id in 0..40 {
+        if projectile_launch_direction(&zsu23(), direction, id, UNIT, 0) != direction {
+            spread += 1;
+        }
+    }
+    assert!(spread > 30, "{spread}");
 }

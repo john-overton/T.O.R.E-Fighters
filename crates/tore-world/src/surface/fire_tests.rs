@@ -301,6 +301,7 @@ fn arc(index: usize, rest: [f64; 2], limit: [f64; 2]) -> MountArc {
         rest,
         limit,
         offset: [0., 10., 0.],
+        barrel: None,
     }
 }
 const FREE: [f64; 2] = [0., 0.];
@@ -1269,6 +1270,62 @@ fn a_moving_unit_fires_from_where_it_is_with_its_mount_turned() {
         ..mount
     };
     assert!((place.mount(&low, &|_, _| 0.)[1] - MUZZLE_CLEARANCE_FT).abs() < 1e-6);
+}
+
+#[test]
+fn a_land_guns_shell_leaves_the_end_of_its_barrel_toward_the_target() {
+    let place = Place {
+        origin: [100., 5., 200.],
+        eye: [100., 20., 200.],
+        basis: Basis::new(0., 0., 0.),
+        heading: 0.,
+        velocity: [0.; 3],
+    };
+    let hardpoint = arc(0, FREE, FREE);
+    // No barrel: the hardpoint, 10 ft up, whatever the bearing.
+    let at = place.muzzle(&hardpoint, 1.0, &|_, _| 0.);
+    assert_eq!(at, [100., 15., 200.]);
+    // A barrel ending 20 ft forward, 3 ft right and 25 ft up: forward is the
+    // bearing the gun has turned to, so facing east it is 20 ft east.
+    let gun = MountArc {
+        barrel: Some([3., 25., 20.]),
+        ..hardpoint
+    };
+    let east = place.muzzle(&gun, std::f64::consts::FRAC_PI_2, &|_, _| 0.);
+    assert!((east[0] - 120.).abs() < 1e-9 && (east[2] - 197.).abs() < 1e-9);
+    assert!((east[1] - 30.).abs() < 1e-9);
+    let north = place.muzzle(&gun, 0., &|_, _| 0.);
+    assert!((north[0] - 103.).abs() < 1e-9 && (north[2] - 220.).abs() < 1e-9);
+}
+
+#[test]
+fn a_flak_burst_falls_in_the_egg_about_the_target_as_it_will_be_when_the_shell_arrives() {
+    let mut record = ks19();
+    surface_guns::apply("KS19", &mut record).unwrap();
+    let muzzle = [0., 30., 0.];
+    let target = TargetObservation {
+        position: [3_000., 15_000., 6_000.],
+        velocity: [0., 0., 760.],
+    };
+    for egg in [
+        [0., 0., 0.],
+        [200., 50., -300.],
+        [-400., -120., 250.],
+        [100., 160., 450.],
+    ] {
+        let first = [3_000., 15_000., 12_000.];
+        let (burst, ticks) = flak_burst_point(&record, muzzle, target, egg, first);
+        let seconds = ticks.expect("in reach") as f64 / 120.;
+        // The target, carried on to the moment the shell arrives, stands
+        // exactly the egg's offset from where the shell bursts.
+        let arrived: Vector =
+            std::array::from_fn(|i| target.position[i] + target.velocity[i] * seconds);
+        let off = sub(burst, arrived);
+        assert!(
+            length(sub(off, egg)) < 12.,
+            "{egg:?}: burst {burst:?}, target then {arrived:?}"
+        );
+    }
 }
 
 #[path = "supply_tests.rs"]

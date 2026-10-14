@@ -105,6 +105,9 @@ pub fn recordings() -> impl Iterator<Item = &'static str> {
     TABLE.iter().flat_map(|e| e.sounds.iter().copied())
 }
 
+/// The explosion type whose recordings and distances a flak burst sounds
+/// with: 27, the original's air flak row, which both flak records name.
+pub const FLAK_SOUND: u8 = 27;
 /// Every FA aircraft explodes as type 30 when destroyed.
 pub const AIRCRAFT: u8 = 30;
 /// A destroyed ground object or ship without a unit record (buildings and

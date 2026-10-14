@@ -23,6 +23,7 @@ pub mod emitters;
 pub mod fire;
 pub mod layout;
 pub mod movement;
+pub mod muzzle;
 pub mod parked;
 pub mod resolve;
 pub mod supply;

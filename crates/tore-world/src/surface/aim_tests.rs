@@ -181,6 +181,7 @@ fn ship_arc(unit: UnitId, hardpoint: usize) -> Option<(usize, MountArc)> {
             rest: [rest, 0.],
             limit: [150., 90.],
             offset: [0., 10., if hardpoint == 0 { 100. } else { -100. }],
+            barrel: None,
         },
     ))
 }

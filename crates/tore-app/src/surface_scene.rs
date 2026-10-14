@@ -80,6 +80,10 @@ struct Options {
     flatten: Option<f64>,
     /// Extra frames drawn per view to time them (nr-fx2).
     frames: usize,
+    /// After `--seconds`, keep stepping until a gun near the focus flashes
+    /// (at most 5 minutes more), so the picture catches the muzzle flash
+    /// (nr-flak).
+    until_flash: bool,
 }
 
 fn options() -> AppResult<Options> {
@@ -104,6 +108,7 @@ fn options() -> AppResult<Options> {
         intruder: None,
         blue: Vec::new(),
         no_aim: false,
+        until_flash: false,
         time: None,
         bomb_runway: 0,
         flatten: None,
@@ -151,6 +156,7 @@ fn options() -> AppResult<Options> {
                 }
             }
             "--no-aim" => o.no_aim = true,
+            "--until-flash" => o.until_flash = true,
             "--bomb-runway" => o.bomb_runway = next()?.parse()?,
             "--time" => {
                 let text = next()?;
@@ -168,7 +174,7 @@ fn options() -> AppResult<Options> {
         }
     }
     let [out, theater, stem] = positional.as_slice() else {
-        return Err("--surface-scene OUT_DIR THEATER STEM [--surface-seed N] [--seconds S] [--surface-only] [--kill all|LIST] [--burn S] [--rails N] [--focus LIST] [--views LIST] [--look YAW,PITCH] [--tag NAME] [--distance FT] [--defenses AAA SAM] [--intruder EAST,UP,NORTH] [--blue LIST] [--no-aim] [--time HH:MM] [--bomb-runway N]".into());
+        return Err("--surface-scene OUT_DIR THEATER STEM [--surface-seed N] [--seconds S] [--surface-only] [--kill all|LIST] [--burn S] [--rails N] [--focus LIST] [--views LIST] [--look YAW,PITCH] [--tag NAME] [--distance FT] [--defenses AAA SAM] [--intruder EAST,UP,NORTH] [--blue LIST] [--no-aim] [--time HH:MM] [--bomb-runway N] [--until-flash]".into());
     };
     o.out = out.clone();
     o.theater = theater.to_ascii_uppercase();
@@ -459,6 +465,29 @@ pub fn run() -> AppResult<()> {
         (o.seconds * 120.).round() as u64,
         o.surface_only,
     )?;
+    let mut tracker = crate::gun_flash::Tracker::default();
+    tracker.set_fire_widths(std::sync::Arc::clone(&scenery.fire_widths));
+    if o.until_flash {
+        // Step on until a gun within 300 ft of the focus has just fired.
+        let start = focused(&o, places(&world));
+        let at = centre(&start);
+        let seen = &mut tracker;
+        let mut found = false;
+        for _ in 0..5 * 60 * 120 {
+            step(&mut world, &mut scenery, 1, false)?;
+            let snapshot = world.combat.render_snapshot().clone();
+            let now = snapshot.tick as f64;
+            seen.observe(&snapshot, now, |_| None);
+            let flashes = seen.draw(now, |_| None);
+            if flashes.flashes.iter().any(|f| {
+                (f.position[0] - at[0]).hypot(f.position[2] - at[2]) < 300. && f.intensity > 0.9
+            }) {
+                found = true;
+                break;
+            }
+        }
+        println!("surface-scene: a gun near the focus flashed: {found}");
+    }
     // One whole-world tick takes the picture the views draw.
     step(&mut world, &mut scenery, 1, false)?;
     let focus = focused(&o, places(&world));
@@ -604,8 +633,6 @@ pub fn run() -> AppResult<()> {
     // The surface defenses' own presentation: wreck fires fitted to their
     // units and the smoke of wrecks without a fire (`surface_fx`).
     let now = snapshot.tick as f64;
-    let mut tracker = crate::gun_flash::Tracker::default();
-    tracker.set_fire_widths(std::sync::Arc::clone(&scenery.fire_widths));
     tracker.observe(&snapshot, now, |_| None);
     let guns = tracker.draw(now, |_| None);
     let tag = o

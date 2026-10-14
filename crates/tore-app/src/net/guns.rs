@@ -945,7 +945,7 @@ fn surface_round(
         }
         None => arms.place(None),
     };
-    let muzzle = place.mount(arc, around.ground);
+    let muzzle = place.muzzle(arc, burst.aim[0], around.ground);
     let radar = matches!(weapon.kind, fire::Kind::Gun { radar: true, .. });
     // The target as drawn now, taken back to the tick the gun observed it.
     let target = burst.target.and_then(|id| {
@@ -2374,6 +2374,7 @@ mod tests {
             rest: [0., 0.],
             limit: [0., 0.],
             offset: [0., 6., 2.],
+            barrel: None,
         };
         let (weapon, stock) =
             WeaponArms::gun(record, "ZSU23", arc, 2, false, [4, 4, 4, 4], 0).expect("a table row");
