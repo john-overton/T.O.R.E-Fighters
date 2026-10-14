@@ -130,3 +130,27 @@ Battery (fuel lines from `--probe-fuel-trace` at the start of the friendly-wing 
 stores aboard): AH-64 3,720 s, Mi-24 7,582 s, CH-47 7,133 s, V-22 8,103 s planned.
 `ai-fight-v22-fuel-bingo` gives the V-22 wingmen 700 lb (about 590 s at the cruise flow):
 they start on caution, turn bingo and head home.
+
+## CH-47 at its real weight (slice HF3 follow-up)
+
+Taken 2026-10-13 on branch `nr-hf3` at multiplayer f2204152, same command. John's
+answer 3 on the evening list ("check other records for copying issues as well"): the
+reader gives `CH47.PT`, which carried the Mi-24's weights, the CH-47F's
+([record correction](../formats/aircraft.md#rotorcraft-fuel-records)). The rotor
+retune is in [powered-lift flight](../spec/powered-lift-flight.md#fuel-slice-hf2).
+
+| CH-47 | Before (Mi-24 copy) | Slice HF3 |
+| --- | --- | --- |
+| Empty / fuel / maximum, lb | 18,078 / 3,307 / 28,660 | 24,578 / 7,340 / 54,000 |
+| Rated power, hp; full flow, lb/s | 3,001; 0.500 | 7,762; 1.294 |
+| Hover at gross, 1,000 ft: share of rated, flow, endurance | 63 %, 0.354, 156 min | 39 %, 0.674, 182 min |
+| 60 / 100 / 130 kt level | 228 / 201 / 160 min | 254 / 232 / 192 min |
+| Planning (156 kt cruise home, sea level): flow, full tank | 0.464 lb/s, 119 min | 0.826 lb/s, 148 min |
+| Hover ceiling at gross / maximum | 15,700 / 4,600 ft | 23,800 / 7,700 ft |
+| Level top speed, sea level, gross | 165 kt | 170 kt |
+| Vertical climb at full collective | 2,925 ft/min | 4,881 ft/min |
+
+Real CH-47F: 400 nautical miles at its 157 knot cruise is about 2.5 hours. Battery: the
+CH-47 friendly wing plans 8,889 s at the start (`ai-fight-ch47-friendly-wings`, minimum
+now 7,800 s); the 15 s hover at 5,000 ft burns 0.69 lb/s (`flight-powered-hover-ch47`,
+band 0.1 to 0.9).

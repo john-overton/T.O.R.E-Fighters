@@ -887,9 +887,10 @@ def fuel_lines(output: str, aircraft: str) -> list[tuple[int, int, int, int, str
 
 # Slice HF2: the least a rotorcraft's planned endurance (seconds) may be at the start with a full tank.
 # The record's flow gave 33 minutes (AH-64, V-22) to 18 (Mi-24). Since slice HF3 the AI plans at its level
-# cruise flow (docs/baselines/rotorcraft-fuel.md: 64 to 139 minutes with a full tank and no stores; the
-# stores the wings carry take a few minutes off), and the V-22 carries the MV-22B's 11,700 lb: over two hours.
-ROTORCRAFT_MIN_ENDURANCE_S = {"Ah64": 3300, "Mi24": 6000, "Ch47": 6600, "V22": 7200}
+# cruise flow (docs/baselines/rotorcraft-fuel.md: 64 to 148 minutes with a full tank and no stores; the
+# stores the wings carry take a few minutes off), and the V-22 and CH-47 carry their real tanks (11,700 lb, the
+# MV-22B's, and 7,340 lb, the CH-47F's; their records had copied the AH-64's and the Mi-24's): over two hours.
+ROTORCRAFT_MIN_ENDURANCE_S = {"Ah64": 3300, "Mi24": 6000, "Ch47": 7800, "V22": 7200}
 
 
 # One AI rotorcraft's flight and the rotor adapter's command (`--probe-rotor-trace`, slice HF1).

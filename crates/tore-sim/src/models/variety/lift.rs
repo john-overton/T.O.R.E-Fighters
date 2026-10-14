@@ -422,10 +422,12 @@ const V22_REAL_MAX_LB: f64 = 52_600.;
 /// weight, hp/lb: the CH-47F's two T55-GA-714A at 4,733 shp each (Pub
 /// W-CH47) at its 54,000 lb maximum gross weight, times the share that
 /// reaches the rotors (Fit, 0.82: transmission and installation losses of
-/// about 8 percent, as for the Mi-24, and the rest the H6 climb band). The PT's weights are 53 percent of
-/// the real aircraft's, so the power is scaled by weight to keep the real
-/// aircraft's power loading (P3 notes; the PT thrust of 135,795 lbf and
-/// the first draft's 1.25 x weight are both set aside).
+/// about 8 percent, as for the Mi-24, and the rest the H6 climb band). The power is
+/// scaled by the record's maximum weight to keep the real aircraft's power
+/// loading (P3 notes; the PT thrust of 135,795 lbf and the first draft's
+/// 1.25 x weight are both set aside). The PT's weights were the Mi-24's,
+/// 53 percent of the real aircraft's; since slice HF3 the reader gives the
+/// CH-47F's, so the share is 1: 7,762 hp (3,001 before).
 const CH47_RATED_HP_AT_MAX: f64 = 2. * 4_733. * 0.82;
 /// The real CH-47F's maximum gross weight, lb (Pub W-CH47).
 const CH47_REAL_MAX_LB: f64 = 54_000.;
@@ -536,12 +538,17 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
         // kt; Vne itself was not found). The PT thrust (4.7 times the
         // maximum weight) is implausible, so the power is the published
         // engines' per pound of maximum weight (see CH47_RATED_HP_AT_MAX)
-        // and the maximum thrust is what that power hovers at.
+        // and the maximum thrust is what that power hovers at. Slice HF3
+        // (the CH-47F's weights, 2.6 times the power): collective 1 to 17
+        // degrees (was 14) so it hovers out of ground effect at 54,000 lb,
+        // pitch differential collective 1.32 degrees (was 1.2) for the
+        // design's 25 deg/s hover pitch rate at the heavier inertia, forward
+        // flat plate 70 ft² (was 38) for the published 170 kt.
         Ch47 => RotorParameters {
             layout: RotorLayout::Tandem {
                 hub_spacing_ft: 38.9,
                 interference: 0.3,
-                pitch_collective_degrees: 1.2,
+                pitch_collective_degrees: 1.32,
                 pedal_cyclic_share: 0.85,
                 trim_tilt_degrees: 2.5,
             },
@@ -555,7 +562,7 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
             energy_seconds: 2.5,
             never_exceed_kt: 190.,
             structural_kt: Some(190.),
-            collective_degrees: [1., 14.],
+            collective_degrees: [1., 17.],
             cyclic_degrees: [8., 9.],
             blowback: 0.12,
             lock_number: 4.,
@@ -566,7 +573,7 @@ fn rotor(id: AircraftId, c: &Configuration) -> Option<RotorParameters> {
             vortex_ring_rise: 2.,
             tail_rotor: None,
             airframe: RotorcraftAirframe {
-                flat_plate_ft2: [38., 250., 150.],
+                flat_plate_ft2: [70., 250., 150.],
                 tail_pitch_ft3: 4_000.,
                 tail_trim_degrees: 0.,
                 fin_yaw_ft3: 1_500.,

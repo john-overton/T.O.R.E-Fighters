@@ -356,7 +356,7 @@ rotor physics (the same rotor model as the AH-64 and Mi-24) and one
 cross-shafted drive with one governor.
 
 - **Controls.** Aft stick adds blade pitch to the front rotor and takes it
-  from the rear (differential collective, 1.2 degrees at full stick); lateral
+  from the rear (differential collective, 1.32 degrees at full stick since slice HF3, 1.2 before); lateral
   stick tilts both disks together; the pedals tilt them apart (front right,
   rear left, 0.85 of the lateral range at full pedal). The collective is
   common. There is no tail rotor.
@@ -381,8 +381,13 @@ cross-shafted drive with one governor.
   at the rotors. The design's first draft (1.25 times the maximum takeoff
   weight in thrust) corresponds to 3,270 hp, 9 percent more; the model's
   maximum static thrust is now what 3,001 hp hovers at, 1.17 times the PT
-  maximum takeoff weight. The PT mass, fuel and
-  stores are kept (the PT weights are 53 percent of the real aircraft's).
+  maximum takeoff weight. The PT stores are kept. The PT's mass and fuel were
+  the Mi-24's (53 percent of the real aircraft's); since slice HF3 the reader
+  gives the CH-47F's (24,578 lb empty, 7,340 lb fuel, 54,000 lb maximum,
+  [record correction](../formats/aircraft.md#rotorcraft-fuel-records)), so
+  the weight ratio is 1 and the power the full 7,762 hp. The results below
+  are the P3 figures at the old weights; the current ones are in
+  [powered-lift flight](powered-lift-flight.md#fuel-slice-hf2).
 - **Vne.** 190 kt, fitted: the published maximum speed is 170 kt but no Vne was
   found in a reliable source. The overspeed rule and the retreating blade
   stall onset both use it.

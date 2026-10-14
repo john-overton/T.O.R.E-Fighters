@@ -1262,14 +1262,14 @@ out of fuel and the aircraft goes down.
 
 | | AH-64 | V-22 | CH-47 | Mi-24 |
 | --- | --- | --- | --- | --- |
-| Internal fuel, lb | 2,000 (record) | 11,700 (MV-22B, slice HF3; the record's 2,000 was the AH-64's) | 3,307 (record) | 3,307 (record) |
+| Internal fuel, lb | 2,000 (record) | 11,700 (MV-22B, slice HF3; the record's 2,000 was the AH-64's) | 7,340 (CH-47F, slice HF3; the record's 3,307 was the Mi-24's) | 3,307 (record) |
 | Flow of the record, lb/s (no longer read) | 1 | 1 | 1 | 3 |
 | Top speed of the envelope at sea level, kt | 173 | 301 | 196 | 196 |
 | Cruise home (80 percent), kt | 138 | 241 (airplane mode) | 156 | 156 |
-| Planning flow at full fuel, lb/s (cruise home, sea level) | 0.52 | 1.44 | 0.46 | 0.44 |
-| Full tank at the planning flow, minutes | 64 | 135 | 119 | 126 |
-| Hover flow, lb/s (HF2's planning figure) | 0.47 | 1.36 | 0.34 | 0.43 |
-| Full tank at 100 kt level, minutes | 93 | 244 | 201 | 199 |
+| Planning flow at full fuel, lb/s (cruise home, sea level) | 0.52 | 1.44 | 0.83 | 0.44 |
+| Full tank at the planning flow, minutes | 64 | 135 | 148 | 126 |
+| Hover flow, lb/s (HF2's planning figure) | 0.47 | 1.36 | 0.65 | 0.43 |
+| Full tank at 100 kt level, minutes | 93 | 244 | 232 | 199 |
 
 (The probe that prints these is `powered_probe`; the table is in the [rotorcraft fuel
 baseline](../baselines/rotorcraft-fuel.md).)
@@ -1296,9 +1296,10 @@ baseline](../baselines/rotorcraft-fuel.md).)
   reach (it was 53), 99 for the V-22 (53), 357 for the CH-47 (123) and 292 for the
   Mi-24 (36). Slice HF3's cruise planning and the V-22's real tank move these: at the
   cruise home speed a full tank less the reserve reaches about 135 nautical miles for the
-  AH-64, about 300 for the Mi-24 and CH-47 and about 520 for the V-22.
+  AH-64, about 300 for the Mi-24, about 370 for the CH-47 (its real tank since slice
+  HF3) and about 520 for the V-22.
 - **Not bingo at the start.** A friendly wing's field is normally a few minutes away
-  (3.5 minutes at the AH-64's cruise in the probes) against 64 to 135 minutes of fuel.
+  (3.5 minutes at the AH-64's cruise in the probes) against 64 to 148 minutes of fuel.
 - **What bingo does.** The same as for a fighter: the actor heads for its home runway
   at the cruise speed, and since slice H2 lands there (a helicopter vertically).
 

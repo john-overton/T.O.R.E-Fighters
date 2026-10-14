@@ -443,8 +443,10 @@ full_flow = rated shaft hp x 0.6 lb/(hp h) / 3600
   a quarter of its full flow at flight idle). Both fitted.
 - **Results** (`powered_probe`, hover and level trims at 1,000 ft at the record weights; the
   full table is in the [baseline](baselines/rotorcraft-fuel.md)): hover 0.47 lb/s for the
-  AH-64 (71 minutes), 0.43 for the Mi-24 (128 minutes, about 200 at 100 knots), 0.35 for
-  the CH-47. The real aircraft burn about 0.3 lb/s (AH-64D cruise, 1,000 to 1,200 lb/h)
+  AH-64 (71 minutes), 0.43 for the Mi-24 (128 minutes, about 200 at 100 knots). The
+  CH-47, with the CH-47F's weights and 7,340 lb of fuel since slice HF3, burns 0.67 lb/s
+  at a hover (182 minutes) and 0.83 at its 156 knot cruise home (148 minutes; the real
+  CH-47F's 400 nautical miles at 157 knots is about 2.5 hours). The real aircraft burn about 0.3 lb/s (AH-64D cruise, 1,000 to 1,200 lb/h)
   and 0.5 to 0.6 (Mi-24). The V-22, with the MV-22B's weights and 11,700 lb of fuel since
   slice HF3 ([record correction](formats/aircraft.md#rotorcraft-fuel-records)), burns
   1.37 lb/s at a hover (142 minutes), 1.16 at 220 knots in airplane mode at 1,000 ft
@@ -463,7 +465,7 @@ full_flow = rated shaft hp x 0.6 lb/(hp h) / 3600
   profile and parasite power, which the weight barely moves, dominate at cruise). Slice
   HF2 used the hover flow. At those speeds the cruise is fast, so the cruise flow is
   about the hover flow or a little more (AH-64 0.52 against 0.47 lb/s, Mi-24 0.44 against
-  0.43, CH-47 0.46 against 0.34, V-22 1.44 against 1.36): the plan matches the flight
+  0.43, CH-47 0.83 against 0.65, V-22 1.44 against 1.36): the plan matches the flight
   home the AI actually flies. A model with no level trim there plans at the hover flow.
 - The Unlimited fuel cheat and the fuel starvation rules are unchanged.
 
