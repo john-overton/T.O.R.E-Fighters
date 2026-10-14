@@ -749,3 +749,12 @@ beside a burning flare and bomb fireballs before and after their initial flash.
 It checks capture completion; inspect the PNGs for lighting appearance.
 `tore-app` tests assert fire size, linear fade, fixed source height and sustained
 fireball light lifetime. See [capture commands](../DEVELOPMENT.md#explosion-inspection).
+
+
+### Theater ground colours
+
+`render-terrain-colors` is a headless scenario, with no window or GPU. It
+compares the live terrain loader's ground palette with the family read from
+each retail base MM at all six weather choices and three altitudes. It prints
+mean land-cell RGB for each comparison and fails on any palette mismatch.
+[Diagnostic and optional offscreen captures](../DEVELOPMENT.md#ground-colour-regression).
