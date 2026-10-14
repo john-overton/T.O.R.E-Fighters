@@ -298,3 +298,42 @@ change"), or the selection map's unit test fails.
 Measured evidence of a battery pass goes in [`docs/baselines/`](../baselines/),
 one file per pass, following the baseline rules in [AGENTS.md](../../AGENTS.md).
 The first pass is [battery-2026-09-28](../baselines/battery-2026-09-28.md).
+
+## Ground decal depth regression
+
+`CARGO_BUILD_JOBS=4 nice -n 10 cargo test --locked -p tore-app
+ gpu_ground_decals_preserve_vehicle_pixels -- --ignored --nocapture` is a
+windowless GPU pixel test. Run the command on one line on a host with an
+available offscreen adapter. It uses the production effect vertex shader and
+pipeline, synthetic crater art and three six-foot-high vehicle roof surfaces.
+At external, narrow sensor and long-range sensor distances it requires every
+vehicle pixel to survive, while ground pixels show the crater. The previous
+20-foot view-ray pull is reconstructed in the fixture and must lose at least
+half the vehicle pixels, proving sensitivity to this bug. Set
+`TORE_DECAL_RENDERS` to a local directory to retain reference, before and after
+PPMs. Vulkan, Metal and DX12 use a one-foot near plane; OpenGL uses a
+1,000-foot near plane in this fixture because its clip-space remapping loses
+small reversed-depth differences at long range. These are synthetic depth evidence, not retail-art or full-console
+acceptance captures. No simulation or shared profile is used.
+
+For a retail-art comparison, set `TORE_DECAL_PREVIEW=1` with the existing
+`--a2g-run UKR QUCOL --pilot ai --aircraft ac130 --load C_25.JT --altitude 6000
+--speed 220 --from 3 --seconds 1 --console-scene OUT --console-at 0.1` command
+(on one line, using an isolated profile). This adds fresh craters to the
+render snapshot under routed surface units without changing their health or
+the simulation. It writes the four narrow sensor modes and a normal external
+view. Compare matched builds using the same profile and command.
+
+The nr-decal follow-up extends the same offscreen fixture to a 15-degree
+hillside at external, narrow sensor and long sensor ranges. The hillside
+before image is the horizontal-quad first fix with the same 16-unit bias;
+the after image uses the production CPU corner sampler and vertex path.
+A coverage reference omits only terrain depth, keeping vehicle roofs. Every
+crater pixel in that reference must survive with terrain present, and every
+vehicle pixel must remain unchanged. Run the decal tests serially:
+`cargo test --locked -p tore-app effect_renderer::depth_tests --
+--include-ignored --nocapture --test-threads=1` (on one line, throttled as
+above). The ordinary CPU checks cover 10, 15 and 20 degree planes, both
+terrain triangle halves at distant map coordinates, and standing effects
+that must not sample ground. `TORE_DECAL_RENDERS` also writes `hill15-*`
+reference, before, after and coverage PPMs.

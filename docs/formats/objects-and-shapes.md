@@ -631,7 +631,10 @@ near-black (sRGB 0.03, 0.03, 0.05) in its own colour, marked with the
 vertex layer -9 so the static solid pass (`airport_solid_fragment`) keeps
 half its pixels in the 4 by 4 ordered pattern, a screen-door translucency
 over the water or ground, lit and fogged like the rest. It still counts as
-the shape's lowest face for the grounding audit. The generated ruins
+the shape's lowest face for the grounding audit. This pass writes and tests
+unbiased reversed depth; it has no camera-facing lift. Texture-on-pavement
+faces use a separate one-unit depth bias, not the effect sprites' former
+20 ft pull. See [ground mark occlusion](../spec/explosions.md#ground-mark-occlusion). The generated ruins
 (`rubble::collapse`) leave it out. The geometric shadows of the lighting
 pass (see [surface lighting](../spec/surface-lighting.md)) are separate. A scan of
 the OT shapes the dump can read found colour 6 faces only in `BRDMID`,

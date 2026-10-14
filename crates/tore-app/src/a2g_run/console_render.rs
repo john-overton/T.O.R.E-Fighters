@@ -93,6 +93,36 @@ pub(super) fn render(
         (rounds, fitted)
     };
     let mut loaded = Loaded::new(&mut scene.world, observer)?;
+    // Presentation-only fixture for ground decal review. Nothing is written
+    // into the simulation or its recordings; every vehicle stays alive.
+    let decal_preview = std::env::var("TORE_DECAL_PREVIEW").as_deref() == Ok("1");
+    if decal_preview {
+        loaded.snapshot.marks = loaded
+            .snapshot
+            .surface
+            .iter()
+            .map(|unit| {
+                let mut position = unit.position;
+                position[1] = f64::from(
+                    scene
+                        .world
+                        .terrain
+                        .height(position[0] as f32, position[2] as f32),
+                );
+                crate::snapshot::MarkPose {
+                    position,
+                    kind: tore_sim::combat::blast::MarkKind::Crater(9),
+                    age: 0,
+                    strength: 1.,
+                    scale: 100,
+                }
+            })
+            .collect();
+        println!(
+            "decal-preview: {} fresh ground marks",
+            loaded.snapshot.marks.len()
+        );
+    }
     // The gunship's own airframe is not in its sensor's picture.
     loaded.snapshot.targets.retain(|t| t.id != striker.0);
     let launcher = crate::combat::launcher(&flight);
@@ -168,7 +198,13 @@ pub(super) fn render(
         ("at-limit", top, 2, SensorMode::WhiteHot, false),
     ];
     let stem = format!("console-t{seconds:05.1}s");
-    for (label, look, zoom, mode, tracking) in forms {
+    for (label, look, mut zoom, mode, tracking) in forms {
+        if decal_preview {
+            if !matches!(label, "whot" | "bhot" | "tv" | "nvg") {
+                continue;
+            }
+            zoom = 5;
+        }
         let mut sym = base.clone();
         sym.sensor = mode;
         sym.look = look;
@@ -248,6 +284,23 @@ pub(super) fn render(
             sym.slant_ft.unwrap_or(-1.),
             sym.status()
         );
+    }
+    if decal_preview {
+        let mut camera = crate::camera::Camera::new();
+        camera.position = [
+            row.position[0] - 500.,
+            row.position[1] + 350.,
+            row.position[2] - 900.,
+        ];
+        let delta: Vector = std::array::from_fn(|i| row.position[i] - camera.position[i]);
+        camera.yaw = delta[0].atan2(delta[2]) as f32;
+        camera.pitch = delta[1].atan2(delta[0].hypot(delta[2])) as f32;
+        camera.zoom = 2.;
+        loaded.upload(&scene.world, &camera)?;
+        let pixels = loaded
+            .gpu
+            .pixels(&camera, &scene.world.terrain, &loaded.scenery)?;
+        super::ai_render::write_png(&dir.join(format!("{stem}-external.png")), &pixels)?;
     }
     Ok(())
 }

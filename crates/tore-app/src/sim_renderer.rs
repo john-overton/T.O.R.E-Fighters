@@ -1670,7 +1670,7 @@ impl SimRenderer {
                 self.smoke.set_city_smoke(&[]);
             }
         }
-        self.effects.update(queue, camera);
+        self.effects.update(queue, camera, world);
         // The night glow of every explosion and fire, and the ground light
         // of the nearest fires beside the flares' (nr-fx3).
         self.glow_points
