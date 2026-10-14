@@ -81,7 +81,7 @@ pub fn height_range(shape: &Shape) -> Option<[f64; 2]> {
 /// Geometry used for footing and contact bounds. Lines are physical geometry
 /// too: radar antenna frames can extend below their filled faces. Components
 /// retain their decoded offsets within the complete shape.
-pub fn points(shape: &Shape) -> impl Iterator<Item = [f32; 3]> + '_ {
+pub fn points(shape: &Shape) -> impl Iterator<Item = [f32; 3]> + Clone + '_ {
     shape
         .faces
         .iter()
@@ -107,19 +107,165 @@ pub fn terrain_correction_ft(
     origin: [f64; 3],
     height: impl Fn(f64, f64) -> f64,
 ) -> f64 {
-    points(shape)
-        .map(|p| {
-            let at: [f64; 3] = std::array::from_fn(|i| {
-                origin[i]
-                    + scale
-                        * (basis.right[i] * f64::from(p[0])
-                            + basis.forward[i] * f64::from(p[1])
-                            + basis.up[i] * f64::from(p[2]))
-            });
+    offsets(shape, scale)
+        .map(|o| {
+            let at = placed(o, &basis, origin);
             height(at[0], at[2]) - at[1]
         })
         .reduce(f64::max)
         .unwrap_or(0.)
+}
+
+/// Slope lift applies only to compact shapes: those reaching at most this
+/// far (feet, across the ground) from their origin. Fitted, lead decision
+/// 2026-10-14 from the nr-objg site audit: the compact objectives and
+/// buildings reach at most 364 ft (HANGRB; the SA-2 and SA-3 site pads 312
+/// and 351 ft), the composites from 457 ft (city blocks CTYBK*, crop fields,
+/// town blocks, lot and reactor pads, CITY2 2037 ft).
+pub const SLOPE_LIFT_MAX_REACH_FT: f64 = 400.;
+
+/// Slope lift is refused when it would leave more than this many feet of air
+/// under the shape's bottom on its downhill side. Fitted, lead decision
+/// 2026-10-14: a rigid lift leaves a gap about twice the burial it removes;
+/// the SA-2 site and Kuril factory fixes leave 27 to 28 ft.
+pub const SLOPE_LIFT_MAX_GAP_FT: f64 = 30.;
+
+/// Points within this many feet of a shape's bottom count as its underside
+/// when [`slope_lift_ft`] measures the gap below it.
+pub const BOTTOM_BAND_FT: f64 = 1.;
+
+/// A shape's points in feet at `scale`: right, up and forward of its origin.
+fn offsets(shape: &Shape, scale: f64) -> impl Iterator<Item = [f64; 3]> + Clone + '_ {
+    points(shape).map(move |p| [p[0], p[2], p[1]].map(|v| scale * f64::from(v)))
+}
+
+/// How far a shape reaches from its origin across the ground (its right and
+/// forward axes), in feet at `scale`.
+pub fn reach_ft(shape: &Shape, scale: f64) -> f64 {
+    reach_of(offsets(shape, scale))
+}
+
+fn reach_of(offsets: impl Iterator<Item = [f64; 3]>) -> f64 {
+    offsets.map(|[r, _, f]| r.hypot(f)).fold(0., f64::max)
+}
+
+/// Where `offset` (feet right, up, forward) lands from `origin` turned by `basis`.
+fn placed(offset: [f64; 3], basis: &tore_sim::attitude::Basis, origin: [f64; 3]) -> [f64; 3] {
+    std::array::from_fn(|i| {
+        origin[i]
+            + basis.right[i] * offset[0]
+            + basis.up[i] * offset[1]
+            + basis.forward[i] * offset[2]
+    })
+}
+
+/// The largest air gap under the bottom of a shape placed at `origin`: the
+/// highest clearance above the terrain among its underside points (within
+/// [`BOTTOM_BAND_FT`] of its lowest point), 0 when none is above it.
+pub fn bottom_gap_ft(
+    shape: &Shape,
+    scale: f64,
+    basis: tore_sim::attitude::Basis,
+    origin: [f64; 3],
+    height: impl Fn(f64, f64) -> f64,
+) -> f64 {
+    gap_of(offsets(shape, scale), &basis, origin, &height)
+}
+
+fn gap_of(
+    offsets: impl Iterator<Item = [f64; 3]> + Clone,
+    basis: &tore_sim::attitude::Basis,
+    origin: [f64; 3],
+    height: &impl Fn(f64, f64) -> f64,
+) -> f64 {
+    let low = offsets.clone().map(|o| o[1]).fold(f64::INFINITY, f64::min);
+    offsets
+        .filter(|o| o[1] - low <= BOTTOM_BAND_FT)
+        .map(|o| {
+            let at = placed(o, basis, origin);
+            at[1] - height(at[0], at[2])
+        })
+        .fold(0., f64::max)
+}
+
+/// The slope lift of a shape stood by the origin rule at `origin` (its
+/// bottom on the ground under its origin, no authored height): how far to
+/// raise (or lower) the whole rigid shape so its nearest point meets the
+/// terrain, or `None` when the origin rule stands. It stands for a flat
+/// shape (ground art: fields, lots, pads), one reaching beyond
+/// [`SLOPE_LIFT_MAX_REACH_FT`], and where the lift would leave more than
+/// [`SLOPE_LIFT_MAX_GAP_FT`] of air under the downhill side.
+pub fn slope_lift_ft(
+    shape: &Shape,
+    scale: f64,
+    basis: tore_sim::attitude::Basis,
+    origin: [f64; 3],
+    height: impl Fn(f64, f64) -> f64,
+) -> Option<f64> {
+    slope_lift_of(offsets(shape, scale), &basis, origin, &height)
+}
+
+/// [`slope_lift_ft`] for a unit that drives: `footing` is its shape as
+/// [`Footing::of`] keeps it, `position` its pose (its bottom on the ground
+/// under it), `basis` its attitude on the slope.
+pub fn unit_slope_lift_ft(
+    footing: &UnitFooting,
+    basis: tore_sim::attitude::Basis,
+    position: [f64; 3],
+    height: impl Fn(f64, f64) -> f64,
+) -> f64 {
+    if footing.points.is_empty() {
+        return 0.;
+    }
+    slope_lift_of(footing.points.iter().copied(), &basis, position, &height).unwrap_or(0.)
+}
+
+/// The one slope rule, over a shape's points in feet (right, up, forward)
+/// from `origin`.
+fn slope_lift_of(
+    offsets: impl Iterator<Item = [f64; 3]> + Clone,
+    basis: &tore_sim::attitude::Basis,
+    origin: [f64; 3],
+    height: &impl Fn(f64, f64) -> f64,
+) -> Option<f64> {
+    let (low, high) = offsets
+        .clone()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), o| {
+            (l.min(o[1]), h.max(o[1]))
+        });
+    if high - low <= f64::EPSILON || reach_of(offsets.clone()) > SLOPE_LIFT_MAX_REACH_FT {
+        return None;
+    }
+    let lift = offsets
+        .clone()
+        .map(|o| {
+            let at = placed(o, basis, origin);
+            height(at[0], at[2]) - at[1]
+        })
+        .fold(f64::NEG_INFINITY, f64::max);
+    let lifted = [origin[0], origin[1] + lift, origin[2]];
+    (gap_of(offsets, basis, lifted, height) <= SLOPE_LIFT_MAX_GAP_FT).then_some(lift)
+}
+
+/// A driving unit's shape for the slope rule: its unique points in feet
+/// (right, up, forward) from its pose, which stands its lowest point on the
+/// ground. Kept on its course so each step measures the same points.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct UnitFooting {
+    pub points: Vec<[f64; 3]>,
+}
+
+impl UnitFooting {
+    /// The footing of `shape` drawn at `scale`, standing on its bottom.
+    pub fn of(shape: &Shape, scale: f64) -> Self {
+        let lift = lift_ft(shape, scale);
+        let mut points: Vec<[f64; 3]> = offsets(shape, scale)
+            .map(|[r, u, f]| [r, u + lift, f])
+            .collect();
+        points.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        points.dedup();
+        Self { points }
+    }
 }
 
 /// The lowest point of viewer-facing sprites, in shape units about their
@@ -304,6 +450,56 @@ mod tests {
         assert_eq!(
             terrain_correction_ft(&shape, 1., basis, [0., 9., 0.], |_, _| 0.),
             -9.
+        );
+    }
+
+    #[test]
+    fn large_flat_or_steep_shapes_keep_the_origin_rule() {
+        let level = tore_sim::attitude::Basis::new(0., 0., 0.);
+        let slope = |x: f64, _: f64| x * 0.5;
+        // Compact, gentle: lifted 5 ft, 5 ft gap under its low end.
+        assert_eq!(
+            slope_lift_ft(&upright(0., 20.), 1., level, [0.; 3], slope),
+            Some(5.)
+        );
+        // Reaching 500 ft (a city block): the origin rule, cut into the hill.
+        assert_eq!(
+            slope_lift_ft(&upright(0., 20.), 50., level, [0.; 3], slope),
+            None
+        );
+        // Flat ground art (a field, a lot): the origin rule.
+        assert_eq!(
+            slope_lift_ft(&upright(0., 0.), 1., level, [0.; 3], slope),
+            None
+        );
+        // Compact but steep: a 60 ft rise across 100 ft leaves 60 ft of air.
+        let steep = |x: f64, _: f64| x * 0.6;
+        assert_eq!(
+            slope_lift_ft(&upright(0., 20.), 10., level, [0.; 3], steep),
+            None
+        );
+        assert_eq!(reach_ft(&upright(0., 20.), 50.), 500.);
+    }
+
+    #[test]
+    fn a_driving_unit_takes_the_same_lift_as_it_stands() {
+        let shape = upright(-5., 20.);
+        let footing = UnitFooting::of(&shape, 1.);
+        let level = tore_sim::attitude::Basis::new(0., 0., 0.);
+        let slope = |x: f64, _: f64| x * 0.5;
+        // Its pose stands its bottom on the ground under it, as the origin
+        // rule stands the shape; the lift is the standing shape's.
+        let standing = slope_lift_ft(&shape, 1., level, [0., 5., 0.], slope);
+        assert_eq!(standing, Some(5.));
+        assert_eq!(unit_slope_lift_ft(&footing, level, [0.; 3], slope), 5.);
+        // Tilted with a plane slope, nothing is left to lift.
+        let tilted =
+            tore_sim::attitude::Basis::new(std::f64::consts::FRAC_PI_2, (0.5f64).atan(), 0.);
+        assert!(unit_slope_lift_ft(&footing, tilted, [0.; 3], slope).abs() < 1e-9);
+        // A unit with no footing (not in the scene) is not lifted.
+        assert_eq!(
+            unit_slope_lift_ft(&UnitFooting::default(), level, [0.; 3], slope),
+            0.
         );
     }
 

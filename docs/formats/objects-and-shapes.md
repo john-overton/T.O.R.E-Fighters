@@ -488,6 +488,45 @@ It does not flatten terrain or rotate buildings into a hillside. A rigid
 base can have a gap on its downhill side; interior face crossings over a
 terrain ridge are not measured by this vertex-based rule.
 
+**Only compact shapes take the slope lift** (`grounding::slope_lift_ft`,
+lead decision 2026-10-14). A rigid lift leaves a downhill gap about twice the
+burial it removes, and a city block lifted 167 ft over a 265 ft gap looks
+worse than one cut into the hill. The origin rule (the bottom on the ground
+under the origin, cut into the slope) stays for:
+
+- flat ground art, a shape with no height: CROPA, CROPB, LOT, REACTB, DTSTRP;
+- a shape reaching more than `SLOPE_LIFT_MAX_REACH_FT` (400 ft) from its
+  origin: the city blocks CTYBKA to CTYBKG (457 ft), town blocks TWNBKA to
+  TWNBKF, CITY1 to CITY3, IND1, IND2, HILT, CASTLE, the large rocks ROCKB*
+  and ROCKD (and the long bridges, roads, runways and ships, which keep
+  their own footing anyway);
+- a placement whose lift would leave more than `SLOPE_LIFT_MAX_GAP_FT`
+  (30 ft) of air under its underside (points within `BOTTOM_BAND_FT`, 1 ft,
+  of its lowest point). On 2026-10-14 that was 4 placements: SA3SITE in the
+  Vladivostok campaign extra `BMULTI05.M` (would leave 87 ft) and FLAGY2 in
+  `VLA.MM` (37 ft).
+
+The thresholds come from the site audit's `reach` and `gap`: the largest
+compact objectives reach 364 ft (HANGRB; SA3SITE 351, FLAGO1 351, SA-2 site
+SA2A 312) and the smallest composites 409 ft (ROCKD) and 457 ft (CTYBK*).
+The largest lifts kept are COLTWR 15 ft (30 ft gap), BNK1 14.3 ft, the
+Panama SA-2 site 13.75 ft (27.6 ft gap) and the Kuril factory 13.2 ft
+(27.3 ft gap); the GCI and KING radars keep their frame fix everywhere.
+
+**Driving units follow the same rule.** A unit on a route tilts with the
+slope as it settles each step (`surface::movement`); its course keeps its
+shape's unique points (`grounding::UnitFooting`, at most 366 points, OILR.NT)
+and `grounding::unit_slope_lift_ft` lifts the tilted unit by the same rule,
+so its pose, picture and hit box agree and nothing of it is buried at a
+change of slope. Its hit box is fitted on the shape without the standing
+lift, which the mover finds again as it settles. Deterministic: plain f64 on
+the settled (quantized) attitude and the terrain height, the same on every
+machine; the lifted height is in the mover state the network already sends.
+
+Ruins and wrecks are not measured again: a static object's ruin stands where
+the intact shape's rule put it (the origin rule leaves it where it was), and
+a destroyed driving unit's wreck stays at its last pose.
+
 **Why it kept coming back.** Until slice GROUND (2026-10-13) each path did
 its own grounding: the placement path stood land units and buildings on
 their lowest point but exempted men; wrecks and ruins used a faces-only
@@ -521,11 +560,13 @@ position and relocated with seed 1 and heavy defenses. A mission's
 It reports before/after minimum geometry clearance per changed placement,
 the largest gap left under the shape's bottom (`gap`) and how far it reaches
 from its origin (`reach`), and totals per theater. The tolerance is 0.05 ft
-relative to authored height. On 2026-10-14 the largest downhill gaps were on
-the big multi-building and flat-pad shapes: CITY2 (Ukraine `~UKRF.MM`, lifted
-167 ft, 265 ft gap), the city blocks (CTYBKC lifted 99 ft in `EGY.MM`, 202 ft
-gap), REACTB and LOT pads (95 and 49 ft); compact objectives stay small
-(GCI 1.3 ft, trucks about 5 ft lifted and 11 ft gap).
+relative to authored height. Each changed placement's line names the rule
+that stood it (`rule slope`, or the origin rule for `flat`, `reach` or
+`gap`) with the full `lift` it would take; a `grounding-rules:` line per
+theater counts the placements on each rule, and `grounding-origin-type:`
+lines list the types the origin rule always keeps. A problem is a slope
+placement left more than the tolerance off the ground, or an origin-rule
+placement that was lifted anyway.
 Non-drawable types are counted as unavailable, and pavement, map-tied shapes
 and ships as exceptions, not silently counted as grounded solids. It uses the current runtime base-grid fallback for unavailable generated
 campaign terrain aliases. It does not claim original campaign terrain

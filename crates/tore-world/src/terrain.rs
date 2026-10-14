@@ -278,6 +278,9 @@ pub struct Stance {
     pub origin: [f64; 3],
     pub center: [f64; 3],
     pub runway: bool,
+    /// Feet the slope rule raised (or lowered) the whole shape above the
+    /// origin rule's stance (`grounding::slope_lift_ft`); 0 on the origin rule.
+    pub slope_lift: f64,
 }
 
 /// A runway's length in feet from its shape's extent along the runway (`min_z`
@@ -858,6 +861,11 @@ impl Placements {
         Ok(())
     }
 
+    /// The scale `object_type`'s shape is drawn at (1 when unknown).
+    pub fn shape_scale(&self, object_type: &str) -> f64 {
+        self.shape_scales.get(object_type).copied().unwrap_or(1.0)
+    }
+
     /// The shared stance on actual terrain, used by both drawing and contact.
     /// Whole assemblies keep their internal offsets and authored height.
     pub fn stance_on_terrain(
@@ -873,15 +881,21 @@ impl Placements {
         let definition = self.definitions.get(&placement.object_type)?;
         if crate::grounding::footing(definition) == crate::grounding::Footing::Bottom {
             let shape = self.shapes.get(&placement.object_type)?;
-            let correction = crate::grounding::terrain_correction_ft(
+            // The lift is measured from the ground, then the authored height
+            // stays above it.
+            let mut on_ground = stance.origin;
+            on_ground[1] -= f64::from(placement.position[1]);
+            if let Some(lift) = crate::grounding::slope_lift_ft(
                 shape,
                 stance.scale,
                 stance.basis,
-                stance.origin,
+                on_ground,
                 height,
-            ) + f64::from(placement.position[1]);
-            stance.origin[1] += correction;
-            stance.center[1] += correction;
+            ) {
+                stance.origin[1] += lift;
+                stance.center[1] += lift;
+                stance.slope_lift = lift;
+            }
         }
         Some(stance)
     }
@@ -965,6 +979,7 @@ impl Placements {
             origin,
             center,
             runway,
+            slope_lift: 0.,
         })
     }
 }
@@ -1203,6 +1218,7 @@ impl Terrain {
         self.surface.parked = parked;
         self.redrawn = built?;
         let mut objects = Vec::new();
+        let mut slope_lifts = BTreeMap::new();
         let mut runways = Vec::new();
         let mut airports = Vec::new();
         let mut anchors = BTreeMap::new();
@@ -1236,8 +1252,10 @@ impl Terrain {
                 support_origin,
                 center,
                 runway,
+                slope_lift,
                 ..
             } = stance;
+            slope_lifts.insert(id, slope_lift);
             let redraw = redrawn::Built::for_runway(&self.redrawn, id);
             // A redrawn airport's contact box is its own whole airfield.
             let bounds = redraw.map_or(
@@ -1364,7 +1382,18 @@ impl Terrain {
         for (id, course) in &mut courses {
             if let Some(object) = objects.iter().find(|object| object.id == id.0) {
                 let ground = f64::from(self.height(course.start[0] as f32, course.start[2] as f32));
-                course.fit(&object.bounds, ground);
+                // The hit box rides on the unit's own shape; a standing
+                // unit's slope lift is the mover's to find as it settles.
+                let lift = slope_lifts.get(&id.0).copied().unwrap_or(0.);
+                course.fit(&object.bounds, ground + lift);
+                if let Some(shape) = sources.shapes.get(&object.object_type) {
+                    let scale = sources
+                        .shape_scales
+                        .get(&object.object_type)
+                        .copied()
+                        .unwrap_or(1.0);
+                    course.footing = crate::grounding::UnitFooting::of(shape, scale);
+                }
             }
         }
         // Units that share a route drive side by side, not on one line.

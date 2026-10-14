@@ -39,6 +39,7 @@ fn course(speed: f64, ship: bool) -> Course {
         ship,
         rig: None,
         lane: 0.,
+        footing: Default::default(),
     }
 }
 

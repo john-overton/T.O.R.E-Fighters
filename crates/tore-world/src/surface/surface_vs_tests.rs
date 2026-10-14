@@ -334,6 +334,7 @@ fn a_column_closes_on_a_tank_it_sees_out_of_reach_then_halts_and_fires() {
         ship: false,
         rig: Some(rig),
         lane: 0.,
+        footing: Default::default(),
     };
     let flat = |_: f64, _: f64| 0.;
     let mut mover = Mover::start(&course, 0.);

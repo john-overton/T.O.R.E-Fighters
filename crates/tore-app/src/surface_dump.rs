@@ -564,6 +564,35 @@ fn grounding_sites_survey(resources: &BTreeMap<String, Vec<u8>>) -> AppResult<()
         .keys()
         .filter(|n| n.ends_with(".OT") || n.ends_with(".NT"));
     let shapes = Placements::of_types(resources, types.map(String::as_str));
+    // What a driving unit's slope rule measures each step.
+    let footing = shapes
+        .shapes
+        .iter()
+        .filter(|(name, _)| name.ends_with(".NT"))
+        .map(|(name, shape)| {
+            let scale = shapes.shape_scale(name);
+            (
+                tore_world::grounding::UnitFooting::of(shape, scale)
+                    .points
+                    .len(),
+                name,
+            )
+        })
+        .max();
+    if let Some((points, name)) = footing {
+        println!("grounding-sites: unit footing at most {points} points ({name})");
+    }
+    // The types the origin rule keeps whatever the slope.
+    for (name, shape) in &shapes.shapes {
+        let scale = shapes.shape_scale(name);
+        let reach = tore_world::grounding::reach_ft(shape, scale);
+        let flat = tore_world::grounding::height_range(shape)
+            .is_none_or(|[low, high]| high - low <= f64::EPSILON);
+        if flat || reach > tore_world::grounding::SLOPE_LIFT_MAX_REACH_FT {
+            let why = if flat { "flat" } else { "reach" };
+            println!("grounding-origin-type: {name} {why} reach {reach:.0}");
+        }
+    }
     let mut layouts = Vec::new();
     let mut unread = 0;
     let mut binary = 0;
@@ -640,6 +669,14 @@ fn grounding_sites_survey(resources: &BTreeMap<String, Vec<u8>>) -> AppResult<()
             audit.before,
             audit.problems
         );
+        let rule = |name| audit.rules.get(name).copied().unwrap_or(0);
+        println!(
+            "grounding-rules: {theater} slope {} origin flat {} origin reach {} origin gap {}",
+            rule("slope"),
+            rule("flat"),
+            rule("reach"),
+            rule("gap")
+        );
         total_problems += audit.problems;
     }
     println!("grounding-sites: {binary} compiled campaign missions not read (no campaign runtime)");
@@ -657,6 +694,9 @@ fn grounding_sites_survey(resources: &BTreeMap<String, Vec<u8>>) -> AppResult<()
 
 #[derive(Default)]
 struct SiteAudit {
+    /// Placements by the rule that stood them: `slope`, or the origin rule
+    /// for a `flat` shape, one beyond the `reach` limit or the `gap` limit.
+    rules: BTreeMap<&'static str, usize>,
     placements: usize,
     exceptions: usize,
     unavailable: usize,
@@ -735,31 +775,37 @@ impl SiteAudit {
         });
         let before = clearance(old_origin).unwrap_or(0.);
         let after = clearance(stand.origin).unwrap_or(0.);
-        // The largest air gap under the shape's bottom (points within one
-        // shape unit of its lowest point): what a rigid lift leaves downhill.
-        let low = tore_world::grounding::bottom(shape).unwrap_or(0.);
-        let gap = tore_world::grounding::points(shape)
-            .filter(|point| f64::from(point[2]) <= low + 1.)
-            .map(|point| {
-                let at: [f64; 3] = std::array::from_fn(|i| {
-                    stand.origin[i]
-                        + stand.scale
-                            * (stand.basis.right[i] * f64::from(point[0])
-                                + stand.basis.forward[i] * f64::from(point[1])
-                                + stand.basis.up[i] * f64::from(point[2]))
-                });
-                at[1] - height(at[0], at[2]) - f64::from(p.position[1])
-            })
-            .fold(0., f64::max);
-        // How far the shape reaches from its origin across the ground.
-        let reach = tore_world::grounding::points(shape)
-            .map(|point| stand.scale * f64::from(point[0]).hypot(f64::from(point[1])))
-            .fold(0., f64::max);
+        // Which rule stood it, and why (tore_world::grounding::slope_lift_ft):
+        // the full rigid lift and the gap it would leave, measured here again.
+        use tore_world::grounding::{
+            SLOPE_LIFT_MAX_GAP_FT, SLOPE_LIFT_MAX_REACH_FT, bottom_gap_ft, height_range, reach_ft,
+            terrain_correction_ft,
+        };
+        let reach = reach_ft(shape, stand.scale);
+        let mut on_ground = stand.origin;
+        on_ground[1] -= stand.slope_lift + f64::from(p.position[1]);
+        let lift = terrain_correction_ft(shape, stand.scale, stand.basis, on_ground, height);
+        let mut lifted = on_ground;
+        lifted[1] += lift;
+        let gap = bottom_gap_ft(shape, stand.scale, stand.basis, lifted, height);
+        let flat = height_range(shape).is_none_or(|[low, high]| high - low <= f64::EPSILON);
+        let rule = if flat {
+            "flat"
+        } else if reach > SLOPE_LIFT_MAX_REACH_FT {
+            "reach"
+        } else if gap > SLOPE_LIFT_MAX_GAP_FT {
+            "gap"
+        } else {
+            "slope"
+        };
         self.placements += 1;
-        if before.abs() > GROUNDING_TOLERANCE_FT {
+        *self.rules.entry(rule).or_default() += 1;
+        if before.abs() > GROUNDING_TOLERANCE_FT
+            || (rule != "slope" && lift.abs() > GROUNDING_TOLERANCE_FT)
+        {
             self.before += 1;
             println!(
-                "site-correction: {theater} {} #{} {} at {} {} height {} angles {:?} before {before:.2} after {after:.2} gap {gap:.2} reach {reach:.0}",
+                "site-correction: {theater} {} #{} {} at {} {} height {} angles {:?} rule {rule} before {before:.2} after {after:.2} lift {lift:.2} gap {gap:.2} reach {reach:.0}",
                 p.key.layout,
                 p.key.ordinal,
                 p.object_type,
@@ -769,11 +815,20 @@ impl SiteAudit {
                 p.angles
             );
         }
-        if !after.is_finite() || after.abs() > GROUNDING_TOLERANCE_FT {
+        // The slope rule leaves nothing buried; the origin rule moves nothing
+        // (a lift it refused must not have been applied).
+        let wrong = if rule == "slope" {
+            !after.is_finite()
+                || after.abs() > GROUNDING_TOLERANCE_FT
+                || (stand.slope_lift - lift).abs() > 1e-9
+        } else {
+            stand.slope_lift != 0.
+        };
+        if wrong {
             self.problems += 1;
             println!(
-                "site-problem: {theater} {} #{} {} clearance {after:.2}",
-                p.key.layout, p.key.ordinal, p.object_type
+                "site-problem: {theater} {} #{} {} rule {rule} clearance {after:.2} slope-lift {:.2}",
+                p.key.layout, p.key.ordinal, p.object_type, stand.slope_lift
             );
         }
     }

@@ -83,7 +83,12 @@ Faces, line endpoints and sprite bounds all count. On a slope, the whole
 shape moves vertically until its nearest geometry meets the ground, within
 0.05 ft in the audit, then keeps any authored placement height. Drawing and
 hit boxes use the same stance. Runways, bridges, roads and ships keep their
-existing pavement, map-height and waterline rules.
+existing pavement, map-height and waterline rules. Only compact shapes are
+lifted: flat ground art, shapes reaching more than 400 ft (city and town
+blocks, CITY1 to CITY3) and placements where the lift would leave more than
+30 ft of air downhill keep the origin rule, cut into the hill (lead
+decision 2026-10-14). Units driving a route tilt with the slope and take the
+same lift as they settle, so a unit does not drop or sink as it drives off.
 
 This slope support is **fitted**, an agent decision on 2026-10-14 responding
 to John's buried-objective report. It preserves rigid shapes rather than
