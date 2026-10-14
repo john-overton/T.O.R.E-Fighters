@@ -633,9 +633,13 @@ repeats):
 | Ctrl+Insert / Ctrl+Delete | Chaff / flare: the console's own countermeasure actions, bound apart from Insert and Delete so a player can move them on their own (John, 2026-10-14; keys *agent*). They work outside the console too, on the same dispensers |
 
 **The gamepad in the console** (John, 2026-10-14, his layout). While the
-console is open these replace the buttons' flight meanings; closed, the
-flight layout is back. Menu navigation on A, B and the D-pad stays for the
-menus over the console.
+console is open the layout owns the whole gamepad, whatever the player's
+profile: every other binding of the gamepad (buttons, D-pad, both sticks and
+both triggers) stands aside, except menu navigation, Start (pause) and Xbox
+(the flight menu). The triggers do nothing in the console (*agent*). A
+console action the player bound on the gamepad themselves wins over the
+layout's. Closed, the flight layout is back. The flight meanings listed are
+the stock ones; on a player's own profile theirs stand aside the same way.
 
 | Gamepad | In the console | Flight meaning it replaces |
 | --- | --- | --- |

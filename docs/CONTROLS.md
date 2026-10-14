@@ -163,11 +163,11 @@ and a gamepad's View+stick defaults avoid the problem.
 
 | Action | Keyboard | Mouse | Gamepad (Xbox) |
 | --- | --- | --- | --- |
-| Fire / release weapon | Space | - | A (in the AC-130 console) or View + RB |
+| Fire / release weapon | Space | - | View + RB or A (in the AC-130 console) |
 | Next weapon / NAV | ] | - | View + LB |
 | Previous weapon / NAV | [ | - | View + X |
-| Next gun candidate (AC-130) | Ctrl+7 | - | X (in the AC-130 console) or View + D-pad up |
-| Link/unlink candidate gun (AC-130) | Ctrl+8 | - | B (in the AC-130 console) or View + D-pad down |
+| Next gun candidate (AC-130) | Ctrl+7 | - | View + D-pad up or X (in the AC-130 console) |
+| Link/unlink candidate gun (AC-130) | Ctrl+8 | - | View + D-pad down or B (in the AC-130 console) |
 | Sensor console and orbit hold (AC-130) | Ctrl+9 | - | View + Xbox |
 | Sight: designate under crosshair | Backslash | - | View + A (tap) |
 | Sight: pin ground point | Shift+Backslash | - | View + A (hold half a second) |
@@ -177,16 +177,16 @@ and a gamepad's View+stick defaults avoid the problem.
 | Sight: zoom out | Shift+Semicolon | - | LB (in the AC-130 console) |
 | Sight: white hot / black hot / TV / night vision (AC-130 console) | Ctrl+Backslash | - | D-pad left (in the AC-130 console) |
 | Sensor console radar range 5 / 10 / 25 nm (AC-130 console) | Ctrl+0 | - | D-pad right (in the AC-130 console) |
-| Sight: slew left/right | - | - | View + Right stick X |
-| Sight: slew up/down | - | - | View + Right stick Y |
+| Sight: slew left/right | - | - | View + Right stick X or Left stick X (in the AC-130 console) |
+| Sight: slew up/down | - | - | View + Right stick Y or Left stick Y (in the AC-130 console) |
 | Sight: slew left | Alt+Left | - | - |
 | Sight: slew right | Alt+Right | - | - |
 | Sight: slew up | Alt+Up | - | - |
 | Sight: slew down | Alt+Down | - | - |
-| Next radar target | T | - | Y (in the AC-130 console) or View + A |
+| Next radar target | T | - | View + A or Y (in the AC-130 console) |
 | Previous radar target | Shift+T | - | View + D-pad right (in the AC-130 console) |
 | Select visual target | Enter or Apostrophe | - | - |
-| Clear designation | Semicolon or L | - | View + Y (in the AC-130 console) or View + B |
+| Clear designation | Semicolon or L | - | View + B or View + Y (in the AC-130 console) |
 | Delivery mode (CCIP/LVL, bore/cued) | Ctrl+M | - | - |
 | Sight: next visible object | / | - | - |
 | Laser on or off | Ctrl+L | - | - |
