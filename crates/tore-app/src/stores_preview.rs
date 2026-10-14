@@ -256,7 +256,13 @@ pub fn run() -> AppResult<()> {
             .max_by(|a, b| a[0].abs().total_cmp(&b[0].abs()));
         let wing = external
             .iter()
-            .filter(|s| s.rack.location() == tore_sim::combat::hardpoints::Location::Wing)
+            .filter(|s| {
+                matches!(
+                    s.rack.location(),
+                    tore_sim::combat::hardpoints::Location::Wing
+                        | tore_sim::combat::hardpoints::Location::Separate
+                )
+            })
             .max_by_key(|s| s.count)
             .map(|s| s.release_point(0));
         let fuselage = external

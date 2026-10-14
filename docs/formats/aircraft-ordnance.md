@@ -271,6 +271,10 @@ What the table shows, by inspection:
   2.8 ft back and 11 ft out 4.4 ft back, not at these positions (row 5's 16.7 ft at 0 ft forward is
   ahead of the swept wing, by the tip) (opinionated, John 2026-10-14;
   [the Yak-141](../spec/stores-on-pylons.md#the-yak-141)).
+- `SU27.PT` and `SU35.PT` rows 5 to 7 hang at the Flankers' real stations: the centreline row
+  in the tunnel one behind the other, row 6 under the intake ducts, row 7 one missile each on the
+  middle and outer underwing pylons (opinionated, John 2026-10-14;
+  [the Su-27 and Su-35](../spec/stores-on-pylons.md#the-su-27-and-su-35)).
 
 Weapon and tank rows of the 36 registered identities (sensor, ECM and gun rows
 omitted; Count is the default quantity):
