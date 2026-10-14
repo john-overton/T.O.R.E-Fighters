@@ -13,8 +13,9 @@ sight holds the fourth Mk 82 past the target, so three of those count):
 * an A-4E's LAU-61 pods on the outer wing row (x 26, 8.67 ft): one rocket a press;
 * an F-4B's fuselage Mk 82 row (x 13, 4.33 ft, retail flag 0x4): one behind another on each
   side (PY2), the front pair first;
-* an F-16C's inner wing row (x 32, 10.67 ft) loaded with Mk 82s: two pylons a wing (BP2),
-  1.4 ft either side of the row's position, the outboard pair first;
+* an F-16C's inner wing row (x 32, 10.67 ft) loaded with Mk 82s: one twin-rail pylon a wing
+  (John 2026-10-14, as the F/A-18's dual launchers), the two either side of its bar, the
+  racks mirrored so the outboard pair leaves first;
 * an F-4B's centreline row (x 0) loaded with two Mk 82s, side by side, right then left.
 
 Every store leaves from the point it hangs at (within 0.05 ft across and up, half a foot
@@ -32,9 +33,6 @@ ORIGIN = re.compile(
     re.M,
 )
 
-# How far either side of a wing row's position its two pylons stand, feet
-# (tore_sim::combat::hardpoints::DUAL_PYLON_SPREAD).
-DUAL = 1.4
 # A fuselage or centreline launcher rail's depth (2 inches) and a wing pylon's, feet
 # (tore_sim::combat::hardpoints::RAIL_DEPTH, PYLON_DEPTH).
 RAIL = 2 / 12
@@ -50,7 +48,7 @@ CASES = [
     ("A-4E LAU-61", 26 / 3, 4, "LRLR", [26 / 3] * 4, [0] * 4, WING),
     ("F-4B fuselage Mk 82", 13 / 3, 4, "LRLR", [13 / 3] * 4, [1, 1, -1, -1], RAIL),
     ("F-16C inner wing Mk 82", 32 / 3, 4, "LRLR",
-     [32 / 3 + DUAL] * 2 + [32 / 3 - DUAL] * 2, [0] * 4, WING),
+     [32 / 3 + SHOULDER] * 2 + [32 / 3 - SHOULDER] * 2, [0] * 4, WING),
     ("F-4B centreline Mk 82", 0.0, 2, "RL", [SHOULDER] * 2, [0] * 2, RAIL),
 ]
 

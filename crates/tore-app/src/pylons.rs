@@ -40,7 +40,7 @@ use std::sync::Mutex;
 use tore_formats::shape::Shape;
 use tore_sim::attitude::{Basis, Vector};
 use tore_sim::combat::hardpoints::{
-    Location, PylonPlace, SHOULDER_OUT, rack_group, shoulder, shoulder_rise, slot_offset,
+    Location, PylonPlace, SHOULDER_OUT, rack_group, shoulder, shoulder_rise,
 };
 use tore_sim::combat::store_sizes::StoreSize;
 use tore_world::snapshot::{StoreLook, StorePose};
@@ -164,7 +164,9 @@ pub fn hung(store: &StorePose) -> Vec<Hung> {
         {
             let on = pylon.slots.len() as u16;
             for (k, slot) in pylon.slots.iter().enumerate() {
-                let offset = slot_offset(k as u16, on, size);
+                let offset = store
+                    .rack
+                    .rack_offset(store.mount, side, k as u16, on, size);
                 out.push(Hung {
                     side,
                     slot: *slot,
@@ -894,21 +896,41 @@ mod tests {
     }
 
     #[test]
-    fn four_stores_on_a_wing_row_hang_from_two_pylons_a_wing() {
+    fn four_stores_on_a_wing_row_hang_two_a_wing_on_twin_rail_pylons() {
         let wing = rack(4);
         let mount = [8., -2., 0.];
         let size = StoreSize::body(PLAIN);
         let pylons =
             |rack: Rack, mount, side, per_side| rack.side_pylons(mount, side, per_side, size);
+        // Two a wing: one pylon at the record with a twin-rail bar (John
+        // 2026-10-14, the F/A-18's dual launchers).
         let right = pylons(wing, mount, 0, 2);
-        assert_eq!(right.len(), 2);
-        assert_eq!(right[0].slots, [0]);
-        assert_eq!(right[1].slots, [1]);
+        assert_eq!(right.len(), 1);
+        assert_eq!(right[0].slots, [0, 1]);
+        assert!((right[0].point[0] - 8.).abs() < 1e-9);
+        // Four a wing (beyond retail's maxima): an inboard and an outboard
+        // pylon, each with two.
         let spread = tore_sim::combat::hardpoints::DUAL_PYLON_SPREAD;
-        assert!((right[0].point[0] - (8. - spread)).abs() < 1e-9, "inboard");
-        assert!((right[1].point[0] - (8. + spread)).abs() < 1e-9, "outboard");
-        let left = pylons(wing, mount, 1, 2);
+        let four = pylons(wing, mount, 0, 4);
+        assert_eq!(four.len(), 2);
+        assert_eq!(
+            [four[0].slots.clone(), four[1].slots.clone()],
+            [vec![0, 2], vec![1, 3]]
+        );
+        assert!((four[0].point[0] - (8. - spread)).abs() < 1e-9, "inboard");
+        assert!((four[1].point[0] - (8. + spread)).abs() < 1e-9, "outboard");
+        let left = pylons(wing, mount, 1, 4);
         assert!((left[1].point[0] + 8. + spread).abs() < 1e-9, "mirrored");
+        // The racks are mirrored too: both wings' outboard stores alike.
+        let hung_at = |side| {
+            hung(&plain(mount, 4, 4))
+                .into_iter()
+                .filter(|h| h.side == side && h.slot == 1)
+                .map(|h| h.centre[0])
+                .next()
+                .unwrap()
+        };
+        assert!((hung_at(0) + hung_at(1)).abs() < 1e-9 && hung_at(0) > 8.);
         // One a side: one pylon. Three: one pylon's triple rack. Six: two
         // pylons with three each. A fuselage pair hangs one behind another.
         assert_eq!(pylons(wing, mount, 0, 1).len(), 1);
@@ -921,7 +943,8 @@ mod tests {
         let tandem = pylons(rack(1), [3., -5., 0.], 0, 2);
         assert_eq!(tandem.len(), 2);
         assert!(tandem[0].point[2] < 0. && tandem[1].point[2] > 0.);
-        // Drawn: four grey slabs, one over each store, the empty ones stay.
+        // Drawn: one grey slab a wing over the twin rail, which stays as the
+        // stores leave.
         let airframe = flat_wing();
         for items in [4, 1, 0] {
             let out = draw(
@@ -932,7 +955,7 @@ mod tests {
                 &airframe,
             );
             let xs = grey(&out);
-            for x in [8. - spread, 8. + spread, -8. + spread, -8. - spread] {
+            for x in [8., -8.] {
                 assert!(
                     xs.iter().any(|v| (f64::from(v[0]) - x).abs() < PYLON_WIDTH),
                     "a pylon at {x} with {items} left"
@@ -977,7 +1000,6 @@ mod tests {
         // it on a wing, 2 inches under it at a fuselage station.
         for (location, loaded, depth) in [
             (4, 2, tore_sim::combat::hardpoints::PYLON_DEPTH),
-            (4, 4, tore_sim::combat::hardpoints::PYLON_DEPTH),
             (1, 2, tore_sim::combat::hardpoints::RAIL_DEPTH),
         ] {
             let store = on_flat_wing(plain([9., -5., 0.], location, loaded));

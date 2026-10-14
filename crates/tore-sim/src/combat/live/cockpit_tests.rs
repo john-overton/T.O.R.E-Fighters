@@ -731,7 +731,8 @@ fn a_paired_station_alternates_sides_for_a_human_and_the_ai() {
         human.push(origin_x(&person, fresh[0]));
         assert!((person.bomb_motion(fresh[0]).unwrap().origin[1] - (8_000. - 3.)).abs() < 1e-9);
     }
-    let s = crate::combat::hardpoints::DUAL_PYLON_SPREAD;
+    // Two a wing on one twin-rail pylon, outboard first.
+    let s = crate::combat::hardpoints::shoulder(config.stations[0].size());
     let want = [-(2. + s), 2. + s, -(2. - s), 2. - s];
     assert!(
         human.iter().zip(want).all(|(x, w)| (x - w).abs() < 1e-9),
@@ -815,9 +816,10 @@ fn the_bomb_sight_predicts_from_the_pylon_the_next_bomb_leaves() {
             .map(|x| (x * 1e6).round() / 1e6)
             .collect::<Vec<_>>()
     };
-    // Four on a wing row hang from two pylons a wing, 1.4 ft either side
-    // of the record's 2 ft: outboard left, outboard right, then inboard.
-    assert_eq!(rounded(&sight), [-3.4, 3.4, -0.6, 0.6]);
+    // Four on a wing row hang two a wing on one twin-rail pylon at the
+    // record's 2 ft, a Mk 82 0.69 ft either side of its bar: outboard left,
+    // outboard right, then inboard.
+    assert_eq!(rounded(&sight), [-2.69, 2.69, -1.31, 1.31]);
     assert_eq!(rounded(&sight), rounded(&dropped));
 }
 
