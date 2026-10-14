@@ -47,6 +47,29 @@ crackles for anyone within 2,000 feet and fades out over its final minute. A
 crash into the sea shows a large water blast and leaves nothing behind. An
 aircraft that explodes in the air leaves no site.
 
+## Ground mark occlusion
+
+Opinionated requirement, John, 2026-10-14: bomb and weapon craters, gun pock
+marks and wreck/building scorch marks stay beneath vehicles, people,
+buildings and wrecks, including in magnified target cameras and the AC-130
+console. The four console picture modes and replays use the same geometry.
+The depth tie break is fitted by the agent: sixteen reversed
+floating-point raster depth bias units, with zero world-space lift and no
+zoom multiplier.
+It replaces the old view-ray pull of up to 20 ft. Standing flames, smoke and
+explosions remain depth-tested effects, not flat ground marks. Colour-6 ground
+shadows use the separate [scenery path](../formats/objects-and-shapes.md#ground-shadow-decals-2026-10-13).
+
+Each ground mark samples terrain or runway pavement at its four corners,
+keeping its horizontal footprint and joining those heights with two triangles
+(agent implementation choice, following lead review on 2026-10-14). Sampling
+uses double-precision world coordinates so distant map coordinates do not
+bury corners through rounding. Buildings and vehicles are not receivers.
+Standing fire and billboard effects do not sample terrain. No camera-facing
+pull or world-space lift is added; the 16-unit raster bias still resolves
+coplanar ties. Across a terrain crease, the two triangles interpolate the
+four sampled corners rather than subdividing at every terrain edge.
+
 ## Numbers
 
 Explosion types (FA table, [format notes](../formats/explosions.md)):

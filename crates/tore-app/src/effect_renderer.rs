@@ -39,8 +39,8 @@ pub const MAX_MARK_INSTANCES: usize = 3072;
 pub const MARK_DRAW_WIDTHS: f64 = 4_000.;
 pub const MARK_DRAW_FT: f64 = 2_200_000.;
 /// Center relative to the eye, extent, mode, art cell, layer, opacity,
-/// emissive flag and tint.
-const INSTANCE_BYTES: usize = 16 * 4;
+/// emissive flag, tint and four ground-corner height offsets.
+const INSTANCE_BYTES: usize = 20 * 4;
 /// Every sheet is 256 wide; the tallest, GRNDMED3, is 386 rows.
 const SHEET_WIDTH: usize = 256;
 const SHEET_HEIGHT: usize = 386;
@@ -392,6 +392,71 @@ struct Sprite {
     fresh: f32,
 }
 
+/// Receiver height for decals, using the terrain's triangle split in f64.
+/// Converting million-foot world coordinates to f32 before sampling can bury
+/// a corner by hundredths of a foot, larger than the raster tie break nearby.
+/// Pavement overrides terrain; roofs and vehicles are deliberately excluded.
+fn ground_height(world: &crate::terrain::Terrain, x: f64, z: f64) -> f64 {
+    if let Some((_, height)) = world.airport_scene.runway_surface(x, z) {
+        return height;
+    }
+    use tore_formats::theater::{CELL_FEET, HEIGHT_FEET};
+    let t = &world.theater;
+    let fx = (x / f64::from(CELL_FEET)).clamp(0., (t.cols - 1) as f64 - 0.001);
+    let fz = (z / f64::from(CELL_FEET)).clamp(0., (t.rows - 1) as f64 - 0.001);
+    let (ix, iz) = (fx as usize, fz as usize);
+    let (u, v) = (fx - ix as f64, fz - iz as f64);
+    let h = |dx, dz| f64::from(t.cell(ix + dx, iz + dz).elevation) * f64::from(HEIGHT_FEET);
+    if u + v <= 1. {
+        h(0, 0) + (h(1, 0) - h(0, 0)) * u + (h(0, 1) - h(0, 0)) * v
+    } else {
+        h(1, 1) + (h(0, 1) - h(1, 1)) * (1. - u) + (h(1, 0) - h(1, 1)) * (1. - v)
+    }
+}
+
+/// Corner heights relative to the mark centre, in UV order 00, 10, 11, 01.
+/// Only ground marks sample the receiver; standing flames and billboards
+/// retain their original geometry. No camera-dependent lift is added.
+fn ground_corners(sprite: &Sprite, ground: &impl Fn(f64, f64) -> f64) -> [f32; 4] {
+    if sprite.mode != Mode::Flat {
+        return [0.; 4];
+    }
+    [[-1., -1.], [1., -1.], [1., 1.], [-1., 1.]].map(|[x, z]| {
+        (ground(
+            sprite.position[0] + x * sprite.extent[0],
+            sprite.position[2] + z * sprite.extent[1],
+        ) - sprite.position[1]) as f32
+    })
+}
+
+/// The GPU instance, shared with the offscreen regression fixture.
+fn instance_values(sprite: &Sprite, eye: [f64; 3], ground: &impl Fn(f64, f64) -> f64) -> [f32; 20] {
+    let offset: [f32; 3] = std::array::from_fn(|i| (sprite.position[i] - eye[i]) as f32);
+    let heights = ground_corners(sprite, ground);
+    [
+        offset[0],
+        offset[1],
+        offset[2],
+        sprite.extent[0] as f32,
+        sprite.extent[1] as f32,
+        sprite.mode as u8 as f32,
+        sprite.cell[0],
+        sprite.cell[1],
+        sprite.cell[2],
+        sprite.cell[3],
+        sprite.layer as f32,
+        sprite.opacity,
+        if sprite.emissive { 1. } else { -sprite.fresh },
+        sprite.tint[0],
+        sprite.tint[1],
+        sprite.tint[2],
+        heights[0],
+        heights[1],
+        heights[2],
+        heights[3],
+    ]
+}
+
 /// A crater cools in the thermal picture over this many seconds (agent
 /// decision, nr-fltv: long enough to see where the rounds went on the next
 /// pass of an orbit).
@@ -627,6 +692,8 @@ fn bomblets(art: &Art, effect: &EffectPose, elapsed: u16, out: &mut Vec<Sprite>)
 
 pub struct EffectRenderer {
     pipeline: wgpu::RenderPipeline,
+    flat_pipeline: wgpu::RenderPipeline,
+    flat_count: u32,
     bind: Option<wgpu::BindGroup>,
     buffer: wgpu::Buffer,
     sprites: Vec<Sprite>,
@@ -728,6 +795,10 @@ fn glows_of(
 /// A fire this near a fitted fire's spot (feet, level) is that fire.
 const FIRE_FIT_FT: f64 = 2.;
 
+/// Fitted raster tolerance for independently triangulated coplanar ground.
+/// Sixteen reversed floating-point depth units, never a slope or world lift.
+const GROUND_DEPTH_BIAS: i32 = 16;
+
 /// `sprites` with every fire sprite that stands on one of `fires` drawn at
 /// that fire's width (the fire's sheet is as wide as it is tall by the
 /// layout's aspect).
@@ -793,8 +864,11 @@ impl EffectRenderer {
         shader: &wgpu::ShaderModule,
         samples: u32,
     ) -> Self {
+        let (pipeline, flat_pipeline) = Self::pipelines(device, format, shader, samples);
         Self {
-            pipeline: Self::pipeline(device, format, shader, samples),
+            pipeline,
+            flat_pipeline,
+            flat_count: 0,
             bind: None,
             buffer: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Bounded explosion sprites"),
@@ -853,18 +927,44 @@ impl EffectRenderer {
         shader: &wgpu::ShaderModule,
         samples: u32,
     ) {
-        self.pipeline = Self::pipeline(device, format, shader, samples);
+        (self.pipeline, self.flat_pipeline) = Self::pipelines(device, format, shader, samples);
         self.bind = None;
+    }
+    fn pipelines(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        shader: &wgpu::ShaderModule,
+        samples: u32,
+    ) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
+        let pipeline = Self::pipeline(device, format, shader, samples, 0, None);
+        // Both passes use the same resources. Share the layout explicitly:
+        // independently inferred layouts cannot share a bind group.
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Ground mark and airborne effect resources"),
+            bind_group_layouts: &[&pipeline.get_bind_group_layout(0)],
+            push_constant_ranges: &[],
+        });
+        let flat = Self::pipeline(
+            device,
+            format,
+            shader,
+            samples,
+            GROUND_DEPTH_BIAS,
+            Some(&layout),
+        );
+        (pipeline, flat)
     }
     fn pipeline(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
         shader: &wgpu::ShaderModule,
         samples: u32,
+        bias: i32,
+        layout: Option<&wgpu::PipelineLayout>,
     ) -> wgpu::RenderPipeline {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Original explosion, fire and crater sprites"),
-            layout: None,
+            layout,
             vertex: wgpu::VertexState {
                 module: shader,
                 entry_point: Some("effect_vertex"),
@@ -880,7 +980,8 @@ impl EffectRenderer {
                         4 => Float32,
                         5 => Float32,
                         6 => Float32,
-                        7 => Float32x3
+                        7 => Float32x3,
+                        8 => Float32x4
                     ],
                 }],
             },
@@ -903,7 +1004,12 @@ impl EffectRenderer {
                 depth_write_enabled: false,
                 depth_compare: wgpu::CompareFunction::Greater,
                 stencil: Default::default(),
-                bias: Default::default(),
+                // A few reversed-depth raster units for flat marks, no slope
+                // bias and no world-space lift. Standing effects use zero.
+                bias: wgpu::DepthBiasState {
+                    constant: bias,
+                    ..Default::default()
+                },
             }),
             multisample: wgpu::MultisampleState {
                 count: samples,
@@ -989,7 +1095,12 @@ impl EffectRenderer {
     }
     /// Sorts what the camera can see: craters first, then everything else
     /// far to near.
-    pub fn update(&mut self, queue: &wgpu::Queue, camera: &Camera) {
+    pub fn update(
+        &mut self,
+        queue: &wgpu::Queue,
+        camera: &Camera,
+        world: &crate::terrain::Terrain,
+    ) {
         let eye = camera.position;
         let mut fitted = fit_fires(&self.sprites, &self.fires);
         fitted.extend_from_slice(&self.city);
@@ -1000,26 +1111,10 @@ impl EffectRenderer {
             self.glows.extend_from_slice(&self.far_city);
         }
         let visible = visible(&fitted, eye);
+        self.flat_count = visible.iter().take_while(|s| s.mode == Mode::Flat).count() as u32;
         let mut instances = Vec::with_capacity(visible.len().min(MAX_INSTANCES) * INSTANCE_BYTES);
         for s in visible {
-            // Relative to the eye in full precision, far from the origin too.
-            let offset: [f32; 3] = std::array::from_fn(|i| (s.position[i] - eye[i]) as f32);
-            let values = offset.into_iter().chain([
-                s.extent[0] as f32,
-                s.extent[1] as f32,
-                s.mode as u8 as f32,
-                s.cell[0],
-                s.cell[1],
-                s.cell[2],
-                s.cell[3],
-                s.layer as f32,
-                s.opacity,
-                // The thermal picture reads minus a crater's freshness here.
-                if s.emissive { 1. } else { -s.fresh },
-                s.tint[0],
-                s.tint[1],
-                s.tint[2],
-            ]);
+            let values = instance_values(s, eye, &|x, z| ground_height(world, x, z));
             for value in values {
                 instances.extend(value.to_le_bytes());
             }
@@ -1039,7 +1134,12 @@ impl EffectRenderer {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, bind, &[]);
         pass.set_vertex_buffer(0, self.buffer.slice(..));
-        pass.draw(0..6, 0..self.count);
+        if self.flat_count > 0 {
+            pass.set_pipeline(&self.flat_pipeline);
+            pass.draw(0..6, 0..self.flat_count);
+            pass.set_pipeline(&self.pipeline);
+        }
+        pass.draw(0..6, self.flat_count..self.count);
     }
 }
 
@@ -1570,3 +1670,6 @@ mod tests {
         assert!(drawn <= MAX_MARK_INSTANCES);
     }
 }
+
+#[cfg(test)]
+mod depth_tests;

@@ -1037,11 +1037,11 @@ struct SmokeOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, 
 // Original explosion, fire and crater sheets (effect_renderer.rs). Mode 0
 // faces the camera centered on its point, mode 1 faces the camera with its
 // base on its point, mode 2 lies flat on the ground. Explosions and fire glow in their unlit colors; craters take
-// the scene's light. Craters are drawn pulled a little toward the eye along
-// the view ray, which keeps them on screen where they lie but above uneven
-// terrain.
+// the scene's light. Flat marks stay at their actual ground depth. A small
+// reversed-depth raster bias resolves coplanar terrain ties without
+// pulling a mark feet toward the eye and over vehicles in a magnified view.
 struct EffectOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, @location(1) opacity:f32, @location(2) distance:f32, @location(3) direction:vec3<f32>, @location(4) altitude:f32, @location(5) @interpolate(flat) layer:i32, @location(6) emissive:f32, @location(7) tint:vec3<f32> }
-@vertex fn effect_vertex(@builtin(vertex_index) vertex:u32,@location(0) offset:vec3<f32>,@location(1) extent:vec2<f32>,@location(2) mode:f32,@location(3) cell:vec4<f32>,@location(4) layer:f32,@location(5) opacity:f32,@location(6) emissive:f32,@location(7) tint:vec3<f32>)->EffectOut {
+@vertex fn effect_vertex(@builtin(vertex_index) vertex:u32,@location(0) offset:vec3<f32>,@location(1) extent:vec2<f32>,@location(2) mode:f32,@location(3) cell:vec4<f32>,@location(4) layer:f32,@location(5) opacity:f32,@location(6) emissive:f32,@location(7) tint:vec3<f32>,@location(8) ground_heights:vec4<f32>)->EffectOut {
  let corners=array<vec2<f32>,6>(vec2(0.0,0.0),vec2(1.0,0.0),vec2(1.0,1.0),vec2(0.0,0.0),vec2(1.0,1.0),vec2(0.0,1.0));
  let corner=corners[vertex];
  let across=(corner.x*2.0-1.0)*extent.x;
@@ -1052,8 +1052,8 @@ struct EffectOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>,
  } else if mode<1.5 {
   p=offset+scene.right.xyz*across+scene.up.xyz*(1.0-corner.y)*extent.y;
  } else {
-  p=offset+vec3<f32>(across,0.0,(corner.y*2.0-1.0)*extent.y);
-  let d=length(p);p=p*(1.0-min(0.02,20.0/max(d,1.0)));
+  let ground_corner=array<u32,6>(0u,1u,2u,0u,2u,3u);
+  p=offset+vec3<f32>(across,ground_heights[ground_corner[vertex]],(corner.y*2.0-1.0)*extent.y);
  }
  let size=vec2<f32>(textureDimensions(tiles).xy);
  let uv=(cell.xy+vec2<f32>(0.5)+corner*(cell.zw-vec2<f32>(1.0)))/size;
