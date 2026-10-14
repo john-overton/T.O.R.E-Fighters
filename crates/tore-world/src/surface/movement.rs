@@ -105,6 +105,9 @@ pub struct Course {
     /// Feet right of the authored path this unit's lane runs ([`set_lanes`]);
     /// 0 for a unit alone on its route. The legs already carry it.
     pub lane: f64,
+    /// Its shape for the slope rule (`grounding::unit_slope_lift_ft`), set
+    /// with the hit box; empty until the scene holds the unit.
+    pub footing: crate::grounding::UnitFooting,
 }
 
 impl Course {
@@ -153,6 +156,7 @@ impl Course {
             ship,
             rig: None,
             lane: 0.,
+            footing: Default::default(),
         })
     }
 
@@ -388,7 +392,6 @@ impl Mover {
         }
         let (x, z) = (feet(self.x), feet(self.z));
         let ground = height(x, z);
-        self.y = fine(ground + f64::from(course.start[1]));
         let slope_x = (height(x + SLOPE_FEET, z) - height(x - SLOPE_FEET, z)) / (2. * SLOPE_FEET);
         let slope_z = (height(x, z + SLOPE_FEET) - height(x, z - SLOPE_FEET)) / (2. * SLOPE_FEET);
         let up = unit([-slope_x, 1., -slope_z]);
@@ -399,6 +402,15 @@ impl Mover {
         let [_, pitch, bank] = Basis { right, up, forward }.angles();
         self.pitch = angle_bits(pitch);
         self.bank = angle_bits(bank);
+        // The one grounding rule, as a standing shape gets it: the whole
+        // unit rises (or sinks) until its nearest point meets the terrain.
+        let lift = crate::grounding::unit_slope_lift_ft(
+            &course.footing,
+            self.basis(),
+            [x, ground, z],
+            &height,
+        );
+        self.y = fine(ground + f64::from(course.start[1]) + lift);
     }
 
     /// The hit box and aim point this pose gives a unit with `rig`.

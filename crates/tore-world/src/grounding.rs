@@ -2,7 +2,7 @@
 //! (docs/formats/objects-and-shapes.md, "Grounding").
 //!
 //! **The rule.** Every ground object, surface unit, man, wreck, ruin and
-//! parked aircraft stands with the lowest point of its drawn shape (faces and
+//! parked aircraft stands with the lowest point of its drawn shape (faces, lines and
 //! sprites, at the scale it is drawn) on the ground: [`lift_ft`] is how far
 //! its origin stands above the ground for that. Only three kinds keep their
 //! authored rule ([`Footing`]): runways and pavement stand on their pavement
@@ -12,7 +12,7 @@
 //!
 //! Every path that places or draws something on the ground goes through this
 //! module: the layout and ground target placements (`terrain::Placements::
-//! stance`, which also sets the contact, collision and hit box), moving
+//! stance_on_terrain`, which also sets the contact, collision and hit box), moving
 //! units, wrecks, ruins, the men's sprites, parked aircraft. Never ground an
 //! object any other way: before this module each path did its own grounding
 //! (faces only, sprites skipped, men exempt, the boost about the centre) and
@@ -66,24 +66,206 @@ pub fn footing(definition: &Definition) -> Footing {
 }
 
 /// The lowest and highest point of a drawn shape along its up axis, in shape
-/// units about its origin, or `None` for an empty shape. Faces count every
+/// units about its origin, or `None` for an empty shape. Faces and lines count every
 /// vertex; a viewer-facing sprite spans half its height either side of its
 /// centre, as `Billboard::face` draws it.
 pub fn height_range(shape: &Shape) -> Option<[f64; 2]> {
     let mut range = [f64::INFINITY, f64::NEG_INFINITY];
-    let faces = shape
-        .faces
-        .iter()
-        .flat_map(|face| face.positions.iter().map(|p| f64::from(p[2])));
-    let sprites = shape.billboards.iter().flat_map(|sprite| {
-        let h = f64::from(sprite.size[1]) * 0.5;
-        let c = f64::from(sprite.center[2]);
-        [c - h, c + h]
-    });
-    for v in faces.chain(sprites) {
+    for point in points(shape) {
+        let v = f64::from(point[2]);
         range = [range[0].min(v), range[1].max(v)];
     }
     range.iter().all(|v| v.is_finite()).then_some(range)
+}
+
+/// Geometry used for footing and contact bounds. Lines are physical geometry
+/// too: radar antenna frames can extend below their filled faces. Components
+/// retain their decoded offsets within the complete shape.
+pub fn points(shape: &Shape) -> impl Iterator<Item = [f32; 3]> + Clone + '_ {
+    shape
+        .faces
+        .iter()
+        .flat_map(|f| f.positions.iter().copied())
+        .chain(shape.lines.iter().flat_map(|l| l.positions))
+        .chain(shape.billboards.iter().flat_map(|sprite| {
+            let [w, h] = sprite.size.map(|v| v * 0.5);
+            let [x, y, z] = sprite.center;
+            [[x - w, y - w, z - h], [x + w, y + w, z + h]]
+        }))
+}
+
+/// Vertical correction for a complete placed shape on uneven terrain. Keep
+/// the authored orientation and internal mount offsets; translate the whole
+/// assembly until its nearest geometry touches the terrain. The caller adds
+/// any authored placement height after this correction. Fitted, agent choice.
+/// This measures vertices (including line ends and sprite bounds), not the
+/// interior of a face crossing a terrain ridge.
+pub fn terrain_correction_ft(
+    shape: &Shape,
+    scale: f64,
+    basis: tore_sim::attitude::Basis,
+    origin: [f64; 3],
+    height: impl Fn(f64, f64) -> f64,
+) -> f64 {
+    offsets(shape, scale)
+        .map(|o| {
+            let at = placed(o, &basis, origin);
+            height(at[0], at[2]) - at[1]
+        })
+        .reduce(f64::max)
+        .unwrap_or(0.)
+}
+
+/// Slope lift applies only to compact shapes: those reaching at most this
+/// far (feet, across the ground) from their origin. Fitted, lead decision
+/// 2026-10-14 from the nr-objg site audit: the compact objectives and
+/// buildings reach at most 364 ft (HANGRB; the SA-2 and SA-3 site pads 312
+/// and 351 ft), the composites from 457 ft (city blocks CTYBK*, crop fields,
+/// town blocks, lot and reactor pads, CITY2 2037 ft).
+pub const SLOPE_LIFT_MAX_REACH_FT: f64 = 400.;
+
+/// Slope lift is refused when it would leave more than this many feet of air
+/// under the shape's bottom on its downhill side. Fitted, lead decision
+/// 2026-10-14: a rigid lift leaves a gap about twice the burial it removes;
+/// the SA-2 site and Kuril factory fixes leave 27 to 28 ft.
+pub const SLOPE_LIFT_MAX_GAP_FT: f64 = 30.;
+
+/// Points within this many feet of a shape's bottom count as its underside
+/// when [`slope_lift_ft`] measures the gap below it.
+pub const BOTTOM_BAND_FT: f64 = 1.;
+
+/// A shape's points in feet at `scale`: right, up and forward of its origin.
+fn offsets(shape: &Shape, scale: f64) -> impl Iterator<Item = [f64; 3]> + Clone + '_ {
+    points(shape).map(move |p| [p[0], p[2], p[1]].map(|v| scale * f64::from(v)))
+}
+
+/// How far a shape reaches from its origin across the ground (its right and
+/// forward axes), in feet at `scale`.
+pub fn reach_ft(shape: &Shape, scale: f64) -> f64 {
+    reach_of(offsets(shape, scale))
+}
+
+fn reach_of(offsets: impl Iterator<Item = [f64; 3]>) -> f64 {
+    offsets.map(|[r, _, f]| r.hypot(f)).fold(0., f64::max)
+}
+
+/// Where `offset` (feet right, up, forward) lands from `origin` turned by `basis`.
+fn placed(offset: [f64; 3], basis: &tore_sim::attitude::Basis, origin: [f64; 3]) -> [f64; 3] {
+    std::array::from_fn(|i| {
+        origin[i]
+            + basis.right[i] * offset[0]
+            + basis.up[i] * offset[1]
+            + basis.forward[i] * offset[2]
+    })
+}
+
+/// The largest air gap under the bottom of a shape placed at `origin`: the
+/// highest clearance above the terrain among its underside points (within
+/// [`BOTTOM_BAND_FT`] of its lowest point), 0 when none is above it.
+pub fn bottom_gap_ft(
+    shape: &Shape,
+    scale: f64,
+    basis: tore_sim::attitude::Basis,
+    origin: [f64; 3],
+    height: impl Fn(f64, f64) -> f64,
+) -> f64 {
+    gap_of(offsets(shape, scale), &basis, origin, &height)
+}
+
+fn gap_of(
+    offsets: impl Iterator<Item = [f64; 3]> + Clone,
+    basis: &tore_sim::attitude::Basis,
+    origin: [f64; 3],
+    height: &impl Fn(f64, f64) -> f64,
+) -> f64 {
+    let low = offsets.clone().map(|o| o[1]).fold(f64::INFINITY, f64::min);
+    offsets
+        .filter(|o| o[1] - low <= BOTTOM_BAND_FT)
+        .map(|o| {
+            let at = placed(o, basis, origin);
+            at[1] - height(at[0], at[2])
+        })
+        .fold(0., f64::max)
+}
+
+/// The slope lift of a shape stood by the origin rule at `origin` (its
+/// bottom on the ground under its origin, no authored height): how far to
+/// raise (or lower) the whole rigid shape so its nearest point meets the
+/// terrain, or `None` when the origin rule stands. It stands for a flat
+/// shape (ground art: fields, lots, pads), one reaching beyond
+/// [`SLOPE_LIFT_MAX_REACH_FT`], and where the lift would leave more than
+/// [`SLOPE_LIFT_MAX_GAP_FT`] of air under the downhill side.
+pub fn slope_lift_ft(
+    shape: &Shape,
+    scale: f64,
+    basis: tore_sim::attitude::Basis,
+    origin: [f64; 3],
+    height: impl Fn(f64, f64) -> f64,
+) -> Option<f64> {
+    slope_lift_of(offsets(shape, scale), &basis, origin, &height)
+}
+
+/// [`slope_lift_ft`] for a unit that drives: `footing` is its shape as
+/// [`Footing::of`] keeps it, `position` its pose (its bottom on the ground
+/// under it), `basis` its attitude on the slope.
+pub fn unit_slope_lift_ft(
+    footing: &UnitFooting,
+    basis: tore_sim::attitude::Basis,
+    position: [f64; 3],
+    height: impl Fn(f64, f64) -> f64,
+) -> f64 {
+    if footing.points.is_empty() {
+        return 0.;
+    }
+    slope_lift_of(footing.points.iter().copied(), &basis, position, &height).unwrap_or(0.)
+}
+
+/// The one slope rule, over a shape's points in feet (right, up, forward)
+/// from `origin`.
+fn slope_lift_of(
+    offsets: impl Iterator<Item = [f64; 3]> + Clone,
+    basis: &tore_sim::attitude::Basis,
+    origin: [f64; 3],
+    height: &impl Fn(f64, f64) -> f64,
+) -> Option<f64> {
+    let (low, high) = offsets
+        .clone()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), o| {
+            (l.min(o[1]), h.max(o[1]))
+        });
+    if high - low <= f64::EPSILON || reach_of(offsets.clone()) > SLOPE_LIFT_MAX_REACH_FT {
+        return None;
+    }
+    let lift = offsets
+        .clone()
+        .map(|o| {
+            let at = placed(o, basis, origin);
+            height(at[0], at[2]) - at[1]
+        })
+        .fold(f64::NEG_INFINITY, f64::max);
+    let lifted = [origin[0], origin[1] + lift, origin[2]];
+    (gap_of(offsets, basis, lifted, height) <= SLOPE_LIFT_MAX_GAP_FT).then_some(lift)
+}
+
+/// A driving unit's shape for the slope rule: its unique points in feet
+/// (right, up, forward) from its pose, which stands its lowest point on the
+/// ground. Kept on its course so each step measures the same points.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct UnitFooting {
+    pub points: Vec<[f64; 3]>,
+}
+
+impl UnitFooting {
+    /// The footing of `shape` drawn at `scale`, standing on its bottom.
+    pub fn of(shape: &Shape, scale: f64) -> Self {
+        let lift = lift_ft(shape, scale);
+        let mut points: Vec<[f64; 3]> = offsets(shape, scale)
+            .map(|[r, u, f]| [r, u + lift, f])
+            .collect();
+        points.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        points.dedup();
+        Self { points }
+    }
 }
 
 /// The lowest point of viewer-facing sprites, in shape units about their
@@ -95,7 +277,7 @@ pub fn sprites_bottom(sprites: &[Billboard]) -> Option<f64> {
         .reduce(f64::min)
 }
 
-/// The bottom of a drawn shape: its lowest point (faces and sprites) in shape
+/// The bottom of a drawn shape: its lowest point (faces, lines and sprites) in shape
 /// units about its origin, or `None` for an empty shape.
 pub fn bottom(shape: &Shape) -> Option<f64> {
     height_range(shape).map(|[low, _]| low)
@@ -235,6 +417,115 @@ mod tests {
             ..upright(0., 1.)
         };
         assert_eq!(lift_ft(&empty, 1.), 0.);
+    }
+
+    #[test]
+    fn antenna_frame_and_complete_assembly_define_the_footing() {
+        let mut shape = upright(-13., 20.);
+        shape.lines.push(tore_formats::shape::Line {
+            positions: [[0., 0., -14.], [0., 0., 18.]],
+            color: 1,
+            fog: Default::default(),
+        });
+        assert_eq!(bottom(&shape), Some(-14.));
+        assert!((lift_ft(&shape, 4. / 3.) - 56. / 3.).abs() < 1e-12);
+        // The whole dish and frame move together, not separately onto the ground.
+        let basis = tore_sim::attitude::Basis::new(0., 0., 0.);
+        assert_eq!(
+            terrain_correction_ft(&shape, 1., basis, [0., 13., 0.], |_, _| 0.),
+            1.
+        );
+    }
+
+    #[test]
+    fn footing_samples_the_slope_under_the_geometry_not_only_the_origin() {
+        let shape = upright(0., 20.);
+        let basis = tore_sim::attitude::Basis::new(0., 0., 0.);
+        // One foot is ten feet east, where the ground rises five feet.
+        assert_eq!(
+            terrain_correction_ft(&shape, 1., basis, [0.; 3], |x, _| x * 0.5),
+            5.
+        );
+        // A floating complete assembly is lowered, not clamped to upward moves.
+        assert_eq!(
+            terrain_correction_ft(&shape, 1., basis, [0., 9., 0.], |_, _| 0.),
+            -9.
+        );
+    }
+
+    #[test]
+    fn large_flat_or_steep_shapes_keep_the_origin_rule() {
+        let level = tore_sim::attitude::Basis::new(0., 0., 0.);
+        let slope = |x: f64, _: f64| x * 0.5;
+        // Compact, gentle: lifted 5 ft, 5 ft gap under its low end.
+        assert_eq!(
+            slope_lift_ft(&upright(0., 20.), 1., level, [0.; 3], slope),
+            Some(5.)
+        );
+        // Reaching 500 ft (a city block): the origin rule, cut into the hill.
+        assert_eq!(
+            slope_lift_ft(&upright(0., 20.), 50., level, [0.; 3], slope),
+            None
+        );
+        // Flat ground art (a field, a lot): the origin rule.
+        assert_eq!(
+            slope_lift_ft(&upright(0., 0.), 1., level, [0.; 3], slope),
+            None
+        );
+        // Compact but steep: a 60 ft rise across 100 ft leaves 60 ft of air.
+        let steep = |x: f64, _: f64| x * 0.6;
+        assert_eq!(
+            slope_lift_ft(&upright(0., 20.), 10., level, [0.; 3], steep),
+            None
+        );
+        assert_eq!(reach_ft(&upright(0., 20.), 50.), 500.);
+    }
+
+    #[test]
+    fn a_driving_unit_takes_the_same_lift_as_it_stands() {
+        let shape = upright(-5., 20.);
+        let footing = UnitFooting::of(&shape, 1.);
+        let level = tore_sim::attitude::Basis::new(0., 0., 0.);
+        let slope = |x: f64, _: f64| x * 0.5;
+        // Its pose stands its bottom on the ground under it, as the origin
+        // rule stands the shape; the lift is the standing shape's.
+        let standing = slope_lift_ft(&shape, 1., level, [0., 5., 0.], slope);
+        assert_eq!(standing, Some(5.));
+        assert_eq!(unit_slope_lift_ft(&footing, level, [0.; 3], slope), 5.);
+        // Tilted with a plane slope, nothing is left to lift.
+        let tilted =
+            tore_sim::attitude::Basis::new(std::f64::consts::FRAC_PI_2, (0.5f64).atan(), 0.);
+        assert!(unit_slope_lift_ft(&footing, tilted, [0.; 3], slope).abs() < 1e-9);
+        // A unit with no footing (not in the scene) is not lifted.
+        assert_eq!(
+            unit_slope_lift_ft(&UnitFooting::default(), level, [0.; 3], slope),
+            0.
+        );
+    }
+
+    #[test]
+    fn placed_contact_and_draw_origin_rise_together_and_keep_authored_height() {
+        use crate::terrain::Placements;
+        use std::collections::BTreeMap;
+        let resources: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        let mut sources = Placements::of_types(&resources, std::iter::empty());
+        sources
+            .definitions
+            .insert("TEST.OT".into(), definition("TEST.OT", "_OBJProc", 0));
+        sources.shapes.insert("TEST.OT".into(), upright(0., 20.));
+        let layout = tore_formats::mission::Layout::parse(
+            "TEST.MM",
+            b"textFormat\nobj\n type TEST.OT\n pos 0 7 0\n.\n",
+        )
+        .unwrap();
+        let p = &layout.placements[0];
+        let flat = sources.stance(p, 0.).unwrap();
+        let slope = sources.stance_on_terrain(p, |x, _| x * 0.5).unwrap();
+        assert_eq!(flat.origin[1], 7.);
+        assert_eq!(slope.origin[1], 12.);
+        assert_eq!(slope.center[1] - flat.center[1], 5.);
+        assert_eq!(slope.support_origin, flat.support_origin);
+        assert_eq!(slope.half, flat.half);
     }
 
     #[test]

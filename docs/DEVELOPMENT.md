@@ -1752,6 +1752,13 @@ unit. `--no-relocate` traces the template at its retail spot. A launcher in a SA
 and launchers. It reads the same retail records, weapons and sensors too.
 The `surface-*` engagement battery scenarios run it.
 
+`--surface-dump --grounding-sites` extends the flat type audit to actual
+theater and mission placements and every offered Quick Mission template
+plus the three unused Ukraine templates, both authored and seed 1 relocated, at heavy defenses. It reports per-theater
+coverage, missing geometry, footing exceptions and before/after clearance.
+`surface-grounding-sites` runs it in the battery. The separate
+`surface-grounding-radar-render` scenario captures a radar objective offscreen.
+
 `--surface-scene OUT_DIR THEATER STEM` renders a ground target as the game
 draws it, offscreen at 1080p (no window): it steps the whole world
 `--seconds S` (`--surface-only` steps just the moving units, for long

@@ -932,7 +932,7 @@ def grounding_problems(output: str) -> list[str]:
         if f2 != "-" and low < 0 and abs(float(f2) - low) > 3.0:
             problems.append(f"{name}: lowest point {low} ft is {abs(float(f2) - low):.1f} ft from its F2 offset {f2}")
     for name, want in [("FACTD.OT", 42.7), ("HANGR.OT", 26.7), ("FACT1.OT", 162.7), ("TROOPS.NT", 3.3),
-                       ("GCI.NT", 17.3)]:
+                       ("GCI.NT", 18.7)]:
         m = rows.get(name)
         if m is None or abs(float(m.group(7)) - want) > 0.11:
             problems.append(f"{name}: lift {m and m.group(7)}, want {want} ft")
@@ -953,6 +953,26 @@ def scenarios() -> list[Scenario]:
             check=grounding_problems,
             notes="B13 and GROUND: every object, unit, man and parked aircraft stands on the bottom of its shape, "
                   "drawn and hit box alike. Reads the records the import lacks from the retail media.",
+        ),
+        Scenario(
+            name="surface-grounding-sites", lane="ai",
+            args=["--surface-dump", "--grounding-sites"], timeout=600,
+            expect=[r"^grounding-sites: 16 theaters, 0 unread resources, 0 problems$"] + [
+                rf"^grounding-sites: {theater} missions [1-9]\d* templates [1-9]\d* "
+                r"placements [1-9]\d{2,} exceptions \d+ unavailable \d+ before \d+ problems 0$"
+                for theater in BASE_DEFENSES
+            ],
+            forbid=[r"^site-problem:"],
+            notes="Authored theater and campaign mission objects plus every Quick Mission template, "
+                  "at its authored site and seed 1 relocated site. Checks lines and slope clearance.",
+        ),
+        Scenario(
+            name="surface-grounding-radar-render", lane="flight",
+            args=["--surface-scene", "{work}/radar", "CUB", "QCLST", "--seconds", "0",
+                  "--focus", "1", "--distance", "35", "--look", "30,-8", "--tag", "radar"],
+            timeout=300, outputs=["radar/radar-look.png"],
+            expect=[r"surface-scene: .*radar-look.png"],
+            notes="Offscreen radar objective with its antenna frame, no window.",
         ),
         Scenario(
             name="surface-resolve-all", lane="ai",

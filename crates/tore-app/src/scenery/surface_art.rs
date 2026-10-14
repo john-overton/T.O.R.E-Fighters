@@ -99,6 +99,7 @@ pub(crate) fn drawn_bottoms(
         drawn
             .vertices
             .chunks_exact(FLOATS)
+            .chain(drawn.lines.chunks_exact(FLOATS))
             .map(|v| f64::from(v[1]))
             .reduce(f64::min)
     };
