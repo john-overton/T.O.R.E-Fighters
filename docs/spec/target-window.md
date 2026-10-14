@@ -588,6 +588,25 @@ choices, labelled below.
   target square, so a target on the centre sits in the gap. The pod pages
   keep their short ticks. Every nose-cone view has it, because they are one
   page.
+- **Target square jitter.** Opinionated, John 2026-10-14 ("the target square
+  should jitter a little bit as it is closing in"); the numbers are agent
+  decisions. The 11 pixel target square is steady far out and shakes more as
+  the weapon closes, like a tracker struggling to hold. The measure is the
+  seconds to go: the weapon's distance to its target (or the laser spot)
+  divided by its speed. From 8 seconds out the share of jitter grows with the
+  square of the closeness (0 at 8 s, about a quarter at 4 s, 0.77 at 1 s, 1 at
+  impact). The square moves up to 3 pixels at impact across and down (a pixel
+  at most from 5 s, so little at long range), and from a quarter of the
+  growth on it also flickers a pixel bigger or smaller each way (its side 8 or
+  12 instead of 10), more often as it grows, so it never leaves the target. A
+  new random-looking value is taken every 10 combat ticks (12 Hz). The values
+  are a hash of the weapon's id and the picture's tick, with nothing stored:
+  stills of one tick match and a replay looks the same. Presentation only, no
+  wire, recording or simulation change. A page with no square (no target in
+  the picture) has nothing to shake, and the crosshair never moves. Code:
+  `square_jitter` in `instruments/targeting.rs`, fed by `Shot::closing` from
+  `seeker_view.rs`; the constants are `JITTER_START_S`, `JITTER_MAX_PX` and
+  `JITTER_STEP_TICKS`.
 - **Static.** Opinionated, John 2026-10-13: "1 second of static once it hits
   before switching back to the regular target view". When the weapon the page
   follows ends (it leaves the picture: it hit, detonated or ran out; the
