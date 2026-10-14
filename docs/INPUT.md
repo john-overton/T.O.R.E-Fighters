@@ -215,8 +215,28 @@ targeting sight". The gamepad gestures stay the AC-130's.
 | Slew the sight | Alt + arrows (or Alt + keypad 4, 6, 8, 2) | Select + right stick | Actions `sight-left`, `sight-right`, `sight-up`, `sight-down` for keys and buttons; `sight-x` and `sight-y` for sticks and HOTAS axes (right and up positive) |
 | Zoom in / out | Shift+' / Shift+; | None | Retail's bomb camera zoom keys; six steps |
 | Next gun / link gun | Ctrl+7 / Ctrl+8 | Select + D-pad up / down | Moved from the right stick |
-| Sensor console and orbit hold | Ctrl+9 | Select + Guide (Xbox) | AC-130 only (`sensor-console`): opens the console and the autopilot circles the sight's point; again hands the aircraft back ([the sensor console](spec/ac130-linked-guns.md#the-sensor-console-and-the-orbit)). Agent choice of keys, 2026-10-13: next to the gun keys; Select + Guide was the range's incoming-missile fixture, which is off on the AC-130 |
+| Pin or release (console: orbit or search) | P | None | AC-130 only (`sight-pin-toggle`): pins the ground under the crosshair with the sight free, else lets the pin or track go, as L does. In the sensor console that is ORBIT or SEARCH. Agent's key choice, 2026-10-14 (P is free in the original, docs/spec/keyboard.md) |
+| Sensor console and orbit hold | Ctrl+9 | Select + Guide (Xbox) | AC-130 only (`sensor-console`): opens the console; the autopilot searches straight and level with the sight free, or circles the sight's pin or track; again hands the aircraft back ([the sensor console](spec/ac130-linked-guns.md#the-sensor-console-and-the-orbit)). Agent choice of keys, 2026-10-13: next to the gun keys; Select + Guide was the range's incoming-missile fixture, which is off on the AC-130 |
 | White hot / black hot | Ctrl+Backslash | None | The AC-130 sensor console only (Ctrl+9; [sensor console](spec/target-window.md#sensor-console)); does nothing elsewhere. Action `sight-polarity`; agent's key choice beside the other Backslash sight keys (2026-10-13) |
+
+**Inside the sensor console** (slice nr-cona; John asked for slew, zoom,
+pin/release and heading, altitude and throttle keys on 2026-10-14; which keys
+is an agent decision). The stick does not fly the aircraft there, so flight
+controls take console meanings, with no new bindings to learn:
+
+| Control | In the console |
+| --- | --- |
+| Arrows, the stick (gamepad left stick), mouse look (right button held) | Slew the sight (the arrows with the hold ramp below; the mouse one field of view per 1,000 pixels at sensitivity 1, capped at the full slew rate) |
+| = and -, the mouse wheel | Zoom the sight a step |
+| Shift + Left / Right (the look keys), the look axes | Step the search heading 5 degrees |
+| Shift + Up / Down, the look axes | Step the search altitude, or the orbit's height above its point, 500 ft |
+| 1 to 6, 7 and 8 (and their bound buttons) | The autopilot's speed: 0 to 100% of the corner-to-maximum band, then 5 kt steps |
+
+A held heading or altitude key steps at once, then every 0.15 s after 0.3 s.
+The view does not turn in the console. Each key reaches the host as the seat
+command `Console` ([the console's keys](spec/ac130-linked-guns.md#the-consoles-keys)).
+Rebinding the arrows, the look keys, the zoom or the throttle keys moves the
+console meanings with them, since the console reads the flight actions.
 
 A held slew key or button starts at a quarter of full deflection for a quarter
 second, so a short press nudges, then runs at full rate; an analog axis is
@@ -494,6 +514,7 @@ Deliberate differences from FA:
 | Shift+B | Afterburner switch, alongside 6 | Unused | Gamepad Y uses the same switch |
 | Backslash | Designate what is under the sight's crosshair (the AC-130's gunsight, or the targeting sight of an aircraft with a laser designator or a FLIR); elsewhere "no targeting sight" | IR/laser designation, only with advanced targeting on | The AC-130 gunsight is that targeting, John 2026-10-09; every sight aircraft since A2G slice T1. The live-fire range reset moved to Ctrl+Shift+Backslash (kept its key, gained Ctrl+Shift) |
 | Shift+Backslash | Pin the sight on the ground under the crosshair | Unused | T.O.R.E addition, John 2026-10-09 |
+| P | AC-130 gunsight: pin or release (`sight-pin-toggle`); in the sensor console ORBIT or SEARCH. Elsewhere "no gunsight" | Unused (free in the original) | T.O.R.E addition, John 2026-10-14 (pin/release); the key is an agent choice |
 | Ctrl+9 | AC-130 sensor console and orbit hold (`sensor-console`); elsewhere "No sensor console on this aircraft" | Unused | T.O.R.E addition, John 2026-10-13 (the console); the key is an agent choice |
 | Shift+' / Shift+; | Zoom the sight in / out; elsewhere a message | Zoom the high-altitude bombing window in / out | The gunsight is the target camera, John 2026-10-09 |
 | Alt + arrows | Slew the sight | Unused | T.O.R.E addition, John 2026-10-09 |

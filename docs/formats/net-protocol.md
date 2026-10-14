@@ -50,6 +50,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [Protocol 27 (stores)](#protocol-27-stores) (built under protocol 27)
 - [Protocol 28 (host loading)](#protocol-28-host-loading) (built under protocol 28)
 - [Protocol 29 (the sensor console)](#protocol-29-the-sensor-console) (built under protocol 29)
+- [The console's search and keys (pending protocol)](#the-consoles-search-and-keys-pending-protocol)
 - [Limits](#limits)
 - [Captures](#captures)
 - [Versions](#versions)
@@ -2854,6 +2855,31 @@ orbit autopilot ([spec](../spec/ac130-linked-guns.md#the-sensor-console-and-the-
   the longer own-plane state. The wire golden changes in the Inputs command
   sample (one SensorConsole), the version line and the packets sealed with
   the version.
+
+## The console's search and keys (pending protocol)
+
+*Built (slice nr-cona, 2026-10-14); the lead numbers the protocol (30 most
+likely).* John asked for slew, zoom, pin and release and heading, altitude and
+throttle keys in the sensor console, with the autopilot searching straight
+while nothing is pinned ([spec](../spec/ac130-linked-guns.md#the-consoles-keys)).
+
+- **Seat command 29, Console**: a sensor console key, then a 3-bit sub-code
+  and an 8-bit value. Sub-codes: 0 Pin (value 0; any other value is
+  refused), 1 Heading (signed steps), 2 Altitude (signed steps), 3 Speed
+  (percentage 0 to 100; above 100 is refused), 4 SpeedStep (signed steps);
+  5 to 7 are refused. The 5-bit command code has two codes left (30 and 31).
+- **The exact own-plane state**: the autopilot's `Orbit` gained three fields
+  after its throttle: `pinned` (a bool: a point is held, else the search),
+  `heading` and `altitude` (f64 against the baseline's: the search's
+  commanded heading, radians, and altitude, ft). The orbit's `speed_fps` is
+  now also the commanded speed of the search. The client predicts the search
+  exactly; a key's change and a pin or release reach it with the host's next
+  exact state, one small correction about a round trip later, as the
+  console's opening does.
+- **Why a bump.** An older game reads command 29 as invalid and cannot read
+  the longer own-plane state. The wire golden changes in the Inputs command
+  sample (five Console commands), the version line and the packets sealed
+  with the version. Until the bump `wire_golden` fails on this branch.
 
 ## Limits
 
