@@ -35,7 +35,8 @@ View+Start for the engine; vectoring jets and the V-22 use View+D-pad Up for
 forward nozzle/nacelle neutral. On the AC-130 View+right stick slews the gunsight,
 View+D-pad Up and Down pick and link its guns (the range reset and damage test
 they carry elsewhere are off there), View+A designates under the crosshair and
-View+A held half a second pins the ground. Other aircraft keep their original
+View+A held half a second pins the ground, and View+Xbox opens the sensor
+console (the range's incoming-missile fixture is off there). Other aircraft keep their original
 modifier look/rudder/fixture mappings. The sight rows are for every aircraft with
 a laser designator or a FLIR: their keyboard keys work on all of them, while the
 gamepad defaults above are the AC-130's. Bind your own button or stick to any
@@ -156,6 +157,7 @@ and a gamepad's View+stick defaults avoid the problem.
 | Previous weapon / NAV | [ | - | View + X |
 | Next gun candidate (AC-130) | Ctrl+7 | - | View + D-pad up |
 | Link/unlink candidate gun (AC-130) | Ctrl+8 | - | View + D-pad down |
+| Sensor console and orbit hold (AC-130) | Ctrl+9 | - | View + Xbox |
 | Sight: designate under crosshair | Backslash | - | View + A (tap) |
 | Sight: pin ground point | Shift+Backslash | - | View + A (hold half a second) |
 | Sight: zoom in | Shift+Apostrophe | - | - |

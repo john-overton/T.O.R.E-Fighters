@@ -287,9 +287,10 @@ flowchart TD
 
 What happens next is the agent's decision, so the player's own choices win:
 
-- **When the view ends** (the newest seeker weapon lands, so the page has
-  nothing left to follow), the window the launch opened closes and the other
-  windows are as they were. A window that was already open stays open.
+- **When the view ends** (the newest seeker weapon lands and its second of
+  [static](#seeker-view) is over, so the page has nothing left to follow), the
+  window the launch opened closes and the other windows are as they were. A
+  window that was already open stays open.
 - **Clear designation** (the way back to the pod view) keeps the window open as
   the player's own, now showing the pod view; Shift+4 closes it.
 - **Shift+4** while the view runs closes the window and it stays closed until
@@ -332,8 +333,13 @@ nice static occasionally and a bit of chromatic aberration and pixelation to
 make it look like a CRT display", after the AC-130 mission of Call of Duty 4,
 "semi realistic". Later the same evening he made it the console the player
 works the guns from while the aircraft flies its orbit by itself: entering the
-console engages the orbit autopilot, leaving it hands the aircraft back (slice
-nr-orbit owns that key and the engaged flag; this section covers the picture).
+console engages the orbit autopilot, leaving it hands the aircraft back.
+**Ctrl+9** (gamepad Select + Guide) opens and closes it: the screen shows
+exactly while orbit hold flies ([the sensor console and the
+orbit](ac130-linked-guns.md#the-sensor-console-and-the-orbit) covers the key and
+the autopilot; this section covers the picture). Online, a client's screen
+follows its own prediction of the plane, which carries the host's orbit mode,
+so it opens and closes with the host's orbit.
 The TARGET CAM page above is unchanged. Everything else here (layout, wording,
 heat levels, the CRT numbers) is an agent decision (nr-fltv, 2026-10-13),
 fitted on offscreen renders. Retail has nothing like it. Presentation only:
@@ -384,7 +390,7 @@ rest is the game's own data.
 
 | Where | Shows |
 | --- | --- |
-| Top left | The sight's mode (MAN free slew, RTN returning, PNT pinned, TRK tracked), the field of view by name (WFOV, MFOV and NFOV for zoom steps 1 to 3, then NFOV E2, E4 and E8: the narrow field's electronic zoom) and IR; the field in degrees; the orbit autopilot's state, radius and height when it is flying (from nr-orbit) |
+| Top left | The sight's mode (MAN free slew, RTN returning, PNT pinned, TRK tracked), the field of view by name (WFOV, MFOV and NFOV for zoom steps 1 to 3, then NFOV E2, E4 and E8: the narrow field's electronic zoom) and IR; the field in degrees; the orbit: ORBIT JOIN while the aircraft is still joining the circle, ORBIT GUNS on it with every gun and the camera bearing on the point, ORBIT NO BEAR on it when one cannot; then the planned radius and height above the point (`flight::State::orbit_status`) |
 | Top right | True heading, height above the ground, true airspeed, WHOT or BHOT |
 | Left, middle | The sensor's azimuth (from the nose, clockwise), its elevation, and the true bearing of its line of sight (LOS) |
 | Right, middle | With a tracked target: its name, range, true bearing and clock bearing with HI or LO |
@@ -420,9 +426,11 @@ draws the console offscreen from an AI gunship's own sensor at those seconds:
 white hot and black hot on its target, the free wide field, the narrow field,
 near and at the gimbal limit, and a burst of static. The AI flies without the
 player's gunsight, so these frames build the symbology from the same geometry
-(arcs and reach); they are a picture check, not a gunsight check. Until slice
-nr-orbit merges, `TORE_SENSOR_CONSOLE=1` shows the console in flight whenever
-the AC-130's gunsight exists (a temporary development switch).
+(arcs and reach); they are a picture check, not a gunsight check. The player's
+own path is `--a2g-run UKR QUCOL --aircraft ac130 --load C_25.JT --attack
+orbit ... --console-scene DIR --console-at S,...`: the seat opens the console
+with its command and the frames (`seat-tS-whot`, `-bhot`, `-static`) are the
+game's own gunsight page, target and orbit status.
 
 ## Targeting page
 
@@ -534,16 +542,21 @@ choices, labelled below.
 
 - **Which weapons.** The air-to-ground weapons with a seeker picture: the
   infrared AGMs (AGM-65G, AGM-65A and the AGM-84E SLAM, class 8), the laser
+  bombs (GBU-10, GBU-10A, Pave Way, Pave Way III and GBU-28, class 4; John
+  2026-10-13: "nosecone (GBU's, Mavericks, AT-12's etc) views"), the laser
   missiles (AS-14, AS-30 and AT-12, class 12) and the AT-2 (retail's
   "optical" label; John 2026-10-12 added it, so its view is the missile's nose
   view like the others, and it stays steered from the launcher's sight). The
   data has no "has a picture" flag, so the list is `missiles::SEEKER_VIEW`
   (agent decision). Weapons without a picture keep today's behaviour: the
   anti-radiation missiles (HARM, Shrike), the active and supported radar
-  missiles, the laser bombs and the JDAMs (they follow a spot or a point and
-  carry no camera; John 2026-10-12: "JDAM no"), rockets and free-fall bombs.
-  There is no TV or IR guided bomb in the data; the list grows by one line if
-  one is added.
+  missiles, the JDAMs (they fly to a point and carry no camera; John
+  2026-10-12: "JDAM no", not changed on 2026-10-13), rockets and free-fall
+  bombs. There is no TV or IR guided bomb (GBU-15, Walleye) in the data; the
+  list grows by one line if one is added. A laser bomb or laser missile marks
+  the laser spot it homes on with the target square (the spot of the plane's
+  designator or a buddy's, whichever the plane's laser weapons use), looking
+  at it while it is inside the 45 degree cone.
 - **When.** From the tick the player's weapon appears until it lands (it
   leaves the picture), whatever the page showed before (the targeting page, the
   plain window or nothing but a grey screen), on any aircraft except the
@@ -557,11 +570,51 @@ choices, labelled below.
   AGM records' zone 1, otherwise along its nose; level, 15 degrees tall (step 2
   of the sight's zoom ladder, fitted). Nothing is smoothed: the picture is the
   weapon's position at the 24 Hz refresh.
-- **Page.** The weapon's record name on the name row (`AGM65G`), SEEKER under
-  it, the crosshair, a 11 pixel square on the target when it is in the
+- **Page.** The weapon's record name at the top left (`AGM65G`), SEEKER at the
+  top right, the crosshair, a 11 pixel square on the target when it is in the
   picture, and `RNG` with the distance on the bottom row (weapon to target,
   else to the aircraft; nautical miles with one decimal, whole feet under a
-  nautical mile). No laser rows, no pod marks.
+  nautical mile). No laser rows, no pod marks. The text sits in the corners so
+  the crosshair's bars run clear of it (agent decision; it was centred at the
+  top before the crosshair changed).
+- **Crosshair.** Opinionated, John 2026-10-13 (his drawing): four straight
+  bars, up, down, left and right, with the centre open and nothing drawn in
+  it. On the 138 by 114 pixel picture each bar starts 10 pixels from the centre
+  and runs to 7 pixels short of the picture's edge (so about 52 pixels across,
+  40 up and down), 3 pixels of ink with the usual 1 pixel white halo (agent
+  decision; the drawing has them thick). The gap is wider than the 11 pixel
+  target square, so a target on the centre sits in the gap. The pod pages
+  keep their short ticks. Every nose-cone view has it, because they are one
+  page.
+- **Static.** Opinionated, John 2026-10-13: "1 second of static once it hits
+  before switching back to the regular target view". When the weapon the page
+  follows ends (it leaves the picture: it hit, detonated or ran out; the
+  picture cannot tell them apart), the picture is video static for 120 combat
+  ticks (1 second): grey snow over the whole window that changes at the
+  24 Hz refresh, with a few bright tearing lines, and no text or marks (the
+  feed is lost). Then the page is what it showed before, or the view of an
+  older seeker weapon still flying (agent decision: the snow comes first, the
+  older weapon after it). A weapon launched during the static takes the page
+  at once (agent decision: a new launch is the pilot's own act). A weapon the
+  page was not following (an older one landing behind the newest) leaves no
+  static, nor does one the pilot sent back to the pod with Clear designation,
+  and Clear during the static ends it. The window a launch opened closes after
+  the static, not before it. Online, a flying weapon cannot leave the picture
+  for want of an update: the wire is delta coded, so lost snapshots and the
+  host's budget and priority only delay a weapon's record, the client draws it
+  on (extrapolated) and only the host's removal message ends it (test
+  `an_own_missile_stays_drawn_through_lost_snapshots_until_its_removal`). As a
+  safeguard an online client still waits 24 combat ticks (0.2 s) for a missing
+  weapon, holding its last picture, before the static starts; the static is
+  timed from the tick the weapon left, so the page is back a second after it
+  left either way, and single player has no wait at all. A weapon that comes
+  back ends the static (agent decisions). A paused game freezes the snow (it counts combat
+  ticks). The static is drawn by the page (`feed_static` in
+  `instruments/targeting.rs`) with the [sensor console](#sensor-console)'s CRT
+  module at full static over a dark picture (`crt::apply_cpu`); it is
+  presentation only, with nothing in the
+  simulation, the wire or the recordings, and it appears wherever the page
+  does: single player and an online client's own weapons.
 - **Back to the pod.** The Clear designation key (Semicolon or L, the existing
   binding; no new key) sends the page back to the targeting pod view for as
   long as that weapon flies, as the pilot would for other targeting; it still
@@ -581,7 +634,9 @@ flowchart TD
     W -->|yes| C{Pilot pressed Clear designation since its launch?}
     C -->|yes| N
     C -->|no| S[Seeker view of the newest one]
-    S -->|weapon lands| N
+    S -->|weapon lands| T[Static for 1 second]
+    T -->|older seeker weapon flying| S
+    T -->|nothing left| N
 ```
 
 ### Preview
@@ -594,7 +649,7 @@ synthetic readout on the same synthetic grey scene the gunsight preview uses
 `lase-mask` / `lase-mask-range`, `lase-mask-terrain`, `lase-pin`, `ready`,
 `slew`, `limit`, `tti`, `impact`, `buddy` (a sight aircraft whose weapon homes
 on a buddy's spot), `both` (own LASE with a second BUDDY row), `buddy-nosight`
-(the buddy form), `flir` and `flir-tracked` (no laser rows), `seeker` (the seeker view of a Maverick). The HUD's laser box
+(the buddy form), `flir` and `flir-tracked` (no laser rows), `seeker` (the seeker view of a Maverick), `seeker-gbu` (a GBU-10 on its spot), `seeker-centre` (the target on the centre, inside the crosshair's gap) and `seeker-static` (the lost feed). The HUD's laser box
 is `--hud-snapshot OUT.ppm --hud-snapshot-state laser-lsr|laser-bud|laser-both|
 laser-ready|laser-mask|laser-edge`
 ([HUD](air-to-ground.md#laser-on-the-hud)).

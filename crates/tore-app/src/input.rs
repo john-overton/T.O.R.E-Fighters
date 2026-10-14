@@ -174,6 +174,12 @@ fn gamepad_binding_enabled(binding: &tore_input::Binding, roles: [bool; 4]) -> b
         {
             !powered
         }
+        // On the AC-130, View + Xbox opens the sensor console instead of the
+        // range's incoming-missile fixture (agent decision, 2026-10-13).
+        Action::Ui(name) if name == "sensor-console" => gunship,
+        Action::Ui(name) if name == "incoming" && binding.control == "button:314+button:316" => {
+            !gunship
+        }
         Action::Ui(name)
             if name == "range-target"
                 && binding.control == "button:314+axis:17"
@@ -1248,6 +1254,7 @@ pub fn gamepad_text(device: &Device) -> String {
         ("axis:17", "damage-player", "position=1"),
         ("button:315", "target-jammer", "press"),
         ("button:316", "incoming", "press"),
+        ("button:316", "sensor-console", "press"),
     ] {
         if device.controls.iter().any(|c| c.id == "button:314")
             && device

@@ -433,3 +433,87 @@ fn a_pin_above_the_hemisphere_leaves_the_predicted_camera_at_the_limit() {
     assert_eq!(sight.look(), from_eye);
     assert!(from_eye[1] < 0.);
 }
+
+/// The sensor console online (slice nr-orbit, protocol 29): a gunner opens
+/// it with its seat command, the host flies orbit hold about the pin it
+/// makes, the client's prediction flies the same orbit from its exact
+/// state and, with the pin standing, agrees with the host at every snapshot;
+/// a second press hands the aircraft back on both.
+#[test]
+fn the_sensor_console_flies_the_same_orbit_on_the_host_and_the_client() {
+    use tore_sim::autopilot::Mode;
+    let mut rig = gunships(80, 0.);
+    let open = Rc::new(Cell::new(false));
+    let close = Rc::new(Cell::new(false));
+    let (o, c) = (Rc::clone(&open), Rc::clone(&close));
+    let mut sent = (false, false);
+    let gunner_player = rig.join(
+        |c| c.plane = Some(0),
+        Box::new(move |_, _, _| {
+            let mut controls = Controls::default();
+            if o.get() && !sent.0 {
+                sent.0 = true;
+                controls.commands = vec![SeatCommand::SensorConsole];
+            } else if c.get() && !sent.1 {
+                sent.1 = true;
+                controls.commands = vec![SeatCommand::SensorConsole];
+            }
+            controls
+        }),
+    );
+    assert!(rig.run_until(Duration::from_secs(5), |r| r.seated(gunner_player)));
+    rig.players[gunner_player].keep_frames = true;
+    rig.run(Duration::from_secs(1));
+    open.set(true);
+    rig.run(Duration::from_secs(3));
+    let host_flight = |rig: &Rig| rig.host.world().cockpits[0].flight.clone();
+    assert_eq!(host_flight(&rig).autopilot.mode(), Mode::Orbit);
+    let host_guns = rig
+        .host
+        .world()
+        .combat
+        .state
+        .ownship(0)
+        .unwrap()
+        .gunship
+        .clone()
+        .unwrap();
+    let Sight::Pinned(pin) = host_guns.sight else {
+        panic!("the console pins the free sight: {:?}", host_guns.sight);
+    };
+    let settled = rig.players[gunner_player].client.stats();
+    rig.run(Duration::from_secs(10));
+    let stats = rig.players[gunner_player].client.stats();
+    assert!(stats.hashes_compared > settled.hashes_compared + 200);
+    assert_eq!(stats.mismatches, settled.mismatches, "{stats:#?}");
+    assert_eq!(stats.corrections, settled.corrections, "{stats:#?}");
+    let predicted = rig.players[gunner_player]
+        .client
+        .prediction()
+        .unwrap()
+        .plane()
+        .flight
+        .clone();
+    let status = predicted
+        .orbit_status()
+        .expect("the client flies the orbit");
+    assert_eq!(status.point, pin);
+    assert_eq!(host_flight(&rig).orbit_status().unwrap().point, pin);
+    // The client's sensor console screen (tore-app `sensor_console::
+    // console_active`, slice nr-fltv) shows while its readout has the
+    // gunsight and its own prediction flies orbit hold: both hold here, and
+    // the mode is off again on both sides once the console closes below.
+    let readout = rig.players[gunner_player]
+        .frames
+        .iter()
+        .rev()
+        .find_map(|f| f.readout.as_ref())
+        .expect("the gunner has a readout");
+    assert!(readout.gunsight.is_some());
+    assert_eq!(predicted.autopilot.mode(), Mode::Orbit);
+    close.set(true);
+    rig.run(Duration::from_secs(2));
+    assert_eq!(host_flight(&rig).autopilot.mode(), Mode::Off);
+    let predicted = rig.players[gunner_player].client.prediction().unwrap();
+    assert_eq!(predicted.plane().flight.autopilot.mode(), Mode::Off);
+}

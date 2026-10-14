@@ -14,6 +14,11 @@ def sc(name, window=False, lane=None):
     return battery.Scenario(name=name, lane=lane or name.split("-")[0], args=[], window=window)
 
 
+def keyed(name):
+    """Like replay-keys-*: the scenario itself is headless, one follow-up step opens the window."""
+    return battery.Scenario(name=name, lane="replay", args=[], then=[battery.Step(["driver"], app=False, window=True)])
+
+
 def plan(changed, scenarios, durations=None, budget=120, jobs=4, **kw):
     return bs.plan_for(changed, scenarios, durations or {}, budget, jobs, **kw)
 
@@ -159,6 +164,23 @@ class MapTests(unittest.TestCase):
         self.assertTrue(bs.family_matches("combat-tapes", "replay-tape-f18"))
         self.assertFalse(bs.family_matches("combat-tapes", "replay-tape-bad-empty"))
         self.assertTrue(bs.family_matches("replay-cli", "replay-tape-bad-empty"))
+
+
+class WindowedTests(unittest.TestCase):
+    def test_a_window_step_makes_the_scenario_windowed(self):
+        self.assertFalse(sc("flight-a").windowed)
+        self.assertTrue(sc("menus-window-a", window=True).windowed)
+        self.assertTrue(keyed("replay-keys-a").windowed)
+        self.assertFalse(keyed("replay-keys-a").window)  # the slot logic still sees the scenario itself as headless
+
+    def test_with_windows_no_drops_scenarios_that_only_have_a_window_step(self):
+        scenarios = [keyed("replay-keys-bookmarks"), sc("replay-input-a")]
+        durations = {s.name: 1.0 for s in scenarios}
+        changed = ["crates/tore-input/src/bindings.rs"]  # selects the replay-input and replay-keys families
+        off = plan(changed, scenarios, durations, windowed="no")
+        self.assertEqual({s.name for s in off.scenarios}, {"replay-input-a"})
+        on = plan(changed, scenarios, durations, windowed="yes")
+        self.assertIn("replay-keys-bookmarks", {s.name for s in on.scenarios})
 
 
 class PlanTests(unittest.TestCase):

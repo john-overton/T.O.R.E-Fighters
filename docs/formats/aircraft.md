@@ -307,7 +307,7 @@ checked below against real aircraft, not against retail play.
 | PT | Engines | Empty lb | Internal fuel lb | `fuelConsumption` | `aftFuelConsumption` | Full tank at the record's flow |
 | --- | --- | --- | --- | --- | --- | --- |
 | AH64.PT | 2 | 18,298 | 2,000 | 1 | 0 | 33 min |
-| V22.PT | 2 | 18,298 | 2,000 | 1 | 0 | 33 min |
+| V22.PT (as stored; corrected below) | 2 | 18,298 | 2,000 | 1 | 0 | 33 min |
 | MI24.PT | 2 | 18,078 | 3,307 | 3 | 0 | 18 min |
 | CH47.PT | 2 | 18,078 | 3,307 | 1 | 0 | 55 min |
 | AV8.PT | 1 | 13,968 | 7,759 | 2 | 0 | 65 min |
@@ -331,7 +331,7 @@ checked below against real aircraft, not against retail play.
   tied to the power their rotors draw.
 - **The rotorcraft records are copies.** `V22.PT` and `AH64.PT` carry the same
   empty weight, fuel, thrust and flow. `CH47.PT` carries the Mi-24's empty weight
-  and fuel (the real CH-47 is a 24,000 lb aircraft carrying several thousand pounds more fuel),
+  and fuel (the real CH-47 is a 24,000 lb aircraft carrying several thousand pounds more fuel; corrected below since slice HF3),
   an implausible thrust (135,795 lbf, set aside by the rotor overhaul) and a flow
   of 1 where the Mi-24 has 3. The flow of the Mi-24 and of the CH-47 therefore
   cannot both be a measurement of anything. Retail never makes a rotorcraft
@@ -341,13 +341,52 @@ checked below against real aircraft, not against retail play.
   Yak-141 (9,700 lb) carry a fighter's flow and a believable tank; the models add the
   lift engines' burn (docs/spec/powered-lift-flight.md). No change.
 
-**Decision (agent, 2026-10-13, John's request).** The reader keeps the retail
-numbers. The weights are kept (they size the rotor models and the mass checks). The
-**flow of a rotorcraft is not read**: the flight model burns by the power the rotor
-draws ([FLIGHT-MODEL](../FLIGHT-MODEL.md#rotorcraft-fuel), fitted). The V-22 keeps
-the AH-64's 2,000 lb tank, which is the weak number now (a real V-22 carries about
-12,000 lb); that is the clone, flagged for John rather than changed here. The
-measured result is in the [rotorcraft fuel baseline](../baselines/rotorcraft-fuel.md).
+**Decision (agent, 2026-10-13, John's request).** The **flow of a rotorcraft is not
+read**: the flight model burns by the power the rotor draws
+([FLIGHT-MODEL](../FLIGHT-MODEL.md#rotorcraft-fuel), fitted). The AH-64 and Mi-24
+weights are kept (they size the rotor models and the mass checks). The measured
+result is in the [rotorcraft fuel baseline](../baselines/rotorcraft-fuel.md).
+
+**V-22 record correction (slice HF3, opinionated: John, 2026-10-13, "V-22 tank: fix
+(real fuel)").** `V22.PT` is the AH-64 record with a new name: its empty weight,
+fuel, maximum takeoff weight and thrust are the AH-64's. The reader now replaces
+those four numbers, and only when every one of them still holds the copied value (an
+edited or different record is read as it is). The table lives in
+`crates/tore-formats/src/aircraft_corrections.rs` and applies inside
+`Aircraft::parse`, so every reader (flight model, loadout, live combat, wreck) sees
+the same aircraft. The choice of figures is an agent decision.
+
+| Field | Record (AH-64 copy) | Corrected | Source |
+| --- | --- | --- | --- |
+| `weight` (empty), lb | 18,298 | 31,818 | MV-22B empty weight (Pub, Wikipedia "Bell Boeing V-22 Osprey", specifications) |
+| `internalFuel`, lb | 2,000 | 11,700 | MV-22B 1,721 US gal (Pub, Bell Boeing V-22 brochure) at 6.8 lb/gal (JP-5) |
+| `maxTakeoffWeight`, lb | 23,810 | 52,600 | Vertical takeoff maximum (Pub, Wikipedia) |
+| `thrust`, lbf | 26,280 | 58,057 | The record's thrust-to-maximum-weight ratio kept (Derived) |
+
+`CH47.PT` carries the Mi-24 record's empty weight, fuel and maximum weight (John's
+answer of 2026-10-13: "check other records for copying issues as well"). The same
+table corrects them to the CH-47F's; its own thrust (135,795 lbf, implausible and
+already set aside by the rotor model) is not a copy and stays.
+
+| Field | Record (Mi-24 copy) | Corrected | Source |
+| --- | --- | --- | --- |
+| `weight` (empty), lb | 18,078 | 24,578 | CH-47F empty weight (Pub, Wikipedia "Boeing CH-47 Chinook", specifications) |
+| `internalFuel`, lb | 3,307 | 7,340 | CH-47F 1,080 US gal (Pub, Wikipedia) at 6.8 lb/gal (JP-5) |
+| `maxTakeoffWeight`, lb | 28,660 | 54,000 | CH-47F gross weight (Pub, Wikipedia; the rotor model already scaled its power by it) |
+
+Checked and left as they are (agent decision, 2026-10-13; no plain copy and no large
+factor in the fields the game uses):
+
+| PT | Record: empty / fuel / maximum, lb | Real | Verdict |
+| --- | --- | --- | --- |
+| MI24.PT | 18,078 / 3,307 / 28,660 | Mi-24V 8,500 kg (18,740 lb) empty, 1,500 to 1,720 kg fuel, 11,200 kg normal and 12,000 kg (26,455 lb) maximum takeoff | Right; the maximum is 8 percent high. Its thrust (1.67 times the gross weight) is set aside by the rotor model |
+| AH64.PT | 18,298 / 2,000 / 23,810 | AH-64A about 11,400 lb empty, 375 US gal (about 2,500 lb) fuel, 21,000 to 23,000 lb maximum | The record's own (the V-22 copied it). The empty weight is about 1.6 times the real one: empty plus fuel, 20,298 lb, is a loaded Apache's mission weight. The rotor model's power comes from the record's thrust at this weight (within 10 percent of the real 2 x 1,690 shp), so the aircraft flies as a loaded AH-64 does; not changed, listed for John. The fuel is 20 percent under the real tank |
+
+Sources disagree on the MV-22B's internal fuel (a fact sheet gives 1,448 gal with the
+aft sponson tank); 1,721 gal is the manufacturer's brochure figure. The rotor model's
+power scales with the corrected maximum weight, so it is the engines' full rating
+([powered-lift flight](../spec/powered-lift-flight.md#mass-power-and-rotors)).
+The fixed-wing records are slice nr-rec's audit.
 
 ## F-14 default external fuel
 

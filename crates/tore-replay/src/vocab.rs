@@ -372,6 +372,13 @@ pub mod kind {
     /// changes of state. Subject: the lasing aircraft. Object: the object
     /// under the spot, if any. Fields: `x_ft`, `y_ft`, `z_ft`.
     pub const PLAYER_LASER_SPOT: &str = "player.laser_spot";
+    /// The AC-130's sensor console and orbit hold (slice nr-orbit,
+    /// 2026-10-13): one entry when it opens or closes, and while it is open
+    /// whenever the point it circles has moved more than 50 ft, at most once
+    /// a second. Subject: the recording's player. Fields: `on` (Bool: the
+    /// console is open), and while open the point as `x_ft`, `y_ft`, `z_ft`
+    /// and the planned `radius_ft` and `height_ft` above it.
+    pub const PLAYER_ORBIT: &str = "player.orbit";
     /// Where a guided weapon in the guiding mode was steering moved (FX-R,
     /// 2026-10-11), sampled like [`PLAYER_LASER_SPOT`]: the spot a laser
     /// weapon follows, the point a JDAM flies to, the target an AT-2 is
@@ -492,6 +499,7 @@ pub mod kind {
         PLAYER_LASER,
         PLAYER_DESIGNATE,
         PLAYER_LASER_SPOT,
+        PLAYER_ORBIT,
         WEAPON_AIM,
         WEAPON_IMPACT,
         STORES_LAYOUT,
@@ -664,6 +672,9 @@ pub mod field {
     pub const GUIDED: &str = "guided";
     /// A position in feet, world axes.
     pub const POSITION: [&str; 3] = [X_FT, Y_FT, Z_FT];
+    /// An orbit's planned radius and height above its centre (`player.orbit`).
+    pub const RADIUS_FT: &str = "radius_ft";
+    pub const HEIGHT_FT: &str = "height_ft";
     /// A velocity in feet per second, world axes.
     pub const VELOCITY: [&str; 3] = ["vx_fps", "vy_fps", "vz_fps"];
     /// An attitude as the right, up and forward unit vectors, world axes.

@@ -180,7 +180,10 @@ pub fn path_words(path: Path) -> &'static str {
 /// flags byte, and a host sends it marked loading to every player while it
 /// builds a mission, so its players keep the connection and its standbys
 /// hold off a migration through a long build.
-pub const PROTOCOL_VERSION: u16 = 28;
+/// 29 since the AC-130 sensor console (slice nr-orbit): seat command 28
+/// (SensorConsole), and the exact own-plane state's autopilot carries the
+/// orbit hold (mode Orbit 4 and its plan and memory).
+pub const PROTOCOL_VERSION: u16 = 29;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

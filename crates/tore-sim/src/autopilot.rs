@@ -18,6 +18,7 @@
 //! speed on the cyclic, as a helicopter's coupled autopilot does; the V-22
 //! with its nacelles down holds the height on the pitch and leaves its power
 //! lever to the pilot, as the throttle is on every other aircraft.
+pub mod orbit;
 pub mod rotor_law;
 
 use crate::flight::{FlightAxis, PilotCommand, PilotInput, State, Switch, trace::Release};
@@ -35,6 +36,10 @@ pub enum Mode {
     /// Hover hold: the helicopters and the V-22 hold a ground point, the
     /// heading and a height above the ground (design 5.4).
     Hover,
+    /// Orbit hold: the AC-130's sensor console circles the point the
+    /// targeting sight is centred on ([`orbit`]). Engaged and fed by the
+    /// host through [`State::engage_orbit`], never by a switch.
+    Orbit,
 }
 
 /// Selected mission waypoint. Coordinates use simulation world X/Z in feet.
@@ -54,6 +59,8 @@ pub struct Autopilot {
     target: Option<NavigationTarget>,
     /// The powered-lift loops' memory; default on every other aircraft.
     loops: Loops,
+    /// Orbit hold's plan and memory, while it is engaged.
+    orbit: Option<orbit::Orbit>,
 }
 
 /// What the rotorcraft loops remember from tick to tick: hover hold, and the
@@ -207,6 +214,7 @@ impl Autopilot {
                 .target
                 .map_or_else(|| "WP --".into(), |target| format!("WP {}", target.number)),
             Mode::Hover => "HOVER".into(),
+            Mode::Orbit => "ORBIT".into(),
         }
     }
     /// Hover hold's ground point, world X/Z ft, once the drift is braked.
@@ -222,6 +230,27 @@ impl Autopilot {
     }
     pub fn disengage(&mut self) {
         self.mode = Mode::Off;
+        self.orbit = None;
+    }
+    /// Orbit hold's plan and memory, while it is engaged.
+    pub fn orbit(&self) -> Option<&orbit::Orbit> {
+        self.orbit.as_ref().filter(|_| self.mode == Mode::Orbit)
+    }
+    /// Engage orbit hold with `orbit` (built by [`State::engage_orbit`]).
+    pub(crate) fn engage_orbit(&mut self, orbit: orbit::Orbit) {
+        self.mode = Mode::Orbit;
+        self.loops = Loops::default();
+        self.orbit = Some(orbit);
+    }
+    /// Move the point orbit hold circles: the pin or the tracked object the
+    /// sight holds now. The orbit slides there ([`orbit::CENTRE_SPEED_FPS`]).
+    pub fn set_orbit_point(&mut self, point: [f64; 3]) {
+        if self.mode == Mode::Orbit
+            && point.iter().all(|v| v.is_finite())
+            && let Some(orbit) = &mut self.orbit
+        {
+            orbit.point = point;
+        }
     }
     pub(crate) fn select(
         &mut self,
@@ -247,12 +276,13 @@ impl Autopilot {
         }
         // From off, or across hover hold and the A modes, the mode captures
         // anew; between the A modes it keeps the capture.
-        if self.mode == Mode::Off || self.mode == Mode::Hover || wanted == Mode::Hover {
+        if matches!(self.mode, Mode::Off | Mode::Hover | Mode::Orbit) || wanted == Mode::Hover {
             self.heading = heading;
             self.altitude = altitude;
             self.loops = Loops::default();
         }
         self.mode = wanted;
+        self.orbit = None;
     }
     /// Hover hold takes a cyclic trim key as a nudge of the point it holds:
     /// a tap (2 percent of travel) moves it 10 ft forward, back, left or
@@ -340,7 +370,11 @@ impl Autopilot {
             || (self.mode == Mode::Hover && s.weight_on_wheels())
         {
             Some(Release::Ground)
-        } else if input.pitch.abs().max(input.roll.abs()).max(input.yaw.abs()) > 0.15 {
+        } else if self.mode != Mode::Orbit
+            && input.pitch.abs().max(input.roll.abs()).max(input.yaw.abs()) > 0.15
+        {
+            // Orbit hold ignores the stick: the sensor console owns the
+            // aircraft until it closes (agent decision, 2026-10-13).
             Some(Release::PilotOverride)
         } else if self.mode == Mode::Hover {
             self.coupled_release(s, input)
@@ -361,6 +395,10 @@ impl Autopilot {
         match (self.mode, Airframe::of(s)) {
             (Mode::Off, _) => {}
             (Mode::Hover, _) => self.hover(s, ground, input),
+            (Mode::Orbit, _) => match &mut self.orbit {
+                Some(orbit) => orbit.fly(s, ground, input),
+                None => self.disengage(),
+            },
             (_, Airframe::Rotorcraft) => self.rotorcraft(s, surface.wind, input),
             _ => self.conventional(s, input),
         }
@@ -370,64 +408,11 @@ impl Autopilot {
     /// vectoring jets: a bank command through the roll rate and a climb
     /// command through the load factor (the module documentation's law).
     fn conventional(&self, s: &State, input: &mut PilotInput) {
-        let c = s.model().configuration();
         let bank = (angle(self.bearing(s.position) - s.yaw) * 1.5)
             .clamp(-30_f64.to_radians(), 30_f64.to_radians());
-        let roll_rate = angle(bank - s.bank);
-        let stall = stall_speed(s);
-        let authority = (s.speed / stall.max(1.)).powi(2).clamp(0., 1.);
-        let roll_limit = if let Some(p) = c.controls {
-            let axis = if s.research.is_some() {
-                p.hybrid_roll.unwrap_or(p.roll)
-            } else {
-                p.roll
-            };
-            let bound = if roll_rate < 0. {
-                -f64::from(axis.minimum)
-            } else {
-                f64::from(axis.maximum)
-            };
-            bound.to_radians() * (s.speed / (2. * stall.max(1.))).clamp(0., 1.)
-        } else if s.research.is_some() {
-            c.aerodynamics.roll_limit_rad_per_second.clamp(0.1, 6.) * authority
-        } else {
-            c.tuning.legacy_roll_limit_rad_per_second * authority
-        };
-        input.roll = (roll_rate / roll_limit.max(0.01)).clamp(-1., 1.);
+        input.roll = roll_for_bank(s, bank);
         let climb = ((self.altitude - s.position[1]) / 10.).clamp(-20. / 0.3048, 20. / 0.3048);
-        let desired_g = (1. + (climb - s.vertical_speed) / (3. * 32.174)) / s.bank.cos().max(0.5);
-        let (mut low, mut high) = (-1_f64, 1_f64);
-        for e in &c.aerodynamics.envelopes {
-            if let Some((min, max)) = e.speeds(s.position[1])
-                && s.speed >= min
-                && s.speed <= max
-            {
-                low = low.min(e.g as f64);
-                high = high.max(e.g as f64);
-            }
-        }
-        // The flight model's fast-side hold, so the autopilot scales its
-        // stick for the pull the aircraft actually has near top speed.
-        if s.research.is_some()
-            && let Some(hold) =
-                crate::flight::fast_side_hold(&c.aerodynamics.envelopes, s.position[1], s.speed)
-        {
-            high = high.max(hold.g);
-        }
-        let loading = 1.
-            + (s.fuel + s.carried_lbs()) / c.mass.empty_lbs
-                * c.aerodynamics.loaded_elevator_percent
-                / 100.;
-        low /= loading;
-        high /= loading;
-        let delta = desired_g / authority.max(0.01) - 1.;
-        input.pitch = (delta
-            / if delta > 0. {
-                (high - 1.).max(0.01)
-            } else {
-                (1. - low).max(0.01)
-            })
-        .clamp(-1., 1.);
+        input.pitch = pitch_for_climb(s, climb);
         input.yaw = 0.;
     }
 
@@ -520,6 +505,74 @@ impl Autopilot {
     }
 }
 
+/// The fixed-wing law's roll stick toward `bank` (radians, left negative):
+/// a roll rate of the bank error a second, scaled by the roll the aircraft
+/// has at its speed.
+pub(crate) fn roll_for_bank(s: &State, bank: f64) -> f64 {
+    let c = s.model().configuration();
+    let roll_rate = angle(bank - s.bank);
+    let stall = stall_speed(s);
+    let authority = (s.speed / stall.max(1.)).powi(2).clamp(0., 1.);
+    let roll_limit = if let Some(p) = c.controls {
+        let axis = if s.research.is_some() {
+            p.hybrid_roll.unwrap_or(p.roll)
+        } else {
+            p.roll
+        };
+        let bound = if roll_rate < 0. {
+            -f64::from(axis.minimum)
+        } else {
+            f64::from(axis.maximum)
+        };
+        bound.to_radians() * (s.speed / (2. * stall.max(1.))).clamp(0., 1.)
+    } else if s.research.is_some() {
+        c.aerodynamics.roll_limit_rad_per_second.clamp(0.1, 6.) * authority
+    } else {
+        c.tuning.legacy_roll_limit_rad_per_second * authority
+    };
+    (roll_rate / roll_limit.max(0.01)).clamp(-1., 1.)
+}
+
+/// The fixed-wing law's pitch stick for a `climb` rate (ft/s): the load
+/// factor that closes the climb error in 3 s, through the envelope's pull.
+pub(crate) fn pitch_for_climb(s: &State, climb: f64) -> f64 {
+    let c = s.model().configuration();
+    let stall = stall_speed(s);
+    let authority = (s.speed / stall.max(1.)).powi(2).clamp(0., 1.);
+    let desired_g = (1. + (climb - s.vertical_speed) / (3. * 32.174)) / s.bank.cos().max(0.5);
+    let (mut low, mut high) = (-1_f64, 1_f64);
+    for e in &c.aerodynamics.envelopes {
+        if let Some((min, max)) = e.speeds(s.position[1])
+            && s.speed >= min
+            && s.speed <= max
+        {
+            low = low.min(e.g as f64);
+            high = high.max(e.g as f64);
+        }
+    }
+    // The flight model's fast-side hold, so the autopilot scales its
+    // stick for the pull the aircraft actually has near top speed.
+    if s.research.is_some()
+        && let Some(hold) =
+            crate::flight::fast_side_hold(&c.aerodynamics.envelopes, s.position[1], s.speed)
+    {
+        high = high.max(hold.g);
+    }
+    let loading = 1.
+        + (s.fuel + s.carried_lbs()) / c.mass.empty_lbs * c.aerodynamics.loaded_elevator_percent
+            / 100.;
+    low /= loading;
+    high /= loading;
+    let delta = desired_g / authority.max(0.01) - 1.;
+    (delta
+        / if delta > 0. {
+            (high - 1.).max(0.01)
+        } else {
+            (1. - low).max(0.01)
+        })
+    .clamp(-1., 1.)
+}
+
 impl State {
     /// Why the autopilot `switch` cannot engage now, as the message the
     /// pilot reads, or None (turning a mode off is never refused).
@@ -581,6 +634,7 @@ crate::flight::exact::exact_enum!(Mode {
     Heading = 1,
     Waypoint = 2,
     Hover = 3,
+    Orbit = 4,
 });
 crate::flight::exact::exact_struct!(NavigationTarget { number, position });
 crate::flight::exact::exact_struct!(Loops {
@@ -613,6 +667,7 @@ crate::flight::exact::exact_struct!(Autopilot {
     altitude,
     target,
     loops,
+    orbit,
 });
 
 #[cfg(test)]

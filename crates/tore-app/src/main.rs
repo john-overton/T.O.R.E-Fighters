@@ -1391,6 +1391,7 @@ impl App {
             "range-target" => Command::RangeReset,
             "sight-designate" => Command::SightDesignate,
             "sight-pin" => Command::SightPinGround,
+            "sensor-console" => Command::SensorConsole,
             // The air-to-ground radar page and the Easy targeting cheat's
             // nearest ground target (slice G1).
             "a-g-radar" => return self.air_ground_key(),
@@ -1588,6 +1589,10 @@ impl App {
             }
             Command::BattleNet => {
                 self.queue(seats::SeatCommand::BattleNet);
+                Action::None
+            }
+            Command::SensorConsole => {
+                self.queue(seats::SeatCommand::SensorConsole);
                 Action::None
             }
             // Retail's IFF squawk: the answer comes from the flight's own copy
@@ -2175,8 +2180,8 @@ impl App {
     /// Ctrl+Backslash: the AC-130 sensor console's white hot / black hot.
     /// Only the console shows it; elsewhere the key does nothing.
     fn sight_polarity_key(&mut self) -> Action {
-        let readout = &net::play::current_frame(&self.world, &self.net_flight, &self.net).readout;
-        if !sensor_console::console_active(readout) {
+        let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
+        if !sensor_console::console_active(&frame.readout, frame.flight) {
             return Action::Click;
         }
         self.console.polarity = self.console.polarity.toggled();
@@ -4370,9 +4375,23 @@ impl ApplicationHandler for App {
                         // the page is not showing, so it never snaps in.
                         let targeting_form =
                             instruments::targeting::form(&frame.readout, frame.config);
-                        let seeker_shot =
-                            self.seeker
-                                .observe(frame.picture, frame.plane.0, presented.position);
+                        // A laser weapon's picture marks the spot it homes on.
+                        let laser_spot = frame
+                            .readout
+                            .laser
+                            .and_then(|laser| laser.spot)
+                            .map(|spot| spot.spot.position);
+                        self.seeker.set_grace(if self.net_flight.is_some() {
+                            seeker_view::NET_GRACE_TICKS
+                        } else {
+                            0
+                        });
+                        let seeker_shot = self.seeker.observe(
+                            frame.picture,
+                            frame.plane.0,
+                            presented.position,
+                            laser_spot,
+                        );
                         let seeker_hidden = seeker_shot.as_ref().map(|shot| shot.id);
                         // A launch opens the target camera window if it is
                         // not open; it closes again when the view ends.
@@ -4517,7 +4536,7 @@ impl ApplicationHandler for App {
                         // The AC-130 sensor console takes the whole screen: the
                         // world seen thermally from the sensor dome, along the
                         // sight's line at its zoom step (sensor_console.rs).
-                        let console_on = sensor_console::console_active(&frame.readout);
+                        let console_on = sensor_console::console_active(&frame.readout, presented);
                         if console_on && let Some(sight_frame) = &sight_frame {
                             let view = gunsight_view::free_view(
                                 &combat::launcher(presented),
@@ -4947,6 +4966,11 @@ impl ApplicationHandler for App {
                                 frame.readout.tick,
                                 seeker.view,
                             ));
+                        } else if let (Some(combat), Some(seed)) =
+                            (self.instruments.combat.as_mut(), self.seeker.lost_feed())
+                        {
+                            // The weapon ended: a second of static.
+                            combat.targeting = Some(instruments::targeting::Page::lost_feed(seed));
                         }
                         if let (Some(page), Some(shot)) = (
                             self.instruments

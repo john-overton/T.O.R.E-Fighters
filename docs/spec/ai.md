@@ -1252,19 +1252,24 @@ for the AH-64, V-22 and CH-47, 3 lb/s for the Mi-24: placeholders, see [aircraft
 records](../formats/aircraft.md#rotorcraft-fuel-records)) but the turboshaft line of the
 [flight model](../FLIGHT-MODEL.md#rotorcraft-fuel): about a fifth of the full flow at
 idle, rising to full flow at rated power, so a hover burns what hovering draws and a
-cruise less. The AI plans with one steady figure, the flow of a hover at the aircraft's
-weight now (`State::endurance_flow_lbs_per_second`), which is slightly more than the
-cruise burns. Fuel at zero is out of fuel and the aircraft goes down.
+cruise less. The AI plans with one steady figure (`State::endurance_flow_lbs_per_second`):
+since slice HF3 (opinionated, John 2026-10-13: "helicopter bingo planned at cruise flow")
+the flow of level flight at its cruise home (below) at sea level, worked out once at
+empty plus full fuel and scaled with the weight now (fitted); slice HF2 planned at the
+hover flow. At the cruise home speed the cruise flow is about the hover flow or a little
+more, so the plan matches the flight home rather than lengthening it. Fuel at zero is
+out of fuel and the aircraft goes down.
 
 | | AH-64 | V-22 | CH-47 | Mi-24 |
 | --- | --- | --- | --- | --- |
-| Internal fuel, lb (record) | 2,000 | 2,000 | 3,307 | 3,307 |
+| Internal fuel, lb | 2,000 (record) | 11,700 (MV-22B, slice HF3; the record's 2,000 was the AH-64's) | 7,340 (CH-47F, slice HF3; the record's 3,307 was the Mi-24's) | 3,307 (record) |
 | Flow of the record, lb/s (no longer read) | 1 | 1 | 1 | 3 |
-| Hover flow, lb/s (planning) | 0.47 | 0.53 | 0.34 | 0.43 |
-| Full tank at the hover flow, minutes | 71 | 62 | 156 | 128 |
-| Same at 100 kt level, minutes | 93 | 96 | 201 | 199 |
-| Top speed in the record's envelope, kt | 130 | 130 | 178 | 178 |
-| Cruise home (80 percent), kt | 104 | 104 | 142 | 142 |
+| Top speed of the envelope at sea level, kt | 173 | 301 | 196 | 196 |
+| Cruise home (80 percent), kt | 138 | 241 (airplane mode) | 156 | 156 |
+| Planning flow at full fuel, lb/s (cruise home, sea level) | 0.52 | 1.44 | 0.83 | 0.44 |
+| Full tank at the planning flow, minutes | 64 | 135 | 148 | 126 |
+| Hover flow, lb/s (HF2's planning figure) | 0.47 | 1.36 | 0.65 | 0.43 |
+| Full tank at 100 kt level, minutes | 93 | 244 | 232 | 199 |
 
 (The probe that prints these is `powered_probe`; the table is in the [rotorcraft fuel
 baseline](../baselines/rotorcraft-fuel.md).)
@@ -1289,15 +1294,19 @@ baseline](../baselines/rotorcraft-fuel.md).)
   at once) was weighed and left out because it would neuter enemy helicopter wings. The
   reach grew with the endurance: a field up to 114 nautical miles from an AH-64 is in
   reach (it was 53), 99 for the V-22 (53), 357 for the CH-47 (123) and 292 for the
-  Mi-24 (36).
+  Mi-24 (36). Slice HF3's cruise planning and the V-22's real tank move these: at the
+  cruise home speed a full tank less the reserve reaches about 135 nautical miles for the
+  AH-64, about 300 for the Mi-24, about 370 for the CH-47 (its real tank since slice
+  HF3) and about 520 for the V-22.
 - **Not bingo at the start.** A friendly wing's field is normally a few minutes away
-  (3.5 minutes at the AH-64's cruise in the probes) against 62 to 156 minutes of fuel.
+  (3.5 minutes at the AH-64's cruise in the probes) against 64 to 148 minutes of fuel.
 - **What bingo does.** The same as for a fighter: the actor heads for its home runway
   at the cruise speed, and since slice H2 lands there (a helicopter vertically).
 
 Tests: `route::tests` (the cruise, the margins, the range), `flight::powered::fuel_tests` (flow by power, endurance per type), `ai_wings::tests::a_helicopter_has_a_fuel_schedule_at_its_own_cruise_and_goes_home_on_bingo`
 and the battery's `ai-fight-*-friendly-wings` (no helicopter bingo at the start, fuel
-lines from `--probe-fuel-trace`) and `ai-fight-heli-fuel-bingo-ah64` (`--probe-fuel`).
+lines from `--probe-fuel-trace`), `ai-fight-heli-fuel-bingo-ah64` and `ai-fight-v22-fuel-bingo`
+(`--probe-fuel`).
 
 ## Implementation status
 
@@ -1545,6 +1554,7 @@ controller above unchanged.
 | Terrain floor | The B44 floor on the flight path, as for every aircraft, but with a minimum height of 100 ft for a helicopter instead of the fighters' 300, so the 200 ft masking height of the helicopter defence and the stand-off attack can be flown. The V-22 keeps the fighters' 300 ft (slice HF1): it never masks, and at 250 kt in aeroplane mode it needs their margin over rising ground | B44 spec-derived; the 100 ft and the V-22's 300 ft fitted (agent) |
 | Strike speed | The helicopter's strike legs, exit, hold-off and break ask for 80% of its envelope's maximum speed, never under its minimum: about 120 kt on the Mi-24 (maximum about 150 kt). See [helicopters](ai-strike.md#helicopters) | about 120 kt opinionated (John, 2026-10-13); the 80% share fitted (agent, slice HF1) |
 | Collective floor | A helicopter in forward flight never flies the collective under 0.1 of its travel (the climb loop and its integrator are held there; the V-22 and pointing, which has its own 0.2, are not touched). Wound to the stop by a long descent at 120 kt (a wingman chasing its slot 400 ft lower asked 42 ft/s down for 10 s), a CH-47's rotor lost its control power: the nose swung up to 85 degrees away from the track while the aircraft kept flying straight, the speed along the nose read near zero, the speed loop pitched the nose down to 68 degrees chasing it and the CH-47 flew into the ground (battery `ai-fight-ch47-enemy-wing`, slice CH47, 2026-10-13). 0.1 still flies the CH-47 down at 1,000 ft/min at 120 kt | fitted (agent, slice CH47) |
+| Formation descent limit | A helicopter or V-22 wingman chasing its formation slot is asked for at most 1,000 ft/min (16.7 ft/s) down, or its leader's own sink when that is more: the formation's flight path is raised to that at the wingman's speed (40 kt floor), climbs untouched (`formation::rotorcraft_formation_path_deg`, applied in the controller's formation motion). The fighters' slot geometry had asked a CH-47 wingman for 28 degrees down at 59 kt, up to 80 ft/s with the pointing regime engaged (battery `ai-fight-ch47-formation-descent` without the limit). 1,000 ft/min is an ordinary helicopter descent and what the CH-47 flies at 120 kt above its collective floor | opinionated (John, 2026-10-13, "helicopter limit on formation descents"); the figure fitted (agent, slice HF3) |
 | Defence's speed rule | The helicopter defence comes down no faster than it can hold its maximum speed; the adapter holds the speed on the cyclic whatever the path, so the defence allows it 10 kt over the maximum before it levels off | fitted (agent) |
 | Pointing | A requested path steeper than 12 degrees that also asks for more than 3,000 ft/min (a pop-up's pull, a rocket run's dive at speed) is flown with the nose on the path (pitch up to 30 degrees) and the speed on the collective (never under 0.2 of it); back to forward flight below 8 degrees | fitted (agent): rockets leave along the nose |
 | Hover | Hover hold's cascade toward a commanded point, wheel height and heading: position to ground velocity (0.15 per second, at most the commanded closing speed) to tilt (at most 20 degrees) to attitude; height to climb (0.25 per second, within the commanded climb and sink) to collective; heading to pedals. An optional slow-flight velocity rides on top (air taxi) | fitted (agent); the gains are hover hold's |

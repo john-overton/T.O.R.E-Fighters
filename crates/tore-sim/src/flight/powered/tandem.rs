@@ -877,16 +877,21 @@ pub(crate) mod tests {
     use crate::flight::PilotInput;
     use tore_formats::aircraft::{Aircraft, AircraftId};
 
-    /// A synthetic record under the CH-47's identity carrying the PT's own
-    /// flight numbers (design 8.2), as plain constants: 18,078 lb empty,
-    /// 3,307 lb fuel, 28,660 lb maximum, 135,795 lbf (implausible, so the
-    /// model fits its own), 53 to 178 kt to 7,000 ft.
+    /// A synthetic record under the CH-47's identity carrying the PT's
+    /// flight numbers as the reader delivers them (design 8.2; slice HF3
+    /// corrected the weights the PT copied from the Mi-24 to the CH-47F's):
+    /// 24,578 lb empty, 7,340 lb fuel, 54,000 lb maximum, the PT's own
+    /// 135,795 lbf (implausible, so the model fits its own), 53 to 178 kt to
+    /// 7,000 ft.
     pub(crate) fn pt_aircraft() -> Aircraft {
+        use tore_formats::aircraft::corrections::{
+            CH47_EMPTY_LB, CH47_INTERNAL_FUEL_LB, CH47_MAX_TAKEOFF_LB,
+        };
         let mut a = crate::models::variety::tests::synthetic(AircraftId::Ch47);
         for (key, value) in [
-            ("weight", 18_078),
-            ("internalFuel", 3_307),
-            ("maxTakeoffWeight", 28_660),
+            ("weight", CH47_EMPTY_LB),
+            ("internalFuel", CH47_INTERNAL_FUEL_LB),
+            ("maxTakeoffWeight", CH47_MAX_TAKEOFF_LB),
             ("thrust", 135_795),
         ] {
             a.fields.get_mut(key).unwrap().value = value.to_string();

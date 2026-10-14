@@ -233,6 +233,7 @@ impl Viewer {
             None => Vec::new(),
         };
         sim.vapor(device, queue, &vapor);
+        sim.set_city_clock(self.city_clock(tick as f64 + self.clock.alpha()));
         let [smoke, contrails] = self.playback.smoke(tick);
         let devices = self.devices.at(tick, &self.world);
         sim.smoke(device, queue, &self.art.smoke, [smoke, contrails], devices);

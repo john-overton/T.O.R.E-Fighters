@@ -35,44 +35,41 @@ use tore_sim::{
     },
 };
 
-// ---------------------------------------------------------------------------
-// MERGE HOOKS (nr-orbit). The console key and the engaged flag belong to
-// slice nr-orbit (the console engages its orbit autopilot; the flag reaches
-// the host online and the replays). Until that slice merges, the console is
-// on only when the development switch `TORE_SENSOR_CONSOLE=1` is set, for
-// headless checks and renders. The lead replaces the body of
-// [`console_active`] with nr-orbit's flag and [`orbit_status`] with its
-// status struct; no player key is bound here.
-// ---------------------------------------------------------------------------
-
-/// Whether the console shows for this cockpit. MERGE HOOK (nr-orbit): read
-/// the console flag from the readout here.
-pub fn console_active(readout: &tore_world::readout::CockpitReadout) -> bool {
-    readout.gunsight.is_some() && development_switch()
-}
-
-/// `TORE_SENSOR_CONSOLE=1`: the temporary development switch (read once).
-fn development_switch() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("TORE_SENSOR_CONSOLE").is_ok_and(|v| v == "1"))
+/// Whether the console shows for this cockpit: the AC-130's sensor console
+/// is open, which is orbit hold engaged (slice nr-orbit: Ctrl+9 or Select +
+/// Guide opens the console and engages the orbit; again hands the aircraft
+/// back). `flight` is the presented flight: a client's prediction carries
+/// the autopilot's mode from the host's exact own-plane state, so a client
+/// seat shows the console exactly while the host flies the orbit.
+pub fn console_active(
+    readout: &tore_world::readout::CockpitReadout,
+    flight: &tore_sim::flight::State,
+) -> bool {
+    readout.gunsight.is_some() && flight.autopilot.mode() == tore_sim::autopilot::Mode::Orbit
 }
 
 /// The orbit autopilot as the console shows it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OrbitStatus {
-    /// Flying the orbit (else handing back, or not yet established).
-    pub engaged: bool,
-    /// On the orbit (radius and altitude held), else still joining it.
+    /// On the circle (within a quarter of the radius and 30 degrees of the
+    /// circle's heading), else still joining it.
     pub settled: bool,
-    /// Orbit radius and altitude above the orbit centre, feet.
+    /// The planned radius and height above the orbit's centre, feet.
     pub radius_ft: f64,
-    pub altitude_ft: f64,
+    pub height_ft: f64,
+    /// Every gun and the camera can bear on the sight's point.
+    pub bearing: bool,
 }
 
-/// MERGE HOOK (nr-orbit): the orbit autopilot's status for this cockpit,
-/// from nr-orbit's status struct. `None` until it merges.
-pub fn orbit_status(_readout: &tore_world::readout::CockpitReadout) -> Option<OrbitStatus> {
-    None
+/// Orbit hold's status for this flight (`flight::State::orbit_status`), while
+/// it is engaged.
+pub fn orbit_status(flight: &tore_sim::flight::State) -> Option<OrbitStatus> {
+    flight.orbit_status().map(|s| OrbitStatus {
+        settled: s.on_orbit,
+        radius_ft: s.radius_ft,
+        height_ft: s.height_ft,
+        bearing: s.all_bearing(),
+    })
 }
 
 /// White hot or black hot.
@@ -359,7 +356,7 @@ impl Symbology {
             others,
             mark: page.mark.map(|m| (m, tracked)),
             notice,
-            orbit: orbit_status(readout),
+            orbit: orbit_status(flight),
             blink: (seconds * 2.).rem_euclid(1.) < 0.5,
         }
     }
@@ -632,25 +629,23 @@ pub fn draw(sym: &Symbology, camera: &Camera, size: [u32; 2]) -> Vec<u8> {
     );
     m.text(&format!("FOV {:.1}*", sym.fov_deg), left, top + row, s, 1);
     if let Some(orbit) = sym.orbit {
-        let state = match (orbit.engaged, orbit.settled) {
-            (true, true) => "ORBIT",
-            (true, false) => "ORBIT JOIN",
-            _ => "ORBIT OFF",
+        let state = match (orbit.settled, orbit.bearing) {
+            (false, _) => "ORBIT JOIN",
+            (true, true) => "ORBIT  GUNS",
+            (true, false) => "ORBIT  NO BEAR",
         };
         m.text(state, left, top + 2 * row, s, 1);
-        if orbit.engaged {
-            m.text(
-                &format!(
-                    "R {:.1}NM  {:.0}FT",
-                    orbit.radius_ft / tore_sim::sensors::FEET_PER_NAUTICAL_MILE,
-                    orbit.altitude_ft
-                ),
-                left,
-                top + 3 * row,
-                s,
-                1,
-            );
-        }
+        m.text(
+            &format!(
+                "R {:.1}NM  H {:.0}",
+                orbit.radius_ft / tore_sim::sensors::FEET_PER_NAUTICAL_MILE,
+                orbit.height_ft
+            ),
+            left,
+            top + 3 * row,
+            s,
+            1,
+        );
     }
 
     // Top right: heading, height, airspeed, polarity.
@@ -1004,7 +999,7 @@ mod tests {
         let text = "MAN RTN PNT TRK WFOV MFOV NFOV E2 E4 E8 IR FOV 7.5* HDG AGL KTAS WHOT \
                     BHOT AZ EL LOS TGT RNG NM BRG 9:00 LO HI > 25MM 40MM 105MM ---- RDY SLEW \
                     NO ARC MAX MIN MASKED BLOCKED EMPTY SAFE FAIL GIMBAL LIMIT FT ORBIT JOIN \
-                    OFF R 0123456789 + - / ( ) % #";
+                    OFF R H GUNS BEAR 0123456789 + - / ( ) % #";
         for c in text.chars() {
             assert!(glyph(c).is_some(), "{c:?}");
         }

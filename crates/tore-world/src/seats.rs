@@ -477,6 +477,11 @@ pub enum SeatCommand {
     /// leads of the other flights repeat their contact reports and assignment
     /// calls (stage G, slice G8). Off at the start.
     BattleNet,
+    /// Ctrl+9: open or close the AC-130's sensor console. Opening it engages
+    /// orbit hold about the point the gunsight is centred on; closing it hands
+    /// the aircraft back (docs/spec/ac130-linked-guns.md, "The sensor console
+    /// and the orbit"). Other aircraft refuse it with a message.
+    SensorConsole,
 }
 
 #[cfg(test)]

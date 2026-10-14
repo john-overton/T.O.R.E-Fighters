@@ -15,7 +15,12 @@ loaded stores drawn on the aircraft ("I'd love positions and drawn pylons").
 Slice PY2 (2026-10-13) made every wing pylon 2 ft deep, put fuselage and
 centreline stores on 4 inch rails and wingtip missiles on the tip itself, hung fuselage pairs one
 behind another and moved the A-4E's Mk 82s to a centreline rack (John's
-morning list, items 25 to 27).
+morning list, items 25 to 27). Slice PY3 (2026-10-13 evening, John's evening
+list, items 7 and 9 and a follow-up) halved the pylons (1 ft wing pylons,
+2 inch rails), replaced the deeper pylons beside nacelles with a sideways
+move of the station, hung two stores on a pylon off the sides of a small
+bar, rolled the weapon shapes so their fins stand in an X, and gave the
+A-4E the real aircraft's three tanks.
 
 ## What the player sees
 
@@ -24,10 +29,18 @@ morning list, items 25 to 27).
   frame: under its own pylon or rail, at its place on a rack, wingtip
   missiles on the tip, internal bay stores below the bay. Nothing jumps at
   release.
-- **Wing pylons are 2 ft deep.** A wing store hangs with its top 2 ft
-  under the wing above it, as real pylons are 15 to 30 inches.
+- **Wing pylons are 1 ft deep.** A wing store hangs with its top 1 ft
+  under the wing above it.
 - **Fuselage and centreline stores sit on short rails**, their tops about
-  4 inches under the body, as launchers and conformal stations are.
+  2 inches under the body, as launchers and conformal stations are.
+- **A store beside a nacelle or a body's flank moves aside** (up to 2 ft)
+  rather than hanging deeper, so no pylon is deeper than those above.
+- **Two stores on one pylon hang beside it**, one each side of a small bar
+  at the pylon's foot, as a wingtip missile sits on the tip, not under a
+  wide beam.
+- **Fins stand in an X.** Every weapon is turned about its long axis so its
+  fins point 45 degrees away from the pylon, the wing, the body and the store
+  beside it, and it keeps that turn after release.
 - **Wingtip missiles sit on the tip.** No pylon or rail is drawn under the
   tip: the missile's centre line lies on the tip's edge, as an F-16's or
   F/A-18's tip AIM-9 does.
@@ -50,7 +63,8 @@ morning list, items 25 to 27).
 | Rule | Value | Provenance |
 | --- | --- | --- |
 | Station position | The source hardpoint record's x (right) and z (forward), a third of a foot a unit, from the aircraft's reference point ([table](../formats/aircraft-ordnance.md#hardpoint-positions)); its height is the pylon's (below) | spec-derived (the height: opinionated, PY2) |
-| Pylon depth | A wing store's top (its lugs, the top of its body) hangs 2 ft under the model's underside over its pylon; a fuselage or centreline store's 4 inches (0.33 ft) under it, on a launcher rail; a rack's beam (0.3 ft) sits between, so a rack's stores hang 2.3 ft (wing) or 0.63 ft (body) under. The underside is the lowest face of the clean model up to 12 ft above the record, straight above the pylon or up to 3 ft inboard, read 0.6 ft either side of it and the lowest taken, so a store beside a nacelle or a body's flank hangs clear of it. A station with nothing of the model above it keeps the record's height | opinionated, John 2026-10-13 ("pylon depth matches real pylons (15-30 inches): 2 ft universally", then the same day: wing pylons 2 ft, fuselage and centreline stations short rails about 4 inches deep); the clearance rule and the samples are agent decisions |
+| Pylon depth | A wing store's top (its lugs, the top of its body) hangs 1 ft under the model's underside over its pylon; a fuselage or centreline store's 2 inches (0.17 ft) under it, on a launcher rail. Stores beside a rack's bar keep the same depth; a triple rack's third hangs under the bar. The underside is the lowest face of the clean model up to 12 ft above the record, straight above the pylon or, where nothing is straight above, up to 3 ft inboard. A station with nothing of the model above it keeps the record's height | opinionated, John 2026-10-13 (morning: 2 ft wing pylons and 4 inch rails; evening: "pylons need to be about half the size they are now"); the samples are agent decisions |
+| Moved aside | A station whose store would cut through a part of the model beside it (a face within 0.6 ft either side of the pylon reaching more than 0.25 ft below the store's top: a nacelle, a gear pod, a body's flank) moves sideways in 0.25 ft steps, out before in at each distance, up to 2 ft, to the first place it clears with model straight above. A store that cannot clear within 2 ft hangs under the lowest surface across its body, as PY2 hung every store (no default load needs it). The move is part of the station's position, so it releases from there too. On the default loads: F/A-18D fuselage AIM-120s 0.25 ft in (3.08 ft out), Rafale fuselage Mavericks 0.25 ft in (3.08), F-14 Phoenixes 0.5 ft in (2.5), AV-8 fuselage Mavericks 0.25 ft out (3.25), Su-25 B-13 pods 0.5 ft out (5.5), A-10 middle wing row 0.5 ft out (8.83) | agent decision, 2026-10-13 (John: short pylons; a store inside the launching aircraft's hit box is not a reason to hang it deeper, slice SD) |
 | Wingtip | A wingtip store's centre line lies on the tip's edge: as far out as the model's outermost point beside the record (within 4 ft inboard and 0.3 ft outboard of it, 2.5 ft fore and aft, 3 ft up or down), at the middle height of that edge. No pylon or rail is drawn. With no model read, the record's position | opinionated, John 2026-10-13 ("the missile's centre line sits on the wingtip geometry, no gap"); the search box is an agent decision |
 | Where the underside is read | When the loadout is built, from the aircraft shape the simulation already reads (`<ID>.SH`, at the debris scale): over the record, over a two-pylon wing's inboard and outboard pylons (1.4 ft either side), and 7 ft ahead of and behind the record; a tandem pylon's surface is interpolated between the record and the sample on its side. The heights travel with the station (`Rack::over`), into checkpoints and replays | agent decision |
 | Released from | The point the store hangs at: its side, its pylon, its place on the pylon's rack and the pylon's height (`Rack::store_point`), for the player, the AI, every network seat and replays. The bomb sight predicts from the same point | opinionated, John 2026-10-13 ("a store never jumps at release") |
@@ -101,9 +115,10 @@ Every number below is fitted (agent decision).
 | --- | --- |
 | Stations drawn | External ones (Centerline, Fuselage, Wing, Wingtip) that held something at mission start; not guns or internal bays |
 | Store look | The weapon's own shape (the same mesh it flies with after release) refitted to the real store's size ([store sizes](#store-sizes)). Rocket pods: a grey-green eight-sided pod of the real pod's size (LAU-61 5.5 by 1.38 ft, LAU-10 8.3 by 1.25, B-8M1 8.9 by 1.71, B-13L 11.7 by 1.35; any other 8.5 by 1.4). Fuel tanks: a light grey pod 13 ft by 2 ft at 2,000 lb of fuel, scaled by the cube root of its fuel (a 330 US gallon tank is 13.3 by 2.05 ft; the real one is about 12.9 by 2.1). A store with no shape: a plain body 8 ft by 0.9 ft |
-| Stores on one pylon | One at the pylon point. Two side by side, 0.55 store widths (fins included) either side. Three as a triple ejector rack: two shoulders and one 0.95 widths below. Four as two side-by-side pairs one behind another (a multiple ejector rack), the front pair first. More: triple racks one behind another, 1.05 store lengths apart. The layout keeps the loaded count's slots; the highest slot empties first. The simulation places them ([released from](#rules)) and the drawing hangs them there |
-| Pylon | A grey slab 0.35 ft thick, from the top of the store's body (its lugs, not its fin tips) up into the model's underside (2 ft, see [pylon depth](#pylon-depth)), 0.02 ft into it (retail wings are single faces, so more would show on top). Its length is 0.55 store lengths, at least twice its depth and at most 0.85 store lengths (1.5 to 10 ft), cut short where the underside ends (a pylon does not run out ahead of a leading edge), and its top follows the underside from end to end. The underside is the lowest face of the clean model up to 12 ft above the lugs, straight above or up to 3 ft inboard |
-| Rack | Two or more stores on one pylon hang from a beam 0.3 ft deep over them, as wide as the side by side pair and as long as the racks one behind another; a post runs down to each triple rack's lower store |
+| Stores on one pylon | One at the pylon point. Two hang off the sides of a small bar at the pylon's foot, one each side, their centre lines level with the bar's middle and at its ends, as a wingtip missile sits on the tip (John 2026-10-13: "the panel should be a small bar on the pylon and ordnance hangs to the side"): out from the pylon's middle by the pylon's half thickness (0.14 ft), a 0.1 ft gap and the store's body radius, or 0.36 of its width across the fins if more, so two sets of fins at 45 degrees clear each other (AIM-9 0.75 ft, Mk 82 0.69 ft, Maverick 0.85 ft). Three as a triple ejector rack: one each side of the bar and the third under it. Four as two pairs one behind another (a multiple ejector rack), the front pair first. More: triple racks one behind another, 1.05 store lengths apart. The layout keeps the loaded count's slots; the highest slot empties first. The simulation places them ([released from](#rules)) and the drawing hangs them there |
+| Pylon | A grey slab 0.28 ft thick, from the top of the store's body (its lugs, not its fin tips) or a rack's bar up into the model's underside (1 ft, see [pylon depth](#pylon-depth)), 0.02 ft into it (retail wings are single faces, so more would show on top). Its length is 0.45 store lengths, at least twice its depth and at most 0.7 store lengths (1.2 to 8 ft), cut short where the underside ends (a pylon does not run out ahead of a leading edge), and its top follows the underside from end to end. The underside is the lowest face of the clean model up to 12 ft above the lugs, straight above or up to 3 ft inboard |
+| Rack | A bar 0.25 ft deep across the pylon's foot, reaching out to the centre lines of the stores beside it, 0.7 of the pylon's length (plus the racks one behind another) |
+| Fin roll | Every weapon shape is rolled about its body's centre line so its fins stand in an X, 45 degrees from straight out and straight up and down, so no fin points into the pylon, the wing or body above, or the store beside it (John 2026-10-13: "ordnance needs to be rotated 45 degrees to make sure fins don't clip and are perpendicular to pylons and the fuselage as best as possible"). The roll is measured per retail shape, not assumed: the fin tips' clock about the body (the corners more than 1.6 body half widths out, their angles averaged over a quarter turn). A "+" shape (clock 0) turns 45 degrees; a shape already in an X (clock about 45) is not turned; a shape whose tips agree on no clock (agreement under 0.5 of 1) is not turned. One roll serves every mount (under a pylon, beside a bar, on a wingtip, on a rail), since an X is the same seen from below or from the side. The rolled shape is the one drawn everywhere the store is: on the pylon, in flight after release (so it does not turn at release), for the player, AI aircraft, network peers, replays and previews. See [fin roll by shape](#fin-roll-by-shape). Opinionated, John 2026-10-13; the measuring rule and one roll per shape are agent decisions |
 | Wingtip | Nothing drawn under a wingtip store ([rules](#rules)) |
 | Edge rail | A wing station's store with nothing of the model above it, beside a wing's edge less than 4 ft inboard, hangs on a rail from 0.3 ft inside the tip's edge out over the store, as deep as both the tip's edge and the store's upper half, 0.6 store lengths long (3 to 9 ft). With no tip beside it, a 0.35 ft rail |
 | Colours | Pylons and racks grey (0.5, 0.52, 0.54), tanks light grey, pods grey-green; weapon shapes keep their palette colours |
@@ -220,6 +235,21 @@ Numbers are public data (manufacturers' and services' published figures, as
 collected by Wikipedia and FAS Military Analysis Network), rounded; spans
 marked approximate are estimates. Pod sizes are in the drawing table above.
 
+## Fin roll by shape
+
+Measured with `tore-app --stores-sizes` (the `fins` lines) on the retail
+shapes:
+
+| Fins | Shapes | Roll |
+| --- | --- | --- |
+| "+" (clock 0) | AIM-9 (`SIDEM`, `SIDEB`), AIM-120 (`AMRAM`), AIM-7 (`SPAR`), AIM-54 (`PHENX`), AA-2, AA-6, AA-8, AA-10, AA-11 (`ARCHR`), AA-9, Maverick (`MAVRK`), HARM, Harpoon, SLAM, AS-7, AS-14, AS-16, AT-2, Mk 82, Mk 84, GBU-10 (`PAVE`), FAB-250, FAB-1000, and the surface-launched missiles | 45 degrees |
+| Already an X (clock 44 to 48) | AIM-9X (`AM9X`), MICA, R-550 (`M55`), AS.30L, AS.15TT (`AS12`), Exocet, CBU-87, CBU-97, Mk 20, GBU-27, GBU-28, RBK-250, RBK-500, Snakeye (fins drawn open in an X), FIM-92, AAM-L | none |
+| No clear pattern | AA-11 (`AA11B`, 0.3), Super 530D (`M53`, 0.4), AA-12 (`AMSKI`, grid fins), the rocket shape; no fin tips found: FAB-500, Mk 82 AIR (`MK82A`) and a few surface shapes | none |
+
+The unturned shapes with no clear pattern are the ones whose fins may still
+touch a pylon or a neighbour; at the refitted real spans none showed a fin
+through a pylon in the close-ups.
+
 ## Pylon depth
 
 Before PY2 a store hung at its hardpoint record's height, so a pylon was as
@@ -232,31 +262,25 @@ the tip itself (2026-10-13). Every store now hangs that far under the
 surface over it and leaves from there, so the release origins moved with
 it: up by a few feet on most aircraft, by up to 4 ft under the F-14, and
 wingtip missiles in to the tip's edge (1 ft on the F/A-18D and F-16C,
-1.7 ft on the Rafale).
+1.7 ft on the Rafale). In the evening John asked for pylons about half that
+size (PY3): 1 ft on wings and 2 inches at fuselage and centreline rails, so
+every store's release origin moved up again by 1 ft (wing) or 2 inches
+(body), and more where PY2 had hung a store clear of a nacelle.
 
 Measured with `tore-app --stores-preview` (the depth from each store's lugs
 straight up to the drawn model, feet; default loads):
 
 | Aircraft | Stations | Depth |
 | --- | --- | --- |
-| F/A-18D, F-16C, MiG-29, Su-25, A-10, F-15, F-4E, F-4J, Rafale | Wing stations | 2.0 (to 2.05 where the wing slopes under the store) |
-| F-14 | Glove AIM-120s, wing AIM-9s | 2.6, 2.2 |
-| AV-8 | Wing Mavericks and AIM-9s | 2.1 |
-| F-15, F-4E, F-4J | Fuselage Sparrows and AMRAAMs | 0.33 to 0.37 |
-| A-4E | Mk 82 centreline rack (rail and beam) | 0.8 to 0.9 (0.63 at the rail, more where the belly curves up at the rack's ends) |
-| F/A-18D | Fuselage AIM-120s | 0.8 (the body's flank is lower beside them) |
-| Rafale | Fuselage Mavericks | 1.1 to 1.3 |
-| F-14 | Belly Phoenixes | 1.5 rear, 3.4 front: they hang clear of the engine ducts beside them, under the tunnel |
-| Su-25 | B-13 pods beside the nacelles | 3.2 (clear of the nacelle, under the wing) |
-| AV-8 | Fuselage Mavericks | 3.7 (clear of the belly, under the wing root) |
+| F/A-18D, F-16C, F-14, A-10, Su-25, MiG-29, AV-8, A-4E, F-15, F-4B, F-4E, F-4J, Rafale | Wing stations | 1.0 |
+| F/A-18D, F-14, F-15, F-4B, F-4E, F-4J, AV-8, Su-25, Rafale | Fuselage stations (moved aside where noted in [the rules](#rules)) | 0.17 (0.02 to 0.15 where the body's underside slopes along the store) |
+| F-4B, A-4E (Mk 82s loaded there) | Centreline pairs beside the bar | 0.17 |
 | F/A-18D, F-16C, Rafale | Wingtip missiles | on the tip's edge (0.0 to 0.1) |
 
-Where a store hangs beside a deeper part of the model (a nacelle, a body's
-flank), its pylon reaches up past it to the wing or body over the store,
-which is the clearance rule in the [rules](#rules): the store sits 2 ft
-(wing) or 4 inches (body) under the lowest surface across its body. The record's own
-lateral and fore and aft position is kept everywhere except the three
-moves listed there.
+PY2's deeper pylons (Su-25 B-13 pods 3.2 ft, AV-8 fuselage Mavericks 3.7 ft,
+F-14 front Phoenixes 3.4 ft) are gone: those stations moved aside instead
+([moved aside](#rules)). The record's own fore and aft position is kept
+everywhere, and its lateral position except the moves listed there.
 
 ## The A-4E
 
@@ -267,15 +291,24 @@ centreline one and two a wing, and carries its tanks on the centreline and
 the inner wing pylons. With BP2's two pylons a wing, the four tanks (two a
 wing) and the Mk 82s (paired, two a wing) crowded the same stretch of wing.
 
-PY2 (agent decision, 2026-10-13) keeps retail's quantities (four tanks are
-four tanks of fuel and weight) and moves the Mk 82 row, which retail
-releases from one side next to the fuselage, to the centreline: a rack of
-two pairs one behind another on a short rail under the belly, the front pair first, right
-then left. The tanks keep two pylons a wing on the inner wing (4.3 and
-7.1 ft out), and the LAU-61s the outer row. A real A-4E would carry three
-tanks at most (centreline and inner wings); matching that would change the
-default fuel, which is retail's, so it is left as an open question for
-John.
+PY2 (agent decision, 2026-10-13) kept retail's quantities and moved the
+Mk 82 row, which retail releases from one side next to the fuselage, to the
+centreline: a rack of two pairs one behind another on a short rail under the
+belly, the front pair first, right then left.
+
+**Default load since PY3 (opinionated, John 2026-10-13: "A-4E: the real
+three tanks (centreline + inner wings)").** A 150 gallon tank on the
+centreline row and one on each inner wing pylon (5.7 ft out, one pylon a
+wing), the LAU-61 pods on the outer row as before. External fuel is 2,970 lb
+instead of retail's 3,960 (about 990 lb less, one tank). The centreline row
+can carry a tank or the Mk 82s, not both, so the Mk 82s are no longer loaded
+by default; they stay the row's weapon in the ordnance screen (four on the
+centreline rack), as do the other stores each row accepts, and each row
+keeps retail's capacity (the inner row can still take four tanks). Only what
+starts loaded changes (`hardpoints::default_records`, applied by the live
+configuration). The development driver `--a2g-run --load MK82` still loads
+the four Mk 82s on the centreline row retail defaults them to, taking that
+row's tank off.
 
 ## Performance
 
@@ -292,7 +325,9 @@ vertices a frame.
 - Retail release position and the 0x4 mirror rule: [weapons formats](../formats/weapons.md#release-state)
   (FA.EXE 1.02F `HARDPos` `0x4532a0`, `HARDUnrotatedHardPos` `0x453220`).
 - Code: `tore_sim::combat::hardpoints` (the rule, two pylons a wing, tandem fuselage pairs,
-  `Rack::store_point` and `placed`, the 2 ft pylon), `tore_sim::combat::store_sizes` (the sizes
+  `Rack::store_point`, `slot_offset` and `shoulder` (the bar), `placed` and `Underside::nudge`
+  (moving aside), the 1 ft pylon, `default_records` (the A-4E)), `tore-app/src/store_sizes.rs`
+  (`fin_clock`, `carried_roll`, the fin roll in `variants`), `tore_sim::combat::store_sizes` (the sizes
   stores hang by), `Station::release_point`, `combat::live::cockpit`
   (`release_round`), `tore_world::ai_wings` (AI missiles),
   `tore_world::snapshot::store_poses`, `tore-app/src/pylons.rs` (drawing), `tore-app/src/store_sizes.rs` (real sizes), `tore_world::snapshot::pod_body`.

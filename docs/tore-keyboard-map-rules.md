@@ -61,7 +61,9 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
   so they no longer carry an AC- label. A small legend box in the keyboard
   plate's free top-right corner lists them with the AC-130's gamepad gestures.
   Keep those labels in step with
-  [the input guide](INPUT.md#ac-130-gunsight-controls). The other
+  [the input guide](INPUT.md#ac-130-gunsight-controls). Ctrl+9 (the AC-130's
+  sensor console, `CONSOLE` on the 9 cap, and the legend's last line with its
+  View + Xbox gesture) sits beside Ctrl+7 and Ctrl+8. The other
   air-to-ground keys are on that sheet as well: Tab (fire the gun, held), Ctrl+M
   on M (delivery mode) and Ctrl+R with Shift+R (the S/C badge) on R.
 - The wing orders that reach the ground are on the Comms sheet in coral: Alt+E

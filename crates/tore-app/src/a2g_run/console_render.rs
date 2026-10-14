@@ -240,3 +240,88 @@ pub(super) fn render(
 fn distance(a: Vector, b: Vector) -> f64 {
     (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt()
 }
+
+/// The console of the run's own seat (the player's path: the `orbit`
+/// attack, the console opened with its seat command), `seconds` into the
+/// run: the gunsight page, target and orbit status exactly as the game
+/// builds them, in white hot, black hot and with a burst of static.
+pub(super) fn render_seat(scene: &mut Scene, seconds: f64, dir: &Path) -> AppResult<()> {
+    let observer = scene.world.cockpits[0].plane;
+    let mut loaded = Loaded::new(&mut scene.world, observer)?;
+    let world = &scene.world;
+    let snapshot = world.combat.render_snapshot().clone();
+    let frame = world
+        .flight_frame(super::SEAT, None, &snapshot, &[])
+        .ok_or("the seat flies no plane")?;
+    let flight = frame.flight;
+    let readout = &*frame.readout;
+    let gunsight = readout
+        .gunsight
+        .as_ref()
+        .ok_or("the seat's plane has no gunsight")?;
+    let launcher = crate::combat::launcher(flight);
+    let view = gunsight_view::free_view(&launcher, gunsight.look, gunsight.zoom);
+    let mut page = crate::instruments::gunsight::Page::new(readout, frame.config, flight)
+        .ok_or("no gunsight page")?;
+    let tracked = gunsight
+        .sight
+        .tracked()
+        .and(readout.targets.display.as_ref());
+    page.present(
+        gunsight.look,
+        gunsight.zoom,
+        view,
+        tracked.map(|t| t.position),
+    );
+    let target = tracked.map(|row| {
+        let name = world
+            .combat
+            .ground_name(row.id)
+            .map_or_else(|| "TARGET".to_string(), str::to_string);
+        crate::target_window::Readout::new(row, flight, name)
+    });
+    let ground = f64::from(
+        world
+            .terrain
+            .height(flight.position[0] as f32, flight.position[2] as f32),
+    );
+    let air = world.terrain.air_data(flight).ok();
+    let mut camera = gunsight_view::camera(&view);
+    camera.weather_slot = 0;
+    camera.thermal = true;
+    camera.near_clip = 1.;
+    loaded.upload(world, &camera)?;
+    let size = [crate::reel::WIDTH, crate::reel::HEIGHT];
+    for (label, polarity, noise) in [
+        ("whot", Polarity::WhiteHot, 0.),
+        ("bhot", Polarity::BlackHot, 0.),
+        ("static", Polarity::WhiteHot, 0.7),
+    ] {
+        let sym = Symbology::live(
+            &page,
+            target.as_ref(),
+            readout,
+            frame.config,
+            flight,
+            air.as_ref(),
+            ground,
+            polarity,
+            seconds,
+        );
+        let overlay = crate::sensor_console::draw(&sym, &camera, size);
+        let crt = crate::sensor_console::crt_frame(seconds, noise, polarity);
+        let pixels =
+            loaded
+                .gpu
+                .console_pixels(&camera, &world.terrain, &loaded.scenery, &crt, &overlay)?;
+        let path = dir.join(format!("seat-t{seconds:05.1}s-{label}.png"));
+        super::ai_render::write_png(&path, &pixels)?;
+        println!(
+            "orbit-run: CONSOLE path={} orbit={:?} status={}",
+            path.display(),
+            sym.orbit,
+            sym.status()
+        );
+    }
+    Ok(())
+}

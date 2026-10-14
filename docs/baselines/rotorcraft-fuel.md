@@ -76,3 +76,81 @@ their 15 seconds for the four rotorcraft.
   still PASS. That is the intended change: in the 7,200-tick roster run the rotorcraft
   now burn a fraction of the fuel and so stay heavier. No fixed-wing line, recording
   or tape moved.
+
+## V-22 at its real weight (slice HF3)
+
+Taken 2026-10-13 on branch `nr-hf3` off multiplayer 5749aaa8, same machine and command
+(the probe now also prints airplane-mode rows for the V-22, the hover at 47,000 lb and
+the planning cruise). John's requests 1 and 2 on the evening list: the V-22's real fuel
+with a rotor retune, and helicopter bingo planned at the cruise flow. The reader now
+gives `V22.PT` the MV-22B's weights and 11,700 lb of fuel
+([record correction](../formats/aircraft.md#rotorcraft-fuel-records)); the AH-64,
+Mi-24 and CH-47 rows above are unchanged.
+
+| V-22 | Before (AH-64 copy) | Slice HF3 |
+| --- | --- | --- |
+| Empty / fuel / maximum, lb | 18,298 / 2,000 / 23,810 | 31,818 / 11,700 / 52,600 |
+| Rated power, hp; full flow, lb/s | 5,122; 0.854 | 11,316; 1.886 |
+| Hover at gross, 1,000 ft: share of rated, flow, endurance | 52 %, 0.536, 62 min | 65 %, 1.370, 142 min |
+| 60 / 100 / 130 kt level, helicopter mode | 94 / 96 / 85 min | 217 / 244 / 225 min |
+| 180 kt airplane mode, 1,000 ft | | 30 %, 0.851 lb/s, 229 min |
+| 220 kt airplane mode, 1,000 ft | | 51 %, 1.163 lb/s, 168 min |
+| 240 kt airplane mode, 1,000 ft | | 65 %, 1.370 lb/s, 142 min |
+| 240 kt airplane mode, 15,000 ft | | 43 %, 1.044 lb/s, 187 min |
+| Hover out of ground effect at 47,000 lb, sea level | | 8,090 hp, 40 % margin, lever 82 % |
+| Hover ceiling at gross / 47,000 lb / maximum | 13,900 ft / none / 8,900 ft | 11,000 / 8,500 / 4,800 ft |
+| Level top speed in airplane mode, sea level | 273 kt | 272 kt |
+| Conversion, keys held, lever 85 %: downstops, 200 KCAS | 15.9 s, 27.0 s | 16.8 s, 27.1 s |
+
+Real MV-22B: 879 nautical miles of range at about 240 knots is about three and a half
+hours; John's figure was 2.5 to 3 hours or more at cruise in airplane mode. The model
+gives 2.8 hours at 220 knots low and 3.1 at 240 knots at 15,000 ft, 2.4 at a hover.
+
+### Planning at the cruise flow
+
+The AI's planning flow (bingo, caution, home in range, the crew voice) is the level flow
+at its cruise home, 80 percent of the envelope's top speed at sea level, empty plus full
+internal fuel, scaled in proportion to the weight:
+
+| | AH-64 | Mi-24 | CH-47 | V-22 |
+| --- | --- | --- | --- | --- |
+| Envelope top at sea level, kt; cruise home | 173; 138 | 196; 156 | 196; 156 | 301; 241 (airplane mode) |
+| Planning flow at full fuel, lb/s (slice HF3) | 0.523 | 0.436 | 0.464 | 1.444 |
+| Hover flow (slice HF2's planning figure), lb/s | 0.467 | 0.429 | 0.344 | 1.359 |
+| A full tank at the planning flow | 64 min | 126 min | 119 min | 135 min |
+
+Finding: slice HF2 called the hover flow pessimistic from the 100 knot rows, but the AI
+flies home at 80 percent of the envelope top, which is fast for a helicopter (95 percent
+of the CH-47's level top speed), so its cruise burns as much as a hover or more. The plan
+at the cruise flow is therefore no earlier home than before; it matches the flight home.
+A slower, best-range cruise home (about 100 knots) would lengthen the reach; that is a
+question for John.
+
+Battery (fuel lines from `--probe-fuel-trace` at the start of the friendly-wing probes,
+stores aboard): AH-64 3,720 s, Mi-24 7,582 s, CH-47 7,133 s, V-22 8,103 s planned.
+`ai-fight-v22-fuel-bingo` gives the V-22 wingmen 700 lb (about 590 s at the cruise flow):
+they start on caution, turn bingo and head home.
+
+## CH-47 at its real weight (slice HF3 follow-up)
+
+Taken 2026-10-13 on branch `nr-hf3` at multiplayer f2204152, same command. John's
+answer 3 on the evening list ("check other records for copying issues as well"): the
+reader gives `CH47.PT`, which carried the Mi-24's weights, the CH-47F's
+([record correction](../formats/aircraft.md#rotorcraft-fuel-records)). The rotor
+retune is in [powered-lift flight](../spec/powered-lift-flight.md#fuel-slice-hf2).
+
+| CH-47 | Before (Mi-24 copy) | Slice HF3 |
+| --- | --- | --- |
+| Empty / fuel / maximum, lb | 18,078 / 3,307 / 28,660 | 24,578 / 7,340 / 54,000 |
+| Rated power, hp; full flow, lb/s | 3,001; 0.500 | 7,762; 1.294 |
+| Hover at gross, 1,000 ft: share of rated, flow, endurance | 63 %, 0.354, 156 min | 39 %, 0.674, 182 min |
+| 60 / 100 / 130 kt level | 228 / 201 / 160 min | 254 / 232 / 192 min |
+| Planning (156 kt cruise home, sea level): flow, full tank | 0.464 lb/s, 119 min | 0.826 lb/s, 148 min |
+| Hover ceiling at gross / maximum | 15,700 / 4,600 ft | 23,800 / 7,700 ft |
+| Level top speed, sea level, gross | 165 kt | 170 kt |
+| Vertical climb at full collective | 2,925 ft/min | 4,881 ft/min |
+
+Real CH-47F: 400 nautical miles at its 157 knot cruise is about 2.5 hours. Battery: the
+CH-47 friendly wing plans 8,889 s at the start (`ai-fight-ch47-friendly-wings`, minimum
+now 7,800 s); the 15 s hover at 5,000 ft burns 0.69 lb/s (`flight-powered-hover-ch47`,
+band 0.1 to 0.9).

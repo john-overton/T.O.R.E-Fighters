@@ -117,20 +117,29 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                 return Err(format!("{} optional station starts loaded", id.pt()).into());
             }
         }
-        for (source, station) in aircraft
+        // What starts loaded: the source defaults, except where T.O.R.E's
+        // default load differs (the A-4E's real three tanks, PY3).
+        let records = tore_sim::combat::hardpoints::default_records(&aircraft);
+        for ((source, record), station) in aircraft
             .hardpoints
             .iter()
-            .filter(|h| h.store.as_deref().is_some_and(|name| name.ends_with(".JT")))
+            .zip(&records)
+            .filter(|(h, _)| h.store.as_deref().is_some_and(|name| name.ends_with(".JT")))
             .zip(&standard.configuration.stations)
         {
+            let count = if record.store == source.store {
+                record.count
+            } else {
+                0
+            };
             if source.store.as_deref() != Some(station.weapon.source.as_str())
-                || source.count != i32::from(station.count)
+                || count != i32::from(station.count)
             {
                 return Err(format!("{} default weapon or quantity changed", id.pt()).into());
             }
         }
         for tank in &standard.configuration.tanks {
-            let source = &aircraft.hardpoints[tank.hardpoint];
+            let source = &records[tank.hardpoint];
             let default = source
                 .store
                 .as_deref()

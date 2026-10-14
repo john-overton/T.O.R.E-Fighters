@@ -4716,71 +4716,7 @@ impl AiActor {
     /// without naming the query, so this reads the same envelope block the
     /// flight model uses rather than inventing a table.
     pub fn speed_limits(&self) -> SpeedLimits {
-        let envelopes = &self.flight.model().configuration().aerodynamics.envelopes;
-        let altitude = self.flight.position[1];
-        let mut minimum = f64::INFINITY;
-        let mut maximum = f64::NEG_INFINITY;
-        let mut corner = f64::NAN;
-        let mut best_g = i32::MIN;
-        for envelope in envelopes {
-            let Some((low, high)) = envelope.speeds(altitude) else {
-                continue;
-            };
-            minimum = minimum.min(low);
-            maximum = maximum.max(high);
-            if envelope.g > best_g {
-                best_g = envelope.g;
-                corner = low;
-            }
-        }
-        if !minimum.is_finite() || !maximum.is_finite() || maximum <= minimum {
-            // No envelope covers this altitude. Fall back to the documented
-            // fixture band rather than producing a non-finite limit.
-            return SpeedLimits {
-                minimum: ScalarSpeed(FALLBACK_MINIMUM_FPS),
-                maximum: ScalarSpeed(FALLBACK_MAXIMUM_FPS),
-                corner: ScalarSpeed(FALLBACK_CORNER_FPS),
-            };
-        }
-        // Fitted (agent decision, 2026-09-29, after the weight-scaled stall
-        // speeds): the lowest slow edge over every row, 0 G and negative G
-        // included, lies well under the speed at which the loaded aircraft
-        // can hold 1 G. The AI never plans to fly slower than that, in its
-        // current flap setting (`flight::State::minimum_level_speed`); on the
-        // F/A-18D the rows alone gave 114 kt against the 140 kt it needs, and
-        // finals built on it sank into the ground.
-        let level = self.flight.minimum_level_speed(altitude, self.flight.flaps);
-        if level < maximum {
-            minimum = minimum.max(level);
-        }
-        // Fitted (agent decision, 2026-09-29): nor faster than the fastest
-        // row that still leaves the loaded aircraft TOP_SPEED_G_MARGIN of
-        // lift. Near its top speed only the 1 G row covers the aircraft, and
-        // the legacy flight model divides that 1 G by the loading, so a
-        // loaded fighter at full power there sank steadily into flat ground
-        // at 1,100 kt without being able to pull up (fuzz seeds 43, 183,
-        // 266).
-        let config = self.flight.model().configuration();
-        let load = 1.0
-            + (self.flight.fuel + self.flight.payload_lbs) / config.mass.empty_lbs
-                * config.aerodynamics.loaded_elevator_percent
-                / 100.0;
-        let manoeuvring = envelopes
-            .iter()
-            .filter(|e| f64::from(e.g) / load >= TOP_SPEED_G_MARGIN)
-            .filter_map(|e| e.speeds(altitude).map(|(_, high)| high))
-            .fold(f64::NEG_INFINITY, f64::max);
-        if manoeuvring > minimum {
-            maximum = maximum.min(manoeuvring);
-        }
-        if !corner.is_finite() {
-            corner = minimum;
-        }
-        SpeedLimits {
-            minimum: ScalarSpeed(minimum),
-            maximum: ScalarSpeed(maximum),
-            corner: ScalarSpeed(corner.min(maximum)),
-        }
+        speed_limits_of(&self.flight)
     }
 
     /// The hybrid model's loaded low-speed positive G ceiling at `speed` with
@@ -4899,7 +4835,7 @@ impl AiActor {
     ///
     /// Fitted host rule: fuel flow is the model's military flow scaled by the
     /// current throttle, floored so a shut-down engine does not report an
-    /// infinite endurance (a rotorcraft plans with its hover flow, see
+    /// infinite endurance (a rotorcraft plans with its level cruise flow, see
     /// `State::endurance_flow_lbs_per_second`). The spec's own definition
     /// needs the throttle search that holds cruise speed, which the host does
     /// not yet perform.
@@ -7942,3 +7878,75 @@ mod thought_tests;
 // Exact checkpoints (docs/formats/checkpoint.md).
 #[path = "mission_checkpoint.rs"]
 mod checkpoint;
+
+/// [`AiActor::speed_limits`] of any flight state: the minimum, maximum and
+/// corner speed the AI reads from the loaded envelopes at the aircraft's
+/// altitude. The AC-130's orbit hold plans with the same numbers as the AI
+/// gunship (docs/spec/ac130-linked-guns.md, "The orbit").
+pub fn speed_limits_of(flight: &crate::flight::State) -> SpeedLimits {
+    let envelopes = &flight.model().configuration().aerodynamics.envelopes;
+    let altitude = flight.position[1];
+    let mut minimum = f64::INFINITY;
+    let mut maximum = f64::NEG_INFINITY;
+    let mut corner = f64::NAN;
+    let mut best_g = i32::MIN;
+    for envelope in envelopes {
+        let Some((low, high)) = envelope.speeds(altitude) else {
+            continue;
+        };
+        minimum = minimum.min(low);
+        maximum = maximum.max(high);
+        if envelope.g > best_g {
+            best_g = envelope.g;
+            corner = low;
+        }
+    }
+    if !minimum.is_finite() || !maximum.is_finite() || maximum <= minimum {
+        // No envelope covers this altitude. Fall back to the documented
+        // fixture band rather than producing a non-finite limit.
+        return SpeedLimits {
+            minimum: ScalarSpeed(FALLBACK_MINIMUM_FPS),
+            maximum: ScalarSpeed(FALLBACK_MAXIMUM_FPS),
+            corner: ScalarSpeed(FALLBACK_CORNER_FPS),
+        };
+    }
+    // Fitted (agent decision, 2026-09-29, after the weight-scaled stall
+    // speeds): the lowest slow edge over every row, 0 G and negative G
+    // included, lies well under the speed at which the loaded aircraft
+    // can hold 1 G. The AI never plans to fly slower than that, in its
+    // current flap setting (`flight::State::minimum_level_speed`); on the
+    // F/A-18D the rows alone gave 114 kt against the 140 kt it needs, and
+    // finals built on it sank into the ground.
+    let level = flight.minimum_level_speed(altitude, flight.flaps);
+    if level < maximum {
+        minimum = minimum.max(level);
+    }
+    // Fitted (agent decision, 2026-09-29): nor faster than the fastest
+    // row that still leaves the loaded aircraft TOP_SPEED_G_MARGIN of
+    // lift. Near its top speed only the 1 G row covers the aircraft, and
+    // the legacy flight model divides that 1 G by the loading, so a
+    // loaded fighter at full power there sank steadily into flat ground
+    // at 1,100 kt without being able to pull up (fuzz seeds 43, 183,
+    // 266).
+    let config = flight.model().configuration();
+    let load = 1.0
+        + (flight.fuel + flight.payload_lbs) / config.mass.empty_lbs
+            * config.aerodynamics.loaded_elevator_percent
+            / 100.0;
+    let manoeuvring = envelopes
+        .iter()
+        .filter(|e| f64::from(e.g) / load >= TOP_SPEED_G_MARGIN)
+        .filter_map(|e| e.speeds(altitude).map(|(_, high)| high))
+        .fold(f64::NEG_INFINITY, f64::max);
+    if manoeuvring > minimum {
+        maximum = maximum.min(manoeuvring);
+    }
+    if !corner.is_finite() {
+        corner = minimum;
+    }
+    SpeedLimits {
+        minimum: ScalarSpeed(minimum),
+        maximum: ScalarSpeed(maximum),
+        corner: ScalarSpeed(corner.min(maximum)),
+    }
+}

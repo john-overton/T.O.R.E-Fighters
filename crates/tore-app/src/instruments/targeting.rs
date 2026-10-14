@@ -17,8 +17,8 @@
 use super::{
     Raster,
     gunsight::{
-        CENTRE, EYE_BITMAP, EyeIcon, INK, PageNotice, Pixels, SightView, W, WHITE, bearing_label,
-        crosshair, square, stamp, text_width,
+        CENTRE, EYE_BITMAP, EyeIcon, H, INK, PageNotice, Pixels, SightView, W, WHITE,
+        bearing_label, crosshair, square, stamp, text_width,
     },
 };
 use crate::target_window::Readout as TargetReadout;
@@ -62,6 +62,11 @@ pub enum Form {
     /// lands (docs/spec/target-window.md, "Seeker view"). Never chosen by
     /// [`form`]: the host raises it from the picture.
     Seeker,
+    /// The seeker's feed after its weapon ended: a second of video static
+    /// before the page returns to what it showed
+    /// (docs/spec/target-window.md, "Seeker view"). Raised by the host from
+    /// [`crate::seeker_view::SeekerCam::lost_feed`].
+    Static,
 }
 
 /// The weapon records that go for the ground and are neither bombs, rocket
@@ -352,6 +357,26 @@ impl Page {
         }
     }
 
+    /// The lost-feed form: static fills the picture. `seed` changes the snow
+    /// (the host passes the tick at the 24 Hz picture refresh).
+    pub fn lost_feed(seed: u64) -> Self {
+        Self {
+            form: Form::Static,
+            ..Self::seeker(
+                "",
+                None,
+                0.,
+                seed,
+                SightView {
+                    position: [0.; 3],
+                    yaw: 0.,
+                    pitch: 0.,
+                    zoom: 1.,
+                },
+            )
+        }
+    }
+
     /// Completes the page with this frame's presented look, the client's zoom
     /// and the camera's view, the presented point of a tracked object and the
     /// lasing pilot's callsign.
@@ -451,6 +476,10 @@ pub(super) fn draw(
     let fit = |s: &str, limit: usize| super::fit_width(f, s, limit);
     if page.form == Form::Seeker {
         draw_seeker(r, f, page);
+        return;
+    }
+    if page.form == Form::Static {
+        feed_static(r, page.tick);
         return;
     }
     let tracked = matches!(page.mode, SightMode::Tracked(_));
@@ -579,25 +608,80 @@ pub(super) fn draw(
 
 /// The seeker form: the weapon's name, SEEKER, a square on its target when
 /// the target is in the picture, the crosshair, and the distance on the
-/// bottom row (docs/spec/target-window.md, "Seeker view").
+/// bottom row (docs/spec/target-window.md, "Seeker view"). The text keeps to
+/// the corners so the crosshair's long bars run clear of it.
 fn draw_seeker(r: &mut Raster, f: &Font, page: &Page) {
     let name = page.owner.as_deref().unwrap_or("SEEKER");
-    centred(r, f, &super::fit_width(f, name, 119), 3, 1, 120, false);
-    centred(r, f, "SEEKER", 16, 1, 120, false);
+    r.text(f, &super::fit_width(f, name, SEEKER_NAME_WIDTH), 1, 3, INK);
+    r.text(f, "SEEKER", W - 2 - text_width(f, "SEEKER"), 3, INK);
     let mut marks = Pixels::new();
     if let Some(view) = &page.view
         && let Some((x, y)) = page.mark.and_then(|point| view.project(point))
     {
         marks.extend(square(x.round() as i32, y.round() as i32, 10));
     }
-    marks.extend(crosshair());
+    marks.extend(seeker_crosshair());
     stamp(r, &marks);
     r.text(f, "RNG", 1, 103, INK);
     r.text(f, &page.range, 136 - text_width(f, &page.range), 103, INK);
 }
 
+/// The name stays left of the vertical bar (pixels).
+const SEEKER_NAME_WIDTH: usize = 62;
+/// The seeker crosshair: four straight bars, up, down, left and right, with
+/// the centre open (John's drawing, 2026-10-13: nothing in the middle). The
+/// gap is wider than the target square so a target on the centre sits in it.
+const BAR_GAP: i32 = 10;
+/// The bars end this far from the picture's edge (most of the way across, as
+/// the drawing has them), pixels.
+const BAR_MARGIN: i32 = 7;
+/// Ink thickness of a bar, pixels (odd, so it is centred); the white halo
+/// adds one on each side.
+const BAR_THICK: i32 = 3;
+
+fn seeker_crosshair() -> Pixels {
+    let (cx, cy) = CENTRE;
+    let half = BAR_THICK / 2;
+    let mut p = Pixels::new();
+    for d in BAR_GAP..W / 2 - BAR_MARGIN {
+        for t in -half..=half {
+            p.extend([(cx - d, cy + t), (cx + d, cy + t)]);
+        }
+    }
+    for d in BAR_GAP..H / 2 - BAR_MARGIN {
+        for t in -half..=half {
+            p.extend([(cx + t, cy - d), (cx + t, cy + d)]);
+        }
+    }
+    p
+}
+
+/// Video static over the whole picture: the seeker's feed is lost. Grey
+/// snow that changes with `seed`, with tearing lines, from the CRT module
+/// the AC-130 sensor console shares (`crate::crt::apply_cpu` at full
+/// static over a dark picture). Presentation only; opinionated, John
+/// 2026-10-13.
+fn feed_static(r: &mut Raster, seed: u64) {
+    let (w, h) = (W as usize, H as usize);
+    let mut pixels: Vec<u8> = std::iter::repeat_n([40, 40, 40, 255], w * h)
+        .flatten()
+        .collect();
+    let mut frame = crate::crt::Frame::new(crate::crt::SENSOR, seed as f64 / 60., 1.);
+    frame.seed = (seed as u32) ^ 0x5eed_0f1e;
+    crate::crt::apply_cpu(&mut pixels, w, h, &frame);
+    for (i, p) in pixels.chunks_exact(4).enumerate() {
+        r.rect(
+            (i % w) as i32,
+            (i / w) as i32,
+            1,
+            1,
+            [p[0], p[1], p[2], 255],
+        );
+    }
+}
+
 /// Preview modes for `--target-cam-preview` that draw the targeting page.
-pub const PREVIEW_MODES: &str = "lase, lase-off, lase-mask, lase-mask-range, lase-mask-terrain, lase-pin, ready, slew, limit, tti, impact, buddy, both, buddy-nosight, flir, flir-tracked, seeker";
+pub const PREVIEW_MODES: &str = "lase, lase-off, lase-mask, lase-mask-range, lase-mask-terrain, lase-pin, ready, slew, limit, tti, impact, buddy, both, buddy-nosight, flir, flir-tracked, seeker, seeker-gbu, seeker-centre, seeker-static";
 
 /// One synthetic page: see [`super::gunsight::Preview`].
 pub struct Preview {
@@ -752,6 +836,21 @@ pub fn preview(mode: &str) -> Option<Preview> {
             page = Page::seeker("AGM65G.JT", Some(at(14., -6.)), 18_000., 0, view);
             target = None;
             object = Some((at(14., -6.), 11, 8));
+        }
+        "seeker-gbu" => {
+            page = Page::seeker("GBU10.JT", Some(at(14., -6.)), 18_000., 0, view);
+            target = None;
+            object = Some((at(14., -6.), 11, 8));
+        }
+        "seeker-centre" => {
+            page = Page::seeker("AGM65G.JT", Some(at(0., 0.)), 9_000., 0, view);
+            target = None;
+            object = Some((at(0., 0.), 11, 8));
+        }
+        "seeker-static" => {
+            page = Page::lost_feed(25);
+            target = None;
+            object = None;
         }
         _ => return None,
     }

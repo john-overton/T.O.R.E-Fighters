@@ -5087,7 +5087,7 @@ mod tests {
         }
     }
 
-    /// A friendly Mi-24 (3,307 lb, planned at its hover flow, about two
+    /// A friendly Mi-24 (3,307 lb, planned at its cruise flow, about two
     /// hours) with a home runway `home_ft` away, airborne and holding, and an enemy.
     fn fuel_wings(home_ft: f64) -> (AiWings, Vec<live::Target>) {
         let runway = runway_view(9, [0., 10., home_ft]);
@@ -5139,11 +5139,11 @@ mod tests {
         // sea-level 178 kt): within 5 percent of the sea-level figure.
         let sea_level = 100_000. / (178. * 1.687_81 * 0.8);
         assert!((home / sea_level - 1.).abs() < 0.05, "home {home}");
-        // Slice HF2: it plans with the hover flow of its rotor, not the
+        // Slices HF2, HF3: it plans with its rotor's cruise flow, not the
         // record's 2 lb/s: about two hours, not 27 minutes.
         let flight = wings.mission.actor(1).unwrap().flight();
         let flow = flight.endurance_flow_lbs_per_second();
-        assert!(flow < 0.7, "hover flow {flow}");
+        assert!(flow < 0.7, "cruise flow {flow}");
         assert!(
             (fuel.endurance_s - flight.fuel / flow).abs() < 5.,
             "{}",
@@ -5154,7 +5154,7 @@ mod tests {
         // The reserve is five minutes, the fighters' (slice HF2): bingo
         // under the time home plus 300 s of fuel, caution above it.
         for (margin, expected) in [(350., FuelState::Caution), (250., FuelState::Bingo)] {
-            // The hover flow falls with the weight, so settle the tank that
+            // The planning flow falls with the weight, so settle the tank that
             // lasts `home + margin` at the flow it then burns.
             for _ in 0..8 {
                 let now = wings.mission.actor(1).unwrap().flight();

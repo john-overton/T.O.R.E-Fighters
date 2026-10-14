@@ -205,17 +205,14 @@ impl Static {
 
 /// An inverted source shows at this share of full scale, so a cool scene in
 /// black hot is not a white page (agent decision; `crt.wgsl` uses it too).
-#[allow(dead_code)] // Through `apply_cpu`.
 const INVERTED: f32 = 0.85;
 
 /// The integer hash `crt.wgsl` uses.
-#[allow(dead_code)] // Through `apply_cpu`.
 fn hash(v: u32) -> u32 {
     let mut x = v.wrapping_mul(747_796_405).wrapping_add(2_891_336_453);
     x = ((x >> ((x >> 28) + 4)) ^ x).wrapping_mul(277_803_737);
     (x >> 22) ^ x
 }
-#[allow(dead_code)] // Through `apply_cpu`.
 fn random(a: u32, b: u32, c: u32) -> f32 {
     f32::from((hash(a ^ hash(b ^ hash(c))) & 0xffff) as u16) / 65535.
 }
@@ -225,8 +222,6 @@ fn random(a: u32, b: u32, c: u32) -> f32 {
 /// (a page this small is soft already); the rest follows `crt.wgsl` with
 /// sizes taken for the buffer's own height as if it filled a 1080-row
 /// screen region, clamped to whole pixels.
-// Offered to the seeker view's impact static (slice nr-seek).
-#[allow(dead_code)]
 pub fn apply_cpu(pixels: &mut [u8], width: usize, height: usize, frame: &Frame) {
     if width == 0 || height == 0 || pixels.len() < width * height * 4 {
         return;
