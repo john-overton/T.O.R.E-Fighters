@@ -260,7 +260,8 @@ fn the_sensor_console_searches_then_orbits_the_pin() {
     let status = world.cockpits[0].flight.orbit_status().unwrap();
     assert_eq!(status.point, pin);
     assert!(status.radius_ft >= status.minimum_radius_ft);
-    // A new pin moves the point the orbit circles.
+    // A new pin moves the point the orbit circles; the centre waits 5 s
+    // with the pin standing still, then slides to it.
     let moved = [pin[0] + 2_000., pin[1], pin[2]];
     world.combat.state.own_mut().gunship.as_mut().unwrap().sight = Sight::Pinned(moved);
     for _ in 0..120 {
@@ -268,6 +269,11 @@ fn the_sensor_console_searches_then_orbits_the_pin() {
     }
     let status = world.cockpits[0].flight.orbit_status().unwrap();
     assert_eq!(status.point, moved);
+    assert_eq!(status.centre, pin, "waiting for the pin to stand still");
+    for _ in 0..(4 * 120 + 10) {
+        step(&mut world, false, Vec::new());
+    }
+    let status = world.cockpits[0].flight.orbit_status().unwrap();
     assert!(status.centre != pin && status.centre != moved, "sliding");
     // P again lets the pin go: the console searches on.
     step(
@@ -348,4 +354,32 @@ fn the_sensor_console_is_the_ac130s() {
         world.cockpits[0].flight.autopilot.mode(),
         tore_sim::autopilot::Mode::Off
     );
+}
+
+/// In the console a slew off a track drops it to a pin on the ground under
+/// the object (slice nr-cona); no slew, or a pin, is left alone.
+#[test]
+fn a_console_slew_drops_a_track_to_a_pin() {
+    let mut guns = tore_sim::combat::gunship::State {
+        sight: Sight::Tracked(7),
+        aim: Some([1_000., 40., 2_000.]),
+        ..Default::default()
+    };
+    assert!(!super::commands::drop_track_on_slew(
+        &mut guns,
+        [0, 0],
+        |_, _| 12.
+    ));
+    assert_eq!(guns.sight, Sight::Tracked(7));
+    assert!(super::commands::drop_track_on_slew(
+        &mut guns,
+        [64, 0],
+        |_, _| 12.
+    ));
+    assert_eq!(guns.sight, Sight::Pinned([1_000., 12., 2_000.]));
+    assert!(!super::commands::drop_track_on_slew(
+        &mut guns,
+        [64, 0],
+        |_, _| 12.
+    ));
 }

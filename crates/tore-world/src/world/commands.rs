@@ -398,11 +398,14 @@ impl World {
                 continue;
             };
             match guns.sight {
-                Sight::Pinned(point) => cockpit.flight.autopilot.set_orbit_point(point),
+                Sight::Pinned(point) => cockpit.flight.autopilot.set_orbit_point(point, false),
                 Sight::Tracked(_) => {
                     if let Some([x, _, z]) = guns.aim {
                         let ground = f64::from(terrain.height(x as f32, z as f32));
-                        cockpit.flight.autopilot.set_orbit_point([x, ground, z]);
+                        cockpit
+                            .flight
+                            .autopilot
+                            .set_orbit_point([x, ground, z], true);
                     }
                 }
                 Sight::Free => cockpit.flight.release_orbit(),
@@ -805,3 +808,27 @@ mod sort;
 // Exact coding for the host's journal (stage K, slice K0).
 #[path = "commands_checkpoint.rs"]
 mod checkpoint;
+
+/// The sensor console's slew off a track (slice nr-cona, agent decision on
+/// John's 2026-10-14 request): with the gunsight tracking an object and a
+/// slew this tick, the sight drops to a pin on the ground under the object,
+/// which the slew then moves, and the orbit waits for the pin to stand still
+/// ([`tore_sim::autopilot::orbit::CENTRE_PAUSE_S`]). The world calls it only
+/// with the console open; elsewhere a slew while tracking still says L TO
+/// DROP. Returns whether it dropped the track.
+pub(super) fn drop_track_on_slew(
+    guns: &mut tore_sim::combat::gunship::State,
+    slew: [i8; 2],
+    ground: impl Fn(f64, f64) -> f64,
+) -> bool {
+    use tore_sim::combat::gunship::Sight;
+    if slew == [0; 2] || !matches!(guns.sight, Sight::Tracked(_)) {
+        return false;
+    }
+    let Some([x, _, z]) = guns.aim else {
+        return false;
+    };
+    guns.sight = Sight::Pinned([x, ground(x, z), z]);
+    guns.returning = false;
+    true
+}

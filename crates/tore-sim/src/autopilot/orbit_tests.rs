@@ -85,12 +85,12 @@ fn it_settles_smoothly_and_ignores_the_stick() {
 fn a_mode_switch_or_the_ground_ends_it_and_the_point_moves() {
     let mut s = hybrid();
     s.engage_orbit([12_000., 0., 16_000.], 13_000.);
-    s.autopilot.set_orbit_point([12_000., 0., 18_000.]);
-    s.autopilot.set_orbit_point([f64::NAN, 0., 0.]);
+    s.autopilot.set_orbit_point([12_000., 0., 18_000.], true);
+    s.autopilot.set_orbit_point([f64::NAN, 0., 0.], true);
     s.step(&PilotInput::default(), |_, _| 0.);
     let orbit = *s.autopilot.orbit().unwrap();
     assert_eq!(orbit.point, [12_000., 0., 18_000.]);
-    // The centre slides 200 ft/s toward the new point.
+    // A track: the centre slides 200 ft/s toward the new point at once.
     assert!((orbit.centre[2] - (16_000. + CENTRE_SPEED_FPS / 120.)).abs() < 1e-6);
     s.step(
         &PilotInput {
@@ -149,18 +149,14 @@ fn bearing_follows_the_arcs() {
 }
 
 /// The search (John, 2026-10-14: released, the autopilot flies straight):
-/// the console opened with a free sight holds the heading the roll-out
-/// reaches, the altitude and the speed, wings level, and says SEARCH.
+/// the console opened with a free sight takes the aircraft's current
+/// heading, altitude and speed and holds them, wings level, and says SEARCH.
 #[test]
 fn the_search_flies_straight_and_level() {
     let mut s = hybrid();
-    s.bank = 10_f64.to_radians();
-    let expected = rollout_heading(&s);
-    assert!(
-        angle(expected - s.yaw) > 0.,
-        "a right bank still turns right"
-    );
+    let expected = s.yaw;
     s.engage_console(13_000.);
+    assert_eq!(s.autopilot.orbit().unwrap().speed_fps, s.speed);
     assert_eq!(s.autopilot.mode(), Mode::Orbit);
     assert_eq!(s.autopilot.label(), "SEARCH");
     assert!(s.orbit_status().is_none());
@@ -261,15 +257,16 @@ fn the_keys_step_the_search() {
     assert!(s.autopilot.orbit().unwrap().speed_fps >= band.corner.0 - 1e-9);
 }
 
-/// Pinning joins the orbit about the point; letting it go rolls out wings
-/// level on the heading the roll-out reaches, with no turn back and the bank
-/// never moving faster than its slew.
+/// Pinning joins the orbit about the point; letting it go takes the current
+/// heading, altitude and speed as the commanded ones (John, 2026-10-14) and
+/// settles back onto that heading after the roll-out, the bank never moving
+/// faster than its slew.
 #[test]
 fn pin_joins_the_orbit_and_release_rolls_out_to_the_search() {
     let mut s = hybrid();
     s.engage_console(13_000.);
     fly(&mut s, 5., &PilotInput::default(), |_, _| {});
-    s.autopilot.set_orbit_point([12_000., 0., 16_000.]);
+    s.autopilot.set_orbit_point([12_000., 0., 16_000.], false);
     assert_eq!(s.autopilot.label(), "ORBIT");
     let status = s.console_status().unwrap();
     assert_eq!(status.phase, ConsolePhase::Join);
@@ -287,24 +284,28 @@ fn pin_joins_the_orbit_and_release_rolls_out_to_the_search() {
     });
     assert!(settled, "the orbit was joined");
     assert!(s.bank.abs() > 10_f64.to_radians(), "circling banked");
-    let expected = rollout_heading(&s);
-    let altitude = s.position[1];
+    let expected = s.yaw.rem_euclid(std::f64::consts::TAU);
+    let (altitude, speed) = (s.position[1], s.speed);
     s.release_orbit();
     let status = s.console_status().unwrap();
     assert_eq!(status.phase, ConsolePhase::Search);
     assert!(status.orbit.is_none() && s.orbit_status().is_none());
     assert!((status.heading_deg.to_radians() - expected).abs() < 1e-9);
+    assert_eq!(s.autopilot.orbit().unwrap().speed_fps, speed);
     let mut worst: f64 = 0.;
     fly(&mut s, 60., &PilotInput::default(), |_, s| {
         let bank = s.autopilot.orbit().unwrap().bank;
         assert!((bank - last).abs() <= BANK_RATE_DEG_S.to_radians() / 120. + 1e-12);
         last = bank;
-        // Past the roll-out heading (the orbit turns left).
+        // Past the release heading (the orbit turns left): the roll-out
+        // still turns a few degrees, then the search turns back.
         worst = worst.max(-angle(s.yaw - expected));
     });
     assert!(
-        worst < 2_f64.to_radians(),
-        "turned past the roll-out by {worst}"
+        // 4 to 5 degrees on the AC-130; this test aircraft is faster and
+        // banks harder in its orbit.
+        worst < rollout_turn(30_f64.to_radians(), 300.).abs() + 1_f64.to_radians(),
+        "turned past the release heading by {worst}"
     );
     assert!(angle(s.yaw - expected).abs() < 1_f64.to_radians());
     assert!(s.bank.abs() < 2_f64.to_radians());
@@ -367,4 +368,40 @@ fn the_search_survives_the_exact_state() {
     fly(&mut s, 5., &PilotInput::default(), |_, _| {});
     fly(&mut copy, 5., &PilotInput::default(), |_, _| {});
     assert_eq!(copy.position, s.position);
+}
+
+/// A slewed pin (John, 2026-10-14): the sight's point moves with the slew,
+/// but the orbit's centre stays put until the pin has stood still 5 s, then
+/// slides to it; a track is followed at once.
+#[test]
+fn a_moved_pin_moves_the_centre_after_a_five_second_pause() {
+    let mut s = hybrid();
+    s.engage_orbit([12_000., 0., 16_000.], 13_000.);
+    // A slew: the pin moves a little every tick for two seconds.
+    for tick in 0..240 {
+        let z = 16_000. + f64::from(tick) * 5.;
+        s.autopilot.set_orbit_point([12_000., 0., z], false);
+        s.step(&PilotInput::default(), |_, _| 0.);
+        assert_eq!(s.autopilot.orbit().unwrap().centre[2], 16_000., "{tick}");
+    }
+    let pin = s.autopilot.orbit().unwrap().point;
+    // Standing still: nothing until five seconds have passed...
+    for _ in 0..(CENTRE_PAUSE_S * 120.) as u32 - 2 {
+        s.autopilot.set_orbit_point(pin, false);
+        s.step(&PilotInput::default(), |_, _| 0.);
+    }
+    assert_eq!(s.autopilot.orbit().unwrap().centre[2], 16_000.);
+    // ...then the centre slides at its speed.
+    for _ in 0..4 {
+        s.autopilot.set_orbit_point(pin, false);
+        s.step(&PilotInput::default(), |_, _| 0.);
+    }
+    let centre = s.autopilot.orbit().unwrap().centre[2];
+    assert!(centre > 16_000. && centre <= 16_000. + 4. * CENTRE_SPEED_FPS / 120. + 1e-9);
+    // A track moves the centre on the next tick.
+    let before = s.autopilot.orbit().unwrap().centre;
+    s.autopilot
+        .set_orbit_point([pin[0] + 3_000., 0., pin[2]], true);
+    s.step(&PilotInput::default(), |_, _| 0.);
+    assert!(s.autopilot.orbit().unwrap().centre[0] > before[0]);
 }
