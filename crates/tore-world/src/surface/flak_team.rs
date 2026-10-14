@@ -26,7 +26,9 @@
 //!   either at least [`FLAK_GROUP_IN_RANGE_PERCENT`] percent of the group's
 //!   aircraft are in range of the team (inside its widest fire zone: the
 //!   union of its live guns' fire zones, range and altitude band, so a mixed
-//!   team reaches as far as its KS-19s; John, 2026-10-14), or the group
+//!   team reaches as far as its KS-19s; John, 2026-10-14) and at least
+//!   [`FLAK_GROUP_IN_RANGE_MIN`] of them are (the whole group when smaller),
+//!   or the group
 //!   heads at the team: the
 //!   mean ground track of its members lies within [`FLAK_HEADING_CONE_DEG`]
 //!   degrees of the bearing from the group's middle to the team's middle,
@@ -80,6 +82,12 @@ pub const FLAK_GROUP_RADIUS_FT: f64 = 2. * 6_076.;
 /// The share of a group that must be in range of the entire team before the
 /// team opens fire on it, percent (opinionated, John, 2026-10-14).
 pub const FLAK_GROUP_IN_RANGE_PERCENT: usize = 25;
+/// The 25 percent rule also needs at least this many of the group in range,
+/// or the whole group when it is smaller (a lone aircraft is engaged when it
+/// comes into reach): a small flight skirting the team with one member in
+/// reach is left alone (opinionated, John, 2026-10-14: "let's add a minimum
+/// of 2 aircraft"). The heading-in rule has no minimum.
+pub const FLAK_GROUP_IN_RANGE_MIN: usize = 2;
 /// A group heads at the team when its track is within this many degrees
 /// either side of the bearing to the team: a 90 degree cone (opinionated,
 /// John, 2026-10-14, "a 90% cone", read as degrees).
@@ -476,7 +484,8 @@ pub(super) fn plan_teams(
                 let track = middle_of(&mut members.iter().map(|c| c.velocity), n as f64);
                 let heading_in = heads_at(track, middle, team_middle);
                 let fighting = members.iter().any(|c| firing.contains(&c.id));
-                let quarter = in_range > 0 && in_range * 100 >= n * FLAK_GROUP_IN_RANGE_PERCENT;
+                let quarter = in_range >= FLAK_GROUP_IN_RANGE_MIN.min(n)
+                    && in_range * 100 >= n * FLAK_GROUP_IN_RANGE_PERCENT;
                 let engaged = fighting || (any && (quarter || heading_in));
                 if engaged {
                     plan.engaged.extend(members.iter().map(|c| c.id));

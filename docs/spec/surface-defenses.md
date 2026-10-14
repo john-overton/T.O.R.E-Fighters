@@ -1263,7 +1263,9 @@ flowchart TD
   of the guns' zones is the reading, since in a mixed team the KS-19s'
   zone, 44,250 ft and up to 25,000 ft, holds the KS-12s' 26,200 ft and
   15,000 ft one, so it is the longest-reach gun's zone measured from where
-  each gun stands); or the group heads at the team: its members' mean track
+  each gun stands), and at least two of its aircraft are (the whole group
+  when it is a single aircraft; John, 2026-10-14: "let's add a minimum of 2
+  aircraft"); or the group heads at the team (no minimum): its members' mean track
   over the ground lies within 45 degrees either side of the bearing from the
   group's middle to the team's middle (John's "90% cone", read as a cone 90
   degrees wide) and at least one member is inside some gun's fire zone. A
@@ -1274,8 +1276,8 @@ flowchart TD
 - **Holding.** Until then the team holds its fire at the group. Its guns
   still choose targets, prepare and lock on (a radar gun paints its target on
   the RWR, as before), so they fire the moment the team engages. A group
-  skirting the edge, not heading in, with fewer than 25 percent in range of
-  the team, is never fired at, not even the one aircraft a gun could reach:
+  skirting the edge, not heading in, with fewer than 25 percent or fewer than
+  two of its aircraft in range of the team, is never fired at, not even the one aircraft a gun could reach:
   a point or line defence does not give its position away (John, 2026-10-14:
   keep holding).
 - **Once engaged.** The team engages the whole group, and keeps engaging it
@@ -1308,10 +1310,12 @@ of the team's 52 shells and died in a third of the passes, now draws about 16,
 like each wingman, and no seat died in any pass; the flight as a whole loses
 about a fifth more hit points (the shells no longer fall on a lead already
 nearly destroyed). A lone gun's opening barrage, spread, now reaches every
-member (a lone KS-19 over a four-ship: 5, 3, 4 and 2 shells). A four-ship
-passing 35,000 ft to the side, one member inside a KS-19's reach, is a quarter
-of the group in range and is engaged; eight aircraft grazing the edge with only
-one in reach draw nothing. A lone gun fires the moment the flight comes into
+member (a lone KS-19 over a four-ship: 5, 3, 4 and 2 shells). A two- or
+four-ship grazing the team's edge with one member inside a KS-19's reach is
+held (the minimum of two); passing 35,000 ft to the side, where a second member
+comes into reach a few seconds later, it is engaged then. Eight aircraft
+grazing the edge with one in reach draw nothing, with two in reach they are
+engaged. A lone gun fires the moment the flight comes into
 reach (before the teams, its lock lapsed every 15 s while it waited, delaying
 its first shell by about 12 s). Every flak jolt is a quarter of a 100-point
 warhead's.
