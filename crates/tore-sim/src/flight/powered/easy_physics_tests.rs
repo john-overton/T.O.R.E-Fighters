@@ -1088,8 +1088,12 @@ fn e2_h3_power_still_sets_the_tandems_top_speed() {
     };
     let (hazard, easy) = (top(rotor::Hazards::ALL), top(rotor::Hazards::NONE));
     println!("H3 CH-47 {hazard} {easy}");
-    assert!((160. ..=170.).contains(&easy), "{easy}");
-    assert!((hazard - easy).abs() <= 0.01 * hazard, "{hazard} {easy}");
+    // Since slice HF3 (the CH-47F's weights and the engines' full power) the
+    // hazards' retreating blade stall sets the top speed at 160 to 170 kt,
+    // as in the real aircraft; with the cheat, which removes it, power still
+    // sets a top speed, at most 200 kt.
+    assert!((160. ..=170.).contains(&hazard), "{hazard}");
+    assert!(easy >= hazard && easy <= 200., "{hazard} {easy}");
 }
 
 /// The climb rate, ft/s, after 20 s of `extra` above the hover lever with

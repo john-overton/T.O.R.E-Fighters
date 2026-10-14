@@ -298,7 +298,8 @@ fn h5_no_artificial_attitude_limits() {
 /// H6: a 10 percent collective step from a hover climbs at a rate that
 /// settles with a time constant of 2 to 4 s (the design's; the tandem's low disk
 /// loading and two rotors make it quicker than the single-rotor 3 to 6 s); full collective climbs at
-/// 1,500 to 3,000 ft/min.
+/// 1,500 to 5,000 ft/min (3,000 before slice HF3: at the CH-47F's empty weight and full fuel, with no
+/// cargo, the hover takes under two fifths of the engines' rated power).
 #[test]
 fn h6_collective_sets_a_climb_rate_not_an_acceleration() {
     let mut s = trimmed(1_000., 0.);
@@ -338,7 +339,7 @@ fn h6_collective_sets_a_climb_rate_not_an_acceleration() {
     });
     let rate = full.vertical_speed * FPM;
     assert!(
-        (1_500. ..=3_000.).contains(&rate),
+        (1_500. ..=5_000.).contains(&rate),
         "full collective {rate} ft/min"
     );
 }
@@ -776,8 +777,8 @@ fn hover_ceiling(weight: f64) -> f64 {
 /// above it, full collective sinks.
 #[test]
 fn h13_weight_and_altitude_take_the_hover_away() {
-    let gross = hover_ceiling(18_078. + 3_307.);
-    let heavy = hover_ceiling(28_660.);
+    let gross = hover_ceiling(24_578. + 7_340.);
+    let heavy = hover_ceiling(54_000.);
     assert!(
         gross > heavy + 2_000. && heavy > 4_000.,
         "{gross} / {heavy} ft"
@@ -786,10 +787,9 @@ fn h13_weight_and_altitude_take_the_hover_away() {
     let s = trimmed(0., 0.);
     let m = model(&s);
     let rho = rotor::air_density(heavy + 1_500.);
-    let t = m
-        .trim(28_660., 0., 0., rho, 1., StabilityLevel::Off)
-        .unwrap();
-    assert!(t.engine_power > m.available_power(rho, 1., 1.));
+    // No trim at all (the collective runs out first) counts as no hover.
+    let t = m.trim(54_000., 0., 0., rho, 1., StabilityLevel::Off);
+    assert!(t.is_none_or(|t| t.engine_power > m.available_power(rho, 1., 1.)));
 }
 
 /// The CH-47 on the runway with its rotors turning.
@@ -1100,12 +1100,14 @@ fn starts_are_trimmed_forward_flight_and_a_governed_ground_idle() {
     assert!(ground.torque_percent().unwrap() > 1.);
 }
 
-/// Reduced power takes the hover away: with the engines at half power the
-/// rotor speed sags and the aircraft sinks.
+/// Reduced power takes the hover away: with the engines at 30 percent power
+/// the rotor speed sags and the aircraft sinks. (Half power until slice HF3:
+/// with the CH-47F's weights and no cargo, half power still hovers, as one
+/// engine does in the real aircraft at a light weight.)
 #[test]
 fn reduced_power_has_no_automatic_hover_support() {
     let mut damaged = trimmed(500., 0.);
-    damaged.throttle *= 0.5;
+    damaged.throttle *= 0.3;
     fly(&mut damaged, 1200, |_| PilotInput::default());
     assert!(
         damaged.position[1] < 450. && damaged.vertical_speed < -10.,
