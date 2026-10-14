@@ -66,8 +66,12 @@ pub(super) fn observe_ownship(
         } else {
             Vec::new()
         };
-    own.sensors
-        .step_ground(&observer, &objects, &environment, context.facts.weather);
+    own.sensors.step_ground(
+        &ground_observer(own, launcher, &observer),
+        &objects,
+        &environment,
+        context.facts.weather,
+    );
     if let Some(id) = own.designated() {
         own.hud_selection = Some(id);
     } else if !easy_targeting {
@@ -292,5 +296,27 @@ pub(super) fn observe_ownship(
         }
     } else {
         own.range_estimate = None;
+    }
+}
+
+/// The observer the ground pages scan from. On the AC-130 the radar's scan
+/// is centred on the gunsight's line of sight rather than the nose: the
+/// gunship's radar works with its sensors toward the orbit's centre, so the
+/// A-G page lists what the sensor turret looks at (agent decision, slice
+/// nr-conb, 2026-10-14, for John's sensor console radar: "cycle targets in
+/// line of view of the sensor"). Every other rule of the page is unchanged.
+/// Other aircraft scan about the nose.
+pub(super) fn ground_observer(own: &Ownship, launcher: Launcher, observer: &Observer) -> Observer {
+    let Some(group) = &own.gunship else {
+        return *observer;
+    };
+    let line = crate::combat::gunship::direction(launcher, group.look[0], group.look[1]);
+    Observer {
+        basis: crate::attitude::Basis::new(
+            line[0].atan2(line[2]),
+            line[1].atan2(line[0].hypot(line[2])),
+            0.,
+        ),
+        ..*observer
     }
 }

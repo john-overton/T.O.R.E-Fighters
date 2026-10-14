@@ -2200,6 +2200,18 @@ ORBIT_RUNS = {
         ["--orbit-sight", "track", "--seconds", "300"],
         "The console opens on the tracked lead tank of the moving column and follows it.",
     ),
+    "orbit-console-radar": (
+        ["--orbit-sight", "pin", "--console-range", "2", "--console-cycle", "70,90", "--seconds", "120"],
+        "The console turns the A-G radar on as it opens; at 70 s and 90 s the console's T (slice nr-conb) "
+        "picks the next radar contact the sensor sees within 25 nm, designates it, and the gunsight tracks "
+        "it one zoom step wider than the step that fills the picture.",
+    ),
+    "orbit-console-search-t": (
+        ["--orbit-sight", "free", "--console-range", "2", "--console-cycle", "20", "--seconds", "90"],
+        "The console opens searching with nothing pinned and the A-G radar on; the console's T at 20 s "
+        "designates the nearest radar contact the sensor sees, the gunsight tracks it and the autopilot "
+        "leaves the search for the orbit about it (slices nr-conb and nr-cona).",
+    ),
     # Slice nr-cona (John, 2026-10-14): the console opens with a free sight and
     # searches straight and level; its keys step the heading, altitude and
     # speed; P pins the ground under the crosshair (orbit) and lets it go

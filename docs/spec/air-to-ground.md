@@ -135,6 +135,15 @@ not traced.
 | Aircraft | Only while attached to an airport: the takeoff sequence (states 1 to 0x12) or the landing sequence (0x13 to 0x1e), within the visibility distance. An aircraft in free flight never shows on A-G, whatever its speed |
 | Everything | Terrain line of sight; detection range scaled by 100 / effective signature, the signature being the object's radar signature times the weather layers' radar percent, less a look-down penalty (a vehicle on the ground loses the radar's full look-down value: 0 for F-18, F-22, MiG-29, Su-27; 30 for A-10, AV-8B, F-14, F-15; 50 for F-4, F-104). Ships take a third of the penalty |
 
+**The AC-130's scan (agent decision, slice nr-conb, 2026-10-14).** On the
+AC-130 the page scans about the gunsight's line of sight instead of the nose:
+the radar's volume (its azimuth and elevation limits) is measured from the
+sensor turret's line, every other rule above unchanged. The gunship flies a
+left-hand orbit with its sensors and guns on the centre, abeam; about the
+nose its radar would never list what the guns are on. The sensor console
+draws this list on its gimbal graphic and steps through it with T
+([sensor console](target-window.md#sensor-console)).
+
 Range and refresh (retail data): contacts are drawn out to the least of twice
 the selected range, the radar's search range (zone 0) and **45 nmi**. The list is
 rebuilt every 6 seconds and holds 50 entries (when full, the farthest is replaced
@@ -1244,7 +1253,7 @@ round. The generated [controls list](../CONTROLS.md) and the
 | --- | --- | --- | --- |
 | A-G radar on or off | Ctrl+R, Shift+R | none | retail manual p. 99 |
 | Scope channel (adds HARM) | M | as today | retail M plus TORE cycle |
-| Next ground target (nearest first), farthest first | T, Shift+T | as today | retail |
+| Next ground target (nearest first), farthest first | T, Shift+T (in the AC-130 sensor console: the radar contacts the sensor sees, [sensor console](target-window.md#sensor-console)) | as today | retail; console meaning opinionated (John, 2026-10-14) |
 | Visual target, nearest the centre | Enter, ' | as today | retail manual p. 112 |
 | Sight: next visible object | `/` | none | retail |
 | Sight: designate, pin, drop, slew, zoom | Backslash, Shift+Backslash, L or ;, Alt+arrows, Shift+' and Shift+; (now every aircraft with a sight) | AC-130 bindings | retail keys, AC-130 design |

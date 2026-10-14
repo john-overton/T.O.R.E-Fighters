@@ -53,6 +53,9 @@ pub const SENSOR: Settings = Settings {
     monochrome: true,
 };
 
+/// The pass's uniform: six vectors of four (`crt.wgsl`'s `Crt`).
+const UNIFORM_FLOATS: usize = 24;
+
 /// One frame's worth of the look: the settings, the clock, the static level
 /// and how the source is mapped.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -69,6 +72,20 @@ pub struct Frame {
     pub lift: f32,
     /// Varies the noise pattern between users of the module.
     pub seed: u32,
+    /// The phosphor's colour: the picture (not the overlay) is multiplied by
+    /// it (white keeps it; a night vision tube's green tints it).
+    pub tint: [f32; 3],
+    /// A coloured picture (a colour source, or a tint): the aberration's
+    /// fringes are faded toward the unshifted picture rather than toward
+    /// grey, so the picture keeps its colours.
+    pub colour: bool,
+    /// Bright parts of the picture bloom over their surroundings, 0 none: an
+    /// image intensifier's halo round lights and fires (GPU pass only).
+    pub bloom: f32,
+    /// A logarithmic response after the gain (`log(1 + v) / log(1 + gain)`)
+    /// instead of clipping: a high-gain picture's lights keep their
+    /// falloff (GPU pass only).
+    pub shoulder: bool,
 }
 
 impl Frame {
@@ -81,11 +98,15 @@ impl Frame {
             gain: 1.,
             lift: 0.,
             seed: 0x1d2c_3b4a,
+            tint: [1.; 3],
+            colour: false,
+            bloom: 0.,
+            shoulder: false,
         }
     }
 
     /// The pass's uniform, as `crt.wgsl` reads it.
-    fn uniform(&self, size: [u32; 2], overlay: bool) -> [f32; 16] {
+    fn uniform(&self, size: [u32; 2], overlay: bool) -> [f32; UNIFORM_FLOATS] {
         let s = &self.settings;
         [
             (self.seconds % 3600.) as f32,
@@ -104,6 +125,14 @@ impl Frame {
             size[1] as f32,
             (self.seed & 0xff_ffff) as f32,
             f32::from(u8::from(overlay)),
+            self.tint[0],
+            self.tint[1],
+            self.tint[2],
+            f32::from(u8::from(self.colour)),
+            self.bloom,
+            f32::from(u8::from(self.shoulder)),
+            0.,
+            0.,
         ]
     }
 }
@@ -249,7 +278,8 @@ pub fn apply_cpu(pixels: &mut [u8], width: usize, height: usize, frame: &Frame) 
             f32::from(source[at + channel]) / 255.
         };
         v = (v * frame.gain + frame.lift).clamp(0., 1.);
-        if frame.invert { (1. - v) * INVERTED } else { v }
+        let v = if frame.invert { (1. - v) * INVERTED } else { v };
+        v * frame.tint[channel]
     };
     for y in 0..height {
         let mut dx = 0.;
@@ -281,10 +311,22 @@ pub fn apply_cpu(pixels: &mut [u8], width: usize, height: usize, frame: &Frame) 
                 y as u32 / 2,
                 tick.wrapping_mul(31) ^ seed ^ 0x5bd1_e995,
             );
-            // Faint fringes, as `crt.wgsl`'s ABERRATION_COLOUR.
-            let luma = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-            for v in &mut c {
-                *v = luma + (*v - luma) * 0.4;
+            // Faint fringes, as `crt.wgsl`'s ABERRATION_COLOUR: toward grey,
+            // or toward the unshifted picture for a colour source.
+            if frame.colour {
+                let base = [
+                    read(fx, y as f64, (0., 0.), 0),
+                    c[1],
+                    read(fx, y as f64, (0., 0.), 2),
+                ];
+                for (v, b) in c.iter_mut().zip(base) {
+                    *v = b + (*v - b) * 0.4;
+                }
+            } else {
+                let luma = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+                for v in &mut c {
+                    *v = luma + (*v - luma) * 0.4;
+                }
             }
             for v in &mut c {
                 *v *= 1. - s.scanline * line;
@@ -359,7 +401,7 @@ impl Crt {
         });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("CRT look"),
-            size: 64,
+            size: (UNIFORM_FLOATS * 4) as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -568,6 +610,40 @@ mod tests {
         apply_cpu(&mut snowy, w, h, &frame);
         let lit = snowy.chunks_exact(4).filter(|p| p[1] > 40).count();
         assert!(lit > w * h / 3, "{lit}");
+    }
+
+    /// The sensor console's TV picture keeps its colours; night vision's
+    /// phosphor tints a grey picture green (sensor_console.rs).
+    #[test]
+    fn a_colour_source_keeps_its_colours_and_a_tint_colours_the_grey() {
+        let (w, h) = (16, 12);
+        let mut settings = SENSOR;
+        settings.noise = 0.;
+        settings.scanline = 0.;
+        settings.vignette = 0.;
+        settings.monochrome = false;
+        let mut colour: Vec<u8> = (0..w * h).flat_map(|_| [200, 40, 40, 255]).collect();
+        let mut frame = Frame::new(settings, 0., 0.);
+        frame.colour = true;
+        apply_cpu(&mut colour, w, h, &frame);
+        assert!(
+            colour
+                .chunks_exact(4)
+                .all(|p| p[0] >= 198 && p[1] <= 42 && p[2] <= 42),
+            "{:?}",
+            &colour[..4]
+        );
+        settings.monochrome = true;
+        let mut green: Vec<u8> = (0..w * h).flat_map(|_| [200, 40, 40, 255]).collect();
+        let mut frame = Frame::new(settings, 0., 0.);
+        frame.tint = [0.4, 1., 0.5];
+        frame.colour = true;
+        apply_cpu(&mut green, w, h, &frame);
+        assert!(
+            green
+                .chunks_exact(4)
+                .all(|p| p[1] > p[0] && p[1] > p[2] && p[2] > p[0])
+        );
     }
 
     #[test]

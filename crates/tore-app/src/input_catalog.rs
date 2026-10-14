@@ -582,9 +582,15 @@ pub const ENTRIES: &[Entry] = &[
     cmd("sight-zoom-out", "Sight: zoom out", Weapons, &["Shift-;"]),
     cmd(
         "sight-polarity",
-        "Sight: white hot / black hot (AC-130 console)",
+        "Sight: white hot / black hot / TV / night vision (AC-130 console)",
         Weapons,
         &["Ctrl-\\"],
+    ),
+    cmd(
+        "console-range",
+        "Sensor console radar range 5 / 10 / 25 nm (AC-130 console)",
+        Weapons,
+        &["Ctrl-0"],
     ),
     e("sight-x", "Sight: slew left/right", Weapons, Axis, &[]),
     e("sight-y", "Sight: slew up/down", Weapons, Axis, &[]),

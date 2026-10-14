@@ -1411,6 +1411,8 @@ impl App {
             "sight-next" => return self.sight_next_key(),
             // The sensor console's white hot / black hot (presentation).
             "sight-polarity" => return self.sight_polarity_key(),
+            // The sensor console radar's range (5, 10, 25 nm).
+            "console-range" => return self.console_range_key(),
             // Tab is a hold: `queue_gun_key` reads it every tick.
             "fire-gun" => Command::None,
             "sight-zoom-in" => Command::SightZoom(1),
@@ -1813,6 +1815,11 @@ impl App {
             // After a loss in a networked flight Enter flies again (slice
             // F2-V, net/play.rs); otherwise it designates.
             Command::TargetVisual if self.fly_again() => Action::None,
+            // In the sensor console T and Shift+T step through the A-G radar
+            // contacts the sensor can see, and zoom to each (slice nr-conb).
+            Command::Target | Command::TargetPrevious if self.console_showing() => {
+                self.console_target_key(command == Command::Target)
+            }
             Command::Target | Command::TargetPrevious | Command::TargetVisual => {
                 use tore_sim::combat::live::Command as Live;
                 self.queue(seats::SeatCommand::Combat(match command {
@@ -2213,15 +2220,129 @@ impl App {
     fn console_open(&self) -> bool {
         console_open(&self.input, &self.world, &self.net_flight)
     }
-    /// Ctrl+Backslash: the AC-130 sensor console's white hot / black hot.
-    /// Only the console shows it; elsewhere the key does nothing.
+    /// Ctrl+Backslash: the AC-130 sensor console's picture, white hot, black
+    /// hot, TV and night vision in turn. Only the console shows it; elsewhere
+    /// the key does nothing.
     fn sight_polarity_key(&mut self) -> Action {
         let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
         if !sensor_console::console_active(&frame.readout, frame.flight) {
             return Action::Click;
         }
-        self.console.polarity = self.console.polarity.toggled();
+        self.console.mode = self.console.mode.cycled();
         Action::None
+    }
+    /// Ctrl+0: the sensor console radar's range, 5, 10 and 25 nm in turn.
+    /// It is the flight A-G radar's own range setting, so the two match.
+    /// Only the console has it; elsewhere the key does nothing.
+    fn console_range_key(&mut self) -> Action {
+        let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
+        if !sensor_console::console_active(&frame.readout, frame.flight) {
+            return Action::Click;
+        }
+        self.instruments.radar_range =
+            sensor_console::next_radar_range(self.instruments.radar_range);
+        Action::None
+    }
+    /// The A-G radar on, for the sensor console, as Ctrl+R turns it on (the
+    /// scope back on the radar, a radar switched off on), when it is off and
+    /// the radar works. Says why not otherwise.
+    fn console_radar_on(&mut self) {
+        let (working, on) = {
+            let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
+            (
+                frame
+                    .readout
+                    .sensors
+                    .available(tore_sim::sensors::Channel::Radar)
+                    && !frame.readout.damage.radar_failed,
+                frame.readout.sensors.air_ground,
+            )
+        };
+        if on {
+            return;
+        }
+        if !working {
+            self.flight_ui.message("No working radar found");
+            return;
+        }
+        self.air_ground_key();
+    }
+    /// T and Shift+T in the sensor console: the next (or the previous) A-G
+    /// radar contact the sensor can see within the console's range
+    /// ([`sensor_console::in_view`]), designated as T and a scope click
+    /// designate (so the gunsight tracks it and the target camera shows it),
+    /// and the sight zoomed so it fills the picture.
+    fn console_target_key(&mut self, forward: bool) -> Action {
+        let picked = {
+            let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
+            if !frame.readout.sensors.air_ground {
+                None
+            } else {
+                let sides = target_info::Sides {
+                    roster: &self.world.roster,
+                    wings: self.world.ai_wings.as_ref(),
+                    scene: &self.world.terrain.airport_scene,
+                };
+                let launcher = combat::launcher(frame.flight);
+                let terrain = &self.world.terrain;
+                let ground = |x: f64, z: f64| f64::from(terrain.height(x as f32, z as f32));
+                let list = sensor_console::in_view(
+                    &frame.readout.sensors,
+                    launcher,
+                    self.instruments.radar_range,
+                    |from, to| tore_sim::combat::sight::clear_line(from, to, &ground),
+                    |id| sides.friendly_to(frame.plane, id),
+                );
+                Some(
+                    sensor_console::cycle(&list, frame.readout.targets.designated, forward).map(
+                        |id| {
+                            let eye = tore_sim::combat::gunship::eye_position(launcher);
+                            let at = frame
+                                .readout
+                                .sensors
+                                .ground
+                                .iter()
+                                .find(|g| g.id() == id)
+                                .map_or(eye, |g| g.contact.position);
+                            let slant =
+                                (0..3).map(|i| (at[i] - eye[i]).powi(2)).sum::<f64>().sqrt();
+                            // The object's size: the largest side of its box.
+                            let extent = self
+                                .world
+                                .combat
+                                .ground_object(id)
+                                .map_or(sensor_console::DEFAULT_EXTENT_FT, |o| {
+                                    2. * o.bounds.half.iter().copied().fold(0., f64::max)
+                                });
+                            (id, sensor_console::fill_zoom(extent, slant))
+                        },
+                    ),
+                )
+            }
+        };
+        match picked {
+            None => {
+                self.console_radar_on();
+                Action::Click
+            }
+            Some(None) => {
+                self.flight_ui.message("Sensor: no radar target in view");
+                Action::Click
+            }
+            Some(Some((id, zoom))) => {
+                self.queue(seats::SeatCommand::Combat(
+                    tore_sim::combat::live::Command::DesignateTarget(id),
+                ));
+                let current = self.input.sight().1;
+                self.input.zoom_sight(zoom as i8 - current as i8);
+                Action::None
+            }
+        }
+    }
+    /// The sensor console is showing on the presented flight.
+    fn console_showing(&self) -> bool {
+        let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
+        sensor_console::console_active(&frame.readout, frame.flight)
     }
     /// `/`: the sight tracks the next visible ground object.
     fn sight_next_key(&mut self) -> Action {
@@ -4611,10 +4732,38 @@ impl ApplicationHandler for App {
                             );
                             self.camera = gunsight_view::camera(&view);
                             self.camera.weather_slot = 0;
-                            self.camera.thermal = true;
+                            self.camera.thermal = self.console.mode.thermal();
+                            self.camera.sensor = true;
                             self.camera.near_clip = 1.;
                         }
                         let console_on = console_on && sight_frame.is_some();
+                        // The console's radar is the A-G radar: opening the
+                        // console turns it on once (as Ctrl+R would) when it
+                        // is off and the radar works.
+                        if console_on
+                            && !std::mem::replace(&mut self.console.was_open, true)
+                            && !frame.readout.sensors.air_ground
+                            && frame
+                                .readout
+                                .sensors
+                                .available(tore_sim::sensors::Channel::Radar)
+                            && !frame.readout.damage.radar_failed
+                        {
+                            self.instruments.channel = 0;
+                            if self.net_flight.is_none() && !self.world.cockpits[OWN].flight.radar {
+                                self.input.queue(tore_input::PilotCommand::Toggle(
+                                    tore_input::Switch::Radar,
+                                ));
+                            }
+                            queue_command(
+                                &mut self.seat_commands,
+                                seats::SeatCommand::Combat(
+                                    tore_sim::combat::live::Command::ToggleAirGround,
+                                ),
+                            );
+                            self.flight_ui.message("Air-Ground Radar on");
+                        }
+                        self.console.was_open = console_on;
                         // One resolved instant per frame, shared by the main view,
                         // the mirrors and the camera panels.
                         self.scenery
@@ -5364,12 +5513,22 @@ impl ApplicationHandler for App {
                                     presented.position[0] as f32,
                                     presented.position[2] as f32,
                                 )),
-                                self.console.polarity,
+                                self.console.mode,
                                 seconds,
+                                self.combat_view
+                                    .display_position(&self.world.combat, &frame.readout),
+                                self.instruments.radar_range,
                             );
                             let size = self.flight_canvas.size;
                             let overlay = sensor_console::draw(&symbology, &self.camera, size);
-                            renderer.set_console(self.console.crt_frame(seconds), overlay, size);
+                            // How dark it is (night vision's gain).
+                            let light =
+                                sensor_console::night(&self.world.terrain, self.camera.position[1]);
+                            renderer.set_console(
+                                self.console.crt_frame(seconds, light),
+                                overlay,
+                                size,
+                            );
                             self.flight_canvas.blank(size);
                         }
                         use tore_sim::g_effects::GEffects;

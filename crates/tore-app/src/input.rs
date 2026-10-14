@@ -45,6 +45,7 @@ bind keyboard p sight-pin-toggle press\n\
 bind keyboard Shift-' sight-zoom-in press\n\
 bind keyboard Shift-; sight-zoom-out press\n\
 bind keyboard Ctrl-\\ sight-polarity press\n\
+bind keyboard Ctrl-0 console-range press\n\
 bind keyboard Alt-ArrowLeft sight-left hold\n\
 bind keyboard Alt-ArrowRight sight-right hold\n\
 bind keyboard Alt-ArrowUp sight-up hold\n\
@@ -1371,6 +1372,7 @@ mod tests {
             "sight-zoom-in",
             "sight-zoom-out",
             "sight-polarity",
+            "console-range",
         ] {
             let entry = ENTRIES
                 .iter()
@@ -1770,6 +1772,7 @@ mod tests {
             ("'", M::SHIFT, "sight-zoom-in"),
             (";", M::SHIFT, "sight-zoom-out"),
             ("\\", M::CONTROL, "sight-polarity"),
+            ("0", M::CONTROL, "console-range"),
         ] {
             assert!(i.key(key, true, modifiers), "{key}");
             assert_eq!(
