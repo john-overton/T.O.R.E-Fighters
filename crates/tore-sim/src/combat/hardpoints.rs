@@ -86,6 +86,11 @@ pub const FUSELAGE_WELL: f64 = 3.0;
 /// typical store's half width (fitted, agent decision).
 pub const CLEARANCE: f64 = 0.6;
 
+/// [`CLEARANCE`] for a wing row loaded two a wing, which hang beside a
+/// twin rail's bar: about a store's half width either side of a Maverick
+/// 0.85 ft out (fitted, agent decision 2026-10-14).
+pub const TWIN_CLEARANCE: f64 = 1.5;
+
 /// How far a part beside a store may reach below the store's top before
 /// the store counts as cutting through it, feet (fitted, agent decision).
 pub const CUT_TOLERANCE: f64 = 0.25;
@@ -282,21 +287,21 @@ impl Rack {
         }
     }
     /// How many pylons one side of the station has when that side was
-    /// loaded with `per_side` stores: a wing side with two stores, or four
-    /// or more, has two pylons (an inboard and an outboard one), and a
-    /// fuselage side the same count one behind another (John 2026-10-13:
-    /// fuselage missile pairs in tandem, as on the F-14, F-15 and F-4);
-    /// three hang on one pylon's triple ejector rack, as do several stores
+    /// loaded with `per_side` stores: a fuselage side with two stores, or
+    /// four or more, has two one behind another (John 2026-10-13: fuselage
+    /// missile pairs in tandem, as on the F-14, F-15 and F-4). A wing side
+    /// with two stores hangs them on one pylon's twin-rail launcher, one
+    /// each side of its bar (John 2026-10-14: "the F-18s need the dual
+    /// pylons for the wings that take 4 weapons at a station", as the real
+    /// F/A-18's wing pylons carry two missiles each); with four or more it
+    /// has two pylons, an inboard and an outboard one, each with its rack.
+    /// Three hang on one pylon's triple ejector rack, as do several stores
     /// at a centreline or wingtip station (agent decision).
     pub fn pylons(self, per_side: u16) -> u16 {
-        if matches!(
-            self.location(),
-            Location::Wing | Location::Fuselage | Location::Tunnel
-        ) && (per_side == 2 || per_side >= 4)
-        {
-            2
-        } else {
-            1
+        match self.location() {
+            Location::Fuselage | Location::Tunnel if per_side == 2 || per_side >= 4 => 2,
+            Location::Wing if per_side >= 4 => 2,
+            _ => 1,
         }
     }
     /// The pylon of store `slot` (0 first loaded, the highest empties
@@ -451,8 +456,25 @@ impl Rack {
         };
         let k = place.slots.iter().position(|s| *s == slot).unwrap_or(0);
         let on = place.slots.len() as u16;
-        let offset = slot_offset(k as u16, on, size);
+        let offset = self.rack_offset(mount, side.min(1), k as u16, on, size);
         std::array::from_fn(|i| place.point[i] + offset[i])
+    }
+    /// [`slot_offset`] on side `side` (0 right, 1 left) of a station at
+    /// `mount`: mirrored on the left of a paired station, so both wings'
+    /// racks are alike and their outboard stores leave first.
+    pub fn rack_offset(
+        self,
+        mount: Vector,
+        side: usize,
+        k: u16,
+        on: u16,
+        size: StoreSize,
+    ) -> Vector {
+        let mut offset = slot_offset(k, on, size);
+        if side == 1 && self.two_sided(mount) {
+            offset[0] = -offset[0];
+        }
+        offset
     }
     /// How far the model's underside over store `slot`'s pylon is above
     /// the store's lugs, feet ([`Self::depth`], on a rack too; a store under
@@ -608,9 +630,18 @@ pub fn placed(h: &Hardpoint, model: Option<&Underside>) -> (Vector, Rack) {
         // A store beside a deeper part (a nacelle, a body's flank) moves
         // aside until it clears it; failing that it hangs under that part,
         // as PY2 hung every store.
+        // A wing row loaded two a wing hangs them on a twin rail, as wide
+        // as two stores side by side.
+        let half = if rack.location() == Location::Wing
+            && rack.sides(mount, h.count.max(0) as u16)[0] == 2
+        {
+            TWIN_CLEARANCE
+        } else {
+            CLEARANCE
+        };
         let mut lowest = false;
-        if right > 1e-9 && model.cuts(right, mount[2], from, depth) {
-            match model.nudge(right, mount[2], from, depth) {
+        if right > 1e-9 && model.cuts(right, mount[2], from, depth, half) {
+            match model.nudge(right, mount[2], from, depth, half) {
                 Some(nudge) => {
                     right += nudge;
                     mount[0] = right * mount[0].signum();
@@ -963,15 +994,16 @@ impl Underside {
     }
     /// Whether a store hung `depth` under the surface over `right`,
     /// `forward` would cut through a part of the model beside it: some face
-    /// within [`CLEARANCE`] either side reaches more than [`CUT_TOLERANCE`]
-    /// below the store's top.
-    pub fn cuts(&self, right: f64, forward: f64, from: f64, depth: f64) -> bool {
+    /// within `half` either side ([`CLEARANCE`] for one store, [`TWIN_CLEARANCE`]
+    /// for a twin rail) reaches more than [`CUT_TOLERANCE`] below the
+    /// store's top.
+    pub fn cuts(&self, right: f64, forward: f64, from: f64, depth: f64, half: f64) -> bool {
         let Some(surface) = self.height(right, forward, from, 6) else {
             return false;
         };
         let top = surface - depth;
         [-1., -0.5, 0.5, 1.].iter().any(|k| {
-            let r = right + k * CLEARANCE;
+            let r = right + k * half;
             r >= 0.
                 && self
                     .over(r, forward, from)
@@ -982,15 +1014,15 @@ impl Underside {
     /// at equal distance), up to [`MAX_NUDGE`] that keeps a store at
     /// `right`, `forward` hung `depth` under the surface over it from
     /// cutting through the model ([`Self::cuts`]), or `None`.
-    pub fn nudge(&self, right: f64, forward: f64, from: f64, depth: f64) -> Option<f64> {
+    pub fn nudge(&self, right: f64, forward: f64, from: f64, depth: f64, half: f64) -> Option<f64> {
         let steps = (MAX_NUDGE / NUDGE_STEP).round() as i32;
         (1..=steps)
             .flat_map(|n| [f64::from(n) * NUDGE_STEP, -f64::from(n) * NUDGE_STEP])
             .find(|d| {
                 let r = right + d;
-                r > CLEARANCE
+                r > half
                     && self.height(r, forward, from, 0).is_some()
-                    && !self.cuts(r, forward, from, depth)
+                    && !self.cuts(r, forward, from, depth, half)
             })
     }
     /// The stretch of the model straight above `right` (within 12 ft above
@@ -1134,16 +1166,26 @@ mod tests {
     }
 
     #[test]
-    fn a_two_pylon_wing_releases_outboard_then_inboard_from_each_pylon() {
+    fn a_wing_pair_hangs_on_one_twin_rail_and_leaves_outboard_first() {
         let wing = rack(4);
         let mount = [10., -2., -1.];
-        let s = DUAL_PYLON_SPREAD;
-        // Four loaded, two a wing: left out, right out, left in, right in.
+        let o = shoulder(SIZE);
+        // Four loaded, two a wing on one pylon's twin rail (John
+        // 2026-10-14): left out, right out, left in, right in, the racks
+        // mirrored so both wings' outboard stores leave first.
         let xs: Vec<f64> = order(wing, mount, 4).iter().map(|p| p[0]).collect();
-        assert_eq!(xs, [-(10. + s), 10. + s, -(10. - s), 10. - s]);
+        let want = [-(10. + o), 10. + o, -(10. - o), 10. - o];
+        assert!(
+            xs.iter().zip(want).all(|(x, w)| (x - w).abs() < 1e-9),
+            "{xs:?}"
+        );
+        assert_eq!(wing.pylons(2), 1);
         // Two loaded (one a wing) keep the record's point.
         assert_eq!(wing.release_point(mount, 2, 1, 0, SIZE)[0], -10.);
         assert_eq!(wing.pylons(3), 1);
+        // Four or more a wing: an inboard and an outboard pylon.
+        let s = DUAL_PYLON_SPREAD;
+        assert_eq!(wing.pylons(4), 2);
         assert_eq!(wing.pylon(6, 5, 10.), (1, [s, 0.]));
     }
 
@@ -1160,9 +1202,9 @@ mod tests {
         // surface, whatever the record's own height.
         let one = wing.store_point(mount, 2, 0, 0, SIZE);
         assert!((one[1] + SIZE.top - (1. - PYLON_DEPTH)).abs() < 1e-9);
-        // Two a side: each under its own pylon's surface.
-        let inboard = wing.store_point(mount, 4, 1, 0, SIZE);
-        let outboard = wing.store_point(mount, 4, 1, 1, SIZE);
+        // Four a side: two pylons, each under its own surface.
+        let inboard = wing.store_point(mount, 8, 1, 0, SIZE);
+        let outboard = wing.store_point(mount, 8, 1, 1, SIZE);
         assert!((inboard[1] + SIZE.top - (1.5 - PYLON_DEPTH)).abs() < 1e-9);
         assert!((outboard[1] + SIZE.top - (0.5 - PYLON_DEPTH)).abs() < 1e-9);
         assert!(inboard[0] < 0. && outboard[0] < inboard[0], "left side");
@@ -1449,10 +1491,10 @@ mod tests {
         // 5.5 ft out, half a foot past the nacelle's edge: the store's
         // inboard side would cut into it, so the station moves out until
         // the nacelle is beyond its body, and hangs a foot under the wing.
-        assert!(model.cuts(5.5, 0., -5., PYLON_DEPTH));
+        assert!(model.cuts(5.5, 0., -5., PYLON_DEPTH, CLEARANCE));
         let (mount, rack) = placed(&wing(16), Some(&model));
         assert!(mount[0] > 5.5 && mount[0] <= 5.5 + MAX_NUDGE, "{mount:?}");
-        assert!(!model.cuts(mount[0], 0., -5., PYLON_DEPTH));
+        assert!(!model.cuts(mount[0], 0., -5., PYLON_DEPTH, CLEARANCE));
         assert_eq!(rack.over[sample::RECORD], Some(-1.));
         // Clear of it already: not moved.
         let (mount, _) = placed(&wing(30), Some(&model));
