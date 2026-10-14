@@ -114,10 +114,14 @@ impl SensorMode {
         }
     }
     /// The sensor's word in the top left block: IR for the thermal camera,
-    /// TV for the television camera, which the night vision mode
-    /// intensifies.
+    /// TV for the television camera, NVG for the intensified picture (the
+    /// same word as the mode label, so the two blocks never disagree).
     pub fn sensor(self) -> &'static str {
-        if self.thermal() { "IR" } else { "TV" }
+        match self {
+            Self::WhiteHot | Self::BlackHot => "IR",
+            Self::Tv => "TV",
+            Self::NightVision => "NVG",
+        }
     }
     /// The world draws thermally ([`crate::camera::Camera::thermal`]).
     pub fn thermal(self) -> bool {
@@ -189,7 +193,7 @@ pub const LIFT: f32 = -0.2;
 /// automatic gain, from the day's (which still overexposes the picture: an
 /// intensifier is made for the dark) to the night's, by how dark the scene
 /// is ([`night`]).
-pub const NVG_GAIN: (f32, f32) = (1.8, 40.);
+pub const NVG_GAIN: (f32, f32) = (6., 200.);
 /// The phosphor's green (P43-like, agent decision).
 pub const NVG_TINT: [f32; 3] = [0.42, 1.0, 0.5];
 /// The intensifier's grain at full gain on top of the CRT's own noise, and
@@ -225,6 +229,7 @@ pub fn crt_frame(
             frame.tint = NVG_TINT;
             frame.colour = true;
             frame.bloom = NVG_BLOOM;
+            frame.shoulder = true;
             // Grain grows with the gain: the darker the scene, the noisier.
             let dark = (gain - NVG_GAIN.0) / (NVG_GAIN.1 - NVG_GAIN.0);
             frame.settings.noise += NVG_GRAIN * dark.clamp(0., 1.);
@@ -1557,12 +1562,23 @@ mod tests {
         let by_day = console.crt_frame(0., day);
         let by_night = console.crt_frame(0., 1.);
         assert_eq!(by_day.tint, NVG_TINT);
-        assert!(by_day.settings.monochrome && by_day.bloom > 0.);
+        assert!(by_day.settings.monochrome && by_day.bloom > 0. && by_day.shoulder);
+        assert!(!tv.shoulder && !whot.shoulder);
         assert!(by_night.gain > by_day.gain);
         assert!(by_night.settings.noise > by_day.settings.noise);
         assert_eq!(nvg_gain(0.), NVG_GAIN.0);
         assert_eq!(nvg_gain(1.), NVG_GAIN.1);
         assert!(!SensorMode::Tv.thermal() && !SensorMode::NightVision.thermal());
+        assert_eq!(
+            [
+                SensorMode::WhiteHot,
+                SensorMode::BlackHot,
+                SensorMode::Tv,
+                SensorMode::NightVision
+            ]
+            .map(SensorMode::sensor),
+            ["IR", "IR", "TV", "NVG"]
+        );
         assert!(SensorMode::WhiteHot.thermal() && SensorMode::BlackHot.thermal());
     }
 

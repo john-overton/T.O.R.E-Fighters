@@ -82,6 +82,10 @@ pub struct Frame {
     /// Bright parts of the picture bloom over their surroundings, 0 none: an
     /// image intensifier's halo round lights and fires (GPU pass only).
     pub bloom: f32,
+    /// A logarithmic response after the gain (`log(1 + v) / log(1 + gain)`)
+    /// instead of clipping: a high-gain picture's lights keep their
+    /// falloff (GPU pass only).
+    pub shoulder: bool,
 }
 
 impl Frame {
@@ -97,6 +101,7 @@ impl Frame {
             tint: [1.; 3],
             colour: false,
             bloom: 0.,
+            shoulder: false,
         }
     }
 
@@ -125,7 +130,7 @@ impl Frame {
             self.tint[2],
             f32::from(u8::from(self.colour)),
             self.bloom,
-            0.,
+            f32::from(u8::from(self.shoulder)),
             0.,
             0.,
         ]

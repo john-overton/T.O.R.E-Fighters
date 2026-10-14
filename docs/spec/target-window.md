@@ -369,8 +369,8 @@ the trigger fires.
 **Picture modes.** **Ctrl+Backslash** steps the picture through white hot,
 black hot, TV and night vision, then back to white hot (the key does nothing
 outside the console). The label at the top right says WHOT, BHOT, TV or NVG,
-and the sensor word at the top left says IR for the two thermal modes and TV
-for the other two. The symbology is the same in all four. The real AC-130U
+and the sensor word at the top left says IR for the two thermal modes, TV
+and NVG (the same word as the label, so the two never disagree). The symbology is the same in all four. The real AC-130U
 carries a FLIR and an all-light-level television (from memory of public
 descriptions, not checked against a source this round); the labels stay
 plain.
@@ -379,7 +379,7 @@ plain.
 | --- | --- |
 | WHOT, BHOT | The thermal world below |
 | TV | The world as the game draws it, in its own colours, through the same CRT (John asked for "regular visual"; colour rather than a grey TV picture is the agent's reading). No lens flare or spotting aid, which are the eye's, not a camera's. Dark at night, as a plain camera is |
-| NVG | An image intensifier: the visible scene in grey, amplified, on a green phosphor (0.42, 1.0, 0.5). Heat does not show: a cold vehicle in the dark is as dark as the ground round it; a fire, a flare, a muzzle flash or an explosion is bright because of its light, and what the gain lifts past full scale blooms over its surroundings (eight taps 9 and 18 px out, strength 1.6), so a blast washes out the narrow fields. The gain follows how dark it is (the sun from 2 degrees above to 6 below the horizon, the rule the night glows use): 1.8 by day, which overexposes the picture as an intensifier would, up to 40 at night. Grain grows with the gain, up to 5 percent on top of the CRT's own 4.5. The symbology keeps its own pale grey |
+| NVG | An image intensifier: the visible scene in grey, amplified, on a green phosphor (0.42, 1.0, 0.5). Heat does not show: a cold vehicle in the dark is as dark as the ground round it; a fire, a flare, a muzzle flash, an explosion or a vehicle's headlight beam (the art's night-lit beam polygon) is bright because of its light, and what the gain lifts past full scale blooms over its surroundings (eight taps 9 and 18 px out, strength 1.6), so a blast washes out the narrow fields. The gain follows how dark it is (the sun from 2 degrees above to 6 below the horizon, the rule the night glows use): 6 by day, which washes the picture out as an intensifier would, up to 200 at night, shown through a logarithmic response (log(1 + v) / log(1 + gain)) so the dark ground comes up while a light many times brighter keeps its own falloff instead of clipping into a flat plate. Grain grows with the gain, up to 5 percent on top of the CRT's own 4.5. The symbology keeps its own pale grey |
 
 **Thermal.** The world draws as a thermal camera sees it, in grey: in white hot
 the hotter the whiter, in black hot the reverse. Levels (agent decision,

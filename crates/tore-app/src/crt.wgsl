@@ -17,7 +17,7 @@ struct Crt {
  d:vec4<f32>,
  // phosphor tint of the picture (rgb), colour picture (0/1: fringes fade toward the unshifted picture, not grey)
  e:vec4<f32>,
- // bloom strength, unused x3
+ // bloom strength, soft shoulder (0/1), unused x2
  f:vec4<f32>,
 }
 @group(0) @binding(0) var crt_source:texture_2d<f32>;
@@ -65,6 +65,11 @@ fn crt_picture(uv:vec2<f32>)->vec3<f32> {
   }
   c+=vec3<f32>(halo*crt.f.x/8.0);
  }
+ // A logarithmic response (night vision): the gained picture is shown as
+ // log(1 + v) / log(1 + gain), so the dark ground comes up while a light
+ // many times brighter keeps its own falloff instead of clipping into a
+ // flat plate.
+ if crt.f.y>0.0 {c=log2(vec3<f32>(1.0)+max(c,vec3<f32>(0.0)))/log2(1.0+max(crt.c.z,1.0));}
  c=clamp(c,vec3<f32>(0.0),vec3<f32>(1.0));
  // Inverted (black hot) at 85 percent, so a cool scene is not a white page.
  if crt.c.y>0.5 {c=(vec3<f32>(1.0)-c)*0.85;}
