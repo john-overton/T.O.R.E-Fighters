@@ -20,6 +20,22 @@ def repeated_capture_problems(work: Path, _output: str) -> list[str]:
             for repeat, path in enumerate(paths[1:], 1) if path.read_bytes() != first]
 
 
+CONSOLE_FORMS = ("whot", "bhot", "free-wfov", "narrow-e4", "near-limit", "at-limit", "static")
+
+
+def console_problems(output: str) -> list[str]:
+    """Every console form was drawn, and only the one at the gimbal's top says GIMBAL LIMIT."""
+    lines = [line for line in output.splitlines() if line.startswith("ai-strike: CONSOLE")]
+    problems = []
+    if len(lines) != len(CONSOLE_FORMS):
+        problems.append(f"{len(lines)} console frames, expected {len(CONSOLE_FORMS)}")
+    for line in lines:
+        at_limit = "-at-limit.png" in line
+        if at_limit != ("status=GIMBAL LIMIT" in line):
+            problems.append(f"gimbal limit status wrong: {line}")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     """Windowed art inspections and exact repeated-capture checks."""
     stable = []
@@ -38,6 +54,21 @@ def scenarios() -> list[Scenario]:
             notes="Bare captures hold the prepared state, independent of startup and GPU initialization time.",
         ))
     return stable + [
+        Scenario(
+            name="render-ac130-sensor-console",
+            lane="flight",
+            args=["--a2g-run", "UKR", "QUCOL", "--pilot", "ai", "--aircraft", "ac130", "--load", "C_25.JT",
+                  "--altitude", "6000", "--speed", "220", "--from", "3", "--seconds", "50", "--skill", "2",
+                  "--console-scene", "{work}/console", "--console-at", "45"],
+            window=True,
+            outputs=[f"console/console-t045.0s-{form}.png" for form in CONSOLE_FORMS],
+            expect=["ai-strike: CONSOLE", "status=GIMBAL LIMIT"],
+            check=console_problems,
+            timeout=300,
+            notes="The AC-130 sensor console offscreen from an AI gunship's own sensor 45 s into its orbit on the "
+                  "Ukraine column (slice nr-fltv): white hot, black hot, wide and narrow fields, near and at the "
+                  "gimbal limit, and static. Inspect the PNGs; the symbology's rules are tore-app unit tests.",
+        ),
         Scenario(
             name="render-night-effect-lights",
             lane="flight",

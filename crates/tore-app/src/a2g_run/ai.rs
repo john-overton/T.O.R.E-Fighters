@@ -289,6 +289,11 @@ pub(crate) struct Config {
     /// `--render-scene DIR`: draws the world offscreen, looking at the
     /// striker, at its first release (slice ST-T2).
     pub render_scene: Option<std::path::PathBuf>,
+    /// `--console-scene DIR --console-at S,...`: frames of the AC-130 sensor
+    /// console from the striker's own sensor at those seconds into the run
+    /// (slice nr-fltv, [`super::console_render`]).
+    pub console_scene: Option<std::path::PathBuf>,
+    pub console_at: Vec<f64>,
     /// `--offset FT`: the striker starts this far right of the pass line
     /// (negative: left), for the first-pass convergence tests.
     pub offset_ft: f64,
@@ -1598,9 +1603,14 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
     spec.sam = Defense::from_level(o.defenses.1).ok_or("defense levels are 0 to 3")?;
     spec.surface_seed = o.seed;
     spec.wings[0].skill = skill;
+    if let Some(condition) = o.condition {
+        spec.condition = condition;
+    }
     // `--render-scene` needs a seat's plane to present the picture from: a
     // companion lead the seat takes, flying well clear of the striker.
-    let companion = cfg.render_scene.is_some() && !ordering && cfg.handback.is_none();
+    let companion = (cfg.render_scene.is_some() || cfg.console_scene.is_some())
+        && !ordering
+        && cfg.handback.is_none();
     spec.wings[0].count = if ordering { 2 } else { 1 };
     if companion && cfg.quick_wing {
         return Err("--render-scene and --quick-wing both use friendly wing 2: pick one".into());
@@ -1869,6 +1879,8 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
     }
     let mut ordered = false;
     let mut rendered = false;
+    let mut console_due = cfg.console_at.clone();
+    console_due.sort_by(f64::total_cmp);
     let mut first_release: Option<f64> = None;
     let mut handed = !human || ordering;
     let mut handed_at: Option<f64> = None;
@@ -2092,6 +2104,13 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
             && t - 1. / 120. < at
         {
             render(&scene, resources, striker, path)?;
+        }
+        // `--console-scene`: the sensor console's frames at their seconds.
+        if let Some(dir) = &cfg.console_scene {
+            while console_due.first().is_some_and(|at| t >= *at) {
+                let at = console_due.remove(0);
+                super::console_render::render(&mut scene, COMPANION, striker, target, at, dir)?;
+            }
         }
         // `--render-scene`: one frame a moment after the first release.
         if let (Some(dir), Some(at)) = (&cfg.render_scene, first_release.or(watch.last_release))

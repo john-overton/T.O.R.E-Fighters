@@ -33,6 +33,9 @@ pub struct Gpu {
     texture: wgpu::Texture,
     symbol_texture: wgpu::Texture,
     buffer: wgpu::Buffer,
+    /// The sensor console's world picture, CRT pass and overlay, made on
+    /// first use ([`Gpu::console_pixels`]).
+    console: Option<(wgpu::Texture, crate::crt::Crt, wgpu::Texture)>,
 }
 static WEATHER: std::sync::OnceLock<std::collections::BTreeMap<String, Vec<u8>>> =
     std::sync::OnceLock::new();
@@ -106,6 +109,7 @@ impl Gpu {
             texture,
             symbol_texture,
             buffer,
+            console: None,
         })
     }
     pub fn mirror(&mut self, camera: &Camera, world: &Terrain, scenery: &Scenery) {
@@ -142,6 +146,70 @@ impl Gpu {
             scenery,
         );
         self.cockpit.draw(&mut encoder, &view);
+        self.read(encoder, false)
+    }
+    /// The world drawn thermally and shown through the sensor console's CRT
+    /// pass with `overlay` (straight-alpha sRGB RGBA, 1080p) on it: the
+    /// offscreen form of the AC-130 sensor console. `camera` should be
+    /// thermal.
+    pub fn console_pixels(
+        &mut self,
+        camera: &Camera,
+        world: &Terrain,
+        scenery: &Scenery,
+        frame: &crate::crt::Frame,
+        overlay: &[u8],
+    ) -> AppResult<Vec<u8>> {
+        if self.console.is_none() {
+            let picture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Reel sensor console world"),
+                size: wgpu::Extent3d {
+                    width: WIDTH,
+                    height: HEIGHT,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let crt = crate::crt::Crt::new(
+                &self.device,
+                &self.queue,
+                wgpu::TextureFormat::Rgba8UnormSrgb,
+            );
+            let layer = crate::crt::overlay_texture(&self.device, [WIDTH, HEIGHT]);
+            self.console = Some((picture, crt, layer));
+        }
+        let (picture, crt, layer) = self.console.as_ref().expect("made above");
+        crate::crt::write_overlay(&self.queue, layer, [WIDTH, HEIGHT], overlay);
+        let picture = picture.create_view(&Default::default());
+        let layer = layer.create_view(&Default::default());
+        let view = self.texture.create_view(&Default::default());
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        self.sim.draw(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &picture,
+            [WIDTH, HEIGHT],
+            camera,
+            world,
+            scenery,
+        );
+        crt.draw(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &picture,
+            Some(&layer),
+            &view,
+            [WIDTH, HEIGHT],
+            frame,
+        );
         self.read(encoder, false)
     }
     /// The cockpit pass again, emitting only the HUD symbols the glass shows.
