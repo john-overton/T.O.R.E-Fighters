@@ -762,6 +762,7 @@ fn arm_the_boat(world: &mut World) -> u32 {
             rest: [0.; 2],
             limit: [0.; 2],
             offset: [0.; 3],
+            barrel: None,
         }],
         profile: Profile {
             timing: Timing::from_quarters(4, 4, 4, 20, 4, 1),

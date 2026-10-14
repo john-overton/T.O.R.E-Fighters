@@ -98,8 +98,8 @@ const PINNED: [Pin; 18] = [
     ("AAA30BAD.JT", None, 2_000, 42, 4, 0, 1_000, 120, 3_440),
     ("M1939.JT", None, 160, 6, 12, 0, 200, 60, 2_890),
     ("A_M1939.JT", None, 160, 6, 12, 0, 200, 60, 2_890),
-    ("KS12.JT", None, 14, 1, 16, 8, 60, 60, 2_620),
-    ("KS19.JT", None, 14, 1, 16, 8, 60, 60, 2_950),
+    ("KS12.JT", None, 5, 1, 50, 8, 60, 60, 2_620),
+    ("KS19.JT", None, 5, 1, 50, 8, 60, 60, 2_950),
     ("M1.JT", None, 6, 1, 39, 0, 34, 60, 5_866),
     ("T72.JT", None, 8, 1, 29, 0, 22, 60, 5_866),
     ("BMP2.JT", None, 300, 20, 12, 0, 500, 60, 3_150),
@@ -132,7 +132,13 @@ fn surface_guns_table_is_pinned() {
         // one percent of the documented rate.
         let w = applied(row);
         let rate = record_rounds_per_minute(&w);
-        let wanted = f64::from(row.rounds_per_minute);
+        // A single-round row states its sustained rate, rounded: the flak's
+        // 4.7 a minute is listed as 5.
+        let wanted = if row.burst <= 1 {
+            row.sustained_rpm()
+        } else {
+            f64::from(row.rounds_per_minute)
+        };
         assert!(
             (rate - wanted).abs() / wanted <= 0.01,
             "{name}: record cadence {rate:.1} rpm against {wanted}"
@@ -187,14 +193,28 @@ fn surface_guns_table_is_pinned() {
             assert!(ratio >= 0.87, "{name}: {ratio:.3}");
         }
         // Retail damage per game round is untouched; the shot code splits it.
-        assert_eq!(w.damage, retail_weapon(row).damage, "{name}");
+        // (Heavy flak's splash reach is shorter: FLAK_SPLASH_RADIUS_FT.)
+        let mut retail_damage = retail_weapon(row).damage;
+        if retail_damage.collateral_radius > 0 {
+            retail_damage.collateral_radius = FLAK_SPLASH_RADIUS_FT;
+        }
+        assert_eq!(w.damage, retail_damage, "{name}");
     }
     // Flak shells carry no tracer, and fire an opening barrage of eight.
+    // Their rate of fire is a third of the earlier fitted 14 a minute
+    // (John, 2026-10-13), so the pause is his.
     for record in ["KS12.JT", "KS19.JT"] {
         let row = tuning("", record).unwrap();
         assert!(!row.tracer);
         assert_eq!(row.opening_shots, 8);
         assert_eq!(row.burst, 1);
+        assert_eq!(row.origins().pause, Origin::Opinionated);
+        let third = 14.1 / 3.;
+        assert!(
+            (row.sustained_rpm() - third).abs() < 0.2,
+            "{record}: {:.2} a minute",
+            row.sustained_rpm()
+        );
     }
     assert!(tuning("", "ZSU23.JT").unwrap().tracer);
     // Small arms carry tracers like the other light guns (John, 2026-10-12);
@@ -716,4 +736,73 @@ fn the_m163_has_its_own_zones_and_the_ships_phalanx_keeps_the_records() {
     w.seeker.zones[0].maximum_range = 50_000;
     apply("NIMZ", &mut w).unwrap();
     assert_eq!(w.seeker.zones[0].maximum_range, 50_000);
+}
+
+#[test]
+fn flak_bursts_inside_an_egg_300_m_wide_and_100_m_tall() {
+    // Corners and the middle of the three draws: every point is inside the
+    // ellipsoid, none outside, and the extremes reach its half axes.
+    let (w, h) = (FLAK_EGG_HALF_WIDTH_FT, FLAK_EGG_HALF_HEIGHT_FT);
+    assert!((w * 0.3048 - 150.).abs() < 1e-9 && (h * 0.3048 - 50.).abs() < 1e-9);
+    let mut state = 7u64;
+    let mut next = || {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (state >> 11) as f64 / (1u64 << 53) as f64
+    };
+    let (mut widest, mut tallest, mut mean_scaled) = (0f64, 0f64, 0.);
+    let n = 20_000;
+    for _ in 0..n {
+        let p = flak_egg_offset([next(), next(), next()], 1.);
+        let scaled = (p[0] / w).powi(2) + (p[1] / h).powi(2) + (p[2] / w).powi(2);
+        assert!(scaled <= 1. + 1e-9, "{p:?} is outside the egg");
+        widest = widest.max(p[0].hypot(p[2]));
+        tallest = tallest.max(p[1].abs());
+        mean_scaled += scaled.sqrt();
+    }
+    // The volume is filled evenly: the mean scaled radius of a uniform ball is 3/4.
+    assert!((mean_scaled / f64::from(n) - 0.75).abs() < 0.01);
+    assert!(widest > 0.98 * w && tallest > 0.98 * h);
+    // A jammer widens it twice over.
+    let p = flak_egg_offset([1., 0.5, 0.], 2.);
+    assert!((p[0] - 2. * w).abs() < 1e-6);
+    // The same draws give the same point.
+    assert_eq!(
+        flak_egg_offset([0.3, 0.6, 0.9], 1.),
+        flak_egg_offset([0.3, 0.6, 0.9], 1.)
+    );
+}
+
+#[test]
+fn heavy_flak_splash_reaches_400_ft_not_the_records_750_ft() {
+    for record in ["KS12.JT", "KS19.JT"] {
+        let mut w = applied_with_splash(tuning("", record).unwrap(), 750);
+        assert_eq!(w.damage.collateral_radius, FLAK_SPLASH_RADIUS_FT);
+        assert_eq!(w.damage.collateral_percent, 35, "the percent stays");
+        // Idempotent, and a record with a shorter reach keeps it.
+        apply("", &mut w);
+        assert_eq!(w.damage.collateral_radius, FLAK_SPLASH_RADIUS_FT);
+        assert_eq!(
+            applied_with_splash(tuning("", record).unwrap(), 200)
+                .damage
+                .collateral_radius,
+            200
+        );
+    }
+    // A gun with no splash gets none.
+    assert_eq!(
+        applied(tuning("", "ZSU23.JT").unwrap())
+            .damage
+            .collateral_radius,
+        0
+    );
+}
+
+fn applied_with_splash(row: &GunTuning, radius: i16) -> Weapon {
+    let mut w = retail_weapon(row);
+    w.damage.collateral_radius = radius;
+    w.damage.collateral_percent = 35;
+    apply("", &mut w).expect("a row");
+    w
 }

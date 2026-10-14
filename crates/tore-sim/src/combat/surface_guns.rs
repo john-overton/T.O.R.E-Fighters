@@ -398,10 +398,10 @@ pub const TABLE: &[GunTuning] = &[
         gun: "52-K 85 mm (KS-12) flak",
         mount: Mount::Towed,
         units: &["KS12"],
-        rounds_per_minute: 14,
+        rounds_per_minute: 5,
         per_game: 1,
         burst: 1,
-        pause_quarters: 16,
+        pause_quarters: 50,
         opening_shots: 8,
         magazine: 60,
         magazine_reload_s: 60,
@@ -416,10 +416,10 @@ pub const TABLE: &[GunTuning] = &[
         gun: "KS-19 100 mm flak",
         mount: Mount::Towed,
         units: &["KS19"],
-        rounds_per_minute: 14,
+        rounds_per_minute: 5,
         per_game: 1,
         burst: 1,
-        pause_quarters: 16,
+        pause_quarters: 50,
         opening_shots: 8,
         magazine: 60,
         magazine_reload_s: 60,
@@ -620,6 +620,11 @@ pub fn apply(unit: &str, weapon: &mut Weapon) -> Option<&'static GunTuning> {
     movement.minimum_speed = movement.minimum_speed.min(movement.final_speed);
     movement.maximum_speed = movement.maximum_speed.max(muzzle);
     movement.corner_speed = movement.corner_speed.max(muzzle);
+    if weapon.damage.collateral_radius > 0 && weapon.damage.collateral_percent > 0 {
+        // Heavy flak: its splash reaches less far than the retail record says.
+        weapon.damage.collateral_radius =
+            weapon.damage.collateral_radius.min(FLAK_SPLASH_RADIUS_FT);
+    }
     if let Some(zones) = row.zones {
         let seeker = &mut weapon.seeker;
         seeker.zones[0].maximum_range = zones.detection_ft;
@@ -672,7 +677,13 @@ impl GunTuning {
         Origins {
             rate: Origin::Fitted,
             burst: from(self.burst == u16::from(retail.rounds_in_burst)),
-            pause: from(self.pause_quarters == u16::from(retail.reload_t)),
+            // The flak guns' pause is John's (2026-10-13): their rate of fire is
+            // a third of what it was.
+            pause: if self.opening_shots > 0 && self.pause_quarters != u16::from(retail.reload_t) {
+                Origin::Opinionated
+            } else {
+                from(self.pause_quarters == u16::from(retail.reload_t))
+            },
             opening: from(self.opening_shots == retail.startup_shots),
             magazine: Origin::Fitted,
             reload: Origin::Opinionated,
@@ -680,6 +691,49 @@ impl GunTuning {
             damage: from(self.per_game == 1),
         }
     }
+}
+
+/// Half the width of the "egg" heavy flak bursts in, feet: 150 m, so the egg
+/// is 300 m across (John, 2026-10-13: "within a sphere around the target of
+/// about 300m wide and roughly 100m in altitude, not really a sphere but an
+/// egg"; opinionated).
+pub const FLAK_EGG_HALF_WIDTH_FT: f64 = 150. / 0.3048;
+/// Half the height of the egg, feet: 50 m, so it is 100 m tall (John,
+/// 2026-10-13; opinionated).
+pub const FLAK_EGG_HALF_HEIGHT_FT: f64 = 50. / 0.3048;
+
+/// Feet a flak burst's splash damage reaches (fitted, agent decision,
+/// 2026-10-13), where the retail record's is 750 ft. The retail reach is
+/// wider than the whole egg the bursts fall in, so every burst hurt the
+/// target however far it fell from it, and that, with the aim, is what made
+/// flak "super strong". 400 ft (120 m) is a little past the real fragment
+/// reach of an 85 to 100 mm shell against an aircraft (about 100 m): inside
+/// the egg a burst near the target hurts, one far from it does not. The
+/// record's percent (35) and its straight-line fall to nothing at the edge
+/// are unchanged.
+pub const FLAK_SPLASH_RADIUS_FT: i16 = 400;
+
+/// Where a flak shell bursts relative to the point the gun aimed at (the
+/// target's predicted position): a point drawn uniformly through the volume
+/// of an ellipsoid [`FLAK_EGG_HALF_WIDTH_FT`] wide in the horizontal plane
+/// and [`FLAK_EGG_HALF_HEIGHT_FT`] high, widened by `widen` (1 for a clear
+/// radar picture). The distribution (uniform in volume) is an agent decision
+/// (fitted); `draws` are three uniform numbers in 0 to 1 from the surface's
+/// seeded stream, so a flight, its replay and a networked host all agree.
+/// Axes are the world's: x, up, z.
+pub fn flak_egg_offset(draws: [f64; 3], widen: f64) -> [f64; 3] {
+    let [radial, pole, turn] = draws.map(|d| d.clamp(0., 1.));
+    // A uniform point in the unit ball: cube-root radius, uniform height on
+    // the axis, uniform angle around it.
+    let radius = radial.cbrt();
+    let up = 2. * pole - 1.;
+    let ring = (1. - up * up).max(0.).sqrt();
+    let angle = std::f64::consts::TAU * turn;
+    [
+        radius * ring * angle.cos() * FLAK_EGG_HALF_WIDTH_FT * widen,
+        radius * up * FLAK_EGG_HALF_HEIGHT_FT * widen,
+        radius * ring * angle.sin() * FLAK_EGG_HALF_WIDTH_FT * widen,
+    ]
 }
 
 /// A gun record's cyclic rate in rounds a minute, read back from the burst

@@ -4240,7 +4240,16 @@ impl State {
         let Some(row) = super::blast::explosion(explosion) else {
             return;
         };
-        self.emit_sound(position, crate::acoustics::Kind::Blast(explosion));
+        // A flak burst is heard as the retail air flak whichever sheet it
+        // draws: the 100 mm shell draws type 28 (fitted), but both flak
+        // records name type 27, and 27's recordings are the retail flak
+        // sound (docs/spec/sound.md, "Flak").
+        let heard = if kind == EffectKind::Flak {
+            super::blast::FLAK_SOUND
+        } else {
+            explosion
+        };
+        self.emit_sound(position, crate::acoustics::Kind::Blast(heard));
         self.push_effect(Effect {
             position,
             kind,
@@ -5441,68 +5450,10 @@ impl State {
                 first = Some((at, None));
             }
             if let Some(round) = surface {
-                // A flak shell bursts as it comes within its fuze radius of a
-                // hostile aircraft in flight, unless it struck something first.
-                if round.flak && armed {
-                    let fuze = f64::from(w.damage.fuze_radius.max(0));
-                    let hostile = |t: &Target| {
-                        t.hp > 0
-                            && t.airborne
-                            && !t.on_ground
-                            && t.body_present()
-                            && t.id != p.owner
-                            && (owner_side == NO_SIDE || t.side != owner_side)
-                    };
-                    let mut near: Option<f64> = None;
-                    let mut closer = |at: Option<f64>| {
-                        if let Some(at) = at
-                            && near.is_none_or(|n| at < n)
-                        {
-                            near = Some(at);
-                        }
-                    };
-                    for r in rows.iter().filter(|r| hostile(&r.target)) {
-                        closer(segment_sphere(
-                            sub(p.previous, r.previous),
-                            sub(p.position, r.target.position),
-                            r.target.radius + fuze,
-                        ));
-                    }
-                    for &i in &candidates {
-                        let t = &self.targets[i];
-                        if t.role == TargetRole::Aircraft && hostile(t) {
-                            closer(segment_sphere(
-                                sub(p.previous, old_targets[i]),
-                                sub(p.position, t.position),
-                                t.radius + fuze,
-                            ));
-                        }
-                    }
-                    if let Some(at) = near
-                        && first.is_none_or(|f| at < f.0)
-                    {
-                        let position = std::array::from_fn(|i| {
-                            p.previous[i] + (p.position[i] - p.previous[i]) * at
-                        });
-                        impacts.push((
-                            position,
-                            EffectKind::Flak,
-                            flak_explosion(w),
-                            None,
-                            super::blast_scale::of(w),
-                        ));
-                        bursts.push(collateral::Burst::new(
-                            p,
-                            w,
-                            shooter,
-                            position,
-                            collateral::Detonation::Air,
-                            None,
-                            true,
-                        ));
-                        return false;
-                    }
-                }
+                // A flak shell has no proximity fuze (John, 2026-10-13: its bursts
+                // fall in an egg around the target, so the burst point is the time
+                // fuze's alone). It bursts on contact with what it strikes, at the
+                // end tick below, or at the end of its life.
                 // The round's end tick: a flak shell's time fuze bursts it;
                 // any other round has gone past its target and goes away.
                 if first.is_none() && round.end_tick.is_some_and(|end| p.age >= end) {
@@ -6353,7 +6304,10 @@ pub fn projectile_launch_direction(
     owner: u32,
     station: usize,
 ) -> Vector {
-    if !is_gun(weapon) {
+    // A flak shell has no dispersion: it is aimed at its own burst point in
+    // the egg around the target, and the egg is the whole of its scatter
+    // (John, 2026-10-13: bursts within about 300 m by 100 m).
+    if !is_gun(weapon) || surface::is_flak(weapon) {
         return direction;
     }
     let forward = unit(direction);

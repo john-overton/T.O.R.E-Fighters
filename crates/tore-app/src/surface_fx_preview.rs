@@ -13,7 +13,8 @@
 //! tore-app --surface-fx-preview OUT_DIR [SCENE...]
 //! ```
 //!
-//! Scenes: `flak` (the KS-19 and KS-12 flak of North Vietnam), `zsu23` and
+//! Scenes: `flak` (the KS-19 and KS-12 flak of North Vietnam), `ks12gun` and
+//! `ks19gun` (each gun's muzzle flash from the side, nr-flak), `zsu23` and
 //! `zsu57` (the Ukraine city's guns), `troops` (an airfield's small arms,
 //! B17), `squadkill` (the same squad killed as it opens fire, BD2), `sam` (its
 //! SA-6 launching), `wreck` (a destroyed ZSU-23 smoking), `map` (the flight
@@ -77,6 +78,9 @@ enum View {
     Jet,
     /// Beside the firing gun, looking along its barrel.
     Gun,
+    /// Standing off to the side of the whole gun, looking at the gun and the
+    /// flash together: does the flash come from the end of the barrel?
+    Side,
     /// Low beside an airfield's squads, looking out along their fire toward
     /// the aircraft.
     Field,
@@ -116,6 +120,7 @@ impl View {
             View::Flak => "wide",
             View::Jet => "jet",
             View::Gun => "gun",
+            View::Side => "side",
             View::Field => "field",
             View::Squad => "squad",
             View::Far => "far",
@@ -154,7 +159,7 @@ struct Scene {
     kill: bool,
 }
 
-const SCENES: [Scene; 11] = [
+const SCENES: [Scene; 13] = [
     Scene {
         name: "flak",
         theater: "TVIET",
@@ -172,6 +177,44 @@ const SCENES: [Scene; 11] = [
         views: &[View::Flak, View::Jet],
         fov: 55.,
         muzzle_class: 0,
+        kill: false,
+    },
+    Scene {
+        name: "ks12gun",
+        theater: "TVIET",
+        stem: "QTAAA",
+        defenses: (3, 0),
+        over: "KS12",
+        index: 0,
+        altitude: 9_000.,
+        speed_kt: 420.,
+        pass: 0.,
+        from_nm: 6.,
+        seconds: 120.,
+        trigger: Trigger::Gun("KS12.JT"),
+        frames: &[2, 6],
+        views: &[View::Side, View::Gun],
+        fov: 40.,
+        muzzle_class: 2,
+        kill: false,
+    },
+    Scene {
+        name: "ks19gun",
+        theater: "TVIET",
+        stem: "QTAAA",
+        defenses: (3, 0),
+        over: "KS19",
+        index: 0,
+        altitude: 9_000.,
+        speed_kt: 420.,
+        pass: 0.,
+        from_nm: 6.,
+        seconds: 120.,
+        trigger: Trigger::Gun("KS19.JT"),
+        frames: &[2, 6],
+        views: &[View::Side, View::Gun],
+        fov: 40.,
+        muzzle_class: 2,
         kill: false,
     },
     Scene {
@@ -736,6 +779,28 @@ fn render(
                         state.position[2] - 360.,
                     ];
                     look_at(eye, burst, scene.fov)
+                }
+                View::Side => {
+                    let (muzzle, direction) = tracker_now
+                        .flashes
+                        .iter()
+                        .filter(|f| f.kind as usize == scene.muzzle_class)
+                        .max_by(|a, b| a.intensity.total_cmp(&b.intensity))
+                        .map(|f| (f.position, f.direction))
+                        .unwrap_or((center, [0., 1., 0.]));
+                    let side = [-direction[2], 0., direction[0]];
+                    let norm = side[0].hypot(side[2]).max(1e-6);
+                    let middle = [
+                        (muzzle[0] + center[0]) / 2.,
+                        (muzzle[1] + center[1]) / 2. + 6.,
+                        (muzzle[2] + center[2]) / 2.,
+                    ];
+                    let eye = [
+                        middle[0] + side[0] / norm * 85.,
+                        middle[1],
+                        middle[2] + side[2] / norm * 85.,
+                    ];
+                    look_at(eye, middle, scene.fov)
                 }
                 View::Gun => {
                     // The brightest flash showing: a gun that has just fired.

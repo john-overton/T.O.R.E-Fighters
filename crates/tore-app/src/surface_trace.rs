@@ -946,7 +946,18 @@ pub fn run() -> AppResult<()> {
                     let above = effect.position[1] - center[1];
                     summary.min_burst_ft =
                         Some(summary.min_burst_ft.map_or(above, |m: f64| m.min(above)));
-                    line(t, format_args!("flak-burst {above:.0} ft above the unit"));
+                    // Where it fell from the player now (a steady target is where
+                    // the gun led to, so this is the burst's place in its egg).
+                    let player = world.cockpits[0].flight.position;
+                    let east = effect.position[0] - player[0];
+                    let north = effect.position[2] - player[2];
+                    let up = effect.position[1] - player[1];
+                    line(
+                        t,
+                        format_args!(
+                            "flak-burst {above:.0} ft above the unit, {east:.0} ft east, {north:.0} ft north and {up:.0} ft up of the player"
+                        ),
+                    );
                 }
                 flak_now.insert(key);
             }

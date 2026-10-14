@@ -169,6 +169,11 @@ pub struct MountArc {
     /// The hardpoint's position relative to the hull at real size, feet:
     /// right, up, forward.
     pub offset: Vector,
+    /// Where the barrel of a land gun ends, feet from the unit's ground point
+    /// as right, up, forward ([`super::muzzle`]); the shell and its flash
+    /// start there instead of at `offset`. `None` for a ship's gun and a
+    /// launcher.
+    pub barrel: Option<Vector>,
 }
 
 impl MountArc {
@@ -311,6 +316,24 @@ impl Place {
     }
 }
 
+impl Place {
+    /// Where a shell leaves `arc` while the gun aims along `bearing`
+    /// (radians, as `direction_at` reads it): the end of its drawn barrel
+    /// when it has one, as the gun turns toward its target about its up axis,
+    /// else the hardpoint ([`Place::mount`]). Kept above the terrain.
+    pub fn muzzle(&self, arc: &MountArc, bearing: f64, ground: &dyn Fn(f64, f64) -> f64) -> Vector {
+        let Some([x, y, z]) = arc.barrel else {
+            return self.mount(arc, ground);
+        };
+        let turned = Basis::new(bearing, 0., 0.);
+        let mut point: Vector = std::array::from_fn(|i| {
+            self.origin[i] + turned.right[i] * x + turned.up[i] * y + turned.forward[i] * z
+        });
+        point[1] = point[1].max(ground(point[0], point[2]) + MUZZLE_CLEARANCE_FT);
+        point
+    }
+}
+
 /// A SAM battery's fight: its radar, launchers and the missile they fire.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BatteryArms {
@@ -446,9 +469,18 @@ impl Arsenal {
                         }
                     }
                 }
+                // A land gun's shell leaves the end of its drawn barrel.
+                let barrel = if ship {
+                    None
+                } else {
+                    nt.shape
+                        .as_deref()
+                        .and_then(|name| super::muzzle::barrel_ft(name, resources.get(name)?))
+                };
                 arms.weapons = weapons_of(
                     nt,
                     &unit.resource,
+                    barrel,
                     resources,
                     unit.skill,
                     ship,
@@ -729,6 +761,7 @@ pub fn mount_arc(index: usize, mount: &tore_formats::surface_unit::Mount) -> Mou
         rest: mount.slew.map(|v| f64::from(v) / UNITS_PER_DEGREE),
         limit: mount.slew_limit.map(|v| f64::from(v) / UNITS_PER_DEGREE),
         offset: super::mount_position_ft(mount),
+        barrel: None,
     }
 }
 
@@ -739,6 +772,7 @@ pub fn mount_arc(index: usize, mount: &tore_formats::surface_unit::Mount) -> Mou
 fn weapons_of(
     nt: &SurfaceUnit,
     resource: &str,
+    barrel: Option<Vector>,
     resources: &dyn ResourceSource,
     skill: i32,
     ship: bool,
@@ -770,8 +804,9 @@ fn weapons_of(
                 continue;
             }
         };
-        let arc = mount_arc(index, mount);
+        let mut arc = mount_arc(index, mount);
         if surface_guns::is_surface_gun(&record.source) {
+            arc.barrel = barrel;
             if let Some((gun, stock)) =
                 WeaponArms::gun(record, unit_name, arc, skill, ship, npc, nt.npc.zone_dist)
             {
@@ -1807,6 +1842,44 @@ pub fn gun_aim_point(
     aim
 }
 
+/// Where a flak shell fired from `muzzle` bursts, and the ticks it takes to
+/// get there: the shell's burst point is `egg` away from the target as the
+/// target will be when the shell arrives, so the search is for the arrival
+/// time at which the target, carried on at its observed velocity, stands
+/// `egg` from the burst point the shell reaches in that time. The shell is
+/// flown under its own speed law (it slows after the muzzle, which the
+/// gunsight's lead does not know: without this a shell at 15,000 ft burst
+/// about half a second short of a jet at 450 kt, which the old proximity fuze
+/// hid) and its distance is to the burst point, not the egg's centre, so a
+/// burst falls in the egg about the target at the moment it goes off.
+/// `first` is the gunsight's lead point, the start of the search.
+fn flak_burst_point(
+    record: &Weapon,
+    muzzle: Vector,
+    observed: TargetObservation,
+    egg: Vector,
+    first: Vector,
+) -> (Vector, Option<u64>) {
+    let mut centre = first;
+    let mut ticks = None;
+    let mut burst: Vector = std::array::from_fn(|i| centre[i] + egg[i]);
+    for _ in 0..8 {
+        burst = std::array::from_fn(|i| centre[i] + egg[i]);
+        ticks = live::ticks_to_range(record, length(sub(burst, muzzle)));
+        let Some(ticks) = ticks else { break };
+        let seconds = ticks as f64 / 120.;
+        let next: Vector =
+            std::array::from_fn(|i| observed.position[i] + observed.velocity[i] * seconds);
+        let moved = length(sub(next, centre));
+        centre = next;
+        if moved < 1. {
+            burst = std::array::from_fn(|i| centre[i] + egg[i]);
+            break;
+        }
+    }
+    (burst, ticks)
+}
+
 /// Fires a gun's rounds of `fire` at `aircraft` (an aircraft, or a ground
 /// unit or ship): the lead point from the
 /// shared gunsight solution, the burst's aim error, the round's end at the
@@ -1823,7 +1896,10 @@ fn fire_gun(
     scene: &Scene<'_>,
 ) {
     let place = state.place(arms);
-    let muzzle = place.mount(&weapon.mounts[0], scene.ground);
+    // A gun turns toward its target, so its barrel's end is out along the
+    // bearing to it.
+    let bearing = bearing_elevation(sub(aircraft.position, place.origin)).0;
+    let muzzle = place.muzzle(&weapon.mounts[0], bearing, scene.ground);
     let mount = weapon.mounts[0].index;
     let (radar, flak, barrage) = match weapon.kind {
         Kind::Gun { radar, flak } => (radar, flak, None),
@@ -1848,7 +1924,9 @@ fn fire_gun(
         let age = (scene.tick - seen.tick) as f64 / 120.;
         observation(weapon, aircraft.surface, seen.position, seen.velocity, age)
     };
-    if fire.burst_start {
+    // Flak does not aim with an angle error: each shell is aimed at its own
+    // burst point inside the egg around the lead point (below).
+    if fire.burst_start && !flak {
         // The burst's aim error, by skill (a quarter of it at a ground unit
         // or ship); a jammer widens a radar gun's.
         let mut error = if aircraft.surface {
@@ -1888,15 +1966,34 @@ fn fire_gun(
     };
     let aim = gun_aim_point(weapon, &place, muzzle, observed);
     let distance = length(sub(aim, muzzle));
-    let direction = deflect(sub(aim, muzzle), offset[0], offset[1]);
-    let end_tick = if flak {
+    let mut direction = deflect(sub(aim, muzzle), offset[0], offset[1]);
+    let mut end_tick = if flak {
         live::ticks_to_range(&weapon.record, distance)
     } else {
         live::ticks_to_range(&weapon.record, gun_end_range(distance))
     };
+    // A jammer widens a radar gun's scatter, the egg's included.
+    let widen = if radar && aircraft.jammer {
+        control::JAMMED_RADAR_GUN_ERROR_FACTOR
+    } else {
+        1.
+    };
     let (mut fired, mut refused) = (0, 0);
     if !holding {
         for _ in 0..fire.rounds {
+            if flak {
+                // The shell is set to burst at a point in the egg around the
+                // lead point: its direction and its time fuze follow it.
+                let draws = [
+                    unit_draw(&mut state.rng),
+                    unit_draw(&mut state.rng),
+                    unit_draw(&mut state.rng),
+                ];
+                let egg = surface_guns::flak_egg_offset(draws, widen);
+                let (burst, ticks) = flak_burst_point(&weapon.record, muzzle, observed, egg, aim);
+                direction = attitude::unit(sub(burst, muzzle));
+                end_tick = ticks;
+            }
             let unit = state.unit_mut(arms.unit).expect("armed");
             let stock = &mut unit.mounts[mount];
             if stock.loaded == 0 {
