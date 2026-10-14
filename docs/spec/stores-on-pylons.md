@@ -74,8 +74,10 @@ shoulder rail ([the F-14](#the-f-14)).
 | --- | --- | --- |
 | Station position | The source hardpoint record's x (right) and z (forward), a third of a foot a unit, from the aircraft's reference point ([table](../formats/aircraft-ordnance.md#hardpoint-positions)); its height is the pylon's (below) | spec-derived (the height: opinionated, PY2) |
 | Pylon depth | A wing store's top (its lugs, the top of its body) hangs 1 ft under the model's underside over its pylon; a fuselage or centreline store's 2 inches (0.17 ft) under it, on a launcher rail. Stores beside a rack's bar keep the same depth; a triple rack's third hangs under the bar. The underside is the lowest face of the clean model up to 12 ft above the record, straight above the pylon or, where nothing is straight above, up to 3 ft inboard. A station with nothing of the model above it keeps the record's height | opinionated, John 2026-10-13 (morning: 2 ft wing pylons and 4 inch rails; evening: "pylons need to be about half the size they are now"); the samples are agent decisions |
-| Moved aside | A station whose store would cut through a part of the model beside it (a face within 0.6 ft either side of the pylon reaching more than 0.25 ft below the store's top: a nacelle, a gear pod, a body's flank) moves sideways in 0.25 ft steps, out before in at each distance, up to 2 ft, to the first place it clears with model straight above. A store that cannot clear within 2 ft hangs under the lowest surface across its body, as PY2 hung every store (no default load needs it). The move is part of the station's position, so it releases from there too. On the default loads: F/A-18D fuselage AIM-120s 0.25 ft in (3.08 ft out), Rafale fuselage Mavericks 0.25 ft in (3.08), AV-8 fuselage Mavericks 0.25 ft out (3.25), Su-25 B-13 pods 0.5 ft out (5.5), A-10 middle wing row 0.5 ft in (7.83, clear of the main gear pod with its twin rail). The F-14's stations are placed by hand instead ([the F-14](#the-f-14)) | agent decision, 2026-10-13 (John: short pylons; a store inside the launching aircraft's hit box is not a reason to hang it deeper, slice SD) |
+| Moved aside | A station whose store would cut through a part of the model beside it (a face within 0.6 ft either side of the pylon reaching more than 0.25 ft below the store's top: a nacelle, a gear pod, a body's flank) moves sideways in 0.25 ft steps, out before in at each distance, up to 2 ft, to the first place it clears with model straight above. A store that cannot clear within 2 ft hangs under the lowest surface across its body, as PY2 hung every store (no default load needs it). The move is part of the station's position, so it releases from there too. On the default loads: F/A-18D fuselage AIM-120s 0.25 ft in (3.08 ft out), Rafale fuselage Mavericks 0.25 ft in (3.08), AV-8 fuselage Mavericks 0.25 ft out (3.25), Su-25 B-13 pods 0.5 ft out (5.5), (the A-10's rows are placed by hand, [the A-10](#the-a-10)). The F-14's stations are placed by hand instead ([the F-14](#the-f-14)) | agent decision, 2026-10-13 (John: short pylons; a store inside the launching aircraft's hit box is not a reason to hang it deeper, slice SD) |
 | Under the chord | A wing station with nothing of the model straight above it (nor up to 3 ft inboard) slides forward or aft, up to 12 ft, to under the wing's chord at its distance out, nearest the record: 2.4 ft behind the leading edge, so a launch rail about as long as an AA-11's pylon (4.3 ft) starts at the leading edge and the missile's nose reaches ahead of it, as on real underwing launchers; on a chord shorter than 4.8 ft, at its middle (John 2026-10-14: "center the rail to the leading edge"). A safety net: no default load of the 22 aircraft the stores preview draws needs it. It was first written for the Yak-141's outer row (retail records it 16.67 ft out at 0 ft forward, ahead of the swept wing, so its AA-11s hung in space), which now has its own stations ([the Yak-141](#the-yak-141)); it stays for any other row recorded off the wing | agent decision, 2026-10-14 (fitted) |
+| Real stations (A-10) | The A-10's rows 6 and 7 hang on the wing at 10.75 and 14.75 ft out, not under the main gear pods ([the A-10](#the-a-10)) | opinionated, John 2026-10-14; the spans are read from his marks |
+| Real stations (Su-27, Su-35) | The Flankers' tunnel, intake and wing rows hang at the real aircraft's stations, one missile a pylon, from the per-aircraft table ([the Su-27 and Su-35](#the-su-27-and-su-35)) | opinionated, John 2026-10-14 ("make them look realistic"); the positions are agent decisions read from the models |
 | Real stations (Yak-141) | The Yak-141's two wing rows hang at its inner and outer underwing pylons, from the per-aircraft table, not the records' positions ([the Yak-141](#the-yak-141)) | opinionated, John 2026-10-14; the positions are agent decisions read from the model |
 | Real stations (F-14) | The F-14's four weapon and tank records hang at the real aircraft's stations, from a per-aircraft table, not the records' positions: no move aside there ([the F-14](#the-f-14)) | opinionated, John 2026-10-14; the positions are agent decisions read from the model |
 | Shoulder rail | A store on a pylon's shoulder rail (the F-14's AIM-9) hangs 1.25 ft outboard of that pylon's centre line, its body 0.05 ft above the pylon's foot (the lugs, the top, of whatever store hangs under the pylon), and leaves from there: the rail juts off the pylon's side just above the main store, so the shoulder store's body is above the whole body of any store under the pylon, real loads or not (AIM-120, AIM-7, AIM-54, bombs, tanks, GBU-10). 1.25 ft keeps an AIM-9's fins (2.07 ft across at 45 degrees) clear of the pylon and of the fins of an AIM-120, AIM-7 or AIM-54 under it | opinionated, John 2026-10-14 ("the AIM-9 rail in real life is a jut off the main pylon slightly elevated above the stores on the main wing pylon"); the spacing and the 0.05 ft gap are agent decisions (fitted) |
@@ -380,6 +382,61 @@ With bombs, tanks or a GBU-10 chosen for the glove pylon (beyond the real
 F-14's loads) the shoulder AIM-9's body stays above them, though its lower
 fins can touch a wide one. John accepts a little clipping (2026-10-14).
 
+## The A-10
+
+John, 2026-10-14, on a head-on picture: "the double pylons are attached to
+the bottom of the gear/sensor things". Retail records row 6 (four
+Mavericks, two a wing on a twin rail since nr-yak) 8.33 ft out, over the
+main gear pod, so its pylon hung from the pod's underside, about 2 ft
+below the other pylons. The real A-10's eleven stations are on the wings
+and fuselage; the gear pods carry none (stations 3 and 9 are just outboard
+of them, 2 and 10 between those and the outermost 1 and 11). From John's
+marks:
+
+| Record (A10.PT row) | Retail, ft out | T.O.R.E, ft out |
+| --- | ---: | ---: |
+| 5, twin rail inboard of the pod | 3.33 | unchanged (moved aside to 2.48) |
+| 6, twin rail | 8.33 (moved aside to 7.83, under the pod) | 10.75, just outboard of the pod |
+| 7, one a wing | 13.33 | 14.75 |
+| 8, one a wing | 18.33 | unchanged |
+
+Every pylon now hangs 1 ft under the wing; the `clip` lines read 0.
+Opinionated, John 2026-10-14; the spans are agent decisions from his marks.
+
+## The Su-27 and Su-35
+
+John, 2026-10-14: the Su-27 and Su-35 should look realistic. The real
+Flankers carry one missile a pylon: wingtip launchers, three underwing
+pylons a wing (inner, middle, outer), a pylon under each intake duct and
+two stations in the tunnel between the engines, one behind the other.
+Retail's records (the same for both; SU35.PT is the canard Su-27M, the only
+other Flanker in the game) put two AA-12s side by side on the centreline,
+the next row 8 ft out beside the intake ducts, four wing missiles on one
+row 17 ft out (two a wing, which nr-yak's rule hung on a twin rail), and
+the wingtip rails.
+
+| Record (row) | Retail position, ft out / forward | T.O.R.E stations | How |
+| --- | --- | --- | --- |
+| 5, centreline (Su-27 two AA-12s, Su-35 one AA-ML) | 0 / 4.0, side by side | The tunnel between the engines, centred 1 ft back | Two hang one behind the other on 2 inch rails, 0.25 ft apart (front 5 ft forward, rear 7 ft back); one hangs at the centre |
+| 6, beside the intakes (AA-12s, AA-MLs) | 8.0 / 2.67 | Under each intake duct, 4.5 ft out, 2 ft forward | On 2 inch rails under the lowest part of the duct along the store, 6 ft either side (the Su-27's duct bottom slopes) |
+| 7, wing (Su-27 four AA-11s, Su-35 four AA-12s) | 17.0 / -1.33 | The middle and outer underwing pylons, one missile each: Su-27 14 and 18 ft out, Su-35 13 and 17 ft out | A row with more stores than one real pylon a wing spreads to the neighbouring real pylon: two a wing are one on the middle pylon and one on the outer, the outer pair first; one a wing hangs on the outer pylon. Each pylon sits 0.75 ft further back for each foot out, along the swept leading edge; Su-27: middle 0.4 ft back, outer 3.4 ft back (rails about 1.5 ft behind the leading edge, clear of the model's drooped leading edge); Su-35: middle 0.6 ft forward, outer 2.4 ft back (rails at the leading edge) |
+| 8, wingtip | 28.0 / -5.33 | Unchanged: on the tip's edge | |
+
+The inner underwing pylons (about 10 ft out) have no retail row, so
+nothing is drawn there. Every store the ordnance screen allows on these
+rows hangs at the same stations. Clips measured with the stores preview's
+`clip` lines, default loads:
+
+| Store | Before | After |
+| --- | ---: | ---: |
+| Su-27 intake AA-12 | 1.30 ft (into the duct beside it) | 0 |
+| Su-27 tunnel AA-12 | 0.54 ft | 0.54 ft (grid fins into the tunnel) |
+| Su-27 wing AA-11 | 0.71 ft | 0.72 ft (the outer one's nose under the drooped leading edge) |
+| Su-35 intake AA-ML | 0.38 ft | 0.38 ft |
+| Su-35 wing AA-12 | 0 | 0 |
+
+Opinionated, John 2026-10-14; positions are agent decisions (fitted).
+
 ## The Yak-141
 
 John, 2026-10-14, with a picture of a Yak-141 from the side: "the wingtip
@@ -422,7 +479,7 @@ vertices a frame.
 - Retail release position and the 0x4 mirror rule: [weapons formats](../formats/weapons.md#release-state)
   (FA.EXE 1.02F `HARDPos` `0x4532a0`, `HARDUnrotatedHardPos` `0x453220`).
 - Code: `tore_sim::combat::hardpoints` (the rule, twin rails on a wing (`Rack::pylons`, `Rack::rack_offset`), tandem fuselage pairs,
-  `station_move` and `placed_on` (the F-14's and Yak-141's stations, the shoulder rail),
+  `station_move` and `placed_on` (the F-14's, Yak-141's and Flankers' stations, the shoulder rail, separate wing pylons),
   `Rack::store_point`, `slot_offset` and `shoulder` (the bar), `placed` and `Underside::nudge`
   (moving aside), the 1 ft pylon, `default_records` (the A-4E)), `tore-app/src/store_sizes.rs`
   (`fin_clock`, `carried_roll`, the fin roll in `variants`), `tore_sim::combat::store_sizes` (the sizes

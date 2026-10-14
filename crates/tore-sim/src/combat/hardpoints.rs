@@ -168,6 +168,13 @@ pub enum Location {
     /// F-14's tunnel pallets, a fuselage station whose pairs one behind
     /// another close up to [`PALLET_GAP`] ([`station_move`]).
     Tunnel,
+    /// T.O.R.E's own, never a source record's: a wing row whose stores hang
+    /// one to a pylon on separate pylons along a swept wing, the outboard
+    /// one [`SEPARATE_SPREAD`] out and [`SEPARATE_SWEEP`] of that further
+    /// back than the station, the inboard one as far the other way; a lone
+    /// store a side hangs on the outboard one (the Flankers' middle and
+    /// outer underwing pylons, [`station_move`]).
+    Separate,
     /// A byte outside the six reviewed names.
     Other(u8),
 }
@@ -176,6 +183,17 @@ pub enum Location {
 pub const SHOULDER_BYTE: u8 = 0x80;
 /// [`Location::Tunnel`]'s byte, outside the source's 0 to 5.
 pub const TUNNEL_BYTE: u8 = 0x81;
+/// [`Location::Separate`]'s byte, outside the source's 0 to 5.
+pub const SEPARATE_BYTE: u8 = 0x82;
+
+/// How far either side of a [`Location::Separate`] station its two pylons
+/// stand, feet: the Su-27's and Su-35's middle and outer underwing pylons,
+/// 4 ft apart (agent decision read from the models, 2026-10-14).
+pub const SEPARATE_SPREAD: f64 = 2.0;
+/// How far back a [`Location::Separate`] pylon sits for each foot it
+/// stands out, so each keeps its rail's front at the swept leading edge
+/// (the Flankers' leading edges sweep back about 0.75 ft a foot out).
+pub const SEPARATE_SWEEP: f64 = 0.75;
 
 impl Location {
     pub fn from_byte(byte: u8) -> Self {
@@ -188,6 +206,7 @@ impl Location {
             5 => Self::Wingtip,
             SHOULDER_BYTE => Self::Shoulder,
             TUNNEL_BYTE => Self::Tunnel,
+            SEPARATE_BYTE => Self::Separate,
             other => Self::Other(other),
         }
     }
@@ -201,6 +220,7 @@ impl Location {
             Self::Wingtip => 5,
             Self::Shoulder => SHOULDER_BYTE,
             Self::Tunnel => TUNNEL_BYTE,
+            Self::Separate => SEPARATE_BYTE,
             Self::Other(byte) => byte,
         }
     }
@@ -211,6 +231,7 @@ impl Location {
             Self::Centerline
                 | Self::Fuselage
                 | Self::Tunnel
+                | Self::Separate
                 | Self::Wing
                 | Self::Wingtip
                 | Self::Shoulder
@@ -301,6 +322,7 @@ impl Rack {
         match self.location() {
             Location::Fuselage | Location::Tunnel if per_side == 2 || per_side >= 4 => 2,
             Location::Wing if per_side >= 4 => 2,
+            Location::Separate if per_side >= 2 => 2,
             _ => 1,
         }
     }
@@ -312,12 +334,28 @@ impl Rack {
     /// a wing's pylon 1 is the outboard one, a fuselage's the front one,
     /// spaced so the stores clear by [`TANDEM_GAP`].
     pub fn pylon(self, per_side: u16, slot: u16, length: f64) -> (u16, [f64; 2]) {
+        let separate = |sign: f64| {
+            [
+                sign * SEPARATE_SPREAD,
+                -sign * SEPARATE_SPREAD * SEPARATE_SWEEP,
+            ]
+        };
         if self.pylons(per_side) < 2 {
-            return (0, [0.; 2]);
+            // A lone store on separate pylons takes the outboard one.
+            return (
+                0,
+                if self.location() == Location::Separate {
+                    separate(1.)
+                } else {
+                    [0.; 2]
+                },
+            );
         }
         let pylon = slot % 2;
         let sign = if pylon == 0 { -1. } else { 1. };
-        let offset = if self.location() == Location::Fuselage {
+        let offset = if self.location() == Location::Separate {
+            separate(sign)
+        } else if self.location() == Location::Fuselage {
             [0., sign * (length + TANDEM_GAP) / 2.]
         } else if self.location() == Location::Tunnel {
             [0., sign * (length + PALLET_GAP) / 2.]
@@ -692,6 +730,9 @@ pub enum Hang {
     /// As recorded, on tunnel pallets ([`Location::Tunnel`]): pairs one
     /// behind another close up to [`PALLET_GAP`].
     Pallets,
+    /// On separate pylons along a swept wing, one store each
+    /// ([`Location::Separate`]).
+    Separate,
 }
 
 /// Where one aircraft type's source record hangs its stores in T.O.R.E,
@@ -801,9 +842,66 @@ pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
             YAK141_OUTER[1],
             Hang::AsRecorded,
         ),
+        // The Flankers: the tunnel between the engines, the intake pylons,
+        // the middle and outer underwing pylons (the wingtip rails stay).
+        (AircraftId::Su27 | AircraftId::Su35, 5) => at(
+            Location::Centerline,
+            0.,
+            FLANKER_TUNNEL_FORWARD,
+            Hang::Pallets,
+        ),
+        (AircraftId::Su27 | AircraftId::Su35, 6) => at(
+            Location::Fuselage,
+            FLANKER_INTAKE[0],
+            FLANKER_INTAKE[1],
+            Hang::Lowest { half: 6. },
+        ),
+        // The A-10: the twin-rail row recorded at the main gear pod moves
+        // out on the wing, just outboard of the pod, and the next row out
+        // halfway to the outermost pylon (John 2026-10-14).
+        (AircraftId::A10, 6) => at(Location::Wing, A10_WING[0], 0., Hang::AsRecorded),
+        (AircraftId::A10, 7) => at(Location::Wing, A10_WING[1], 0., Hang::AsRecorded),
+        (AircraftId::Su27, 7) => at(Location::Wing, SU27_WING[0], SU27_WING[1], Hang::Separate),
+        (AircraftId::Su35, 7) => at(Location::Wing, SU35_WING[0], SU35_WING[1], Hang::Separate),
         _ => None,
     }
 }
+
+/// The A-10's wing pylons for its rows 6 and 7, feet out (John 2026-10-14,
+/// on a head-on picture: "the double pylons are attached to the bottom of
+/// the gear/sensor things"; the spans are read from his marks). Retail
+/// records row 6 8.33 ft out, over the main gear pod (the station moved
+/// aside to 7.83 since nr-yak and hung under the pod, 2 ft below the other
+/// pylons), and row 7 13.33 ft out. The real A-10's stations 3 and 9 are
+/// just outboard of the gear pods, 2 and 10 between them and the outermost.
+/// Row 6 now hangs its twin rail 10.75 ft out, 1 ft under the wing, its
+/// Mavericks clear of the pod (which runs to about 8.5 ft out); row 7 its
+/// single Maverick 14.75 ft out; row 8 stays 18.33 ft out and row 5 inboard
+/// of the pod.
+const A10_WING: [f64; 2] = [10.75, 14.75];
+
+/// Where the Flankers' tunnel stations (between the engines, on the
+/// centreline) are centred, feet forward: two stores hang one behind the
+/// other 0.25 ft apart ([`PALLET_GAP`]), about 1 ft and 13 ft behind the
+/// intake lips; one hangs here (agent decision read from the models).
+const FLANKER_TUNNEL_FORWARD: f64 = -1.0;
+/// The Flankers' intake pylons, [feet out, feet forward]: under the middle
+/// of each intake duct (the Su-27 model's run 2.5 to 6.5 ft out, the
+/// Su-35's 3 to 6 ft), 4.5 ft out, a little behind the intake lips, under
+/// the lowest part of the duct along the store (retail records the row
+/// 8 ft out, beside the duct, at 2.67 ft forward).
+const FLANKER_INTAKE: [f64; 2] = [4.5, 2.0];
+/// The Su-27's row of four wing missiles (retail 17 ft out, 1.33 ft back,
+/// on one twin rail since nr-yak), centred between its middle pylon (14 ft
+/// out, 0.4 ft back) and its outer pylon (18 ft out, 3.4 ft back), both
+/// rails' fronts about 1.5 ft behind the swept leading edge: the model's
+/// leading edge droops 1.6 ft below the wing's underside over its front
+/// 1.5 ft, and an AA-11's nose further forward runs into it. The inner
+/// underwing pylon (about 10 ft out) has no retail row and is not drawn.
+const SU27_WING: [f64; 2] = [16.0, -1.9];
+/// The Su-35's (canard Su-27M) row: middle pylon 13 ft out, outer 17 ft
+/// out (its wing is shorter, 24.3 ft half span against 26.3).
+const SU35_WING: [f64; 2] = [15.0, -0.9];
 
 /// The Yak-141's inner underwing pylon, [feet out, feet forward] (agent
 /// decision read from the model, John 2026-10-14: "both pylons are fully
@@ -848,12 +946,24 @@ pub fn placed_on(
             rack.location = TUNNEL_BYTE;
             (moved.right, mount[2])
         }
+        Hang::Separate => {
+            rack.location = SEPARATE_BYTE;
+            (moved.right, mount[2])
+        }
         _ => (moved.right, mount[2]),
     };
     if let Some(model) = model {
         let from = mount[1];
         rack.over = sample_points(pylon, forward)
             .map(|(r, f)| model.height(r, f, from, 6).map(|h| h as f32));
+        if moved.hang == Hang::Separate {
+            // Each pylon's own surface, where it stands.
+            for (index, sign) in [(sample::INBOARD, -1.), (sample::OUTBOARD, 1.)] {
+                let r = pylon + sign * SEPARATE_SPREAD;
+                let f = forward - sign * SEPARATE_SPREAD * SEPARATE_SWEEP;
+                rack.over[index] = model.height(r, f, from, 6).map(|h| h as f32);
+            }
+        }
         if let Hang::Lowest { half } = moved.hang {
             let steps = (half / 0.5).round() as i32;
             rack.over[sample::RECORD] = (-steps..=steps)
@@ -1754,5 +1864,105 @@ mod tests {
             );
         }
         const { assert!(YAK141_OUTER[0] - YAK141_INNER[0] >= 3.) };
+    }
+
+    #[test]
+    fn the_flankers_hang_one_missile_a_pylon_at_their_real_stations() {
+        // A flat underside 1 ft below the reference, everywhere.
+        let flat = Shape {
+            lines: Vec::new(),
+            faces: vec![tore_formats::shape::Face {
+                positions: vec![
+                    [0., -90., -3.],
+                    [90., -90., -3.],
+                    [90., 90., -3.],
+                    [0., 90., -3.],
+                ],
+                colors: vec![1; 4],
+                fog: Default::default(),
+                uv: Vec::new(),
+                texture: String::new(),
+                subtype: 0x20,
+                normal: None,
+                address: 0,
+            }],
+            billboards: Vec::new(),
+            state_words: Default::default(),
+        };
+        let model = Underside::of(&flat, 1. / 3.);
+        let row = |location, position, count| Hardpoint {
+            location,
+            flags: 0x07e5,
+            position,
+            store: Some("AA11.JT".into()),
+            count,
+            weight_class: 0,
+        };
+        let aa11 = StoreSize::of_shape(Some("ARCHR.SH"));
+        for (id, [right, forward]) in [(AircraftId::Su27, SU27_WING), (AircraftId::Su35, SU35_WING)]
+        {
+            // The wing row of four: one missile on each of the middle and
+            // outer pylons a wing, no twin rail; the outer ones leave first.
+            let (mount, wing) = placed_on(id, 7, &row(4, [51, -18, -4], 4), Some(&model));
+            assert_eq!(wing.location(), Location::Separate);
+            assert_eq!([mount[0], mount[2]], [right, forward]);
+            let order: Vec<Vector> = (0..4u32)
+                .rev()
+                .map(|after| {
+                    let side = usize::from(wing.release_mount(mount, after)[0] < 0.);
+                    let slot = wing.sides(mount, after as u16)[side];
+                    wing.release_point(mount, 4, after, slot, aa11)
+                })
+                .collect();
+            let (s, back) = (SEPARATE_SPREAD, SEPARATE_SPREAD * SEPARATE_SWEEP);
+            let want = [
+                [-(right + s), forward - back],
+                [right + s, forward - back],
+                [-(right - s), forward + back],
+                [right - s, forward + back],
+            ];
+            for (p, [x, z]) in order.iter().zip(want) {
+                assert!(
+                    (p[0] - x).abs() < 1e-9 && (p[2] - z).abs() < 1e-9,
+                    "{id:?} {p:?}"
+                );
+                assert!((p[1] + aa11.top - (-1. - PYLON_DEPTH)).abs() < 1e-4);
+            }
+            // One a wing: on the outer pylon.
+            let (mount, wing) = placed_on(id, 7, &row(4, [51, -18, -4], 2), Some(&model));
+            assert!((wing.store_point(mount, 2, 0, 0, aa11)[0] - (right + s)).abs() < 1e-9);
+            // The intake pylons under the ducts, the tunnel on the centreline.
+            let (mount, _) = placed_on(id, 6, &row(1, [24, -25, 8], 2), Some(&model));
+            assert_eq!([mount[0], mount[2]], FLANKER_INTAKE);
+            let (mount, tunnel) = placed_on(id, 5, &row(0, [0, -25, 12], 2), Some(&model));
+            assert_eq!(tunnel.location(), Location::Tunnel);
+            assert_eq!([mount[0], mount[2]], [0., FLANKER_TUNNEL_FORWARD]);
+            let pair = [0, 1].map(|slot| tunnel.store_point(mount, 2, 0, slot, aa11));
+            assert!(
+                pair.iter().all(|p| p[0] == 0.) && (pair[0][2] - pair[1][2]).abs() > aa11.length
+            );
+        }
+    }
+
+    #[test]
+    fn the_a10s_pylons_hang_from_the_wing_not_the_gear_pods() {
+        // Rows 6 and 7 move out on the wing; the others keep their records.
+        let row = |x| Hardpoint {
+            location: 4,
+            flags: 0x0585,
+            position: [x, -10, 0],
+            store: Some("AGM65G.JT".into()),
+            count: 4,
+            weight_class: 0,
+        };
+        let at = |index, x| placed_on(AircraftId::A10, index, &row(x), None).0;
+        assert_eq!(at(6, 25)[0], A10_WING[0]);
+        assert_eq!(at(7, 40)[0], A10_WING[1]);
+        assert_eq!(at(8, 55)[0], 55. / 3.);
+        assert!(station_move(AircraftId::A10, 5).is_none());
+        // Ordered out along the wing with room between: the twin rail
+        // (Mavericks 0.85 ft either side of its bar, fins 1.2 ft) clear of
+        // the single Maverick outboard of it.
+        const { assert!(A10_WING[1] - A10_WING[0] > 0.85 + 2.4 && 55. / 3. - A10_WING[1] > 2.4) };
     }
 }
