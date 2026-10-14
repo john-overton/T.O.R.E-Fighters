@@ -603,33 +603,23 @@ fn fit_store(
     });
     // The row retail loads this store on by default (the A-4E's Mk 82s,
     // whose centreline row carries a tank in T.O.R.E's default load since
-    // PY3): there, with retail's count, in place of the tank.
+    // PY3).
+    let record = tore_formats::aircraft::Aircraft::parse(
+        resources
+            .get(o.aircraft.pt())
+            .ok_or("missing aircraft record")?,
+    )?;
     let retail = o.load.as_ref().and_then(|name| {
-        let record =
-            tore_formats::aircraft::Aircraft::parse(resources.get(o.aircraft.pt())?).ok()?;
-        let (hardpoint, h) = record.hardpoints.iter().enumerate().find(|(_, h)| {
+        let hardpoint = record.hardpoints.iter().position(|h| {
             h.store
                 .as_deref()
                 .is_some_and(|s| s.eq_ignore_ascii_case(name))
         })?;
-        let station = (*config.hardpoint_slots.get(hardpoint)?)?;
-        Some((hardpoint, station, u16::try_from(h.count).ok()?))
+        *config.hardpoint_slots.get(hardpoint)?
     });
-    let mut retail_row = false;
-    if let Some((hardpoint, station, count)) = retail
-        && o.station.is_none_or(|s| s == station)
-        && config.stations[station].count == 0
-    {
-        for tank in config.tanks.iter_mut().filter(|t| t.hardpoint == hardpoint) {
-            tank.quantity = 0;
-        }
-        config.refresh_tanks()?;
-        config.stations[station].count = count;
-        retail_row = true;
-    }
     let station = match (carried, o.station, retail) {
         (_, Some(station), _) => station,
-        (_, None, Some((_, station, _))) if retail_row => station,
+        (_, None, Some(station)) => station,
         (Some(station), None, _) => station,
         (None, None, _) => config
             .stations
@@ -661,6 +651,29 @@ fn fit_store(
     }
     if station >= config.stations.len() {
         return Err(format!("the aircraft has {} stations", config.stations.len()).into());
+    }
+    // An empty row (the A-4E's centreline Mk 82 row, a tank there by
+    // default since PY3) given no `--count` carries what retail loads on it,
+    // in place of its tank.
+    let mut retail_row = false;
+    if o.count.is_none()
+        && !added
+        && config.stations[station].count == 0
+        && let Some(hardpoint) = config
+            .hardpoint_slots
+            .iter()
+            .position(|s| *s == Some(station))
+        && let Some(h) = record
+            .hardpoints
+            .get(hardpoint)
+            .filter(|h| h.store.as_deref().is_some_and(|n| n.ends_with(".JT")))
+    {
+        for tank in config.tanks.iter_mut().filter(|t| t.hardpoint == hardpoint) {
+            tank.quantity = 0;
+        }
+        config.refresh_tanks()?;
+        config.stations[station].count = u16::try_from(h.count).unwrap_or(0);
+        retail_row = true;
     }
     let fitted = match &o.load {
         Some(name)
