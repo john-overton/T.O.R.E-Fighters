@@ -38,6 +38,7 @@ bind keyboard Ctrl-Alt-a hover-hold press\n\
 bind keyboard Ctrl-Shift-a stability-level press\n\
 bind keyboard Ctrl-7 weapon-group-next press\n\
 bind keyboard Ctrl-8 weapon-group-toggle press\n\
+bind keyboard Ctrl-9 sensor-console press\n\
 bind keyboard \\ sight-designate press\n\
 bind keyboard Shift-\\ sight-pin press\n\
 bind keyboard Shift-' sight-zoom-in press\n\
@@ -1288,6 +1289,39 @@ mod tests {
         input.resolver.profile.aliases.extend(profile.aliases);
         input.resolver.profile.bindings.extend(profile.bindings);
         input
+    }
+    /// The AC-130's command keys the controls catalog lists (and so
+    /// CONTROLS.md and the keyboard map show) are bound in the stock profile:
+    /// Ctrl+9, the sensor console, was listed and drawn on the keyboard map
+    /// but never bound (2026-10-14), so pressing it did nothing.
+    #[test]
+    fn the_ac130_command_keys_are_stock_bound() {
+        use crate::input_catalog::ENTRIES;
+        let stock = Profile::parse(DEFAULTS).expect("static defaults").bindings;
+        for action in [
+            "weapon-group-next",
+            "weapon-group-toggle",
+            "sensor-console",
+            "sight-designate",
+            "sight-pin",
+            "sight-zoom-in",
+            "sight-zoom-out",
+            "sight-polarity",
+        ] {
+            let entry = ENTRIES
+                .iter()
+                .find(|e| e.action == action)
+                .unwrap_or_else(|| panic!("{action} is not in the catalog"));
+            assert!(!entry.keys.is_empty(), "{action} lists no stock key");
+            for &key in entry.keys {
+                assert!(
+                    stock
+                        .iter()
+                        .any(|b| b.device == "keyboard" && b.control == key && entry.matches(b)),
+                    "{key} ({action}) is listed but not bound in the stock profile"
+                );
+            }
+        }
     }
     #[test]
     fn fa_throttle_steps_cross_into_and_out_of_afterburner() {
