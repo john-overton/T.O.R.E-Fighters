@@ -524,10 +524,11 @@ agent for the layout).
 | Gimbal limit | The AC-130 eye icon |
 
 Retail shows the weapon's own view in the IR/Laser window after launch (Shift+2,
-retail manual p. 88). The page does that for the weapons with a seeker picture,
-from launch until impact, and the Clear designation key goes back to the pod
-view ([seeker view](target-window.md#seeker-view); opinionated, John
-2026-10-12, which reverses the earlier agent choice to keep the pod view).
+retail manual p. 88). The page does that for the weapons with a seeker picture
+(the laser bombs among them), from launch until impact, then a second of
+static, and the Clear designation key goes back to the pod view
+([seeker view](target-window.md#seeker-view); opinionated, John 2026-10-12 and
+2026-10-13, which reverses the earlier agent choice to keep the pod view).
 
 ## The HUD in air-to-ground modes
 

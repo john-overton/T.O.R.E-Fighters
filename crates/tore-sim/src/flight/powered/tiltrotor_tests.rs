@@ -26,16 +26,20 @@ fn every_setting() -> impl Iterator<Item = (StabilityLevel, bool)> {
 }
 
 /// A synthetic record under the V-22's identity carrying its PT's flight
-/// numbers (design 8.2) as plain constants: 18,298 lb empty, 2,000 lb fuel,
-/// 23,810 lb maximum, 26,280 lbf, 36 to 130 kt to 7,000 ft (the AH-64's
-/// envelope; the variety fit scales it to 275 kt and 25,000 ft).
+/// numbers as the reader delivers them (design 8.2; slice HF3 corrected the
+/// weights the PT copied from the AH-64 to the MV-22B's): 31,818 lb empty,
+/// 11,700 lb fuel, 52,600 lb maximum, 58,057 lbf, 36 to 130 kt to 7,000 ft
+/// (the AH-64's envelope; the variety fit scales it to 275 kt and 25,000 ft).
 pub(crate) fn pt_v22() -> Aircraft {
+    use tore_formats::aircraft::corrections::{
+        V22_EMPTY_LB, V22_INTERNAL_FUEL_LB, V22_MAX_TAKEOFF_LB, V22_THRUST_LBF,
+    };
     let mut a = crate::models::variety::tests::synthetic(AircraftId::V22);
     for (key, value) in [
-        ("weight", 18_298),
-        ("internalFuel", 2_000),
-        ("maxTakeoffWeight", 23_810),
-        ("thrust", 26_280),
+        ("weight", V22_EMPTY_LB),
+        ("internalFuel", V22_INTERNAL_FUEL_LB),
+        ("maxTakeoffWeight", V22_MAX_TAKEOFF_LB),
+        ("thrust", V22_THRUST_LBF),
     ] {
         a.fields.get_mut(key).unwrap().value = value.to_string();
     }
@@ -357,7 +361,8 @@ fn t1_full_stick_reaches_the_hover_rate_targets() {
 
 /// H6: a 10 percent lever step from a hover sets a climb rate that settles
 /// (time constant 3 to 6 s, as the helicopters' rotor heave damping gives),
-/// and full lever climbs at 1,500 to 3,000 ft/min.
+/// and full lever climbs inside the published 2,320 to 4,000 ft/min (Pub
+/// W-V22; slice HF3, at the MV-22B's weights; 1,500 to 3,000 before).
 #[test]
 fn t1_the_lever_sets_a_climb_rate_not_an_acceleration() {
     let hold = |lever| Hold {
@@ -382,7 +387,7 @@ fn t1_the_lever_sets_a_climb_rate_not_an_acceleration() {
     let mut full = trimmed(1_000., 0., 87., StabilityLevel::Damper);
     fly(&mut full, 120 * 15, |s| steer(s, hold(1.)));
     let rate = full.vertical_speed * FPM;
-    assert!((1_500. ..=3_000.).contains(&rate), "{rate} ft/min");
+    assert!((2_320. ..=4_000.).contains(&rate), "{rate} ft/min");
 }
 
 /// H9b: the engines cut in a hover with the lever held. Rotor speed falls
@@ -744,7 +749,10 @@ fn t4_airplane_mode_speed_roll_and_rotor_speed() {
 
 /// The wing stalls near the published 110 kt at the PT gross weight in
 /// airplane mode, and the stall warning sounds below the corridor's lower
-/// edge with the nacelles under 35 degrees.
+/// edge with the nacelles under 35 degrees. Slowest wingborne flight 105 to
+/// 125 kt (120 before slice HF3: at the MV-22B's weight the wing's induced
+/// drag, the weight squared over the same span, holds the nose higher at
+/// the slow end; 122 kt).
 #[test]
 fn the_wing_stalls_near_110_kt_and_warns_below_the_lower_edge() {
     let s = untrimmed(0., StabilityLevel::Damper);
@@ -757,7 +765,7 @@ fn the_wing_stalls_near_110_kt_and_warns_below_the_lower_edge() {
             s.trim_tiltrotor(kt * KT, 0.) && s.pitch < 10_f64.to_radians()
         })
         .unwrap();
-    assert!((105. ..=120.).contains(&slowest), "{slowest} kt");
+    assert!((105. ..=125.).contains(&slowest), "{slowest} kt");
     // Decelerate with the power off, holding height: the warning comes
     // below 110 KCAS on the downstops.
     let mut slowing = trimmed(

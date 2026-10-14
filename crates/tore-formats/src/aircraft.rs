@@ -1,6 +1,8 @@
 //! Bounded BRF data recovery and aircraft dependency selection. Never executes modules.
 use crate::{Archive, Result, invalid};
 use std::collections::{BTreeMap, BTreeSet};
+#[path = "aircraft_corrections.rs"]
+pub mod corrections;
 #[path = "aircraft_schema.rs"]
 pub(crate) mod schema;
 #[derive(Clone, Debug)]
@@ -809,14 +811,16 @@ impl Aircraft {
         if root.len() != o + n + schema::PLANE.len() {
             return Err(invalid("unsupported aircraft BRF layout"));
         }
-        let object = fields(&root[..o], schema::OBJECT)?;
+        let mut object = fields(&root[..o], schema::OBJECT)?;
         let npc = fields(&root[o..o + n], schema::NPC)?;
-        let plane = fields(&root[o + n..], schema::PLANE)?;
+        let mut plane = fields(&root[o + n..], schema::PLANE)?;
         let names = b.strings("ot_names")?;
         if names.len() != 3 {
             return Err(invalid("invalid aircraft identity"));
         }
         let id = AircraftId::parse(&names[2])?;
+        // Plainly copied records get published figures (slice HF3).
+        corrections::apply(id, &mut object, &mut plane);
         let size = match id {
             AircraftId::F14 | AircraftId::F22 | AircraftId::F22n | AircraftId::Mig29 => 636,
             AircraftId::A4E | AircraftId::Mig21 => 612,

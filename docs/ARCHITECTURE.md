@@ -539,7 +539,7 @@ the state.
 | `flight/powered/body.rs` | The rigid body: inertia from the radii of gyration, moments, the attitude integrator that conserves angular momentum |
 | `flight/powered/rotor.rs` | One lifting rotor: thrust, inflow, vortex ring state, ground effect, power, blade stall, the `Hazards` switches |
 | `flight/powered/drive.rs` | Rotor speed, governor and engines for any number of rotors on one drive |
-| `flight/powered/fuel.rs` | The rotorcraft fuel flow: the turboshaft line of the power the drive delivers, and the steady hover flow the AI plans with (slice HF2) |
+| `flight/powered/fuel.rs` | The rotorcraft fuel flow: the turboshaft line of the power the drive delivers (slice HF2), and the steady level cruise flow the AI plans with, trimmed once when the model is built (slice HF3) |
 | `flight/powered/fuselage.rs` | Helicopter fuselage drag, tail surfaces, fin and stub wings |
 | `flight/powered/helicopter.rs` | The single-rotor AH-64 and Mi-24: rotor, tail rotor, trim |
 | `flight/powered/tandem.rs` | The CH-47's two rotors, wake interference, mixer, trim |
@@ -910,7 +910,7 @@ flowchart LR
 | `tore-world` `surface::{movement, supply, parked}` | Routed units (integer `Mover` state), supply truck resupply, parked aircraft poses and deck spots |
 | `tore-sim` `ai::surface` | The engagement controller (Idle, Search, Prepare, Track, Fire, Pause, Reload, Empty, Blind) and the experience table, renderer-free and checkpointed |
 | `tore-sim` `combat::surface_guns`, `combat/live/{surface, collateral, parked}` | The AAA tuning table; `State::fire_surface` and surface rounds (flak time fuze, capacity reserve); splash damage for every weapon; parked aircraft rows |
-| `tore-app` `scenery/surface_art.rs`, `scenery/rubble.rs`, `surface_fx.rs`, `city_fires.rs` | Wreck swaps (a destroyed parked aircraft's burnt hulk too), launcher rails, carrier parts and sprites; flak, gunfire and launch effects and wreck smoke; the burning city fill's fires and smoke (presentation from the fill's flattened set) |
+| `tore-app` `scenery/surface_art.rs`, `scenery/rubble.rs`, `surface_fx.rs`, `city_fires.rs` | Wreck swaps (a destroyed parked aircraft's burnt hulk too), launcher rails, carrier parts and sprites; flak, gunfire and launch effects and wreck smoke; the burning city fill's fires and smoke (presentation from the fill's flattened set; a replay ages the columns from each building's recorded fall tick) |
 | `tore-app` `night_glow.rs`, `night_glow.wgsl` | The night glow points of explosions and fires and the fires' ground light (nr-fx3), built from the effect renderer's glowing sprites and the burning city's farther buildings, drawn in the world pass after the airfield lights |
 
 **One tick.** `World::step` moves routed units (`Combat::step_surface`) right

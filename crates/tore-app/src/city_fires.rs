@@ -8,8 +8,9 @@
 //! flattened set, which the host already tells every player
 //! ([`tore_world::city::CityFill::knock_down`]) and the world checkpoint
 //! carries, so every machine shows the same fires without a single new
-//! message. (A replay does not record the fill's flattened set, so a replay
-//! shows its city whole and unburnt, as before.)
+//! message. A replay records the set by where each building stands
+//! (nr-fx3) and the tick it fell on, and shows the fires and their columns
+//! from that tick (nr-fx4, [`Falls`]).
 //!
 //! What keeps it cheap with thousands burning:
 //!
@@ -20,7 +21,9 @@
 //!   explosions ([`crate::effect_renderer`]), and the nearest
 //!   [`MAX_COLUMNS`] within [`COLUMN_RANGE_FT`] get a smoke column.
 //! - **Smoke is analytic, not simulated.** A column is computed from its
-//!   age ([`crate::surface_fx::column`], the wreck smoke's own shape) at
+//!   age ([`crate::surface_fx::column`], the wreck smoke's own shape; a
+//!   function of the age alone, so a replay seek shows the column at the
+//!   height it had, nr-fx4) at
 //!   half the wreck column's puff density ([`STEP_TICKS`]), about
 //!   [`PUFFS_PER_COLUMN`] puffs a column, so the smoke budget this adds is
 //!   at most `MAX_COLUMNS * PUFFS_PER_COLUMN` (about 1,200) puffs, a
@@ -36,6 +39,9 @@
 //! `surface_fx::object_fire`), and a column density of half the wrecks'.
 use crate::gun_flash::Puff;
 use crate::surface_fx::{column, wreck};
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use tore_sim::attitude::Vector;
 use tore_world::city::CityFill;
@@ -92,16 +98,97 @@ pub struct Frame {
     /// nearest [`MAX_FAR_GLOWS`]: drawn as night glow points only
     /// (nr-fx3), so a burning city shows from afar.
     pub glows: Vec<crate::night_glow::Glow>,
+    /// The tallest column's top above its building's ground, feet (the
+    /// centre of its highest puff).
+    pub tallest: f64,
+}
+
+/// What a frame drew of the burning city, in numbers (nr-fx4): printed by
+/// `--replay-stills` so a seek and a play-through can be compared as text.
+/// `digest` covers every puff's place, size and opacity.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Report {
+    /// Buildings burning, whether drawn or not.
+    pub burning: usize,
+    /// Fire sprites drawn.
+    pub fires: usize,
+    /// Smoke puffs drawn.
+    pub puffs: usize,
+    /// The tallest column's top above its ground, feet.
+    pub tallest_ft: f64,
+    pub digest: u64,
+}
+
+impl Frame {
+    /// This frame in numbers, for `burning` buildings on fire.
+    pub fn report(&self, burning: usize) -> Report {
+        let mut digest = 0xcbf2_9ce4_8422_2325_u64;
+        for p in &self.puffs {
+            for v in [
+                p.position[0],
+                p.position[1],
+                p.position[2],
+                p.radius,
+                f64::from(p.opacity),
+            ] {
+                digest = (digest ^ v.to_bits()).wrapping_mul(0x0100_0000_01b3);
+            }
+        }
+        Report {
+            burning,
+            fires: self.fires.len(),
+            puffs: self.puffs.len(),
+            tallest_ft: self.tallest,
+            digest,
+        }
+    }
 }
 
 /// Burning buildings drawn as glow points only, at most, the nearest past
 /// the fire sprites (agent decision, nr-fx3).
 pub const MAX_FAR_GLOWS: usize = 2_048;
 
+/// When each flattened building fell, in the clock the columns age on
+/// (nr-fx4): a replay's simulation ticks. With it a column's age is
+/// `tick - fell`, whether the playhead played to the tick, jumped there or
+/// went back; without it (live flight) a building's fire starts when the
+/// tracker first sees it flat.
+#[derive(Debug)]
+pub struct Falls {
+    id: u64,
+    fell: HashMap<u32, f64>,
+}
+
+impl Falls {
+    /// `fell` maps a fill building's index to the tick it fell on.
+    pub fn new(fell: HashMap<u32, f64>) -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        Self {
+            id: NEXT.fetch_add(1, Ordering::Relaxed),
+            fell,
+        }
+    }
+
+    /// The tick building `n` fell on.
+    pub fn get(&self, n: u32) -> Option<f64> {
+        self.fell.get(&n).copied()
+    }
+}
+
+/// A replay's clock for the burning city: the playhead in ticks and when
+/// each building fell ([`Falls`]).
+#[derive(Clone, Debug)]
+pub struct Clock {
+    pub tick: f64,
+    pub falls: Arc<Falls>,
+}
+
 /// The burning buildings of one city fill, and the clock their animation
 /// runs on.
 pub struct CityFires {
-    version: Option<u64>,
+    /// The fill (by address), its version and the [`Falls`] the burning set
+    /// was last built from.
+    seen: Option<(usize, u64, Option<u64>)>,
     blazes: Vec<Blaze>,
     epoch: Instant,
 }
@@ -128,7 +215,7 @@ fn column_scale(width: f64) -> f64 {
 impl CityFires {
     pub fn new() -> Self {
         Self {
-            version: None,
+            seen: None,
             blazes: Vec::new(),
             epoch: Instant::now(),
         }
@@ -147,23 +234,44 @@ impl CityFires {
     /// Follows `fill`: when its version changed, the burning set becomes
     /// its flattened buildings, a newly flattened one starting at `now`.
     pub fn observe(&mut self, fill: &CityFill, now: f64) {
-        let version = fill.version();
-        if self.version == Some(version) {
+        self.observe_with(fill, now, None);
+    }
+
+    /// As [`Self::observe`], with a replay's fall ticks (nr-fx4): every
+    /// building burns from the tick it fell on, in the same clock as `now`,
+    /// so the burning set is a function of the fill and the falls alone. A
+    /// building the falls do not name (a recording of an older build, a
+    /// place the rebuilt fill moved) starts warm, with its column up.
+    pub fn observe_with(&mut self, fill: &CityFill, now: f64, falls: Option<&Falls>) {
+        let key = (
+            fill as *const CityFill as usize,
+            fill.version(),
+            falls.map(|f| f.id),
+        );
+        if self.seen == Some(key) {
             return;
         }
-        let first = self.version.is_none();
-        self.version = Some(version);
+        // The first look, another fill, or a change of clock: whatever
+        // burns was already burning.
+        let first = self
+            .seen
+            .is_none_or(|(at, _, was)| at != key.0 || was.is_some() != key.2.is_some());
+        self.seen = Some(key);
         let old = std::mem::take(&mut self.blazes);
         self.blazes = fill
             .flattened()
             .into_iter()
             .map(|n| {
-                if let Ok(at) = old.binary_search_by_key(&n, |b| b.building) {
+                if falls.is_none()
+                    && !first
+                    && let Ok(at) = old.binary_search_by_key(&n, |b| b.building)
+                {
                     return old[at];
                 }
                 let index = n as usize;
                 let instance = &fill.layout.instances[index];
                 let piece = &fill.layout.kit.pieces[usize::from(instance.piece)];
+                let warm = now - WARM_TICKS;
                 Blaze {
                     building: n,
                     position: [
@@ -172,7 +280,11 @@ impl CityFires {
                         f64::from(instance.z),
                     ],
                     width: width_of(piece.half),
-                    born: if first { now - WARM_TICKS } else { now },
+                    born: match falls {
+                        Some(falls) => falls.get(n).unwrap_or(warm),
+                        None if first => warm,
+                        None => now,
+                    },
                 }
             })
             .collect();
@@ -229,6 +341,7 @@ impl CityFires {
             });
             if columns < MAX_COLUMNS && d <= COLUMN_RANGE_FT {
                 columns += 1;
+                let from = frame.puffs.len();
                 column(
                     u64::from(b.building) ^ 0x5eed,
                     b.position,
@@ -238,6 +351,9 @@ impl CityFires {
                     1.,
                     &mut frame.puffs,
                 );
+                for p in &frame.puffs[from..] {
+                    frame.tallest = frame.tallest.max(p.position[1] - b.position[1]);
+                }
             }
         }
         frame
@@ -362,6 +478,64 @@ mod tests {
         let grown = fires.frame(eye, 1_000. + 20_000.);
         assert_eq!(young.puffs.len(), 480 / STEP_TICKS as usize + 1);
         assert_eq!(grown.puffs.len() as u64, PUFFS_PER_COLUMN);
+    }
+
+    /// nr-fx4: in a replay a column's height depends on the playhead and the
+    /// tick each building fell on alone, not on how the playhead got there:
+    /// playing through, jumping ahead, jumping back and a fresh viewer all
+    /// draw the same smoke.
+    #[test]
+    fn a_replay_seek_shows_the_columns_as_tall_as_playing_through() {
+        let fill = fill(10);
+        let eye = [0., 100., 0.];
+        // Buildings 3 and 4 fell at tick 1,000, building 7 at tick 9,000.
+        let early = |ids: &[(u32, f64)]| Falls::new(ids.iter().copied().collect());
+        let at_5000 = early(&[(3, 1_000.), (4, 1_000.)]);
+        let at_12000 = early(&[(3, 1_000.), (4, 1_000.), (7, 9_000.)]);
+        let draw = |fires: &mut CityFires, tick: f64, set: &[u32], falls: &Falls| {
+            fill.set_flattened(set);
+            fires.observe_with(&fill, tick, Some(falls));
+            fires.frame(eye, tick)
+        };
+        // Played through: a frame every 400 ticks, the third building falling
+        // on the way.
+        let mut played = CityFires::new();
+        let mut through = None;
+        for tick in (0..=12_000).step_by(400) {
+            let (set, falls): (&[u32], &Falls) = match tick {
+                0..=999 => (&[], &at_5000),
+                1_000..=8_999 => (&[3, 4], &at_5000),
+                _ => (&[3, 4, 7], &at_12000),
+            };
+            let tick = tick as f64;
+            through = Some(draw(&mut played, tick, set, falls));
+        }
+        let through = through.expect("frames drawn");
+        // A viewer that opens at tick 12,000, one that jumps there from
+        // tick 5,000 and one that jumps back from the end and forward again
+        // all agree.
+        let mut fresh = CityFires::new();
+        let fresh = draw(&mut fresh, 12_000., &[3, 4, 7], &at_12000);
+        let mut jumped = CityFires::new();
+        draw(&mut jumped, 5_000., &[3, 4], &at_5000);
+        let jumped = draw(&mut jumped, 12_000., &[3, 4, 7], &at_12000);
+        let mut back = CityFires::new();
+        draw(&mut back, 12_000., &[3, 4, 7], &at_12000);
+        draw(&mut back, 2_000., &[3, 4], &at_5000);
+        let back = draw(&mut back, 12_000., &[3, 4, 7], &at_12000);
+        assert_eq!(through, fresh);
+        assert_eq!(through, jumped);
+        assert_eq!(through, back);
+        // Buildings 3 and 4 have stood 11,000 ticks: a full column of 37
+        // puffs (their ages, 56 ticks and every 96 after, stop below
+        // 3,600). Building 7 has stood 3,000: puffs at ages 3,000 down to 24.
+        assert_eq!(through.puffs.len(), 2 * 37 + 32);
+        // Going back before the third fell takes its column away at once,
+        // and the others are as tall as they were.
+        let mut before = CityFires::new();
+        let before = draw(&mut before, 5_000., &[3, 4], &at_5000);
+        assert_eq!(before.fires.len(), 2);
+        assert_eq!(before.puffs.len(), 2 * 37);
     }
 
     /// nr-fx3: the recorder writes each knocked-down building by where it

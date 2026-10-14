@@ -150,6 +150,14 @@ impl AircraftModel {
         matches!(self, Self::Variety(m) if matches!(m.id,
             tore_formats::aircraft::AircraftId::Ah64 | tore_formats::aircraft::AircraftId::Ch47))
     }
+    /// A rotorcraft's level cruise power at full internal fuel, ft·lbf/s
+    /// (the AI's fuel planning figure, slice HF3).
+    pub fn rotor_cruise_power(&self) -> Option<f64> {
+        match self {
+            Self::Variety(m) => m.cruise_power,
+            _ => None,
+        }
+    }
     pub fn powered_lift(&self) -> Option<variety::PoweredLift> {
         match self {
             Self::Variety(m) => m.lift.as_deref().copied(),

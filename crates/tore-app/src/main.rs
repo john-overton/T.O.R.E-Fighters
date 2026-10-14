@@ -4359,9 +4359,23 @@ impl ApplicationHandler for App {
                         // the page is not showing, so it never snaps in.
                         let targeting_form =
                             instruments::targeting::form(&frame.readout, frame.config);
-                        let seeker_shot =
-                            self.seeker
-                                .observe(frame.picture, frame.plane.0, presented.position);
+                        // A laser weapon's picture marks the spot it homes on.
+                        let laser_spot = frame
+                            .readout
+                            .laser
+                            .and_then(|laser| laser.spot)
+                            .map(|spot| spot.spot.position);
+                        self.seeker.set_grace(if self.net_flight.is_some() {
+                            seeker_view::NET_GRACE_TICKS
+                        } else {
+                            0
+                        });
+                        let seeker_shot = self.seeker.observe(
+                            frame.picture,
+                            frame.plane.0,
+                            presented.position,
+                            laser_spot,
+                        );
                         let seeker_hidden = seeker_shot.as_ref().map(|shot| shot.id);
                         // A launch opens the target camera window if it is
                         // not open; it closes again when the view ends.
@@ -4920,6 +4934,11 @@ impl ApplicationHandler for App {
                                 frame.readout.tick,
                                 seeker.view,
                             ));
+                        } else if let (Some(combat), Some(seed)) =
+                            (self.instruments.combat.as_mut(), self.seeker.lost_feed())
+                        {
+                            // The weapon ended: a second of static.
+                            combat.targeting = Some(instruments::targeting::Page::lost_feed(seed));
                         }
                         if let (Some(page), Some(shot)) = (
                             self.instruments

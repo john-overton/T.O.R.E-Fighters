@@ -188,6 +188,10 @@ impl Renderer {
         self.sim
             .smoke(&self.device, &self.queue, art, smoke, devices);
     }
+    /// A replay's clock for the burning city fill buildings (nr-fx4).
+    pub fn set_city_clock(&mut self, clock: Option<crate::city_fires::Clock>) {
+        self.sim.set_city_clock(clock);
+    }
     /// Explosions, craters and crash-site fires.
     pub fn effects(
         &mut self,

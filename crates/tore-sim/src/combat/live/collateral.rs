@@ -20,6 +20,13 @@
 //!   the shooter included. With it on the shooter can be caught in its own
 //!   blast, as the manual warns (p. 126: a missile fired inside its minimum
 //!   range or a bomb dropped too low); that damage credits no one.
+//! - Launch grace (John, 2026-10-13): a round that goes off in the air (or on
+//!   an aircraft) while it is still inside its own launcher's hit volume (the
+//!   aircraft's contact sphere) hurts the launcher not at all. A burst on the
+//!   ground, the sea, a ground object or a ship is not covered: its splash
+//!   reaches the launcher as always, even inside the sphere. The hit test
+//!   keeps the same promise for a direct hit and a proximity fuze (the
+//!   `owner` exemption in the round search of `live.rs`).
 //! - A surface unit's round reaches aircraft and the other side's ground
 //!   objects and ships, never its own side's or neutral scenery, whatever
 //!   the friendly fire setting (surface units fight each other: John,
@@ -82,6 +89,8 @@ pub(super) struct Burst {
     /// [`Detonation::Air`] passes 100 percent of the share on, a ground
     /// detonation [`ground_share`].
     pub share: i32,
+    /// Where it went off; the launch grace covers [`Detonation::Air`] only.
+    pub detonation: Detonation,
     pub flags: u32,
     /// The target the round struck directly, which takes no collateral.
     pub exclude: Option<u32>,
@@ -108,6 +117,7 @@ impl Burst {
             damage: w.damage.by_class,
             radius: f64::from(w.damage.collateral_radius.max(0)),
             percent: i32::from(w.damage.collateral_percent.max(0)),
+            detonation,
             share: match detonation {
                 Detonation::Air => 100,
                 Detonation::Ground => ground_share(w.damage.collateral_percent),
@@ -116,6 +126,14 @@ impl Burst {
             exclude,
             resolves,
         }
+    }
+    /// Launch grace: whether the burst spares aircraft `id`, its own
+    /// launcher, at `position` with a hit volume of `radius`. Only an
+    /// airburst inside that volume is spared; a ground burst is not.
+    fn graced(&self, id: u32, position: Vector, radius: f64) -> bool {
+        id == self.owner
+            && self.detonation == Detonation::Air
+            && inside_sphere(position, radius, self.position)
     }
     /// Whether the burst reaches anyone at all.
     pub fn collateral(&self) -> bool {
@@ -152,6 +170,13 @@ pub fn box_distance(bounds: &OrientedBox, point: Vector) -> f64 {
     ];
     let outside: Vector = std::array::from_fn(|i| (local[i].abs() - bounds.half[i]).max(0.));
     dot(outside, outside).sqrt()
+}
+
+/// Whether `point` is inside the sphere of `radius` around `center`: the
+/// aircraft hit volume a round launched from that aircraft has not yet left.
+pub(super) fn inside_sphere(center: Vector, radius: f64, point: Vector) -> bool {
+    let delta = sub(point, center);
+    dot(delta, delta) < radius * radius
 }
 
 /// Feet from `point` to the surface of a sphere of `radius` around `center`
@@ -207,6 +232,11 @@ impl State {
                 if skipped(t.id, t.hp, t.body_present(), t.side) {
                     continue;
                 }
+                // Launch grace: a round that goes off in the air still inside
+                // its own launcher's hit volume does the launcher no harm.
+                if burst.graced(t.id, t.position, t.radius) {
+                    continue;
+                }
                 let base = burst.nominal(
                     t.category,
                     sphere_distance(t.position, t.radius, burst.position),
@@ -252,6 +282,7 @@ impl State {
                     .surface
                     .is_some_and(|side| !aircraft && !super::opposed(side, t.side))
                     || skipped(t.id, t.hp, t.body_present(), t.side)
+                    || (aircraft && burst.graced(t.id, t.position, t.radius))
                 {
                     continue;
                 }
