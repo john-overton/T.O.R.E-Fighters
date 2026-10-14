@@ -77,6 +77,9 @@ pub enum Command {
     BattleNet,
     /// Ctrl+9: open or close the AC-130's sensor console (orbit hold).
     SensorConsole,
+    /// P: pin the AC-130 gunsight's point or let it go (in the console,
+    /// ORBIT or SEARCH).
+    SightPinToggle,
     /// Ctrl+V: the Valkyries situation score.
     Valkyries,
     /// Ctrl+B: mark this moment in the mission recording.

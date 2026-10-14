@@ -41,6 +41,7 @@ bind keyboard Ctrl-8 weapon-group-toggle press\n\
 bind keyboard Ctrl-9 sensor-console press\n\
 bind keyboard \\ sight-designate press\n\
 bind keyboard Shift-\\ sight-pin press\n\
+bind keyboard p sight-pin-toggle press\n\
 bind keyboard Shift-' sight-zoom-in press\n\
 bind keyboard Shift-; sight-zoom-out press\n\
 bind keyboard Ctrl-\\ sight-polarity press\n\
@@ -224,6 +225,10 @@ pub struct Input {
     /// The gunsight's zoom step, 1 to 6: client state that rides in the seat
     /// input (docs/INPUT.md, AC-130 gunsight).
     sight_zoom: u8,
+    /// The AC-130 sensor console's keys: while it is open the stick and
+    /// arrows slew the sight and the look keys step the heading and
+    /// altitude ([`crate::console_keys`]).
+    pub console: crate::console_keys::ConsoleKeys,
 }
 impl Input {
     /// The saved controls file, loaded without being asked for. A file that
@@ -303,6 +308,7 @@ impl Input {
             sight_slew: tore_input::SightSlew::default(),
             sight_deflection: [0; 2],
             sight_zoom: tore_input::sight::ZOOM_DEFAULT,
+            console: crate::console_keys::ConsoleKeys::default(),
         })
         .map(|mut input| {
             // The stock keys of a fixed-wing aircraft until a flight says
@@ -878,9 +884,44 @@ impl Input {
         let mut commands = std::mem::take(&mut self.commands);
         commands.append(&mut frame.commands);
         frame.commands = commands;
-        let holds = ["sight-left", "sight-right", "sight-up", "sight-down"]
+        let mut holds = ["sight-left", "sight-right", "sight-up", "sight-down"]
             .map(|name| self.resolver.held(name));
-        let analog = self.resolver.sight_axes();
+        let mut analog = self.resolver.sight_axes();
+        if self.console.open {
+            // The sensor console: the stick does not fly the aircraft, so
+            // the arrows (as holds, with the fine-then-full ramp), the stick
+            // and the mouse slew the sight; the look keys and axes step the
+            // heading and altitude (crate::console_keys).
+            for (hold, key) in
+                holds
+                    .iter_mut()
+                    .zip(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"])
+            {
+                *hold |= keys.contains(key);
+            }
+            let keyboard = |resolver: &Resolver, axis| {
+                resolver
+                    .owned_binding(axis)
+                    .is_some_and(|b| b.device == "keyboard")
+            };
+            let mouse = self.console.mouse_deflection();
+            // Stick right and forward slew right and up, as the arrows do.
+            if !keyboard(&self.resolver, tore_input::Axis::Roll) {
+                analog[0] += frame.roll;
+            }
+            if !keyboard(&self.resolver, tore_input::Axis::Pitch) {
+                analog[1] -= frame.pitch;
+            }
+            analog = [analog[0] + mouse[0], analog[1] + mouse[1]];
+            frame.pitch = 0.;
+            frame.roll = 0.;
+            frame.yaw = 0.;
+            let look = self.resolver.look();
+            self.console
+                .step_look([f64::from(look[0]), f64::from(look[1])]);
+        } else {
+            self.console.release();
+        }
         self.sight_deflection = tore_input::sight::deflection(self.sight_slew.step(holds, analog));
         (frame, look)
     }
@@ -1304,6 +1345,7 @@ mod tests {
             "sensor-console",
             "sight-designate",
             "sight-pin",
+            "sight-pin-toggle",
             "sight-zoom-in",
             "sight-zoom-out",
             "sight-polarity",
@@ -1615,6 +1657,84 @@ mod tests {
             p.to_text().unwrap()
         );
     }
+    /// The AC-130 sensor console's keys on the real key path (slice nr-cona):
+    /// P is stock-bound to the pin toggle; with the console open the plain
+    /// arrows (as the flight's key handler records them) slew the sight
+    /// with the fine-then-full ramp and fly nothing, Shift with the arrows
+    /// steps the heading and altitude once a press, and the zoom and
+    /// throttle keys reach the console's meanings; closed, the arrows fly
+    /// again.
+    #[test]
+    fn the_console_keys_slew_step_and_zoom_on_the_real_key_path() {
+        use tore_sim::autopilot::orbit::ConsoleCommand;
+        let mut i = Input::new(None, false).unwrap();
+        assert!(i.key("p", true, M::empty()));
+        assert_eq!(
+            i.resolver.drain(),
+            vec![("keyboard".into(), Action::Ui("sight-pin-toggle".into()))]
+        );
+        assert!(i.key("p", false, M::empty()));
+        i.console.open = true;
+        let mut keys = BTreeSet::new();
+        crate::look::press(&mut keys, "ArrowLeft", M::empty());
+        crate::look::press(&mut keys, "ArrowUp", M::empty());
+        let (pilot, _) = i.frame(&keys, 0.5);
+        assert_eq!((pilot.pitch, pilot.roll, pilot.yaw), (0., 0., 0.));
+        assert_eq!(i.sight().0, [-32, 32], "a quarter rate first");
+        for _ in 0..tore_input::sight::FINE_TICKS {
+            i.frame(&keys, 0.5);
+        }
+        assert_eq!(i.sight().0, [-127, 127], "then full rate");
+        assert!(i.console.take().is_empty());
+        let mut keys = BTreeSet::new();
+        crate::look::press(&mut keys, "ArrowRight", M::SHIFT);
+        i.frame(&keys, 0.5);
+        assert_eq!(i.sight().0, [0, 0], "Shift+arrows do not slew");
+        i.frame(&keys, 0.5);
+        assert_eq!(i.console.take(), vec![ConsoleCommand::Heading(1)]);
+        let mut keys = BTreeSet::new();
+        crate::look::press(&mut keys, "ArrowDown", M::SHIFT);
+        i.frame(&keys, 0.5);
+        assert_eq!(i.console.take(), vec![ConsoleCommand::Altitude(-1)]);
+        // The view zoom keys, the wheel and the throttle keys, then their
+        // meaning in the console: the wheel through the bindings, the others
+        // through the flight's key handler.
+        i.mouse_wheel(1);
+        i.mouse_wheel(-1);
+        let wheel: Vec<_> = i.resolver.drain().into_iter().map(|(_, a)| a).collect();
+        assert_eq!(
+            wheel,
+            [Action::Ui("zoom-in".into()), Action::Ui("zoom-out".into())]
+        );
+        assert_eq!(crate::console_keys::zoom_action("zoom-in"), Some(1));
+        assert_eq!(crate::console_keys::zoom_action("zoom-out"), Some(-1));
+        let mut ui = crate::flight_ui::FlightUi::default();
+        for (key, zoom) in [("=", Some(1)), ("-", Some(-1)), ("1", None)] {
+            assert!(!i.key(key, true, M::empty()), "{key} is the flight's key");
+            assert_eq!(crate::console_keys::zoom_key(key), zoom);
+        }
+        for (key, meaning) in [
+            ("1", ConsoleCommand::Speed(0)),
+            ("3", ConsoleCommand::Speed(50)),
+            ("6", ConsoleCommand::Speed(100)),
+            ("7", ConsoleCommand::SpeedStep(-1)),
+            ("8", ConsoleCommand::SpeedStep(1)),
+        ] {
+            let command = ui.key(key, false, false, false, &[]);
+            assert_eq!(
+                crate::console_keys::throttle(&command),
+                Some(meaning),
+                "{key}"
+            );
+        }
+        // Closed, the arrows fly the aircraft and slew nothing.
+        i.console.open = false;
+        let mut keys = BTreeSet::new();
+        crate::look::press(&mut keys, "ArrowLeft", M::empty());
+        let (pilot, _) = i.frame(&keys, 0.5);
+        assert!(pilot.roll < 0.);
+        assert_eq!(i.sight().0, [0, 0]);
+    }
     /// The gunsight's stock keys (John, 2026-10-09): Backslash designates,
     /// Shift+Backslash pins, Shift+' and Shift+; zoom, Alt with the arrows
     /// (or the keypad's 4, 6, 8 and 2) slew. Ctrl+Shift+Backslash is not one
@@ -1776,6 +1896,10 @@ mod tests {
         let device = crate::controls_editor::preview_device();
         let mut i = input("");
         i.resolver = Resolver::new(gamepad_defaults(&device));
+        // A new resolver: the role filter must run again. Its cache keys on
+        // the roles and the binding count, which the gamepad profile could
+        // share with the stock one by chance (it did once P was bound).
+        i.filter_signature = None;
         i.devices.insert(device.id.clone(), device.clone());
         let event = |i: &mut Input, control: &str, value: f64| {
             i.resolver.event(Event {

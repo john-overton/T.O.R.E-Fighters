@@ -5,8 +5,9 @@
 //!
 //! `--orbit-sight pin|track|free` says what the sight holds when the console
 //! opens: the ground under the target pinned or the target tracked (both set
-//! by hand, setup shortcuts), or a free sight that the console pins under its
-//! crosshair. `--orbit-slew S` holds the sight's slew
+//! by hand, setup shortcuts), or a free sight, with which the console
+//! searches (slice nr-cona, [`console`]; `--console-keys` sends its keys).
+//! `--orbit-slew S` holds the sight's slew
 //! right at full deflection for 4 s from S seconds, which moves a pin (the pod
 //! point moves); `--orbit-close S` closes the console at S seconds.
 //!
@@ -19,7 +20,12 @@ use tore_sim::combat::gunship::Sight;
 use tore_world::seats::{SeatCommand, SeatInput};
 
 /// The options this module reads, each with one value.
-pub(super) const OPTIONS: [&str; 3] = ["--orbit-sight", "--orbit-slew", "--orbit-close"];
+pub(super) const OPTIONS: [&str; 4] = [
+    "--orbit-sight",
+    "--orbit-slew",
+    "--orbit-close",
+    "--console-keys",
+];
 /// The share of the time after entry that every gun and the camera must
 /// bear on the sight's point (fitted acceptance, agent decision).
 const BEARING_SHARE: f64 = 0.9;
@@ -30,10 +36,13 @@ const PITCH_RATE_LIMIT: f64 = 4.;
 /// The slew is held this long, s.
 const SLEW_SECONDS: f64 = 4.;
 
+mod console;
+
 struct Extra {
     sight: String,
     slew: Option<f64>,
     close: Option<f64>,
+    keys: Vec<(f64, tore_sim::autopilot::orbit::ConsoleCommand)>,
 }
 
 fn extra() -> AppResult<Extra> {
@@ -42,6 +51,7 @@ fn extra() -> AppResult<Extra> {
         sight: "pin".into(),
         slew: None,
         close: None,
+        keys: Vec::new(),
     };
     for pair in args.windows(2) {
         let value = &pair[1];
@@ -52,6 +62,7 @@ fn extra() -> AppResult<Extra> {
             },
             "--orbit-slew" => e.slew = Some(value.parse()?),
             "--orbit-close" => e.close = Some(value.parse()?),
+            "--console-keys" => e.keys = console::keys(value)?,
             _ => {}
         }
     }
@@ -115,6 +126,9 @@ pub(super) fn run(scene: &mut Scene, o: &Options) -> AppResult<()> {
     // Half a second for the designation and the sight to settle.
     for _ in 0..60 {
         scene.step(false)?;
+    }
+    if e.sight == "free" {
+        return console::run(scene, o.seconds, &e.keys);
     }
     scene.queue(SeatCommand::SensorConsole);
     scene.step(false)?;

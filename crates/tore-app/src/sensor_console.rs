@@ -245,6 +245,10 @@ pub struct Symbology {
     /// A one-off notice ("NO GROUND POINT", "L TO DROP").
     pub notice: Option<&'static str>,
     pub orbit: Option<OrbitStatus>,
+    /// The console's autopilot (slice nr-cona): SEARCH, ORBIT JOIN or ORBIT
+    /// and the commanded heading, altitude and speed
+    /// (`flight::State::console_status`).
+    pub autopilot: Option<tore_sim::autopilot::orbit::ConsoleStatus>,
     /// The blink phase for flashing marks (on half of each half second).
     pub blink: bool,
 }
@@ -357,6 +361,7 @@ impl Symbology {
             mark: page.mark.map(|m| (m, tracked)),
             notice,
             orbit: orbit_status(flight),
+            autopilot: flight.console_status(),
             blink: (seconds * 2.).rem_euclid(1.) < 0.5,
         }
     }
@@ -628,6 +633,23 @@ pub fn draw(sym: &Symbology, camera: &Camera, size: [u32; 2]) -> Vec<u8> {
         1,
     );
     m.text(&format!("FOV {:.1}*", sym.fov_deg), left, top + row, s, 1);
+    // SEARCH (no point held): the commanded heading, altitude and speed
+    // the autopilot flies straight on (slice nr-cona).
+    if let Some(ap) = sym.autopilot
+        && ap.phase == tore_sim::autopilot::orbit::ConsolePhase::Search
+    {
+        m.text("SEARCH  P PINS", left, top + 2 * row, s, 1);
+        m.text(
+            &format!(
+                "HDG {:03.0}  ALT {:.0}  {:.0}KT",
+                ap.heading_deg, ap.altitude_ft, ap.speed_kt
+            ),
+            left,
+            top + 3 * row,
+            s,
+            1,
+        );
+    }
     if let Some(orbit) = sym.orbit {
         let state = match (orbit.settled, orbit.bearing) {
             (false, _) => "ORBIT JOIN",
@@ -990,6 +1012,7 @@ mod tests {
             mark: None,
             notice: None,
             orbit: None,
+            autopilot: None,
             blink: true,
         }
     }

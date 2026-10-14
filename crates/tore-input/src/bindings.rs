@@ -244,6 +244,7 @@ impl Action {
                 | "damage-player"
                 | "sight-designate"
                 | "sight-pin"
+                | "sight-pin-toggle"
                 | "sensor-console"
                 | "sight-zoom-in"
                 | "sight-zoom-out"

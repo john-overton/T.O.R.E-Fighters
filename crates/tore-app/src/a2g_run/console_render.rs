@@ -141,6 +141,7 @@ pub(super) fn render(
         mark: Some((row.position, true)),
         notice: None,
         orbit: None,
+        autopilot: None,
         blink: true,
     };
     // The forms: name, look, zoom, polarity, tracking, static level.
