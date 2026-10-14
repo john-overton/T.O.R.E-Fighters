@@ -18,6 +18,11 @@ G envelopes, departure/contact limits and roll controls are decoded using the
 [aircraft schema](../formats/aircraft.md). Each aircraft owns its configuration.
 Sharing the integration law does not erase F-4 fuel, envelope or equipment
 differences. No autonomous pilot behavior is specified or changed.
+Two records are corrected before use (agent decisions on John's request of
+2026-10-13, [aircraft record corrections](aircraft-records.md)): the C-130's
+military thrust is the AC-130U record's 40,000 lbf instead of 108,192, and the
+MiG-17F's internal fuel is 2,520 lb instead of the MiG-21's 4,534, with fuel
+flows of 1 and 4 lb/s instead of 3 and 20.
 
 ## Conventional flight
 

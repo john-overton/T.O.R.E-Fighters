@@ -104,7 +104,7 @@ factor of `1 / sqrt(fraction)` on the imported edges at the empty weight.
 | MiG-29 | 1.20 | 0.91 | 132 / 719 | 140 | none | 135 to 145 |
 | Su-27 | 0.86 | 1.08 | 128 / 757 | 142 | 135 to 150 | 120 to 135 |
 | MiG-21 | 0.73 | 1.17 | 136 / 1,224 | 160 | none | 160 to 170 |
-| Su-25 | 0.55 | 1.35 | 123 / 1,506 | 131 | 130 to 145 | 125 to 140 |
+| Su-25 | 0.51 | 1.40 | 120 / 1,210 | 131 | 130 to 145 | 125 to 140 |
 | MiG-23 | 0.78 | 1.13 | 142 / 1,552 | 152 | none | 150 to 165 |
 | Su-35 | 0.95 | 1.03 | 127 / 897 | 139 | none | 135 to 145 |
 | F-22, F-22N, F/A-XX | 0.42 | 1.54 | 128 / 559 | 148 | 130 to 150 | 135 to 145 |
@@ -131,7 +131,11 @@ factor of `1 / sqrt(fraction)` on the imported edges at the empty weight.
   model's G rows cross (measured by sweeping each fraction 0.06 either side: the
   X-31 jumps down between 0.94 and 0.95, the MiG-21 between 0.68 and 0.69 and the
   Su-25 between 0.52 and 0.53; the Su-25's 0.55 is the closest, 0.02 above its
-  jump, so any change to it should be re-swept).
+  jump, so any change to it should be re-swept). The Su-25's record was corrected
+  on 2026-10-13 ([aircraft record corrections](aircraft-records.md)): its fraction
+  became 0.51 on the corrected empty weight, the same stall scale at its default
+  load, and the jump moved with it to about 0.49. Liftoff is now 120 kt in
+  1,210 ft and the approach 131 kt (not re-swept).
 - A longer roll on a short strip: from the 1,074 ft strips (a solo start has
   1,020 ft of paved run) the F/A-18D, F-14D, A-4E, X-31, MiG-21, Su-25 and MiG-23
   now roll past the paved end before liftoff (1,098, 1,164, 1,507, 1,040, 1,278,

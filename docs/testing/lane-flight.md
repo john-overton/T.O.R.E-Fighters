@@ -502,7 +502,9 @@ around the recorded value, on top of John's range plus or minus 10 percent).
 Each fraction was chosen at least 0.02 clear of the liftoff jumps that appear when the
 model's G rows cross at a larger scale (the X-31 between 0.94 and 0.95, the MiG-21 between
 0.68 and 0.69 and the Su-25 between 0.52 and 0.53, measured by sweeping every fraction 0.06
-either side; the Su-25's 0.55 is the closest).
+either side; the Su-25's 0.55 is the closest). Since the Su-25's record correction
+(2026-10-13) its fraction is 0.51 on the corrected empty weight and its jump sits near
+0.49; `KNOWN_LIFTOFF` is 120.2 kt and `PULL_G_RETAIL` 5.41 G for it.
 
 **Combat-speed G (correction, 2026-09-29).** The first version scaled every row of the
 polygon, which counted the weight twice (the edges, then the loaded-elevator divisor) and left a
