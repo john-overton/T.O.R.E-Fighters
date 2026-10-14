@@ -47,6 +47,9 @@
 //! - `strafe` ([`strafe`]): the `release` pass with a store selected and Tab,
 //!   the gun key, held `--hold S` (2 by default); the gun fires, the store
 //!   stays on its station.
+//! - `orbit` ([`orbit`], slice nr-orbit): the AC-130's sensor console
+//!   opens and orbit hold flies the attack orbit with no stick or throttle,
+//!   `--orbit-sight pin|track|free`, `--orbit-slew S`, `--orbit-close S`.
 //!
 //! `--pilot ai` ([`ai`], AI strike slice ST-D) takes no `--attack`: the AI
 //! flies the aircraft and the driver only watches and prints `ai-strike:`
@@ -74,6 +77,7 @@ mod guided;
 pub mod guided_preview;
 mod level;
 mod missile;
+mod orbit;
 pub mod preview;
 mod release;
 mod rocket;
@@ -120,7 +124,7 @@ pub(crate) struct Options {
     ai: ai::Config,
 }
 
-const USAGE: &str = "--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND [--from NM] [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S] [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S] [--defenses AAA SAM] [--surface-seed N] [--unit ID] [--designate ag|ir|harm|visual|none] [--break-at S] [--skill N] [--render OUT.png] [--record PATH [--verify-render]] [--laser-off S] [--buddy ID [--buddy-ai]] [--turn-away S] [--condition clear|cloudy|foggy|night] | --a2g-run THEATER STEM --pilot ai [--aircraft ID] [--load REC] [--target N] [--skill 0..3] [--profile straight|popup|fasthigh|dive|level|orbit|standoff|laydown|strafe] [--handback S [--mode ccip|lvl] [--trigger] [--laser] [--take-back S]] [--order KIND [--order-at S]] [--quick-wing] [--choose-store] [--buddy ID] [--render OUT.png --render-at S] [--mission-altitude FT] [--render-scene DIR] [--offset FT] [--sead-at S]; player kinds also take [--render-scene DIR --scene-at S,...] [--condition clear|cloudy|foggy|night] [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG] [--seconds S]";
+const USAGE: &str = "--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND [--from NM] [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S] [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S] [--defenses AAA SAM] [--surface-seed N] [--unit ID] [--designate ag|ir|harm|visual|none] [--break-at S] [--skill N] [--render OUT.png] [--record PATH [--verify-render]] [--laser-off S] [--buddy ID [--buddy-ai]] [--turn-away S] [--condition clear|cloudy|foggy|night] [--orbit-sight pin|track|free] [--orbit-slew S] [--orbit-close S] | --a2g-run THEATER STEM --pilot ai [--aircraft ID] [--load REC] [--target N] [--skill 0..3] [--profile straight|popup|fasthigh|dive|level|orbit|standoff|laydown|strafe] [--handback S [--mode ccip|lvl] [--trigger] [--laser] [--take-back S]] [--order KIND [--order-at S]] [--quick-wing] [--choose-store] [--buddy ID] [--render OUT.png --render-at S] [--mission-altitude FT] [--render-scene DIR] [--offset FT] [--sead-at S]; player kinds also take [--render-scene DIR --scene-at S,...] [--condition clear|cloudy|foggy|night] [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG] [--seconds S]";
 
 fn options() -> AppResult<Options> {
     let args: Vec<String> = std::env::args().skip(2).collect();
@@ -198,7 +202,7 @@ fn options() -> AppResult<Options> {
                     .map(str::parse)
                     .collect::<Result<_, _>>()?
             }
-            other if guided::OPTIONS.contains(&other) => {
+            other if guided::OPTIONS.contains(&other) || orbit::OPTIONS.contains(&other) => {
                 next()?;
             }
             "--unit" => o.unit = Some(parse_id(&next()?)?),
@@ -308,6 +312,7 @@ pub fn run() -> AppResult<()> {
             scene.print_record();
             strafe::run(&mut scene, &o)?
         }
+        "orbit" => orbit::run(&mut scene, &o)?,
         "ccip" | "level" | "rocket" => {
             scene.print_record();
             match o.attack.as_str() {
@@ -318,7 +323,7 @@ pub fn run() -> AppResult<()> {
         }
         other => {
             return Err(format!(
-                "unknown --attack {other}; kinds: release, cluster, ccip, level, rocket, strafe, maverick, harm, antiship, sarh, laser, jdam, at2"
+                "unknown --attack {other}; kinds: release, cluster, ccip, level, rocket, strafe, orbit, maverick, harm, antiship, sarh, laser, jdam, at2"
             )
             .into());
         }
@@ -504,6 +509,11 @@ impl Scene {
             commands: std::mem::take(&mut self.commands),
             ..SeatInput::default()
         };
+        self.step_input(input)
+    }
+
+    /// One mission tick with the seat's whole input.
+    fn step_input(&mut self, input: SeatInput) -> AppResult<()> {
         self.recorded(|world, out| world.step(std::slice::from_ref(&input), out))?;
         scene_render::after_step(self)
     }

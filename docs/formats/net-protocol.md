@@ -2834,6 +2834,27 @@ flowchart LR
 - **Numbering.** Built as 26 on its own branch; slice BF's explosion scale
   took 26 first, so the stores take 27 (lead, 2026-10-12).
 
+## The sensor console (pending protocol)
+
+*Built on branch nr-orbit (2026-10-13), not yet numbered: the lead assigns the
+protocol version at merge.* John asked for the AC-130's sensor console with an
+orbit autopilot ([spec](../spec/ac130-linked-guns.md#the-sensor-console-and-the-orbit)).
+
+- **Seat command 28, SensorConsole**, no fields: Ctrl+9 on the AC-130. The
+  5-bit command code has three codes left (29 to 31).
+- **The exact own-plane state**: the autopilot's mode can be `Orbit` (4), and
+  the autopilot gained an `Option<Orbit>` after its loops (nine fields: the
+  point and centre, three each, then radius, height, speed, reach, bank,
+  climb and throttle, all f64 against the baseline's). A hosted orbit with a
+  standing point is predicted exactly by a client; a moving track changes
+  the point every tick, so the client is corrected at each snapshot while it
+  follows one (corrections too small to show, about the cross-platform
+  cost).
+- **Why a bump.** An older game reads command 28 as invalid and cannot read
+  the longer own-plane state. The wire golden changes in the Inputs command
+  sample (one SensorConsole) and the own-state samples; `wire_golden` fails
+  on this branch until the version is raised and the golden refreshed.
+
 ## Limits
 
 Decoders check every count and length against these before reading on.
