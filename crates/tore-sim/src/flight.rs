@@ -1082,10 +1082,19 @@ impl State {
     /// not it did damage. `strength` is 1 for a 100-point warhead. Fitted
     /// kick sizes: docs/spec/cheats.md#missile-hit-jolt.
     pub fn jolt_from(&mut self, blast: [f64; 3], strength: f64) {
+        self.jolt_scaled(blast, strength, 1.);
+    }
+    /// [`Self::jolt_from`] with the whole knock (rates and push) scaled by
+    /// `share` after the strength's clamp: a flak burst passes on half
+    /// ([`crate::combat::live::FLAK_JOLT_SHARE`]; John, 2026-10-14).
+    pub fn jolt_scaled(&mut self, blast: [f64; 3], strength: f64, share: f64) {
         if self.crashed || self.native.is_some() {
             return;
         }
-        let strength = strength.clamp(0.5, 2.);
+        let strength = strength.clamp(0.5, 2.) * share.max(0.);
+        if strength <= 0. {
+            return;
+        }
         let away = crate::attitude::unit(std::array::from_fn(|i| self.position[i] - blast[i]));
         let basis = Basis::new(self.yaw, self.pitch, self.bank);
         let side = dot(away, basis.right);
@@ -3124,6 +3133,27 @@ mod tests {
         assert_eq!(cheat.carried_lbs(), cheat.systems.external_lbs());
         assert_eq!(normal.carried_lbs(), normal.payload_lbs);
         assert!(cheat.speed > normal.speed, "lighter and cleaner");
+    }
+    #[test]
+    fn a_flak_share_halves_the_knock_and_the_push() {
+        // John, 2026-10-14: flak pushes half as hard; the clamp's floor (0.5)
+        // applies before the share, so a weak flak burst is halved too.
+        let calm = State::new(&profile(), [0., 15000., 0.]).unwrap();
+        let blast = [
+            calm.position[0] + 60.,
+            calm.position[1] - 60.,
+            calm.position[2],
+        ];
+        for strength in [0.1, 1., 3.] {
+            let (mut whole, mut half) = (calm.clone(), calm.clone());
+            whole.jolt_from(blast, strength);
+            half.jolt_scaled(blast, strength, 0.5);
+            for i in 0..3 {
+                assert!((half.jolt[i] - whole.jolt[i] * 0.5).abs() < 1e-12);
+                let push = |s: &State| s.velocity[i] - calm.velocity[i];
+                assert!((push(&half) - push(&whole) * 0.5).abs() < 1e-9);
+            }
+        }
     }
     #[test]
     fn a_blast_knocks_the_aircraft_away_and_fades() {

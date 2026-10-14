@@ -97,6 +97,9 @@ pub(super) struct Burst {
     /// The burst is the round's outcome (a flak shell that struck nothing):
     /// the ledger records it as a hit if it damaged anyone.
     pub resolves: bool,
+    /// The share of the knock its splash gives an aircraft: half for flak
+    /// ([`super::FLAK_JOLT_SHARE`]), whole for every other weapon.
+    pub jolt_share: f64,
 }
 impl Burst {
     pub fn new(
@@ -125,6 +128,11 @@ impl Burst {
             flags: w.flags,
             exclude,
             resolves,
+            jolt_share: if super::is_flak(w) {
+                super::FLAK_JOLT_SHARE
+            } else {
+                1.
+            },
         }
     }
     /// Launch grace: whether the burst spares aircraft `id`, its own
@@ -262,6 +270,7 @@ impl State {
                     target: t.id,
                     from: burst.position,
                     strength: f64::from(base) / 100.,
+                    share: burst.jolt_share,
                 }));
                 total = total.saturating_add(u32::try_from(amount).unwrap_or(0));
             }
@@ -300,6 +309,7 @@ impl State {
                         target: t.id,
                         from: burst.position,
                         strength: f64::from(nominal) / 100.,
+                        share: burst.jolt_share,
                     }));
                 }
                 let applied = nominal.min(t.hp);

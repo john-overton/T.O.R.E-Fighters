@@ -1450,7 +1450,15 @@ pub struct Jolt {
     pub target: u32,
     pub from: Vector,
     pub strength: f64,
+    /// The share of the knock the aircraft takes, after its strength's
+    /// clamp: 1, or [`FLAK_JOLT_SHARE`] for a flak burst.
+    pub share: f64,
 }
+/// A flak burst knocks an aircraft about half as hard as another blast of
+/// its strength; its damage is unchanged (opinionated, John, 2026-10-14:
+/// "flak pushes aircraft a lot, maybe cut push forces by 50%, damage can
+/// stay the same").
+pub const FLAK_JOLT_SHARE: f64 = 0.5;
 /// Mounted weapon audio state, independent of playback and rendering.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SeekerTone {
@@ -5641,6 +5649,7 @@ impl State {
                                 strength: f64::from(
                                     w.damage.by_class[damage_class(own.config.target_category)],
                                 ) / 100.,
+                                share: 1.,
                             }));
                         }
                         let burst = collateral::Burst::new(
@@ -5699,6 +5708,7 @@ impl State {
                             target: t.id,
                             from: position,
                             strength: f64::from(nominal) / 100.,
+                            share: 1.,
                         }));
                     }
                     let critical = critical_hit(t, w, section, scaled);

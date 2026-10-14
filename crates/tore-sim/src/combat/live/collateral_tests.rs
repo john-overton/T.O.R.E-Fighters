@@ -777,3 +777,19 @@ fn the_box_edge_is_the_aircraft_contact_sphere() {
     assert!(!inside_sphere(c, 28., [10., 20., 58.]));
     assert!(!inside_sphere(c, 28., [10., 20., 59.]));
 }
+
+#[test]
+fn a_flak_burst_knocks_aircraft_half_as_hard() {
+    // John, 2026-10-14: flak's push cut by half, its damage unchanged.
+    let mut flak = sparrow();
+    flak.source = "KS19.JT".into();
+    flak.damage.collateral_radius = 400;
+    flak.damage.collateral_percent = 35;
+    assert!(is_flak(&flak));
+    assert_eq!(burst(&flak, Detonation::Air).jolt_share, FLAK_JOLT_SHARE);
+    assert_eq!(FLAK_JOLT_SHARE, 0.5);
+    assert_eq!(burst(&sparrow(), Detonation::Air).jolt_share, 1.);
+    // The share changes the knock only: the splash still passes on 35
+    // percent falling to nothing at 400 ft (27 percent at 100 ft).
+    assert_eq!(burst(&flak, Detonation::Air).percent_at(100.), 27);
+}

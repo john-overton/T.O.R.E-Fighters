@@ -324,7 +324,7 @@ fn distance(a: Vector, b: Vector) -> f64 {
 }
 
 /// One surface trace line, ids in hex.
-fn describe(trace: &Trace) -> String {
+pub(crate) fn describe(trace: &Trace) -> String {
     match trace {
         Trace::Phase {
             unit,
@@ -376,6 +376,38 @@ fn describe(trace: &Trace) -> String {
             target.map_or("none".into(), |t| t.to_string()),
             if *optical { " optical" } else { "" }
         ),
+        Trace::FlakTeam { team, guns, groups } => {
+            let groups: Vec<String> = groups
+                .iter()
+                .map(|g| {
+                    format!(
+                        "[{}] in-range {}/{}{}{} {}",
+                        g.members
+                            .iter()
+                            .map(u32::to_string)
+                            .collect::<Vec<_>>()
+                            .join(","),
+                        g.in_range,
+                        g.members.len(),
+                        if g.heading_in { " heading-in" } else { "" },
+                        if g.firing { " firing" } else { "" },
+                        if g.engaged { "engaged" } else { "holding" },
+                    )
+                })
+                .collect();
+            format!(
+                "flak-team {team} guns {} groups {}",
+                guns.iter()
+                    .map(|g| format!("{:#x}", g.0))
+                    .collect::<Vec<_>>()
+                    .join(","),
+                if groups.is_empty() {
+                    "none".to_owned()
+                } else {
+                    groups.join(" ")
+                }
+            )
+        }
     }
 }
 
@@ -389,7 +421,7 @@ fn about(trace: &Trace) -> Option<UnitId> {
         | Trace::Refill { unit, .. }
         | Trace::Radar { unit, .. }
         | Trace::Shutdown { unit, .. } => Some(*unit),
-        Trace::Battery { .. } => None,
+        Trace::Battery { .. } | Trace::FlakTeam { .. } => None,
     }
 }
 

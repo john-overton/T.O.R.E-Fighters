@@ -711,6 +711,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/ils_survey.rs", ("airports", "flight-landing", "ai-airfield"), "ILS survey"),
     _r("crates/tore-app/src/surface_dump.rs", ("surface",), "the surface dump and template sheets"),
     _r("crates/tore-app/src/surface_trace.rs", ("surface",), "the surface trace"),
+    _r("crates/tore-app/src/flak_pass.rs", ("surface",), "the flak team probe (--flak-pass)"),
     _r("crates/tore-app/src/surface_drive.rs", ("surface",), "the surface movement drive"),
     _r("crates/tore-app/src/surface_battle.rs", ("surface",), "the surface battle drive and survey"),
     _r("crates/tore-app/src/surface_parked.rs", ("surface",), "the parked aircraft drive"),

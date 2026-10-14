@@ -283,6 +283,10 @@ pub struct SurfaceState {
     /// This tick's new gun bursts, for a networked host's clients. Not
     /// checkpointed: rebuilt every tick.
     pub bursts: Vec<super::fire::BurstNote>,
+    /// Each flak team's groups and whether it engages them, as last traced
+    /// (by team index). Presentation only: the trace's memory, never read by
+    /// the fight, not checkpointed.
+    pub flak_teams: std::collections::BTreeMap<usize, Vec<(Vec<u32>, bool)>>,
 }
 
 /// Equal when the checkpointed state is: the per-tick trace, locks,
@@ -321,6 +325,7 @@ impl SurfaceState {
         self.painting.clear();
         self.places.clear();
         self.bursts.clear();
+        self.flak_teams.clear();
     }
     pub fn unit(&self, id: UnitId) -> Option<&SurfaceUnitState> {
         self.units

@@ -83,7 +83,7 @@ tore_sim::checkpoint_struct!(SurfaceUnitState {
 });
 
 // The trace, locks, painting, places and bursts are rebuilt every surface
-// tick.
+// tick; the flak teams' traced picture is the trace's memory only.
 tore_sim::checkpoint_struct!(SurfaceState {
     digest,
     units,
@@ -96,6 +96,7 @@ tore_sim::checkpoint_struct!(SurfaceState {
     painting = Vec::new(),
     places = Default::default(),
     bursts = Vec::new(),
+    flak_teams = Default::default(),
 });
 
 impl SurfaceState {

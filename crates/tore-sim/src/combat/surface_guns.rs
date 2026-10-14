@@ -652,6 +652,16 @@ impl GunTuning {
             quarters as u8
         }
     }
+    /// Quarter seconds between the shells of the opening barrage, or 0 for
+    /// the burst's own round spacing: [`FLAK_OPENING_GAP_QUARTERS`] for the
+    /// flak, the only rows with an opening barrage.
+    pub fn opening_gap_quarters(&self) -> u8 {
+        if self.opening_shots > 0 {
+            FLAK_OPENING_GAP_QUARTERS
+        } else {
+            0
+        }
+    }
     /// Seconds from the first round of one burst to the first of the next.
     pub fn cycle_s(&self) -> f64 {
         (f64::from(self.burst_quarters()) + f64::from(self.pause_quarters)) / 4.
@@ -692,6 +702,13 @@ impl GunTuning {
         }
     }
 }
+
+/// Quarter seconds between the shells of a flak gun's opening barrage: 0.75
+/// s, three times the retail quarter second, as its rate of fire is a third
+/// of what it was (opinionated, John, 2026-10-14: "The 8-shell opening
+/// barrage should be slowed as well"; the value is an agent decision, the
+/// same cut as the rate). The eight shells take 6 s instead of 2 s.
+pub const FLAK_OPENING_GAP_QUARTERS: u8 = 3;
 
 /// Half the width of the "egg" heavy flak bursts in, feet: 150 m, so the egg
 /// is 300 m across (John, 2026-10-13: "within a sphere around the target of

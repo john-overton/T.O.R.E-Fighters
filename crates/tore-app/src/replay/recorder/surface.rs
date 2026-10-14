@@ -333,7 +333,7 @@ impl Watch {
                             },
                         ),
                 ),
-                Trace::Swap { .. } | Trace::Battery { .. } => {}
+                Trace::Swap { .. } | Trace::Battery { .. } | Trace::FlakTeam { .. } => {}
             }
         }
         for (id, before) in lost {

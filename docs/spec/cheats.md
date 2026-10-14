@@ -258,6 +258,7 @@ also with Invulnerable on. It applies to AI aircraft too. Gun hits do not jolt.
 | Push | 15 ft/s away from the burst |
 | Fade | the kick halves about every 0.1 s and is gone within 1.5 s |
 | Warhead scale | the warhead's damage against that aircraft over 100, between 0.5 and 2 (an AIM-9M is 1, an AIM-54C is 2) |
+| Flak | a flak burst's splash knocks half as hard: the whole jolt (kicks and push) times 0.5 after the warhead scale's floor (John, 2026-10-14; [flak](surface-defenses.md#flak)) |
 
 ### Midair collisions
 

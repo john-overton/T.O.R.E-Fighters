@@ -53,6 +53,14 @@ side pass. Their rounds carry tracers (every third round) and they only rarely h
 Mk 82 in a dive, and with the trace's own kill at 23 s: every one is a kill of the squad's id, and a squad
 killed in the middle of a pass fires no more.
 
+`surface-flak-team` (nr-flak2, John 2026-10-14) runs `--flak-pass`, which flies a flight of two or four on a
+scripted line over a team of heavy flak guns (KS-12 and KS-19 within a nautical mile of each other) or a lone
+gun, every other armed unit laid down: North Vietnam's storage template, whose four guns form one team. A flight
+of four heading in is engaged by the whole team (heading-in trigger), the shells spread over every member, the
+lead lives, each gun's eight-shell opening barrage is 0.75 s a shell and every flak knock is half the old one. A
+flight skirting the team at 35,000 ft, outside the KS-12s' reach and not heading in, draws no fire. Two players
+in seats heading in both draw fire, and a lone KS-19 (a team of one) still fires at a flight.
+
 The engagement scenarios run `--surface-trace`, which flies the player on a
 scripted straight line past one surface unit and prints what its controller
 does (phases, shots, bursts, radar, HARM rolls, battery changes), the RWR's
@@ -593,6 +601,83 @@ def base_defenses_problems(output: str) -> list[str]:
     return problems
 
 
+FLAK_PASS = re.compile(r"^flak-pass: t=([0-9.]+) (.*)$", re.M)
+FLAK_MEMBER = re.compile(
+    r"^flak-pass: member (\d+)( \(lead\))? shells (\d+) opening (\d+) first-shell (\S+) hp (\d+) -> (\d+) "
+    r"lost (-?\d+) destroyed (\S+) jolts (\d+) knock ([0-9.]+)$",
+    re.M,
+)
+FLAK_SUMMARY = re.compile(r"^flak-pass: summary first-shell (\S+) shells \[([0-9, ]*)\] .* lead-survived (\w+)$",
+                          re.M)
+
+
+def flak_pass_shots(run: str) -> list[tuple[float, str, bool]]:
+    """Each shell the followed team fired: time, gun, opening barrage."""
+    out = []
+    for m in FLAK_PASS.finditer(run):
+        text = m.group(2)
+        if text.startswith("shot "):
+            out.append((float(m.group(1)), text.split()[1], text.endswith(" opening")))
+    return out
+
+
+def flak_team_problems(output: str) -> list[str]:
+    """Flak teams (John, 2026-10-14): fire spread over the group, held at a
+    group skirting the team, half the knock, a slower opening barrage."""
+    problems: list[str] = []
+    heading_in, skirt, seats, lone = (runs(output) + ["", "", "", ""])[:4]
+
+    # A flight of four heading at the four-gun team.
+    team_lines = [m.group(2) for m in FLAK_PASS.finditer(heading_in) if m.group(2).startswith("flak-team ")]
+    if not any("heading-in engaged" in line for line in team_lines):
+        problems.append(f"the team never engaged the flight heading in: {team_lines[:3]}")
+    members = FLAK_MEMBER.findall(heading_in)
+    shells = [int(m[2]) for m in members]
+    if len(shells) != 4 or min(shells, default=0) < 2:
+        problems.append(f"shells per member {shells}: every member should draw fire")
+    elif shells[0] * 10 > sum(shells) * 4:
+        problems.append(f"the lead drew {shells[0]} of {sum(shells)} shells (more than 40 percent)")
+    summary_line = FLAK_SUMMARY.search(heading_in)
+    if not summary_line or summary_line.group(3) != "true":
+        problems.append("the lead did not survive the pass")
+    for m in members:
+        jolts, knock = int(m[9]), float(m[10])
+        if abs(knock - 0.25 * jolts) > 0.011:
+            problems.append(f"member {m[0]} knock {knock} for {jolts} flak jolts, expected a quarter each")
+    by_gun: dict[str, list[float]] = {}
+    for t, gun, opening in flak_pass_shots(heading_in):
+        if opening:
+            by_gun.setdefault(gun, []).append(t)
+    if len(by_gun) != 4:
+        problems.append(f"{len(by_gun)} guns fired an opening barrage, expected 4")
+    for gun, times in by_gun.items():
+        gaps = {round(b - a, 2) for a, b in zip(times, times[1:])}
+        if len(times) != 8 or gaps != {0.75}:
+            problems.append(f"{gun} opening barrage {len(times)} shells, gaps {sorted(gaps)}")
+
+    # Skirting at 35,000 ft: the team holds.
+    if flak_pass_shots(skirt):
+        problems.append(f"{len(flak_pass_shots(skirt))} shells at a flight skirting the team")
+    skirt_lines = [m.group(2) for m in FLAK_PASS.finditer(skirt) if m.group(2).startswith("flak-team ")]
+    if not any("holding" in line for line in skirt_lines) or any("engaged" in line for line in skirt_lines):
+        problems.append(f"the skirting flight was not held: {skirt_lines[:3]}")
+
+    # Two players in seats heading in: both draw fire.
+    seat_shells = [int(m[2]) for m in FLAK_MEMBER.findall(seats)]
+    if len(seat_shells) != 2 or min(seat_shells, default=0) < 2:
+        problems.append(f"shells per seated player {seat_shells}")
+
+    # A lone KS-19, a team of one.
+    if not flak_pass_shots(lone):
+        problems.append("the lone KS-19 never fired")
+    return problems
+
+
+def flak_pass(*args: str) -> list[str]:
+    return ["--flak-pass", "TVIET", "QTSTRG", "--defenses", "3", "0", "--solo-team", "--from", "20",
+            "--seconds", "200", "--rng", "1", *args]
+
+
 TRACE_NOTES = ("Reads the surface records the import does not keep yet from the retail media "
                "(TORE_GAME_DIR, the remembered source or the gameassets link).")
 
@@ -978,6 +1063,19 @@ def scenarios() -> list[Scenario]:
                              "--speed", "300", "--from", "10", "--seconds", "120", "--invulnerable"),
                        timeout=300)],
             check=flak_problems, notes=TRACE_NOTES,
+        ),
+        Scenario(
+            name="surface-flak-team", lane="ai", timeout=600,
+            args=flak_pass("--size", "4", "--flight", "4"),
+            then=[
+                Step(flak_pass("--size", "4", "--flight", "4", "--pass", "35000"), timeout=300),
+                Step(flak_pass("--size", "4", "--flight", "2", "--seats"), timeout=300),
+                Step(flak_pass("--size", "1", "--flight", "2"), timeout=300),
+            ],
+            forbid=[r"^flak-pass: t=\S+ member 0 destroyed"],
+            check=flak_team_problems,
+            notes=TRACE_NOTES + " Flak teams, spread fire, the 25 percent and heading-in triggers, half the "
+                  "knock and the slower opening barrage (John, 2026-10-14).",
         ),
         Scenario(
             name="surface-barrage-zone", lane="ai", timeout=300,

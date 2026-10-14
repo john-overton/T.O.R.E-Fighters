@@ -2680,10 +2680,17 @@ impl AiWings {
         })
     }
 
-    /// A missile blast knocks an AI aircraft around, like the player's.
-    pub fn jolt(&mut self, id: u32, from: [f64; 3], strength: f64) {
+    /// An AI aircraft's flight state, for a development probe that flies it
+    /// on a scripted line (`--flak-pass`). The game never calls it.
+    pub fn actor_flight_mut(&mut self, id: u32) -> Option<&mut tore_sim::flight::State> {
+        self.mission.actor_mut(id).map(|actor| actor.flight_mut())
+    }
+
+    /// A missile blast knocks an AI aircraft around, like the player's;
+    /// `share` scales the knock (a flak burst's is half).
+    pub fn jolt(&mut self, id: u32, from: [f64; 3], strength: f64, share: f64) {
         if let Some(actor) = self.mission.actor_mut(id) {
-            actor.flight_mut().jolt_from(from, strength);
+            actor.flight_mut().jolt_scaled(from, strength, share);
         }
     }
 

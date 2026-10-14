@@ -827,7 +827,7 @@ stateDiagram-v2
 | Detection range | The weapon's seeker `zone0` range and altitude band (SA-2 150,000 ft with an altitude floor of 3,000 ft; SA-6 80,000 ft, floor 500 ft); a sensor's range for GCI and BUTLER (303,800 ft, 50 nm). A battery detects from its radar's position with the battery missile's `zone0`; a GCI element also gives its 50 nm sensor for search, never for launch | retail; battery use defined (John) |
 | Search period | Quarter seconds in the NPC block: 5 s for small SAMs, ZSU-23 and vehicles, 10 s for big SAMs, guns and ships, 48 s for the SCUD | retail, B42 |
 | Eligibility | Hostile side, airborne, class matches the object's `react` attack mask (templates use `$c000`: fighters and bombers), inside detection range and band, terrain line of sight clear, inside `searchDist` when non-zero (unit unknown: 25 is read as 25 x 256 ft). Ground units and ships of the other side too, for a weapon whose record may aim at them ([surface against surface](#surface-against-surface)) | retail; the `searchDist` reading fitted |
-| Choice | Nearest eligible; keep the current target while valid; KS-12 and KS-19 re-evaluate every 10 s (`retargetT` 40) | fitted (the retail ranking terms for surface actors are untraced) |
+| Choice | Nearest eligible; keep the current target while valid; KS-12 and KS-19 re-evaluate every 10 s (`retargetT` 40), choosing as a team ([flak teams](#flak-teams)) | fitted (the retail ranking terms for surface actors are untraced); flak teams opinionated (John, 2026-10-14) |
 | Preparation | `unreadyAttackT` for a unit's first engagement (SA-2, SA-3 and SA-6 36 s; SA-15 5 s), `attackT` afterwards (5 to 20 s) | retail times; which engagement counts as first is fitted (B42 says the producer of the unready flag is unknown) |
 | Lock to fire | `trackT`: guns 1 s, missiles 5 s, Sea Sparrow and SS-N-9 3 s | retail, B42 |
 | Launch gates | `zone1` range, altitude floor and ceiling, heading and pitch half-angles; mount arcs `slewLimitH/P` relative to the hull; terrain line of sight from the mount | retail |
@@ -1169,7 +1169,11 @@ flowchart LR
   shell every 12.75 s is 4.7 a minute (was 14.1). The retail record's own
   cycle is 4.5 s, 13.3 a minute; the real 85 mm 52-K and 100 mm KS-19 fire 15
   to 20 rounds a minute at the most. The eight-shell opening barrage (retail
-  startup shots), fired once in a gun's life, is unchanged.
+  startup shots), fired once in a gun's life, is slowed by the same third
+  (opinionated, John, 2026-10-14: "The 8-shell opening barrage should be
+  slowed as well"; the 0.75 s is an agent decision): its shells leave 0.75 s
+  apart, eight in 6 s, where they left a quarter second apart (eight in
+  2 s).
 - A burst deals splash damage and plays an air flak explosion: the KS-12's
   is the record's own type 27 (the original's air flak row: size 130, 2 s,
   air explosion sounds; retail), the KS-19's is type 28 (size 170, 1 s;
@@ -1182,7 +1186,15 @@ flowchart LR
 - A shell passes friendly aircraft and aircraft on the ground (collateral
   damage spares the gun's own side when friendly fire is off).
 - Startup shots 8: the first engagement opens with an eight-shell barrage
-  (retail).
+  (retail), 0.75 s a shell (above).
+- **A burst knocks an aircraft half as hard (opinionated, John, 2026-10-14:
+  "flak pushes aircraft a lot, maybe cut push forces by 50%, damage can stay
+  the same").** A flak burst's splash jolts an aircraft with half the roll,
+  pitch and yaw kick and half the push of another blast of its strength
+  ([missile hit jolt](cheats.md#missile-hit-jolt)), halved after the
+  strength's floor, so every flak jolt is now a quarter of a 100-point
+  warhead's (it was a half). The damage is unchanged.
+- The guns fight as teams: see [flak teams](#flak-teams).
 - A shell reaching its life without bursting bursts there.
 
 What this does, measured with `--surface-trace ... --solo` (one gun, the
@@ -1194,6 +1206,105 @@ points. The whole North Vietnam emplacement killed the jet in 66 to 73 s and
 now leaves it with 31 to 68 hit points after a 150 s pass. Of the bursts
 measured 97 percent lie inside the egg and the rest within 5 percent of its
 edge.
+
+#### Flak teams
+
+John, 2026-10-14: "Flak looks a lot better, however they just attack the first
+plane that comes in range until it dies ... in flight it is usually the flight
+lead. It would be nicer if flak would try to attack the group ... let's give
+flak a 'group logic' kind of how supply trucks work, but give them double the
+detection range, and have the flak attach and detect and work as a team within
+1 mile of each other, and have it attack the entire detected group once 25% of
+the detected group is in range of the entire group." Amended the same day: a
+group just outside range with only one of ten in reach would draw no fire, so
+the team also opens fire when the group "judges heading ... within a 90%
+cone of the known blob". Every rule below is opinionated (John's request);
+the readings and numbers marked *agent* are agent decisions.
+
+```mermaid
+flowchart TD
+    D["Team detects: any gun sees the aircraft<br/>within twice its detection range"] --> G["Detected aircraft split into groups<br/>(within 2 nm of each other)"]
+    G --> Q{"25% of the group in range<br/>of every gun of the team?"}
+    G --> H{"Group heading at the team<br/>(within 45 degrees) and one<br/>member in some gun's reach?"}
+    Q -- yes --> E[Engage the whole group]
+    H -- yes --> E
+    Q -- no --> W[Hold: guns choose, prepare and lock on, none fires]
+    H -- no --> W
+    E --> S["Each gun takes its own member:<br/>in reach first, then the least covered,<br/>then the nearest"]
+    S --> K["Keep engaging while any gun<br/>is firing at the group"]
+```
+
+- **Who is in a team.** The KS-12 and KS-19 guns, the only heavy flak (the
+  other guns fire as before). Guns of one side join one team when a gun of
+  the team stands within 1 nautical mile (6,076 ft) of them, so a chain of
+  guns each a mile from the next is one team (*agent*: chained; the nautical
+  mile is the lead's reading of John's "1 mile"). Teams form from where the
+  mission places the guns and do not change; a destroyed gun drops out and
+  the rest stay a team. A gun with no other within a mile is a team of one
+  and follows the same rules, so a lone gun still fires at a single aircraft
+  or a flight heading at it. Ships' guns and other AAA are not in teams.
+  Measured on the retail data: North Vietnam's base layout stands its 24 KS
+  guns 1.5 to 3 nm apart, so each is a team of one; its Quick Mission
+  templates hold teams of 2 (barges, cargo ships), 4 (storage units) and 11
+  (the comm center); no other theater has heavy flak.
+- **Shared detection, doubled.** The team sees every hostile aircraft any of
+  its live guns sees within twice the gun's detection range (the records'
+  100,000 ft, so 200,000 ft, about 33 nm), with terrain line of sight from
+  that gun; the record's altitude band is kept and `searchDist` is doubled too
+  where a unit has one. Every gun of the team knows every aircraft the team
+  sees.
+- **The group** (*agent*). The aircraft the team sees are split into groups:
+  an aircraft within 2 nm of another of the group belongs to it. A flight in
+  formation is one group; two flights on different tracks are usually two.
+- **When the team opens fire on a group.** Either at least 25 percent of the
+  group's aircraft are in range of the entire team, meaning inside the fire
+  zone (range and altitude band) of every live gun of the team (*agent*: the
+  strict reading, so a team with KS-12s, whose shells reach 26,200 ft, waits
+  for the group to come inside their reach and not only the KS-19s'
+  44,250 ft); or the group heads at the team: its members' mean track over
+  the ground lies within 45 degrees either side of the bearing from the
+  group's middle to the team's middle (John's "90% cone", read as a cone 90
+  degrees wide) and at least one member is inside some gun's fire zone. A
+  group slower than 30 kt over the ground (a hovering helicopter group) has
+  no track and opens fire by the 25 percent rule only (*agent*). On a
+  straight line the heading cone opens fire first, as soon as a member comes
+  into reach, unless the line passes the team more than about 30,000 ft off
+  (the KS-19's reach divided by the square root of two at 8,000 ft); then the
+  group is skirting the team.
+- **Holding.** Until then the team holds its fire at the group. Its guns
+  still choose targets, prepare and lock on (a radar gun paints its target on
+  the RWR, as before), so they fire the moment the team engages. A group
+  skirting the edge, not heading in, with fewer than 25 percent in range of
+  the whole team, is never fired at, not even the one aircraft a gun could
+  reach: the ambush rule John described. (Alternative offered to John: let a
+  gun fire at any aircraft inside its own reach after all, which brings back
+  some fire on the lead.)
+- **Once engaged.** The team engages the whole group, and keeps engaging it
+  while any gun of the team is firing at a member (a burst begun, the pause
+  after it or a magazine swap), even if the group turns away.
+- **Spreading the fire** (*agent*). Each gun takes its own member of the
+  engaged groups: one inside its reach, or within 1 nm of it, before one
+  farther (so the members of a formation reaching a gun count alike), then the
+  member the fewest other guns of the team are on, then the nearest, then the
+  lowest id. A gun picks again when its target dies or leaves and at flak's
+  10 s retarget period, so the fire moves over the group rather than staying
+  on the lead.
+- Determinism: everything is a function of this tick's positions and the
+  controllers' checkpointed state, read in ascending unit id, so the player,
+  the AI, a networked host and a replay all see the same teams and the same
+  fire. Nothing is added to the checkpoint or the wire.
+
+What this does, measured with `--flak-pass` (a flight on a scripted line over
+the storage template's four-gun team and a lone gun;
+[measurements](../baselines/flak-teams.md)): a four-ship's lead, which drew 39 of
+the team's 52 shells and died in a third of the passes, now draws about 15,
+like each wingman, each gun's opening barrage going to a different member, and
+no seat died in any pass; the flight as a whole loses about a fifth more hit
+points (the shells no longer fall on a lead already nearly destroyed). A flight
+skirting the team 35,000 ft to the side, which lost a wingman to 24 shells,
+draws none. A lone gun fires the moment the flight comes into reach (before,
+its lock lapsed every 15 s while it waited, delaying its first shell by about
+12 s). Every flak jolt is now a quarter of a 100-point warhead's.
 
 #### Barrage zone
 
@@ -1357,7 +1468,7 @@ radars to the rules above. Where the rules leave a choice, it chose as follows
 | First engagement | The unready preparation time is the controller's first Prepare; every later one takes the ordinary time | fitted (unknown producer) |
 | Lost target, failing gates | A target no longer eligible returns to Search at once; launch gates that fail hold the lock up to 15 s, then Search (which may choose the same target again) | B42 window, fitted recovery |
 | Lock between salvos | The lock holds through the pause between bursts and salvos: the RWR lock tone and the painting state continue | defined (John, 2026-10-10) |
-| Gun bursts | A burst's rounds leave evenly over its burst time; the first engagement's opening barrage (`startupShots`) spaces its rounds by the burst's round spacing, at least a quarter second apart (KS-19: 8 shells in 2 s) | fitted |
+| Gun bursts | A burst's rounds leave evenly over its burst time; the first engagement's opening barrage (`startupShots`) spaces its rounds by the burst's round spacing, at least a quarter second apart; the flak's are 0.75 s apart (KS-12 and KS-19: 8 shells in 6 s; John, 2026-10-14) | fitted; flak opinionated |
 | Where rounds leave from | A **missile** leaves its rail: the unit's pose this tick (a moving unit fires from where it is, with its velocity) plus the hardpoint offset at real size (a third of the record's) turned by the unit's attitude, at least 5 ft above the terrain. A **land gun** leaves the end of its drawn barrel ([muzzles](#muzzles)), and a **ship's gun** its hardpoint, which sits at the gun. Radars and sights look from 10 ft above the unit's reference point | fitted |
 | RWR reception of a ground radar | The terrain test ends at least 10 ft above the ground under the radar (its antenna), so a unit whose contact volume sits low on a slope still shows its square | fitted |
 | Mount arcs | A half-arc of 0 is unrestricted on that axis (every land vehicle reads 0 for heading); otherwise the bearing (guns: and elevation) must lie inside the half-arc of the mount's rest direction, relative to the hull. A missile's launch pitch is the line to the target clamped between 10 degrees and the rail's arc | inference, fitted |
@@ -1778,8 +1889,8 @@ tracer, each marked retail or fitted. Tags: `R` retail record value, `F` fitted,
 | AK-230 class, twin 30 mm | AAA30BAD (TYPE69, KNOX, JIANC, JIANE, KRIVAK, CYCL, PMORN) | 4 in 0.25 s / 1.0 s / 0 / 3,666 | 2,000 F | 42 F (1.25 s) | 1.0 R | 0 R | 1,000 F | 120 O | ship | unlimited F | 3,440 F | every 3rd | 1/6 of retail F | 0.97 |
 | 61-K 37 mm M1939 | M1939 | 4 in 0.5 s / 3.0 s / 0 / 3,960 | 160 F | 6 F (2.25 s) | 3.0 R | 0 R | 200 F | 60 O | towed | 2 F | 2,890 F | every 3rd | retail R | 1.00 |
 | 61-K 37 mm M1939, barrage zone | A_M1939 | 4 in 0.5 s / 3.0 s / 0 / 3,960 | 160 F | 6 F (2.25 s) | 3.0 R | 0 R | 200 F | 60 O | towed | 2 F | 2,890 F | every 3rd | retail R | 1.00 |
-| 52-K 85 mm (KS-12) flak | KS12 | 1 in 0.5 s / 4.0 s / 8 / 3,520 | 5 F | 1 R (single shot) | 12.5 O | 8 R | 60 F | 60 O | towed | 2 F | 2,620 F | none | retail R | 0.35 |
-| KS-19 100 mm flak | KS19 | 1 in 0.5 s / 4.0 s / 8 / 4,400 | 5 F | 1 R (single shot) | 12.5 O | 8 R | 60 F | 60 O | towed | 2 F | 2,950 F | none | retail R | 0.35 |
+| 52-K 85 mm (KS-12) flak | KS12 | 1 in 0.5 s / 4.0 s / 8 / 3,520 | 5 F | 1 R (single shot) | 12.5 O | 8 R, 0.75 s apart O | 60 F | 60 O | towed | 2 F | 2,620 F | none | retail R | 0.35 |
+| KS-19 100 mm flak | KS19 | 1 in 0.5 s / 4.0 s / 8 / 4,400 | 5 F | 1 R (single shot) | 12.5 O | 8 R, 0.75 s apart O | 60 F | 60 O | towed | 2 F | 2,950 F | none | retail R | 0.35 |
 | M256 120 mm tank gun | M1 | 1 in 0.25 s / 4.0 s / 0 / 5,866 | 6 F | 1 R (single shot) | 9.75 F | 0 R | 34 F | 60 O | vehicle | 2 F | 5,866 R | none | retail R | 0.43 |
 | 2A46 125 mm tank gun | T72 (T72, T80, T90) | 1 in 0.25 s / 4.0 s / 0 / 5,866 | 8 F | 1 R (single shot) | 7.25 F | 0 R | 22 F | 60 O | vehicle | 2 F | 5,866 R | none | retail R | 0.57 |
 | 2A42 30 mm | BMP2 | 2 in 0.5 s / 3.0 s / 0 / 3,666 | 300 F | 20 F (4.0 s) | 3.0 R | 0 R | 500 F | 60 O | vehicle | 2 F | 3,150 F | every 3rd | 1/5 of retail F | 1.00 |

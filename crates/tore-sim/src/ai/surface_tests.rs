@@ -28,6 +28,7 @@ fn zsu23() -> Profile {
             burst_ticks: 7 * QUARTER_SECOND_TICKS,
             pause: 4 * QUARTER_SECOND_TICKS,
             opening: 0,
+            opening_gap: 0,
             swap: 120 * TPS,
         },
     }
@@ -52,6 +53,7 @@ struct Run {
     in_range: bool,
     gates: bool,
     blind: bool,
+    hold: bool,
     fired: Vec<(u64, FireRequest)>,
     swaps: Vec<u64>,
 }
@@ -69,6 +71,7 @@ impl Run {
             in_range: true,
             gates: true,
             blind: false,
+            hold: false,
             fired: Vec::new(),
             swaps: Vec::new(),
         }
@@ -82,6 +85,7 @@ impl Run {
             stock: stock(self.loaded, self.reserve),
             blind: self.blind,
             slow: false,
+            hold: self.hold,
         };
         let outcome = self.controller.advance(&self.profile, &inputs);
         if let Some(fire) = outcome.fire {
@@ -259,6 +263,7 @@ fn zsu23_bursts_pauses_empties_and_swaps() {
         },
         blind: false,
         slow: false,
+        hold: false,
     };
     run.controller.advance(&run.profile, &inputs);
     assert_eq!(run.controller.phase(), Phase::Reload);
@@ -276,6 +281,7 @@ fn ks19_opens_with_eight_shells() {
             burst_ticks: QUARTER_SECOND_TICKS,
             pause: 16 * QUARTER_SECOND_TICKS,
             opening: 8,
+            opening_gap: 0,
             swap: 60 * TPS,
         },
     };
@@ -295,6 +301,71 @@ fn ks19_opens_with_eight_shells() {
 }
 
 #[test]
+fn a_held_controller_keeps_its_lock_and_fires_the_moment_it_is_released() {
+    // A flak team waiting for a group: the gun locks on and holds, past the
+    // gates' 15 s window, and fires on the first tick the hold lifts.
+    let profile = Profile {
+        timing: Timing::from_quarters(40, 100, 60, 4, 40, 1),
+        arm: Arm::Gun {
+            burst: 1,
+            burst_ticks: QUARTER_SECOND_TICKS,
+            pause: 50 * QUARTER_SECOND_TICKS,
+            opening: 8,
+            opening_gap: 3 * QUARTER_SECOND_TICKS,
+            swap: 60 * TPS,
+        },
+    };
+    let mut run = Run::new(profile, 60, 2);
+    run.hold = true;
+    run.first_phase(Phase::Track, 60 * TPS);
+    for _ in 0..(40 * TPS) {
+        run.step();
+    }
+    assert_eq!(run.controller.phase(), Phase::Track);
+    assert!(run.fired.is_empty());
+    run.hold = false;
+    let released = run.tick;
+    let first = run.first_fire(released + TPS);
+    assert_eq!(first, released, "fires on the tick the hold lifts");
+    // Held again mid-barrage: the rest of the burst is not fired.
+    run.hold = true;
+    for _ in 0..(10 * TPS) {
+        run.step();
+    }
+    assert_eq!(run.fired.len(), 1);
+    assert_eq!(run.controller.phase(), Phase::Track);
+}
+
+#[test]
+fn an_opening_gap_spaces_the_barrage() {
+    // Flak since 2026-10-14: the eight opening shells 0.75 s apart (three
+    // quarters), a third of the old rate like the rest of its fire.
+    let profile = Profile {
+        timing: Timing::from_quarters(40, 100, 60, 4, 40, 1),
+        arm: Arm::Gun {
+            burst: 1,
+            burst_ticks: QUARTER_SECOND_TICKS,
+            pause: 50 * QUARTER_SECOND_TICKS,
+            opening: 8,
+            opening_gap: 3 * QUARTER_SECOND_TICKS,
+            swap: 60 * TPS,
+        },
+    };
+    let mut run = Run::new(profile, 60, 2);
+    run.first_fire(60 * TPS);
+    run.first_phase(Phase::Pause, 60 * TPS);
+    assert_eq!(run.fired.len(), 8);
+    let spacing: Vec<u64> = run.fired.windows(2).map(|w| w[1].0 - w[0].0).collect();
+    assert!(
+        spacing.iter().all(|s| *s == 3 * QUARTER_SECOND_TICKS),
+        "{spacing:?}"
+    );
+    // The barrage spans 6 s, then the 12.5 s pause.
+    let next = run.first_fire(100 * TPS);
+    assert_eq!(next, run.fired[0].0 + 6 * TPS + 25 * TPS / 2);
+}
+
+#[test]
 fn flak_moves_to_the_nearest_target_each_retarget_period() {
     let profile = Profile {
         timing: Timing::from_quarters(40, 100, 60, 4, 40, 1),
@@ -303,6 +374,7 @@ fn flak_moves_to_the_nearest_target_each_retarget_period() {
             burst_ticks: QUARTER_SECOND_TICKS,
             pause: 16 * QUARTER_SECOND_TICKS,
             opening: 0,
+            opening_gap: 0,
             swap: 60 * TPS,
         },
     };
@@ -353,6 +425,7 @@ fn optical_backup_doubles_preparation() {
         stock: stock(3, 0),
         blind: false,
         slow: true,
+        hold: false,
     };
     controller.advance(&profile, &inputs);
     assert_eq!(controller.phase(), Phase::Prepare);

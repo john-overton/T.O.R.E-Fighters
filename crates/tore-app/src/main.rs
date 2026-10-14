@@ -57,6 +57,7 @@ mod f16_animation;
 mod f22_animation;
 mod f4_animation;
 mod fill_renderer;
+mod flak_pass;
 mod flight;
 mod flight_canvas;
 mod flight_map;
@@ -10129,6 +10130,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     }
     if std::env::args().nth(1).as_deref() == Some("--surface-trace") {
         surface_trace::run()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--flak-pass") {
+        flak_pass::run()?;
         return Ok(Outcome::Done);
     }
     if std::env::args().nth(1).as_deref() == Some("--surface-preview") {
