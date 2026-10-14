@@ -490,7 +490,16 @@ choices, labelled below.
   page was not following (an older one landing behind the newest) leaves no
   static, nor does one the pilot sent back to the pod with Clear designation,
   and Clear during the static ends it. The window a launch opened closes after
-  the static, not before it. A paused game freezes the snow (it counts combat
+  the static, not before it. Online, a flying weapon cannot leave the picture
+  for want of an update: the wire is delta coded, so lost snapshots and the
+  host's budget and priority only delay a weapon's record, the client draws it
+  on (extrapolated) and only the host's removal message ends it (test
+  `an_own_missile_stays_drawn_through_lost_snapshots_until_its_removal`). As a
+  safeguard an online client still waits 24 combat ticks (0.2 s) for a missing
+  weapon, holding its last picture, before the static starts; the static is
+  timed from the tick the weapon left, so the page is back a second after it
+  left either way, and single player has no wait at all. A weapon that comes
+  back ends the static (agent decisions). A paused game freezes the snow (it counts combat
   ticks). The static is drawn by the page alone (`feed_static` in
   `instruments/targeting.rs`); it is presentation only, with nothing in the
   simulation, the wire or the recordings, and it appears wherever the page

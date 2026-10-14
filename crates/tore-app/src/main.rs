@@ -4360,6 +4360,11 @@ impl ApplicationHandler for App {
                             .laser
                             .and_then(|laser| laser.spot)
                             .map(|spot| spot.spot.position);
+                        self.seeker.set_grace(if self.net_flight.is_some() {
+                            seeker_view::NET_GRACE_TICKS
+                        } else {
+                            0
+                        });
                         let seeker_shot = self.seeker.observe(
                             frame.picture,
                             frame.plane.0,
