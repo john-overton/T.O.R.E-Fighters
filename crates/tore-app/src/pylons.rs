@@ -9,16 +9,17 @@
 //!   do ([`hung`], [`tore_sim::combat::hardpoints::Rack::store_point`]):
 //!   a paired station's split between its position and its mirror, a wing
 //!   side with two stores (or four or more) on an inboard and an outboard
-//!   pylon, a fuselage side's in tandem; a wing store's lugs 2 ft under the
+//!   pylon, a fuselage side's in tandem; a wing store's lugs 1 ft under the
 //!   model's underside over its pylon, a fuselage or centreline store's
-//!   4 inches under the body on a short rail, and a wingtip store's centre
+//!   2 inches under the body on a short rail, and a wingtip store's centre
 //!   line on the tip's edge with nothing drawn under it (John 2026-10-13).
 //!   A released store leaves from that same point, so it never jumps.
-//! - **Several on one pylon** sit on a fitted rack: two side by side, three
-//!   as a triple ejector rack (two shoulders, one below), four as two pairs
-//!   one behind another, more as triple racks one behind another. The
-//!   slots keep the full load's layout, and the highest-numbered slot
-//!   empties first.
+//! - **Several on one pylon** hang off a small bar at the pylon's foot: two
+//!   alongside it, one each side, as a wingtip missile sits on the tip
+//!   (John 2026-10-13); three as a triple ejector rack (one each side, one
+//!   under the bar), four as two pairs one behind another, more as triple
+//!   racks one behind another. The slots keep the full load's layout, and
+//!   the highest-numbered slot empties first.
 //! - **Stores** use the weapon's own shape, refitted to the real store's size
 //!   ([`crate::store_sizes`]). Retail has no rocket pod or fuel tank shape,
 //!   so those, and a store with no shape, are fitted bodies.
@@ -36,7 +37,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use tore_formats::shape::Shape;
 use tore_sim::attitude::{Basis, Vector};
-use tore_sim::combat::hardpoints::{Location, PylonPlace, rack_group, slot_offset};
+use tore_sim::combat::hardpoints::{Location, PylonPlace, rack_group, shoulder, slot_offset};
 use tore_sim::combat::store_sizes::StoreSize;
 use tore_world::snapshot::{StoreLook, StorePose};
 
@@ -50,13 +51,14 @@ const PLAIN: [f64; 2] = tore_sim::combat::store_sizes::PLAIN;
 /// A pylon's height when nothing of the model is above or beside it (a
 /// rail), feet.
 const RAIL: f64 = 0.35;
-/// A pylon's thickness, feet.
-const PYLON_WIDTH: f64 = 0.35;
+/// A pylon's thickness, feet (the simulation spaces stores beside a rack's
+/// bar clear of it).
+const PYLON_WIDTH: f64 = 2. * tore_sim::combat::hardpoints::PYLON_HALF_WIDTH;
 /// How far a pylon reaches into the surface it hangs from, feet, so no
 /// sliver of sky shows at the joint. Retail wings are single faces, so a
 /// deeper sink would show through on top.
 const SINK: f64 = 0.02;
-/// A rack beam's depth under its pylon, feet.
+/// A rack's bar's depth at the foot of its pylon, feet.
 const RACK_DEPTH: f64 = tore_sim::combat::hardpoints::RACK_DEPTH;
 
 /// The model surfaces stores meet, looked up once per point
@@ -158,7 +160,7 @@ pub fn hung(store: &StorePose) -> Vec<Hung> {
         {
             let on = pylon.slots.len() as u16;
             for (k, slot) in pylon.slots.iter().enumerate() {
-                let offset = slot_offset(k as u16, on, size.length, size.width);
+                let offset = slot_offset(k as u16, on, size);
                 out.push(Hung {
                     side,
                     slot: *slot,
@@ -310,9 +312,9 @@ fn dims(store: &StorePose, shape: Option<&Shape>) -> Dims {
 }
 
 /// What holds a pylon's `on` stores of `dims` up: the pylon slab from the
-/// stores' lugs into the model's underside, a rack beam under it when it
-/// carries several, a post down to a triple rack's lower store; or, with
-/// nothing above, a rail joining a wingtip beside it, or a short rail.
+/// stores' lugs (or a rack's bar) into the model's underside, the small bar
+/// at its foot that two or more stores hang beside; or, with nothing above,
+/// a rail joining a wingtip beside it, or a short rail.
 fn hanger(
     out: &mut Vec<f32>,
     at: &impl Fn(Vector) -> Vector,
@@ -330,41 +332,27 @@ fn hanger(
     let depth = airframe
         .and_then(|a| a.underside(p[0], middle, lugs, 6))
         .map_or(0., |surface| surface - lugs);
-    let length = (0.55 * dims.length)
+    let length = (0.45 * dims.length)
         .max(2. * depth)
-        .min(0.85 * dims.length.max(4.))
-        .clamp(1.5, 10.);
-    // A rack: a beam over the stores, as wide as the side-by-side pair and
-    // as long as the racks one behind another, and a post down to each
-    // triple rack's lower store.
+        .min(0.7 * dims.length.max(4.))
+        .clamp(1.2, 8.);
+    // A rack: a small bar across the pylon's foot, reaching out to the
+    // centre lines of the stores beside it, 0.7 of the pylon's length (and
+    // the racks one behind another); the stores' centre lines at its middle.
     let mut top_of_rack = lugs;
     if on >= 2 {
         let per = rack_group(on);
         let groups = on.div_ceil(per);
-        let width = 2. * (0.55 * size.width + dims.radius.max(0.15));
-        let long = f64::from(groups - 1) * 1.05 * size.length + length;
+        let long = f64::from(groups - 1) * 1.05 * size.length + 0.7 * length;
+        let centre = p[1] + dims.top - dims.radius.min(dims.top);
         block(
             out,
             at,
-            [p[0], lugs + RACK_DEPTH / 2., middle],
-            [width, RACK_DEPTH, long],
+            [p[0], centre, middle],
+            [2. * shoulder(size), RACK_DEPTH, long],
             PYLON,
         );
-        for group in 0..groups {
-            let lower = group * per + 2;
-            if per == 3 && lower < on {
-                let offset = slot_offset(lower, on, size.length, size.width);
-                let from = p[1] + offset[1] + dims.top;
-                block(
-                    out,
-                    at,
-                    [p[0], (from + lugs) / 2., middle + offset[2]],
-                    [PYLON_WIDTH, lugs - from, length * 0.6],
-                    PYLON,
-                );
-            }
-        }
-        top_of_rack = lugs + RACK_DEPTH;
+        top_of_rack = centre + RACK_DEPTH / 2.;
     }
     let Some(airframe) = airframe else {
         block(
@@ -924,10 +912,10 @@ mod tests {
     }
 
     #[test]
-    fn a_wing_pylon_is_two_feet_deep_and_a_fuselage_rail_four_inches() {
+    fn a_wing_pylon_is_a_foot_deep_and_a_fuselage_rail_two_inches() {
         let airframe = flat_wing();
-        // Recorded 5 ft below the wing: the store moves up to hang 2 ft under
-        // it on a wing, 4 inches under it at a fuselage station.
+        // Recorded 5 ft below the wing: the store moves up to hang 1 ft under
+        // it on a wing, 2 inches under it at a fuselage station.
         for (location, loaded, depth) in [
             (4, 2, tore_sim::combat::hardpoints::PYLON_DEPTH),
             (4, 4, tore_sim::combat::hardpoints::PYLON_DEPTH),
@@ -944,7 +932,7 @@ mod tests {
                 (f64::from(tank_top) + depth).abs() < 1e-4,
                 "store top {tank_top} with {loaded} loaded at {location}"
             );
-            // The pylon fills the 2 ft with no gap at either end.
+            // The pylon fills the depth with no gap at either end.
             let ys: Vec<f32> = grey(&out).iter().map(|v| v[1]).collect();
             let low = ys.iter().copied().fold(f32::MAX, f32::min);
             let high = ys.iter().copied().fold(f32::MIN, f32::max);
