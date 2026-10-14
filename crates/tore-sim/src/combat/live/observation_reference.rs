@@ -2,6 +2,7 @@
 //! Keep it independent of observation::observe_ownship and weapon_observation:
 //! agreement between serial and worker executions alone cannot validate that
 //! their shared extraction preserved the previous behavior.
+use super::observation::ground_observer;
 use super::*;
 
 pub(super) fn observe(
@@ -57,8 +58,12 @@ pub(super) fn observe(
         } else {
             Vec::new()
         };
-    own.sensors
-        .step_ground(&observer, &objects, &environment, facts.weather);
+    own.sensors.step_ground(
+        &ground_observer(own, launcher, &observer),
+        &objects,
+        &environment,
+        facts.weather,
+    );
     if let Some(id) = own.designated() {
         own.hud_selection = Some(id);
     } else if !state.cheats.easy_targeting {
