@@ -665,14 +665,14 @@ gun's pivot against its arcs, its airframe and the reach). The console screen
 and the HUD read it; it is the same in single player, on a client and in a
 check.
 
-**Online and replays.** The host owns it. The console key is a seat command
-(code 28 on the wire); the host engages orbit hold and, before each flight
+**Online and replays.** Multiplayer needs protocol 29. The host owns it. The
+console key is a seat command (code 28 on the wire); the host engages orbit hold and, before each flight
 step, gives it the sight's point. The orbit's plan and memory ride in the
 exact own-plane state, so a client's prediction flies the same law from the
 last point it was given and agrees with the host while the point stands
 still; following a moving track it differs a little each tick and is
 corrected as any prediction is. Wire changes are listed under
-[the sensor console](../formats/net-protocol.md#the-sensor-console-pending-protocol).
+[the sensor console](../formats/net-protocol.md#protocol-29-the-sensor-console).
 A mission recording keeps the flight as flown, the autopilot's "orbit mode"
 in the flight telemetry, and a `player.orbit` event when the console opens or
 closes and when its point moves ([replays](../REPLAYS.md)).

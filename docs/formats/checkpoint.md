@@ -243,7 +243,7 @@ which gained, after its `loops`, the AC-130 orbit hold's `orbit`
 (`Option<Orbit>`: the point, the centre, the radius, height, speed and reach,
 and the slewed bank, climb and throttle terms; slice nr-orbit, 2026-10-13).
 That changes the wire's own-state bytes too
-([the sensor console](net-protocol.md#the-sensor-console-pending-protocol)).
+([the sensor console](net-protocol.md#protocol-29-the-sensor-console)).
 The seat command `SensorConsole` is 15 in a checkpoint's queued seat
 commands.
 

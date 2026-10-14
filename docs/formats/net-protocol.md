@@ -49,6 +49,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [Protocol 26: explosions sized by weapon](#protocol-26-explosions-sized-by-weapon) (built under protocol 26)
 - [Protocol 27 (stores)](#protocol-27-stores) (built under protocol 27)
 - [Protocol 28 (host loading)](#protocol-28-host-loading) (built under protocol 28)
+- [Protocol 29 (the sensor console)](#protocol-29-the-sensor-console) (built under protocol 29)
 - [Limits](#limits)
 - [Captures](#captures)
 - [Versions](#versions)
@@ -2834,10 +2835,9 @@ flowchart LR
 - **Numbering.** Built as 26 on its own branch; slice BF's explosion scale
   took 26 first, so the stores take 27 (lead, 2026-10-12).
 
-## The sensor console (pending protocol)
+## Protocol 29 (the sensor console)
 
-*Built on branch nr-orbit (2026-10-13), not yet numbered: the lead assigns the
-protocol version at merge.* John asked for the AC-130's sensor console with an
+*Built (slice nr-orbit, 2026-10-13); the lead numbered it 29.* John asked for the AC-130's sensor console with an
 orbit autopilot ([spec](../spec/ac130-linked-guns.md#the-sensor-console-and-the-orbit)).
 
 - **Seat command 28, SensorConsole**, no fields: Ctrl+9 on the AC-130. The
@@ -2852,8 +2852,8 @@ orbit autopilot ([spec](../spec/ac130-linked-guns.md#the-sensor-console-and-the-
   cost).
 - **Why a bump.** An older game reads command 28 as invalid and cannot read
   the longer own-plane state. The wire golden changes in the Inputs command
-  sample (one SensorConsole) and the own-state samples; `wire_golden` fails
-  on this branch until the version is raised and the golden refreshed.
+  sample (one SensorConsole), the version line and the packets sealed with
+  the version.
 
 ## Limits
 
@@ -3019,6 +3019,9 @@ again with an observer; the capture format did not change for it.
   every aircraft's pylons and stores.
   28 since the networking slice NET2 ([host loading](#protocol-28-host-loading)):
   the Keepalive's flags byte, sent by a host building a mission.
+  29 since the AC-130 sensor console (slice nr-orbit,
+  [the sensor console](#protocol-29-the-sensor-console)): seat command 28,
+  and the orbit hold in the exact own-plane state's autopilot.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
