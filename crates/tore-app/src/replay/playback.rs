@@ -290,6 +290,12 @@ impl Playback {
         self.city.flattened_at(tick)
     }
 
+    /// Where the city fill buildings flat at `tick` stand, with the tick
+    /// each fell on (nr-fx4).
+    pub fn city_falls_at(&self, tick: u64) -> Vec<([i32; 2], u64)> {
+        self.city.fell_ticks_at(tick)
+    }
+
     /// Where every city fill building the recording knocks down stands.
     pub fn city_all(&self) -> Vec<[i32; 2]> {
         self.city.all()

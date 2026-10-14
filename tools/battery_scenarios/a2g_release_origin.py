@@ -1,4 +1,4 @@
-"""Lane: flight. Where stores leave the aircraft (bug B3, slices BP2 and PY2,
+"""Lane: flight. Where stores leave the aircraft (bug B3, slices BP2, PY2 and PY3,
 docs/spec/stores-on-pylons.md), through `--a2g-run`'s `release` attack and its `origin` lines
 (every round's start against the aircraft, feet right, up and forward, the point the drawing
 hangs the store at, and how deep its pylon is).
@@ -7,7 +7,9 @@ hangs the store at, and how deep its pylon is).
 sight holds the fourth Mk 82 past the target, so three of those count):
 
 * an A-4E's Mk 82 row (source x 8, 2.67 ft, no retail pair flag): a centreline rack of two
-  pairs one behind another (PY2), the front pair first, right then left;
+  pairs one behind another (PY2), the front pair first, right then left, each pair either side
+  of the rack's bar (PY3); the A-4E's default load carries a tank there (PY3), which the run
+  takes off for the bombs;
 * an A-4E's LAU-61 pods on the outer wing row (x 26, 8.67 ft): one rocket a press;
 * an F-4B's fuselage Mk 82 row (x 13, 4.33 ft, retail flag 0x4): one behind another on each
   side (PY2), the front pair first;
@@ -16,9 +18,9 @@ sight holds the fourth Mk 82 past the target, so three of those count):
 * an F-4B's centreline row (x 0) loaded with two Mk 82s, side by side, right then left.
 
 Every store leaves from the point it hangs at (within 0.05 ft across and up, half a foot
-along for the tick flown). A wing pylon is 2 ft deep; a fuselage or centreline launcher rail
-4 inches (John 2026-10-13), with a rack's 0.3 ft beam between rail and stores. Paired
-rows alternate left and right.
+along for the tick flown). A wing pylon is 1 ft deep; a fuselage or centreline launcher rail
+2 inches (John 2026-10-13, half of PY2's); stores two to a pylon hang beside its bar with
+their tops as deep. Paired rows alternate left and right.
 """
 import re
 
@@ -33,22 +35,23 @@ ORIGIN = re.compile(
 # How far either side of a wing row's position its two pylons stand, feet
 # (tore_sim::combat::hardpoints::DUAL_PYLON_SPREAD).
 DUAL = 1.4
-# A fuselage or centreline launcher rail's depth (4 inches) and a rack beam's, feet
-# (tore_sim::combat::hardpoints::RAIL_DEPTH, RACK_DEPTH).
-RAIL = 4 / 12
-RACK = 0.3
-# A Mk 82's shoulder on a rack: 0.55 of its 1.27 ft fin span.
-SHOULDER = 0.55 * 1.27
+# A fuselage or centreline launcher rail's depth (2 inches) and a wing pylon's, feet
+# (tore_sim::combat::hardpoints::RAIL_DEPTH, PYLON_DEPTH).
+RAIL = 2 / 12
+WING = 1.0
+# A Mk 82 beside a rack's bar: its centre line half the pylon's 0.28 ft, a 0.1 ft gap and its
+# 0.45 ft radius out (tore_sim::combat::hardpoints::shoulder).
+SHOULDER = 0.14 + 0.1 + 0.45
 
 # (label, station right ft, presses, the releases' sides, how far out each leaves,
 # whether each leaves ahead of the row (+1), behind (-1) or either (0), pylon depth ft)
 CASES = [
-    ("A-4E Mk 82 centreline rack", 0.0, 4, "RLRL", [SHOULDER] * 4, [1, 1, -1, -1], RAIL + RACK),
-    ("A-4E LAU-61", 26 / 3, 4, "LRLR", [26 / 3] * 4, [0] * 4, 2.0),
+    ("A-4E Mk 82 centreline rack", 0.0, 4, "RLRL", [SHOULDER] * 4, [1, 1, -1, -1], RAIL),
+    ("A-4E LAU-61", 26 / 3, 4, "LRLR", [26 / 3] * 4, [0] * 4, WING),
     ("F-4B fuselage Mk 82", 13 / 3, 4, "LRLR", [13 / 3] * 4, [1, 1, -1, -1], RAIL),
     ("F-16C inner wing Mk 82", 32 / 3, 4, "LRLR",
-     [32 / 3 + DUAL] * 2 + [32 / 3 - DUAL] * 2, [0] * 4, 2.0),
-    ("F-4B centreline Mk 82", 0.0, 2, "RL", [SHOULDER] * 2, [0] * 2, RAIL + RACK),
+     [32 / 3 + DUAL] * 2 + [32 / 3 - DUAL] * 2, [0] * 4, WING),
+    ("F-4B centreline Mk 82", 0.0, 2, "RL", [SHOULDER] * 2, [0] * 2, RAIL),
 ]
 
 
@@ -114,6 +117,6 @@ def scenarios() -> list[Scenario]:
                       "--station", "0", "--load", "MK82", "--count", "2"], timeout=300),
             ],
             check=origin_problems,
-            notes="Four presses on four rows and two on a centreline row: each store leaves from where it hangs, under a 2 ft wing pylon or a 4 inch body rail (B3, BP2, PY2).",
+            notes="Four presses on four rows and two on a centreline row: each store leaves from where it hangs, under a 1 ft wing pylon or a 2 inch body rail, pairs beside a rack's bar (B3, BP2, PY2, PY3).",
         ),
     ]

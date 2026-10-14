@@ -143,24 +143,51 @@ pub const SURFACE_ROLE: [&str; 10] = [
 
 /// The air-to-ground weapons whose seeker has a picture, by record name: the
 /// infrared AGMs (class 8, AGM-65G, AGM-65A and the AGM-84E SLAM), the
-/// laser missiles (class 12, AS-14, AS-30 and AT-12) and the AT-2 (retail's
+/// laser bombs (class 4, the GBU-10 family, Pave Way and GBU-28), the laser
+/// missiles (class 12, AS-14, AS-30 and AT-12) and the AT-2 (retail's
 /// "optical", command guided from the launcher's sight). The target camera
 /// follows the player's last one in flight (docs/spec/target-window.md,
 /// "Seeker view"). Left out, by design: the anti-radiation, active radar and
-/// supported radar missiles (no picture) and the laser bombs and JDAMs (they
-/// follow a spot or a point and carry no camera; John 2026-10-12: "JDAM
-/// no"). Opinionated: the pick was the agent's on John's "every weapon with a
-/// seeker view" (2026-10-12), and John added the AT-2 the same day; the data
-/// has no such flag.
-pub const SEEKER_VIEW: [&str; 7] = [
+/// supported radar missiles (no picture) and the JDAMs (they fly to a point
+/// and carry no camera; John 2026-10-12: "JDAM no"). Opinionated: the pick was
+/// the agent's on John's "every weapon with a seeker view" (2026-10-12), John
+/// added the AT-2 the same day and the laser bombs on 2026-10-13 ("nosecone
+/// (GBU's, Mavericks, AT-12's etc) views"); the data has no such flag, and no
+/// TV or IR guided bomb (GBU-15, Walleye) exists in it.
+pub const SEEKER_VIEW: [&str; 12] = [
     "AGM65G.JT",
     "AGM65A.JT",
     "AGM84E.JT",
+    "GBU10.JT",
+    "GBU10A.JT",
+    "PAVEWAY.JT",
+    "PAVEWA3.JT",
+    "GBU28.JT",
     "AS14.JT",
     "AS30.JT",
     "AT12.JT",
     "AT2.JT",
 ];
+
+/// The seeker-view weapons that home on a laser spot rather than on an
+/// object: the laser bombs and the laser missiles (class 4 and 12). Their
+/// picture marks the spot (the laser, docs/spec/air-to-ground.md).
+pub const SPOT_HOMING: [&str; 8] = [
+    "GBU10.JT",
+    "GBU10A.JT",
+    "PAVEWAY.JT",
+    "PAVEWA3.JT",
+    "GBU28.JT",
+    "AS14.JT",
+    "AS30.JT",
+    "AT12.JT",
+];
+
+/// Whether the weapon record named `source` homes on a laser spot
+/// ([`SPOT_HOMING`]).
+pub fn homes_on_spot(source: &str) -> bool {
+    SPOT_HOMING.contains(&source)
+}
 
 /// Whether the weapon record named `source` has a seeker picture for the
 /// target camera ([`SEEKER_VIEW`]).
@@ -1038,6 +1065,20 @@ pub fn firing_band(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn the_laser_weapons_have_a_seeker_view_and_the_jdams_do_not() {
+        // John 2026-10-13: GBUs, Mavericks and AT-12s have nose views; the
+        // JDAMs stay out (2026-10-12).
+        for laser in SPOT_HOMING {
+            assert!(has_seeker_view(laser) && homes_on_spot(laser), "{laser}");
+        }
+        for jdam in ["GBU29.JT", "GBU29P.JT", "GBU30.JT"] {
+            assert!(!has_seeker_view(jdam) && !homes_on_spot(jdam), "{jdam}");
+        }
+        assert!(has_seeker_view("AGM65G.JT") && !homes_on_spot("AGM65G.JT"));
+        assert!(!has_seeker_view("MK82.JT") && !has_seeker_view("AGM88.JT"));
+    }
+
     fn movement() -> Movement {
         Movement {
             minimum_speed: 0,

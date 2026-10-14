@@ -150,6 +150,11 @@ pub struct SimRenderer {
     /// The fires of the fill's knocked-down buildings
     /// ([`crate::city_fires`]).
     city_fires: crate::city_fires::CityFires,
+    /// A replay's clock for the burning city (nr-fx4): columns age on the
+    /// playhead's ticks, not the wall clock. `None` in live flight.
+    city_clock: Option<crate::city_fires::Clock>,
+    /// The burning city as the last draw had it, in numbers (nr-fx4).
+    city_report: crate::city_fires::Report,
     /// Whether they are drawn (`TORE_NO_CITY_FIRES=1` turns them off, a
     /// developer aid like `TORE_CITY_FILL=0`; the stress measurement flips
     /// it).
@@ -863,12 +868,24 @@ impl SimRenderer {
             samples,
             fill,
             city_fires: crate::city_fires::CityFires::new(),
+            city_clock: None,
+            city_report: crate::city_fires::Report::default(),
             city_fires_on: std::env::var_os("TORE_NO_CITY_FIRES").is_none(),
         }
     }
     /// Draws (or stops drawing) the burning city fill buildings.
     pub fn set_city_fires(&mut self, on: bool) {
         self.city_fires_on = on;
+    }
+    /// The burning city the last draw showed, in numbers (nr-fx4).
+    pub fn city_report(&self) -> crate::city_fires::Report {
+        self.city_report
+    }
+    /// A replay's clock for the burning city: the playhead and the tick
+    /// each building fell on. Their smoke columns then stand at the height
+    /// they had at the playhead however it got there (nr-fx4).
+    pub fn set_city_clock(&mut self, clock: Option<crate::city_fires::Clock>) {
+        self.city_clock = clock;
     }
     pub fn smoke(
         &mut self,
@@ -1608,14 +1625,22 @@ impl SimRenderer {
         // the camera, replaced every draw (`crate::city_fires`).
         match world.city_fill.as_ref().filter(|_| self.city_fires_on) {
             Some(fill) => {
-                let now = self.city_fires.now();
-                self.city_fires.observe(fill, now);
+                // Flames flicker on the wall clock; a replay's columns age
+                // on the playhead.
+                let wall = self.city_fires.now();
+                let (now, falls) = match &self.city_clock {
+                    Some(clock) => (clock.tick, Some(&*clock.falls)),
+                    None => (wall, None),
+                };
+                self.city_fires.observe_with(fill, now, falls);
                 let frame = self.city_fires.frame(camera.position, now);
-                self.effects.set_city_fires(&frame.fires, now as u64);
+                self.city_report = frame.report(self.city_fires.blazes().len());
+                self.effects.set_city_fires(&frame.fires, wall as u64);
                 self.effects.set_far_city(frame.glows);
                 self.smoke.set_city_smoke(&frame.puffs);
             }
             None => {
+                self.city_report = crate::city_fires::Report::default();
                 self.effects.set_city_fires(&[], 0);
                 self.effects.set_far_city(Vec::new());
                 self.smoke.set_city_smoke(&[]);

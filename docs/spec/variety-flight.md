@@ -413,10 +413,12 @@ longer flies the fitted law above; the rules are in
 - **Rotors and drive.** Two 38 ft 1 in proprotors 46.5 ft apart (Pub,
   Derived) on nacelles, each the shared rotor model with the nacelle axis as
   its shaft, on one interconnected drive. Rated power is two AE 1107C at
-  6,150 shp (Pub) times 0.42, about 8 percent losses times the PT's maximum
-  takeoff weight over the published 52,600 lb vertical maximum, so the
-  aircraft, about 40 percent of the real one's weight, keeps its power
-  loading: 5,122 hp. Rotor speed 100 percent (397 rpm, Pub) with the nacelles
+  6,150 shp (Pub) less about 8 percent losses, times the record's maximum
+  takeoff weight over the published 52,600 lb vertical maximum, so any record
+  keeps the real aircraft's power loading. Since slice HF3 the reader gives
+  the V-22 the MV-22B's weights (the PT's were the AH-64's,
+  [record correction](../formats/aircraft.md#rotorcraft-fuel-records)), so the
+  share is 1: 11,316 hp (5,122 hp before). Rotor speed 100 percent (397 rpm, Pub) with the nacelles
   up and 84 percent on the downstops (Pub), moving at 6 percent a second.
 - **Nacelles.** 0 to 97.5 degrees at 8 degrees per second (Pub); the
   helicopter preset is 87. The conversion keys move the demand at the same

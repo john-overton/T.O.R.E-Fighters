@@ -162,10 +162,90 @@ fn copy(shape: &Shape) -> Shape {
     }
 }
 
+/// How a store shape's fins are clocked about its long axis: the angle,
+/// degrees from 0 to 90, of its fin tips from the right (0: fins straight
+/// out to the sides and up and down, a "+"; 45: an "X"), and how well the
+/// tips agree on it (1: every tip at that clock, 0: no pattern). Fin tips
+/// are the drawn corners more than 1.6 body half widths from the body's
+/// centre line; `None` when there are none.
+pub fn fin_clock(shape: &Shape) -> Option<(f64, f64)> {
+    let b = body(shape)?;
+    let reach = 1.6 * b.half[0].max(b.half[1]);
+    let [mut x, mut y, mut w] = [0.; 3];
+    for q in shape
+        .faces
+        .iter()
+        .filter(|f| !texture_only(f))
+        .flat_map(|f| f.positions.iter())
+    {
+        let p = feet(*q);
+        let d = [p[0] - b.centre[0], p[2] - b.centre[1]];
+        let r = d[0].hypot(d[1]);
+        if r <= reach {
+            continue;
+        }
+        // Four fins repeat every 90 degrees: four times the angle repeats
+        // every turn, so a circular mean finds their common clock.
+        let angle = 4. * d[1].atan2(d[0]);
+        x += r * angle.cos();
+        y += r * angle.sin();
+        w += r;
+    }
+    (w > 0.).then(|| {
+        let clock = (y.atan2(x).to_degrees() / 4.).rem_euclid(90.);
+        // 90 degrees is the same clock as 0.
+        let clock = if clock > 89.95 { 0. } else { clock };
+        (clock, x.hypot(y) / w)
+    })
+}
+
+/// How far a store shape is rolled about its long axis wherever it is drawn,
+/// on a pylon and in flight, degrees: so its fins stand in an X, 45 degrees
+/// from its pylon, the wing or body above it and the stores beside it
+/// (John 2026-10-13: "ordnance needs to be rotated 45 degrees to make sure
+/// fins don't clip"). A shape already in an X, or with no clear fin pattern
+/// (agreement under 0.5), is not rolled (agent decision).
+pub fn carried_roll(shape: &Shape) -> f64 {
+    match fin_clock(shape) {
+        Some((clock, agree)) if agree >= 0.5 => {
+            let roll = 45. - clock;
+            if roll.abs() < 5. { 0. } else { roll }
+        }
+        _ => 0.,
+    }
+}
+
+/// `shape` rolled `degrees` about its body's centre line (positive turns
+/// right towards up).
+pub fn rolled(shape: Shape, degrees: f64) -> Shape {
+    if degrees == 0. {
+        return shape;
+    }
+    let Some(b) = body(&shape) else {
+        return shape;
+    };
+    let (sin, cos) = degrees.to_radians().sin_cos();
+    let mut out = shape;
+    for face in &mut out.faces {
+        for q in &mut face.positions {
+            let p = feet(*q);
+            let d = [p[0] - b.centre[0], p[2] - b.centre[1]];
+            let right = b.centre[0] + d[0] * cos - d[1] * sin;
+            let up = b.centre[1] + d[0] * sin + d[1] * cos;
+            *q = [right, p[1], up].map(|v| (v * 3.) as f32);
+        }
+        face.normal = None;
+    }
+    out
+}
+
 /// The shapes a weapon shape `name` draws as: on a pylon, when that differs
 /// from in flight, and in flight. Unlisted shapes keep their retail size.
+/// Both are rolled by the retail shape's [`carried_roll`], so a released
+/// store keeps the roll it hung with and does not turn at release.
 pub fn variants(name: &str, shape: Shape) -> (Option<Shape>, Shape) {
-    match real_size(name) {
+    let roll = carried_roll(&shape);
+    let (store, flight) = match real_size(name) {
         Some(real) => match real.flight_span {
             Some(span) => (
                 Some(fitted(&shape, &real, real.span)),
@@ -174,7 +254,8 @@ pub fn variants(name: &str, shape: Shape) -> (Option<Shape>, Shape) {
             None => (None, fitted(&shape, &real, real.span)),
         },
         None => (None, shape),
-    }
+    };
+    (store.map(|s| rolled(s, roll)), rolled(flight, roll))
 }
 
 #[cfg(test)]
@@ -231,6 +312,28 @@ mod tests {
         assert!((f.reach[0] - 0.75).abs() < 0.01, "{f:?}");
         // Thin stays thin: the fin's own plane is not thickened.
         assert!((f.reach[1] - 0.21).abs() < 0.01, "{f:?}");
+    }
+
+    #[test]
+    fn fins_in_a_plus_are_rolled_into_an_x_and_an_x_is_left() {
+        // One flat fin pair out to the sides: a "+" clock of 0.
+        let plus = store(27., 2., 6.);
+        let (clock, agree) = fin_clock(&plus).unwrap();
+        assert!(clock.abs() < 1e-6 && agree > 0.99, "{clock} {agree}");
+        assert_eq!(carried_roll(&plus), 45.);
+        let x = rolled(store(27., 2., 6.), 45.);
+        let (clock, _) = fin_clock(&x).unwrap();
+        assert!((clock - 45.).abs() < 1.5, "{clock}");
+        assert_eq!(carried_roll(&x), 0.);
+        // The body's centre line stays where it is.
+        let [a, b] = [body(&plus).unwrap(), body(&x).unwrap()];
+        assert!(
+            (a.centre[0] - b.centre[0]).abs() < 0.05 && (a.centre[1] - b.centre[1]).abs() < 0.05
+        );
+        // The shape drawn (on the pylon and in flight) is the rolled one.
+        let (carried, flight) = variants("UNLISTED.SH", store(27., 2., 6.));
+        assert!(carried.is_none());
+        assert!((fin_clock(&flight).unwrap().0 - 45.).abs() < 1.5);
     }
 
     #[test]
