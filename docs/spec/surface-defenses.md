@@ -1257,38 +1257,45 @@ flowchart TD
   an aircraft within 2 nm of another of the group belongs to it. A flight in
   formation is one group; two flights on different tracks are usually two.
 - **When the team opens fire on a group.** Either at least 25 percent of the
-  group's aircraft are in range of the entire team, meaning inside the fire
-  zone (range and altitude band) of every live gun of the team (*agent*: the
-  strict reading, so a team with KS-12s, whose shells reach 26,200 ft, waits
-  for the group to come inside their reach and not only the KS-19s'
-  44,250 ft); or the group heads at the team: its members' mean track over
-  the ground lies within 45 degrees either side of the bearing from the
+  group's aircraft are in range of the team, meaning inside its widest fire
+  zone: inside the fire zone (range and altitude band) of at least one live
+  gun of the team (John, 2026-10-14: "the team's longest reach"; the union
+  of the guns' zones is the reading, since in a mixed team the KS-19s'
+  zone, 44,250 ft and up to 25,000 ft, holds the KS-12s' 26,200 ft and
+  15,000 ft one, so it is the longest-reach gun's zone measured from where
+  each gun stands); or the group heads at the team: its members' mean track
+  over the ground lies within 45 degrees either side of the bearing from the
   group's middle to the team's middle (John's "90% cone", read as a cone 90
   degrees wide) and at least one member is inside some gun's fire zone. A
   group slower than 30 kt over the ground (a hovering helicopter group) has
   no track and opens fire by the 25 percent rule only (*agent*). On a
-  straight line the heading cone opens fire first, as soon as a member comes
-  into reach, unless the line passes the team more than about 30,000 ft off
-  (the KS-19's reach divided by the square root of two at 8,000 ft); then the
-  group is skirting the team.
+  straight line the heading cone usually opens fire first; a line passing
+  more than about 30,000 ft off the team is skirting it.
 - **Holding.** Until then the team holds its fire at the group. Its guns
   still choose targets, prepare and lock on (a radar gun paints its target on
   the RWR, as before), so they fire the moment the team engages. A group
   skirting the edge, not heading in, with fewer than 25 percent in range of
-  the whole team, is never fired at, not even the one aircraft a gun could
-  reach: the ambush rule John described. (Alternative offered to John: let a
-  gun fire at any aircraft inside its own reach after all, which brings back
-  some fire on the lead.)
+  the team, is never fired at, not even the one aircraft a gun could reach:
+  a point or line defence does not give its position away (John, 2026-10-14:
+  keep holding).
 - **Once engaged.** The team engages the whole group, and keeps engaging it
   while any gun of the team is firing at a member (a burst begun, the pause
   after it or a magazine swap), even if the group turns away.
-- **Spreading the fire** (*agent*). Each gun takes its own member of the
-  engaged groups: one inside its reach, or within 1 nm of it, before one
-  farther (so the members of a formation reaching a gun count alike), then the
-  member the fewest other guns of the team are on, then the nearest, then the
-  lowest id. A gun picks again when its target dies or leaves and at flak's
-  10 s retarget period, so the fire moves over the group rather than staying
-  on the lead.
+- **Spreading the fire** (*agent*). The team gives each gun a member of the
+  groups it engages (while it holds, of every group it sees): the guns that
+  reach farthest first, as they open fire first, each the next member by id
+  in turn, round again when every member has a gun. With fewer guns than
+  members the turn moves on one member every 10 s, so a lone gun walks over a
+  flight. A gun chooses its own member when it is within its reach or 1 nm
+  past it, else any member it can reach, else its own, else any within 1 nm
+  of its reach; the nearest, then the lowest id, first among equals. It
+  chooses again when its target dies or leaves and at flak's 10 s retarget
+  period, so the fire stays spread over the group rather than on the lead.
+- **The opening barrage is spread** (John, 2026-10-14). A gun's eight opening
+  shells go round the members of the engaged groups it can reach (inside its
+  fire zone, with a clear line), one shell each in turn, its own target
+  first, then ascending id; members coming into reach during the barrage join
+  the round. With a single target all eight go to it.
 - Determinism: everything is a function of this tick's positions and the
   controllers' checkpointed state, read in ascending unit id, so the player,
   the AI, a networked host and a replay all see the same teams and the same
@@ -1296,15 +1303,18 @@ flowchart TD
 
 What this does, measured with `--flak-pass` (a flight on a scripted line over
 the storage template's four-gun team and a lone gun;
-[measurements](../baselines/flak-teams.md)): a four-ship's lead, which drew 39 of
-the team's 52 shells and died in a third of the passes, now draws about 15,
-like each wingman, each gun's opening barrage going to a different member, and
-no seat died in any pass; the flight as a whole loses about a fifth more hit
-points (the shells no longer fall on a lead already nearly destroyed). A flight
-skirting the team 35,000 ft to the side, which lost a wingman to 24 shells,
-draws none. A lone gun fires the moment the flight comes into reach (before,
-its lock lapsed every 15 s while it waited, delaying its first shell by about
-12 s). Every flak jolt is now a quarter of a 100-point warhead's.
+[measurements](../baselines/flak-teams.md)): a four-ship's lead, which drew 39
+of the team's 52 shells and died in a third of the passes, now draws about 16,
+like each wingman, and no seat died in any pass; the flight as a whole loses
+about a fifth more hit points (the shells no longer fall on a lead already
+nearly destroyed). A lone gun's opening barrage, spread, now reaches every
+member (a lone KS-19 over a four-ship: 5, 3, 4 and 2 shells). A four-ship
+passing 35,000 ft to the side, one member inside a KS-19's reach, is a quarter
+of the group in range and is engaged; eight aircraft grazing the edge with only
+one in reach draw nothing. A lone gun fires the moment the flight comes into
+reach (before the teams, its lock lapsed every 15 s while it waited, delaying
+its first shell by about 12 s). Every flak jolt is a quarter of a 100-point
+warhead's.
 
 #### Barrage zone
 

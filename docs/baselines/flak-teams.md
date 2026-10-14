@@ -107,6 +107,70 @@ lone gun, the KS-19; `--team 1` the KS-12) with `--flight 2|4`, `--seats`,
 `surface-flak-team` checks the heading-in, skirting, seats and lone-gun cases
 ([testing](../testing/lane-ai.md)).
 
+## Follow-up, 2026-10-14 afternoon (slice nr-flak3)
+
+John's answers: keep holding fire at a skirting group; damage spread over the
+flight is fine; "in range of the entire team" is the team's **longest reach**;
+the opening barrage is **spread over the flight** unless there is a single
+target; lone guns opening sooner is kept. Implemented:
+
+- In range of the team: inside the fire zone of at least one live gun, the
+  union of the guns' zones (in the storage team, the KS-19s' 44,250 ft and up
+  to 25,000 ft, which holds the KS-12s' zone). See
+  [flak teams](../spec/surface-defenses.md#flak-teams).
+- The opening barrage: each of a gun's eight shells at the next member of
+  the engaged groups it can reach (fire zone, line of sight), its own target
+  first; one target takes all eight.
+- A gun's choice now prefers any member in its reach over its own member
+  still outside it (agent: with the longer trigger reach a group grazing the
+  edge engaged the team while each gun waited for its own member, which never
+  came into reach, and nothing was fired).
+
+Same cases, the same probe and seeds. "Before" is the end of nr-flak2 (the
+"after" rows above), "after" this follow-up; the probe gained `--second N`
+(Friendly Wing 2 flying on in the same formation) for groups of eight.
+
+| Case | | Shells per member | Lost per member | Destroyed | Lead lived | Damage |
+| --- | --- | --- | --- | --- | ---: | ---: |
+| Team of 4, two seats | before | 27, 27 | 180, 179 | 0, 1 | 3 of 3 | 359 |
+| | after | 28, 26 | 184, 172 | 0, 1 | 3 of 3 | 356 |
+| Team of 4, four seats | before | 15, 15, 12, 12 | 121, 113, 77, 43 | none | 3 of 3 | 354 |
+| | after | 16, 14, 12, 12 | 112, 98, 77, 67 | none | 3 of 3 | 353 |
+| Team of 4, player and an AI wingman | before | 32, 19 | 206, 116 | 1, 3 | 2 of 3 | 322 |
+| | after | 32, 17 | 213, 116 | 1, 3 | 2 of 3 | 329 |
+| Team of 4, player and three AI | before | 17, 13, 11, 12 | 119, 111, 82, 46 | 0, 2, 1, 0 | 3 of 3 | 358 |
+| | after | 19, 13, 10, 10 | 119, 95, 94, 82 | 0, 1, 2, 1 | 3 of 3 | 391 |
+| Lone KS-19, two | before | 12, 2 | 64, 27 | none | 3 of 3 | 91 |
+| | after | 9, 5 | 50, 41 | none | 3 of 3 | 91 |
+| Lone KS-19, four | before | 10, 2, 2, 0 | 54, 27, 2, 0 | none | 3 of 3 | 82 |
+| | after | 5, 3, 4, 2 | 25, 34, 19, 7 | none | 3 of 3 | 85 |
+| Lone KS-12, two | before | 10, 2 | 34, 10 | none | 3 of 3 | 44 |
+| | after | 7, 5 | 25, 20 | none | 3 of 3 | 45 |
+| Lone KS-12, four | before | 8, 1, 2, 1 | 29, 1, 6, 10 | none | 3 of 3 | 45 |
+| | after | 3, 2, 4, 3 | 11, 6, 17, 14 | none | 3 of 3 | 48 |
+| Four at 35,000 ft to the side (seed 1) | before | none | none | none | yes | 0 |
+| | after | 11, 7, 6, 1 | 89, 83, 26, 0 | none | yes | 198 |
+| Two at 35,000 ft to the side (seed 1) | before | none | none | none | yes | 0 |
+| | after | 15, 9 | 102, 83 | none | yes | 185 |
+| Eight at 48,300 ft to the side, one in reach (seed 1) | after | none | none | none | yes | 0 |
+| Eight at 46,000 ft to the side, two in reach (seed 1) | after | 4 and 4 (members 5 and 7) | none | none | yes | 0 |
+
+Fire starts as before (103.1 s over the team, 102.7 s for the lone KS-19,
+127.1 s for the lone KS-12). What changed:
+
+- **The opening barrage is spread.** A lone gun's damage now falls on every
+  member (a lone KS-19 over a four-ship: 10, 2, 2, 0 shells became 5, 3, 4, 2)
+  and the lead's share drops further. Over the team each gun's barrage goes
+  round the flight; total damage is about the same (seats 354 and 353).
+- **The longest-reach trigger engages more groups.** A flight of four or
+  fewer with one member inside a KS-19's reach is a quarter of the group, so
+  the 35,000 ft passes that were held are now fired at, with about 190 hit
+  points lost between the members and nobody destroyed. The hold now applies
+  to larger groups with under a quarter in reach: eight aircraft grazing the
+  edge with one in reach draw nothing (the trace shows "in-range 1/8
+  holding"), with two in reach (25 percent) they are engaged.
+- **Knock** still a quarter per jolt.
+
 ## Not run
 
 - A windowed or audio run; online play by eye. The team rules run on the host
