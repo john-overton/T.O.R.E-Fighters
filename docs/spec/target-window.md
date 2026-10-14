@@ -342,9 +342,19 @@ follows its own prediction of the plane, which carries the host's orbit mode,
 so it opens and closes with the host's orbit.
 The TARGET CAM page above is unchanged. Everything else here (layout, wording,
 heat levels, the CRT numbers) is an agent decision (nr-fltv, 2026-10-13),
-fitted on offscreen renders. Retail has nothing like it. Presentation only:
-nothing reaches the simulation or the wire, so it works the same in single
-player and on an online client flying its own AC-130.
+fitted on offscreen renders. Retail has nothing like it. The picture is
+presentation only, so it works the same in single player and on an online
+client flying its own AC-130; its radar and target keys act through the
+seat's existing commands (below), so they work online and in replays.
+
+After trying it John asked (2026-10-14, opinionated) for: no periodic
+static; a box on the target selected in flight, hidden while the reticle is
+over it; an air-to-ground radar on the gimbal graphic with a 5, 10 and 25 nm
+range selector, whose targets T cycles, linked to the flight target view,
+each selection snapping the sensor to the target and zooming in to fill;
+then white hot, black hot, "regular visual" and night vision ("that is not
+thermal") on one key. Slice nr-conb built those; the numbers and the
+layout are agent decisions unless marked.
 
 **The picture.** The whole screen is the sensor's view from dome D along the
 sight's look at the sight's zoom step (the same eye, look and zoom ladder as
@@ -356,10 +366,24 @@ works unchanged: Alt+arrows slew, Backslash designates, Shift+Backslash pins,
 L drops, Shift+' and Shift+; zoom, Ctrl+7 and Ctrl+8 pick and link guns, and
 the trigger fires.
 
+**Picture modes.** **Ctrl+Backslash** steps the picture through white hot,
+black hot, TV and night vision, then back to white hot (the key does nothing
+outside the console). The label at the top right says WHOT, BHOT, TV or NVG,
+and the sensor word at the top left says IR for the two thermal modes and TV
+for the other two. The symbology is the same in all four. The real AC-130U
+carries a FLIR and an all-light-level television (from memory of public
+descriptions, not checked against a source this round); the labels stay
+plain.
+
+| Mode | Picture |
+| --- | --- |
+| WHOT, BHOT | The thermal world below |
+| TV | The world as the game draws it, in its own colours, through the same CRT (John asked for "regular visual"; colour rather than a grey TV picture is the agent's reading). No lens flare or spotting aid, which are the eye's, not a camera's. Dark at night, as a plain camera is |
+| NVG | An image intensifier: the visible scene in grey, amplified, on a green phosphor (0.42, 1.0, 0.5). Heat does not show: a cold vehicle in the dark is as dark as the ground round it; a fire, a flare, a muzzle flash or an explosion is bright because of its light, and what the gain lifts past full scale blooms over its surroundings (eight taps 9 and 18 px out, strength 1.6), so a blast washes out the narrow fields. The gain follows how dark it is (the sun from 2 degrees above to 6 below the horizon, the rule the night glows use): 1.8 by day, which overexposes the picture as an intensifier would, up to 40 at night. Grain grows with the gain, up to 5 percent on top of the CRT's own 4.5. The symbology keeps its own pale grey |
+
 **Thermal.** The world draws as a thermal camera sees it, in grey: in white hot
-the hotter the whiter, and **Ctrl+Backslash** turns it to black hot and back
-(the key does nothing outside the console). Levels (agent decision, display
-grey 0 to 1, white hot):
+the hotter the whiter, in black hot the reverse. Levels (agent decision,
+display grey 0 to 1, white hot):
 
 | What | Level | Notes |
 | --- | --- | --- |
@@ -390,24 +414,78 @@ rest is the game's own data.
 
 | Where | Shows |
 | --- | --- |
-| Top left | The sight's mode (MAN free slew, RTN returning, PNT pinned, TRK tracked), the field of view by name (WFOV, MFOV and NFOV for zoom steps 1 to 3, then NFOV E2, E4 and E8: the narrow field's electronic zoom) and IR; the field in degrees; the orbit: ORBIT JOIN while the aircraft is still joining the circle, ORBIT GUNS on it with every gun and the camera bearing on the point, ORBIT NO BEAR on it when one cannot; then the planned radius and height above the point (`flight::State::orbit_status`) |
-| Top right | True heading, height above the ground, true airspeed, WHOT or BHOT |
+| Top left | The sight's mode (MAN free slew, RTN returning, PNT pinned, TRK tracked), the field of view by name (WFOV, MFOV and NFOV for zoom steps 1 to 3, then NFOV E2, E4 and E8: the narrow field's electronic zoom) and the sensor, IR or TV; the field in degrees; the orbit: ORBIT JOIN while the aircraft is still joining the circle, ORBIT GUNS on it with every gun and the camera bearing on the point, ORBIT NO BEAR on it when one cannot; then the planned radius and height above the point (`flight::State::orbit_status`) |
+| Top right | True heading, height above the ground, true airspeed, the picture mode (WHOT, BHOT, TV, NVG) |
 | Left, middle | The sensor's azimuth (from the nose, clockwise), its elevation, and the true bearing of its line of sight (LOS) |
 | Right, middle | With a tracked target: its name, range, true bearing and clock bearing with HI or LO |
 | Bottom left | The guns: a mark for each linked gun, the name and the rounds left; the candidate in a filled box; a gun the aircraft does not carry struck through |
 | Bottom centre | The lead gun's state (RDY, SLEW, NO ARC, MAX RNG, MIN RNG, MASKED, BLOCKED, EMPTY) or GIMBAL LIMIT, flashing; under it the slant range from the sensor to the aim point in feet and nautical miles |
 | Centre | An open crosshair: four arms with a clear centre, ticks along them and a bar across each end |
-| Over the picture | The pipper (ring, range arc and centre dot, dashed when the gun cannot bear or is out of range, parked at the screen edge when off it), the other linked guns' impacts as diamonds, a square on a tracked target and corner marks on a pinned point |
-| Bottom right | The gimbal (below) |
+| Over the picture | The pipper (ring, range arc and centre dot, dashed when the gun cannot bear or is out of range, parked at the screen edge when off it), the other linked guns' impacts as diamonds, a square on a tracked target and corner marks on a pinned point, and the target box (below) |
+| Bottom right | The gimbal and the radar (below), with the radar's state and range under it (A-G 10NM, or A-G OFF) |
 
-**Gimbal.** The camera's lower hemisphere seen from above, the nose up: the rim
-is its limit (the aircraft's horizontal plane), the centre straight down, a
-dashed ring 45 degrees down, a small cross the aircraft. A dashed sector shows
-where the lead gun can bear, dots the linked guns' trains, and an arm from the
-centre ends in a square at the sensor's line, so the graphic moves as the
-sensor slews. Over the last 10 degrees before the limit the rim beside the
-sensor thickens; at the limit it flashes and LIMIT shows under it, with GIMBAL
-LIMIT on the status line.
+The top left block's orbit lines are where nr-cona's console flight status
+(SEARCH, ORBIT JOIN, ORBIT and the commanded heading, altitude and speed)
+goes; a marked hook in `sensor_console.rs` holds the place until that slice
+merges.
+
+**Target box.** The designated target (whatever designated it: the
+gunsight's track, T or Enter in flight, a scope click, the console's T) has
+a square box 8 percent of the picture's height across on it, besides the
+reticle. It hides while the reticle is over the target, which is while the
+target lies within 4 percent of the picture's height of the centre on both
+axes (the reticle's centre inside the box); a tracked target, which the
+sight centres, therefore shows only the track square. Off the picture a
+small arrow at the edge points to it.
+
+**Gimbal and radar.** A plan view about the aircraft, the nose up, the rim at
+the radar's range (agent decision: one scale for the radar's contacts and
+the sensor, so a contact under the sensor's mark is what the sensor sees).
+The centre is straight down; a line from the camera at or above the horizon
+meets the ground beyond any range, so the camera's limit (the aircraft's
+horizontal plane) is on the rim too. A dashed ring is 45 degrees down (the
+height away over the ground), a small cross the aircraft. The lead gun's
+sector, small open diamonds for the linked guns' trains, and an arm from the
+centre to corner marks round the sensor's aim move as they slew, each placed
+where its line meets the ground. The radar's contacts are drawn over them as
+the A-G page draws them: a dot for a unit, a structure or a ship, an X for
+a SAM or AAA unit, a filled square for an aircraft, the designated one
+between two bars. Over the last 10 degrees before the camera's limit the rim
+beside the sensor thickens; at the limit it flashes and LIMIT shows under
+the graphic, with GIMBAL LIMIT on the status line.
+
+**The console's radar.** It is the aircraft's own A-G radar page
+([air-to-ground radar](air-to-ground.md#the-air-to-ground-radar)): the same
+host-built list, by the same detection rules and limits, so a client sees
+what the host's page lists. Opening the console turns the A-G radar on once,
+as Ctrl+R would, when it is off and the radar works ("Air-Ground Radar on");
+pressing Ctrl+R in the console turns it off again (A-G OFF, no contacts).
+On the AC-130 the page's scan is centred on the sensor's line of sight
+rather than the nose (agent decision, 2026-10-14: the gunship's radar works
+toward the orbit's centre; scanning about the nose would never see what the
+guns are on), in flight as in the console. **Ctrl+0** steps the range 5, 10
+and 25 nm (the A-G radar's first three range settings, 25 its maximum here,
+John 2026-10-14). It is the flight radar's own range setting, so the scope
+and the console agree; a flight range above 25 nm shows as 25 in the console
+until Ctrl+0 is pressed. Contacts beyond the range are not drawn.
+
+**T in the console.** T steps to the next contact, Shift+T to the previous
+one, among the radar's contacts the sensor can see: on the A-G list, within
+the console's range over the ground, not friendly, at or below the
+aircraft's horizontal plane from the sensor dome (inside the gimbal), and
+with a clear terrain line from the dome (the sight's own line rule). They
+are taken nearest the dome first; T after the last wraps to the first, and
+with no current one T takes the nearest. The selection is a designation by
+the seat's existing command (as a scope click), so the gunsight tracks it,
+the camera snaps onto it and the TARGET CAM page, the HUD and the weapons
+show the same target, and a target designated in flight is the console's
+current one: the two are linked both ways. The sight then zooms so the
+target fills the picture: the narrowest zoom step whose field still holds
+the target's largest side within 60 percent of the picture's height at its
+slant range from the dome (the object's own box; 60 ft for an aircraft),
+the widest step when none does. A tank at 2 nm takes the narrowest step. With
+A-G off, T turns it on; with nothing in view it says "Sensor: no radar
+target in view". Outside the console T keeps its flight meaning.
 
 **CRT.** The picture and the symbology are shown on a small monochrome monitor
 (`crt.rs`, a module the seeker view may share: a GPU pass, and the same
@@ -416,23 +494,32 @@ slight soft focus, red and blue pulled 1.1 pixels apart toward the edges
 (only 40 percent of the fringes' colour is kept, so they are a hint; every
 colour reads the same 2 pixel block, so block edges never split into colour),
 scanlines of 12 percent every 3 rows with a faint band rolling down, a
-vignette, fine noise of 4.5 percent, and every 7 to 18 seconds a burst of
-static 0.08 to 0.3 seconds long and 35 to 80 percent strong (snow over up to
-60 percent of the picture, sideways tearing and the odd bright or dark line).
-The symbology goes through the same monitor, without the blocks. Sizes are
-for 1080 rows and scale with the screen.
+vignette and fine noise of 4.5 percent. There is no periodic static (John,
+2026-10-14: "an occasional console flicker, let's remove that"); the module's
+bursts (snow, sideways tearing, bright and dark lines) remain for a caller
+that asks for one, as the seeker view's second of static on impact does. In
+the TV picture the fringes fade toward the picture's own colours rather than
+grey. The symbology goes through the same monitor, without the blocks and
+without the night vision's tint. Sizes are for 1080 rows and scale with the
+screen.
 
 **Previews.** `--a2g-run UKR QUCOL --pilot ai --aircraft ac130 --load C_25.JT
 --console-scene DIR --console-at S,...` (with `--condition night` for the dark)
 draws the console offscreen from an AI gunship's own sensor at those seconds:
-white hot and black hot on its target, the free wide field, the narrow field,
-near and at the gimbal limit, and a burst of static. The AI flies without the
+white hot, black hot, TV and night vision on its target, the free wide
+field, the narrow field, and near and at the gimbal limit. The AI flies without the
 player's gunsight, so these frames build the symbology from the same geometry
 (arcs and reach); they are a picture check, not a gunsight check. The player's
 own path is `--a2g-run UKR QUCOL --aircraft ac130 --load C_25.JT --attack
 orbit ... --console-scene DIR --console-at S,...`: the seat opens the console
-with its command and the frames (`seat-tS-whot`, `-bhot`, `-static`) are the
-game's own gunsight page, target and orbit status.
+with its command and the frames (`seat-tS-whot`, `-bhot`, `-tv`, `-nvg`, the
+radar at `-radar-5nm`, `-radar-10nm` and `-radar-25nm`, and `-box-visible` and `-box-edge`
+with the sensor turned off the target) are the game's own gunsight page,
+target, orbit status and A-G list. There `--console-range N` sets the seat's
+radar range setting, `--console-cycle S,...` presses the console's T at
+those seconds through the game's own rule and checks the designation, the
+track and the zoom (battery `flight-ac130-orbit-console-radar`), and
+`--console-fire FROM,TO` links the 105 mm and holds the trigger.
 
 ## Targeting page
 

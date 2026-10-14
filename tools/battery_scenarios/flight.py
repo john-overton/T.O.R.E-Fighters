@@ -2200,6 +2200,12 @@ ORBIT_RUNS = {
         ["--orbit-sight", "track", "--seconds", "300"],
         "The console opens on the tracked lead tank of the moving column and follows it.",
     ),
+    "orbit-console-radar": (
+        ["--orbit-sight", "pin", "--console-range", "2", "--console-cycle", "70,90", "--seconds", "120"],
+        "The console turns the A-G radar on as it opens; at 70 s and 90 s the console's T (slice nr-conb) "
+        "picks the next radar contact the sensor sees within 25 nm, designates it, and the gunsight tracks "
+        "it at the zoom step that fills the picture.",
+    ),
     "orbit-close": (
         ["--orbit-sight", "pin", "--orbit-close", "120", "--seconds", "130"],
         "Ctrl+9 again at 120 s closes the console and hands the aircraft back, flying, with no snap.",

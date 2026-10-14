@@ -44,6 +44,7 @@ bind keyboard Shift-\\ sight-pin press\n\
 bind keyboard Shift-' sight-zoom-in press\n\
 bind keyboard Shift-; sight-zoom-out press\n\
 bind keyboard Ctrl-\\ sight-polarity press\n\
+bind keyboard Ctrl-0 console-range press\n\
 bind keyboard Alt-ArrowLeft sight-left hold\n\
 bind keyboard Alt-ArrowRight sight-right hold\n\
 bind keyboard Alt-ArrowUp sight-up hold\n\
@@ -1307,6 +1308,7 @@ mod tests {
             "sight-zoom-in",
             "sight-zoom-out",
             "sight-polarity",
+            "console-range",
         ] {
             let entry = ENTRIES
                 .iter()
@@ -1628,6 +1630,7 @@ mod tests {
             ("'", M::SHIFT, "sight-zoom-in"),
             (";", M::SHIFT, "sight-zoom-out"),
             ("\\", M::CONTROL, "sight-polarity"),
+            ("0", M::CONTROL, "console-range"),
         ] {
             assert!(i.key(key, true, modifiers), "{key}");
             assert_eq!(
@@ -1776,6 +1779,10 @@ mod tests {
         let device = crate::controls_editor::preview_device();
         let mut i = input("");
         i.resolver = Resolver::new(gamepad_defaults(&device));
+        // A new resolver needs its aircraft filter again, as
+        // `save_settings_to` does: the cache keys on the binding count, which
+        // the stock keyboard profile can share with the gamepad's.
+        i.filter_signature = None;
         i.devices.insert(device.id.clone(), device.clone());
         let event = |i: &mut Input, control: &str, value: f64| {
             i.resolver.event(Event {
@@ -1916,6 +1923,7 @@ mod tests {
             let text = profile.to_text().unwrap();
             let mut i = input("");
             i.resolver = Resolver::new(Profile::parse(&text).unwrap());
+            i.filter_signature = None;
             i.devices.insert(device.id.clone(), device.clone());
             i.aircraft_controls(roles[0], roles[1], roles[2], roles[3]);
             for control in ["button:314", "button:315"] {

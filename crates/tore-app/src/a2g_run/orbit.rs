@@ -10,6 +10,16 @@
 //! right at full deflection for 4 s from S seconds, which moves a pin (the pod
 //! point moves); `--orbit-close S` closes the console at S seconds.
 //!
+//! The sensor console's radar (slice nr-conb): opening the console turns the
+//! A-G radar on, as the game does; `--console-range N` sets the seat's radar
+//! range setting (0 to 5, default the game's) and `--console-cycle S,...`
+//! presses the console's T at those seconds, through the game's own rule
+//! (`sensor_console::in_view` and `cycle`), designating the next contact and
+//! zooming to it; each press checks the gunsight then tracks it.
+//! `--console-fire FROM,TO` links the 105 mm (Ctrl+7 twice, Ctrl+8) and
+//! holds the trigger between those seconds, for renders of gunfire and
+//! fires.
+//!
 //! Each line starts `orbit-run:`; checks print `PASS` or `FAIL` lines and a
 //! last `orbit probe: PASS` the battery reads.
 use super::{FEET_PER_NM, FPS_PER_KNOT, Options, Scene};
@@ -19,7 +29,14 @@ use tore_sim::combat::gunship::Sight;
 use tore_world::seats::{SeatCommand, SeatInput};
 
 /// The options this module reads, each with one value.
-pub(super) const OPTIONS: [&str; 3] = ["--orbit-sight", "--orbit-slew", "--orbit-close"];
+pub(super) const OPTIONS: [&str; 6] = [
+    "--orbit-sight",
+    "--orbit-slew",
+    "--orbit-close",
+    "--console-range",
+    "--console-cycle",
+    "--console-fire",
+];
 /// The share of the time after entry that every gun and the camera must
 /// bear on the sight's point (fitted acceptance, agent decision).
 const BEARING_SHARE: f64 = 0.9;
@@ -34,6 +51,16 @@ struct Extra {
     sight: String,
     slew: Option<f64>,
     close: Option<f64>,
+    /// The seat's radar range setting and the sight's zoom step (0 the
+    /// default), sent with every tick as the game sends them.
+    range: usize,
+    zoom: u8,
+    /// Console T presses, seconds.
+    cycle: Vec<f64>,
+    /// The trigger held from and to these seconds (renders of gunfire).
+    fire: Option<(f64, f64)>,
+    /// The run's clock (seconds after the console opened) for the step.
+    clock: f64,
 }
 
 fn extra() -> AppResult<Extra> {
@@ -42,6 +69,11 @@ fn extra() -> AppResult<Extra> {
         sight: "pin".into(),
         slew: None,
         close: None,
+        range: tore_sim::sensors::DEFAULT_RANGE_INDEX,
+        zoom: 0,
+        cycle: Vec::new(),
+        fire: None,
+        clock: -1.,
     };
     for pair in args.windows(2) {
         let value = &pair[1];
@@ -52,6 +84,18 @@ fn extra() -> AppResult<Extra> {
             },
             "--orbit-slew" => e.slew = Some(value.parse()?),
             "--orbit-close" => e.close = Some(value.parse()?),
+            "--console-range" => {
+                e.range = value
+                    .parse::<usize>()?
+                    .min(tore_sim::sensors::RANGE_LADDER_NMI.len() - 1)
+            }
+            "--console-fire" => {
+                let (a, b) = value.split_once(',').ok_or("--console-fire FROM,TO")?;
+                e.fire = Some((a.parse()?, b.parse()?));
+            }
+            "--console-cycle" => {
+                e.cycle = value.split(',').map(str::parse).collect::<Result<_, _>>()?
+            }
             _ => {}
         }
     }
@@ -77,7 +121,7 @@ struct Watch {
 }
 
 pub(super) fn run(scene: &mut Scene, o: &Options) -> AppResult<()> {
-    let e = extra()?;
+    let mut e = extra()?;
     let row = scene.target_row().ok_or("no target row")?;
     let target = row.position;
     let ground = scene.ground(target[0], target[2]);
@@ -114,10 +158,18 @@ pub(super) fn run(scene: &mut Scene, o: &Options) -> AppResult<()> {
     );
     // Half a second for the designation and the sight to settle.
     for _ in 0..60 {
-        scene.step(false)?;
+        step(scene, false, &e)?;
     }
     scene.queue(SeatCommand::SensorConsole);
-    scene.step(false)?;
+    // The console's radar is the A-G radar: the game turns it on as the
+    // console opens (sensor_console.rs, main.rs).
+    let radar = o.ai.console_scene.is_some() || !e.cycle.is_empty();
+    if radar && !scene.world.combat.state.own().sensors.air_ground() {
+        scene.queue(SeatCommand::Combat(
+            tore_sim::combat::live::Command::ToggleAirGround,
+        ));
+    }
+    step(scene, false, &e)?;
     let flight = &scene.world.cockpits[0].flight;
     let mut report = Report::default();
     report.check(
@@ -164,6 +216,8 @@ pub(super) fn run(scene: &mut Scene, o: &Options) -> AppResult<()> {
         ..Watch::default()
     };
     let first_point = status.point;
+    // A console T press waiting for its check: the target and when.
+    let mut pending: Option<(u32, f64)> = None;
     let ticks = (o.seconds * 120.) as u64;
     for tick in 0..ticks {
         let t = tick as f64 / 120.;
@@ -171,13 +225,38 @@ pub(super) fn run(scene: &mut Scene, o: &Options) -> AppResult<()> {
         if e.close.is_some_and(|at| (t - at).abs() < 0.5 / 120.) {
             scene.queue(SeatCommand::SensorConsole);
         }
-        step(scene, slewing)?;
+        e.clock = t;
+        // The fire window works the 105 mm as the player would: Ctrl+7
+        // twice to make it the candidate, Ctrl+8 to link it.
+        if e.fire
+            .is_some_and(|(from, _)| (t - from).abs() < 0.5 / 120.)
+        {
+            use tore_sim::combat::live::Command as Live;
+            for command in [Live::NextGunGroup, Live::NextGunGroup, Live::ToggleGunGroup] {
+                scene.queue(SeatCommand::Combat(command));
+            }
+        }
+        step(scene, slewing, &e)?;
+        if e.cycle.iter().any(|at| (t - at).abs() < 0.5 / 120.) {
+            pending = console_cycle(scene, &mut e, &mut report)?.map(|id| (id, t + 0.25));
+        }
+        if let Some((id, due)) = pending
+            && t >= due
+        {
+            pending = None;
+            check_cycle(scene, &e, &mut report, id);
+        }
         // `--console-scene DIR --console-at S,...`: the sensor console's
         // frames from this seat (slice nr-fltv).
         if let Some(dir) = &o.ai.console_scene
             && o.ai.console_at.iter().any(|at| (t - at).abs() < 0.5 / 120.)
         {
-            super::console_render::render_seat(scene, t, dir)?;
+            let tag = if e.cycle.iter().any(|at| *at < t) {
+                "cycled-"
+            } else {
+                ""
+            };
+            super::console_render::render_seat(scene, t, dir, e.range, tag)?;
         }
         let flight = &scene.world.cockpits[0].flight;
         report.fatal(!flight.crashed, "the aircraft did not crash")?;
@@ -327,18 +406,111 @@ fn finish(
 }
 
 /// One tick with no stick or throttle, the sight slewed right when asked.
-fn step(scene: &mut Scene, slewing: bool) -> AppResult<()> {
-    if !slewing {
-        return scene.step(false);
-    }
+fn step(scene: &mut Scene, slewing: bool, e: &Extra) -> AppResult<()> {
     let input = SeatInput {
         seat: super::SEAT,
         tick: scene.world.tick(),
-        sight: [127, 0],
+        sight: if slewing { [127, 0] } else { [0, 0] },
+        trigger: e
+            .fire
+            .is_some_and(|(from, to)| e.clock >= from && e.clock < to),
+        sight_zoom: e.zoom,
+        sensors: tore_sim::sensors::Controls {
+            range_index: e.range,
+            ..tore_sim::sensors::Controls::default()
+        },
         commands: std::mem::take(&mut scene.commands),
         ..SeatInput::default()
     };
     scene.step_input(input)
+}
+
+/// The console's T, as main.rs presses it: the next A-G contact the sensor
+/// sees within the console's range, designated, the sight zoomed to fill.
+/// Returns the target; a quarter second later [`check_cycle`] checks the
+/// designation, the gunsight's track and the zoom.
+fn console_cycle(scene: &mut Scene, e: &mut Extra, report: &mut Report) -> AppResult<Option<u32>> {
+    let picked = {
+        let world = &scene.world;
+        let flight = &world.cockpits[0].flight;
+        let launcher = tore_world::combat::launcher(flight);
+        let readout = world
+            .cockpit_readout(super::SEAT, launcher)
+            .ok_or("the seat has no readout")?;
+        let sides = crate::target_info::Sides {
+            roster: &world.roster,
+            wings: world.ai_wings.as_ref(),
+            scene: &world.terrain.airport_scene,
+        };
+        let plane = world.cockpits[0].plane;
+        let ground = |x: f64, z: f64| f64::from(world.terrain.height(x as f32, z as f32));
+        let list = crate::sensor_console::in_view(
+            &readout.sensors,
+            launcher,
+            e.range,
+            |from, to| tore_sim::combat::sight::clear_line(from, to, &ground),
+            |id| sides.friendly_to(plane, id),
+        );
+        println!(
+            "orbit-run: console radar on {} listed {} in view {:?} designated {:?}",
+            readout.sensors.air_ground,
+            readout.sensors.ground.len(),
+            list,
+            readout.targets.designated
+        );
+        crate::sensor_console::cycle(&list, readout.targets.designated, true).map(|id| {
+            let eye = tore_sim::combat::gunship::eye_position(launcher);
+            let at = readout
+                .sensors
+                .ground
+                .iter()
+                .find(|g| g.id() == id)
+                .map_or(eye, |g| g.contact.position);
+            let slant = (0..3).map(|i| (at[i] - eye[i]).powi(2)).sum::<f64>().sqrt();
+            let extent = world
+                .combat
+                .ground_object(id)
+                .map_or(crate::sensor_console::DEFAULT_EXTENT_FT, |o| {
+                    2. * o.bounds.half.iter().copied().fold(0., f64::max)
+                });
+            (
+                id,
+                crate::sensor_console::fill_zoom(extent, slant),
+                slant,
+                extent,
+            )
+        })
+    };
+    let Some((id, zoom, slant, extent)) = picked else {
+        report.check(false, "the console's T found a radar target in view");
+        return Ok(None);
+    };
+    println!(
+        "orbit-run: console T picks {id:#010x} {} slant {slant:.0} ft extent {extent:.0} ft zoom {zoom}",
+        scene.world.combat.ground_name(id).unwrap_or("unnamed")
+    );
+    e.zoom = zoom;
+    scene.queue(SeatCommand::Combat(
+        tore_sim::combat::live::Command::DesignateTarget(id),
+    ));
+    Ok(Some(id))
+}
+
+fn check_cycle(scene: &Scene, e: &Extra, report: &mut Report, id: u32) {
+    let zoom = e.zoom;
+    let own = scene.world.combat.state.own();
+    report.check(
+        own.designated() == Some(id),
+        format_args!("the console's T designated {id:#010x}"),
+    );
+    report.check(
+        own.gunship.as_ref().and_then(|g| g.sight.tracked()) == Some(id),
+        format_args!("the gunsight tracks {id:#010x}"),
+    );
+    report.check(
+        own.gunship.as_ref().map(|g| g.zoom()) == Some(zoom),
+        format_args!("the sight zoomed to step {zoom}"),
+    );
 }
 
 #[derive(Default)]

@@ -4,8 +4,8 @@
 //! S seconds into the run, looking at the target. Each moment is drawn in
 //! several forms: white hot and black hot tracking the target, the free
 //! sensor with no target, the wide field, the sensor near and at its
-//! gimbal limit, and a burst of static. Day or night comes from
-//! `--condition`.
+//! gimbal limit, and the TV and night vision pictures. Day or night comes
+//! from `--condition`.
 //!
 //! The picture is the world as the game draws it, thermally. The AI flies
 //! the gunship without the player's gunsight, so the symbology is built here
@@ -15,7 +15,7 @@
 use super::{Scene, ai_render::Loaded};
 use crate::{
     AppResult, gunsight_view,
-    sensor_console::{GunLine, Mode, Pipper, Polarity, Symbology, TargetLine},
+    sensor_console::{GunLine, Mode, Pipper, Plan, Radar, SensorMode, Symbology, TargetLine},
 };
 use std::path::Path;
 use tore_sim::{
@@ -24,8 +24,8 @@ use tore_sim::{
 };
 use tore_world::seats::PlaneId;
 
-/// One form of the console: name, look, zoom, polarity, tracking, static.
-type Form<'a> = (&'a str, [f64; 2], u8, Polarity, bool, f32);
+/// One form of the console: name, look, zoom, picture mode, tracking.
+type Form<'a> = (&'a str, [f64; 2], u8, SensorMode, bool);
 
 /// The guns' reach in this harness: the shipped guns' 13,000 ft.
 const REACH_FT: f64 = 13_000.;
@@ -100,13 +100,14 @@ pub(super) fn render(
     let offset: Vector = std::array::from_fn(|i| row.position[i] - eye[i]);
     let on_target = sight::body_angles(launcher, offset);
     let ground = |x: f64, z: f64| f64::from(scene.world.terrain.height(x as f32, z as f32));
+    let agl_ft = flight.position[1] - ground(flight.position[0], flight.position[2]);
     let base = Symbology {
-        polarity: Polarity::WhiteHot,
+        sensor: SensorMode::WhiteHot,
         mode: Mode::Track,
         zoom: 3,
         fov_deg: gunship::field_of_view(3).to_degrees(),
         heading_deg: flight.yaw.to_degrees().rem_euclid(360.),
-        agl_ft: flight.position[1] - ground(flight.position[0], flight.position[2]),
+        agl_ft,
         airspeed_kt: flight.speed / 1.68781,
         look: on_target,
         los_deg: 0.,
@@ -141,24 +142,33 @@ pub(super) fn render(
         mark: Some((row.position, true)),
         notice: None,
         orbit: None,
+        designated: Some(row.position),
+        // The AI flies without the player's pages: no A-G list here.
+        radar: Radar {
+            on: false,
+            range_nm: 10.,
+            dots: Vec::new(),
+        },
+        plan: Plan::new(launcher, agl_ft, on_target, [on_target; 3], None, Some(2)),
         blink: true,
     };
     // The forms: name, look, zoom, polarity, tracking, static level.
     let near = [on_target[0], -4_f64.to_radians()];
     let top = [on_target[0], gunship::GIMBAL_TOP];
-    let forms: [Form; 7] = [
-        ("whot", on_target, 3, Polarity::WhiteHot, true, 0.),
-        ("bhot", on_target, 3, Polarity::BlackHot, true, 0.),
-        ("free-wfov", on_target, 1, Polarity::WhiteHot, false, 0.),
-        ("narrow-e4", on_target, 5, Polarity::WhiteHot, true, 0.),
-        ("near-limit", near, 2, Polarity::WhiteHot, false, 0.),
-        ("at-limit", top, 2, Polarity::WhiteHot, false, 0.),
-        ("static", on_target, 3, Polarity::WhiteHot, true, 0.7),
+    let forms: [Form; 8] = [
+        ("whot", on_target, 3, SensorMode::WhiteHot, true),
+        ("bhot", on_target, 3, SensorMode::BlackHot, true),
+        ("tv", on_target, 3, SensorMode::Tv, true),
+        ("nvg", on_target, 3, SensorMode::NightVision, true),
+        ("free-wfov", on_target, 1, SensorMode::WhiteHot, false),
+        ("narrow-e4", on_target, 5, SensorMode::WhiteHot, true),
+        ("near-limit", near, 2, SensorMode::WhiteHot, false),
+        ("at-limit", top, 2, SensorMode::WhiteHot, false),
     ];
     let stem = format!("console-t{seconds:05.1}s");
-    for (label, look, zoom, polarity, tracking, noise) in forms {
+    for (label, look, zoom, mode, tracking) in forms {
         let mut sym = base.clone();
-        sym.polarity = polarity;
+        sym.sensor = mode;
         sym.look = look;
         sym.zoom = zoom;
         sym.fov_deg = gunship::field_of_view(zoom).to_degrees();
@@ -195,6 +205,7 @@ pub(super) fn render(
                 look[1].clamp(-half_e, half_e),
             ];
         }
+        sym.plan = Plan::new(launcher, agl_ft, look, sym.trains, aim, Some(2));
         sym.pipper = aim.map(|point| {
             let status = sym.guns[2].status;
             Pipper {
@@ -210,12 +221,14 @@ pub(super) fn render(
         let view = gunsight_view::free_view(&launcher, look, zoom);
         let mut camera = gunsight_view::camera(&view);
         camera.weather_slot = 0;
-        camera.thermal = true;
+        camera.thermal = mode.thermal();
+        camera.sensor = true;
         camera.near_clip = 1.;
         loaded.upload(&scene.world, &camera)?;
+        let light = crate::sensor_console::night(&scene.world.terrain, camera.position[1]);
         let overlay =
             crate::sensor_console::draw(&sym, &camera, [crate::reel::WIDTH, crate::reel::HEIGHT]);
-        let frame = crate::sensor_console::crt_frame(seconds, noise, polarity);
+        let frame = crate::sensor_console::crt_frame(seconds, 0., mode, light);
         let pixels = loaded.gpu.console_pixels(
             &camera,
             &scene.world.terrain,
@@ -243,9 +256,19 @@ fn distance(a: Vector, b: Vector) -> f64 {
 
 /// The console of the run's own seat (the player's path: the `orbit`
 /// attack, the console opened with its seat command), `seconds` into the
-/// run: the gunsight page, target and orbit status exactly as the game
-/// builds them, in white hot, black hot and with a burst of static.
-pub(super) fn render_seat(scene: &mut Scene, seconds: f64, dir: &Path) -> AppResult<()> {
+/// run: the gunsight page, target, orbit status and A-G radar exactly as the
+/// game builds them, in each picture mode, at the console radar's three
+/// ranges, and with the sensor slewed off the designated target so its box
+/// shows (`box-visible`, and off the picture, `box-edge`; a picture check:
+/// the console's slew is nr-cona's).
+/// `range` is the seat's radar range setting; `tag` names the moment.
+pub(super) fn render_seat(
+    scene: &mut Scene,
+    seconds: f64,
+    dir: &Path,
+    range: usize,
+    tag: &str,
+) -> AppResult<()> {
     let observer = scene.world.cockpits[0].plane;
     let mut loaded = Loaded::new(&mut scene.world, observer)?;
     let world = &scene.world;
@@ -260,13 +283,13 @@ pub(super) fn render_seat(scene: &mut Scene, seconds: f64, dir: &Path) -> AppRes
         .as_ref()
         .ok_or("the seat's plane has no gunsight")?;
     let launcher = crate::combat::launcher(flight);
-    let view = gunsight_view::free_view(&launcher, gunsight.look, gunsight.zoom);
     let mut page = crate::instruments::gunsight::Page::new(readout, frame.config, flight)
         .ok_or("no gunsight page")?;
     let tracked = gunsight
         .sight
         .tracked()
         .and(readout.targets.display.as_ref());
+    let view = gunsight_view::free_view(&launcher, gunsight.look, gunsight.zoom);
     page.present(
         gunsight.look,
         gunsight.zoom,
@@ -280,24 +303,41 @@ pub(super) fn render_seat(scene: &mut Scene, seconds: f64, dir: &Path) -> AppRes
             .map_or_else(|| "TARGET".to_string(), str::to_string);
         crate::target_window::Readout::new(row, flight, name)
     });
+    let designated = readout.targets.display.as_ref().map(|row| row.position);
     let ground = f64::from(
         world
             .terrain
             .height(flight.position[0] as f32, flight.position[2] as f32),
     );
     let air = world.terrain.air_data(flight).ok();
-    let mut camera = gunsight_view::camera(&view);
-    camera.weather_slot = 0;
-    camera.thermal = true;
-    camera.near_clip = 1.;
-    loaded.upload(world, &camera)?;
     let size = [crate::reel::WIDTH, crate::reel::HEIGHT];
-    for (label, polarity, noise) in [
-        ("whot", Polarity::WhiteHot, 0.),
-        ("bhot", Polarity::BlackHot, 0.),
-        ("static", Polarity::WhiteHot, 0.7),
-    ] {
-        let sym = Symbology::live(
+    let shown = crate::sensor_console::radar_range_index(range);
+    // Name, picture mode, the console's radar range, the sensor slewed off
+    // the target (fields of view of heading: a third keeps the target in
+    // the picture, two put it off the edge).
+    let forms: [(&str, SensorMode, usize, f64); 9] = [
+        ("whot", SensorMode::WhiteHot, shown, 0.),
+        ("bhot", SensorMode::BlackHot, shown, 0.),
+        ("tv", SensorMode::Tv, shown, 0.),
+        ("nvg", SensorMode::NightVision, shown, 0.),
+        ("radar-5nm", SensorMode::WhiteHot, 0, 0.),
+        ("radar-10nm", SensorMode::WhiteHot, 1, 0.),
+        ("radar-25nm", SensorMode::WhiteHot, 2, 0.),
+        ("box-visible", SensorMode::WhiteHot, shown, 0.33),
+        ("box-edge", SensorMode::WhiteHot, shown, 2.),
+    ];
+    for (label, mode, radar, slew) in forms {
+        let field = tore_sim::combat::gunship::field_of_view(gunsight.zoom);
+        let look = [gunsight.look[0] + slew * field, gunsight.look[1]];
+        let view = gunsight_view::free_view(&launcher, look, gunsight.zoom);
+        let mut camera = gunsight_view::camera(&view);
+        camera.weather_slot = 0;
+        camera.thermal = mode.thermal();
+        camera.sensor = true;
+        camera.near_clip = 1.;
+        loaded.upload(world, &camera)?;
+        let light = crate::sensor_console::night(&world.terrain, camera.position[1]);
+        let mut sym = Symbology::live(
             &page,
             target.as_ref(),
             readout,
@@ -305,21 +345,33 @@ pub(super) fn render_seat(scene: &mut Scene, seconds: f64, dir: &Path) -> AppRes
             flight,
             air.as_ref(),
             ground,
-            polarity,
+            mode,
             seconds,
+            designated,
+            radar,
         );
+        if slew != 0. {
+            // The sensor turned away by hand: free, no track mark.
+            sym.mode = Mode::Manual;
+            sym.mark = None;
+            sym.look = look;
+        }
         let overlay = crate::sensor_console::draw(&sym, &camera, size);
-        let crt = crate::sensor_console::crt_frame(seconds, noise, polarity);
+        let crt = crate::sensor_console::crt_frame(seconds, 0., mode, light);
         let pixels =
             loaded
                 .gpu
                 .console_pixels(&camera, &world.terrain, &loaded.scenery, &crt, &overlay)?;
-        let path = dir.join(format!("seat-t{seconds:05.1}s-{label}.png"));
+        let path = dir.join(format!("seat-{tag}t{seconds:05.1}s-{label}.png"));
         super::ai_render::write_png(&path, &pixels)?;
         println!(
-            "orbit-run: CONSOLE path={} orbit={:?} status={}",
+            "orbit-run: CONSOLE path={} light={light:.4} gain={:.2} zoom={} dots={} radar={} designated={:?} status={}",
             path.display(),
-            sym.orbit,
+            crt.gain,
+            gunsight.zoom,
+            sym.radar.dots.len(),
+            sym.radar.range_nm,
+            readout.targets.designated,
             sym.status()
         );
     }

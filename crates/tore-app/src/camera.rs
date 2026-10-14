@@ -30,6 +30,10 @@ pub struct Camera {
     /// apparent temperature as grey (the AC-130 sensor console,
     /// `crate::sensor_console`).
     pub thermal: bool,
+    /// A sensor's picture (the sensor console in any mode, thermal or not):
+    /// no lens flare and no spotting aid, which are the eye's, not a
+    /// camera's.
+    pub sensor: bool,
 }
 impl Camera {
     pub fn new() -> Self {
@@ -46,6 +50,7 @@ impl Camera {
             near_clip: 1.,
             keys: BTreeSet::new(),
             thermal: false,
+            sensor: false,
         }
     }
     pub fn for_world(world: &Terrain) -> Self {

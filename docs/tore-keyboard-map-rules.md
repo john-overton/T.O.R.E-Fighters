@@ -54,7 +54,7 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
   that key's cap as its first row, in the display colour.
 - The sight keys are on Fly & Fight: Backslash and Shift+Backslash
   (designate, pin ground; Ctrl+Backslash is the AC-130 sensor console's
-  white hot / black hot, `W/B HOT`), `/` (next visible ground object), Alt with the
+  picture, white hot, black hot, TV and night vision, `IR/TV/NV`), `/` (next visible ground object), Alt with the
   arrows (slew), Shift+' and Shift+; (zoom), L and ; (drop) and Ctrl+L (the
   laser). They were the AC-130 gunsight's keys (John, 2026-10-09) and serve
   every aircraft with a laser designator or a FLIR since air-to-ground slice T1,
@@ -62,8 +62,11 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
   plate's free top-right corner lists them with the AC-130's gamepad gestures.
   Keep those labels in step with
   [the input guide](INPUT.md#ac-130-gunsight-controls). Ctrl+9 (the AC-130's
-  sensor console, `CONSOLE` on the 9 cap, and the legend's last line with its
-  View + Xbox gesture) sits beside Ctrl+7 and Ctrl+8. The other
+  sensor console, `CONSOLE` on the 9 cap, and the legend's line with its
+  View + Xbox gesture) sits beside Ctrl+7 and Ctrl+8, and Ctrl+0 (the
+  console radar's range, `RDR RNG` on the 0 cap) beside it; the legend's
+  last line gives the console's own keys: Ctrl+Backslash (the picture), T
+  (the next radar target) and Ctrl+0 (the radar's range). The other
   air-to-ground keys are on that sheet as well: Tab (fire the gun, held), Ctrl+M
   on M (delivery mode) and Ctrl+R with Shift+R (the S/C badge) on R.
 - The wing orders that reach the ground are on the Comms sheet in coral: Alt+E

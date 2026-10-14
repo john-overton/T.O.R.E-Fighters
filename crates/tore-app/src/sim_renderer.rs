@@ -1722,8 +1722,9 @@ impl SimRenderer {
             queue.write_buffer(&self.cloud_vertices, 0, &bytes(&cloud_data));
         }
         let linear = |v: u8| ((v as f64 / 255.0 + 0.055) / 1.055).powf(2.4);
-        // A thermal picture has no lens flare: the sun is just a hot spot.
-        let flare_target = if camera.thermal {
+        // A thermal picture has no lens flare: the sun is just a hot spot. No
+        // sensor picture has one.
+        let flare_target = if camera.thermal || camera.sensor {
             None
         } else {
             self.lens_flare.prepare(
@@ -1773,6 +1774,7 @@ impl SimRenderer {
         // excluded; combat targets share its airframe when no dummies load.
         let rim = camera.weather_slot <= 1
             && !camera.thermal
+            && !camera.sensor
             && self.options.spotting_aid.strength() > 0.;
         let mut others: Vec<(&wgpu::BindGroup, &wgpu::Buffer, &[Contact])> = Vec::new();
         if rim {

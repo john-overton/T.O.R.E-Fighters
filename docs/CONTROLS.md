@@ -162,7 +162,8 @@ and a gamepad's View+stick defaults avoid the problem.
 | Sight: pin ground point | Shift+Backslash | - | View + A (hold half a second) |
 | Sight: zoom in | Shift+Apostrophe | - | - |
 | Sight: zoom out | Shift+Semicolon | - | - |
-| Sight: white hot / black hot (AC-130 console) | Ctrl+Backslash | - | - |
+| Sight: white hot / black hot / TV / night vision (AC-130 console) | Ctrl+Backslash | - | - |
+| Sensor console radar range 5 / 10 / 25 nm (AC-130 console) | Ctrl+0 | - | - |
 | Sight: slew left/right | - | - | View + Right stick X |
 | Sight: slew up/down | - | - | View + Right stick Y |
 | Sight: slew left | Alt+Left | - | - |
