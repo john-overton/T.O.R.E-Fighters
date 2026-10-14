@@ -261,6 +261,7 @@ pub fn run() -> AppResult<()> {
                 matches!(
                     s.rack.location(),
                     tore_sim::combat::hardpoints::Location::Fuselage
+                        | tore_sim::combat::hardpoints::Location::Tunnel
                         | tore_sim::combat::hardpoints::Location::Centerline
                 )
             })
