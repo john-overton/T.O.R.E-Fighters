@@ -148,6 +148,7 @@ mod surface_trace;
 mod tape_file;
 mod target_info;
 mod target_preview;
+mod terrain_colors;
 mod ui_text;
 mod ui_text_renderer;
 mod v22_animation;
@@ -5024,13 +5025,16 @@ impl ApplicationHandler for App {
                         if let (Some(combat), Some(seeker)) =
                             (self.instruments.combat.as_mut(), &seeker_shot)
                         {
-                            combat.targeting = Some(instruments::targeting::Page::seeker(
-                                &seeker.weapon,
-                                seeker.target,
-                                seeker.range_ft,
-                                frame.readout.tick,
-                                seeker.view,
-                            ));
+                            combat.targeting = Some(
+                                instruments::targeting::Page::seeker(
+                                    &seeker.weapon,
+                                    seeker.target,
+                                    seeker.range_ft,
+                                    frame.readout.tick,
+                                    seeker.view,
+                                )
+                                .closing(seeker.closing),
+                            );
                         } else if let (Some(combat), Some(seed)) =
                             (self.instruments.combat.as_mut(), self.seeker.lost_feed())
                         {
@@ -9862,6 +9866,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     }
     if std::env::args().nth(1).as_deref() == Some("--reel-music") {
         reel::music()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--terrain-colors") {
+        terrain_colors::run()?;
         return Ok(Outcome::Done);
     }
     if std::env::args().nth(1).as_deref() == Some("--blast-preview") {

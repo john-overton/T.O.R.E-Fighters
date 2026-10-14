@@ -1959,3 +1959,26 @@ above; never write extracted retail resources into tracked assets.
 Variants are static source scenery lists, with the
 [documented fitted grid/composition rule](spec/terrain-detail.md#host-presentation-where-the-source-rule-is-incomplete).
 They do not start a campaign or add autonomous ground behavior.
+
+
+## Ground colour regression
+
+`--terrain-colors` (first argument) checks all sixteen theaters and six weather
+choices at 0, 6,000 and 30,000 feet without a window or GPU. It prints the mean
+land-cell RGB and compares every terrain palette entry with the weather family
+independently read from the retail base MM. A mismatch fails the command.
+The battery scenario is `render-terrain-colors`.
+
+`--terrain-colors OUT_DIR THEATER` also writes four offscreen 1080p PNGs:
+`THEATER-day-near.png`, `THEATER-day-far.png`, `THEATER-night-near.png` and
+`THEATER-night-far.png`. The cameras sit 1,800 and 18,000 feet above the central
+land cell and look down 0.65 radians. City fill and scattered clouds are off
+for this repeatable terrain fixture. Use a private profile copy and never
+write over an earlier capture directory. This is a developer fixture, not a
+retail screenshot comparison.
+
+Add `--cpu` after THEATER for an unlit orthographic software render of the
+actual terrain mesh and its indexed textures. The near/far views span 32,768
+and 262,144 feet vertically, sampled through the live palette at the same
+camera altitudes. This mode needs no GPU. It omits objects, lighting, fog and
+GPU distance filtering, so it verifies artwork and palette colours only.

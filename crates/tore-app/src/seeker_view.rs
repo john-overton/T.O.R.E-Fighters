@@ -7,7 +7,11 @@
 //! Presentation only: it reads the picture (`RenderSnapshot`), which a
 //! single-player host, a networked client and a replay all have, so it needs
 //! nothing of the simulation and nothing on the wire.
-use crate::instruments::{Instruments, gunsight::SightView, targeting::SEEKER_ZOOM_STEP};
+use crate::instruments::{
+    Instruments,
+    gunsight::SightView,
+    targeting::{Closing, SEEKER_ZOOM_STEP},
+};
 use tore_sim::{attitude::Vector, combat::missiles};
 use tore_world::snapshot::{ProjectilePose, RenderSnapshot};
 
@@ -70,6 +74,9 @@ pub struct Shot {
     pub target: Option<Vector>,
     /// The distance the page reads: weapon to target, else to the aircraft.
     pub range_ft: f64,
+    /// What jitters the target square as the weapon closes: only with a
+    /// target in the picture and a weapon that is moving.
+    pub closing: Option<Closing>,
 }
 
 impl SeekerCam {
@@ -160,12 +167,19 @@ impl SeekerCam {
             .and_then(|id| position_of(picture, id))
             .or_else(|| spot.filter(|_| missiles::homes_on_spot(&p.weapon)));
         let view = view(p, target);
+        let speed_fps = f64::from(p.speed_f8) / 256.;
+        let closing = target.filter(|_| speed_fps > 1.).map(|target| Closing {
+            id: p.id,
+            tick: picture.tick,
+            time_to_go_s: distance(p.position, target) / speed_fps,
+        });
         let shot = Shot {
             id: p.id,
             weapon: p.weapon.clone(),
             view,
             target,
             range_ft: distance(p.position, target.unwrap_or(at)),
+            closing,
         };
         self.held = Some(shot.clone());
         Some(shot)
@@ -703,5 +717,27 @@ mod tests {
         see(&mut cam, vec![back.clone()], 100);
         assert!(see(&mut cam, vec![], 101).is_none() && cam.lost_feed().is_some());
         assert!(see(&mut cam, vec![back], 110).is_some() && cam.lost_feed().is_none());
+    }
+
+    #[test]
+    fn the_shot_carries_the_seconds_to_go_for_the_jitter() {
+        // A Maverick 6,000 ft short of its target at 1,000 ft/s: 6 s to go.
+        let mut maverick = missile(1, 0, "AGM65G.JT", [0., 0., 0.]);
+        maverick.target = Some(9);
+        let mut pic = picture_at(vec![maverick.clone()], 777);
+        pic.targets.push(tore_world::snapshot::AircraftPose {
+            id: 9,
+            position: [0., 0., 6_000.],
+            ..Default::default()
+        });
+        let shot = SeekerCam::default().observe(&pic, 0, HERE, None).unwrap();
+        let closing = shot.closing.unwrap();
+        assert_eq!((closing.id, closing.tick), (1, 777));
+        assert!((closing.time_to_go_s - 6.).abs() < 1e-9);
+        // No target in the picture, no square, nothing to shake.
+        let blind = SeekerCam::default()
+            .observe(&picture(vec![maverick]), 0, HERE, None)
+            .unwrap();
+        assert_eq!(blind.closing, None);
     }
 }

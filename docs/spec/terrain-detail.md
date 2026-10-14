@@ -33,6 +33,15 @@ Retain the original indexed artwork and resolve it through the selected
 theater's live weather palette. A painted river, road or field is already
 landscape detail and must not be discarded because it is not a separate object.
 
+Weather choices retain the map's retail palette family. Egypt, Iraq, Persian
+Gulf and Spain use the sand family by day and at night; North Vietnam uses its
+MM's unsuffixed family. All sixteen families are listed in the
+[weather contract](../formats/weather.md#theater-palette-families).
+This applies to textured and bare ground, distance filtering, daylight colours
+under night lights, city classification, and maps that use terrain colours as a
+fallback. Briefing pictures keep their own embedded palettes. Provenance:
+**spec-derived**, from the explicit retail MM layer references.
+
 Kurile has 236 explicitly named texture placements, including coastline and
 interior land artwork. They are part of its landscape even though the previous
 host displayed only its cell colors. Both source image sizes use the same
