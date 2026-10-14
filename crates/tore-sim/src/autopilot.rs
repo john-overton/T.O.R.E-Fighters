@@ -36,9 +36,12 @@ pub enum Mode {
     /// Hover hold: the helicopters and the V-22 hold a ground point, the
     /// heading and a height above the ground (design 5.4).
     Hover,
-    /// Orbit hold: the AC-130's sensor console circles the point the
-    /// targeting sight is centred on ([`orbit`]). Engaged and fed by the
-    /// host through [`State::engage_orbit`], never by a switch.
+    /// The AC-130's sensor console's autopilot ([`orbit`]): it circles the
+    /// point the targeting sight holds (ORBIT), or flies straight and level
+    /// on the console's commanded heading, altitude and speed while the
+    /// sight is free (SEARCH). Engaged and fed by the host through
+    /// [`State::engage_console`] and [`State::engage_orbit`], never by a
+    /// switch.
     Orbit,
 }
 
@@ -214,7 +217,10 @@ impl Autopilot {
                 .target
                 .map_or_else(|| "WP --".into(), |target| format!("WP {}", target.number)),
             Mode::Hover => "HOVER".into(),
-            Mode::Orbit => "ORBIT".into(),
+            Mode::Orbit => match &self.orbit {
+                Some(orbit) if !orbit.pinned => "SEARCH".into(),
+                _ => "ORBIT".into(),
+            },
         }
     }
     /// Hover hold's ground point, world X/Z ft, once the drift is braked.
@@ -242,14 +248,22 @@ impl Autopilot {
         self.loops = Loops::default();
         self.orbit = Some(orbit);
     }
-    /// Move the point orbit hold circles: the pin or the tracked object the
-    /// sight holds now. The orbit slides there ([`orbit::CENTRE_SPEED_FPS`]).
+    /// The point the console's autopilot circles: the pin or the tracked
+    /// object the sight holds now. From the search it joins the orbit about
+    /// it; already orbiting, the orbit slides there
+    /// ([`orbit::CENTRE_SPEED_FPS`]).
     pub fn set_orbit_point(&mut self, point: [f64; 3]) {
         if self.mode == Mode::Orbit
-            && point.iter().all(|v| v.is_finite())
             && let Some(orbit) = &mut self.orbit
         {
-            orbit.point = point;
+            orbit.pin(point);
+        }
+    }
+    /// Replace the console autopilot's plan and memory (its commands and a
+    /// release, through [`State`]).
+    pub(crate) fn set_orbit(&mut self, orbit: orbit::Orbit) {
+        if self.mode == Mode::Orbit {
+            self.orbit = Some(orbit);
         }
     }
     pub(crate) fn select(

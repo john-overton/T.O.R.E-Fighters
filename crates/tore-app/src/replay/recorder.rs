@@ -995,9 +995,10 @@ impl Recorder {
         self.frame = Some(frame);
     }
 
-    /// `player.orbit`: the AC-130's sensor console opening or closing, and
-    /// the point its orbit circles when it has moved more than 50 ft, at
-    /// most once a second (slice nr-orbit).
+    /// `player.orbit`: the AC-130's sensor console's orbit starting or
+    /// ending (opening or closing on a point, or a pin made or let go while
+    /// it searches, slice nr-cona), and the point its orbit circles when it
+    /// has moved more than 50 ft, at most once a second (slice nr-orbit).
     fn orbit_event(&mut self, tick: &Tick<'_>, number: u64, events: &mut Vec<Event>) {
         const MOVED_FT: f64 = 50.;
         let status = tick.flight.orbit_status();

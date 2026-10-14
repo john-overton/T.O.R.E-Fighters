@@ -1,3 +1,4 @@
+use super::super::rotor_law::angle;
 use super::*;
 use crate::autopilot::Mode;
 use crate::flight::Switch;
@@ -145,4 +146,225 @@ fn bearing_follows_the_arcs() {
     // Banked so far the point lies above the wing line: the camera loses it.
     s.bank = -60_f64.to_radians();
     assert!(!bearing(&s, centre, 13_000.).1);
+}
+
+/// The search (John, 2026-10-14: released, the autopilot flies straight):
+/// the console opened with a free sight holds the heading the roll-out
+/// reaches, the altitude and the speed, wings level, and says SEARCH.
+#[test]
+fn the_search_flies_straight_and_level() {
+    let mut s = hybrid();
+    s.bank = 10_f64.to_radians();
+    let expected = rollout_heading(&s);
+    assert!(
+        angle(expected - s.yaw) > 0.,
+        "a right bank still turns right"
+    );
+    s.engage_console(13_000.);
+    assert_eq!(s.autopilot.mode(), Mode::Orbit);
+    assert_eq!(s.autopilot.label(), "SEARCH");
+    assert!(s.orbit_status().is_none());
+    let status = s.console_status().unwrap();
+    assert_eq!(status.phase, ConsolePhase::Search);
+    assert!((status.altitude_ft - 8_000.).abs() < 1e-9);
+    let mut last = s.autopilot.orbit().unwrap().bank;
+    fly(&mut s, 120., &PilotInput::default(), |tick, s| {
+        let bank = s.autopilot.orbit().unwrap().bank;
+        assert!((bank - last).abs() <= BANK_RATE_DEG_S.to_radians() / 120. + 1e-12);
+        last = bank;
+        assert!(s.stall_alert(0.).is_none(), "stall at {tick}");
+    });
+    let speed = s.autopilot.orbit().unwrap().speed_fps;
+    assert!(
+        angle(s.yaw - expected).abs() < 1_f64.to_radians(),
+        "heading"
+    );
+    assert!(
+        (s.position[1] - 8_000.).abs() < 100.,
+        "altitude {}",
+        s.position[1]
+    );
+    assert!(s.bank.abs() < 2_f64.to_radians(), "bank {}", s.bank);
+    // The test aircraft idles faster than the planned speed at this height:
+    // the throttle sits at idle then.
+    assert!(
+        (s.speed - speed).abs() < 5. * KT || (s.throttle == 0. && s.speed > speed),
+        "speed {} of {speed}, throttle {}",
+        s.speed,
+        s.throttle
+    );
+}
+
+/// The console's heading, altitude and speed keys step the search's
+/// commanded values; the aircraft turns onto the new heading without
+/// overshooting it, climbs to the altitude and holds the speed.
+#[test]
+fn the_keys_step_the_search() {
+    let mut s = hybrid();
+    s.engage_console(13_000.);
+    let start = s.console_status().unwrap();
+    let message = s.console_command(ConsoleCommand::Heading(6)).unwrap();
+    let wanted = (start.heading_deg / 5.).round() * 5. + 30.;
+    assert_eq!(
+        message,
+        format!("Search heading {:03.0}", wanted.rem_euclid(360.))
+    );
+    assert_eq!(
+        s.console_command(ConsoleCommand::Altitude(2)).unwrap(),
+        "Search altitude 9000 ft"
+    );
+    let band = crate::ai::mission::speed_limits_of(&s);
+    s.console_command(ConsoleCommand::Speed(100));
+    assert!((s.autopilot.orbit().unwrap().speed_fps - band.maximum.0).abs() < 1e-9);
+    s.console_command(ConsoleCommand::Speed(0));
+    assert!((s.autopilot.orbit().unwrap().speed_fps - band.corner.0).abs() < 1e-9);
+    s.console_command(ConsoleCommand::Speed(50));
+    let half = s.autopilot.orbit().unwrap().speed_fps;
+    s.console_command(ConsoleCommand::SpeedStep(2));
+    let stepped = s.autopilot.orbit().unwrap().speed_fps;
+    assert!((stepped / KT - ((half / KT / 5.).round() * 5. + 10.)).abs() < 1e-9);
+    let status = s.console_status().unwrap();
+    assert!((status.heading_deg - wanted.rem_euclid(360.)).abs() < 1e-9);
+    assert_eq!(status.altitude_ft, 9_000.);
+    let target = status.heading_deg.to_radians();
+    let mut overshoot: f64 = 0.;
+    let mut max_bank: f64 = 0.;
+    fly(&mut s, 150., &PilotInput::default(), |_, s| {
+        // Past the heading on the far side (the turn is to the right).
+        overshoot = overshoot.max(angle(s.yaw - target));
+        max_bank = max_bank.max(s.bank.abs());
+        assert!(s.stall_alert(0.).is_none());
+    });
+    assert!(overshoot < 1_f64.to_radians(), "overshoot {overshoot}");
+    assert!(
+        max_bank < (SEARCH_BANK_DEG + 3.).to_radians(),
+        "bank {max_bank}"
+    );
+    assert!(angle(s.yaw - target).abs() < 0.5_f64.to_radians());
+    assert!(
+        (s.position[1] - 9_000.).abs() < 100.,
+        "altitude {}",
+        s.position[1]
+    );
+    assert!(
+        (s.speed - stepped).abs() < 5. * KT,
+        "speed {}",
+        s.speed / KT
+    );
+    // The bounds: altitude and speed stay in their ranges.
+    s.console_command(ConsoleCommand::Altitude(i8::MAX));
+    assert_eq!(
+        s.console_status().unwrap().altitude_ft,
+        SEARCH_ALTITUDE_FT[1]
+    );
+    s.console_command(ConsoleCommand::SpeedStep(i8::MIN));
+    assert!(s.autopilot.orbit().unwrap().speed_fps >= band.corner.0 - 1e-9);
+}
+
+/// Pinning joins the orbit about the point; letting it go rolls out wings
+/// level on the heading the roll-out reaches, with no turn back and the bank
+/// never moving faster than its slew.
+#[test]
+fn pin_joins_the_orbit_and_release_rolls_out_to_the_search() {
+    let mut s = hybrid();
+    s.engage_console(13_000.);
+    fly(&mut s, 5., &PilotInput::default(), |_, _| {});
+    s.autopilot.set_orbit_point([12_000., 0., 16_000.]);
+    assert_eq!(s.autopilot.label(), "ORBIT");
+    let status = s.console_status().unwrap();
+    assert_eq!(status.phase, ConsolePhase::Join);
+    let orbit = *s.autopilot.orbit().unwrap();
+    // Joining from the search puts the centre on the point at once.
+    assert_eq!(orbit.point, [12_000., 0., 16_000.]);
+    assert_eq!(orbit.centre, orbit.point);
+    let mut last = orbit.bank;
+    let mut settled = false;
+    fly(&mut s, 300., &PilotInput::default(), |_, s| {
+        let bank = s.autopilot.orbit().unwrap().bank;
+        assert!((bank - last).abs() <= BANK_RATE_DEG_S.to_radians() / 120. + 1e-12);
+        last = bank;
+        settled |= s.console_status().unwrap().phase == ConsolePhase::Orbit;
+    });
+    assert!(settled, "the orbit was joined");
+    assert!(s.bank.abs() > 10_f64.to_radians(), "circling banked");
+    let expected = rollout_heading(&s);
+    let altitude = s.position[1];
+    s.release_orbit();
+    let status = s.console_status().unwrap();
+    assert_eq!(status.phase, ConsolePhase::Search);
+    assert!(status.orbit.is_none() && s.orbit_status().is_none());
+    assert!((status.heading_deg.to_radians() - expected).abs() < 1e-9);
+    let mut worst: f64 = 0.;
+    fly(&mut s, 60., &PilotInput::default(), |_, s| {
+        let bank = s.autopilot.orbit().unwrap().bank;
+        assert!((bank - last).abs() <= BANK_RATE_DEG_S.to_radians() / 120. + 1e-12);
+        last = bank;
+        // Past the roll-out heading (the orbit turns left).
+        worst = worst.max(-angle(s.yaw - expected));
+    });
+    assert!(
+        worst < 2_f64.to_radians(),
+        "turned past the roll-out by {worst}"
+    );
+    assert!(angle(s.yaw - expected).abs() < 1_f64.to_radians());
+    assert!(s.bank.abs() < 2_f64.to_radians());
+    assert!((s.position[1] - altitude).abs() < 150.);
+}
+
+/// In the orbit the altitude keys move its height above the point within the
+/// camera's lowest and the guns' highest, the heading keys say why they do
+/// nothing, and the speed stays where the guns still reach.
+#[test]
+fn the_keys_in_the_orbit_keep_its_limits() {
+    let mut s = hybrid();
+    s.engage_orbit([12_000., 0., 16_000.], 13_000.);
+    let orbit = *s.autopilot.orbit().unwrap();
+    let (low, high) = orbit.height_range();
+    assert!(
+        (orbit.height_ft - low).abs() < 1e-6,
+        "the plan sits on the camera's lowest"
+    );
+    let message = s.console_command(ConsoleCommand::Altitude(-1)).unwrap();
+    assert!(message.ends_with("the camera's lowest"), "{message}");
+    s.console_command(ConsoleCommand::Altitude(2));
+    let orbit = *s.autopilot.orbit().unwrap();
+    assert!(
+        (orbit.height_ft - (low + 1_000.).min(high)).abs() < 1e-6,
+        "{orbit:?} {low} {high}"
+    );
+    let message = s.console_command(ConsoleCommand::Altitude(100)).unwrap();
+    assert!(message.ends_with("the guns' highest"), "{message}");
+    assert!((s.autopilot.orbit().unwrap().height_ft - high).abs() < 1e-6);
+    let before = *s.autopilot.orbit().unwrap();
+    let message = s.console_command(ConsoleCommand::Heading(3)).unwrap();
+    assert!(message.starts_with("Orbiting"), "{message}");
+    assert_eq!(*s.autopilot.orbit().unwrap(), before);
+    s.console_command(ConsoleCommand::Speed(100));
+    let orbit = *s.autopilot.orbit().unwrap();
+    assert!(orbit.speed_fps <= orbit.orbit_speed_cap() + 1e-9);
+    let (radius, _) = orbit.minimum();
+    assert!(orbit.radius_ft >= radius - 1e-9);
+    assert!(orbit.radius_ft.hypot(orbit.height_range().0) <= 0.9 * 13_000. + 1e-6);
+    // With the console closed the keys do nothing.
+    s.autopilot.disengage();
+    assert!(s.console_command(ConsoleCommand::Altitude(1)).is_none());
+}
+
+/// The search's commanded values ride in the exact state too.
+#[test]
+fn the_search_survives_the_exact_state() {
+    use tore_codec::{BitReader, BitWriter};
+    let mut s = hybrid();
+    s.engage_console(13_000.);
+    s.console_command(ConsoleCommand::Heading(-4));
+    s.console_command(ConsoleCommand::Altitude(3));
+    fly(&mut s, 10., &PilotInput::default(), |_, _| {});
+    let model = s.model().clone();
+    let mut w = BitWriter::new();
+    s.write_exact(&mut w, None).unwrap();
+    let mut copy = State::read_exact(&mut BitReader::new(&w.finish()), None, &model).unwrap();
+    assert_eq!(copy.autopilot, s.autopilot);
+    fly(&mut s, 5., &PilotInput::default(), |_, _| {});
+    fly(&mut copy, 5., &PilotInput::default(), |_, _| {});
+    assert_eq!(copy.position, s.position);
 }

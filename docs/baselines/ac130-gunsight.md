@@ -70,6 +70,26 @@ No stall warning in any run. Steady orbits settle 3 to 7% outside the planned
 radius, the circle law's own offset (the AI gunship's measured 8,800 to 10,600
 ft about the moving tank shows the same). A run takes about 50 s.
 
+Since slice nr-cona (2026-10-14) a free sight no longer pins as the console
+opens, so `orbit-slew` opens on the pin instead; the row above is nr-orbit's
+run.
+
+### The search and the console's keys
+
+2026-10-14, Linux x86_64, debug build of branch `nr-cona` (on multiplayer
+`81593406`), profile a copy of `.local/surface-data`, the same start with
+`--orbit-sight free` and `--console-keys`
+(`crates/tore-app/src/a2g_run/orbit/console.rs`).
+[Spec](../spec/ac130-linked-guns.md#the-search).
+
+| Scenario | Keys | Measured |
+| --- | --- | --- |
+| `console-search` | At 10 s heading +6 (to 030), altitude +4 (6,000 ft), speed +2 (200 kt); at 90 s heading -18 (to 300), altitude -2 (5,000 ft), speed 25% (171 kt) | Opens searching on 000 at 4,000 ft, nothing pinned. The right turn banks 20 degrees and settles on 030 by 60 s with no overshoot; the 90 degree left turn holds 25 degrees of bank and settles on 300 by 150 s, within 1.0 degree after first reaching it. At 220 s: 5,020 ft (commanded 5,000), 171 kt, wings level. Bank rate at most 5.0 deg/s, pitch rate 2.1, no stall |
+| `console-pin-release` | P at 15 s, P at 240 s | Search on 000; P pins the ground under the crosshair (the default look, abeam left) and the orbit is entered at 73.6 s (every gun and the camera bear 100% after entry). P at 240 s, banked 20.7 degrees: the search takes 247.7, rolls wings level within 10 s, passing 0.7 degrees short then settling on 247.7, and holds 6,019 ft (commanded 5,992) and 191 kt. Bank rate at most 5.0 deg/s, pitch rate 2.1, no stall |
+
+The search holds about 20 to 27 ft above its commanded altitude in level
+flight, the same climb law's small steady offset as the orbit's height.
+
 ## Pose evidence
 
 - **Animation probe sight poses.** `--aircraft ac130 --animation-probe DIR`

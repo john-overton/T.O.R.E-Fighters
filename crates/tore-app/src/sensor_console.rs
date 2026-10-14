@@ -611,6 +611,10 @@ pub struct Symbology {
     pub radar: Radar,
     /// The gimbal graphic's geometry.
     pub plan: Plan,
+    /// The console's autopilot (slice nr-cona): SEARCH, ORBIT JOIN or ORBIT
+    /// and the commanded heading, altitude and speed
+    /// (`flight::State::console_status`).
+    pub autopilot: Option<tore_sim::autopilot::orbit::ConsoleStatus>,
     /// The blink phase for flashing marks (on half of each half second).
     pub blink: bool,
 }
@@ -742,6 +746,7 @@ impl Symbology {
                 readout.targets.designated,
             ),
             plan,
+            autopilot: flight.console_status(),
             blink: (seconds * 2.).rem_euclid(1.) < 0.5,
         }
     }
@@ -1017,19 +1022,36 @@ pub fn draw(sym: &Symbology, camera: &Camera, size: [u32; 2]) -> Vec<u8> {
         s,
         1,
     );
-    let fov = format!("FOV {:.1}*", sym.fov_deg);
-    m.text(&fov, left, top + row, s, 1);
-    zoom_ladder(
-        &mut m,
-        left + text_width(&fov, s) + 4 * s,
-        top + row,
-        s,
-        sym.zoom,
-    );
-    // MERGE HOOK (nr-cona): the console's flight status (SEARCH, ORBIT JOIN,
-    // ORBIT and the commanded heading, altitude and speed) belongs in these
-    // rows, from top + 2 * row down; today they show orbit hold's status.
-    if let Some(orbit) = sym.orbit {
+    m.text(&format!("FOV {:.1}*", sym.fov_deg), left, top + row, s, 1);
+    // The console's flight status (slice nr-cona's `console_status`): the
+    // phase, then in SEARCH the commanded heading, altitude and speed the
+    // autopilot flies straight on, holding a point the orbit's radius and
+    // height and the commanded speed.
+    if let Some(ap) = sym.autopilot {
+        use tore_sim::autopilot::orbit::ConsolePhase;
+        let state = match (ap.phase, sym.orbit.map(|o| o.bearing)) {
+            (ConsolePhase::Search, _) => "SEARCH  P PINS".to_string(),
+            (ConsolePhase::Orbit, Some(true)) => "ORBIT  GUNS".to_string(),
+            (ConsolePhase::Orbit, Some(false)) => "ORBIT  NO BEAR".to_string(),
+            (phase, _) => phase.label().to_string(),
+        };
+        m.text(&state, left, top + 2 * row, s, 1);
+        let values = match (ap.phase, ap.orbit) {
+            (ConsolePhase::Search, _) | (_, None) => format!(
+                "HDG {:03.0}  ALT {:.0}  {:.0}KT",
+                ap.heading_deg.rem_euclid(360.),
+                ap.altitude_ft,
+                ap.speed_kt
+            ),
+            (_, Some(orbit)) => format!(
+                "R {:.1}NM  H {:.0}  {:.0}KT",
+                orbit.radius_ft / tore_sim::sensors::FEET_PER_NAUTICAL_MILE,
+                ap.orbit_height_ft,
+                ap.speed_kt
+            ),
+        };
+        m.text(&values, left, top + 3 * row, s, 1);
+    } else if let Some(orbit) = sym.orbit {
         let state = match (orbit.settled, orbit.bearing) {
             (false, _) => "ORBIT JOIN",
             (true, true) => "ORBIT  GUNS",
@@ -1219,27 +1241,6 @@ pub fn draw(sym: &Symbology, camera: &Camera, size: [u32; 2]) -> Vec<u8> {
     gimbal(&mut m, sym, (w * 0.86, h * 0.72), h * GIMBAL_RADIUS, t, s);
 
     m.pixels(o)
-}
-
-/// The zoom ladder beside the field of view: one box for each of the six
-/// zoom steps, widest on the left, the boxes up to the current step filled
-/// (agent decision, John 2026-10-14: the zoom state must be legible).
-fn zoom_ladder(m: &mut Mask, x: i32, y: i32, s: i32, zoom: u8) {
-    let step = tore_sim::combat::sight::zoom_step(zoom);
-    for i in 1..=tore_sim::combat::sight::ZOOM_STEPS {
-        let bx = x + i32::from(i - 1) * 5 * s;
-        let size = 2 * s + i32::from(i) * s * 2 / 3;
-        let by = y + 7 * s - size;
-        if i <= step {
-            m.rect(bx, by, 4 * s, size, 1);
-        } else {
-            let t = (s / 2).max(1);
-            m.rect(bx, by, 4 * s, t, 1);
-            m.rect(bx, by + size - t, 4 * s, t, 1);
-            m.rect(bx, by, t, size, 1);
-            m.rect(bx + 4 * s - t, by, t, size, 1);
-        }
-    }
 }
 
 /// An open crosshair: four arms with a clear centre, ticks along each arm
@@ -1492,6 +1493,7 @@ mod tests {
                 arc: Vec::new(),
                 ring_ft: 6_300.,
             },
+            autopilot: None,
             blink: true,
         }
     }
@@ -1659,16 +1661,6 @@ mod tests {
         assert!(field(step + 1) * FILL >= 250. && field(step + 2) * FILL < 250.);
         // Nothing fits closer than the widest field: the widest.
         assert_eq!(fill_zoom(5_000., 1_000.), 1);
-    }
-
-    #[test]
-    fn the_zoom_ladder_fills_up_to_the_step() {
-        let ink = |zoom| {
-            let mut m = Mask::new([200, 60]);
-            zoom_ladder(&mut m, 2, 2, 2, zoom);
-            m.cells.iter().filter(|c| **c == 1).count()
-        };
-        assert!(ink(1) < ink(3) && ink(3) < ink(6));
     }
 
     #[test]

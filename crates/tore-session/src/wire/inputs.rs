@@ -13,6 +13,7 @@ use tore_codec::{BitReader, BitWriter, CodecError};
 use tore_input::pilot::{FlightAxis, LiftCommand, NozzlePreset, StabilityLevel, TrimAxis};
 use tore_sim::ai::wing::{Formation, PlayerApproach, PlayerBreak, PlayerOrder};
 use tore_sim::airport;
+use tore_sim::autopilot::orbit::ConsoleCommand;
 use tore_sim::combat::live;
 use tore_sim::flight::{PilotCommand, PilotInput, Switch};
 use tore_sim::sensors::{Channel, Controls, RANGE_LADDER_NMI};
@@ -717,7 +718,19 @@ const LIFT: u64 = 27;
 /// Wave 6 (slice nr-orbit; the lead numbers the protocol): open or close the
 /// AC-130's sensor console. No fields.
 const SENSOR_CONSOLE: u64 = 28;
+/// Wave 7 (slice nr-cona; the lead numbers the protocol): a sensor console
+/// key, then its [`CONSOLE_BITS`]-bit sub-code and an 8-bit value (a signed
+/// step, or the speed's percentage).
+const CONSOLE: u64 = 29;
 const COMMAND_BITS: u32 = 5;
+
+// The sensor console's sub-codes (protocol 30).
+const CONSOLE_BITS: u32 = 3;
+const CONSOLE_PIN: u64 = 0;
+const CONSOLE_HEADING: u64 = 1;
+const CONSOLE_ALTITUDE: u64 = 2;
+const CONSOLE_SPEED: u64 = 3;
+const CONSOLE_SPEED_STEP: u64 = 4;
 
 // The powered-lift sub-codes (protocol 19). The numbers are the wire's; the
 // golden test pins them.
@@ -796,6 +809,18 @@ pub(crate) fn write_command(w: &mut BitWriter, command: &Command) {
             }
             SeatCommand::BattleNet => code(BATTLE_NET),
             SeatCommand::SensorConsole => code(SENSOR_CONSOLE),
+            SeatCommand::Console(command) => {
+                code(CONSOLE);
+                let (sub, value) = match command {
+                    ConsoleCommand::Pin => (CONSOLE_PIN, 0),
+                    ConsoleCommand::Heading(steps) => (CONSOLE_HEADING, steps as u8),
+                    ConsoleCommand::Altitude(steps) => (CONSOLE_ALTITUDE, steps as u8),
+                    ConsoleCommand::Speed(percent) => (CONSOLE_SPEED, percent.min(100)),
+                    ConsoleCommand::SpeedStep(steps) => (CONSOLE_SPEED_STEP, steps as u8),
+                };
+                let _ = w.write_bits(sub, CONSOLE_BITS);
+                let _ = w.write_bits(u64::from(value), 8);
+            }
         },
         Command::Pilot(pilot) => match quantize_command(pilot) {
             PilotCommand::Eject => code(EJECT),
@@ -957,6 +982,18 @@ pub(crate) fn read_command(r: &mut BitReader<'_>) -> WireResult<Command> {
         WING_REPLY => seat(SeatCommand::WingReply(Reply::ALL[r.read_bits(2)? as usize])),
         BATTLE_NET => seat(SeatCommand::BattleNet),
         SENSOR_CONSOLE => seat(SeatCommand::SensorConsole),
+        CONSOLE => {
+            let sub = r.read_bits(CONSOLE_BITS)?;
+            let value = r.read_bits(8)? as u8;
+            seat(SeatCommand::Console(match sub {
+                CONSOLE_PIN if value == 0 => ConsoleCommand::Pin,
+                CONSOLE_HEADING => ConsoleCommand::Heading(value as i8),
+                CONSOLE_ALTITUDE => ConsoleCommand::Altitude(value as i8),
+                CONSOLE_SPEED if value <= 100 => ConsoleCommand::Speed(value),
+                CONSOLE_SPEED_STEP => ConsoleCommand::SpeedStep(value as i8),
+                _ => return Err(WireError::Invalid("sensor console command")),
+            }))
+        }
         EJECT => Ok(Command::Pilot(PilotCommand::Eject)),
         TOGGLE => Ok(Command::Pilot(PilotCommand::Toggle(read_switch(r)?))),
         SET => {

@@ -572,6 +572,12 @@ pub const ENTRIES: &[Entry] = &[
         Weapons,
         &["Shift-\\"],
     ),
+    cmd(
+        "sight-pin-toggle",
+        "Sight: pin or release (AC-130 console: orbit or search)",
+        Weapons,
+        &["p"],
+    ),
     cmd("sight-zoom-in", "Sight: zoom in", Weapons, &["Shift-'"]),
     cmd("sight-zoom-out", "Sight: zoom out", Weapons, &["Shift-;"]),
     cmd(
@@ -1612,6 +1618,7 @@ mod tests {
         };
         assert_eq!(owners("\\"), ["sight-designate"]);
         assert_eq!(owners("Shift-\\"), ["sight-pin"]);
+        assert_eq!(owners("p"), ["sight-pin-toggle"]);
         assert_eq!(owners("Ctrl-Shift-\\"), ["range-target"]);
         assert_eq!(owners("Ctrl-\\"), ["sight-polarity"]);
         assert_eq!(owners("Shift-'"), ["sight-zoom-in"]);

@@ -37,6 +37,7 @@ mod cockpit_renderer;
 mod cockpit_sheet;
 mod combat_smoke;
 mod combat_view;
+mod console_keys;
 mod controls_editor;
 mod countermeasure_renderer;
 mod crt;
@@ -147,6 +148,7 @@ mod surface_trace;
 mod tape_file;
 mod target_info;
 mod target_preview;
+mod terrain_colors;
 mod ui_text;
 mod ui_text_renderer;
 mod v22_animation;
@@ -1370,6 +1372,13 @@ impl App {
             );
             return self.flight_command(command);
         }
+        // In the AC-130's sensor console the mouse wheel zooms the sight
+        // (slice nr-cona).
+        if let Some(steps) = console_keys::zoom_action(&name)
+            && self.console_open()
+        {
+            return self.flight_command(Command::SightZoom(steps));
+        }
         let command = match name.as_str() {
             "weapon-next" => Command::NextWeapon,
             "weapon-group-next" => Command::Combat(tore_sim::combat::live::Command::NextGunGroup),
@@ -1392,6 +1401,7 @@ impl App {
             "sight-designate" => Command::SightDesignate,
             "sight-pin" => Command::SightPinGround,
             "sensor-console" => Command::SensorConsole,
+            "sight-pin-toggle" => Command::SightPinToggle,
             // The air-to-ground radar page and the Easy targeting cheat's
             // nearest ground target (slice G1).
             "a-g-radar" => return self.air_ground_key(),
@@ -1595,6 +1605,17 @@ impl App {
             }
             Command::SensorConsole => {
                 self.queue(seats::SeatCommand::SensorConsole);
+                Action::None
+            }
+            Command::SightPinToggle => {
+                if !self.input.gunsight() {
+                    self.flight_ui
+                        .message("Pin or release: no gunsight on this aircraft");
+                    return Action::Click;
+                }
+                self.queue(seats::SeatCommand::Console(
+                    tore_sim::autopilot::orbit::ConsoleCommand::Pin,
+                ));
                 Action::None
             }
             // Retail's IFF squawk: the answer comes from the flight's own copy
@@ -2008,6 +2029,16 @@ impl App {
                 self.instruments.toggle(page);
                 Action::Click
             }
+            // In the sensor console the throttle keys set the console
+            // autopilot's speed (slice nr-cona).
+            Command::ThrottlePreset(..) | Command::ThrottleStep(_)
+                if self.console_open() && console_keys::throttle(&command).is_some() =>
+            {
+                if let Some(console) = console_keys::throttle(&command) {
+                    self.queue(seats::SeatCommand::Console(console));
+                }
+                Action::None
+            }
             Command::ThrottlePreset(value, burner) => {
                 self.input.queue(tore_input::PilotCommand::Throttle(value));
                 self.input.queue(tore_input::PilotCommand::Set(
@@ -2183,6 +2214,11 @@ impl App {
         self.flight_ui
             .message(if on { "Laser off" } else { "Laser on" });
         Action::None
+    }
+    /// The AC-130's sensor console is open on the presented flight
+    /// ([`console_open`]).
+    fn console_open(&self) -> bool {
+        console_open(&self.input, &self.world, &self.net_flight)
     }
     /// Ctrl+Backslash: the AC-130 sensor console's picture, white hot, black
     /// hot, TV and night vision in turn. Only the console shows it; elsewhere
@@ -3441,6 +3477,14 @@ impl App {
             let before = self.flight_ui.frozen();
             let command = if event.repeat || self.modifiers.super_key() {
                 flight_ui::Command::None
+            } else if let Some(steps) = console_keys::zoom_key(&name).filter(|_| {
+                // In the sensor console the view zoom keys zoom the sight.
+                self.modifiers.is_empty()
+                    && !self.flight_ui.menu
+                    && !self.flight_ui.map.open
+                    && self.console_open()
+            }) {
+                flight_ui::Command::SightZoom(steps)
             } else {
                 self.flight_ui.key(
                     &name,
@@ -3773,7 +3817,19 @@ impl ApplicationHandler for App {
                         if self.flight_ui.frozen() {
                             self.mouse_look = None;
                         }
-                        if let Some(last) = self.mouse_look {
+                        if let Some(last) = self.mouse_look
+                            && self.input.console.open
+                        {
+                            // The sensor console: mouse look slews the sight.
+                            let profile = &self.input.resolver.profile;
+                            let up = if profile.mouse_invert { 1. } else { -1. };
+                            let sensitivity = profile.mouse_sensitivity;
+                            self.input.console.mouse_moved(
+                                [position.x - last.0, (position.y - last.1) * up],
+                                sensitivity,
+                            );
+                            self.mouse_look = Some((position.x, position.y));
+                        } else if let Some(last) = self.mouse_look {
                             let profile = &self.input.resolver.profile;
                             // 1.0 sensitivity turns 2 radians per 1,000 pixels.
                             let k = 0.002 * profile.mouse_sensitivity;
@@ -4265,7 +4321,15 @@ impl ApplicationHandler for App {
                                 start.flight.throttle,
                                 start.flight.lift_controls.collective,
                             );
+                            self.input.console.open =
+                                console_open(&self.input, &self.world, &self.net_flight);
                             let (pilot, _) = self.input.frame(&self.camera.keys, lever);
+                            for command in self.input.console.take() {
+                                queue_command(
+                                    &mut self.seat_commands,
+                                    seats::SeatCommand::Console(command),
+                                );
+                            }
                             if let Some(recording) = &mut self.input_recording {
                                 self.recorded_ticks += 1;
                                 if let Err(error) = tore_input::recording::write_frame(
@@ -4360,7 +4424,9 @@ impl ApplicationHandler for App {
                         }
                         self.performance.ticks(steps, self.flight_ui.time_scale);
                         self.input.feedback_flush();
-                        if !self.flight_ui.frozen() {
+                        // In the sensor console the look keys and axes fly
+                        // the console's autopilot (Input::frame), not the view.
+                        if !self.flight_ui.frozen() && !self.input.console.open {
                             let analog_look = self.input.resolver.look();
                             look::step_axes(
                                 &mut self.flight_ui.look,
@@ -5108,13 +5174,16 @@ impl ApplicationHandler for App {
                         if let (Some(combat), Some(seeker)) =
                             (self.instruments.combat.as_mut(), &seeker_shot)
                         {
-                            combat.targeting = Some(instruments::targeting::Page::seeker(
-                                &seeker.weapon,
-                                seeker.target,
-                                seeker.range_ft,
-                                frame.readout.tick,
-                                seeker.view,
-                            ));
+                            combat.targeting = Some(
+                                instruments::targeting::Page::seeker(
+                                    &seeker.weapon,
+                                    seeker.target,
+                                    seeker.range_ft,
+                                    frame.readout.tick,
+                                    seeker.view,
+                                )
+                                .closing(seeker.closing),
+                            );
                         } else if let (Some(combat), Some(seed)) =
                             (self.instruments.combat.as_mut(), self.seeker.lost_feed())
                         {
@@ -9958,6 +10027,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
         reel::music()?;
         return Ok(Outcome::Done);
     }
+    if std::env::args().nth(1).as_deref() == Some("--terrain-colors") {
+        terrain_colors::run()?;
+        return Ok(Outcome::Done);
+    }
     if std::env::args().nth(1).as_deref() == Some("--blast-preview") {
         blast_preview::run()?;
         return Ok(Outcome::Done);
@@ -14425,6 +14498,20 @@ fn apply_sensor_controls(
     }
 }
 /// Profile names of the mouse buttons other than the left one.
+/// The AC-130's sensor console is open on the presented flight: a client's
+/// prediction carries the host's autopilot mode.
+fn console_open(
+    input: &input::Input,
+    world: &world::World,
+    net_flight: &Option<net::play::NetFlight>,
+) -> bool {
+    let flight = net_flight
+        .as_ref()
+        .and_then(|f| f.frame.as_ref())
+        .map_or(&world.cockpits[OWN].flight, |client| &client.presented);
+    input.gunsight() && flight.autopilot.mode() == tore_sim::autopilot::Mode::Orbit
+}
+
 fn mouse_control(button: MouseButton) -> Option<&'static str> {
     Some(match button {
         MouseButton::Right => "button:right",

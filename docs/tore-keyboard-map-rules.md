@@ -64,9 +64,13 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
   [the input guide](INPUT.md#ac-130-gunsight-controls). Ctrl+9 (the AC-130's
   sensor console, `CONSOLE` on the 9 cap, and the legend's line with its
   View + Xbox gesture) sits beside Ctrl+7 and Ctrl+8, and Ctrl+0 (the
-  console radar's range, `RDR RNG` on the 0 cap) beside it; the legend's
-  last line gives the console's own keys: Ctrl+Backslash (the picture), T
-  (the next radar target) and Ctrl+0 (the radar's range). The other
+  console radar's range, `RDR RNG` on the 0 cap) beside it. P (`PIN/REL`, the
+  gunsight's pin or release: orbit or search in the console) has its own cap;
+  the legend's last two lines give the console's own meanings of the arrows,
+  = and -, T (the next radar target), Shift with the arrows, 1 to 8, Ctrl+0
+  (the radar's range) and Ctrl+Backslash (the picture: IR, TV, NVG) (slices
+  nr-cona and nr-conb, 2026-10-14), at
+  13 px so the legend keeps its box clear of the keypad. The other
   air-to-ground keys are on that sheet as well: Tab (fire the gun, held), Ctrl+M
   on M (delivery mode) and Ctrl+R with Shift+R (the S/C badge) on R.
 - The wing orders that reach the ground are on the Comms sheet in coral: Alt+E

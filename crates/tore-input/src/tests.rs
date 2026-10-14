@@ -634,6 +634,7 @@ fn gunsight_names_parse_name_and_roundtrip_through_profiles() {
         ("sight-y", Action::Axis(Axis::SightY)),
         ("sight-designate", Action::Ui("sight-designate".into())),
         ("sight-pin", Action::Ui("sight-pin".into())),
+        ("sight-pin-toggle", Action::Ui("sight-pin-toggle".into())),
         ("sensor-console", Action::Ui("sensor-console".into())),
         ("sight-zoom-in", Action::Ui("sight-zoom-in".into())),
         ("sight-zoom-out", Action::Ui("sight-zoom-out".into())),

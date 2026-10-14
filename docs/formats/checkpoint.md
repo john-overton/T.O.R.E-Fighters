@@ -247,6 +247,15 @@ That changes the wire's own-state bytes too
 The seat command `SensorConsole` is 15 in a checkpoint's queued seat
 commands.
 
+Protocol 30 (slice nr-cona, 2026-10-14): the `Orbit` gained, after its
+throttle term, `pinned` (bool), `heading` and `altitude` (f64: the console
+search's commanded heading and altitude), so the search rides the exact state
+too ([the console's search and keys](net-protocol.md#protocol-30-the-consoles-search-and-keys)).
+The seat command `Console` is 16 in a checkpoint's queued seat commands,
+followed by two varints: its variant (0 Pin, 1 Heading, 2 Altitude, 3 Speed,
+4 SpeedStep) and its value as a byte (the steps in two's complement, the
+speed's percentage as is). Same-build checkpoints only, as before.
+
 One field follows the exact coding: a two-seater's second chute
 (`crew_escape`, an `Option<Escape>` by the trait, one bit when there is
 none). The wire's exact state leaves it out, since a client's prediction

@@ -482,6 +482,10 @@ pub enum SeatCommand {
     /// the aircraft back (docs/spec/ac130-linked-guns.md, "The sensor console
     /// and the orbit"). Other aircraft refuse it with a message.
     SensorConsole,
+    /// A key of the AC-130's sensor console (slice nr-cona, John's request
+    /// of 2026-10-14): pin or release the sight's point (ORBIT or SEARCH), and
+    /// step the console autopilot's heading, altitude and speed.
+    Console(tore_sim::autopilot::orbit::ConsoleCommand),
 }
 
 #[cfg(test)]

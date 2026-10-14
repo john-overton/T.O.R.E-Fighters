@@ -233,6 +233,73 @@ pub struct Page {
     /// Combat tick of the readout: the blink's clock.
     pub tick: u64,
     pub view: Option<SightView>,
+    /// The seeker form's closing data: what makes the target square jitter
+    /// ([`Closing`]). `None` on every other form.
+    pub closing: Option<Closing>,
+}
+
+/// What the seeker page needs to jitter its target square as the weapon
+/// closes in (docs/spec/target-window.md, "Seeker view"): the weapon's id,
+/// the picture's tick and the seconds the weapon has left to its target.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Closing {
+    pub id: u32,
+    pub tick: u64,
+    pub time_to_go_s: f64,
+}
+
+/// The target square jitters from this many seconds before impact (agent
+/// decision; John asked 2026-10-14 for a little jitter as the weapon closes
+/// in). Farther out the square is steady.
+pub const JITTER_START_S: f64 = 8.;
+/// The offset of the square at impact, pixels on the 138 by 114 picture
+/// (agent decision): small against the 11 pixel square, so it never leaves
+/// the target.
+pub const JITTER_MAX_PX: f64 = 3.;
+/// How many times a second the jitter takes a new value: every 10 combat
+/// ticks, 12 Hz, the 24 Hz picture refresh halved so the square struggles
+/// rather than fizzes (agent decision).
+pub const JITTER_STEP_TICKS: u64 = 10;
+/// The share of the jitter growth (0 to 1) above which the square's size
+/// also flickers a pixel either way (agent decision).
+const FLICKER_FROM: f64 = 0.25;
+
+/// How far along the jitter is, 0 at [`JITTER_START_S`] and farther out, 1
+/// at impact. It grows with the square of the closeness, so it is barely
+/// there at long range and strongest in the last seconds.
+pub fn jitter_growth(time_to_go_s: f64) -> f64 {
+    let closeness = (1. - time_to_go_s / JITTER_START_S).clamp(0., 1.);
+    closeness * closeness
+}
+
+/// Splitmix64: a well mixed 64 bit value from one.
+fn mix(mut z: u64) -> u64 {
+    z = z.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
+/// The jitter of the target square: pixels to move it across and down, and
+/// the pixels to add to its side (a pixel each way, so the side stays even
+/// and the square stays centred). A pure function of the weapon's id,
+/// the picture's tick and the time to go, so stills of one tick match and a
+/// replay looks the same.
+pub fn square_jitter(c: &Closing) -> (i32, i32, i32) {
+    let growth = jitter_growth(c.time_to_go_s);
+    let step = c.tick / JITTER_STEP_TICKS;
+    let seed = mix((u64::from(c.id) << 40) ^ step);
+    // Three independent values in [-1, 1].
+    let unit = |salt: u64| (mix(seed ^ salt) >> 11) as f64 / (1u64 << 52) as f64 - 1.;
+    let reach = growth * JITTER_MAX_PX;
+    let dx = (unit(1) * reach).round() as i32;
+    let dy = (unit(2) * reach).round() as i32;
+    let side = if growth >= FLICKER_FROM && unit(3).abs() < growth * 0.6 {
+        if unit(4) < 0. { -2 } else { 2 }
+    } else {
+        0
+    };
+    (dx, dy, side)
 }
 
 /// The name a buddy's laser spot goes by on the page: the pilot's callsign
@@ -318,6 +385,7 @@ impl Page {
             owner: None,
             tick: now,
             view: None,
+            closing: None,
         })
     }
 
@@ -354,7 +422,14 @@ impl Page {
             )),
             tick,
             view: Some(view),
+            closing: None,
         }
+    }
+
+    /// The seeker page with the closing data that jitters its target square.
+    pub fn closing(mut self, closing: Option<Closing>) -> Self {
+        self.closing = closing;
+        self
     }
 
     /// The lost-feed form: static fills the picture. `seed` changes the snow
@@ -618,7 +693,12 @@ fn draw_seeker(r: &mut Raster, f: &Font, page: &Page) {
     if let Some(view) = &page.view
         && let Some((x, y)) = page.mark.and_then(|point| view.project(point))
     {
-        marks.extend(square(x.round() as i32, y.round() as i32, 10));
+        let (dx, dy, side) = page.closing.as_ref().map_or((0, 0, 0), square_jitter);
+        marks.extend(square(
+            x.round() as i32 + dx,
+            y.round() as i32 + dy,
+            10 + side,
+        ));
     }
     marks.extend(seeker_crosshair());
     stamp(r, &marks);
@@ -681,7 +761,9 @@ fn feed_static(r: &mut Raster, seed: u64) {
 }
 
 /// Preview modes for `--target-cam-preview` that draw the targeting page.
-pub const PREVIEW_MODES: &str = "lase, lase-off, lase-mask, lase-mask-range, lase-mask-terrain, lase-pin, ready, slew, limit, tti, impact, buddy, both, buddy-nosight, flir, flir-tracked, seeker, seeker-gbu, seeker-centre, seeker-static";
+pub const PREVIEW_MODES: &str = "lase, lase-off, lase-mask, lase-mask-range, lase-mask-terrain, lase-pin, ready, slew, limit, tti, impact, buddy, both, buddy-nosight, flir, flir-tracked, seeker, seeker-gbu, seeker-centre, seeker-static, seeker-ttg:AGM:2:490";
+// `seeker-ttg:WEAPON:SECONDS:TICK` also works: WEAPON is AGM or GBU, then the
+// seconds to go and the combat tick of a closing seeker page.
 
 /// One synthetic page: see [`super::gunsight::Preview`].
 pub struct Preview {
@@ -725,6 +807,7 @@ pub fn preview(mode: &str) -> Option<Preview> {
         owner: None,
         tick: 0,
         view: Some(view),
+        closing: None,
     };
     let tank = || {
         (
@@ -851,6 +934,26 @@ pub fn preview(mode: &str) -> Option<Preview> {
             page = Page::lost_feed(25);
             target = None;
             object = None;
+        }
+        other if other.starts_with("seeker-ttg:") => {
+            // seeker-ttg:AGM:1.5:470 : a closing page, to see the jitter.
+            let mut parts = other.split(':').skip(1);
+            let weapon = match parts.next()? {
+                "AGM" => "AGM65G.JT",
+                "GBU" => "GBU10.JT",
+                _ => return None,
+            };
+            let time_to_go_s: f64 = parts.next()?.parse().ok()?;
+            let tick: u64 = parts.next()?.parse().ok()?;
+            page = Page::seeker(weapon, Some(at(14., -6.)), 18_000., tick, view).closing(Some(
+                Closing {
+                    id: 7,
+                    tick,
+                    time_to_go_s,
+                },
+            ));
+            target = None;
+            object = Some((at(14., -6.), 11, 8));
         }
         _ => return None,
     }
@@ -1277,5 +1380,117 @@ mod tests {
         assert!(tti_of(&ro).unwrap().impact);
         ro.guided_impact_tick = Some(800);
         assert_eq!(tti_of(&ro), None);
+    }
+
+    fn closing(id: u32, tick: u64, time_to_go_s: f64) -> Closing {
+        Closing {
+            id,
+            tick,
+            time_to_go_s,
+        }
+    }
+
+    #[test]
+    fn the_jitter_grows_as_the_weapon_closes() {
+        assert_eq!(jitter_growth(JITTER_START_S), 0.);
+        assert_eq!(jitter_growth(60.), 0.);
+        assert_eq!(jitter_growth(0.), 1.);
+        assert_eq!(jitter_growth(-1.), 1.);
+        let mut last = 0.;
+        for tenth in (0..=80).rev() {
+            let growth = jitter_growth(f64::from(tenth) / 10.);
+            assert!(growth >= last, "{tenth}");
+            last = growth;
+        }
+        // Little at the half way mark, most of it in the last seconds.
+        assert!(jitter_growth(4.) < 0.3);
+        assert!(jitter_growth(1.) > 0.7);
+    }
+
+    /// The largest offset any tick and weapon gives at `time_to_go_s`.
+    fn worst(time_to_go_s: f64) -> (i32, i32) {
+        let mut most = (0, 0);
+        for id in 1..6 {
+            for tick in (0..6_000).step_by(JITTER_STEP_TICKS as usize) {
+                let (dx, dy, side) = square_jitter(&closing(id, tick, time_to_go_s));
+                most.0 = most.0.max(dx.abs().max(dy.abs()));
+                most.1 = most.1.max(side.abs());
+            }
+        }
+        most
+    }
+
+    #[test]
+    fn the_square_is_steady_at_long_range_and_shakes_most_at_the_end() {
+        assert_eq!(worst(JITTER_START_S), (0, 0));
+        assert_eq!(worst(20.), (0, 0));
+        // Five seconds out: a single pixel at most, and no size flicker yet.
+        assert!(worst(5.).0 <= 1);
+        assert_eq!(worst(5.).1, 0, "no size flicker yet");
+        let (reach, flicker) = worst(0.3);
+        assert!(reach >= 2, "reach {reach}");
+        assert_eq!(flicker, 2);
+        assert!(worst(1.5).0 <= worst(0.2).0);
+    }
+
+    #[test]
+    fn the_square_never_leaves_the_target() {
+        for tenth in 0..=100 {
+            let (reach, flicker) = worst(f64::from(tenth) / 10.);
+            assert!(f64::from(reach) <= JITTER_MAX_PX.ceil());
+            // The 10 pixel square moves at most 3 pixels and 1 pixel either
+            // side: the target stays well inside it.
+            assert!(reach + flicker / 2 < 5);
+        }
+    }
+
+    #[test]
+    fn the_jitter_is_a_function_of_the_tick_and_the_weapon() {
+        let a = closing(9, 1_234, 0.8);
+        assert_eq!(square_jitter(&a), square_jitter(&a));
+        // Same value across one jitter step, new values over time.
+        let step_start = 1_230;
+        assert_eq!(
+            square_jitter(&closing(9, step_start, 0.8)),
+            square_jitter(&closing(9, step_start + JITTER_STEP_TICKS - 1, 0.8))
+        );
+        let distinct: std::collections::BTreeSet<_> = (0..60)
+            .map(|i| square_jitter(&closing(9, i * JITTER_STEP_TICKS, 0.3)))
+            .collect();
+        assert!(distinct.len() > 8, "{}", distinct.len());
+        // Two weapons do not shake in step.
+        let same = (0..60)
+            .filter(|i| {
+                square_jitter(&closing(9, i * JITTER_STEP_TICKS, 0.3))
+                    == square_jitter(&closing(10, i * JITTER_STEP_TICKS, 0.3))
+            })
+            .count();
+        assert!(same < 30, "{same}");
+    }
+
+    #[test]
+    fn the_drawn_square_moves_with_the_jitter() {
+        let square_pixels = |page: &Page| {
+            let mut r = Raster::screen();
+            r.rect(0, 0, W, super::super::gunsight::H, [185, 185, 185, 255]);
+            draw(&mut r, &font(), page, None);
+            r
+        };
+        let calm = preview("seeker-ttg:AGM:20:470").unwrap().page;
+        let plain = preview("seeker").unwrap().page;
+        // Long range: the same picture as with no jitter at all.
+        assert_eq!(square_pixels(&calm).pixels, square_pixels(&plain).pixels);
+        // The last half second differs from the calm picture on some tick.
+        let moved = (0..40).any(|i| {
+            let page = preview(&format!("seeker-ttg:AGM:0.3:{}", i * 10))
+                .unwrap()
+                .page;
+            square_pixels(&page).pixels != square_pixels(&plain).pixels
+        });
+        assert!(moved);
+        // Stills of one tick match.
+        let a = preview("seeker-ttg:GBU:0.5:700").unwrap().page;
+        let b = preview("seeker-ttg:GBU:0.5:700").unwrap().page;
+        assert_eq!(square_pixels(&a).pixels, square_pixels(&b).pixels);
     }
 }

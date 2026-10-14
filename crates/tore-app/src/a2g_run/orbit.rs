@@ -5,8 +5,9 @@
 //!
 //! `--orbit-sight pin|track|free` says what the sight holds when the console
 //! opens: the ground under the target pinned or the target tracked (both set
-//! by hand, setup shortcuts), or a free sight that the console pins under its
-//! crosshair. `--orbit-slew S` holds the sight's slew
+//! by hand, setup shortcuts), or a free sight, with which the console
+//! searches (slice nr-cona, [`console`]; `--console-keys` sends its keys).
+//! `--orbit-slew S` holds the sight's slew
 //! right at full deflection for 4 s from S seconds, which moves a pin (the pod
 //! point moves); `--orbit-close S` closes the console at S seconds.
 //!
@@ -29,13 +30,14 @@ use tore_sim::combat::gunship::Sight;
 use tore_world::seats::{SeatCommand, SeatInput};
 
 /// The options this module reads, each with one value.
-pub(super) const OPTIONS: [&str; 6] = [
+pub(super) const OPTIONS: [&str; 7] = [
     "--orbit-sight",
     "--orbit-slew",
     "--orbit-close",
     "--console-range",
     "--console-cycle",
     "--console-fire",
+    "--console-keys",
 ];
 /// The share of the time after entry that every gun and the camera must
 /// bear on the sight's point (fitted acceptance, agent decision).
@@ -46,6 +48,8 @@ const BANK_RATE_LIMIT: f64 = 8.;
 const PITCH_RATE_LIMIT: f64 = 4.;
 /// The slew is held this long, s.
 const SLEW_SECONDS: f64 = 4.;
+
+mod console;
 
 struct Extra {
     sight: String,
@@ -61,6 +65,7 @@ struct Extra {
     fire: Option<(f64, f64)>,
     /// The run's clock (seconds after the console opened) for the step.
     clock: f64,
+    keys: Vec<(f64, tore_sim::autopilot::orbit::ConsoleCommand)>,
 }
 
 fn extra() -> AppResult<Extra> {
@@ -74,6 +79,7 @@ fn extra() -> AppResult<Extra> {
         cycle: Vec::new(),
         fire: None,
         clock: -1.,
+        keys: Vec::new(),
     };
     for pair in args.windows(2) {
         let value = &pair[1];
@@ -96,6 +102,7 @@ fn extra() -> AppResult<Extra> {
             "--console-cycle" => {
                 e.cycle = value.split(',').map(str::parse).collect::<Result<_, _>>()?
             }
+            "--console-keys" => e.keys = console::keys(value)?,
             _ => {}
         }
     }
@@ -159,6 +166,12 @@ pub(super) fn run(scene: &mut Scene, o: &Options) -> AppResult<()> {
     // Half a second for the designation and the sight to settle.
     for _ in 0..60 {
         step(scene, false, &e)?;
+    }
+    if e.sight == "free" && !e.cycle.is_empty() {
+        return search_then_t(scene, o, &mut e);
+    }
+    if e.sight == "free" {
+        return console::run(scene, o.seconds, &e.keys);
     }
     scene.queue(SeatCommand::SensorConsole);
     // The console's radar is the A-G radar: the game turns it on as the
@@ -541,4 +554,73 @@ impl Report {
             Err(format!("orbit probe: {} check(s) FAILED", self.failures).into())
         }
     }
+}
+
+/// `--orbit-sight free --console-cycle S,...` (slice nr-conb with nr-cona's
+/// search): the console opens with the sight free and searches; the A-G
+/// radar comes on as the game turns it on; each console T designates the
+/// next radar contact the sensor sees, the gunsight tracks it and the
+/// autopilot leaves the search for the orbit about it.
+fn search_then_t(scene: &mut Scene, o: &Options, e: &mut Extra) -> AppResult<()> {
+    use tore_sim::autopilot::orbit::ConsolePhase;
+    let mut report = Report::default();
+    scene.queue(SeatCommand::SensorConsole);
+    scene.queue(SeatCommand::Combat(
+        tore_sim::combat::live::Command::ToggleAirGround,
+    ));
+    step(scene, false, e)?;
+    let phase = |scene: &Scene| {
+        scene.world.cockpits[0]
+            .flight
+            .console_status()
+            .map(|s| s.phase)
+    };
+    report.check(
+        phase(scene) == Some(ConsolePhase::Search),
+        "the console opens searching, nothing pinned",
+    );
+    let mut pending: Option<(u32, f64)> = None;
+    let mut first_t: Option<f64> = None;
+    let ticks = (o.seconds * 120.) as u64;
+    for tick in 0..ticks {
+        let t = tick as f64 / 120.;
+        e.clock = t;
+        step(scene, false, e)?;
+        if e.cycle.iter().any(|at| (t - at).abs() < 0.5 / 120.) {
+            if first_t.is_none() {
+                report.check(
+                    phase(scene) == Some(ConsolePhase::Search),
+                    format_args!("still searching at {t:.0} s before T"),
+                );
+                first_t = Some(t);
+            }
+            pending = console_cycle(scene, e, &mut report)?.map(|id| (id, t + 0.25));
+        }
+        if let Some((id, due)) = pending
+            && t >= due
+        {
+            pending = None;
+            check_cycle(scene, e, &mut report, id);
+        }
+        if let Some(dir) = &o.ai.console_scene
+            && o.ai.console_at.iter().any(|at| (t - at).abs() < 0.5 / 120.)
+        {
+            let tag = if first_t.is_some() { "t-" } else { "search-" };
+            super::console_render::render_seat(scene, t, dir, e.range, tag)?;
+        }
+        if tick % (120 * 10) == 0 {
+            println!("orbit-run: t={t:.0} phase {:?}", phase(scene));
+        }
+    }
+    let last = phase(scene);
+    println!("orbit-run: end phase {last:?}");
+    report.check(
+        matches!(last, Some(ConsolePhase::Join | ConsolePhase::Orbit)),
+        "after T the autopilot left the search for the orbit about the target",
+    );
+    report.check(
+        scene.world.cockpits[0].flight.orbit_status().is_some(),
+        "the orbit holds the tracked target's point",
+    );
+    report.done()
 }

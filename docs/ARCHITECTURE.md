@@ -91,7 +91,7 @@ keeps rectangular aircraft/smoke images and paged world/weather art distinct.
 All sample, palette-remap and shadow paths use the corresponding addressing.
 [Source coverage and static variant composition](spec/terrain-detail.md).
 
-`terrain.rs` (in `tore-world`) builds `Terrain` from the selected retail MM and its resolved T2: the grid, the airport scene and the weather clock, with the height, surface and wind queries the simulation uses. It holds no art and reads no environment variable. `scenery.rs` builds `Scenery` from the same resources and the finished `Terrain`: the named or numbered texture references, DAY2 variant palette, terrain mesh, sky art, static airport geometry and per-camera weather. Neither has a GPU or window dependency. `sim_renderer.rs` uploads geometry and a texture array, owns depth targets and draws terrain plus a fullscreen sky pass; `terrain.wgsl` supplies the initial perspective, sampling and fog. `renderer.rs` composes this scene with the transparent CPU HUD, resizing depth and surface together. This separation allows aircraft/object/weather passes and a deterministic simulation to be added without coupling format readers to wgpu.
+`terrain.rs` (in `tore-world`) builds `Terrain` from the selected retail MM and its resolved T2: the grid, the airport scene and the weather clock, with the height, surface and wind queries the simulation uses. It holds no art and reads no environment variable. `scenery.rs` builds `Scenery` from the same resources and the finished `Terrain`: the named or numbered texture references, the map's [retail weather palette family](formats/weather.md#theater-palette-families), terrain mesh, sky art, static airport geometry and per-camera weather. Neither has a GPU or window dependency. `sim_renderer.rs` uploads geometry and a texture array, owns depth targets and draws terrain plus a fullscreen sky pass; `terrain.wgsl` supplies the initial perspective, sampling and fog. `renderer.rs` composes this scene with the transparent CPU HUD, resizing depth and surface together. This separation allows aircraft/object/weather passes and a deterministic simulation to be added without coupling format readers to wgpu.
 
 The initial implementation uses full-resolution fixed triangles and an authored sky/fog projection. It is not the native adaptive renderer. All geometry/colors come from local source data at runtime; no retail derivatives are embedded. See [theater findings](formats/theater.md) for recovered versus authored behavior. The Hornet adapter now advances at 120 fixed ticks/second; the developer free camera still uses elapsed wall time for inspection.
 
@@ -142,8 +142,11 @@ aircraft can be the reference. [Behavior and fitted constants](spec/flight-views
 
 `tore_sim::autopilot` owns captured heading/altitude, mode and an optional
 world-space navigation target, and the AC-130's orbit hold (`autopilot::orbit`:
-its plan, slewed commands and the point it circles, which the world sets each
-tick from the gunsight in `World::feed_orbits` before the flight steps). `State::step_surface` consumes mode switches,
+its plan, slewed commands, the point it circles, or with no point the
+search's commanded heading, altitude and speed, which the world sets each
+tick from the gunsight in `World::feed_orbits` before the flight steps; the
+console's keys reach it as the seat command `Console`, and in the app
+`console_keys` gives the flight controls their console meanings). `State::step_surface` consumes mode switches,
 applies pilot override and generates control deflections before the selected
 flight adapter runs. The HUD reads this state. See the
 [autopilot specification](spec/autopilot.md).
@@ -549,7 +552,7 @@ the state.
 | `flight/powered/trim.rs` | Airborne starts in trimmed forward flight and ground starts |
 | `flight/powered/readout.rs` | Pure cockpit readings (NR, TQ, nacelle, hover display, buffet) for the HUD, sound and camera |
 | `autopilot.rs` | Hover hold and the A modes on the powered-lift aircraft (`Mode::Hover`, `Loops`) |
-| `autopilot/orbit.rs` | Orbit hold for the AC-130's sensor console (`Mode::Orbit`, `Orbit`, `OrbitStatus`): the AI gunship's orbit flown through stick and throttle (slice nr-orbit) |
+| `autopilot/orbit.rs` | Orbit hold for the AC-130's sensor console (`Mode::Orbit`, `Orbit`, `OrbitStatus`): the AI gunship's orbit flown through stick and throttle (slice nr-orbit); the search with no point, the console's keys (`ConsoleCommand`) and `ConsoleStatus` (slice nr-cona) |
 | `autopilot/rotor_law.rs` | The hover cascade and the coupled forward-flight law as pure functions of a commanded target (`HoverTarget`, `ForwardTarget`) and the `Loops` memory, shared by the player's modes and the AI (slice H1) |
 | `ai/rotor_adapter.rs` | The AI's control of the helicopters and the V-22: steer and hover requests (`RotorRequest`, `HoverGuidance`) flown on the rotor laws, the V-22 nacelle schedule, its regime and loops coded with the actor (`ai/rotor_checkpoint.rs`) |
 | `ai/airfield_vertical.rs` | The vertical phases of the airfield sequence (slice H2): the hold, the vertical climb, a jet's transition, the hover approach, the vertical descent under the shared touchdown rule, the settle and a helicopter's air taxi to parking |
@@ -3423,9 +3426,10 @@ functions in `tore-world`, `world::plane`, that `World::step` calls for every
 cockpit in the tick's order and a client calls for its own plane with no
 `World`, `Combat` or `AiWings`:
 
-0. (Host only.) `World::feed_orbits` gives every cockpit flying the AC-130's
-   orbit hold the point its gunsight holds now; a client's prediction keeps
-   the last point its exact state brought.
+0. (Host only.) `World::feed_orbits` gives every cockpit with the AC-130's
+   sensor console open the point its gunsight holds now, or lets it search
+   when the sight is free; a client's prediction keeps the last point and
+   search its exact state brought.
 1. `fly`: the flight at the start of the tick is kept, the flight steps with
    the pilot's input over the terrain's surface, and building contact is
    tested against the ground objects still standing (a crash, or a rebound

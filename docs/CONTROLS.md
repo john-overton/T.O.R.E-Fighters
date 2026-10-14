@@ -44,6 +44,15 @@ sight row in the controls screen to use it on another aircraft. Tab holds the
 gun whatever is selected and has no gamepad default.
 The full profile remains visible in Controls. See [input contexts](INPUT.md).
 
+**Keys inside the AC-130 sensor console.** While the console (Ctrl+9) is open
+the stick does not fly, so the arrows, the stick and mouse look slew the
+sight; = and - and the mouse wheel zoom it; Shift with Left and Right steps the
+search heading and Shift with Up and Down the altitude (or the orbit's
+height); the throttle keys 1 to 8 set the autopilot's speed; P pins or
+releases the point (orbit or search). See
+[input](INPUT.md#ac-130-gunsight-controls) and the
+[console's keys](spec/ac130-linked-guns.md#the-consoles-keys).
+
 **Keys that depend on the aircraft.** On the AV-8 and Yak-141, Z and X step the
 nozzles and Shift+Z and Shift+X are the nozzle presets, as in the retail manual;
 on every other aircraft they stay a rudder pair. On the helicopters and the V-22
@@ -160,6 +169,7 @@ and a gamepad's View+stick defaults avoid the problem.
 | Sensor console and orbit hold (AC-130) | Ctrl+9 | - | View + Xbox |
 | Sight: designate under crosshair | Backslash | - | View + A (tap) |
 | Sight: pin ground point | Shift+Backslash | - | View + A (hold half a second) |
+| Sight: pin or release (AC-130 console: orbit or search) | P | - | - |
 | Sight: zoom in | Shift+Apostrophe | - | - |
 | Sight: zoom out | Shift+Semicolon | - | - |
 | Sight: white hot / black hot / TV / night vision (AC-130 console) | Ctrl+Backslash | - | - |

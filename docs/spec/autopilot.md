@@ -117,8 +117,13 @@ the attack orbit while the player works the guns from the sensor console. It
 is a fourth mode, `Mode::Orbit`, engaged only by the console key (Ctrl+9 on
 the AC-130), never by A or Ctrl+A, and it ignores the stick and the throttle
 instead of letting go at 0.15 (agent decision). It is the only mode with an
-autothrottle. The HUD's second line reads `ORBIT`. Its rules, numbers and
-provenance are in [the sensor console and the orbit](ac130-linked-guns.md#the-sensor-console-and-the-orbit).
+autothrottle. Since 2026-10-14 (John: "unpinned the aircraft just flies
+straight") it searches straight and level on a commanded heading, altitude
+and speed while the gunsight holds no point, and circles only a pinned or
+tracked point; the console's keys step the commanded values. The HUD's
+second line reads `SEARCH` or `ORBIT`. Its rules, numbers and provenance are
+in [the sensor console and the orbit](ac130-linked-guns.md#the-sensor-console-and-the-orbit)
+and [the search](ac130-linked-guns.md#the-search).
 
 ## Numbers and provenance
 

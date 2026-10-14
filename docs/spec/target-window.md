@@ -335,7 +335,7 @@ make it look like a CRT display", after the AC-130 mission of Call of Duty 4,
 works the guns from while the aircraft flies its orbit by itself: entering the
 console engages the orbit autopilot, leaving it hands the aircraft back.
 **Ctrl+9** (gamepad Select + Guide) opens and closes it: the screen shows
-exactly while orbit hold flies ([the sensor console and the
+exactly while the console's autopilot flies, searching or orbiting ([the sensor console and the
 orbit](ac130-linked-guns.md#the-sensor-console-and-the-orbit) covers the key and
 the autopilot; this section covers the picture). Online, a client's screen
 follows its own prediction of the plane, which carries the host's orbit mode,
@@ -364,7 +364,11 @@ the sensor really is (agent decision). The cockpit, HUD and instrument windows
 are hidden; messages, the map and the menus still draw over it. The gunsight
 works unchanged: Alt+arrows slew, Backslash designates, Shift+Backslash pins,
 L drops, Shift+' and Shift+; zoom, Ctrl+7 and Ctrl+8 pick and link guns, and
-the trigger fires.
+the trigger fires. Since the stick does not fly in the console, the arrows,
+the stick and mouse look also slew, the view zoom keys (= and -) and the
+mouse wheel zoom, P pins and releases, and Shift with the arrows and the
+throttle keys command the autopilot (opinionated, John 2026-10-14; the keys
+are [the console's keys](ac130-linked-guns.md#the-consoles-keys)).
 
 **Picture modes.** **Ctrl+Backslash** steps the picture through white hot,
 black hot, TV and night vision, then back to white hot (the key does nothing
@@ -414,7 +418,7 @@ rest is the game's own data.
 
 | Where | Shows |
 | --- | --- |
-| Top left | The sight's mode (MAN free slew, RTN returning, PNT pinned, TRK tracked), the field of view by name (WFOV, MFOV and NFOV for zoom steps 1 to 3, then NFOV E2, E4 and E8: the narrow field's electronic zoom) and the sensor, IR or TV; the field in degrees with a zoom ladder beside it (six boxes, widest on the left, filled up to the current step; agent decision so the zoom reads at a glance); the orbit: ORBIT JOIN while the aircraft is still joining the circle, ORBIT GUNS on it with every gun and the camera bearing on the point, ORBIT NO BEAR on it when one cannot; then the planned radius and height above the point (`flight::State::orbit_status`) |
+| Top left | The sight's mode (MAN free slew, RTN returning, PNT pinned, TRK tracked), the field of view by name (WFOV, MFOV and NFOV for zoom steps 1 to 3, then NFOV E2, E4 and E8: the narrow field's electronic zoom) and the sensor, IR, TV or NVG; the field in degrees (with the field's name, the zoom legend); searching (nothing pinned): SEARCH P PINS, then the commanded heading, altitude and speed (HDG 275 ALT 9500 191KT; slice nr-cona, `flight::State::console_status`); holding a point, the orbit: ORBIT JOIN while the aircraft is still joining the circle, ORBIT GUNS on it with every gun and the camera bearing on the point, ORBIT NO BEAR on it when one cannot; then the planned radius and height above the point (`flight::State::orbit_status`) |
 | Top right | True heading, height above the ground, true airspeed, the picture mode (WHOT, BHOT, TV, NVG) |
 | Left, middle | The sensor's azimuth (from the nose, clockwise), its elevation, and the true bearing of its line of sight (LOS) |
 | Right, middle | With a tracked target: its name, range, true bearing and clock bearing with HI or LO |
@@ -484,7 +488,11 @@ target: one step wider (John, 2026-10-14, for context) than the narrowest
 zoom step whose field still holds the target's largest side within 60
 percent of the picture's height at its slant range from the dome (the
 object's own box; 60 ft for an aircraft), the widest step when none does.
-A tank at 2 nm takes NFOV E4. With
+A tank at 2 nm takes NFOV E4. In SEARCH (the console's straight and level search with nothing
+pinned, slice nr-cona) the selection is a track, so the autopilot leaves
+the search and joins the orbit about the target; the scan centres on the
+sensor's line, which in SEARCH is the default look abeam left, so T finds
+what lies there. With
 A-G off, T turns it on; with nothing in view it says "Sensor: no radar
 target in view". Outside the console T keeps its flight meaning.
 
@@ -520,7 +528,7 @@ target, orbit status and A-G list. There `--console-range N` sets the seat's
 radar range setting, `--console-cycle S,...` presses the console's T at
 those seconds through the game's own rule and checks the designation, the
 track and the zoom (battery `flight-ac130-orbit-console-radar`), and
-`--console-fire FROM,TO` links the 105 mm and holds the trigger.
+`--console-fire FROM,TO` links the 105 mm and holds the trigger. With `--orbit-sight free` and `--console-cycle` the run opens the console searching and checks that T leaves the search for the orbit (battery `flight-ac130-orbit-console-search-t`).
 
 ## Targeting page
 
@@ -676,6 +684,25 @@ choices, labelled below.
   target square, so a target on the centre sits in the gap. The pod pages
   keep their short ticks. Every nose-cone view has it, because they are one
   page.
+- **Target square jitter.** Opinionated, John 2026-10-14 ("the target square
+  should jitter a little bit as it is closing in"); the numbers are agent
+  decisions. The 11 pixel target square is steady far out and shakes more as
+  the weapon closes, like a tracker struggling to hold. The measure is the
+  seconds to go: the weapon's distance to its target (or the laser spot)
+  divided by its speed. From 8 seconds out the share of jitter grows with the
+  square of the closeness (0 at 8 s, about a quarter at 4 s, 0.77 at 1 s, 1 at
+  impact). The square moves up to 3 pixels at impact across and down (a pixel
+  at most from 5 s, so little at long range), and from a quarter of the
+  growth on it also flickers a pixel bigger or smaller each way (its side 8 or
+  12 instead of 10), more often as it grows, so it never leaves the target. A
+  new random-looking value is taken every 10 combat ticks (12 Hz). The values
+  are a hash of the weapon's id and the picture's tick, with nothing stored:
+  stills of one tick match and a replay looks the same. Presentation only, no
+  wire, recording or simulation change. A page with no square (no target in
+  the picture) has nothing to shake, and the crosshair never moves. Code:
+  `square_jitter` in `instruments/targeting.rs`, fed by `Shot::closing` from
+  `seeker_view.rs`; the constants are `JITTER_START_S`, `JITTER_MAX_PX` and
+  `JITTER_STEP_TICKS`.
 - **Static.** Opinionated, John 2026-10-13: "1 second of static once it hits
   before switching back to the regular target view". When the weapon the page
   follows ends (it leaves the picture: it hit, detonated or ran out; the

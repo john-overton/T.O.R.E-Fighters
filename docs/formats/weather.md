@@ -286,10 +286,34 @@ The source mission writer at `0x495fa0` emits `map %s`, `layer %s %d`,
 | 5 | `day2` | 00:00 | no |
 
 So cloud and fog are altitude-banded modules while dawn, noon, dusk and night
-are the same day module entered at different times. `0x42a80c` then appends a
-per-theater letter when the map name begins with B, E, F, T or V, after skipping
-a `~` or `$` campaign prefix; every other theater uses the unsuffixed module.
-That is exactly why the archive ships six variants of each.
+are the same day module entered at different times. The earlier reading of
+`0x42a80c` treated the map's first letter as its palette family. That is not
+valid for the supplied retail layouts: it makes Iraq, Persian Gulf and Spain
+green and assigns North Vietnam the Taiwan palette. The complete original
+selection context remains untraced; the explicit MM layer references below
+are authoritative for these maps.
+
+### Theater palette families
+
+The imported 1.02F installation (FA.EXE SHA-256
+`e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c`)
+contains 16 base MM files and 59 variants. Their explicit `layer` lines agree
+on these families, including the cloudy Baltic variant:
+
+| Palette suffix | Base theaters |
+| --- | --- |
+| E, sand | EGY, IRA, PGU, SPA |
+| B | BAL |
+| F | FRA |
+| V | VLA |
+| none | APA, CUB, GRE, KURILE, LFA, NSK, TVIET, UKR, WTA |
+
+Egypt, Iraq and Persian Gulf are the desert maps in this set. Spain also uses
+the sand palette. There are no separate Arabian or Saudi base theater codes.
+Snow in Kurile comes from its original indexed artwork under the unsuffixed
+palette; climate must not replace that palette. `DAY2`, `CLOUD1` and `FOG1`
+retain this family for every weather choice. This is a data-derived correction,
+not a new climate tint. [Regression evidence](../baselines/terrain-colors.md).
 
 The creator offers **seven** labels, dawn, clear, cloudy, overcast, foggy,
 sunset and night, against these six choices, and no table joining the two lists
