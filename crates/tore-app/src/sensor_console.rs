@@ -249,6 +249,9 @@ pub struct Symbology {
     /// and the commanded heading, altitude and speed
     /// (`flight::State::console_status`).
     pub autopilot: Option<tore_sim::autopilot::orbit::ConsoleStatus>,
+    /// With the gun lock on, where the guns are laid (slice nr-cona; the
+    /// readout's `GunsightReadout::gun_lock`).
+    pub gun_lock: Option<Vector>,
     /// The blink phase for flashing marks (on half of each half second).
     pub blink: bool,
 }
@@ -362,6 +365,7 @@ impl Symbology {
             notice,
             orbit: orbit_status(flight),
             autopilot: flight.console_status(),
+            gun_lock: readout.gunsight.as_ref().and_then(|g| g.gun_lock),
             blink: (seconds * 2.).rem_euclid(1.) < 0.5,
         }
     }
@@ -650,6 +654,11 @@ pub fn draw(sym: &Symbology, camera: &Camera, size: [u32; 2]) -> Vec<u8> {
             1,
         );
     }
+    // The gun lock (slice nr-cona): a line under the orbit block and a
+    // diamond in a square where the guns are laid.
+    if sym.gun_lock.is_some() {
+        m.text("GUNS LOCKED", left, top + 4 * row, s, 1);
+    }
     if let Some(orbit) = sym.orbit {
         let state = match (orbit.settled, orbit.bearing) {
             (false, _) => "ORBIT JOIN",
@@ -789,6 +798,12 @@ pub fn draw(sym: &Symbology, camera: &Camera, size: [u32; 2]) -> Vec<u8> {
     {
         let half = h * if tracked { 0.03 } else { 0.018 };
         square(&mut m, c, half, t, tracked);
+    }
+    if let Some(point) = sym.gun_lock
+        && let Some(c) = place(point)
+    {
+        square(&mut m, c, h * 0.024, t, true);
+        diamond(&mut m, c, h * 0.012, t);
     }
     for point in &sym.others {
         if let Some(c) = place(*point) {
@@ -1013,6 +1028,7 @@ mod tests {
             notice: None,
             orbit: None,
             autopilot: None,
+            gun_lock: None,
             blink: true,
         }
     }

@@ -42,6 +42,9 @@ bind keyboard Ctrl-9 sensor-console press\n\
 bind keyboard \\ sight-designate press\n\
 bind keyboard Shift-\\ sight-pin press\n\
 bind keyboard p sight-pin-toggle press\n\
+bind keyboard Shift-p gun-lock press\n\
+bind keyboard Ctrl-Insert console-chaff press\n\
+bind keyboard Ctrl-Delete console-flare press\n\
 bind keyboard Shift-' sight-zoom-in press\n\
 bind keyboard Shift-; sight-zoom-out press\n\
 bind keyboard Ctrl-\\ sight-polarity press\n\
@@ -153,9 +156,73 @@ fn binding_set_hash(profile: &Profile) -> u64 {
 }
 pub const AUTO_GAMEPAD_PREFIX: &str = "auto-gamepad:";
 
-fn gamepad_binding_enabled(binding: &tore_input::Binding, roles: [bool; 4]) -> bool {
+/// The AC-130 sensor console's gamepad layout (John, 2026-10-14): plain
+/// buttons and the D-pad take these meanings only while the console is open,
+/// in place of their flight meanings ([`CONSOLE_PAD_REPLACES`]). The sticks
+/// need no binding: the left stick (the flight stick) slews and the right
+/// stick (the look axes) steps the heading and altitude in the console
+/// (`crate::console_keys`). View + Xbox opens and closes it as before.
+/// (control, action, mode).
+pub const CONSOLE_PAD: [(&str, &str, &str); 15] = [
+    ("button:304", "fire", "hold"),
+    ("button:305", "weapon-group-toggle", "press"),
+    ("button:307", "weapon-group-next", "press"),
+    ("button:308", "designate", "press"),
+    ("button:314+button:308", "clear-designation", "press"),
+    ("button:310", "sight-zoom-out", "press"),
+    ("button:311", "sight-zoom-in", "press"),
+    ("axis:17", "throttle-step=0.05", "position=-1"),
+    ("axis:17", "throttle-step=-0.05", "position=1"),
+    ("axis:16", "sight-polarity", "position=-1"),
+    ("button:317", "sight-pin-toggle", "press"),
+    ("button:314+button:318", "gun-lock", "press"),
+    ("button:314+button:304", "console-flare", "press"),
+    ("button:314+button:305", "console-chaff", "press"),
+    ("button:314+axis:16", "designate-previous", "position=1"),
+];
+/// The controls whose flight meanings stand aside while the console is open
+/// (menu navigation on A, B and the D-pad stays, for the menus over it).
+const CONSOLE_PAD_REPLACES: [&str; 14] = [
+    "button:304",
+    "button:305",
+    "button:307",
+    "button:308",
+    "button:314+button:308",
+    "button:310",
+    "button:311",
+    "axis:16",
+    "axis:17",
+    "button:317",
+    "button:314+button:318",
+    "button:314+button:304",
+    "button:314+button:305",
+    "button:314+axis:16",
+];
+
+/// Whether `binding` is one of the console's gamepad bindings.
+pub fn console_pad_binding(binding: &tore_input::Binding) -> bool {
+    binding.device.starts_with(AUTO_GAMEPAD_PREFIX)
+        && CONSOLE_PAD.iter().any(|(control, action, _)| {
+            binding.control == *control
+                && tore_input::profile_text::action_name(&binding.action) == *action
+        })
+}
+
+fn gamepad_binding_enabled(binding: &tore_input::Binding, roles: [bool; 4], console: bool) -> bool {
     let [vectoring, conversion, collective, gunship] = roles;
     let powered = vectoring || conversion || collective;
+    if binding.device.starts_with(AUTO_GAMEPAD_PREFIX) {
+        if console_pad_binding(binding) {
+            return console && gunship;
+        }
+        if console
+            && gunship
+            && CONSOLE_PAD_REPLACES.contains(&binding.control.as_str())
+            && !matches!(&binding.action, Action::Ui(name) if name.starts_with("menu-"))
+        {
+            return false;
+        }
+    }
     if !binding.device.starts_with(AUTO_GAMEPAD_PREFIX)
         || !binding.control.starts_with("button:314+")
     {
@@ -222,7 +289,7 @@ pub struct Input {
     gamepad_roles: [bool; 4],
     /// The roles and the binding set ([`binding_set_hash`]) the aircraft
     /// filter last ran for: it runs again when either changes.
-    filter_signature: Option<([bool; 4], u64)>,
+    filter_signature: Option<([bool; 4], bool, u64)>,
     pub observed: Vec<Event>,
     profile_path: Option<std::path::PathBuf>,
     pub devices: BTreeMap<String, Device>,
@@ -670,7 +737,10 @@ impl Input {
     ) {
         self.gamepad_roles = [vectoring, conversion, collective, gunship];
         let roles = self.gamepad_roles;
-        let signature = (roles, binding_set_hash(&self.resolver.profile));
+        // The AC-130's sensor console swaps the gamepad's plain buttons for
+        // its own layout ([`CONSOLE_PAD`]).
+        let console = gunship && self.console.open;
+        let signature = (roles, console, binding_set_hash(&self.resolver.profile));
         if self.filter_signature == Some(signature) {
             return;
         }
@@ -714,7 +784,7 @@ impl Input {
                     !matches!((*mode, binding.mode), (tore_input::Mode::Position(a), tore_input::Mode::Position(b)) if a != b)
                 }) { return false; }
             }
-            gamepad_binding_enabled(binding, roles)
+            gamepad_binding_enabled(binding, roles, console)
         });
         if changed {
             self.key_claims.clear();
@@ -1291,6 +1361,19 @@ pub fn gamepad_text(device: &Device) -> String {
     if device.controls.iter().any(|c| c.id == "button:314") {
         text.push_str(&format!("modifier {default_ref} button:314\n"));
     }
+    for (control, action, mode) in CONSOLE_PAD {
+        let present = control.split('+').all(|part| {
+            device
+                .controls
+                .iter()
+                .any(|c| c.id == tore_input::token_base(part))
+        });
+        if present {
+            text.push_str(&format!(
+                "bind {default_ref} {control} {action} {mode} -1 0 1 0.1 1 1 10\n"
+            ));
+        }
+    }
     for (control, action, mode) in [
         ("axis:3", "vector-yaw-rate", "axis"),
         ("axis:4", "vector-pitch-rate", "axis"),
@@ -1368,6 +1451,9 @@ mod tests {
             "sight-designate",
             "sight-pin",
             "sight-pin-toggle",
+            "gun-lock",
+            "console-chaff",
+            "console-flare",
             "sight-zoom-in",
             "sight-zoom-out",
             "sight-polarity",
@@ -1913,6 +1999,95 @@ mod tests {
         assert_eq!(i.frame(&BTreeSet::new(), 0.7).0.throttle, None);
         assert_eq!(i.frame(&BTreeSet::new(), 0.1).0.throttle, None);
     }
+    /// The AC-130 sensor console's gamepad layout (John, 2026-10-14) on the
+    /// real button path: with the console open each button gives its console
+    /// action instead of its flight one; closed, the flight meanings return.
+    #[test]
+    fn the_console_gamepad_layout_replaces_the_flight_buttons_only_in_the_console() {
+        let device = crate::controls_editor::preview_device();
+        let mut i = input("");
+        i.resolver = Resolver::new(gamepad_defaults(&device));
+        i.devices.insert(device.id.clone(), device.clone());
+        let event = |i: &mut Input, control: &str, value: f64| {
+            i.resolver.event(Event {
+                device: device.id.clone(),
+                control: control.into(),
+                value,
+                baseline: false,
+            })
+        };
+        let press = |i: &mut Input, control: &str, value: f64| -> Vec<Action> {
+            event(i, control, value);
+            // Menu navigation stays on A, B and the D-pad for the menus.
+            let fired = i
+                .resolver
+                .drain()
+                .into_iter()
+                .map(|(_, a)| a)
+                .filter(|a| !matches!(a, Action::Ui(name) if name.starts_with("menu-")))
+                .collect();
+            event(i, control, 0.);
+            i.resolver.drain();
+            fired
+        };
+        let ui = |name: &str| vec![Action::Ui(name.into())];
+        i.console.open = true;
+        i.aircraft_controls(false, false, false, true);
+        assert_eq!(press(&mut i, "button:317", 1.), ui("sight-pin-toggle"));
+        assert_eq!(press(&mut i, "button:305", 1.), ui("weapon-group-toggle"));
+        assert_eq!(press(&mut i, "button:307", 1.), ui("weapon-group-next"));
+        assert_eq!(press(&mut i, "button:308", 1.), ui("designate"));
+        assert_eq!(press(&mut i, "button:310", 1.), ui("sight-zoom-out"));
+        assert_eq!(press(&mut i, "button:311", 1.), ui("sight-zoom-in"));
+        assert_eq!(press(&mut i, "axis:17", -1.), ui("throttle-step=0.05"));
+        assert_eq!(press(&mut i, "axis:17", 1.), ui("throttle-step=-0.05"));
+        assert_eq!(press(&mut i, "axis:16", -1.), ui("sight-polarity"));
+        // A is the trigger, held.
+        event(&mut i, "button:304", 1.);
+        assert!(i.resolver.held("fire"));
+        let (pilot, _) = i.frame(&BTreeSet::new(), 0.5);
+        assert!(pilot.commands.is_empty(), "no gear: {:?}", pilot.commands);
+        event(&mut i, "button:304", 0.);
+        assert!(!i.resolver.held("fire"));
+        i.resolver.drain();
+        // The View chords.
+        event(&mut i, "button:314", 1.);
+        assert_eq!(press(&mut i, "button:308", 1.), ui("clear-designation"));
+        assert_eq!(press(&mut i, "button:318", 1.), ui("gun-lock"));
+        assert_eq!(press(&mut i, "button:304", 1.), ui("console-flare"));
+        assert_eq!(press(&mut i, "button:305", 1.), ui("console-chaff"));
+        assert_eq!(press(&mut i, "axis:16", 1.), ui("designate-previous"));
+        assert_eq!(press(&mut i, "button:316", 1.), ui("sensor-console"));
+        event(&mut i, "button:314", 0.);
+        i.resolver.drain();
+        // The console's speed and zoom reach their meanings in the app.
+        assert_eq!(
+            crate::console_keys::throttle(&crate::flight_ui::Command::ThrottleStep(0.05)),
+            Some(tore_sim::autopilot::orbit::ConsoleCommand::SpeedStep(1))
+        );
+        // Closed: the flight meanings are back.
+        i.console.open = false;
+        i.aircraft_controls(false, false, false, true);
+        assert_eq!(
+            press(&mut i, "button:305", 1.),
+            vec![Action::Pilot(PilotCommand::Toggle(
+                tore_input::Switch::Airbrake
+            ))]
+        );
+        assert_eq!(
+            press(&mut i, "button:317", 1.),
+            vec![Action::Ui("view-front".into())]
+        );
+        event(&mut i, "button:304", 1.);
+        assert!(!i.resolver.held("fire"));
+        // And another aircraft never gets the console layout.
+        i.console.open = true;
+        i.aircraft_controls(false, false, false, false);
+        assert_eq!(
+            press(&mut i, "button:317", 1.),
+            vec![Action::Ui("view-front".into())]
+        );
+    }
     /// The aircraft filter runs again for a different binding set of the
     /// same size: its cache once keyed on the binding count, so a new
     /// resolver whose profile had as many bindings as the old one (the
@@ -2273,7 +2448,7 @@ mod tests {
                 .filter(|b| {
                     b.control.contains('+')
                         && !matches!(b.action, Action::Axis(_))
-                        && gamepad_binding_enabled(b, roles)
+                        && gamepad_binding_enabled(b, roles, false)
                 })
                 .cloned()
                 .collect();
@@ -2283,7 +2458,7 @@ mod tests {
             assert_eq!(chords.len(), if roles[3] { 15 } else { 14 });
             for binding in chords {
                 let mut r = Resolver::new(profile.clone());
-                r.filter_bindings(|binding| gamepad_binding_enabled(binding, roles));
+                r.filter_bindings(|binding| gamepad_binding_enabled(binding, roles, false));
                 for id in ids {
                     r.event(Event {
                         device: d.id.clone(),

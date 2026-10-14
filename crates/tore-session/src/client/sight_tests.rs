@@ -39,6 +39,7 @@ fn host_shows(look: [f64; 2], sight: Sight, returning: bool) -> GunsightReadout 
         status: [Readiness::NoTarget; 3],
         notice: None,
         zoom: 3,
+        gun_lock: None,
     }
 }
 

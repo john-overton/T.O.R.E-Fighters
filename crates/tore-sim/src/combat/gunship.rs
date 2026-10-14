@@ -133,6 +133,18 @@ pub fn sensor() -> super::sight::SightSensor {
 /// no gun reports a range (the shipped guns reach 13,000 feet).
 const SKY_RANGE_FT: f64 = 13_000.;
 
+/// The gun lock (John, 2026-10-14: "separate guns from sensor slew: pin
+/// guns to target or location, and allow the player to slew away"): the
+/// linked guns stay laid on an object or a point while the sight slews
+/// freely.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GunLock {
+    /// The object the guns follow, while it lives; None for a point.
+    pub object: Option<u32>,
+    /// Where the guns lay: the point, or the object where it was last seen.
+    pub point: Vector,
+}
+
 /// Actual fixed-tick mount angles, linked membership and the sight.
 #[derive(Clone, Debug, PartialEq)]
 pub struct State {
@@ -169,6 +181,8 @@ pub struct State {
     pub slew_held: bool,
     pub request: Option<SightRequest>,
     pub notice: Option<SightNotice>,
+    /// The gun lock, when the guns are laid apart from the sight.
+    pub gun_lock: Option<GunLock>,
 }
 impl Default for State {
     /// An AC-130 group with no guns installed, in the default view.
@@ -189,6 +203,7 @@ impl Default for State {
             slew_held: false,
             request: None,
             notice: None,
+            gun_lock: None,
         }
     }
 }
@@ -264,6 +279,61 @@ impl State {
         self.sight = Sight::Tracked(id);
         self.returning = false;
         self.request = None;
+    }
+    /// Lock the guns on what the sight holds now (its tracked object, its
+    /// pin, or the point under its crosshair), or let them follow the sight
+    /// again. Returns whether the guns are locked after it.
+    pub fn toggle_gun_lock(&mut self) -> bool {
+        if self.gun_lock.take().is_some() {
+            return false;
+        }
+        self.gun_lock = match self.sight {
+            Sight::Tracked(id) => self.aim.map(|point| GunLock {
+                object: Some(id),
+                point,
+            }),
+            Sight::Pinned(point) => Some(GunLock {
+                object: None,
+                point,
+            }),
+            Sight::Free => self.aim.map(|point| GunLock {
+                object: None,
+                point,
+            }),
+        };
+        self.gun_lock.is_some()
+    }
+    /// The guns' aim this tick under a gun lock, from the sight's objects:
+    /// the locked object where it is now (a lock whose object is gone is
+    /// let go), or the locked point. None without a lock.
+    pub fn locked_aim(&mut self, objects: &[SightObject]) -> Option<(TargetObservation, bool)> {
+        let lock = self.gun_lock.as_mut()?;
+        match lock.object {
+            Some(id) => match objects.iter().find(|o| o.id == id && o.alive) {
+                Some(object) => {
+                    lock.point = object.position;
+                    let led = object.airborne || object.velocity != [0.; 3];
+                    Some((
+                        TargetObservation {
+                            position: object.position,
+                            velocity: object.velocity,
+                        },
+                        led,
+                    ))
+                }
+                None => {
+                    self.gun_lock = None;
+                    None
+                }
+            },
+            None => Some((
+                TargetObservation {
+                    position: lock.point,
+                    velocity: [0.; 3],
+                },
+                false,
+            )),
+        }
     }
     /// L: drop a target or pin and slew freely from the current look; with
     /// nothing held, travel back to the default view.
@@ -559,4 +629,57 @@ fn ray_box(origin: Vector, direction: Vector, lo: Vector, hi: Vector) -> bool {
         }
     }
     far >= near
+}
+
+#[cfg(test)]
+mod gun_lock_tests {
+    use super::*;
+    use crate::combat::sight::SightObject;
+
+    fn object(id: u32, position: Vector, alive: bool) -> SightObject {
+        SightObject {
+            id,
+            position,
+            velocity: [10., 0., 0.],
+            alive,
+            airborne: false,
+            friendly: false,
+        }
+    }
+
+    /// The gun lock takes what the sight holds: a tracked object, followed
+    /// while it lives and let go when it is gone, or a point; again lets go.
+    #[test]
+    fn the_gun_lock_follows_its_object_and_lets_go_when_it_is_gone() {
+        let mut guns = State {
+            sight: Sight::Tracked(5),
+            aim: Some([100., 0., 200.]),
+            ..State::default()
+        };
+        assert!(guns.toggle_gun_lock());
+        // The sight slews away to a pin; the guns stay on the object.
+        guns.sight = Sight::Pinned([9_000., 0., 9_000.]);
+        let (aim, led) = guns
+            .locked_aim(&[object(5, [150., 0., 200.], true)])
+            .unwrap();
+        assert_eq!(
+            (aim.position, aim.velocity, led),
+            ([150., 0., 200.], [10., 0., 0.], true)
+        );
+        assert_eq!(guns.gun_lock.unwrap().point, [150., 0., 200.]);
+        assert!(
+            guns.locked_aim(&[object(5, [150., 0., 200.], false)])
+                .is_none()
+        );
+        assert!(
+            guns.gun_lock.is_none(),
+            "a destroyed object lets the guns go"
+        );
+        // On a pin, the point.
+        assert!(guns.toggle_gun_lock());
+        let (aim, led) = guns.locked_aim(&[]).unwrap();
+        assert_eq!((aim.position, led), ([9_000., 0., 9_000.], false));
+        assert!(!guns.toggle_gun_lock());
+        assert!(guns.locked_aim(&[]).is_none());
+    }
 }

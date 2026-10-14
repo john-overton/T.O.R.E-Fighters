@@ -318,7 +318,12 @@ impl World {
         }
         let reach = reach.filter(|r| r.is_finite()).unwrap_or(0.);
         let terrain = &self.terrain;
+        let locked = guns.gun_lock.map(|lock| {
+            let [x, _, z] = lock.point;
+            [x, f64::from(terrain.height(x as f32, z as f32)), z]
+        });
         let point = match guns.sight {
+            _ if locked.is_some() => locked,
             Sight::Pinned(point) => Some(point),
             Sight::Tracked(_) => guns
                 .aim
@@ -345,6 +350,21 @@ impl World {
     fn console_key(&mut self, cockpit: usize, command: ConsoleCommand) -> Option<String> {
         use tore_sim::combat::gunship::Sight;
         let plane = self.cockpits[cockpit].plane.0;
+        if command == ConsoleCommand::GunLock {
+            let Some(guns) = self
+                .combat
+                .state
+                .ownship_mut(plane)
+                .and_then(|own| own.gunship.as_mut())
+            else {
+                return Some("Gun lock: no gunsight on this aircraft".into());
+            };
+            return Some(if guns.toggle_gun_lock() {
+                "Guns locked: the sensor slews free".into()
+            } else {
+                "Guns follow the sensor".into()
+            });
+        }
         if command == ConsoleCommand::Pin {
             let Some(sight) = self
                 .combat
@@ -397,6 +417,20 @@ impl World {
                 cockpit.flight.autopilot.disengage();
                 continue;
             };
+            // A gun lock: the orbit circles where the guns are laid, not
+            // where the sensor looks (slice nr-cona).
+            if let Some(lock) = guns.gun_lock {
+                let [x, _, z] = lock.point;
+                let point = match lock.object {
+                    Some(_) => [x, f64::from(terrain.height(x as f32, z as f32)), z],
+                    None => lock.point,
+                };
+                cockpit
+                    .flight
+                    .autopilot
+                    .set_orbit_point(point, lock.object.is_some());
+                continue;
+            }
             match guns.sight {
                 Sight::Pinned(point) => cockpit.flight.autopilot.set_orbit_point(point, false),
                 Sight::Tracked(_) => {

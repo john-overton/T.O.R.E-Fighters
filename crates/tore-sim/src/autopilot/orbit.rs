@@ -152,6 +152,11 @@ pub enum ConsoleCommand {
     Speed(u8),
     /// The throttle steps 7 and 8: step the speed [`SPEED_STEP_KT`] a step.
     SpeedStep(i8),
+    /// The gun lock (John, 2026-10-14): lay the guns on what the sight holds
+    /// and let the sight slew away, or let the guns follow the sight again
+    /// (the world's to apply: it is the gunsight's). The orbit circles the
+    /// locked point while it holds.
+    GunLock,
 }
 
 /// What the console's autopilot is doing.
@@ -433,7 +438,7 @@ impl Orbit {
             high
         };
         match command {
-            ConsoleCommand::Pin => "Sensor console: pin".into(),
+            ConsoleCommand::Pin | ConsoleCommand::GunLock => "Sensor console: pin".into(),
             ConsoleCommand::Heading(_) if self.pinned => {
                 "Orbiting: P lets the point go to steer".into()
             }

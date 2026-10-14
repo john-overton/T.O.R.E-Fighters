@@ -383,3 +383,86 @@ fn a_console_slew_drops_a_track_to_a_pin() {
         |_, _| 12.
     ));
 }
+
+/// The gun lock (John, 2026-10-14): locked on a pin, the guns' pippers stay
+/// on it while the sight is moved 2,000 ft away, the readout shows where the
+/// guns lie, the console's orbit circles the locked point rather than the
+/// sight's; unlocked, the guns go back to the sight. Dropping the target (L)
+/// also lets the guns go.
+#[test]
+fn the_gun_lock_keeps_the_guns_and_the_orbit_on_their_point() {
+    let mut world = gunship();
+    step(&mut world, false, Vec::new());
+    let guns = |world: &World| world.combat.state.own().gunship.clone().unwrap();
+    let aim = guns(&world).aim.expect("the default view meets the ground");
+    let ground =
+        |world: &World, x: f64, z: f64| f64::from(world.terrain.height(x as f32, z as f32));
+    let first = [aim[0], ground(&world, aim[0], aim[2]), aim[2]];
+    world.combat.state.own_mut().gunship.as_mut().unwrap().sight = Sight::Pinned(first);
+    for _ in 0..240 {
+        step(&mut world, false, Vec::new());
+    }
+    let out = step(
+        &mut world,
+        false,
+        vec![SeatCommand::Console(ConsoleCommand::GunLock)],
+    );
+    assert!(said(&out, "Guns locked"));
+    assert_eq!(guns(&world).gun_lock.map(|l| l.point), Some(first));
+    step(&mut world, false, vec![SeatCommand::SensorConsole]);
+    // The sight moves 2,000 ft away; the guns and the orbit stay.
+    let x = first[0] + 2_000.;
+    let away = [x, ground(&world, x, first[2]), first[2]];
+    world.combat.state.own_mut().gunship.as_mut().unwrap().sight = Sight::Pinned(away);
+    for _ in 0..360 {
+        step(&mut world, false, Vec::new());
+    }
+    let distance = |a: [f64; 3], b: [f64; 3]| (a[0] - b[0]).hypot(a[2] - b[2]);
+    let impacts: Vec<_> = guns(&world)
+        .impacts
+        .iter()
+        .flatten()
+        .map(|i| i.point())
+        .collect();
+    assert!(!impacts.is_empty());
+    for point in &impacts {
+        assert!(
+            distance(*point, first) < distance(*point, away),
+            "a pipper left the locked point: {point:?}"
+        );
+    }
+    let launcher = crate::combat::launcher(&world.cockpits[0].flight);
+    let readout = world.cockpit_readout(SeatId(0), launcher).unwrap();
+    assert_eq!(readout.gunsight.unwrap().gun_lock, Some(first));
+    assert_eq!(
+        world.cockpits[0].flight.orbit_status().unwrap().point,
+        first
+    );
+    // Unlocked: the guns follow the sight again, and so does the orbit.
+    let out = step(
+        &mut world,
+        false,
+        vec![SeatCommand::Console(ConsoleCommand::GunLock)],
+    );
+    assert!(said(&out, "Guns follow the sensor"));
+    for _ in 0..600 {
+        step(&mut world, false, Vec::new());
+    }
+    for point in guns(&world).impacts.iter().flatten().map(|i| i.point()) {
+        assert!(distance(point, away) < distance(point, first), "{point:?}");
+    }
+    assert_eq!(world.cockpits[0].flight.orbit_status().unwrap().point, away);
+    // L drops the target and the lock with it.
+    step(
+        &mut world,
+        false,
+        vec![SeatCommand::Console(ConsoleCommand::GunLock)],
+    );
+    assert!(guns(&world).gun_lock.is_some());
+    step(
+        &mut world,
+        false,
+        vec![SeatCommand::Combat(Live::ClearDesignation)],
+    );
+    assert!(guns(&world).gun_lock.is_none());
+}

@@ -804,8 +804,9 @@ fn option_pair(value: Option<i64>) -> [i64; 2] {
 /// impact (a kind: 0 none, 1 ground, 2 air, 3 spent; its point; its
 /// seconds and range) as offsets from the aim point; the impacts' tick and
 /// the notice's tick as ticks before the readout's; the three readiness
-/// codes; the notice (0 none, 1 no ground point, 2 drop to slew); and the
-/// zoom step. Empty when the plane has no gunsight.
+/// codes; the notice (0 none, 1 no ground point, 2 drop to slew); the
+/// zoom step; and (pending protocol, slice nr-cona) the gun lock, a flag and
+/// its point as an offset. Empty when the plane has no gunsight.
 fn gunsight_values(g: &GunsightReadout, tick: u64) -> Vec<i64> {
     let origin = g.aim.unwrap_or([0.; 3]);
     let offset =
@@ -859,11 +860,15 @@ fn gunsight_values(g: &GunsightReadout, tick: u64) -> Vec<i64> {
         ),
     };
     out.extend([notice, notice_back, i64::from(g.zoom)]);
+    // Pending protocol (slice nr-cona): the gun lock, a flag and its point
+    // from the aim's origin.
+    out.push(flag(g.gun_lock.is_some()));
+    out.extend(g.gun_lock.map_or([0; 3], offset));
     out
 }
 
 /// Values of the gunsight group: the count [`gunsight_values`] writes.
-const GUNSIGHT_VALUES: usize = 2 + 3 + 2 + 1 + 4 + 3 * 6 + 1 + 3 + 3;
+const GUNSIGHT_VALUES: usize = 2 + 3 + 2 + 1 + 4 + 3 * 6 + 1 + 3 + 3 + 4;
 
 /// Reads the gunsight group; `None` when it is empty.
 fn gunsight_of(values: &[i64], tick: u64) -> WireResult<Option<GunsightReadout>> {
@@ -950,6 +955,11 @@ fn gunsight_of(values: &[i64], tick: u64) -> WireResult<Option<GunsightReadout>>
         ],
         notice,
         zoom,
+        gun_lock: match values[37] {
+            0 => None,
+            1 => Some(point(38)),
+            _ => return Err(bad("gunsight gun lock")),
+        },
     }))
 }
 

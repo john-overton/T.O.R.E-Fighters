@@ -578,6 +578,12 @@ pub const ENTRIES: &[Entry] = &[
         Weapons,
         &["p"],
     ),
+    cmd(
+        "gun-lock",
+        "Gun lock: guns stay on the target, the sensor slews free (AC-130)",
+        Weapons,
+        &["Shift-p"],
+    ),
     cmd("sight-zoom-in", "Sight: zoom in", Weapons, &["Shift-'"]),
     cmd("sight-zoom-out", "Sight: zoom out", Weapons, &["Shift-;"]),
     cmd(
@@ -658,6 +664,18 @@ pub const ENTRIES: &[Entry] = &[
     ),
     cmd("chaff", "Release chaff", Weapons, &["Insert"]),
     cmd("flare", "Release flare", Weapons, &["Delete"]),
+    cmd(
+        "console-chaff",
+        "Release chaff (AC-130 console)",
+        Weapons,
+        &["Ctrl-Insert"],
+    ),
+    cmd(
+        "console-flare",
+        "Release flare (AC-130 console)",
+        Weapons,
+        &["Ctrl-Delete"],
+    ),
     cmd(
         "jettison",
         "Jettison selected stores",
@@ -1554,7 +1572,10 @@ mod tests {
                     .iter()
                     .filter(|b| entry.bindable() && entry.matches(b))
                     .map(|b| {
-                        let label = control_label(&b.device, &b.control, b.mode, true);
+                        let mut label = control_label(&b.device, &b.control, b.mode, true);
+                        if crate::input::console_pad_binding(b) {
+                            label.push_str(" (in the AC-130 console)");
+                        }
                         match b.mode {
                             Mode::Tap => format!("{label} (tap)"),
                             Mode::Long => format!("{label} (hold half a second)"),

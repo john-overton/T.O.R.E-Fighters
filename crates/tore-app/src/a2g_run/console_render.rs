@@ -142,6 +142,7 @@ pub(super) fn render(
         notice: None,
         orbit: None,
         autopilot: None,
+        gun_lock: None,
         blink: true,
     };
     // The forms: name, look, zoom, polarity, tracking, static level.

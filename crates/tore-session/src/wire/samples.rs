@@ -99,6 +99,7 @@ pub fn commands() -> Vec<Command> {
         Command::Seat(S::Console(ConsoleCommand::Altitude(2))),
         Command::Seat(S::Console(ConsoleCommand::Speed(100))),
         Command::Seat(S::Console(ConsoleCommand::SpeedStep(-1))),
+        Command::Seat(S::Console(ConsoleCommand::GunLock)),
         Command::Seat(S::WingFormationCycle),
         Command::Seat(S::TriggerKey {
             down: true,
@@ -1350,6 +1351,7 @@ pub fn gunsight() -> tore_world::readout::GunsightReadout {
             tick: 390,
         }),
         zoom: 4,
+        gun_lock: Some([5_120., 40., 7_000.5]),
     }
 }
 

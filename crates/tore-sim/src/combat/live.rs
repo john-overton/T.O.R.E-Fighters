@@ -1784,6 +1784,9 @@ fn step_gunship(
         .collect();
     let before = group.target();
     let (aim, led) = group.step_sight(&own.config, launcher, &objects, ground, tick);
+    // A gun lock lays the guns on its object or point while the sight slews
+    // on (slice nr-cona).
+    let (aim, led) = group.locked_aim(&objects).unwrap_or((aim, led));
     group.update(&own.config, launcher, Some(aim), |from, to| {
         terrain_hit(from, to, ground).is_none()
     });
@@ -3663,6 +3666,8 @@ impl State {
                 own.release();
                 if let Some(group) = &mut own.gunship {
                     group.drop_hold();
+                    // Dropping the target lets the guns follow the sight.
+                    group.gun_lock = None;
                 }
                 if let Some(sight) = &mut own.sight {
                     sight.drop_hold();

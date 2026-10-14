@@ -198,6 +198,9 @@ pub struct GunsightReadout {
     pub notice: Option<SightNotice>,
     /// The zoom step in use, 1 to 6.
     pub zoom: u8,
+    /// With the gun lock on (slice nr-cona), where the guns are laid: the
+    /// locked object or point. The sight slews on its own meanwhile.
+    pub gun_lock: Option<Vector>,
 }
 impl GunsightReadout {
     /// The readout of a gunship group.
@@ -212,6 +215,7 @@ impl GunsightReadout {
             status: group.status,
             notice: group.notice,
             zoom: group.zoom(),
+            gun_lock: group.gun_lock.map(|lock| lock.point),
         }
     }
 }
