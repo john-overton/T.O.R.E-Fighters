@@ -258,11 +258,15 @@ What the table shows, by inspection:
   0x4: retail releases them from the centreline. T.O.R.E hangs them 3 ft either side,
   in the Sparrow wells (fitted, slice PY2).
 - The records' heights (y) are where retail releases stores; T.O.R.E hangs and
-  releases every wing store 2 ft under the model's underside over its pylon, a
-  fuselage or centreline store 4 inches under it, and a wingtip missile on the tip's
+  releases every wing store 1 ft under the model's underside over its pylon, a
+  fuselage or centreline store 2 inches under it, and a wingtip missile on the tip's
   edge instead (opinionated, John 2026-10-13), so the y column is not where a store leaves in
   T.O.R.E ([pylon depth](../spec/stores-on-pylons.md#pylon-depth)). Fuselage rows
   with two stores a side hang them one behind another, which no record says either.
+- `F14.PT` rows 4 to 7 hang at the real F-14's stations, not at these positions:
+  the Phoenixes in the tunnel 1.25 ft out, the tanks under the intake nacelles,
+  the AIM-120 under the glove pylon and the AIM-9 on its shoulder rail
+  (opinionated, John 2026-10-14; [the F-14](../spec/stores-on-pylons.md#the-f-14)).
 
 Weapon and tank rows of the 36 registered identities (sensor, ECM and gun rows
 omitted; Count is the default quantity):
