@@ -89,6 +89,7 @@ enum View {
     Squad,
     /// The squad from 1,500 ft out, 60 ft up: the range of a low pass.
     Far,
+    TracerRange,
     /// Beside the launcher, looking up at it.
     Launch,
     /// Farther off, looking up the missile's path.
@@ -124,6 +125,7 @@ impl View {
             View::Field => "field",
             View::Squad => "squad",
             View::Far => "far",
+            View::TracerRange => "tracers-4nm",
             View::Launch => "pad",
             View::Trail => "trail",
             View::Wreck => "wreck",
@@ -231,7 +233,7 @@ const SCENES: [Scene; 13] = [
         seconds: 120.,
         trigger: Trigger::Gun("ZSU23.JT"),
         frames: &[4, 9, 60],
-        views: &[View::Gun],
+        views: &[View::Gun, View::TracerRange],
         fov: 45.,
         muzzle_class: 0,
         kill: false,
@@ -250,7 +252,7 @@ const SCENES: [Scene; 13] = [
         seconds: 120.,
         trigger: Trigger::Gun("ZSU57.JT"),
         frames: &[3, 30],
-        views: &[View::Gun],
+        views: &[View::Gun, View::TracerRange],
         fov: 45.,
         muzzle_class: 1,
         kill: false,
@@ -856,6 +858,14 @@ fn render(
                     // line (west and north), 5 ft up, looking at the men.
                     let eye = [center[0] - 30., center[1] + 5., center[2] + 50.];
                     look_at(eye, [center[0], center[1] + 3., center[2]], 38.)
+                }
+                View::TracerRange => {
+                    let aim = picture
+                        .projectiles
+                        .iter()
+                        .find(|p| p.gun && p.tracer)
+                        .map_or(center, |p| p.position);
+                    look_at([aim[0] - 4. * 6076.12, aim[1], aim[2]], aim, 60.)
                 }
                 View::Far => {
                     let eye = [center[0] - 1_500., center[1] + 60., center[2]];

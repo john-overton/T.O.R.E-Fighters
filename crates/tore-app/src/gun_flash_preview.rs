@@ -67,6 +67,13 @@ pub fn run() -> AppResult<()> {
     let all: Vec<(usize, f64)> = burst.iter().copied().chain([(1, 2.), (2, 1.)]).collect();
     let pictures = [
         Shot {
+            name: "tracers-external-4nm",
+            fired: &all,
+            flown: 0.,
+            view: View::Outside([-4. * 6076.12, 0., 0.], [0., 0., 0.], 60.),
+            tracers: Some(300.),
+        },
+        Shot {
             name: "outside-25mm",
             fired: &burst,
             flown: 0.,

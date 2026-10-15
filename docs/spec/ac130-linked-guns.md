@@ -453,11 +453,10 @@ took it, so it drifts aft of the gunship as it flies on, swelling and fading.
 2026-10-10; 1.75 is an agent choice, opinionated: the ordinary ribbon is 2.4 feet
 across, the 105's 4.2). Its length is the round's one tick of flight, as for
 every tracer. The rules key on the round's weapon record (C_105.JT), so they
-apply to every 105 round the simulation marks as a tracer. At gunship ranges
-(thousands of feet) any of the three tracers is under a pixel wide on the
-138 x 114 target camera page; the extra width shows in the outside views and
-the nearer sight ranges, and does not make a thin tracer at 6,000 feet more
-than a faint dot.
+apply to every 105 round the simulation marks as a tracer. In daylight and thermal views, at gunship ranges (thousands of feet), these
+ribbons remain under a pixel wide on the 138 x 114 target camera page.
+Visible-light night views now share the [night tracer rule](damage-smoke.md#night-tracer-visibility),
+including its small pixel floor; the 105's relative radiance stays unchanged.
 
 **The 25 mm flickers.** It never holds a steady glow (John, 2026-10-10): its
 size and brightness change every tick while the trigger is held, as the table
