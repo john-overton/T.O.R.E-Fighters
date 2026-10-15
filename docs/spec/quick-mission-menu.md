@@ -691,3 +691,14 @@ theater tables; restart retains the selected layout. The renderer uses the
 [static variant contract](terrain-detail.md), not a live campaign simulation.
 The creator probe checks that the list holds exactly the sixteen base theaters,
 then sweeps every layout, variants included.
+
+## Paired-airport selection compatibility
+
+The [single-field replacement](airports.md#single-fields-replacing-paired-tiles)
+shows each pair once in both sides' airport lists. Mission files may still
+name either old runway object ID. Profile draft version 2 records positions
+in the merged lists; version 1 drafts load through their old side-filtered
+lists and redirect a second-half selection to the base. New loadout fingerprints include the list revision. When no new-version
+load exists, lookup reconstructs equivalent old airport-list positions by
+source ID, including either former half and shifted STOL entries. If both
+old halves have saved loads, the most recently flown compatible load wins.

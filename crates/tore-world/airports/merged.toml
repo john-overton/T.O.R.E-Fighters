@@ -1,0 +1,112 @@
+# Single merged field, agent-selected 12,000 ft runway. See docs/spec/airports.md.
+applies_to = "STRIP2.OT"
+runway_length_ft = 12000
+ils_runway = true
+grass_margin_ft = 150
+
+[[material]]
+name = "runway_plain"
+pic = "_RNWY2.PIC"
+rect = [153, 7, 97, 130]
+tile_ft = [0, 240]
+paint = ["edges"]
+
+[[material]]
+name = "runway_centreline"
+pic = "_RNWY2.PIC"
+rect = [153, 7, 97, 130]
+tile_ft = [0, 240]
+paint = ["edges", "centre"]
+
+[[material]]
+name = "runway_touchdown"
+pic = "_RNWY2.PIC"
+rect = [153, 7, 97, 130]
+tile_ft = [0, 240]
+paint = ["edges", "centre"]
+
+[[material]]
+name = "runway_threshold"
+pic = "_RNWY2.PIC"
+rect = [153, 7, 97, 130]
+tile_ft = [0, 150]
+paint = ["threshold"]
+
+[[material]]
+name = "taxiway"
+pic = "_RNWY2.PIC"
+rect = [3, 403, 146, 57]
+tile_ft = [190, 0]
+along = "u"
+paint = ["taxiway"]
+
+[[material]]
+name = "apron"
+pic = "_RNWY2.PIC"
+rect = [3, 5, 146, 143]
+tile_ft = [100, 100]
+
+[[runway]]
+name = "R0"
+from = [0, 0]
+length = 12000
+width = 200
+pad = 220
+touchdown = 1500
+
+[[taxiway]]
+name = "west"
+width = 75
+points = [[-450, -190], [-450, 11750]]
+
+[[taxiway]]
+name = "east"
+width = 75
+points = [[450, -190], [450, 11750]]
+
+[[taxiway]]
+name = "south"
+width = 75
+points = [[-450, -190], [450, -190]]
+
+[[taxiway]]
+name = "north"
+width = 75
+points = [[-450, 11750], [450, 11750]]
+
+[[taxiway]]
+name = "mid1"
+width = 75
+points = [[-450, 2900], [450, 2900]]
+
+[[apron]]
+name = "main"
+min = [487.5, 900]
+max = [1237.5, 3599]
+
+[[apron]]
+name = "second"
+min = [-987.5, 1799]
+max = [-487.5, 3599]
+
+[[line]]
+from = [1237.5, 900]
+to = [1237.5, 3599]
+out = [1, 0]
+
+[[line]]
+from = [-987.5, 1799]
+to = [-987.5, 3599]
+out = [-1, 0]
+
+[anchors]
+taxi_out = [[470, 1000], [450, -190], [225, -190], [0, -190]]
+takeoff = [0, 0]
+landing = [0, 1000]
+taxi_in = [[0, 11750], [225, 11750], [420, 11750], [450, 3599]]
+parking = [[862, 1250], [862, 1500], [862, 1750], [862, 2000], [862, 2250], [862, 2500], [862, 2750], [862, 3000], [862, 3250]]
+parking_heading = -90
+
+[extras]
+hangars = 4
+vehicles = true

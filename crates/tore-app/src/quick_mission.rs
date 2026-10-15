@@ -243,6 +243,8 @@ pub struct QuickMission {
     /// (names and runway objects, in layout order), from [`Self::fields`].
     airport_names: Vec<Vec<String>>,
     airport_objects: Vec<Vec<u32>>,
+    airport_aliases: Vec<BTreeMap<u32, u32>>,
+    legacy_fields: Vec<Vec<Field>>,
     /// Per theater, the airports offered to the enemy's Enemy Wing 1 for an
     /// enemy ground start (fields 35 and 36): the Red and neutral fields (STOL
     /// strips last, labelled), whichever side the creator's pilot flies for.
@@ -402,6 +404,21 @@ impl QuickMission {
             .iter()
             .map(|code| Self::airports_in(code, data, &mut definitions))
             .collect();
+        let airport_aliases: Vec<_> = theater_codes
+            .iter()
+            .map(|code| Self::aliases_in(code, data))
+            .collect();
+        let legacy_fields = fields.clone();
+        let fields: Vec<Vec<Field>> = fields
+            .into_iter()
+            .zip(&airport_aliases)
+            .map(|(fields, aliases)| {
+                fields
+                    .into_iter()
+                    .filter(|f| !aliases.contains_key(&f.id))
+                    .collect()
+            })
+            .collect();
         let (airport_names, airport_objects) =
             fields.iter().map(|list| offered(list, false)).unzip();
         let (enemy_airport_names, enemy_airport_objects) =
@@ -413,6 +430,8 @@ impl QuickMission {
             start_modes: vec!["Airborne".into(), "Ground".into()],
             airport_names,
             airport_objects,
+            airport_aliases,
+            legacy_fields,
             enemy_airport_names,
             enemy_airport_objects,
             fields,
@@ -478,6 +497,20 @@ impl QuickMission {
     /// or any wing; nor, since slice AL1 (John, 2026-10-10), is a field of
     /// the other side ([`Field::offered_to`]). `definitions` caches, per
     /// object type, whether it is an airport and its runway length.
+    fn aliases_in(code: &str, data: &BTreeMap<String, Vec<u8>>) -> BTreeMap<u32, u32> {
+        let name = format!("{code}.MM");
+        data.get(&name)
+            .and_then(|b| tore_formats::mission::Layout::parse(&name, b).ok())
+            .map(|l| tore_world::terrain::redrawn::pair_aliases(&l))
+            .unwrap_or_default()
+    }
+    fn canonical_runway(&self, theater: usize, object: u32) -> u32 {
+        self.airport_aliases
+            .get(theater)
+            .and_then(|a| a.get(&object))
+            .copied()
+            .unwrap_or(object)
+    }
     fn airports_in(
         code: &str,
         data: &BTreeMap<String, Vec<u8>>,
@@ -578,6 +611,13 @@ impl QuickMission {
                 continue;
             }
             let fields = Self::airports_in(&code, data, &mut definitions);
+            let aliases = Self::aliases_in(&code, data);
+            self.legacy_fields.push(fields.clone());
+            let fields: Vec<_> = fields
+                .into_iter()
+                .filter(|f| !aliases.contains_key(&f.id))
+                .collect();
+            self.airport_aliases.push(aliases);
             let (names, ids) = offered(&fields, self.player_redfor);
             self.airport_names.push(names);
             self.airport_objects.push(ids);
@@ -1094,6 +1134,7 @@ impl QuickMission {
         self.ground_start() && self.has_target() && self.draft.values[34] == 0
     }
     pub fn choose_ground_runway(&mut self, object: u32) -> Result<(), String> {
+        let object = self.canonical_runway(self.draft.values[13], object);
         if let Some(field) = self
             .fields
             .get(self.draft.values[13])
@@ -1151,6 +1192,7 @@ impl QuickMission {
     /// the Enemy airport list would. A Blue field is refused with the reason,
     /// as [`Self::choose_ground_runway`] does; a STOL strip is allowed.
     pub fn choose_enemy_runway(&mut self, object: u32) -> Result<(), String> {
+        let object = self.canonical_runway(self.draft.values[13], object);
         if let Some(field) = self
             .fields
             .get(self.draft.values[13])
@@ -1421,6 +1463,7 @@ impl QuickMission {
         let target = usize::from(v[30] != 0);
         v[start] = 1;
         v[airport] = 0;
+        let runway = runway.map(|id| self.canonical_runway(v[13], id));
         match runway {
             Some(runway) => match offered.iter().position(|id| *id == runway) {
                 Some(at) => v[airport] = at + target,

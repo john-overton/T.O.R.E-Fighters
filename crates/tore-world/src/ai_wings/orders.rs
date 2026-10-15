@@ -1446,6 +1446,7 @@ mod landing_tests {
             neutral_permission: false,
         };
         Scene {
+            aliases: Default::default(),
             objects: strips.iter().map(|(o, _)| o.clone()).collect(),
             runways: strips.iter().map(|(_, r)| r.clone()).collect(),
             airports: vec![

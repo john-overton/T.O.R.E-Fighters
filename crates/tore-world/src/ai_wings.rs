@@ -3577,6 +3577,7 @@ mod tests {
             neutral_permission,
         };
         let scene = Scene {
+            aliases: Default::default(),
             objects: Vec::new(),
             runways: [
                 (1, 0.),

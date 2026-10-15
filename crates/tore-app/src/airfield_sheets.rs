@@ -7,6 +7,7 @@
 //! and cameras are chosen from the redrawn scene; the scene drawn follows
 //! `TORE_REDRAWN_AIRPORTS`, so a run with it set to 0 renders the same views
 //! of the retail airfields for a before and after pair.
+mod cpu;
 use crate::{
     AppResult,
     camera::Camera,
@@ -21,6 +22,9 @@ pub fn run() -> AppResult<()> {
     let Some((out, wanted)) = args.split_first() else {
         return Err("--airfield-sheets OUTPUT_DIRECTORY [--all] [THEATER ...]".into());
     };
+    if wanted.iter().any(|w| w == "--cpu-merged") {
+        return cpu::run(Path::new(out));
+    }
     let all = wanted.iter().any(|w| w == "--all");
     let mut theaters: Vec<String> = wanted
         .iter()

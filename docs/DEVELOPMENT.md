@@ -1989,3 +1989,17 @@ actual terrain mesh and its indexed textures. The near/far views span 32,768
 and 262,144 feet vertically, sampled through the live palette at the same
 camera altitudes. This mode needs no GPU. It omits objects, lighting, fog and
 GPU distance filtering, so it verifies artwork and palette colours only.
+
+## CPU paired-airfield comparison
+
+`TORE_DATA_DIR=<isolated profile> tore-app --airfield-sheets <output directory> --cpu-merged`
+produces eight windowless diagnostic PNGs: Southampton and Spassk Dalniy,
+before and after merging, overhead and from an orthographic approach angle.
+It reads the real terrain and static scenery buffers and indexed texture
+pages. It omits GPU lighting, city-fill instances, weather and moving objects.
+Use it when the graphics backend cannot create an offscreen renderer; it
+checks layout and artwork, not full GPU presentation.
+
+The headless AI probe accepts up to 288,000 ticks (40 simulation minutes).
+This allows four-ship landing and parking checks on the 12,000 ft merged
+fields to finish their long taxi returns; normal flight duration is unchanged.

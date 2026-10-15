@@ -28,7 +28,7 @@ use std::path::PathBuf;
 use tore_formats::aircraft::AircraftId;
 
 /// The file's first line. A file with another version is left alone.
-const HEADER: &str = "tore-quick-draft 1";
+const HEADER: &str = "tore-quick-draft 2";
 /// The draft fields saved by position: the retail setup's, from 3 on, less
 /// the theater (13, saved by code) and the six aircraft fields.
 fn positional(id: usize) -> bool {
@@ -38,6 +38,7 @@ fn positional(id: usize) -> bool {
 /// A draft file read but not yet put to use.
 #[derive(Debug, Default, PartialEq, Eq)]
 struct File {
+    legacy_airports: bool,
     theater: Option<String>,
     player: Option<String>,
     wings: BTreeMap<usize, String>,
@@ -49,12 +50,13 @@ struct File {
 impl File {
     fn parse(text: &str) -> Result<Self, String> {
         let mut lines = text.lines();
+        let mut draft = Self::default();
         match lines.next() {
             Some(HEADER) => {}
+            Some("tore-quick-draft 1") => draft.legacy_airports = true,
             Some(other) => return Err(format!("unknown quick mission draft header {other:?}")),
             None => return Err("empty quick mission draft".into()),
         }
-        let mut draft = Self::default();
         for line in lines.filter(|l| !l.trim().is_empty()) {
             let words: Vec<&str> = line.split_whitespace().collect();
             let number = |word: &str| {
@@ -105,6 +107,16 @@ impl File {
         }
         Ok(draft)
     }
+}
+
+fn fingerprint(text: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for line in text.lines().filter(|l| !l.starts_with("field 18 ")) {
+        for byte in line.bytes().chain(std::iter::once(b'\n')) {
+            hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    format!("{hash:016x}")
 }
 
 /// A small, fast, seeded mixer for the menu's random picks. Not the
@@ -197,14 +209,63 @@ impl QuickMission {
     /// re-fly keeps it), the cheats, the AI mission preset and the other
     /// command-line choices. Agent decision, 2026-10-12.
     pub fn mission_fingerprint(&self) -> String {
+        fingerprint(&self.remembered())
+    }
+
+    /// Equivalent version-1 mission keys, by source airport identity. A
+    /// removed list entry must not accidentally select another field's load.
+    pub fn legacy_airport_fingerprints(&self) -> Vec<String> {
+        let theater = self.draft.values[13];
+        let offset = usize::from(self.has_target());
+        let choices = |field: usize, red: bool, current: &[Vec<u32>]| {
+            let value = self.draft.values[field];
+            if value < offset {
+                return vec![value];
+            }
+            let legacy = self
+                .legacy_fields
+                .get(theater)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            let (_, old_ids) = super::offered(legacy, red);
+            if old_ids.is_empty() {
+                return vec![value];
+            }
+            let Some(id) = current.get(theater).and_then(|ids| ids.get(value - offset)) else {
+                return Vec::new();
+            };
+            old_ids
+                .iter()
+                .enumerate()
+                .filter(|(_, old)| self.canonical_runway(theater, **old) == *id)
+                .map(|(at, _)| at + offset)
+                .collect::<Vec<_>>()
+        };
+        let blue = choices(34, self.player_redfor, &self.airport_objects);
+        let red = choices(super::ENEMY_AIRPORT, true, &self.enemy_airport_objects);
         let text = self.remembered();
-        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-        for line in text.lines().filter(|l| !l.starts_with("field 18 ")) {
-            for byte in line.bytes().chain(std::iter::once(b'\n')) {
-                hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
+        let mut keys = Vec::new();
+        for blue in blue {
+            for red in &red {
+                let old = text
+                    .lines()
+                    .map(|line| {
+                        if line == HEADER {
+                            "tore-quick-draft 1".into()
+                        } else if line.starts_with("field 34 ") {
+                            format!("field 34 {blue}")
+                        } else if line.starts_with(&format!("field {} ", super::ENEMY_AIRPORT)) {
+                            format!("field {} {red}", super::ENEMY_AIRPORT)
+                        } else {
+                            line.to_owned()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                keys.push(fingerprint(&old));
             }
         }
-        format!("{hash:016x}")
+        keys
     }
     /// Puts a saved draft into the creator. A file that does not parse
     /// changes nothing. A choice the lists no longer have (an aircraft the
@@ -221,6 +282,29 @@ impl QuickMission {
         for (field, at) in &saved.fields {
             if *at < self.values(*field).len() {
                 self.draft.values[*field] = *at;
+            }
+        }
+        if saved.legacy_airports {
+            let theater = self.draft.values[13];
+            if let Some(fields) = self.legacy_fields.get(theater) {
+                let offset = usize::from(self.draft.values[30] != 0);
+                for (field, red) in [(34, self.player_redfor), (super::ENEMY_AIRPORT, true)] {
+                    if let Some(old) = saved.fields.get(&field).and_then(|v| v.checked_sub(offset))
+                    {
+                        let (_, ids) = super::offered(fields, red);
+                        if let Some(id) = ids.get(old) {
+                            let id = self.canonical_runway(theater, *id);
+                            let current = if field == 34 {
+                                &self.airport_objects
+                            } else {
+                                &self.enemy_airport_objects
+                            };
+                            if let Some(at) = current[theater].iter().position(|r| *r == id) {
+                                self.draft.values[field] = at + offset;
+                            }
+                        }
+                    }
+                }
             }
         }
         if let Some(at) = saved
@@ -323,6 +407,42 @@ mod tests {
         launch::{Side, WingId},
     };
 
+    #[test]
+    fn a_legacy_second_half_selection_migrates_and_round_trips() {
+        let mut q = full_catalog();
+        q.theater(0);
+        let theater = q.draft.values[13];
+        let field = super::super::Field {
+            id: 0x40000001,
+            name: "Field".into(),
+            short: false,
+            stol: false,
+            redfor: Some(false),
+        };
+        let mut tile = field.clone();
+        tile.id = 0x40000002;
+        tile.name = "Field1".into();
+        q.legacy_fields[theater] = vec![field.clone(), tile];
+        q.fields[theater] = vec![field];
+        q.airport_aliases[theater].insert(0x40000002, 0x40000001);
+        q.airport_objects[theater] = vec![0x40000001];
+        q.airport_names[theater] = vec!["Field".into()];
+        q.recall("tore-quick-draft 1\nfield 30 0\nfield 33 1\nfield 34 1\n")
+            .unwrap();
+        assert_eq!(q.ground_runway(), Some(0x40000001));
+        let text = q.remembered();
+        let old_tile = text
+            .replacen(HEADER, "tore-quick-draft 1", 1)
+            .replace("field 34 0\n", "field 34 1\n");
+        assert!(
+            q.legacy_airport_fingerprints()
+                .contains(&fingerprint(&old_tile))
+        );
+        assert_ne!(q.mission_fingerprint(), fingerprint(&old_tile));
+        q.recall(&text).unwrap();
+        assert_eq!(q.ground_runway(), Some(0x40000001));
+    }
+
     /// A creator with a spread of choices made, none of them a default.
     fn busy() -> QuickMission {
         let mut q = full_catalog();
@@ -373,8 +493,8 @@ mod tests {
         let good = busy().remembered();
         for bad in [
             String::new(),
-            "tore-quick-draft 2\n".to_string(),
-            good.replace("tore-quick-draft 1", "something else"),
+            "tore-quick-draft 3\n".to_string(),
+            good.replace(HEADER, "something else"),
             format!("{good}field 4 1\n"),
             format!("{good}field 6 1\n"),
             format!("{good}field 13 1\n"),

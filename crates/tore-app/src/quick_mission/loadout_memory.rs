@@ -293,6 +293,31 @@ impl LoadoutMemory {
         }
     }
 
+    /// Read old airport-list keys only when no current-version load exists.
+    /// If both old halves have a load, the most recently flown one wins.
+    pub fn choose_compatible(
+        &self,
+        fingerprint: &str,
+        legacy: &[String],
+        session_has_one: bool,
+    ) -> Choice {
+        let current = self
+            .entries
+            .iter()
+            .any(|entry| entry.fingerprint == fingerprint);
+        let current_session = session_has_one && self.shown.as_deref() == Some(fingerprint);
+        if !(self.locked || current || current_session)
+            && let Some(entry) = self
+                .entries
+                .iter()
+                .rev()
+                .find(|entry| legacy.contains(&entry.fingerprint))
+        {
+            return Choice::Remembered(entry.load.clone());
+        }
+        self.choose(fingerprint, session_has_one)
+    }
+
     /// The page opened for the mission `fingerprint`.
     pub fn opened_for(&mut self, fingerprint: &str) {
         self.shown = Some(fingerprint.to_owned());
@@ -366,6 +391,36 @@ mod tests {
     }
     fn cleanup(path: &std::path::Path) {
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_merged_airport_recovers_its_old_load_without_matching_another_field() {
+        let mut memory = LoadoutMemory {
+            path: PathBuf::new(),
+            entries: vec![Entry {
+                fingerprint: "old-tile".into(),
+                load: load(3),
+            }],
+            saved: String::new(),
+            locked: false,
+            shown: None,
+        };
+        assert_eq!(
+            memory.choose_compatible("new", &["old-tile".into()], false),
+            Choice::Remembered(load(3))
+        );
+        assert_eq!(
+            memory.choose_compatible("other", &["different-airport".into()], false),
+            Choice::Standard
+        );
+        memory.entries.push(Entry {
+            fingerprint: "new".into(),
+            load: load(4),
+        });
+        assert_eq!(
+            memory.choose_compatible("new", &["old-tile".into()], false),
+            Choice::Remembered(load(4))
+        );
     }
 
     #[test]

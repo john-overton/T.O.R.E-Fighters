@@ -10,22 +10,23 @@
 //! in feet in the **runway frame** of that type: `x` to the right of the
 //! retail runway's centreline, `z` along it from its near threshold (STRIP
 //! anchor 0x11). Every placement of the type shares that frame, so one plan
-//! redraws them all, and the runway's position, heading, length and ILS do
-//! not move. A pair plan joins a base type and its second tile (the A
-//! types) placed beside it into one airfield.
+//! redraws standalone fields without moving their runway line. A paired
+//! field now uses the single long-runway plan in `merge`; its former second
+//! tile is an identity alias. Pair plans remain for legacy replay scenes.
 //!
 //! What a redrawn airport replaces, for its STRIP placements: the drawn mesh
 //! ([`Built::patches`], drawn by the app), the landable and contact box
 //! ([`Built::surface`], the whole redrawn field, grass included), the AI
 //! anchors ([`Built::anchors`]) and the positions of the airport's
-//! buildings, plus extra hangars and vehicles. The runway's approach line,
-//! length and elevation stay the retail ones.
+//! buildings, plus extra hangars and vehicles. Standalone fields retain
+//! their source approach lines; merged pairs use their new plan's line.
 pub mod audit;
 mod buildings;
 mod data;
 pub mod geometry;
 pub mod layout;
 pub mod lights;
+mod merge;
 pub mod plan;
 
 use super::{Placements, runway_length_ft};
@@ -77,6 +78,8 @@ pub struct Plans {
     /// (2026-10-12): only a replay of a recording flown on airfield scene 1
     /// sets it.
     pub retail_templates: bool,
+    /// Keep the pre-merge layout when rebuilding an old recording.
+    pub legacy_pairs: bool,
 }
 
 impl Plans {
@@ -88,6 +91,7 @@ impl Plans {
         Ok(Self {
             plans: Self::builtin()?,
             retail_templates: false,
+            legacy_pairs: false,
         })
     }
 
@@ -160,6 +164,10 @@ pub struct Built {
     pub plan: String,
     /// The STRIP placement's object id: the runway it redraws.
     pub strip_id: u32,
+    /// Former second runway identity, redirected to this field.
+    pub merged_from: Option<u32>,
+    /// Original tile centres, retained for terrain-art replacement.
+    pub replaced_centres: Vec<[f64; 3]>,
     pub frame: Frame,
     pub materials: Vec<Material>,
     /// The paved pieces; empty for a pair's second tile, whose pavement its
@@ -175,6 +183,8 @@ pub struct Built {
     pub runways: Vec<DrawnRunway>,
     /// Layout placements moved: index in the layout and the new placement.
     moved: Vec<(usize, Placement)>,
+    /// Template structures moved with a merged field, keyed by stable unit ID.
+    moved_surface: Vec<(u32, Placement)>,
     /// Placements added after the layout's own.
     added: Vec<Placement>,
     /// Parked template aircraft moved off the grass onto the aprons.
@@ -344,7 +354,10 @@ impl Built {
     }
     /// How many retail buildings it moved and how many it added.
     pub fn building_counts(&self) -> (usize, usize) {
-        (self.moved.len(), self.added.len())
+        (
+            self.moved.len() + self.moved_surface.len(),
+            self.added.len(),
+        )
     }
     /// Whether world `x, z` lies on this airport's drawn pavement. A pair's
     /// second tile has none of its own: its base draws it.
@@ -389,6 +402,7 @@ pub(super) fn apply(
     plans: &Plans,
     parked: &mut [crate::surface::ParkedAircraft],
     height: impl Fn(f64, f64) -> f64,
+    terrain: Option<&super::Terrain>,
 ) -> WorldResult<Vec<Built>> {
     if plans.is_empty() {
         return Ok(Vec::new());
@@ -517,6 +531,23 @@ pub(super) fn apply(
             },
             None => None,
         };
+        if tile.is_some() && !plans.legacy_pairs {
+            let built = merge::build(
+                resources,
+                sources,
+                base,
+                tile.expect("pair"),
+                &zones,
+                parked,
+                &mut taken,
+                &mut added_count,
+                &height,
+                terrain,
+            )?;
+            apply_edits(std::slice::from_ref(&built), sources);
+            out.push(built);
+            continue;
+        }
         let frame = base.frame;
         // A tile alone marks both ends of its runways (slice CL-AP).
         let alone = (!base_plan.ils_runway && tile.is_none()).then(|| marked_alone(base_plan));
@@ -643,6 +674,8 @@ pub(super) fn apply(
         let built = Built {
             plan: name.clone(),
             strip_id: base_id,
+            merged_from: None,
+            replaced_centres: Vec::new(),
             frame,
             materials,
             patches,
@@ -651,6 +684,7 @@ pub(super) fn apply(
             lights: airport_lights,
             runways: drawn_runways,
             moved: relaid.moved,
+            moved_surface: Vec::new(),
             added: relaid.added,
             snapped,
             runway_line,
@@ -673,6 +707,8 @@ pub(super) fn apply(
             out.push(Built {
                 plan: name,
                 strip_id: tile_id,
+                merged_from: None,
+                replaced_centres: Vec::new(),
                 frame,
                 materials: Vec::new(),
                 patches: Vec::new(),
@@ -681,6 +717,7 @@ pub(super) fn apply(
                 lights: Vec::new(),
                 runways: Vec::new(),
                 moved: Vec::new(),
+                moved_surface: Vec::new(),
                 added: Vec::new(),
                 snapped: 0,
                 runway_line: line,
@@ -694,6 +731,11 @@ pub(super) fn apply(
 
 fn apply_edits(built: &[Built], sources: &mut Placements) {
     for airport in built {
+        for (id, placement) in &airport.moved_surface {
+            if let Some((_, old)) = sources.surface.iter_mut().find(|(old, _)| old == id) {
+                *old = placement.clone();
+            }
+        }
         for (index, placement) in &airport.moved {
             sources.layout.placements[*index] = placement.clone();
         }
@@ -721,3 +763,40 @@ pub(super) fn reapply(
 
 #[cfg(test)]
 mod tests;
+
+/// Stable source IDs of second tiles and their base, for saved menu selections.
+/// Geometry uses the same type, heading and distance rule in `apply`.
+pub fn pair_aliases(
+    layout: &tore_formats::mission::Layout,
+) -> std::collections::BTreeMap<u32, u32> {
+    let mut aliases = std::collections::BTreeMap::new();
+    for base in &layout.placements {
+        let kind = base.object_type.to_ascii_uppercase();
+        if !["STRIP3.OT", "STRIP5.OT", "STRIP6.OT", "STRIP7.OT"].contains(&kind.as_str()) {
+            continue;
+        }
+        let tile_kind = kind.replace(".OT", "A.OT");
+        let distance = |p: &Placement| {
+            let x = i64::from(p.position[0]) - i64::from(base.position[0]);
+            let z = i64::from(p.position[2]) - i64::from(base.position[2]);
+            i128::from(x) * i128::from(x) + i128::from(z) * i128::from(z)
+        };
+        if let Some(tile) = layout
+            .placements
+            .iter()
+            .filter(|p| {
+                p.object_type.eq_ignore_ascii_case(&tile_kind)
+                    && (p.angles[0] - base.angles[0]).rem_euclid(360) == 0
+                    && distance(p) <= 14_000i128 * 14_000
+                    && !aliases.contains_key(&(0x4000_0000 + p.key.ordinal))
+            })
+            .min_by_key(|p| (distance(p), p.key.ordinal))
+        {
+            aliases.insert(
+                0x4000_0000 + tile.key.ordinal,
+                0x4000_0000 + base.key.ordinal,
+            );
+        }
+    }
+    aliases
+}

@@ -124,7 +124,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "AI takeoff, landing, return to base, ILS approaches on every theater",
         (
             "ai-takeoff-*", "ai-theater-*", "ai-ground-*", "ai-rtb-*", "ai-ils-*",
-            "ai-long-ground-land", "ai-lost-lead-*", "ai-airfield-taxi-*", "ai-enemy-ground-start-*",
+            "ai-long-ground-land", "ai-lost-lead-*", "ai-airfield-taxi-*", "ai-merged-airfield-*", "ai-enemy-ground-start-*",
             "ai-heli-*", "ai-stovl-*", "ai-v22-*", "ai-records-*",
         ),
     ),
@@ -158,7 +158,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         (
             "menus-validate-creator", "menus-validate-ils*", "menus-snap-quick-airports", "airport-allegiance",
             "menus-snap-quick-ground-start", "menus-snap-quick-field-*", "ai-ils-*",
-            "airfield-taxi-audit", "airfield-parked-audit", "ai-airfield-taxi-*",
+            "airfield-taxi-audit", "airfield-parked-audit", "merged-airport-audit", "ai-airfield-taxi-*",
         ),
     ),
     "surface": (

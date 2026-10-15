@@ -734,3 +734,16 @@ authored site and relocated seed 1, with 0.05 ft clearance tolerance. Its
 per-theater rows separate unavailable shapes and authored footing exceptions.
 `surface-grounding-radar-render` draws the Cuba radar installation (QCLST, GCI) offscreen.
 See [grounding](../formats/objects-and-shapes.md#grounding-every-object-stands-on-the-bottom-of-its-shape).
+
+## Merged-airfield regression flights
+
+`ai-merged-airfield-{f18,c130}-wing{2,4}` flies a two- or four-ship group.
+The F/A-18D uses Southampton (FRA 14 or old half 24); the C-130 uses Spassk
+Dalniy (VLA 6 or old half 22). One scripted leader takes off, then the AI
+members depart, receive a landing order and must return and park without a
+ground tick off the pavement. The Hornet orders arrive at 100 or 200 seconds;
+the C-130 order arrives at 300 seconds. Southampton leaves room for the
+scripted jet leader's straight departure. Spassk's northern map edge is too
+close for that long jet departure. The 264,000-tick run leaves time for the
+last aircraft to taxi back from the far end of a 12,000 ft runway. The
+existing taxi/landing checker requires every AI member to park.

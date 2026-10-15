@@ -187,7 +187,7 @@ pub fn launch_terrain(
 
 /// Preserve every source index. Doubling 128-square images is exact nearest
 /// replication; all retail terrain images retain the same four-cell footprint.
-fn append_ground_texture(out: &mut Vec<u8>, pic: &Pic) -> AppResult<()> {
+pub(crate) fn append_ground_texture(out: &mut Vec<u8>, pic: &Pic) -> AppResult<()> {
     if pic.width != pic.height || !matches!(pic.width, 128 | 256) || !pic.palette.is_empty() {
         return Err("unsupported indexed ground image".into());
     }
@@ -197,6 +197,47 @@ fn append_ground_texture(out: &mut Vec<u8>, pic: &Pic) -> AppResult<()> {
             out.push(if pic.mask[at] { pic.pixels[at] } else { 255 });
         }
     }
+    Ok(())
+}
+
+/// Keep the tile's own ground grain instead of substituting the unrelated LAND
+/// plane texture. Fitted cleanup: the existing terrain green ramps are donors;
+/// other opaque markings inherit their nearest donor on the wrapping tile.
+/// Source water is never filled. Queue order makes equal-distance ties stable.
+pub(crate) fn append_neutral_ground_texture(out: &mut Vec<u8>, source: &Pic) -> AppResult<()> {
+    let mut pixels = Vec::new();
+    append_ground_texture(&mut pixels, source)?;
+    let mut donors = vec![None; pixels.len()];
+    let mut queue = std::collections::VecDeque::new();
+    for (at, &pixel) in pixels.iter().enumerate() {
+        if matches!(pixel, 192..=197 | 208..=215) {
+            donors[at] = Some(pixel);
+            queue.push_back(at);
+        }
+    }
+    if queue.is_empty() {
+        return Err("merged airport ground has no local ground texels".into());
+    }
+    while let Some(at) = queue.pop_front() {
+        let x = at % 256;
+        let y = at / 256;
+        for next in [
+            y * 256 + (x + 255) % 256,
+            y * 256 + (x + 1) % 256,
+            ((y + 255) % 256) * 256 + x,
+            ((y + 1) % 256) * 256 + x,
+        ] {
+            if donors[next].is_none() {
+                donors[next] = donors[at];
+                queue.push_back(next);
+            }
+        }
+    }
+    out.extend(pixels.iter().zip(donors).map(
+        |(&pixel, donor)| {
+            if pixel == 255 { 255 } else { donor.unwrap() }
+        },
+    ));
     Ok(())
 }
 
@@ -299,23 +340,33 @@ impl Scenery {
         let mut texture_indices = Vec::new();
         let mut terrain_layers = BTreeMap::new();
         let mut ground_layers = BTreeMap::new();
-        for (key, placement) in &terrain.environment.textures {
-            let name = placement.resource_name(base);
-            let layer = if let Some(layer) = terrain_layers.get(&name) {
-                *layer
-            } else {
-                let pic = Pic::parse(required(&name)?)?;
-                let layer = texture_indices.len() / 65536;
-                append_ground_texture(&mut texture_indices, &pic)?;
-                terrain_layers.insert(name, layer);
-                layer
-            };
-            ground_layers.insert(*key, layer);
-        }
         let land_name = format!("{}LAND.PIC", &base[..1]);
         let land = resources
             .get(&land_name)
             .or_else(|| resources.get("LAND.PIC"));
+        for (key, placement) in &terrain.environment.textures {
+            let name = placement.resource_name(base);
+            let neutral = terrain.neutral_airfield_ground.contains(key);
+            let cache_key = if neutral {
+                format!("neutral:{name}")
+            } else {
+                name.clone()
+            };
+            let layer = if let Some(layer) = terrain_layers.get(&cache_key) {
+                *layer
+            } else {
+                let pic = Pic::parse(required(&name)?)?;
+                let layer = texture_indices.len() / 65536;
+                if neutral {
+                    append_neutral_ground_texture(&mut texture_indices, &pic)?;
+                } else {
+                    append_ground_texture(&mut texture_indices, &pic)?;
+                }
+                terrain_layers.insert(cache_key, layer);
+                layer
+            };
+            ground_layers.insert(*key, layer);
+        }
         let land_texture = if let Some(bytes) = land {
             let layer = texture_indices.len() / 65536;
             append_ground_texture(&mut texture_indices, &Pic::parse(bytes)?)?;
@@ -453,6 +504,9 @@ impl Scenery {
         )> = Vec::new();
         for placed in sources.placed() {
             let (id, placement) = placed?;
+            if terrain.airport_scene.aliases.contains_key(&id) {
+                continue;
+            }
             let Some(shape) = sources.shapes.get(&placement.object_type) else {
                 continue;
             };
@@ -1049,6 +1103,42 @@ pub(crate) mod tests {
         pic.width = 127;
         assert!(append_ground_texture(&mut Vec::new(), &pic).is_err());
     }
+    #[test]
+    fn neutral_airfield_ground_keeps_local_grain_and_water_cutouts() {
+        let picture = |fill| Pic {
+            width: 128,
+            height: 128,
+            pixels: vec![fill; 128 * 128],
+            mask: vec![true; 128 * 128],
+            palette: vec![],
+            glyphs: vec![],
+        };
+        let mut source = picture(193);
+        source.pixels[2] = 204;
+        source.pixels[3] = 197;
+        source.pixels[1] = 255;
+        source.mask[128] = false;
+        let mut out = Vec::new();
+        append_neutral_ground_texture(&mut out, &source).unwrap();
+        assert_eq!(out.len(), 65536);
+        for y in 0..256 {
+            for x in 0..256 {
+                let at = (y / 2) * 128 + x / 2;
+                assert_eq!(
+                    out[y * 256 + x],
+                    if source.pixels[at] == 255 || !source.mask[at] {
+                        255
+                    } else if at == 2 {
+                        // Left/right halves inherit the nearest original ground.
+                        if x == 4 { 193 } else { 197 }
+                    } else {
+                        source.pixels[at]
+                    }
+                );
+            }
+        }
+    }
+
     #[test]
     fn listed_destroyed_objects_hide_as_their_fallen_targets_do() {
         let mut w = scenery();

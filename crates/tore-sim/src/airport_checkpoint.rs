@@ -152,6 +152,7 @@ mod tests {
             ..bounds
         };
         Scene {
+            aliases: Default::default(),
             objects: vec![object(1000, true, bounds), object(2000, false, hangar)],
             runways: vec![Runway {
                 object: 1000,

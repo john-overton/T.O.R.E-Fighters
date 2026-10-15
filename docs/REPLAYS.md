@@ -813,7 +813,8 @@ beyond them.
     has; 1 is the [redrawn airports](formats/redrawn-airports.md), the
     default since 2026-10-11 (protocol 24), with a ground target template's
     own runway piece still retail; 2 (since 2026-10-12, slice BG) is the
-    redraw with that piece redrawn too, what a flight records now. A
+    redraw with that piece redrawn too; 3 replaces paired theater airfields
+    with one long-runway field and neutral ground art. New flights record 3. A
     recording of a flight over the redrawn airports is a format 3 file. A flight with
     `TORE_REDRAWN_AIRPORTS=0` writes scene 0 and, with no other format 3
     content, stays format 2. The viewer rebuilds the
