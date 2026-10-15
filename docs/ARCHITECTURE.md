@@ -3964,6 +3964,15 @@ hooks. The lobby's calls are [the lobby's](#the-lobby).
   seating interval; commands are retained, not discarded. A synthetic test holds
   nonzero roll and rudder and sends an immediate airbrake command across 60 and
   120 ms round trips, requiring zero mismatches from startup and command delivery.
+  A seating heard late (a slow frame as the mission loads, the host already
+  ticks past the Seated tick) moves the forecast on: until the first live tick
+  is stepped, the clock is kept at least a round trip and the margin ahead of
+  the host's newest snapshot, and the forecast stays neutral up to it, so the
+  first live input still reaches the host in time (nr-ci2, 2026-10-14, agent
+  decision; before it the strict hosted test failed on the Linux CI runner in
+  about 60 percent of runs with one unseen correction of a few billionths of a
+  foot in the first second, and `a_seating_heard_late_predicts_the_hosts_neutral_ticks_and_mismatches_nothing`
+  keeps it).
   The first margin the host reports after it has
   had an input from the seat sets the clock outright, whatever the size: the
   Seated message can be late by retransmitted fragments, and seating snaps
@@ -5640,6 +5649,15 @@ by the stalled game would still fail the normal form: its gap would be the
 stall's length and its rates near zero. The rule that a stall costs at most
 one correction is also held exactly on the network simulator
 (`a_stalled_game_recovers_with_at_most_one_correction` in tore-session).
+
+From 2026-10-12 the strict hosted mission failed in about 60 percent of
+Linux runs with two mismatches and one unseen correction in the first second
+after seating (8e-9 ft). That was a real race in the client, not the runner:
+the hosting player's game heard its seating about 45 ms late, so the first
+live input left with under 2 ms to spare and sometimes reached the host
+after it had flown that tick neutral. Pinning the test to one busy core made
+it fail every time locally with the CI's exact figures. The seating forecast
+now moves on with the host's newest snapshot (nr-ci2; [the clock](#the-client-session)).
 
 Two more failures were not real time at all:
 

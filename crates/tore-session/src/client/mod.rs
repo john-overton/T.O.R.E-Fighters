@@ -2977,6 +2977,28 @@ impl Client {
         {
             self.settled = true;
         }
+        // Still in the seating forecast (no live tick stepped yet): the host
+        // flies this seat neutral until our first input arrives, so the
+        // forecast may move on at no cost. A seating heard late (a slow
+        // frame as the mission loads: the host already some ticks past the
+        // seating tick) left the forecast's lead short of a round trip and
+        // the margin, and the first live ticks reached the host after it
+        // had flown them neutral: a small misprediction and a correction
+        // in the first second (nr-ci2, the strict hosted test on the Linux
+        // CI runner). The forecast starts again that far ahead of the
+        // host's newest snapshot, neutral all the way (agent decision).
+        if let (Some(newest), Some(seat)) = (self.snapshot_tick, self.seat.as_mut())
+            && seat.predictor.tick() <= seat.bootstrap_until
+        {
+            let round_trip = self.net.stats().map_or(Duration::ZERO, |s| s.round_trip);
+            let lead = clock::ticks_of(round_trip) + target + 1.;
+            let wanted = (f64::from(newest) + lead).ceil();
+            if self.input_clock.position() < wanted {
+                self.input_clock.reset(now, wanted);
+                self.settled = false;
+                seat.bootstrap_until = seat.bootstrap_until.max(wanted as u64);
+            }
+        }
         // Behind the host's own newest snapshot (a starved or stalled game):
         // every input would come late and none would be sent, so no margin
         // would ever say so. The clock jumps ahead of the host as seating
