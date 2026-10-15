@@ -2591,12 +2591,6 @@ impl<'a> LauncherView<'a> {
             if surface && bore.is_some_and(|o| self.terrain_masked(o.position)) {
                 return Readiness::TerrainMask;
             }
-            if bore.is_some_and(|o| {
-                missiles::length(sub(o.position, launcher.position))
-                    < f64::from(w.seeker.zones[1].minimum_range.max(0))
-            }) {
-                return Readiness::MinimumRange;
-            }
             if surface
                 && (self.view.own.mounted.target != bore.map(|o| o.id)
                     || self.view.own.mounted.status != Status::Locked)
@@ -2674,13 +2668,19 @@ impl<'a> LauncherView<'a> {
             {
                 return Readiness::RadarAcquiring;
             }
-            if self.mounted_solution().is_none() {
+            if self.mounted_solution().is_none()
+                && missiles::length(sub(t.position, launcher.position))
+                    >= f64::from(w.seeker.zones[1].minimum_range)
+            {
                 return Readiness::MaximumRange;
             }
             return Readiness::Ready;
         }
         zone_readiness(
-            &w.seeker.zones[1],
+            &tore_formats::weapons::Zone {
+                minimum_range: 0,
+                ..w.seeker.zones[1]
+            },
             launcher.position,
             launcher.basis.forward,
             t.position,
@@ -2768,8 +2768,9 @@ impl<'a> LauncherView<'a> {
             });
         }
         let bore_ir = if self.view.own.launch_mode == LaunchMode::Boresight {
-            // Use the HUD's eligible return, never a stale or hidden target.
-            let observed = self.weapon_observation()?;
+            // Tone follows the actual seeker return, not the HUD fly-out
+            // estimate. Energy prediction cannot silence a visible IR target.
+            let observed = self.view.own.bore_observation?;
             let tracked = self.view.own.mounted.observation?;
             if tracked.id != observed.id {
                 return None;
@@ -6420,7 +6421,15 @@ fn acquisition(
     if w.seeker.signature == 3 && !radar && (zone == 1 || w.flags & 0x200 != 0) {
         return false;
     }
-    cone(&w.seeker.zones[zone], position, forward, target)
+    cone(
+        &tore_formats::weapons::Zone {
+            minimum_range: 0,
+            ..w.seeker.zones[zone]
+        },
+        position,
+        forward,
+        target,
+    )
 }
 fn cone(
     z: &tore_formats::weapons::Zone,
@@ -6499,6 +6508,77 @@ mod tests {
     const OWN: u32 = 0;
     use tore_formats::weapons::*;
     use tore_formats::weapons::{Guidance, Seeker};
+    #[test]
+    fn r27_loadout_family_and_rail_rules() {
+        use crate::combat::loadout::Loadout;
+        use tore_formats::aircraft::Hardpoint;
+        let config = fixture(true).own().configuration().clone();
+        let mut load = Loadout {
+            aircraft: AircraftId::Su27,
+            configuration: config,
+            quantities: vec![0],
+            fuel_lbs: 0.,
+            internal_capacity_lbs: 1000.,
+            empty_lbs: 100.,
+            maximum_lbs: 10000.,
+            hardpoints: vec![Hardpoint {
+                location: 4,
+                flags: 0xc0,
+                position: [0; 3],
+                store: None,
+                count: 1,
+                weight_class: 0,
+            }],
+            tank_hardpoints: vec![],
+            cheat: false,
+        };
+        for aircraft in [
+            AircraftId::Su27,
+            AircraftId::Su35,
+            AircraftId::Mig29,
+            AircraftId::Yak141,
+            AircraftId::F18,
+        ] {
+            load.aircraft = aircraft;
+            load.configuration.hardpoint_slots = vec![None; 6];
+            load.configuration.hardpoint_slots[5] = Some(0);
+            for source in ["AA10.JT", "R27ER.JT", "R27T.JT", "R27ET.JT"] {
+                let mut w = load.configuration.stations[0].weapon.clone();
+                w.source = source.into();
+                w.flags = if matches!(source, "R27T.JT" | "R27ET.JT") {
+                    0x1204f
+                } else {
+                    0x1234f
+                };
+                w.seeker.signature = if w.flags & 0x200 == 0 { 2 } else { 3 };
+                let expected = match aircraft {
+                    AircraftId::Su27 | AircraftId::Su35 | AircraftId::Mig29 => 1,
+                    AircraftId::Yak141 if matches!(source, "AA10.JT" | "R27T.JT") => 1,
+                    _ => 0,
+                };
+                assert_eq!(load.capacity(0, &w), expected, "{aircraft:?} {source}");
+                if aircraft == AircraftId::Mig29 {
+                    load.configuration.hardpoint_slots[5] = None;
+                    load.configuration.hardpoint_slots[4] = Some(0);
+                    assert_eq!(
+                        load.capacity(0, &w),
+                        0,
+                        "only the inner MiG-29 pair takes R-27"
+                    );
+                    load.configuration.hardpoint_slots[4] = None;
+                    load.configuration.hardpoint_slots[5] = Some(0);
+                }
+                load.hardpoints[0].flags = 0x80;
+                assert_eq!(
+                    load.capacity(0, &w),
+                    0,
+                    "short IR rail cannot take {source}"
+                );
+                load.hardpoints[0].flags = 0xc0;
+            }
+        }
+    }
+
     #[test]
     fn external_tank_quantity_accounts_for_shell_fuel_and_empty_equipment() {
         use crate::combat::loadout::Loadout;
@@ -9812,7 +9892,7 @@ mod tests {
         assert_eq!(s.own_view().readiness(l), Readiness::Ready);
         let z = &mut s.own_mut().config.stations[0].weapon.seeker.zones[1];
         z.minimum_range = 4000;
-        assert_eq!(s.own_view().readiness(l), Readiness::MinimumRange);
+        assert_eq!(s.own_view().readiness(l), Readiness::Ready);
         s.own_mut().config.stations[0].weapon.seeker.zones[1].minimum_range = 0;
         s.own_mut().config.stations[0].weapon.seeker.zones[1].maximum_range = 2000;
         assert_eq!(s.own_view().readiness(l), Readiness::MaximumRange);

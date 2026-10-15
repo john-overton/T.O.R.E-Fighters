@@ -284,6 +284,7 @@ crate::checkpoint_struct!(TargetView {
     is_aircraft,
     is_fighter,
     human_controlled,
+    infrared_strength,
     valid,
     type_allowed,
     seeker_eligible,

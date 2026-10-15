@@ -414,6 +414,7 @@ fn a_track_of_a_friend_a_wreck_or_another_aircraft_makes_no_view() {
                 0,
                 Side(1),
                 &WorldObject {
+                    infrared_strength: 1.,
                     id: 3,
                     ..bandit.clone()
                 },

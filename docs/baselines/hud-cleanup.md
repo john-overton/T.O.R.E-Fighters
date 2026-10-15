@@ -86,7 +86,8 @@ Validation on Linux with a display-capable host:
 - Radar-power regressions cover disabling mounted radar cues, rejecting the bore
   toggle, unguided release for active and supported radar missiles,
   and no reacquisition after power returns. Armed IR remains in bore with radar
-  power off without designation; minimum-range inhibition remains intact.
+  power off without designation. The former minimum-range inhibit was superseded
+  by [the 2026-10-15 player release rule](../spec/missiles.md#minimum-engagement-and-target-role).
   Radar bore tests cover selected scope range and exact aircraft tracking limits.
   IR handoff checks select a weaker target outside bore, inhibit the bore toggle
   while designated, launch against that target, then clear designation and

@@ -6,6 +6,8 @@ use crate::{
     invalid,
 };
 use std::collections::BTreeMap;
+#[path = "weapon_corrections.rs"]
+pub mod corrections;
 
 /// Shared gameplay classification of a guided store's seeker. The raw record
 /// remains intact. See docs/spec/missiles.md, "Shared classification".
@@ -51,6 +53,13 @@ const SEEKER_OVERRIDES: &[(&str, SeekerKind)] = &[
 ];
 
 impl Weapon {
+    /// Fitted interpretation of the reviewed aspect field: 100 is rear-only,
+    /// 20..40 identifies the all-aspect A2A records. Zero is unspecified.
+    pub fn infrared_all_aspect(&self) -> bool {
+        corrections::infrared_aspect(&self.source)
+            .unwrap_or(self.seeker.all_aspect > 0 && self.seeker.all_aspect < 100)
+    }
+
     /// Shared classification, with the existing surface-defense exceptions.
     /// Ambiguous A2A variants stay data-defined, never guessed from HUD text.
     pub fn seeker_kind(&self) -> SeekerKind {
@@ -496,7 +505,7 @@ impl Weapon {
         if native_callback != "_PROJProc" {
             return Err(invalid("unreviewed projectile callback"));
         }
-        Ok(Self {
+        let mut weapon = Self {
             source,
             name: e.name.clone(),
             hud_name: e.name.clone(),
@@ -512,7 +521,9 @@ impl Weapon {
             guidance,
             damage,
             effects,
-        })
+        };
+        corrections::apply(&mut weapon);
+        Ok(weapon)
     }
 }
 
@@ -526,6 +537,9 @@ mod tests {
         // No retail bytes: complete 22-record A2A inventory, 2026-10-15.
         let rows = [
             ("AA10.JT", 3, 0x1234f, SemiActiveRadar, "^FOXONE"),
+            ("R27ER.JT", 3, 0x1234f, SemiActiveRadar, "^FOXONE"),
+            ("R27T.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
+            ("R27ET.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
             ("AA11.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
             ("AA11B.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
             ("AA12.JT", 3, 0x1204f, ActiveRadar, "^FOXTHR"),
@@ -556,6 +570,48 @@ mod tests {
         assert_eq!(SeekerKind::from_fields(0, 3), Other);
         assert_eq!(SeekerKind::from_fields(1, 0).fox_stem(), None);
         assert_eq!(SeekerKind::from_fields(1, 4), PassiveRadar);
+    }
+
+    #[test]
+    fn derived_r27_records_change_guidance_motor_and_names_at_parse() {
+        let bytes = fixture();
+        let mut donor = Weapon::parse("AA10.JT", bytes.as_bytes()).unwrap();
+        donor.flags = 0x1234f;
+        donor.seeker.signature = 3;
+        donor.movement.fuel_t = 212;
+        donor.movement.remove_t = 424;
+        donor.movement.acceleration = 100;
+        donor.seeker.zones[0].maximum_range = 120_000;
+        donor.seeker.zones[1].maximum_range = 120_000;
+        for (name, kind, maximum, weight) in [
+            ("R27ER.JT", SeekerKind::SemiActiveRadar, 180_000, 772),
+            ("R27T.JT", SeekerKind::Infrared, 100_000, 541),
+            ("R27ET.JT", SeekerKind::Infrared, 150_000, 756),
+        ] {
+            let mut variant = donor.clone();
+            variant.source = name.into();
+            corrections::apply(&mut variant);
+            assert_eq!(variant.seeker_kind(), kind);
+            assert_eq!(variant.seeker.zones[1].maximum_range, maximum);
+            assert_eq!(variant.weight, weight);
+            let extended = name != "R27T.JT";
+            assert_eq!(variant.movement.fuel_t, if extended { 318 } else { 212 });
+            assert_eq!(
+                variant.movement.acceleration,
+                if extended { 125 } else { 100 }
+            );
+            let parsed = Weapon::parse(name, bytes.as_bytes()).unwrap();
+            assert_eq!(parsed.hud_name, variant.hud_name);
+            assert!(parsed.name.starts_with("R-27"));
+            assert!(parsed.hud_name.len() <= 7);
+        }
+        assert_eq!(donor.hud_name, "AA-10A", "old replay resource stays valid");
+        let mut map = BTreeMap::from([("AA10.JT".into(), bytes.into_bytes())]);
+        corrections::extend_resources(&mut map);
+        let once = map.clone();
+        corrections::extend_resources(&mut map);
+        assert_eq!(map, once);
+        assert_eq!(map.len(), 4);
     }
 
     #[test]

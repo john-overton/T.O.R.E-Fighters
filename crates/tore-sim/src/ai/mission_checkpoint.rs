@@ -77,6 +77,7 @@ crate::checkpoint_struct!(StationSpec {
     requires_radar,
     requires_sensor,
     employment_zone,
+    infrared_envelope,
     mount,
 });
 

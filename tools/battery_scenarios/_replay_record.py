@@ -327,6 +327,50 @@ def fox_three_problems(work: Path, output: str) -> list[str]:
     return ["AIM-120 release has no matching delivered ^FOXTHR recording"]
 
 
+def missile_release_problems(work: Path, output: str, *, close: bool) -> list[str]:
+    problems = fox_three_problems(work, output)
+    rows = [json.loads(line) for line in (work / "log" / "log.jsonl").read_text().splitlines()]
+    launches = [r for r in rows if r.get("kind") == "weapon.launch" and r.get("subject") == 0]
+    if not launches:
+        return problems + ["manual player shot did not leave the rail"]
+    if "readiness=Ready" not in output:
+        problems.append("manual release was not ready")
+    if close:
+        if "initial_range_ft=1215.2" not in output:
+            problems.append("close target was not placed at 0.2 nm")
+        if not any(r.get("kind") == "weapon.pitbull" and r.get("subject") == 0
+                   and r.get("fields", {}).get("range_ft", 12000) < 2000 for r in rows):
+            problems.append("close shot did not acquire with its own seeker inside minimum range")
+        if not any(r.get("kind") == "weapon.outcome" and r.get("subject") == 0
+                   and r.get("fields", {}).get("result") in ("hit", "miss", "ground", "expired") for r in rows):
+            problems.append("close shot has no recorded physical outcome")
+    else:
+        calls = [r for r in rows if r.get("kind") == "comms.radio"
+                 and r.get("subject") == 0 and "^FOXTHR" in r.get("fields", {}).get("stems", "")]
+        if not calls:
+            problems.append("targetless launch has no recorded Fox three")
+    return problems
+
+
+def head_ir_problems(work: Path, output: str) -> list[str]:
+    rows = [json.loads(line) for line in (work / "log" / "log.jsonl").read_text().splitlines()]
+    weapons = {r["id"] for r in rows if r.get("type") == "weapon" and r.get("source") == "AIM9M.JT"}
+    launches = [r for r in rows if r.get("kind") == "weapon.launch" and r.get("subject") == 0
+                and r.get("fields", {}).get("weapon") in weapons]
+    problems = []
+    if not launches:
+        problems.append("head-on AIM-9M did not leave the rail")
+    elif not any(r.get("fields", {}).get("aspect_deg", 0) > 170
+                 and 2.5 * 6076 < r.get("fields", {}).get("range_ft", 0) < 3.1 * 6076 for r in launches):
+        problems.append("AIM-9M release was not head-on near 3 nm")
+    if not any(r.get("kind") == "combat.hit" and r.get("subject") == 0
+               and r.get("fields", {}).get("weapon") in weapons for r in rows):
+        problems.append("head-on guided missile did not reach the fixture target")
+    if not any(r.get("kind") == "audio.tone" and r.get("fields", {}).get("tone") == "infrared lock" for r in rows):
+        problems.append("head-on IR lock tone was not recorded")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     out: list[Scenario] = []
     out.append(record_scenario(
@@ -335,6 +379,30 @@ def scenarios() -> list[Scenario]:
          "--probe-attack", "600:10"],
         same_run=False, timeout=400, extra_check=fox_three_problems,
         notes="AIM-120 launch is recorded as ^FOXTHR and survives replay export",
+    ))
+
+    for close in [False, True]:
+        mode = "close" if close else "empty"
+        out.append(record_scenario(
+            f"replay-rec-missile-release-{mode}",
+            ["--aircraft", "f18", "--ai-probe-ticks", "1200",
+             "--probe-missile-release", mode, "--ai-mission", "hold",
+             *(["--probe-fight", "1:1", "--probe-geometry", "rear"] if close
+               else ["--probe-wing-only", "--probe-wing-size", "1"])],
+            timeout=180, same_run=True,
+            extra_check=lambda work, output, close=close: missile_release_problems(work, output, close=close),
+            notes="Manual missile release, recorded Fox call and deterministic playback; minimum range is advisory",
+        ))
+
+    out.append(record_scenario(
+        "replay-rec-missile-head-ir",
+        ["--aircraft", "f18", "--ai-probe-ticks", "1800", "--probe-fight", "1:1",
+         "--probe-enemy-aircraft", "mig29", "--probe-geometry", "head",
+         "--probe-missile-release", "head-ir", "--ai-mission", "hold"],
+        timeout=180, same_run=True,
+        expect=[r"missile release tone: Some.*locked: true", r"readiness=Ready"],
+        extra_check=head_ir_problems,
+        notes="AIM-9M head-on at a MiG-29 from 3 nm: tone, release, guidance and replay",
     ))
 
     # AI fights of every size.

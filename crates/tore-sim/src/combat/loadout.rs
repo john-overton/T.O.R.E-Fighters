@@ -267,6 +267,45 @@ impl Loadout {
         self.refresh_equipment()
     }
     pub fn capacity(&self, slot: usize, w: &Weapon) -> i32 {
+        // R-27 carriage is an explicit family policy, not generic IR rail
+        // compatibility. Cheat keeps its existing unrestricted behavior.
+        if !self.cheat
+            && matches!(
+                w.source.as_str(),
+                "AA10.JT" | "R27ER.JT" | "R27T.JT" | "R27ET.JT"
+            )
+        {
+            let extended = matches!(w.source.as_str(), "R27ER.JT" | "R27ET.JT");
+            if !matches!(
+                self.aircraft,
+                AircraftId::Su27 | AircraftId::Su35 | AircraftId::Mig29
+            ) && (extended || self.aircraft != AircraftId::Yak141)
+            {
+                return 0;
+            }
+            // MIG29.PT is the Fulcrum-C: R/ER/T/ET on its inner pair only.
+            // Source row 5 represents those two stations.
+            if self.aircraft == AircraftId::Mig29
+                && self
+                    .configuration
+                    .hardpoint_slots
+                    .iter()
+                    .position(|s| *s == Some(slot))
+                    != Some(5)
+            {
+                return 0;
+            }
+            // R-27s use medium rails, never Flanker wingtip rails. IR heads
+            // also need an unobstructed underwing view rather than a tunnel.
+            let infrared = matches!(w.source.as_str(), "R27T.JT" | "R27ET.JT");
+            if self.hardpoints.get(slot).is_none_or(|h| {
+                h.location == 5
+                    || (infrared && h.location != 4)
+                    || (h.flags & 0x40 == 0 && h.store.as_deref() != Some("AA10.JT"))
+            }) {
+                return 0;
+            }
+        }
         // Boulder and Moose load only under Cheat loading.
         if novelty(&w.source) && !self.cheat {
             return 0;
@@ -573,6 +612,9 @@ pub const SUPPORTED_WEAPONS: &[&str] = &[
     "R530.JT",
     "R550.JT",
     "AA10.JT",
+    "R27ER.JT",
+    "R27T.JT",
+    "R27ET.JT",
     "AGM88.JT",
     "AIM7.JT",
     "AIM7E.JT",

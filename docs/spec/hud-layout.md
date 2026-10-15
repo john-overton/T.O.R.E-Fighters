@@ -199,6 +199,16 @@ armed. These exceptions are developer facilities, not alternate player defaults.
 
 [Horizon reference validation](../baselines/horizon-creator.md).
 
+## Missile range and tone cues
+
+John's 2026-10-15 revision makes the missile minimum-range scale and IN RNG
+informational. MIN RANGE no longer inhibits the player's missile release.
+Radar tone retains its existing below-minimum silence; IR growl and lock tone
+follow the mounted seeker's return, including head-on all-aspect acquisition,
+without requiring the HUD's predicted intercept. The compact corrected missile
+names are specified in [missile identities](missiles.md#corrected-identities-and-r-27-stores).
+No default control binding changes.
+
 ## Air-to-ground status words
 
 Specified in [air-to-ground](air-to-ground.md#the-hud-in-air-to-ground-modes),

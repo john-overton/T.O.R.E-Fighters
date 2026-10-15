@@ -122,6 +122,7 @@ impl PointMass {
 
 fn target_view(id: u32, side: u32, position: [f64; 3]) -> TargetView {
     TargetView {
+        infrared_strength: 1.,
         id,
         side: Side(side),
         position,
@@ -159,6 +160,7 @@ fn station_view(
         employment_fit: None,
         minimum_range_ft: range.0,
         maximum_range_ft: range.1,
+        infrared_envelope: None,
         requires_radar: false,
         requires_sensor: false,
         employment_zone: None,

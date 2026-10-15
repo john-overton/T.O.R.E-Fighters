@@ -54,8 +54,8 @@ Implementation mode, 2026-10-15. `Weapon::seeker_kind` is the authority for
 missile guidance, launch speech and ordnance labels. For guided records (flag
 `0x1`), signature 2 means infrared, 3 with support flag `0x200` means
 semi-active radar, 3 without it means active radar, and 4 means passive emitter.
-Other signatures remain other guidance, not an invented Fox class. Raw records
-are unchanged. Reviewed flight eligibility and the fitted activation distances
+Other signatures remain other guidance, not an invented Fox class. Retail bytes
+are unchanged; the load-time variant rules below adjust owned weapon fields. Reviewed flight eligibility and the fitted activation distances
 below remain separate from classification.
 
 The only store-name overrides preserve the existing fitted surface policy:
@@ -72,14 +72,92 @@ the original 50 percent generic-call alternative. Active releases use the
 Phoenix's existing always-Fox-three rule, an agent decision. Surface-target
 shots keep generic calls. See [radio](radio-chatter.md#weapon-launch-calls).
 
-The 22-record A2A census includes five catalog-only records: AA6, AA9, AEMP1,
-PL7 and PL10. These remain unavailable to loadouts. No new missile variant is
-invented. `AA10.JT` says AA-10T but specifies radar support: it remains supported
-radar pending John's decision to relabel it as R-27R or introduce an actual IR
-variant. MICA's radar record represents the EM role; no separate MICA-IR record
-exists. PL10 is the 1997 catalog identity, not a license to substitute the modern
-infrared weapon with that name. AAM-L and AEMP-1 have no verified real-world
-counterpart here. [Inventory and source evidence](../baselines/missile-classification.md).
+The 22 retail A2A records now have three derived R-27 stores. Five retail
+records remain catalog-only: AA6, AA9, AEMP1, PL7 and PL10. MICA's radar
+record represents the EM role; no MICA-IR or AIM-9L record is added.
+
+## Corrected identities and R-27 stores
+
+**Opinionated, requested by John on 2026-10-15.** AA10.JT remains the stable
+R-27R resource identity, including in old replays, but its HUD reads AA-10A.
+The three new resource keys are R27ER.JT, R27T.JT and R27ET.JT. Loading a
+user's pack supplies these virtual records from AA10.JT in memory. The checked
+weapon reader applies the variant rules, so the UI, host, clients, AI and
+replay effects resolve one definition. No retail bytes are distributed.
+
+Agent naming choice: compact NATO-style AA-10A/B/C/D on the HUD, full names
+R-27R (AA-10A Alamo-A), R-27T (AA-10B Alamo-B), R-27ER (AA-10C Alamo-C),
+and R-27ET (AA-10D Alamo-D) on selection in Load Ordnance. Cards use the
+R-27 variant name. Other corrections: AA-2A / R-3S, AA-6A / R-40R family,
+S530D / Super 530D, MICA-EM and AIM-54C. AA8's all-aspect record represents
+R-60M. AA-11B keeps its distinct game IR variant, without the misleading
+Backfire name; PL10-R explicitly means the 1997 radar concept, not today's
+IR PL-10. AAM-L and AEMP-1 remain fictional game stores. Exact AA-11B and
+historical PL-10 hardware identities remain unknown.
+
+The **fitted** envelopes below are agent choices, not measured retail behavior
+or real missile performance claims. R/ER are SARH, T/ET are IR. The ER/ET
+larger motor multiplies donor acceleration by 1.25 and fuel/removal timers
+by 1.5, with integer truncation. ER multiplies both donor range maxima by
+1.5. T/ET clear launcher/support flags 0x300, use signature 2 and all-aspect
+IR. All other donor physics, turn limits, damage and fuze arming remain.
+Extended variants reuse the donor artwork, so their larger motor is modeled
+in propulsion and mass, not a new mesh.
+
+| Resource | HUD | Guidance / Fox | Nominal launch min/max ft | Seeker max ft | Burn / removal s | Mass lb |
+| --- | --- | --- | --- | ---: | --- | ---: |
+| AA10.JT | AA-10A | SARH / one | 12000 / 120000 | 120000 | 53 / 106 | donor |
+| R27ER.JT | AA-10C | SARH / one | 12000 / 180000 | 180000 | 79.5 / 159 | 772 |
+| R27T.JT | AA-10B | IR / two | 12000 / 100000 | 60000 | 53 / 106 | 541 |
+| R27ET.JT | AA-10D | IR / two | 12000 / 150000 | 60000 | 79.5 / 159 | 756 |
+
+Normal loadouts allow all four on Su-27 and Su-35 medium-missile rails,
+and on the MiG-29's inner pair (source hardpoint row 5). MIG29.PT is the
+Fulcrum-C, not an early export Fulcrum-A; the [US Army MiG-29S entry](https://odin.t2com.army.mil/WEG/Asset/8e5ee70c6f22f4df21b8514ebc3a68e9)
+lists T1/ER1/ET1 capability. Yak-141 takes R/T; extended variants are withheld
+there as an agent choice. No Su-30 aircraft exists in the current 36-aircraft
+roster. Existing defaults remain: Flankers use AA-12, MiG-29 uses AA-8,
+Yak-141's AA10 is R-27R. Wingtip and short IR-only rails do not gain R-27
+capacity; T/ET require underwing positions for their seeker view. Cheat
+loading retains its explicit override.
+
+Real-world family grounding: [Rosoboronexport R-27ER1](https://roe.ru/pdfs/pdf_4712.pdf)
+and [R-27ET1](https://roe.ru/pdfs/pdf_4714.pdf) identify the extended radar
+and IR family. These references do not calibrate this game's motor timers.
+
+## Infrared aspect and acquisition
+
+**Opinionated, requested by John on 2026-10-15; numeric model fitted by the
+agent.** The reviewed retail `allAspect` field is 100 for AIM-9B and AA2,
+30 for AIM-9M, AA11/B, AA8 and R550, 20 for AIM-9X, and 40 for PL7.
+The correction table explicitly records rear-only B/AA2 and all-aspect
+M/X, AA11/B, AA8 (R-60M role), R550, PL7 and the new R27T/ET. PL7 stays
+catalog-only. The field's exact original numeric formula is unknown.
+
+For the reviewed A2A stores against an airborne target, strength is `max(IR signature, 0) / 100 * engine heat`.
+Engine heat retains 0.1 stopped, 0.5 + 0.5 * throttle running, 1.5 in
+burner, or 1 for an unspecified source. Facing is the dot product of the
+target's nose and its direction toward the seeker, +1 head-on, -1 rear.
+All-aspect acquisition reach is `nominal seeker range * (0.7 - 0.3 * facing)
+* sqrt(strength)`: a head-on fighter has 40% of its rear reach; burner extends
+both by sqrt(1.5), capped by the imported seeker maximum. Rear-only weapons require a 45-degree rear quarter and
+use the full nominal reach within it. Outside reach there is no return.
+Inside, quality is `strength / (1 + (distance / reach)^2)`. Existing acquisition
+and retention thresholds remain 0.25 and 0.20, with 30 ticks dwell at 120 Hz.
+This fixes the previous head-on quality ceiling of 0.25, which distance made
+strictly lower than the acquisition threshold.
+
+SAM profiles retain their previous heat response and minimum-range rules.
+AI jet observations refresh engine heat; rotorcraft retain their supplied heat
+observation, including a handoff snapshot. Collective is not jet throttle.
+
+The mounted seeker produces growl while acquiring and locked tone after dwell.
+CUED IR can fire with its own lock, including head-on. BORESIGHT still permits
+an uncued launch. AI employment reads the same IR response and observed target
+strength, retaining its minimum range, pointing, cadence and tactical discipline.
+The player readout drives both local and client tone; recordings retain tone
+changes for replay audio. [USAF Sidewinder](https://www.af.mil/About-Us/Fact-Sheets/Display/Article/104557/aim-9-sidewinder/)
+confirms the L/M all-aspect distinction; no L store is present here.
 
 ## Manual-supported behavior
 
@@ -94,7 +172,8 @@ rules. Manual text was reviewed, not pixel geometry or a matching retail run.
 
 ## First-pass inventory matrix
 
-All 135 imported JT definitions were reviewed for inventory inclusion. The table
+All 135 retail JT definitions in the import were reviewed for inventory inclusion.
+The three virtual R-27 variants above are separate from this raw census. The table
 contains **63 missile or missile-like candidates**, including ground/ship and
 unresolved special roles, not 63 accepted playable missiles. [Inventory method,
 source identity and validation](../baselines/missiles.md).
@@ -128,14 +207,14 @@ should use launch-relative 120 Hz timers. Removal can precede burnout, as noted
 below. Tracking/battery life remains a
 separate proposed profile setting, never inferred from these motor numbers.
 
-| Record (source label) | Type | Availability | Launch envelope nmi | Ignition s | Burn s | Removal s | Seeker max nmi | Seeker H/V half-angle deg | Active-on distance nmi (fitted) | Uncued search H/V deg (fitted) |
+| Record (current HUD label) | Type | Availability | Launch envelope nmi | Ignition s | Burn s | Removal s | Seeker max nmi | Seeker H/V half-angle deg | Active-on distance nmi (fitted) | Uncued search H/V deg (fitted) |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- |
-| AA10.JT (AA-10T) | S* | Live | 1.97 to 19.75 | 0 | 53 | 106 | 19.75 | 45/45 | N/A | N/A |
+| AA10.JT (AA-10A) | S* | Live | 1.97 to 19.75 | 0 | 53 | 106 | 19.75 | 45/45 | N/A | N/A |
 | AA11.JT (AA-11) | I* | Live | 0.33 to 9.87 | 0 | 26 | 52 | 9.87 | 80/80 | N/A | 5/5 |
 | AA11B.JT (AA-11B) | I* | Live | 0.25 to 9.87 | 0 | 26 | 52 | 9.87 | wide*/90 | N/A | 5/5 |
 | AA12.JT (AA-12) | A* | Live | 1.97 to 24.69 | 0 | 66 | 132 | 24.69 | 60/60 | 5 | 5/5 |
-| AA2.JT (AA-2) | I* | Live | 0.66 to 3.95 | 0 | 4 | 20 | 4.94 | 45/45 | N/A | 5/5 |
-| AA6.JT (AA-6) | S* | Catalog | 1.97 to 14.81 | 1 | 39 | 80 | 14.81 | 45/45 | N/A | N/A |
+| AA2.JT (AA-2A) | I* | Live | 0.66 to 3.95 | 0 | 4 | 20 | 4.94 | 45/45 | N/A | 5/5 |
+| AA6.JT (AA-6A) | S* | Catalog | 1.97 to 14.81 | 1 | 39 | 80 | 14.81 | 45/45 | N/A | N/A |
 | AA8.JT (AA-8) | I* | Live | 0.66 to 3.95 | 0 | 4 | 20 | 4.94 | 45/45 | N/A | 5/5 |
 | AA9.JT (AA-9) | S* | Catalog | 1.97 to 41.15 | 2 | 130 | 264 | 41.15 | 45/45 | N/A | N/A |
 | AAML.JT (AAM-L) | A* | Live | 4.94 to 74.06 | 0 | 130 | 270 | 74.06 | 45/45 | 8 | 5/5 |
@@ -147,7 +226,7 @@ separate proposed profile setting, never inferred from these motor numbers.
 | AGM84E.JT (AGM-84E) | I* | Live | 0.08 to 49.37 | 2 | 118 | 120 | 49.37 | 45/45 | N/A | 5/5 |
 | AGM88.JT (AGM-88) | E* | Live | 0.08 to 32.92 | 0 | 25 | 40 | 32.92 | 45/45 | N/A | 45/45 (HARM cue) |
 | AIM120.JT (AIM-120) | A* | Live | 1.97 to 23.70 | 0 | 66 | 132 | 23.70 | 45/45 | 5 | 5/5 |
-| AIM54C.JT (AIM-54) | A* | Live | 4.94 to 98.75 | 2 | 139 | 283 | 98.75 | 45/45 | 10 | 5/5 |
+| AIM54C.JT (AIM-54C) | A* | Live | 4.94 to 98.75 | 2 | 139 | 283 | 98.75 | 45/45 | 10 | 5/5 |
 | AIM7.JT (AIM-7) | S* | Live | 1.32 to 19.75 | 2 | 51 | 106 | 19.75 | 45/45 | N/A | N/A |
 | AIM7E.JT (AIM-7E) | S* | Live | 0.49 to 16.46 | 1 | 11 | 60 | 16.46 | 45/45 | N/A | N/A |
 | AIM9B.JT (AIM-9B) | I* | Live | 0.66 to 3.95 | 0 | 3 | 20 | 8.23 | 45/45 | N/A | 5/5 |
@@ -165,13 +244,13 @@ separate proposed profile setting, never inferred from these motor numbers.
 | FIM92.JT (FIM-92) | I* | Catalog | 1.23 to 8.89 | 0 | 4 | 20 | 16.46 | wide*/90 | N/A | 5/5 |
 | HQ2J.JT (HQ-2J) | S* | Catalog | 1.23 to 8.89 | 2 | 21 | 40 | 16.46 | wide*/90 | N/A | N/A |
 | HQ61.JT (HQ-61) | S* | Catalog | 1.23 to 8.89 | 2 | 21 | 40 | 16.46 | wide*/90 | N/A | N/A |
-| MICA.JT (MICA) | A* | Live | 1.97 to 24.69 | 0 | 66 | 132 | 24.69 | 45/45 | 5 | 5/5 |
+| MICA.JT (MICA-EM) | A* | Live | 1.97 to 24.69 | 0 | 66 | 132 | 24.69 | 45/45 | 5 | 5/5 |
 | MIM23.JT (MIM-23) | S* | Catalog | 0.16 to 7.41 | 1 | 9 | 20 | 15.43 | wide*/90 | N/A | N/A |
 | MIS.JT (MIS) | S* | Catalog | 1.23 to 7.90 | 2 | 21 | 40 | 10.53 | wide*/90 | N/A | N/A |
-| PL10.JT (PL-10) | S* | Catalog | 1.32 to 24.69 | 2 | 18 | 40 | 24.69 | 45/45 | N/A | N/A |
+| PL10.JT (PL10-R) | S* | Catalog | 1.32 to 24.69 | 2 | 18 | 40 | 24.69 | 45/45 | N/A | N/A |
 | PL7.JT (PL-7) | I* | Catalog | 0.66 to 3.95 | 0 | 4 | 20 | 8.23 | 45/45 | N/A | 5/5 |
 | R440.JT (R-440) | S* | Catalog | 1.23 to 8.89 | 2 | 21 | 40 | 16.46 | wide*/90 | N/A | N/A |
-| R530.JT (R-530D) | S* | Live | 1.32 to 16.46 | 0 | 53 | 106 | 19.75 | 45/45 | N/A | N/A |
+| R530.JT (S530D) | S* | Live | 1.32 to 16.46 | 0 | 53 | 106 | 19.75 | 45/45 | N/A | N/A |
 | R550.JT (R-550) | I* | Live | 0.66 to 3.95 | 0 | 7 | 20 | 8.23 | 45/45 | N/A | 5/5 |
 | ROLAND.JT (Roland) | S* | Catalog | 0.16 to 4.44 | 1 | 9 | 20 | 7.41 | wide*/90 | N/A | N/A |
 | SA13.JT (SA-13) | I* | Catalog | 0.25 to 2.47 | 1 | 9 | 20 | 4.11 | wide*/90 | N/A | 5/5 |
@@ -194,8 +273,8 @@ separate proposed profile setting, never inferred from these motor numbers.
 | SEA_SPAR.JT (AIM-7) | S* | Catalog | 0.49 to 19.75 | 0 | 10 | 40 | 19.75 | wide*/90 | N/A | N/A |
 | SSN9.JT (SS-N-9) | S* | Catalog | 0.49 to 19.75 | 0 | 100 | 360 | 41.15 | wide*/90 | N/A | N/A |
 
-Seeker maximum uses source `zone0`; its minimum and relative-altitude limits
-also remain binding. Half-angles use 182 source units per degree. `wide*` denotes
+Seeker maximum uses source `zone0`; relative-altitude limits remain binding.
+Minimum range does not suppress an aircraft-launched missile seeker. Half-angles use 182 source units per degree. `wide*` denotes
 the 0x7fff source value, whose wide-angle handling needs review, not a normal
 180-degree cone. These columns describe imported geometry, not proven detection
 range or completed seeker behavior. The uncued-search column contains agent-fitted
@@ -384,8 +463,8 @@ its seeker immediately and requiring acquisition before reporting PITBULL.
 A separate prelaunch estimate can identify a provisional bore contact. With a lock, retain that target; without one, fly on
 and search until acquisition or guidance expiry. Keep normal station, bay, trigger
 and ammunition gates. Missing target data cannot produce a fake range inhibit:
-omit `IN RNG` for an uncued release. A known bore candidate inside imported `zone1.minimum_range` inhibits release
-with MIN RANGE. Other envelope cues still warn without blocking uncued release.
+omit `IN RNG` for an uncued release. Minimum range is advisory and never blocks release.
+Other envelope cues still warn without blocking uncued release.
 The trigger opens an internal bay, with or without a cockpit designation ([F-22 bays](aircraft-animation.md#f-22-main-weapon-bays)).
 
 The fitted bore is a **5-degree circular half-angle** for independent seekers,
@@ -417,28 +496,12 @@ existing IFF, but unknown contacts must not gain hidden identity information.
 
 ### Fitted heat quality and tone
 
-These initial constants are agent choices for the game, not retail measurements.
-Reuse the imported IR signature, independently of radar RCS. Multiply its ratio
-to reference signature 100 by an aspect factor and engine factor. Use aspect
-factor 1.0 when viewing the tail, 0.5 from the side and 0.25 head-on, interpolating
-between them. Engine factor is 0.1 when off, 0.5 at idle, 1.0 at full dry power
-and 1.5 with afterburner; interpolate idle-to-dry with normalized throttle.
-Call the result `heat`. Unknown engine state uses factor 1.0, labelled fitted;
-do not substitute radar emission state. Add these observables to fixtures and
-combat tapes so playback and live search agree.
+The current numeric rule is defined once under [infrared aspect and
+acquisition](#infrared-aspect-and-acquisition). It separates shorter head-on
+reach from signal quality, so an eligible all-aspect return can complete dwell.
+Terrain masking and the seeker's gimbal still reject observations. These are
+fitted game numbers, not retail measurements.
 
-Use effective IR range `nominal_range * min(1, sqrt(max(0, heat)))`.
-Inside that range and the cone, quality is
-`max(heat / (1 + (distance / nominal_range)^2), 0)`; otherwise it is zero.
-Require quality at least 0.25 for the 0.25-second acquisition dwell, and at least
-0.20 for retention. These are game thresholds, not probabilities of hitting.
-Preserve independently specified rear-aspect eligibility and target classes;
-a high heat score cannot bypass them. Do not infer such eligibility by filename.
-
-Example: a full-power, reference-signature tail target at half nominal range
-scores 0.8, while its head-on score is 0.2 and cannot acquire at that distance.
-Afterburner raises the same head-on score to 0.3, allowing acquisition after dwell
-if the weapon's aspect eligibility permits it. A masked target scores zero.
 
 Selected armed missiles produce local seeker audio. IR growl now follows the
 same fitted percentage displayed on the HUD, with quieter tracking and louder
@@ -554,16 +617,15 @@ in advance. No new artwork or sound assets are required for this planning pass.
 
 ## Minimum engagement and target role
 
-John requested minimum-range enforcement and separate surface-weapon behavior on
-2026-09-17. The following boundary rules are **agent-fitted**, not measured retail
-behavior. Use imported `zone1.minimum_range` in feet, inclusive at equality.
-A known designated or inferred bore target below that distance inhibits release.
-An uncued shot with no observed candidate remains possible. Its seeker cannot
-acquire, and its proximity/direct-hit test cannot damage, a target inside that
-radius measured from the launch origin. A target accepted outside the boundary
-keeps its eligibility while closing, including terminal flight below minR.
-This is an engagement qualification, not a mandatory straight-flight distance or
-an added fuze timer. Imported fuze arming time remains a separate gate.
+**Opinionated revision requested by John, 2026-10-15.** Imported minimum
+range is information for the player and shot discipline for AI. It does not
+inhibit a player missile release, suppress seeker acquisition, or disqualify a
+close hit. This supersedes the earlier fitted launch-origin qualification.
+Normal seeker geometry, signal, turn limits, propulsion and fuze arming decide
+whether a released missile hits. No additional straight-flight or arming time
+is invented. The HUD range scale and IN RNG still use the imported minimum;
+radar tone keeps its existing below-minimum silence. AI still checks its own
+minimum-range envelope before firing.
 
 Weapon role is explicit, separate from seeker type and target damage category.
 AGM65G, AGM65A, AGM84E, AGM45, AGM88, AGM84A, AM39, AS16, AS7 and AS15 require
@@ -602,7 +664,7 @@ presence and collision; the renderer does not decide what is hittable.
 
 Keep four independent concepts:
 
-1. **Launch envelope:** imported minimum slant range and altitude/angle limits,
+1. **Launch envelope:** imported altitude/angle limits,
    plus a predicted intercept, control cued firing permission. The imported
    nominal launch maximum does not cap the engagement estimate. BORESIGHT explicitly permits uncued
    release as specified above. Being in range does not promise a hit.
@@ -1007,8 +1069,7 @@ radar power OFF disables radar-missile acquisition, boresight, seeker tones
 and target-derived weapon cues. IR guidance remains independent of radar power. Arming follows weapon/NAV selection.
 An armed radar missile may release without designation while radar power is off, with
 normal safe, bay, ammunition and station gates. The HUD omits DUMB and IN RNG for that unguided release. Such a shot never acquires or steers, even if radar power returns later.
-It retains normal propulsion, inherited velocity, fuze timing, minimum-engagement
-and target-role damage gates. Radar power returning enables acquisition for the
+It retains normal propulsion, inherited velocity, fuze timing, target-role damage gates. Radar power returning enables acquisition for the
 next shot. Already airborne guided shots retain their own guidance rules; power
 off does not retroactively turn an independent shot dumb. Compatibility rules
 remain unchanged. This is a requested game rule, not a claimed retail behavior.
@@ -1080,7 +1141,7 @@ from imported minimum to the search ceiling, then refine the outermost
 successful interval with 10 bisections. Show zero if none succeeds. Refresh the
 range estimate every 60 simulation ticks or immediately when contact/station
 changes. Hit estimate uses that maximum and the predicted time; IN RNG requires
-an actual predicted intercept. Imported minimum range, altitude and angle limits remain release constraints.
+an actual predicted intercept. Imported minimum is advisory; altitude and angle limits remain release constraints.
 CUED MAX RANGE comes from failure to predict an intercept, not the old nominal
 maximum. Actual seeker acquisition/retention volumes remain unchanged. A radar
 bore search still needs a prelaunch observation inside the selected scope and

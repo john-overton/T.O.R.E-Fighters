@@ -731,6 +731,7 @@ fn own_state(position: [f64; 3], heading: f64, pitch: f64, bank: f64, speed: f64
 
 fn target_view(id: u32, side: u32, position: [f64; 3]) -> TargetView {
     TargetView {
+        infrared_strength: 1.,
         id,
         side: Side(side),
         position,
@@ -787,6 +788,7 @@ fn station_view(
         employment_fit: None,
         minimum_range_ft: range.0,
         maximum_range_ft: range.1,
+        infrared_envelope: None,
         requires_radar: false,
         requires_sensor: false,
         employment_zone,
@@ -1578,6 +1580,7 @@ fn store(station: u8, kind: SeekerClass, gun: bool, rounds: u32, radar: bool) ->
             pacing: pacing(10, Delay::quarters(1), Delay::quarters(2)),
             maximum_range_ft: Some(9_000.),
             minimum_range_ft: 0.,
+            infrared_envelope: None,
             requires_radar: false,
             requires_sensor: false,
             employment_zone: None,
@@ -1611,6 +1614,7 @@ fn store(station: u8, kind: SeekerClass, gun: bool, rounds: u32, radar: bool) ->
         ),
         maximum_range_ft: Some(if infrared { 14_000. } else { 42_000. }),
         minimum_range_ft: if infrared { 1_000. } else { 2_000. },
+        infrared_envelope: None,
         requires_radar: radar && !infrared,
         requires_sensor: infrared,
         employment_zone: infrared.then(|| zone(30., 30., (1_000, 14_000), (-15_000, 15_000))),
@@ -1709,6 +1713,7 @@ fn world_objects(mission: &AiMission) -> Vec<WorldObject> {
             let on_ground = f.research.as_ref().is_some_and(|r| r.on_ground);
             let alive = actor.alive();
             WorldObject {
+                infrared_strength: 1.,
                 id: actor.id(),
                 side: actor.identity().side,
                 position: f.position,
@@ -2384,6 +2389,7 @@ fn human_leader(t: f64, release_s: f64) -> WorldObject {
     let climb = (rolling - liftoff).max(0.) * 20.;
     let position = [0., climb, -3_700. + along];
     WorldObject {
+        infrared_strength: 1.,
         id: HUMAN_LEADER,
         side: Side(1),
         position,

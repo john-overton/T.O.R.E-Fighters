@@ -196,6 +196,8 @@ impl OwnState {
 /// sensors; `Observable` is service input, never automatic AI knowledge.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TargetView {
+    /// Observed IR signature relative to 100, multiplied by engine heat.
+    pub infrared_strength: f64,
     pub id: u32,
     pub side: targeting::Side,
     pub position: [f64; 3],
@@ -320,6 +322,8 @@ pub struct StationView {
     pub employment_fit: Option<f64>,
     pub minimum_range_ft: f64,
     pub maximum_range_ft: Option<f64>,
+    /// All-aspect flag and nominal IR seeker reach, absent for other stores.
+    pub infrared_envelope: Option<(bool, f64)>,
     pub requires_radar: bool,
     pub requires_sensor: bool,
     pub employment_zone: Option<tore_formats::weapons::Zone>,
@@ -371,6 +375,32 @@ impl StationView {
         }
     }
 
+    fn infrared_fit(&self, origin: [f64; 3], target: &TargetView) -> bool {
+        self.infrared_envelope.is_none_or(|(all_aspect, nominal)| {
+            let direction =
+                crate::attitude::unit(crate::combat::missiles::sub(origin, target.position));
+            let facing = crate::attitude::dot(
+                crate::attitude::Basis::new(
+                    target.heading_deg.to_radians(),
+                    target.pitch_deg.to_radians(),
+                    0.,
+                )
+                .forward,
+                direction,
+            );
+            crate::combat::missiles::seeker::infrared_quality(
+                all_aspect,
+                nominal,
+                target.infrared_strength,
+                facing,
+                crate::combat::missiles::length(crate::combat::missiles::sub(
+                    origin,
+                    target.position,
+                )),
+            ) >= 0.25
+        })
+    }
+
     /// Current mount-relative pointing error after a successful employment
     /// check. This is shared by diagnostics and release, avoiding stale target
     /// geometry when selection changes during the decision. It stops at the
@@ -382,7 +412,8 @@ impl StationView {
             range,
             error,
         } = self.mount_geometry(own, target);
-        let permitted = range >= self.minimum_range_ft
+        let permitted = self.infrared_fit(origin, target)
+            && range >= self.minimum_range_ft
             && self.maximum_range_ft.is_none_or(|max| range <= max)
             && self.employment_limit_deg.is_none_or(|limit| error <= limit)
             && self.employment_zone.is_none_or(|zone| {
@@ -411,9 +442,10 @@ impl StationView {
             below_minimum_range: !(range >= self.minimum_range_ft),
             beyond_maximum_range: !self.maximum_range_ft.is_none_or(|max| range <= max),
             beyond_angle_limit: !self.employment_limit_deg.is_none_or(|limit| error <= limit),
-            outside_zone: !self.employment_zone.is_none_or(|zone| {
-                crate::combat::missiles::geometry(&zone, origin, basis, target.position, None)
-            }),
+            outside_zone: !self.infrared_fit(origin, target)
+                || !self.employment_zone.is_none_or(|zone| {
+                    crate::combat::missiles::geometry(&zone, origin, basis, target.position, None)
+                }),
         }
     }
 
@@ -3736,6 +3768,7 @@ mod tests {
 
     fn enemy(id: u32, position: [f64; 3]) -> TargetView {
         TargetView {
+            infrared_strength: 1.,
             id,
             side: targeting::Side(2),
             position,
@@ -3794,6 +3827,7 @@ mod tests {
                     employment_fit: Some(1.0),
                     minimum_range_ft: 0.0,
                     maximum_range_ft: Some(40000.0),
+                    infrared_envelope: None,
                     requires_radar: false,
                     requires_sensor: false,
                     employment_zone: None,

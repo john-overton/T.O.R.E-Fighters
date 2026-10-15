@@ -60,6 +60,7 @@ fn station_view(station: u8) -> StationView {
         employment_fit: None,
         minimum_range_ft: 1_500.,
         maximum_range_ft: Some(5.8 * NM),
+        infrared_envelope: None,
         requires_radar: true,
         requires_sensor: false,
         employment_zone: None,

@@ -136,15 +136,15 @@ are `<stem>.5K` in `FA_2.LIB`.
 
 ### Weapon launch calls
 
-- **Trigger.** A weapon release. The player's releases are always announced.
-  AI releases are announced on one of the two AI weapon-release paths only; which
-  AI releases that covers is **unknown**. A release with no target is announced
-  only when the released store carries the bomb flag (**unknown**: the check
-  reads the current object type, which is probably the released store).
+- **Trigger.** A weapon release, for players, wingmen and AI. Guided missiles
+  with no target also announce their Fox class, requested by John on 2026-10-15.
+  Targetless Fox calls are guaranteed, with a fitted 2-second global cooldown
+  per seeker class to limit ripples. Targeted IR/SARH retain the 50/50 generic
+  alternative. Guns, rockets and bombs retain their earlier rules.
 - **Speaker and listeners.** The shooter, to its whole flight, after half a
   second. Silenced by radio silence.
 - **What is said.** The first matching rule wins:
-  1. Active-radar missile against an aircraft: "Fox three", from the shared
+  1. Active-radar missile against an aircraft or with no target: "Fox three", from the shared
      [missile classification](missiles.md#shared-classification). Includes AIM-54,
      AIM-120, AA-12, MICA and AAM-L. This corrects the original Phoenix-only rule
      at John's request, 2026-10-15 (opinionated).
@@ -154,7 +154,7 @@ are `<stem>.5K` in `FA_2.LIB`.
   3. Otherwise an unguided store (guns and rockets) first adds "I'm using my
      gun", global cooldown 4 seconds. The recording `^FIRGUN` is absent from
      `FA_2.LIB`, so this is text only. The call then continues with rule 4.
-  4. On a 50% roll, if the target is an aircraft: "Fox one" for a
+  4. With no target, or on a 50% roll if the target is an aircraft: "Fox one" for a
      semi-active radar store (AIM-7, for example) and "Fox two"
      for an infrared store. In every other case: one of "I'm taking a shot",
      "Missile away" or "Firing missile".

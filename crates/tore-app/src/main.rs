@@ -6216,6 +6216,8 @@ struct ProbeScript {
     trace_ticks: u64,
     /// The leader fires its own weapons from this tick.
     attack: Option<ProbeAttack>,
+    /// Manual AIM-120 shot at tick 60, empty sky or a target 0.2 nm ahead.
+    missile_release: Option<u8>,
     /// `--probe-pavement`: print how many ground ticks of the AI aircraft at
     /// a redrawn airport were off its drawn pavement (an off-pavement tick is
     /// an anomaly either way).
@@ -8321,6 +8323,45 @@ fn ai_probe_run(
             bridge.friendly_ids(tore_sim::ai::launch::Side::Friendly);
         ProbeAttacker::new(attack, &combat, &bridge, script.guns)
     });
+    if let Some(mode) = script.missile_release {
+        let source = if mode == 2 { "AIM9M.JT" } else { "AIM120.JT" };
+        let selected = combat
+            .state
+            .own()
+            .configuration()
+            .stations
+            .iter()
+            .position(|s| s.weapon.source == source && s.count > 0)
+            .ok_or("missile release probe needs a loaded AIM-120")?;
+        combat.state.own_mut().selected = selected;
+        combat.state.own_mut().armed = true;
+        combat.state.own_mut().launch_mode = tore_sim::combat::missiles::LaunchMode::Boresight;
+        if mode != 0 {
+            let target = combat
+                .state
+                .targets
+                .iter()
+                .find(|t| t.hp > 0)
+                .ok_or("close missile probe needs an enemy")?;
+            let forward = attitude::Basis::new(flight.yaw, 0., 0.).forward;
+            flight.position = std::array::from_fn(|i| {
+                target.position[i] - forward[i] * if mode == 2 { 3. * 6076. } else { 0.2 * 6076. }
+            });
+            if mode == 1 {
+                flight.velocity = target.velocity;
+            }
+            println!(
+                "missile release probe: target={} initial_range_ft={} min_ft={}",
+                target.id,
+                if mode == 2 { 3. * 6076. } else { 0.2 * 6076. },
+                combat.state.own().configuration().stations[selected]
+                    .weapon
+                    .seeker
+                    .zones[1]
+                    .minimum_range
+            );
+        }
+    }
     // A mission recording of the probe: the picture is taken the way live
     // flight takes it, and nothing it reads feeds back into the run.
     let recording = match record {
@@ -8707,6 +8748,30 @@ fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<
                 mission.ai_wings.as_ref().expect(PROBE_BRIDGE),
                 &mut commands,
             );
+        }
+        if script.missile_release == Some(2)
+            && tick == 1
+            && let Some(target) = mission.combat.state.targets.first()
+        {
+            commands.push(seats::SeatCommand::Combat(
+                tore_sim::combat::live::Command::DesignateTarget(target.id),
+            ));
+        }
+        if script.missile_release.is_some() && (tick == 60 || tick == 61) {
+            commands.push(trigger_key(tick == 60));
+            if tick == 60 {
+                let own = mission.combat.state.own();
+                let readout = mission.combat.state.own_view();
+                let launcher = combat::launcher(&mission.cockpits[OWN].flight);
+                println!("missile release tone: {:?}", readout.seeker_tone(launcher));
+                println!(
+                    "missile release probe: fire tick=60 mode={:?} designated={:?} readiness={:?} rounds={}",
+                    own.launch_mode,
+                    readout.designated(),
+                    readout.readiness(launcher),
+                    own.rounds(own.selected)
+                );
+            }
         }
         // The script's wing orders, given after the leader's own controls.
         for (_, order, member) in script.orders.iter().filter(|(at, ..)| *at == tick) {
@@ -10493,6 +10558,12 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--probe-data-link" => probe_script.data_link = true,
             "--probe-blind-wing" => probe_script.blind_wing = true,
+            "--probe-missile-release" => probe_script.missile_release = Some(match args.next().as_deref() {
+                Some("empty") => 0,
+                Some("close") => 1,
+                Some("head-ir") => 2,
+                _ => return Err("--probe-missile-release needs empty, close or head-ir".into()),
+            }),
             "--probe-attack" => probe_script.attack = Some(ProbeScript::parse_attack(
                 &args.next().ok_or("--probe-attack needs TICK or TICK:REPEAT_SECONDS")?,
             )?),

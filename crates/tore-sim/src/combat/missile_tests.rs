@@ -11,6 +11,7 @@ fn weapon(name: &str) -> Weapon {
         "AIM7.JT"
             | "AIM7E.JT"
             | "AA10.JT"
+            | "R27ER.JT"
             | "R530.JT"
             | "AS7.JT"
             | "AS15.JT"
@@ -23,8 +24,8 @@ fn weapon(name: &str) -> Weapon {
     };
     w.seeker.signature = match name {
         "AGM45.JT" | "AGM88.JT" => 4,
-        "AIM9M.JT" | "AIM9B.JT" | "AIM9X.JT" | "AA11.JT" | "AA11B.JT" | "AA2.JT" | "AA8.JT"
-        | "R550.JT" | "AGM65G.JT" | "AGM65A.JT" | "AGM84E.JT" => 2,
+        "R27T.JT" | "R27ET.JT" | "AIM9M.JT" | "AIM9B.JT" | "AIM9X.JT" | "AA11.JT" | "AA11B.JT"
+        | "AA2.JT" | "AA8.JT" | "R550.JT" | "AGM65G.JT" | "AGM65A.JT" | "AGM84E.JT" => 2,
         _ => 3,
     };
     w
@@ -51,20 +52,21 @@ fn heat_aspect_power_masking_and_dwell() {
     assert_eq!(seeker.status, Status::Locked);
     assert_eq!(seeker.target, Some(7));
     t.basis = Basis::new(std::f64::consts::PI, 0., 0.);
+    t.position[2] = 3000.;
     let head = seeker::observe(&w, profile, &view, &t).unwrap();
-    assert!((head.quality - 0.2).abs() < 1e-12);
+    assert!(head.quality >= 0.25);
     let mut fresh = seeker::Seeker::default();
     for _ in 0..DWELL {
         fresh.step(profile, &[head]);
     }
-    assert_eq!(fresh.target, None);
+    assert_eq!(fresh.target, Some(7));
     t.heat = Heat::Engine {
         on: true,
         throttle: 1.,
         afterburner: true,
     };
     let hot = seeker::observe(&w, profile, &view, &t).unwrap();
-    assert!((hot.quality - 0.3).abs() < 1e-12);
+    assert!(hot.quality > head.quality);
     for _ in 0..DWELL {
         fresh.step(profile, &[hot]);
     }
@@ -913,9 +915,9 @@ fn automatic_bore_release_and_radar_search_start_without_designation() {
         );
     }
     assert_eq!(s.own().mounted.target, Some(8));
-    // This off-axis fixture acquires heat but cannot produce a launch/HUD solution.
+    // The actual heat lock sounds even when the fly-out predicts a miss.
     assert!(s.own_view().weapon_observation(l).is_none());
-    assert!(s.own_view().seeker_tone(l).is_none());
+    assert!(s.own_view().seeker_tone(l).is_some_and(|t| t.locked));
     s.targets[1].position = [5000., 1000., 5000.];
     s.targets[0].position = [-5000., 1000., 5000.];
     s.step(
@@ -1094,12 +1096,12 @@ fn range_launcher() -> Launcher {
 }
 
 #[test]
-fn minimum_range_inhibits_bore_release_at_the_inclusive_boundary() {
-    for name in ["AIM120.JT", "AIM9M.JT"] {
-        for distance in [999., 1000., 1001.] {
+fn minimum_range_is_advisory_for_player_bore_release() {
+    for name in ["AIM120.JT", "AIM9M.JT", "R27T.JT", "R27ET.JT"] {
+        for distance in [999., 1000., 1001., 0.2 * missiles::NMI] {
             let mut s = fixture(true);
             s.own_mut().config.stations[0].weapon = weapon(name);
-            s.own_mut().config.stations[0].weapon.seeker.zones[1].minimum_range = 1000;
+            s.own_mut().config.stations[0].weapon.seeker.zones[1].minimum_range = 2000;
             s.targets.push(target(7, [0., 1000., distance], 200, 0x80));
             let l = range_launcher();
             for _ in 0..DWELL + 1 {
@@ -1114,36 +1116,39 @@ fn minimum_range_inhibits_bore_release_at_the_inclusive_boundary() {
             }
             assert!(s.own().bore_observation.is_some());
             let rounds = s.own().rounds(0);
-            if distance < 1000. {
-                assert_eq!(s.own_view().readiness(l), Readiness::MinimumRange, "{name}");
+            assert_eq!(s.own_view().readiness(l), Readiness::Ready, "{name}");
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            );
+            assert!(s.own().rounds(0) < rounds);
+            assert_eq!(s.projectiles.len(), 1);
+            let flight = s.projectiles[0].guidance.as_ref().unwrap();
+            assert!(!flight.unguided);
+            // Active radar acquires after launch, unlike the mounted IR seeker.
+            for _ in 0..DWELL + 1 {
                 s.step(
                     &[OwnshipInput {
                         aircraft: 0,
-                        held: true,
+                        held: false,
                         launcher: l,
                     }],
                     |_, _| 0.,
                 );
-                assert_eq!(s.own().rounds(0), rounds);
-                assert!(s.projectiles.is_empty());
-            } else {
-                assert_eq!(s.own_view().readiness(l), Readiness::Ready, "{name}");
-                s.step(
-                    &[OwnshipInput {
-                        aircraft: 0,
-                        held: true,
-                        launcher: l,
-                    }],
-                    |_, _| 0.,
-                );
-                assert!(s.own().rounds(0) < rounds);
             }
+            let flight = s.projectiles[0].guidance.as_ref().unwrap();
+            assert_eq!(flight.seeker.target, Some(7), "{name}");
+            assert!(flight.eligible(&s.own().config.stations[0].weapon, &s.targets[0]));
         }
     }
 }
 
 #[test]
-fn blind_shot_rejects_close_contacts_but_retains_valid_terminal_tracking() {
+fn blind_shot_acquires_close_contacts_and_retains_terminal_tracking() {
     for name in ["AIM120.JT", "AIM9M.JT"] {
         let mut w = weapon(name);
         w.seeker.zones[1].minimum_range = 1000;
@@ -1153,8 +1158,8 @@ fn blind_shot_rejects_close_contacts_but_retains_valid_terminal_tracking() {
         for _ in 0..DWELL + 1 {
             guide(&mut p, &w, &[t.clone()], &sensors, &|_, _| false);
         }
-        assert_eq!(p.target, None);
-        assert!(!p.guidance.as_ref().unwrap().eligible(&w, &t));
+        assert_eq!(p.target, Some(7));
+        assert!(p.guidance.as_ref().unwrap().eligible(&w, &t));
         t.position[2] = 1000.;
         for _ in 0..DWELL {
             guide(&mut p, &w, &[t.clone()], &sensors, &|_, _| false);
@@ -1171,7 +1176,7 @@ fn blind_shot_rejects_close_contacts_but_retains_valid_terminal_tracking() {
 }
 
 #[test]
-fn blind_shot_cannot_damage_inside_minimum_range() {
+fn blind_shot_can_damage_inside_minimum_range_when_fuze_is_armed() {
     for name in ["AIM120.JT", "AIM9M.JT"] {
         let mut s = fixture(true);
         let mut w = weapon(name);
@@ -1191,7 +1196,7 @@ fn blind_shot_cannot_damage_inside_minimum_range() {
             }],
             |_, _| 0.,
         );
-        assert_eq!(s.targets[0].hp, 200, "{name}");
+        assert!(s.targets[0].hp < 200, "{name}");
     }
 }
 
@@ -1603,8 +1608,8 @@ fn armed_ir_bore_ignores_radar_power_without_designation() {
         }],
         |_, _| 0.,
     );
-    assert!(s.own_view().weapon_observation(l).is_none());
-    assert_eq!(s.own_view().readiness(l), Readiness::MinimumRange);
+    assert!(s.own_view().weapon_observation(l).is_some());
+    assert_eq!(s.own_view().readiness(l), Readiness::Ready);
 }
 
 #[test]
@@ -2813,5 +2818,133 @@ fn sagging_air_missiles_and_sams_hold_the_live_and_predicted_intercept() {
                 "{name} {height}: path holding must reduce miss"
             );
         }
+    }
+}
+
+#[test]
+fn infrared_aspect_acquisition_matches_each_store_and_afterburner_extends_reach() {
+    for name in [
+        "AIM9M.JT", "AIM9X.JT", "AA11.JT", "AA11B.JT", "AA8.JT", "R550.JT", "R27T.JT", "R27ET.JT",
+        "PL7.JT", "AIM9B.JT", "AA2.JT",
+    ] {
+        let mut w = weapon(name);
+        w.seeker.signature = 2;
+        w.seeker.zones[0].maximum_range = 50_000;
+        let all = !matches!(name, "AIM9B.JT" | "AA2.JT");
+        assert_eq!(w.infrared_all_aspect(), all, "{name}");
+        let mut t = target(7, [0., 1000., 18_228.], 200, 0x80);
+        t.basis = Basis::new(std::f64::consts::PI, 0., 0.);
+        let quality = seeker::heat_quality(&w, &t, [0., 1000., 0.], 50_000.);
+        assert_eq!(quality >= 0.25, all, "head-on at 3 nm {name}");
+        t.position[2] = 21_000.;
+        assert_eq!(seeker::heat_quality(&w, &t, [0., 1000., 0.], 50_000.), 0.);
+        t.heat = Heat::Engine {
+            on: true,
+            throttle: 1.,
+            afterburner: true,
+        };
+        assert_eq!(
+            seeker::heat_quality(&w, &t, [0., 1000., 0.], 50_000.) >= 0.25,
+            all,
+            "burner {name}"
+        );
+        t.basis = Basis::new(0., 0., 0.);
+        assert!(
+            seeker::heat_quality(&w, &t, [0., 1000., 0.], 50_000.) >= 0.25,
+            "rear {name}"
+        );
+    }
+}
+
+#[test]
+fn head_on_ir_has_search_and_lock_tone_then_fires_without_radar() {
+    let mut s = fixture(true);
+    let mut w = weapon("AIM9M.JT");
+    w.seeker.zones[0].maximum_range = 50_000;
+    w.seeker.zones[1].maximum_range = 50_000;
+    s.own_mut().config.stations[0].weapon = w;
+    let mut t = target(7, [0., 1000., 3. * missiles::NMI], 200, 0x80);
+    t.basis = Basis::new(std::f64::consts::PI, 0., 0.);
+    s.targets.push(t);
+    let l = Launcher {
+        radar: false,
+        radar_power: false,
+        ..range_launcher()
+    };
+    for tick in 0..DWELL + 1 {
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
+        if tick == 1 {
+            assert!(s.own_view().seeker_tone(l).is_some_and(|t| !t.locked));
+        }
+    }
+    assert!(
+        s.own_view()
+            .seeker_tone(l)
+            .is_some_and(|t| t.locked && !t.radar)
+    );
+    s.step(
+        &[OwnshipInput {
+            aircraft: 0,
+            held: true,
+            launcher: l,
+        }],
+        |_, _| 0.,
+    );
+    assert_eq!(s.projectiles[0].target, Some(7));
+    assert!(!s.projectiles[0].guidance.as_ref().unwrap().unguided);
+}
+
+#[test]
+fn cued_close_releases_cover_sarh_active_and_ir() {
+    for name in [
+        "AA10.JT",
+        "R27ER.JT",
+        "AIM7.JT",
+        "AIM120.JT",
+        "AIM9M.JT",
+        "R27T.JT",
+        "R27ET.JT",
+    ] {
+        let mut s = fixture(true);
+        s.own_mut().config.stations[0].weapon = weapon(name);
+        s.own_mut().config.stations[0].weapon.seeker.zones[1].minimum_range = 2000;
+        s.targets
+            .push(target(7, [0., 1000., 0.2 * missiles::NMI], 200, 0x80));
+        let l = range_launcher();
+        for tick in 0..180 {
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            );
+            if tick == 1 {
+                s.command(0, Command::DesignateTarget(7), l);
+            }
+        }
+        assert_eq!(s.own().launch_mode, LaunchMode::Cued, "{name}");
+        assert_eq!(s.own_view().readiness(l), Readiness::Ready, "{name}");
+        let rounds = s.own().rounds(0);
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: true,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
+        assert!(s.own().rounds(0) < rounds, "{name}");
+        let shot = &s.projectiles[0];
+        assert_eq!(shot.target, Some(7), "{name}");
+        assert!(!shot.guidance.as_ref().unwrap().unguided, "{name}");
     }
 }

@@ -53,6 +53,9 @@ pub fn weapon_label<'a>(
     font: &'a Sprite,
 ) -> impl Fn(&mut Weapon) + 'a {
     move |w: &mut Weapon| {
+        if tore_formats::weapons::corrections::identity(&w.source).is_some() {
+            return;
+        }
         if let Some(bytes) = data.get(&w.source)
             && let Ok(brf) = tore_formats::aircraft::Brf::parse(bytes)
             && let Ok(names) = brf.strings("si_names")
@@ -1381,12 +1384,21 @@ impl Ordnance {
         // in the strip under the title bar; the lobby's one band is that
         // strip, so there it gives way to the other two (slice BQ, B24).
         let warning = laser_warning(&self.loadout);
+        let identity = match self.selected {
+            Some(CatalogEntry::Weapon(index)) => {
+                tore_formats::weapons::corrections::identity(&self.catalog[index].source)
+                    .map(|(_, long)| long)
+            }
+            _ => None,
+        };
         if let Some(message) = &self.message {
             notice(&mut c, font, message, self.lobby);
         } else if let Some(words) = warning {
             band(&mut c, font, words, self.lobby, WARNING_INK);
+        } else if let Some(name) = identity {
+            notice(&mut c, font, name, self.lobby);
         }
-        if !(self.lobby && (self.message.is_some() || warning.is_some()))
+        if !(self.lobby && (self.message.is_some() || warning.is_some() || identity.is_some()))
             && let Some(words) = sensor_helper(&self.loadout, !self.designator_catalog.is_empty())
         {
             band(&mut c, font, &words, true, HELPER_INK);
@@ -1537,7 +1549,11 @@ fn card(
         );
     }
     let font = &sprites[if selected { "WPNYELLOW" } else { "QUICKFONT" }];
-    let mut name = w.name.clone();
+    let mut name = if tore_formats::weapons::corrections::identity(&w.source).is_some() {
+        w.name.split(" (").next().unwrap_or(&w.name).to_owned()
+    } else {
+        w.name.clone()
+    };
     while text_width(font, &name) > 111 && !name.is_empty() {
         name.pop();
     }
@@ -1669,7 +1685,13 @@ fn tank_thumbnail<'a>(
     sprites.get(&format!("${}.PIC", tank.source.trim_end_matches(".GAS")))
 }
 fn thumbnail<'a>(sprites: &'a BTreeMap<String, Sprite>, weapon: &Weapon) -> Option<&'a Sprite> {
-    sprites.get(&format!("${}.PIC", weapon.source.trim_end_matches(".JT")))
+    let source =
+        if tore_formats::weapons::corrections::R27_DERIVED.contains(&weapon.source.as_str()) {
+            "AA10.JT"
+        } else {
+            &weapon.source
+        };
+    sprites.get(&format!("${}.PIC", source.trim_end_matches(".JT")))
 }
 fn card_outline(c: &mut Canvas, x: i32, y: i32, selected: bool) {
     let edge = if selected {

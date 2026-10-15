@@ -574,6 +574,12 @@ pub(crate) fn station_specs_loaded(
             tore_sim::ai::weapon_service::Delay::quarters(u32::from(w.guidance.track_t));
         spec.damage_vs_category = f64::from(w.damage.by_class[0]);
         spec.mount = station.mount;
+        spec.infrared_envelope = (w.flags & 0x10000 != 0
+            && w.seeker_kind() == tore_formats::weapons::SeekerKind::Infrared)
+            .then_some((
+                w.infrared_all_aspect(),
+                f64::from(w.seeker.zones[0].maximum_range),
+            ));
         spec.requires_radar = w.seeker_kind() == tore_formats::weapons::SeekerKind::SemiActiveRadar;
         spec.requires_sensor = w.flags & 0x400 != 0;
         let zone = w.seeker.zones[1];
@@ -601,6 +607,20 @@ fn hovers(flight: &flight::State) -> bool {
                 | tore_sim::models::variety::LiftKind::Tiltrotor
         )
     })
+}
+
+/// Jet throttle is a heat input. Rotor collective is not engine heat; retain
+/// the existing observation (including a handoff's engine snapshot).
+fn aircraft_heat(flight: &flight::State, previous: seeker::Heat) -> seeker::Heat {
+    if hovers(flight) {
+        previous
+    } else {
+        seeker::Heat::Engine {
+            on: flight.engine,
+            throttle: flight.throttle,
+            afterburner: flight.burner,
+        }
+    }
 }
 
 /// Puts an AI aircraft on the hybrid flight model, seeded as the AI probe
@@ -2638,6 +2658,13 @@ impl AiWings {
             maximum_speed: maximum_speed(player),
             is_aircraft: true,
             is_fighter: true,
+            infrared_strength: human.signature.infrared.max(0.) / 100.
+                * seeker::Heat::Engine {
+                    on: player.engine,
+                    throttle: player.throttle,
+                    afterburner: player.burner,
+                }
+                .factor(),
             human_controlled: true,
             alive: human.alive(),
             destroyed: player_hp <= 0,
@@ -2857,6 +2884,9 @@ impl AiWings {
                 maximum_speed: maximum_speed(f),
                 is_aircraft: true,
                 is_fighter: true,
+
+                infrared_strength: target.map_or(1., |t| t.signature.infrared.max(0.) / 100.)
+                    * aircraft_heat(f, target.map_or(seeker::Heat::Unknown, |t| t.heat)).factor(),
                 human_controlled: false,
                 alive: actor.alive(),
                 destroyed: target.is_some_and(|t| t.hp <= 0),
@@ -2913,6 +2943,7 @@ impl AiWings {
             target.position = f.position;
             target.velocity = f.velocity;
             target.basis = Basis::new(f.yaw, f.pitch, f.bank);
+            target.heat = aircraft_heat(f, target.heat);
             target.radar_emitting = f.radar;
             target.on_ground = f.research.as_ref().is_some_and(|r| r.on_ground);
             target.wreck_power = f.wreck_power(target.wreck_power.engine_count.max(1));
@@ -3982,6 +4013,7 @@ mod tests {
                 .all(|id| !wings.objective_for_player(id))
         );
         let contact = |id, position| TargetView {
+            infrared_strength: 1.,
             id,
             side: ENEMY_SIDE,
             position,
@@ -4235,6 +4267,7 @@ mod tests {
     fn a_wing_led_by_any_human_follows_that_human() {
         let (mut wings, mut targets, _) = two_led_wings();
         let led = |position: Vector, id: u32| WorldObject {
+            infrared_strength: 1.,
             id,
             ..player_object(position)
         };
@@ -4573,6 +4606,7 @@ mod tests {
             .collect();
         assert_eq!(members, [(1, 1), (2, 3)]);
         let object = |id, alive| WorldObject {
+            infrared_strength: 1.,
             id,
             alive,
             destroyed: !alive,
@@ -4651,6 +4685,7 @@ mod tests {
         };
         let (mut wings, mut targets) = led_wing(2, &[slot(20, 0), slot(21, 1)]);
         let object = |id, alive| WorldObject {
+            infrared_strength: 1.,
             id,
             alive,
             destroyed: !alive,
@@ -4796,6 +4831,7 @@ mod tests {
         // A brand new aircraft as member 4 of the wing, after the flight has
         // lost its human leader and re-formed: it takes the rank behind it.
         let object = |alive| WorldObject {
+            infrared_strength: 1.,
             id: 20,
             alive,
             destroyed: !alive,
@@ -4925,6 +4961,42 @@ mod tests {
         wings.mission.actor_mut(2).unwrap().set_dummy();
         wings.set_flight_model(AiFlightModel::AllHybrid).unwrap();
         assert_eq!(hybrid(&wings), [true, false, true]);
+    }
+
+    #[test]
+    fn infrared_pose_refresh_preserves_rotor_handoff_heat_and_updates_jets() {
+        let retained = seeker::Heat::Engine {
+            on: true,
+            throttle: 0.7,
+            afterburner: false,
+        };
+        for rotor in [true, false] {
+            let (mut wings, mut targets) = led_wing_of(1, &[], 3000., || {
+                if rotor {
+                    crate::test_support::powered_profile(AircraftId::Mi24)
+                } else {
+                    aircraft()
+                }
+            });
+            targets[0].heat = retained;
+            let f = wings.mission.actor_mut(1).unwrap().flight_mut();
+            f.engine = true;
+            f.throttle = 0.2;
+            f.burner = !rotor;
+            wings.mirror_pose_out(&mut targets);
+            assert_eq!(
+                targets[0].heat,
+                if rotor {
+                    retained
+                } else {
+                    seeker::Heat::Engine {
+                        on: true,
+                        throttle: 0.2,
+                        afterburner: true,
+                    }
+                }
+            );
+        }
     }
 
     #[test]
@@ -5308,6 +5380,7 @@ mod tests {
 
     pub(super) fn player_object(position: Vector) -> WorldObject {
         WorldObject {
+            infrared_strength: 1.,
             id: PLAYER_ID,
             side: FRIENDLY_SIDE,
             position,
