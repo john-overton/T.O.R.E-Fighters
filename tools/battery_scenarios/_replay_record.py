@@ -371,8 +371,51 @@ def head_ir_problems(work: Path, output: str) -> list[str]:
     return problems
 
 
+def unlocked_release_problems(work: Path, output: str, *, mode: str) -> list[str]:
+    rows = [json.loads(line) for line in (work / "log" / "log.jsonl").read_text().splitlines()]
+    launches = [r for r in rows if r.get("kind") == "weapon.launch" and r.get("subject") == 0]
+    if not launches:
+        return ["manual player missile did not launch"]
+    problems = []
+    shots = {r.get("fields", {}).get("projectile") for r in launches}
+    guidance = [{n["label"]: n.get("value") for n in r.get("nodes", [])}
+                for r in rows if r.get("type") == "tree"
+                and r.get("channel") == "weapon.guidance" and r.get("subject") in shots]
+    if mode in ("maddog", "unlocked-ir"):
+        if not guidance or guidance[0].get("Mode") != "boresight" or guidance[0].get("Target") is not None:
+            problems.append("unlocked shot did not record independent targetless search")
+    if mode == "maddog":
+        problems += fox_three_problems(work, output)
+        if not any(g.get("Seeker") == "PITBULL" for g in guidance):
+            problems.append("recorded guidance tree never shows PITBULL")
+        if not any(r.get("kind") == "weapon.pitbull" and r.get("subject") == 0 for r in rows):
+            problems.append("maddog failed to acquire the off-bore target")
+    elif mode == "unlocked-ir":
+        if "mode=Cued" not in output or "locked: true" in output:
+            problems.append("IR shot was not cued without seeker lock")
+    elif mode == "max-range":
+        if "readiness=MaximumRange" not in output:
+            problems.append("shot did not retain MAX RANGE advisory")
+        if any(r.get("kind") == "combat.hit" and r.get("subject") == 0 for r in rows):
+            problems.append("beyond-energy shot unexpectedly hit")
+    if mode != "maddog" and not any(r.get("kind") == "weapon.outcome"
+            and r.get("subject") == 0 for r in rows):
+        problems.append("shot has no recorded physical outcome")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     out: list[Scenario] = []
+    for mode in ["maddog", "unlocked-ir", "max-range"]:
+        out.append(record_scenario(
+            f"replay-rec-missile-{mode}",
+            ["--aircraft", "f14" if mode == "max-range" else "f18", "--ai-probe-ticks", "18000", "--probe-fight", "1:1",
+             "--probe-enemy-aircraft", "mig29", "--probe-geometry", "rear",
+             "--probe-missile-release", mode, "--scope-range", "150", "--ai-mission", "hold"],
+            timeout=300, same_run=True,
+            extra_check=lambda work, output, mode=mode: unlocked_release_problems(work, output, mode=mode),
+            notes="Player release advisories and independent seeker flight, recorded and replayed without rendering",
+        ))
     out.append(record_scenario(
         "replay-rec-fox-three",
         ["--aircraft", "f18", "--ai-probe-ticks", "7200", "--separation", "5",

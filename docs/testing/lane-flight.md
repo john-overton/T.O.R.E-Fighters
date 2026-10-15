@@ -82,6 +82,7 @@ rule](../spec/ordnance-presentation.md#novelty-bombs-are-cheat-only)).
 | `a2g-harm-page` | The same F-4G on the HARM page (M), T to the Straight Flush | The designation turns the cue to CUED; the HARM leaves in CUED at the radar and kills it |
 | `a2g-antiship` | Over `~QUSFLT`: an F/A-18D's AGM-84A and a Rafale's AM-39 at the Krivak designated on the A-G page | Launched midcourse at the Krivak, the seeker goes active on it and it is hit |
 | `a2g-sarh` | Over `~QUCOL`: a MiG-23's AS-7 on a tank designated on the A-G page, then the same with the A-G page turned off two seconds after launch | On the track it kills its tank, never unguided; with the page off it loses its target for good (status Lost, unguided) and the tank is not hit |
+| `a2g-sarh-uncued` | A MiG-23 AS-7 released at 0.5 seconds with no A-G track; the page opens at 3 seconds and designation follows | Initial targetless Search without permanent disablement, then Locked on later illumination; `--attack sarh-uncued` uses ordinary player controls |
 
 ## AI strike driver
 

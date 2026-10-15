@@ -200,6 +200,35 @@ impl Readiness {
                 | Self::GunObscured
         )
     }
+    /// Player launch advisories do not inhibit a missile release. Hardware,
+    /// ammunition, terrain and surface-role restrictions still apply.
+    pub fn player_missile_may_fire(self, w: &Weapon) -> bool {
+        if self == Self::Ready {
+            return true;
+        }
+        if is_gun(w) || w.seeker.signature == 0 {
+            return false;
+        }
+        if matches!(self, Self::MaximumRange | Self::RadarAcquiring) {
+            return true;
+        }
+        let free_search = missiles::Profile::for_weapon(w).is_some_and(|p| {
+            p.role == TargetRole::Aircraft
+                || matches!(p.guidance, Guidance::Active | Guidance::Supported)
+        });
+        free_search
+            && matches!(
+                self,
+                Self::NoTarget
+                    | Self::NoRadar
+                    | Self::RadarOff
+                    | Self::RadarFailed
+                    | Self::RadarCoverage
+                    | Self::RadarSearchOnly
+                    | Self::FieldOfView
+                    | Self::TrackLost
+            )
+    }
     pub fn label(self) -> &'static str {
         match self {
             Self::Ready => "READY",
@@ -2513,7 +2542,8 @@ impl<'a> LauncherView<'a> {
         let solution = self.launch_solution();
         // A closed bay only delays a shot: the trigger opens it, so the
         // closed bay shows while a release waits on the doors.
-        if solution == Readiness::Ready
+        if solution
+            .player_missile_may_fire(&self.view.own.config.stations[self.view.own.selected].weapon)
             && self.view.own.bay_waits(launcher)
             && self.view.own.bay_release.is_some()
         {
@@ -4692,20 +4722,20 @@ impl State {
                     && own.bay_release.is_some_and(|(station, pressed)| {
                         station != index
                             || self.tick.saturating_sub(pressed) > BAY_RELEASE_TICKS
-                            || !matches!(
-                                own.release_readiness,
-                                Readiness::Ready | Readiness::BayClosed
-                            )
+                            || !(own.release_readiness == Readiness::BayClosed
+                                || own
+                                    .release_readiness
+                                    .player_missile_may_fire(&own.config.stations[index].weapon))
                     })
                 {
                     own.bay_release = None;
                 }
-                // An AC-130 gun fires with or without a solution; any other weapon
-                // needs READY.
+                // Guns and missiles retain advisory cues without inhibiting release.
                 let allowed = if grouped {
                     own.release_readiness.gun_may_fire()
                 } else {
-                    own.release_readiness == Readiness::Ready
+                    own.release_readiness
+                        .player_missile_may_fire(&own.config.stations[index].weapon)
                 } && !bay_waits;
                 let station = &own.config.stations[index];
                 let w = &station.weapon;
@@ -4744,7 +4774,7 @@ impl State {
                     }
                     None => polled,
                 };
-                if polled && bay_waits && own.release_readiness == Readiness::Ready {
+                if polled && bay_waits && own.release_readiness.player_missile_may_fire(w) {
                     own.bay_release = Some((index, self.tick));
                     own.release_readiness = Readiness::BayClosed;
                 }
@@ -4830,24 +4860,69 @@ impl State {
                                 .slot(index)
                                 .map(|slot| (slot, group.headings[slot], group.elevations[slot]))
                         });
-                        let target = if self.weapon_rules == Rules::Spec
-                            && !own.guidance_available(launcher)
-                        {
+                        let profile = missiles::Profile::for_weapon(w);
+                        let designated = own.designated();
+                        let supported = designated.is_some_and(|id| {
+                            launcher.radar_power
+                                && launcher.radar
+                                && !own.radar_failed
+                                && agm::ownship_supports(
+                                    own,
+                                    profile,
+                                    w,
+                                    &launcher,
+                                    id,
+                                    self.targets.iter().find(|t| t.id == id),
+                                )
+                        });
+                        let mounted_lock = own.mounted.acquired
+                            && matches!(own.mounted.status, Status::Locked | Status::Pitbull);
+                        // An unsupported player shot starts with its own search, never
+                        // a hidden cockpit target. Supported SARH retains identity so
+                        // later illumination can revive guidance.
+                        let searching = self.weapon_rules == Rules::Spec
+                            && profile.is_some_and(|p| match p.guidance {
+                                Guidance::Active => {
+                                    !supported
+                                        || own.launch_mode == LaunchMode::Boresight
+                                        || own.release_readiness == Readiness::FieldOfView
+                                }
+                                Guidance::Infrared => {
+                                    !mounted_lock
+                                        || (own.launch_mode == LaunchMode::Cued
+                                            && own.mounted.target != designated)
+                                }
+                                _ => false,
+                            });
+                        let permanently_unguided = self.weapon_rules == Rules::Spec
+                            && profile.is_some_and(|p| {
+                                !p.guidance_available(launcher.radar_power)
+                                    && p.role != TargetRole::Aircraft
+                                    && !matches!(p.guidance, Guidance::Active | Guidance::Supported)
+                            });
+                        let target = if searching || permanently_unguided {
                             None
                         } else if own.launch_mode == LaunchMode::Boresight {
                             own.mounted.target
                         } else {
-                            own.designated()
+                            designated
+                        };
+                        // Unsupported SARH uses the existing uncued mode to retain
+                        // search/reacquisition through later support changes. AI and
+                        // supported surface releases keep their cued track policy.
+                        let waiting_for_support = self.weapon_rules == Rules::Spec
+                            && !supported
+                            && profile.is_some_and(|p| p.guidance == Guidance::Supported);
+                        let mode = if searching || waiting_for_support {
+                            LaunchMode::Boresight
+                        } else {
+                            own.launch_mode
                         };
                         let guidance = missiles::Profile::for_weapon(w)
                             .filter(|_| self.weapon_rules == Rules::Spec)
                             .map(|profile| {
-                                let mut flight = Flight::new(
-                                    profile,
-                                    own.launch_mode,
-                                    target,
-                                    launcher.position,
-                                );
+                                let mut flight =
+                                    Flight::new(profile, mode, target, launcher.position);
                                 flight.qualified_target = target.filter(|id| {
                                     self.targets
                                         .iter()
@@ -4865,12 +4940,13 @@ impl State {
                                 // A surface radar weapon leaves for the point
                                 // the A-G track gives; the track refreshes it.
                                 if profile.needs_air_ground()
+                                    && supported
                                     && let Some(contact) =
                                         target.and_then(|id| own.sensors.observation(id))
                                 {
                                     flight.last_intercept = Some(contact.position);
                                 }
-                                if !profile.guidance_available(launcher.radar_power) {
+                                if permanently_unguided {
                                     flight.unguided = true;
                                     flight.enabled = false;
                                     flight.seeker = Seeker::default();
@@ -5201,7 +5277,13 @@ impl State {
                     let own = &ships[row.index];
                     p.guidance
                         .as_ref()
-                        .and_then(|flight| flight.seeker.target)
+                        .and_then(|flight| {
+                            flight.seeker.target.or_else(|| {
+                                (flight.profile.guidance == Guidance::Supported)
+                                    .then(|| own.designated())
+                                    .flatten()
+                            })
+                        })
                         .map(|id| ActorSupport {
                             owner: p.owner,
                             supported: agm::ownship_supports(
@@ -10665,6 +10747,11 @@ fn guide_owned<'a>(
     let supported = flight
         .seeker
         .target
+        .or_else(|| {
+            (profile.guidance == Guidance::Supported)
+                .then(|| support.and_then(|s| s.observation.map(|o| o.id)))
+                .flatten()
+        })
         .filter(|id| {
             support.is_some_and(|answer| {
                 answer.supported
@@ -10684,9 +10771,9 @@ fn guide_owned<'a>(
                 .and_then(|answer| answer.observation)
                 .filter(|o| o.id == id)
         });
-    // A supported surface missile (AS-7, AS-15) whose A-G track drops loses
-    // its target for good and flies on unguided (retail data).
-    if profile.rides_air_ground() && supported.is_none() {
+    // Cued surface shots retain the A-G permanent-loss policy. An uncued
+    // player SARH release waits for later illumination instead.
+    if profile.rides_air_ground() && flight.mode == LaunchMode::Cued && supported.is_none() {
         agm::blind(p);
         return;
     }
@@ -10718,8 +10805,10 @@ fn guide_owned<'a>(
             .is_some_and(|(point, distance)| missiles::length(sub(point, p.position)) <= distance);
     }
     if flight.enabled {
-        let cap = (flight.mode == LaunchMode::Boresight && !flight.seeker.acquired)
-            .then(|| profile.search_cap());
+        let cap = (flight.mode == LaunchMode::Boresight
+            && !flight.seeker.acquired
+            && !matches!(profile.guidance, Guidance::Active | Guidance::Supported))
+        .then(|| profile.search_cap());
         let basis = Basis::new(
             p.direction[0].atan2(p.direction[2]),
             p.direction[1].atan2(p.direction[0].hypot(p.direction[2])),
@@ -10772,6 +10861,7 @@ fn guide_owned<'a>(
             })
             .collect();
         if profile.guidance == Guidance::Supported && !observations.is_empty() {
+            flight.seeker.target = supported.map(|o| o.id);
             flight.seeker.candidate = flight.seeker.target;
             flight.seeker.dwell = missiles::DWELL;
         }

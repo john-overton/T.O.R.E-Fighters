@@ -136,6 +136,10 @@ are `<stem>.5K` in `FA_2.LIB`.
 
 ### Weapon launch calls
 
+Player active maddog releases retain the targetless Fox three call. Launch
+advisories do not suppress a call for a missile that actually leaves the rail.
+See [player release rules](missiles.md#player-release-advisories-and-maddog).
+
 - **Trigger.** A weapon release, for players, wingmen and AI. Guided missiles
   with no target also announce their Fox class, requested by John on 2026-10-15.
   Targetless Fox calls are guaranteed, with a fitted 2-second global cooldown

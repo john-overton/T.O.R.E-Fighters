@@ -152,8 +152,8 @@ AI jet observations refresh engine heat; rotorcraft retain their supplied heat
 observation, including a handoff snapshot. Collective is not jet throttle.
 
 The mounted seeker produces growl while acquiring and locked tone after dwell.
-CUED IR can fire with its own lock, including head-on. BORESIGHT still permits
-an uncued launch. AI employment reads the same IR response and observed target
+CUED IR can fire with or without its own lock, including head-on. A release
+without lock starts BORE search. AI employment reads the same IR response and observed target
 strength, retaining its minimum range, pointing, cadence and tactical discipline.
 The player readout drives both local and client tone; recordings retain tone
 changes for replay audio. [USAF Sidewinder](https://www.af.mil/About-Us/Fact-Sheets/Display/Article/104557/aim-9-sidewinder/)
@@ -278,8 +278,9 @@ Minimum range does not suppress an aircraft-launched missile seeker. Half-angles
 the 0x7fff source value, whose wide-angle handling needs review, not a normal
 180-degree cone. These columns describe imported geometry, not proven detection
 range or completed seeker behavior. The uncued-search column contains agent-fitted
-half-angle caps, separately from the imported seeker envelope. Each axis uses
-the smaller of its fitted cap and its usable source limit.
+half-angle caps, separately from the imported seeker envelope. IR search uses the smaller of the fitted cap and source limit. Active airborne
+maddog search now uses the source limits without the fitted cap; the table
+caps for active stores describe the cockpit cue only.
 
 ## Variety-default weapon extension
 
@@ -457,7 +458,7 @@ kept alongside. Snapshot
 the mode at launch; changing modes later cannot retask missiles in flight.
 
 In BORESIGHT, an armed, operational, loaded weapon can fire without designation,
-installed FLIR or seeker lock, provided radar power is on. IR searches forward on the rail
+installed FLIR, radar power or seeker lock. IR searches forward on the rail
 and after release. Active radar guidance searches only after release, enabling
 its seeker immediately and requiring acquisition before reporting PITBULL.
 A separate prelaunch estimate can identify a provisional bore contact. With a lock, retain that target; without one, fly on
@@ -470,8 +471,9 @@ The trigger opens an internal bay, with or without a cockpit designation ([F-22 
 The fitted bore is a **5-degree circular half-angle** for independent seekers,
 limited by the imported seeker volume. John requested a smaller bore on 2026-09-17; the latest "5%" wording is
 interpreted as five degrees. The half-angle interpretation preserves the existing
-meaning of the setting. It follows the rail axis
-before launch and missile nose afterward, independent of camera look and zoom.
+meaning of the setting. It follows the rail axis before launch and the IR missile nose afterward,
+independent of camera look and zoom. Active airborne search uses the imported
+seeker volume without that five-degree cap.
 Mounted bore IR stays inside the circle even after acquisition. Released seekers
 use imported tracking limits after acquisition.
 No source cone value is overwritten. Keep normal terrain, range, target-class
@@ -633,7 +635,9 @@ surface targets (the list `missiles::SURFACE_ROLE`). Other reviewed implemented
 profiles require airborne aircraft. Of the surface weapons the infrared ones and
 the anti-radiation ones fire in BORE as well as on a designation (slice W2,
 [air-to-ground](air-to-ground.md#missiles-and-the-harm-boresight-cue)); the
-radar ones need a designation on the A-G track. Aircraft that land or
+radar ones use the A-G track for supported cueing. Player active surface
+missiles can instead launch maddog; unsupported player surface SARH shots
+wait for later illumination under the player release rules below. Aircraft that land or
 are assigned another damage-test category do not become surface targets.
 The manual's air-to-ground and IR sections support Maverick's surface role and
 its separate lock tone. Surface IR uses imported thermal signature without
@@ -665,7 +669,7 @@ presence and collision; the renderer does not decide what is hittable.
 Keep four independent concepts:
 
 1. **Launch envelope:** imported altitude/angle limits,
-   plus a predicted intercept, control cued firing permission. The imported
+   with predicted intercept for advisory cues, not a maximum-range trigger gate. The imported
    nominal launch maximum does not cap the engagement estimate. BORESIGHT explicitly permits uncued
    release as specified above. Being in range does not promise a hit.
 2. **Seeker envelope:** onboard acquisition/retention limits govern observations
@@ -1062,17 +1066,49 @@ gap. The bezel and bottom buttons keep the normal pointer. This applies when
 the radar is off or sensor data is unavailable too. Contact projection and
 selection tolerance do not change. Scaling uses the displayed instrument bounds.
 
-## Radar-off unguided release
+## Player release advisories and maddog
 
-**Opinionated, requested by John on 2026-09-17.** In the spec weapon rules,
-radar power OFF disables radar-missile acquisition, boresight, seeker tones
-and target-derived weapon cues. IR guidance remains independent of radar power. Arming follows weapon/NAV selection.
-An armed radar missile may release without designation while radar power is off, with
-normal safe, bay, ammunition and station gates. The HUD omits DUMB and IN RNG for that unguided release. Such a shot never acquires or steers, even if radar power returns later.
-It retains normal propulsion, inherited velocity, fuze timing, target-role damage gates. Radar power returning enables acquisition for the
-next shot. Already airborne guided shots retain their own guidance rules; power
-off does not retroactively turn an independent shot dumb. Compatibility rules
-remain unchanged. This is a requested game rule, not a claimed retail behavior.
+**Opinionated, requested by John on 2026-10-15.** MAX RANGE and a failed
+intercept solution are advice, not player missile trigger inhibits, including
+the compatibility weapon adapter. The HUD keeps the range scale, out-of-range
+marker and MAX RANGE. SAFE, ammunition, station failure, launcher death,
+projectile capacity, cadence and bay delay still apply. Surface target-role,
+terrain and emitter restrictions remain separate; lack of A-G support is
+also advisory for player radar missiles.
+
+A player may release an A2A missile with no target or usable lock. An unlocked
+IR release starts the existing BORE search with no inherited target, within
+its five-degree circular search cap and imported seeker envelope. It can
+acquire a different aircraft, or fly out without acquisition. Existing flare
+seduction remains available after acquisition. SARH launches without support
+fly without steering until the launcher illuminates a target; a designated identity
+is retained, and an initially targetless shot can take the launcher's later
+illuminated designation. It never steers from hidden target coordinates.
+This also applies when the radar was off at release. An unsupported player
+surface SARH release is recorded as BORESIGHT, retains that recoverable
+state, and uses later A-G illumination. It keeps its first acquired identity.
+Supported-at-launch CUED surface shots and AI shots retain their separately
+specified A-G retarget/loss policy.
+
+An active-radar player missile without supported cueing, including radar off,
+no designation, no lock or a target outside the launch acquisition cone,
+starts active BORE search immediately (maddog). Its airborne search uses the
+imported zone-0 seeker field of view and range, without the cockpit's fitted
+five-degree cue cap. This applies by guidance classification, including
+AIM-120, AIM-54C, AA-12, MICA-EM and AAM-L. Motor, turning, acquisition dwell
+(30 ticks, 0.25 seconds), signature, terrain, notch and lifetime rules remain.
+The seeker selects an available return deterministically by signal quality,
+then angular centering, range and ID. It has no side/IFF filter: a friendly
+can be acquired. Collision and damage still follow the friendly-fire setting. After acquisition, the existing same-target memory
+and reacquisition rules apply. No return means continued search until expiry.
+These selection details reuse the fitted seeker, not measured real hardware.
+
+The recorded guidance tree already stores BORESIGHT/CUED and ACTIVE SEARCH,
+ACQUIRING, PITBULL, MEMORY, LOST and EXPIRED. The replay banner uses that
+current recorded seeker state before older guidance-event labels. Active radar
+BORESIGHT is labeled MADDOG using the existing tree guidance description. No new
+record format or state is needed. Targetless active launches retain Fox three.
+AI employment keeps its minimum, maximum, lock and support discipline.
 
 ## IR independence and retail-reference readouts
 
@@ -1092,7 +1128,7 @@ intercept prediction before displaying the blinking inferred diamond. Radar bore
 candidates are additionally limited by the selected scope range and the aircraft
 radar's imported tracking maximum. These are prelaunch limits, not restrictions
 on an already released independent seeker. Missing aircraft radar gives no radar
-bore candidates. Radar-off radar missiles still release unguided, but no DUMB
+bore candidates. Radar-off active missiles launch maddog; SARH waits for illumination. No DUMB
 label appears in the lower HUD. IR guidance and tones are independent of power.
 
 Use the supplied retail screenshots as presentation references, not proof of
@@ -1110,8 +1146,7 @@ timing remain fitted.
 Implementation revision requested by John on 2026-09-17. The displayed maximum
 is an **agent-fitted kinematic estimate**. The imported nominal launch maximum
 is not a cap. Active radar shots can be cued outside onboard seeker range and
-acquire later; other guidance types remain limited by their prelaunch seeker
-range. Use launcher world velocity, rail
+acquire later; other guidance types retain their seeker range for acquisition, not release.  Use launcher world velocity, rail
 attitude and altitude, observed target velocity, and the target's bearing and
 relative altitude. Target heading affects heat/signature; target velocity supplies
 its approach, crossing and recession geometry. Future maneuvers are unknown.
@@ -1142,7 +1177,7 @@ successful interval with 10 bisections. Show zero if none succeeds. Refresh the
 range estimate every 60 simulation ticks or immediately when contact/station
 changes. Hit estimate uses that maximum and the predicted time; IN RNG requires
 an actual predicted intercept. Imported minimum is advisory; altitude and angle limits remain release constraints.
-CUED MAX RANGE comes from failure to predict an intercept, not the old nominal
+CUED MAX RANGE is advisory and comes from failure to predict an intercept, not the old nominal
 maximum. Actual seeker acquisition/retention volumes remain unchanged. A radar
 bore search still needs a prelaunch observation inside the selected scope and
 radar tracking limits.

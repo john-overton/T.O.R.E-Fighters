@@ -8,7 +8,7 @@
 use super::{Launcher, Ownship, Projectile, State, Target};
 use crate::attitude::{Basis, Vector, dot, unit};
 use crate::combat::missiles::{
-    self, Profile,
+    self, LaunchMode, Profile,
     seeker::{self, Seeker, Status},
 };
 use crate::sensors::Mode;
@@ -226,7 +226,7 @@ pub(super) fn harm_emitters<'a>(
     cue
 }
 
-/// The player's new designation `id` retargets the supported surface
+/// The player's new designation `id` retargets cued supported surface
 /// missiles `own` has in flight (AS-7, AS-15): one whose zone-1 cone about
 /// its nose holds the new target, with the A-G track on it and the target
 /// inside the weapon's zone 1 from the launcher, now homes on it; any other
@@ -249,7 +249,10 @@ pub(super) fn retarget(state: &mut State, own: &Ownship, id: u32, launcher: &Lau
         let Some(flight) = p.guidance.as_mut() else {
             continue;
         };
-        if !flight.profile.rides_air_ground() || flight.unguided || flight.seeker.target == Some(id)
+        if !flight.profile.rides_air_ground()
+            || flight.mode == LaunchMode::Boresight
+            || flight.unguided
+            || flight.seeker.target == Some(id)
         {
             continue;
         }

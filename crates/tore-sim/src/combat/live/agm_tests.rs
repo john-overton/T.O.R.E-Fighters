@@ -410,7 +410,7 @@ fn a_surface_seeker_sees_a_stationary_ground_object_without_the_air_notch() {
 }
 
 #[test]
-fn a_surface_radar_weapon_needs_the_ag_track_at_release() {
+fn a_surface_radar_cued_solution_uses_the_ag_track() {
     let mut s = armed("AGM84A.JT", 3);
     ground(&mut s, 0x5000_0001, 0., 30_000., 0x2000);
     s.command(0, Command::ToggleAirGround, launcher());
@@ -676,4 +676,58 @@ fn in_range_is_off_with_master_arm_safe_or_an_empty_station() {
     let at = s.own_view().at(launcher());
     assert_eq!(at.readiness(), Readiness::Empty);
     assert!(!at.in_estimated_range(), "empty station");
+}
+
+#[test]
+fn unsupported_player_surface_sarh_launches_and_recovers_later_illumination() {
+    for source in ["AS7.JT", "AS15.JT"] {
+        for radar_off in [false, true] {
+            let mut s = armed(source, 3);
+            ground(&mut s, 0x5000_0001, 500., 20_000., 0x400);
+            s.command(0, Command::ToggleAirGround, launcher());
+            step(&mut s, launcher(), false);
+            s.command(0, Command::DesignateTarget(0x5000_0001), launcher());
+            s.command(0, Command::ToggleAirGround, launcher());
+            let off = Launcher {
+                radar: !radar_off,
+                radar_power: !radar_off,
+                ..launcher()
+            };
+            let p = fire(&mut s, off);
+            assert_eq!(p.guidance.as_ref().unwrap().mode, LaunchMode::Boresight);
+            assert!(!p.guidance.as_ref().unwrap().unguided);
+            assert!(p.guidance.as_ref().unwrap().last_intercept.is_none());
+            for _ in 0..30 {
+                step(&mut s, off, false);
+            }
+            let shot = s.projectiles.iter().find(|x| x.id == p.id).unwrap();
+            assert_eq!(shot.direction, p.direction);
+            assert!(shot.guidance.as_ref().unwrap().last_intercept.is_none());
+            s.command(0, Command::ToggleAirGround, launcher());
+            for _ in 0..60 {
+                step(&mut s, launcher(), false);
+            }
+            let shot = s.projectiles.iter().find(|x| x.id == p.id).unwrap();
+            assert_eq!(shot.target, Some(0x5000_0001));
+            assert_eq!(
+                shot.guidance.as_ref().unwrap().seeker.status,
+                Status::Locked
+            );
+            assert_ne!(shot.direction, p.direction);
+            // Unlike a supported-at-launch surface shot, this uncued release
+            // remains eligible for another support recovery.
+            s.command(0, Command::ToggleAirGround, launcher());
+            step(&mut s, launcher(), false);
+            assert!(
+                !s.projectiles
+                    .iter()
+                    .find(|x| x.id == p.id)
+                    .unwrap()
+                    .guidance
+                    .as_ref()
+                    .unwrap()
+                    .unguided
+            );
+        }
+    }
 }

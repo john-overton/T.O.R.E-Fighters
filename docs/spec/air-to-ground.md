@@ -190,8 +190,10 @@ has no switch); the HARM page also lists emitting aircraft as squares, as the
 retail page does by the air rules.
 
 **Support (retail data).** AGM-84A, AM-39, AS-16, AS-7 and AS-15 are
-surface-target radar weapons: **A-G must be on at release**. AS-7 and AS-15 (flag
-0x200) need A-G on for the whole flight and the target inside their zone 1 (45
+surface-target radar weapons: **A-G supplies the cued release solution**. Player radar missiles may also
+release without support: active missiles use maddog search, while SARH waits
+for later illumination ([release rules](missiles.md#player-release-advisories-and-maddog)). AS-7 and AS-15 (flag
+0x200) need A-G on to steer and the target inside their zone 1 (45
 degrees, range included) as seen from the launcher. The gun's LCOS solves against
 a designated ground object as it does for an aircraft, so strafing a designated
 tank shows the pipper on it. Tab fires the gun whatever is selected ([the gun key](#the-gun-key)).
@@ -363,7 +365,8 @@ weapon then holds its heading and pitch. **Retail never reacquires.**
 laser (and SARH) weapon of the player's in flight retargets to it if the new
 target lies inside the weapon's 45 degree cone, and is blinded otherwise.
 Clearing the designation (;) leaves them guiding on the old target. A weapon
-already in its terminal hit roll is not retargeted. AI launchers never retarget.
+already in its terminal hit roll is not retargeted. AI launchers never retarget. The current unsupported player SARH release
+exception below retains its acquired identity instead.
 The manual's "switch targets and the bomb will fall blindly" (retail manual
 pp. 120, 123, 125) describes only the failing case.
 
@@ -951,14 +954,14 @@ Built (W2), with these rules (opinionated, agent, where not labelled):
   candidate, blinking in BORE, and the word BORE or CUED sits above the bore
   ring. The candidate is the painting radar first, then the one nearest the
   bore, then the nearest.
-- **The A-G track.** A surface radar weapon is released only while the A-G page
-  is up and lists its designated target (`NO TRACK` otherwise, retail data); it
+- **The A-G track.** A cued surface radar solution requires the A-G page
+  to be up and list its designated target (`NO TRACK` otherwise, retail data); it
   leaves for the point the page gives and the page refreshes its midcourse
-  point. The AS-7 and AS-15 need the page and the target inside their zone 1
+  point. CUED AS-7 and AS-15 shots need the page and the target inside their zone 1
   from the launcher for the whole flight; once that fails the missile loses its
   target for good and flies on unguided (retail data: the lock clears the
   target and nothing gives it a new one).
-- **Target switch.** A new designation sends the player's AS-7 and AS-15 in
+- **Target switch.** A new designation sends the player's CUED AS-7 and AS-15 in
   flight to the new target when it is inside their zone-1 cone about the nose
   and on the A-G track, and blinds them otherwise; clearing the designation
   leaves them guiding (retail data). The air-to-air supported missiles, which
@@ -1043,6 +1046,16 @@ track loss, and HARM's angle-only in-flight hold remain as specified above.
   while it is selected; the TTI row is for guided weapons only. Online it is
   read from the readout like the page's row (protocol 23).
 
+### Unsupported player SARH releases
+
+Opinionated revision requested by John, 2026-10-15. A player surface SARH
+shot released without A-G support uses the uncued release policy in the
+[missile spec](missiles.md#player-release-advisories-and-maddog). It flies
+without steering until illumination begins, including after a radar-off
+release, and can recover subsequent support losses. Its first acquired
+identity is retained. The CUED retarget/permanent-loss policy elsewhere in
+this document still describes supported-at-launch surface shots and AI.
+
 ### Warnings
 
 Opinionated (agent, decision 15). Advisory, in the readiness slot, except where
@@ -1065,7 +1078,8 @@ LOW and FRAG together in the readiness slot, and OVERFLY in place of the
 release time. Only a GPS bomb with no designated point and an AT-2 with no
 target block release, apart from the missiles: a missile that needs a target
 (NO TARGET, NO TRACK, NO EMITTER) does not leave without one, as before this
-round (built, W2). Laser bombs can be released without a spot (they fall ballistic and can
+round (built, W2), except player radar missiles: active shots launch maddog and unsupported
+SARH shots wait for later illumination without that track or designation. Laser bombs can be released without a spot (they fall ballistic and can
 still pick one up), as retail allows. The text strings are fitted.
 
 ## Weapon classes
@@ -1086,8 +1100,8 @@ record-by-record table).
 | 7 | Optical rocket | AT2 | 27 (Mi-24 default) | Retail: steers at the designated object until impact (cruise profile), needs its launcher alive, zone 1 500 to 18,000 ft and 45 degrees; a switch does not retarget it. Without a target it flies unguided | Built (W1: command guidance while the launcher keeps the target in its sight) |
 | 8 | IR AGMs | AGM65G, AGM65A, AGM84E | 24 to 25 | Existing surface infrared profile; designated lock, or BORE | Built (W2) |
 | 9 | Anti-radiation | AGM88, AGM45 | 26 | Existing emitter profile; HUD boresight cue and HARM page; keeps homing on the object after its radar stops | Built (W2) |
-| 10 | Active radar AGMs | AGM84A, AM39, AS16 | 20, 20, 13 | Existing active profiles; launch target from the A-G designation, A-G on at release (retail); surface seekers see surface rows without the air notch | Built (W2) |
-| 11 | SARH AGMs | AS7, AS15 | 21 | Needs A-G on at release and for the whole flight, target inside zone 1 (45 degrees) from the launcher; lost: unguided | Built (W2) |
+| 10 | Active radar AGMs | AGM84A, AM39, AS16 | 20, 20, 13 | Existing active profiles; launch target from the A-G designation, A-G cue or player maddog search (John, 2026-10-15); surface seekers see surface rows without the air notch | Built (W2) |
+| 11 | SARH AGMs | AS7, AS15 | 21 | A-G support and target inside zone 1 (45 degrees) from the launcher permit steering. CUED loss is permanent; an unsupported player release waits for later illumination | Built (W2) |
 | 12 | Laser AGMs | AS14, AS30, AT12 | 24 to 25 | Class 4's lock rule on a powered, cruising missile | Built (W1) |
 
 Built (slice W1): classes 4, 5, 7 and 12 fly on their own guidance kinds
@@ -1137,7 +1151,7 @@ flowchart TD
     W -->|HARM, BORE| HB[HUD emitters in cone; candidate blinks; fire]
     W -->|HARM, CUED| HC[Designated emitter; fire]
     W -->|Active AGM| AA[Launch target from designation; seeker active at record range]
-    W -->|SARH AGM| SA[A-G on at release and to impact]
+    W -->|SARH AGM| SA[A-G supports steering; uncued release waits]
     W -->|Laser bomb or missile| LZ[Sight holds point; laser on; target inside 45 degree cone; release inside reach]
     W -->|JDAM| GP[Point stored at release inside reach]
     W -->|AT-2| AT[Designated object in 45 degree launch cone]
@@ -1473,7 +1487,7 @@ found these promised or specified items unbuilt:
 - A radar weapon selected with the radar not set for it: AGM-84A, AM-39, AS-16,
   AS-7 and AS-15 need A-G on at release (retail); with the radar off the missile
   reads READY and flies unguided (existing rule,
-  [missiles](missiles.md#radar-off-unguided-release)).
+  [missiles](missiles.md#player-release-advisories-and-maddog)).
 - A bomb released below its arm time: LOW before the release, and the bomb lands
   a dud (a puff of dirt, no burst or splash).
 - A moving target with a GPS bomb: the bomb hits the stored point and misses.

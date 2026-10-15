@@ -202,7 +202,9 @@ armed. These exceptions are developer facilities, not alternate player defaults.
 ## Missile range and tone cues
 
 John's 2026-10-15 revision makes the missile minimum-range scale and IN RNG
-informational. MIN RANGE no longer inhibits the player's missile release.
+informational. MIN RANGE and MAX RANGE do not inhibit the player's missile release. MAX RANGE
+remains visible when the intercept solve fails. ACQUIRING and missing radar support
+are also advisory; release follows the [missile rules](missiles.md#player-release-advisories-and-maddog).
 Radar tone retains its existing below-minimum silence; IR growl and lock tone
 follow the mounted seeker's return, including head-on all-aspect acquisition,
 without requiring the HUD's predicted intercept. The compact corrected missile
