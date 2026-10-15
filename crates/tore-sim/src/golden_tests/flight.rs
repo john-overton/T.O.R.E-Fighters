@@ -33,14 +33,14 @@ const LEGACY: [(&str, u64); 8] = [
 const HYBRID: [(&str, u64); 10] = [
     ("cruise-roll-rudder", 0x947c_cadc_63ab_b7b5),
     ("burner-loop", 0x5bbe_f6a2_8af5_21eb),
-    ("stall-and-spin", 0x63b2_3672_ad14_39eb),
-    ("devices-and-switches", 0x27a6_7daa_cc8a_1e78),
+    ("stall-and-spin", 0x1d6e_034b_6974_a966),
+    ("devices-and-switches", 0x2942_7a44_b60d_a2ed),
     ("damage-and-disturbance", 0xbbef_fa6c_2269_63c4),
     ("cheats-and-ricochet", 0x7302_18fa_975e_7c90),
     ("ground-impact", 0x4eb0_1069_03e3_7584),
     ("airborne-destruction", 0x51af_456f_a86b_5813),
-    ("crosswind-takeoff", 0xca5d_2cb8_86ee_37f7),
-    ("approach-and-landing", 0x4d3c_afe2_c0a3_3483),
+    ("crosswind-takeoff", 0x97cb_5ac8_3042_3784),
+    ("approach-and-landing", 0xee52_ca3d_2a78_e1cd),
 ];
 const NATIVE: [(&str, u64); 2] = [
     ("cruise-roll-rudder", 0xe239_05a8_a49b_d119),
