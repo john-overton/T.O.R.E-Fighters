@@ -473,14 +473,14 @@ pub struct Store {
     pub flags: u32,
     /// Seeker signature: 2 infrared, 3 radar.
     pub seeker: u8,
-    pub phoenix: bool,
+    pub active_radar: bool,
 }
 
 impl fmt::Display for Store {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let guided = self.flags & 1 != 0;
-        let text = if self.phoenix {
-            "AIM-54 Phoenix"
+        let text = if self.active_radar {
+            "active radar missile"
         } else if self.flags & 0x10 != 0 {
             "bomb"
         } else {
@@ -1579,7 +1579,7 @@ mod tests {
             store: Store {
                 flags: 1,
                 seeker: 3,
-                phoenix: false,
+                active_radar: false,
             },
         };
         assert_eq!(release.to_string(), "radar missile release at aircraft 3");

@@ -95,7 +95,7 @@ fn weapon_with(resource: &str, gun: bool, extra_flags: i64) -> Vec<u8> {
             0
         }
         "weight" => 20,
-        "flags" => (if gun { 0x844 } else { 0x240 }) | extra_flags,
+        "flags" => (if gun { 0x844 } else { 0x241 }) | extra_flags,
         "sig" => {
             if gun {
                 0

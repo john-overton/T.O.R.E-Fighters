@@ -27,7 +27,7 @@ use tore_sim::checkpoint::{Checkpoint, CheckpointError, InPlace, Loader, Saver, 
 tore_sim::checkpoint_struct!(Release {
     flags,
     seeker,
-    phoenix,
+    active_radar,
     target,
 });
 
@@ -266,7 +266,7 @@ mod tests {
                 release: Release {
                     flags: 0x11,
                     seeker: 3,
-                    phoenix: true,
+                    active_radar: true,
                     target: Some(9),
                 },
             },
@@ -275,7 +275,7 @@ mod tests {
                 release: Release {
                     flags: 0,
                     seeker: 2,
-                    phoenix: false,
+                    active_radar: false,
                     target: None,
                 },
             },

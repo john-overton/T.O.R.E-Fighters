@@ -108,7 +108,7 @@ impl Chatter {
                     store: crate::comms::journal::Store {
                         flags: release.flags,
                         seeker: release.seeker,
-                        phoenix: release.phoenix,
+                        active_radar: release.active_radar,
                     },
                 },
             ),

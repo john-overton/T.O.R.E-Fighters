@@ -219,6 +219,7 @@ mod tests {
         let mut config = state.own().configuration().clone();
         let mut missile = config.stations[0].weapon.clone();
         missile.source = "AIM120.JT".into();
+        missile.flags = 0x41;
         missile.seeker.signature = 3;
         config.stations[0].weapon = mk82_pack(config.stations[0].weapon.clone());
         config.stations[0].mount = [3., -2., 1.];

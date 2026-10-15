@@ -1563,14 +1563,17 @@ fn guidance(w: &Weapon) -> &'static str {
     if w.flags & 1 == 0 {
         return "unguided";
     }
-    match w.seeker.signature {
-        0 => "optical",
-        1 => "laser",
-        2 => "IR",
-        3 if w.flags & 0x200 != 0 => "SARH",
-        3 => "active rdr",
-        4 => "passive rdr",
-        _ => "",
+    use tore_formats::weapons::SeekerKind;
+    match w.seeker_kind() {
+        SeekerKind::Infrared => "IR",
+        SeekerKind::SemiActiveRadar => "SARH",
+        SeekerKind::ActiveRadar => "active rdr",
+        SeekerKind::PassiveRadar => "passive rdr",
+        SeekerKind::Other => match w.seeker.signature {
+            0 => "optical",
+            1 => "laser",
+            _ => "",
+        },
     }
 }
 /// A laser designator pod's card: its name, its weight and "laser" in the

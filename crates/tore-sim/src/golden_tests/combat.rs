@@ -523,6 +523,11 @@ fn weapon(source: &str, signature: u8) -> Weapon {
 /// A longer-legged synthetic missile: 40 s of flight, 10 s of it powered.
 fn missile(source: &str, signature: u8, range: i32, decoy_percent: u8) -> Weapon {
     let mut w = weapon(source, signature);
+    w.flags = if matches!(source, "R530.JT" | "SYNTHETIC.JT") {
+        0x241
+    } else {
+        0x41
+    };
     w.movement.maximum_speed = 3_000;
     w.movement.initial_speed = 1_200;
     w.movement.final_speed = 1_500;

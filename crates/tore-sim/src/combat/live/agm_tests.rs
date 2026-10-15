@@ -70,6 +70,11 @@ fn armed(source: &str, signature: u8) -> State {
     let own = s.own_mut();
     let w = &mut own.config.stations[0].weapon;
     w.source = source.into();
+    w.flags = if matches!(source, "AS7.JT" | "AS15.JT") {
+        0x241
+    } else {
+        0x41
+    };
     w.seeker.signature = signature;
     w.movement.remove_t = 400;
     w.movement.fuel_t = 200;
@@ -119,11 +124,17 @@ fn fire(s: &mut State, l: Launcher) -> Projectile {
 
 #[test]
 fn the_reviewed_air_to_ground_records_have_surface_profiles() {
-    let s = fixture(true);
     let profile = |source: &str| {
-        let mut w = s.own().config.stations[0].weapon.clone();
-        w.source = source.into();
-        missiles::Profile::for_weapon(&w).unwrap()
+        let signature = match source {
+            "AGM65A.JT" | "AGM65G.JT" | "AGM84E.JT" | "AIM9M.JT" => 2,
+            "AGM45.JT" | "AGM88.JT" => 4,
+            _ => 3,
+        };
+        let mut s = armed(source, signature);
+        if source == "AIM7.JT" {
+            s.own_mut().config.stations[0].weapon.flags |= 0x200;
+        }
+        missiles::Profile::for_weapon(&s.own().config.stations[0].weapon).unwrap()
     };
     for (source, guidance) in [
         ("AGM65G.JT", Guidance::Infrared),
@@ -181,6 +192,16 @@ fn every_sagging_missile_and_surface_guidance_holds_its_path() {
         ("SYNTHETIC.JT", false),
     ] {
         w.source = source.into();
+        w.flags = if matches!(source, "AIM7.JT" | "SA6.JT" | "SEA_SPAR.JT") {
+            0x241
+        } else {
+            0x41
+        };
+        w.seeker.signature = match source {
+            "AGM65A.JT" | "AGM65G.JT" | "AIM9M.JT" => 2,
+            "AGM88.JT" => 4,
+            _ => 3,
+        };
         for sags in [false, true] {
             w.flags = (w.flags & !missiles::SAG_FLAG) | if sags { missiles::SAG_FLAG } else { 0 };
             assert_eq!(
