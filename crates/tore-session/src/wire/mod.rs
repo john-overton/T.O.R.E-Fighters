@@ -196,7 +196,10 @@ pub fn path_words(path: Path) -> &'static str {
 /// changes, but the store catalog (new R-27 variants, corrected names and
 /// carrier rules), IR seeker response and radio cooldown keys differ, so an
 /// older game must not join.
-pub const PROTOCOL_VERSION: u16 = 33;
+/// 34 since the player release pass (slice nr-fox3): no message changes,
+/// but player missile release outcomes (advisory MAX RANGE and lock, active
+/// maddog, SARH support recovery) differ, so an older game must not join.
+pub const PROTOCOL_VERSION: u16 = 34;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
