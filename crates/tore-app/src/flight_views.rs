@@ -472,6 +472,12 @@ impl Rig {
     pub fn next_wingman(&mut self) {
         self.advance_wingman = true;
     }
+    /// The exact projectile held by the missile reference, including when it
+    /// has disappeared. Replay captions must describe the same camera subject.
+    pub fn missile_subject(&self) -> Option<u32> {
+        self.last_missile
+    }
+
     /// The aircraft F6 last followed.
     pub fn wingman(&self) -> Option<u32> {
         self.wingman.map(|key| key.2)

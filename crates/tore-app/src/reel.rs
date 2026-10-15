@@ -447,8 +447,18 @@ pub const WORLD_ANCHOR: u32 = u32::MAX - 1;
 /// in world feet. Writes `OUT_DIR/still-NN-tTICK.png`.
 pub fn stills() -> AppResult<()> {
     let args: Vec<_> = std::env::args().skip(2).collect();
-    let [replay, plan, out] = args.as_slice() else {
-        return Err("--replay-stills REPLAY FRAME_PLAN OUT_DIR".into());
+    let (replay, plan, out, look_at) = match args.as_slice() {
+        [replay, plan, out] => (replay, plan, out, None),
+        [replay, plan, out, flag, object] if flag == "--look-at" => (
+            replay,
+            plan,
+            out,
+            Some(crate::replay::viewer::parse_object(object)?),
+        ),
+        _ => return Err(
+            "--replay-stills REPLAY FRAME_PLAN OUT_DIR [--look-at aircraft:ID|weapon:ID|ground:ID]"
+                .into(),
+        ),
     };
     let assets = load_assets()?;
     let plan = std::fs::read_to_string(plan)?
@@ -459,7 +469,10 @@ pub fn stills() -> AppResult<()> {
     let mut viewer = Viewer::open(
         Path::new(replay),
         &assets.theater_resources,
-        &Options::default(),
+        &Options {
+            look_at,
+            ..Options::default()
+        },
     )?;
     viewer.finish_tracks();
     let mut gpu = pollster::block_on(Gpu::new(&viewer.scenery))?;

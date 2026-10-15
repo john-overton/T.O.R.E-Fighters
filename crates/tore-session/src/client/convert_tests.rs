@@ -793,6 +793,47 @@ mod events {
     /// fill; those told with a late seat's backlog stand flat from the
     /// replay's first tick.
     #[test]
+    fn a_surface_bursts_target_and_last_known_shot_survive_conversion() {
+        for (fired, last) in [(3, Some(105.)), (0, None)] {
+            let seen = seen(vec![
+                (
+                    100,
+                    WireEvent::SurfaceBurst {
+                        unit: 20,
+                        mount: 2,
+                        target: Some(7),
+                        aim: [0; 2],
+                        rounds: 40,
+                        span: 90,
+                    },
+                ),
+                (
+                    100,
+                    WireEvent::SurfaceBurstEnd {
+                        unit: 20,
+                        mount: 2,
+                        fired,
+                    },
+                ),
+            ]);
+            let weapons = BTreeMap::new();
+            let mut events = Events::new(&seen, 0, &weapons, 0, 200, None);
+            let mut frame = replay::Frame {
+                tick: 100,
+                ..Default::default()
+            };
+            events.fill(100, &mut frame);
+            let event = frame
+                .events
+                .iter()
+                .find(|e| e.kind == kind::WEAPON_GUN_BURST)
+                .unwrap();
+            assert_eq!(event.object, Some(7));
+            assert_eq!(event.num("last_tick"), last);
+        }
+    }
+
+    #[test]
     fn city_flattened_events_are_recorded_by_place() {
         use std::sync::Arc;
         use tore_world::city::{CityFill, Instance, Layout, kit};
@@ -1098,5 +1139,36 @@ fn surface_labels_number_every_added_unit_from_zero_within_its_range() {
     assert_eq!(
         convert::surface_label("T-72", FRONT_LINE_BASE + 41),
         "T-72 +41"
+    );
+}
+
+#[test]
+fn cockpit_facts_reach_replay_as_change_events_without_a_wire_extension() {
+    let flight = fight(3);
+    let converted = convert::observe(&flight.capture, flight.resources).unwrap();
+    let info = converted.flights().remove(0);
+    let seen = &converted.observed().flights[info.index];
+    assert!(
+        !seen.banner.is_empty(),
+        "decoded cockpit facts are retained"
+    );
+    let mut facts = Vec::new();
+    converted
+        .frames(&info, &mut |frame| {
+            facts.extend(
+                frame
+                    .events
+                    .into_iter()
+                    .filter(|e| e.string(replay::vocab::field::SOURCE) == Some("net.readout")),
+            );
+            Ok::<_, replay::Error>(())
+        })
+        .unwrap();
+    assert!(facts.iter().any(
+        |e| e.kind == replay::vocab::kind::PLAYER_VIEW_TARGET && e.subject == Some(info.plane)
+    ));
+    assert!(
+        facts.len() < seen.banner.len(),
+        "unchanged snapshots add no replay events"
     );
 }

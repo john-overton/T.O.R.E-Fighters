@@ -5,6 +5,7 @@
 //! by John on 2026-09-26; see docs/REPLAYS.md. The format, reader and exports
 //! live in the dependency-free `tore-replay` crate; this module is the only
 //! place the app's own types meet it.
+pub mod banner;
 pub mod cli;
 pub mod clock;
 pub mod context_menu;

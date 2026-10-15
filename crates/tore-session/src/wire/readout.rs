@@ -1321,6 +1321,21 @@ impl QReadout {
             .all(|(index, group)| !always_holds_values(index) || !group.is_empty())
     }
 
+    /// The target identity and target-window scalar groups have arrived.
+    /// Other cockpit groups may still be absent. A promised display/view
+    /// row must be present before a replay may interpret absence as no target.
+    pub fn target_groups_present(&self) -> bool {
+        [scalar::HEADER, scalar::TARGETS, scalar::WINDOW]
+            .into_iter()
+            .all(|i| !self.scalars[i].is_empty())
+            && match self.scalars[scalar::TARGETS].get(2).copied() {
+                Some(0) => true,
+                Some(1) => !self.lists[list::DISPLAY].is_empty(),
+                Some(2) => !self.lists[list::VIEW].is_empty(),
+                _ => false,
+            }
+    }
+
     /// The plane this readout is for, once its header has arrived.
     pub fn plane(&self) -> Option<u32> {
         self.scalars[scalar::HEADER].first().map(|p| *p as u32)

@@ -101,6 +101,8 @@ pub struct FlightSeen {
     /// order the client saw them.
     pub trace: Vec<Trace>,
     pub events: Vec<SeenEvent>,
+    /// Small cockpit facts in host-tick order; conversion emits changes only.
+    pub banner: BTreeMap<u32, super::convert::banner::Facts>,
     /// The connection's name table at the end of the flight.
     pub names: ReceivedNames,
 }
@@ -182,6 +184,25 @@ impl Observed {
             return;
         };
         flight.snapshots.push((received.tick, now));
+        let facts = received
+            .readout
+            .as_ref()
+            .and_then(|q| super::convert::banner::Facts::read(q, received.tick))
+            .or_else(|| {
+                // No readout payload means unchanged, not an unknown target.
+                (received.readout.is_none() && !received.readout_unresolved)
+                    .then(|| {
+                        flight
+                            .banner
+                            .range(..=received.tick)
+                            .next_back()
+                            .map(|(_, facts)| *facts)
+                    })
+                    .flatten()
+            });
+        if let Some(facts) = facts {
+            flight.banner.insert(received.tick, facts);
+        }
         for entity in &received.updated {
             let states = flight.states.entry(entity.key()).or_default();
             match states.binary_search_by_key(&received.tick, |(tick, _)| *tick) {
@@ -211,5 +232,54 @@ impl Observed {
         if let Some(flight) = self.current() {
             flight.trace.extend(trace);
         }
+    }
+}
+
+#[cfg(test)]
+mod banner_tests {
+    use super::*;
+    use crate::client::convert::banner::Facts;
+
+    #[test]
+    fn an_unchanged_snapshot_refreshes_facts_but_a_missing_baseline_does_not() {
+        let facts = Facts {
+            plane: 4,
+            target: Some(7),
+            held: false,
+            ai: None,
+        };
+        let mut flight = FlightSeen::default();
+        flight.banner.insert(100, facts);
+        let mut observed = Observed {
+            flights: vec![flight],
+        };
+        observed.snapshot(
+            Duration::ZERO,
+            &ReceivedSnapshot {
+                tick: 110,
+                ..Default::default()
+            },
+        );
+        assert_eq!(observed.flights[0].banner.get(&110), Some(&facts));
+        observed.snapshot(
+            Duration::ZERO,
+            &ReceivedSnapshot {
+                tick: 120,
+                readout_unresolved: true,
+                ..Default::default()
+            },
+        );
+        assert!(!observed.flights[0].banner.contains_key(&120));
+        observed.snapshot(
+            Duration::ZERO,
+            &ReceivedSnapshot {
+                tick: 90,
+                ..Default::default()
+            },
+        );
+        assert!(
+            !observed.flights[0].banner.contains_key(&90),
+            "out-of-order snapshots never borrow future facts"
+        );
     }
 }
