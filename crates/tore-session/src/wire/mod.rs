@@ -206,7 +206,11 @@ pub fn path_words(path: Path) -> &'static str {
 /// changes, but AI wingmen take their human lead's loadout (more
 /// FlightLoadouts entries, mission text `share-flight-loadout`), so an
 /// older game must not join.
-pub const PROTOCOL_VERSION: u16 = 36;
+/// 37 since jettison (slice nr-jett): the extended live command 5
+/// (JettisonTanks), tank quantities in store stations 55 to 63, the
+/// sound-only jettison blast and inert falling bodies, so an older game must
+/// not join.
+pub const PROTOCOL_VERSION: u16 = 37;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
