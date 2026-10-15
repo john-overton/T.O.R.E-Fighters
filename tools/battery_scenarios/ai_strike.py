@@ -1233,6 +1233,34 @@ def scenarios() -> list[Scenario]:
                   "its cockpit as left, one bomb fewer (slice ST-K).",
         ),
         Scenario(
+            name="ai-wing-a7-bomb-vehicles", lane="flight",
+            args=pilot_run("KURILE", "QKPLNGR", "--aircraft", "a7", "--load", "MK82", "--station", "3",
+                           "--choose-store", "--order", "engage-class", "--order-class", "vehicles",
+                           "--order-at", "0", "--unit", "0x4000004f", "--altitude", "7800",
+                           "--from", "1", "--skill", "3", "--sead-at", "0", "--seconds", "240"),
+            timeout=600,
+            expect=[r"Engage target class: 1 applied", r"PROFILE .*name=level", r"RELEASE .*weapon=MK82.JT",
+                    r"SELECTION .*kind=Bomb side=2 class=0x0200", r"summary .*target_hp=0/50"],
+            notes="The ordered A-7 with Mavericks replaced by bombs must release from a level pass, "
+                  "using the unchanged shared bomb solution and Ace circle.",
+        ),
+        Scenario(
+            name="ai-wing-a7-attack-vehicles", lane="flight",
+            args=pilot_run("KURILE", "QKPLNGR", "--aircraft", "a7", "--load", "MK82",
+                           "--choose-store", "--order", "engage-class", "--order-class", "vehicles",
+                           "--order-wingmen", "2", "--order-at", "0", "--unit", "0x4000004f",
+                           "--altitude", "10000", "--from", "1", "--skill", "3", "--sead-at", "0",
+                           "--seconds", "240", "--record", "{work}/a7-attack-vehicles.tore-replay"),
+            timeout=600,
+            expect=[r"Engage target class: 2 applied", r"SELECTION .*kind=Seeker side=2 class=0x0200",
+                    r"WINGMAN id=1 shots=[1-9]", r"WINGMAN id=2 shots=[1-9]",
+                    r"WINGMAN id=[12] shots=[1-9][0-9]* hits=[1-9]", r"recorded .*a7-attack-vehicles"],
+            notes="John's A-7E three-ship vehicle order near the Kuril airstrip. Starts near the order's "
+                  "geometry at 10,000 ft; the two static ZSU sites are removed, as John had destroyed "
+                  "them before his order. Default stores, real seat command, both wingmen release "
+                  "and the hostile vehicle is hit. The full run is recorded without rendering.",
+        ),
+        Scenario(
             name="ai-strike-order", lane="flight",
             args=pilot_run("UKR", "QUCOL", "--aircraft", "a4e", "--load", "MK82", "--order", "engage-my-target",
                            "--order-at", "3", "--seconds", "30"),

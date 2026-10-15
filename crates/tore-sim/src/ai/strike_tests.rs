@@ -2055,3 +2055,117 @@ fn a_cue_strike_state_with_a_last_sample_round_trips_through_a_checkpoint() {
     assert!(!cleared.cue_passing(&cx, None, [0., 0., 24_000.]));
     assert_eq!(cleared.cue_last, None);
 }
+
+#[test]
+fn anti_radiation_only_cannot_choose_a_non_radar_vehicle() {
+    let subjects = [ground(TARGET, [0., 0., 20_000.], 0x200, None)];
+    let world = World {
+        own: own([0., 10_000., 0.], 600.),
+        picture: picture(&subjects, Vec::new()),
+        inputs: inputs(vec![store(1, StoreKind::AntiRadiation)], None),
+    };
+    let mut strike = Strike::new(1);
+    assert_eq!(strike.pick_target(&world.context(0)), None);
+    strike.step(&world.context(0));
+    assert!(strike.home(), "no usable target ends the assignment");
+    for kind in [
+        StoreKind::Bomb,
+        StoreKind::Rocket,
+        StoreKind::Seeker,
+        StoreKind::Gun,
+    ] {
+        let world = World {
+            own: own([0., 10_000., 0.], 600.),
+            picture: picture(&subjects, Vec::new()),
+            inputs: inputs(vec![store(1, kind)], None),
+        };
+        assert_eq!(
+            Strike::new(1).pick_target(&world.context(0)),
+            Some(TARGET),
+            "{kind:?}"
+        );
+    }
+}
+
+#[test]
+fn a_class_order_with_no_usable_store_goes_home_instead_of_waiting_forever() {
+    let subjects = [ground(TARGET, [0., 0., 20_000.], 0x200, None)];
+    let mut picture = picture(&subjects, Vec::new());
+    picture.set_ordered(None);
+    picture.set_class_order(vec![TARGET]);
+    picture.rebuild(0, Vec::new(), &Subjects::new(&subjects), Vec::new());
+    let world = World {
+        own: own([0., 10_000., 0.], 600.),
+        picture,
+        inputs: inputs(vec![store(1, StoreKind::AntiRadiation)], None),
+    };
+    let mut strike = Strike::new(1);
+    strike.step(&world.context(0));
+    assert!(strike.home());
+}
+
+#[test]
+fn ordered_wingmen_use_seekers_then_a_level_bomb_pass_without_changing_strike_wings() {
+    let subjects = [ground(TARGET, [0., 0., 30_000.], 0x200, None)];
+    for role in [StrikeRole::Cap, StrikeRole::Strike] {
+        for guided in [true, false] {
+            let mut picture = picture(&subjects, Vec::new());
+            picture.set_role(role);
+            let mut stores = vec![bomb(2)];
+            if guided {
+                stores.push(store(2, StoreKind::Seeker));
+            }
+            let world = World {
+                own: own([0., 7_800., 0.], 600.),
+                picture,
+                inputs: inputs(stores, None),
+            };
+            let mut strike = Strike::new(1);
+            strike.step(&world.context(0));
+            if role == StrikeRole::Cap {
+                assert_eq!(
+                    strike.kind,
+                    Some(if guided {
+                        StoreKind::Seeker
+                    } else {
+                        StoreKind::Bomb
+                    })
+                );
+                assert_eq!(
+                    strike.pass(),
+                    Some(if guided { Pass::FastHigh } else { Pass::Level })
+                );
+            } else {
+                assert_eq!(strike.kind, Some(StoreKind::Bomb));
+                assert_eq!(strike.pass(), Some(Pass::Straight));
+            }
+        }
+    }
+}
+
+#[test]
+fn ordered_slick_bomb_releases_from_level_pass_when_shared_solution_is_due() {
+    let target = [0., 0., 20_000.];
+    let subjects = [ground(TARGET, target, 0x200, None)];
+    let mut picture = picture(&subjects, Vec::new());
+    picture.set_role(StrikeRole::Cap);
+    let mut world = World {
+        own: own([0., 7_800., 0.], 600.),
+        picture,
+        inputs: inputs(vec![bomb(2)], None),
+    };
+    let mut strike = Strike::new(1);
+    strike.step(&world.context(0));
+    assert_eq!(strike.pass(), Some(Pass::Level));
+    world.inputs.solution = Some(solution(target, target, true));
+    assert!(
+        strike.step(&world.context(1)).release.is_none(),
+        "the synthetic 20,000 ft weapon zone still applies"
+    );
+    world.own.position[2] = 5_000.;
+    let order = strike.step(&world.context(2));
+    assert_eq!(
+        order.release.map(|r| (r.station, r.target)),
+        Some((StationId(1), TARGET))
+    );
+}

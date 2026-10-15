@@ -347,6 +347,9 @@ fn activity_reason(look: &Look, activity: Activity) -> String {
                 choice().map_or_else(|| "evading".to_owned(), |c| format!("tactics chose {c}"))
             }
         }
+        Activity::Attacking if look.actor.strike().is_some() => {
+            "flying a ground attack pass; see Ground attack for the selection".to_owned()
+        }
         Activity::Attacking => {
             let store = trace
                 .weapons
@@ -1277,7 +1280,11 @@ fn thought(look: &Look, mind: &Mind, fallbacks: &[Fallback]) -> Vec<tore_replay:
         who: look.who,
         store: look.store,
     };
-    trees::ai_thought(&t)
+    let mut nodes = trees::ai_thought(&t);
+    if let Some(strike) = actor.strike() {
+        nodes.extend(trees::strike_thought(strike, look.store));
+    }
+    nodes
 }
 
 /// The effects in force, with debounced on and off events. Returns whether
