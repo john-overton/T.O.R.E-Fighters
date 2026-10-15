@@ -25,6 +25,7 @@ fn fact(id: u32, side: Side, class: u16, x: f64, z: f64) -> GroundFact {
         side,
         class,
         position: [x, 0., z],
+        emitting: class & SAM != 0,
     }
 }
 
@@ -1020,4 +1021,57 @@ fn a_laser_only_wingman_takes_an_order_onto_an_object_its_side_lases() {
     let report = order(&mut world, vec![(US, target)]);
     assert_eq!(report.reached, [id]);
     assert_eq!(ordered(&world), Some(target));
+}
+
+#[test]
+fn every_ground_class_order_excludes_friendly_and_neutral_objects() {
+    use tore_sim::sensors::track::class;
+    for category in [class::SAM, class::AAA, class::SHIP, 0x0400, 0x0200, 0x0100] {
+        let ground = aim(vec![
+            fact(10, THEM, category, 0., 0.),
+            fact(11, US, category, 10., 0.),
+            fact(12, live::NO_SIDE, category, 20., 0.),
+            fact(13, THEM, category, 30., 0.),
+        ]);
+        let Plan::Class { targets, .. } = resolve(O::EngageClass, Some(10), &ground, US, &no_air)
+        else {
+            panic!("hostile class anchor must resolve");
+        };
+        assert_eq!(targets, vec![10, 13], "class {category:#x}");
+        for anchor in [11, 12] {
+            assert!(!matches!(
+                resolve(O::EngageClass, Some(anchor), &ground, US, &no_air),
+                Plan::Class { .. }
+            ));
+        }
+    }
+}
+
+#[test]
+fn an_incompatible_class_order_says_winchester_and_clears_the_previous_assignment() {
+    let mut world = world();
+    bomb_the_wingman(&mut world, false);
+    let id = wingman(&world);
+    let target = *hostile(&world, 0x0400).first().expect("hostile tank");
+    assert!(
+        !give(&mut world, O::EngageClass, Some(target))
+            .reached
+            .is_empty()
+    );
+    let wings = world.ai_wings.as_mut().unwrap();
+    let weapon = &mut wings.configs.get_mut(&id).unwrap().stations[0].weapon;
+    weapon.source = "AGM88A.JT".into();
+    weapon.flags = 0x20001;
+    weapon.seeker.signature = 4;
+    let report = give(&mut world, O::EngageClass, Some(target));
+    assert_eq!(
+        report.message,
+        "Wing order unavailable: no usable surface store"
+    );
+    let wings = world.ai_wings.as_ref().unwrap();
+    assert!(!wings.mission().actor(id).unwrap().has_ground_order());
+    assert!(lines(&world).contains(&Chatter::Line {
+        speaker: id,
+        line: WingLine::Winchester
+    }));
 }

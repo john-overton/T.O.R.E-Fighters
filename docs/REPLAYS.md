@@ -233,6 +233,11 @@ cloud against the devices combat flew, bit for bit. Releases lost to a
 
 ### Display trees
 
+The AI tree includes a separate ground-attack section with its phase, segment,
+pass, target object id, selected surface weapon and release gate. A planned
+attack phase does not mean a weapon fired; launch events establish releases.
+
+
 A display tree is what a debug panel shows, as numbered lines: a label, a
 value with its unit, and a note that says why. The recorder builds three
 kinds from the simulation's write-only records, and the debug panels will

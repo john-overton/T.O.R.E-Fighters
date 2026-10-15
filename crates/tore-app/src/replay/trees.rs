@@ -890,6 +890,49 @@ fn thought_perception(tree: &mut Tree, t: &Thought) {
     }
 }
 
+/// Ground attack decisions, independent of the air-to-air weapon service.
+pub fn strike_thought(
+    strike: &tore_sim::ai::strike::Strike,
+    store: &dyn Fn(StationId) -> Option<String>,
+) -> Vec<Node> {
+    let mut tree = Tree::default();
+    tree.text(
+        0,
+        "Ground attack",
+        format!("{:?}", strike.phase()),
+        "a pass phase is not a weapon release",
+    );
+    tree.text(1, "Segment", format!("{:?}", strike.segment()), "");
+    if let Some(pass) = strike.pass() {
+        tree.text(1, "Pass", pass.label(), "");
+    }
+    if let Some(selection) = strike.selection() {
+        tree.text(
+            1,
+            "Ground target",
+            format!("object {:#010x}", selection.target),
+            "",
+        );
+        tree.int(2, "Object id", i64::from(selection.target), "");
+        tree.text(
+            1,
+            "Surface weapon",
+            store(selection.station).unwrap_or_else(|| format!("station {}", selection.station.0)),
+            "",
+        );
+        tree.text(2, "Kind", format!("{:?}", selection.kind), "");
+        tree.num(
+            1,
+            "Release gate",
+            selection.gate_ft,
+            0,
+            "ft",
+            "around the drawn aim point",
+        );
+    }
+    tree.nodes
+}
+
 /// Builds an AI aircraft's thought tree. See docs/REPLAYS.md for the layout.
 pub fn ai_thought(t: &Thought) -> Vec<Node> {
     let mut tree = Tree::default();

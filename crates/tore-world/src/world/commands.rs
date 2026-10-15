@@ -638,6 +638,7 @@ impl World {
                 side: t.side,
                 class: t.category,
                 position: t.position,
+                emitting: t.radar_emitting,
             })
             .collect();
         let (sight, pin) = state.ownship(plane.0).map_or((None, None), |own| {

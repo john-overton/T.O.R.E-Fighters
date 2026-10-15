@@ -86,6 +86,13 @@ rule](../spec/ordnance-presentation.md#novelty-bombs-are-cheat-only)).
 
 ## AI strike driver
 
+Class-order probes accept `--order-class vehicles|tanks|structures|aaa|sams|ships`
+and `--order-wingmen 1..9`. Order probes can use `--record PATH` without a GPU.
+The `SELECTION` line identifies the actual ground target, side, class and weapon;
+`WINGMAN` totals report each member's launches, hits and damage when the count is
+explicit. These probes exercise the ordinary seat order path, including host
+processing of client orders.
+
 `--a2g-run THEATER STEM --pilot ai` (scenario file
 [`tools/battery_scenarios/ai_strike.py`](../../tools/battery_scenarios/ai_strike.py), source
 `crates/tore-app/src/a2g_run/ai.rs`) is the headless driver for the AI strike round (plan

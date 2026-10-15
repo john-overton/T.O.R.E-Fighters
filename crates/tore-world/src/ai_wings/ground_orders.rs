@@ -36,6 +36,8 @@ pub struct GroundFact {
     /// The class word (`sensors::track::class`).
     pub class: u16,
     pub position: [f64; 3],
+    /// A radar seeker can attack this object now.
+    pub emitting: bool,
 }
 
 /// What the sender's cockpit lets an order name, read by the world.
@@ -123,7 +125,7 @@ pub(super) enum Plan {
     Class { targets: Vec<u32>, noun: Noun },
     /// Lase one ground object.
     Lase { target: u32 },
-    /// "Lase my target" and no ground object named.
+    /// No valid object for a named ground order.
     NoTarget,
 }
 
@@ -193,6 +195,7 @@ pub(super) fn resolve(
                     targets: ground.class_of(anchor, side),
                     noun: Noun::of_class(anchor.class),
                 },
+                None if selected.is_some() => Plan::NoTarget,
                 None => Plan::Air {
                     order: PlayerOrder::AttackOnContact,
                     selected: None,
@@ -223,6 +226,7 @@ pub(super) struct Call {
     pub selected: Option<u32>,
     pub recipient: Option<u8>,
     pub plan: Plan,
+    pub facts: Vec<GroundFact>,
     /// The addressed living wingmen that still answer, lowest member first.
     pub members: Vec<(u8, u32)>,
     /// The first wingman of the wing, addressed or not.
@@ -251,6 +255,7 @@ impl AiWings {
             selected,
             recipient,
             plan,
+            facts,
             members,
             first,
             humans,
@@ -297,6 +302,12 @@ impl AiWings {
                     let side = self.mission.actor(*id).map(|a| a.identity().side);
                     spots.iter().any(|(s, on)| Some(*s) == side && on == target)
                 }
+                Plan::Class { targets, .. } => {
+                    let side = self.mission.actor(*id).map(|a| a.identity().side);
+                    spots
+                        .iter()
+                        .any(|(s, on)| Some(*s) == side && targets.contains(on))
+                }
                 _ => false,
             };
             let ability = self.capability(*id, spot_on);
@@ -306,7 +317,43 @@ impl AiWings {
                 answers.push(answer(Answered::NoDesignator, Vec::new()));
                 continue;
             }
-            if !lase && !ability.strike {
+            let candidates: Vec<u32> = match &plan {
+                Plan::Ground { target, .. } => vec![*target],
+                Plan::Class { targets, .. } => targets.clone(),
+                _ => Vec::new(),
+            };
+            let usable: Vec<u32> = candidates
+                .into_iter()
+                .filter(|target| {
+                    let Some(fact) = facts.iter().find(|f| f.id == *target) else {
+                        return false;
+                    };
+                    let Some(config) = self.configs.get(id) else {
+                        return false;
+                    };
+                    let stores = super::super::strike::strike_stores(config, actor.stations());
+                    tore_sim::ai::strike::can_attack_target(
+                        &stores,
+                        config.strike_class,
+                        tore_sim::ai::strike::TargetFacts {
+                            radar: fact.emitting,
+                            emitting: fact.emitting,
+                        },
+                        self.can_lase(*id)
+                            || self.mission.actors().iter().any(|mate| {
+                                mate.alive()
+                                    && mate.identity().side == actor.identity().side
+                                    && mate.identity().wing == actor.identity().wing
+                                    && self.can_lase(mate.id())
+                            })
+                            || spots
+                                .iter()
+                                .any(|(side, on)| *side == actor.identity().side && on == target),
+                    )
+                })
+                .collect();
+            if !lase && (!ability.strike || usable.is_empty()) {
+                self.mission.actor_mut(*id).unwrap().clear_ground_orders();
                 no_stores += 1;
                 refuser.get_or_insert((*id, WingLine::Winchester));
                 answers.push(answer(Answered::NoSurfaceStore, Vec::new()));
@@ -328,7 +375,7 @@ impl AiWings {
             let actor = self.mission.actor_mut(*id).unwrap();
             match &plan {
                 Plan::Ground { target, .. } => actor.order_strike(*target),
-                Plan::Class { targets, .. } => actor.order_strike_class(targets.clone()),
+                Plan::Class { .. } => actor.order_strike_class(usable),
                 Plan::Lase { target } => actor.order_lase(*target),
                 Plan::Air { .. } | Plan::NoTarget => {
                     unreachable!("an air order is not a ground call")

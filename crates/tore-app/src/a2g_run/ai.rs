@@ -274,6 +274,10 @@ pub(crate) struct Config {
     pub take_back: Option<f64>,
     pub order: Option<(&'static str, PlayerOrder)>,
     pub order_at: f64,
+    /// Ground class for an explicit class-order probe, otherwise the historical SAM probe.
+    pub order_class: Option<u16>,
+    /// Number of wingmen in an order probe (default one).
+    pub order_wingmen: Option<u8>,
     /// `--quick-wing`.
     pub quick_wing: bool,
     /// Remove the last enemy aircraft at this second, testing unfinished strikes.
@@ -378,6 +382,12 @@ impl Config {
             }
             return Ok(());
         }
+        if self.order_wingmen.is_some_and(|n| !(1..=9).contains(&n)) {
+            return Err("--order-wingmen needs 1 through 9".into());
+        }
+        if (self.order_class.is_some() || self.order_wingmen.is_some()) && self.order.is_none() {
+            return Err("--order-class and --order-wingmen need --order".into());
+        }
         if let Some(at) = self.clear_air_at
             && (!self.quick_wing || !at.is_finite() || at < 0.)
         {
@@ -402,8 +412,8 @@ impl Config {
                     .into(),
             );
         }
-        if records {
-            return Err("--record is not built for --pilot ai (slice ST-RA)".into());
+        if records && self.order.is_none() {
+            return Err("AI --record currently needs --order and its human lead".into());
         }
         if let Some(skill) = skill
             && !(0..=3).contains(&skill)
@@ -953,6 +963,33 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
     {
         w.phase = Some(phase);
         println!("ai-strike: PHASE t={t:.3} name={phase:?}");
+        if let Some(selection) = scene
+            .actor(w.plane)
+            .and_then(|a| a.strike())
+            .and_then(|s| s.selection())
+        {
+            let row = scene
+                .world
+                .combat
+                .state
+                .targets
+                .iter()
+                .find(|r| r.id == selection.target);
+            println!(
+                "ai-strike: SELECTION t={t:.3} target={:#010x} station={} kind={:?} side={} class={:#06x} name={}",
+                selection.target,
+                selection.station.0,
+                selection.kind,
+                row.map_or(0, |r| r.side.0),
+                row.map_or(0, |r| r.category),
+                scene
+                    .world
+                    .combat
+                    .ground_name(selection.target)
+                    .unwrap_or("unnamed")
+                    .replace(' ', "_")
+            );
+        }
         if scene.actor(w.plane).is_some_and(AiActor::is_rotorcraft) {
             print_rings(scene, w, t, target_at);
         }
@@ -1582,7 +1619,15 @@ fn designate(
             .state
             .ownship(plane.0)
             .ok_or("no ownship")?;
-        if let Some(id) = own.designated() {
+        let hostile = |id| {
+            scene.world.combat.state.targets.iter().any(|target| {
+                target.id == id
+                    && target.hp > 0
+                    && target.side != live::NO_SIDE
+                    && target.side != own.side
+            })
+        };
+        if let Some(id) = own.designated().filter(|id| hostile(*id)) {
             let class = scene
                 .world
                 .combat
@@ -1604,7 +1649,7 @@ fn designate(
             .sensors
             .ground()
             .iter()
-            .filter(|g| prefer.is_none_or(|class| g.class & class != 0))
+            .filter(|g| hostile(g.contact.id) && prefer.is_none_or(|class| g.class & class != 0))
             .min_by(|a, b| d(a.contact.position).total_cmp(&d(b.contact.position)))
             .map(|g| g.contact.id);
         if let Some(id) = nearest {
@@ -1637,7 +1682,11 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
     let companion = (cfg.render_scene.is_some() || cfg.console_scene.is_some())
         && !ordering
         && cfg.handback.is_none();
-    spec.wings[0].count = if ordering { 2 } else { 1 };
+    spec.wings[0].count = if ordering {
+        1 + usize::from(cfg.order_wingmen.unwrap_or(1))
+    } else {
+        1
+    };
     if companion && cfg.quick_wing {
         return Err("--render-scene and --quick-wing both use friendly wing 2: pick one".into());
     }
@@ -1804,6 +1853,18 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         // seat then flies the lead.
         place(&mut scene.world, striker, &pass, -300., 600.);
         scene.world.give_back_plane(striker_seat)?;
+        for member in 2..=cfg.order_wingmen.unwrap_or(1) {
+            let plane = PlaneId(u32::from(member));
+            scene.world.take_plane(striker_seat, plane)?;
+            place(
+                &mut scene.world,
+                plane,
+                &pass,
+                -300. * f64::from(member),
+                -600.,
+            );
+            scene.world.give_back_plane(striker_seat)?;
+        }
         scene.world.take_plane(SEAT, lead)?;
         place(&mut scene.world, lead, &pass, 0., 0.);
         scene.owner = lead.0;
@@ -1838,6 +1899,25 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
                 -COMPANION_BEHIND_FT,
                 COMPANION_RIGHT_FT,
             );
+        }
+    }
+    if cfg.order_wingmen.is_some()
+        && let Some(wings) = scene.world.ai_wings.as_ref()
+    {
+        for member in 1..=cfg.order_wingmen.unwrap_or(1) {
+            let id = u32::from(member);
+            if let (Some(actor), Some(config)) =
+                (wings.mission().actor(id), wings.configuration(id))
+            {
+                for station in actor.stations() {
+                    if let Some(store) = config.stations.get(usize::from(station.station.0)) {
+                        println!(
+                            "ai-strike: INVENTORY id={id} station={} weapon={} rounds={:?}",
+                            station.station.0, store.weapon.source, station.store.rounds
+                        );
+                    }
+                }
+            }
         }
     }
     let mut watch = Watch::new(striker, target);
@@ -1893,8 +1973,17 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         let flier = if ordering { lead } else { striker };
         // A class order is given on a SAM (Attack SAMs).
         let prefer = (cfg.order.map(|(_, order)| order) == Some(PlayerOrder::EngageClass))
-            .then_some(tore_sim::sensors::track::class::SAM);
+            .then_some(
+                cfg.order_class
+                    .unwrap_or(tore_sim::sensors::track::class::SAM),
+            );
         let designated = designate(&mut scene, &pass, flier, prefer)?;
+        if cfg.order_class.is_some() && designated.is_none() {
+            return Err(
+                "the order probe could not designate a hostile contact of the requested class"
+                    .into(),
+            );
+        }
         match designated {
             Some(id) => {
                 scene.target = id;
@@ -1908,6 +1997,7 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
             None => println!("ai-strike: DESIGNATE t={:.3} target=none", scene.seconds()),
         }
     }
+    let mut scene = scene.recording(o)?;
     let mut ordered = false;
     let mut rendered = false;
     let mut console_due = cfg.console_at.clone();
@@ -2240,6 +2330,19 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
     );
     if watch.releases == 0 {
         println!("ai-strike: no release");
+    }
+    if cfg.order_wingmen.is_some() {
+        for member in 1..=cfg.order_wingmen.unwrap_or(1) {
+            let id = u32::from(member);
+            let tally = scene.world.combat.state.ledger.total(|key| key.owner == id);
+            println!(
+                "ai-strike: WINGMAN id={id} shots={} hits={} damage={}",
+                tally.launched, tally.hit, tally.damage
+            );
+        }
+    }
+    if scene.record.is_some() {
+        scene.finish()?;
     }
     println!("ai-strike: done");
     Ok(())

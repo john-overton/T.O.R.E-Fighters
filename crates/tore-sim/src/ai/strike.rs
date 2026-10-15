@@ -1216,11 +1216,20 @@ impl Strike {
                     return;
                 }
             }
-            let waiting = cx
-                .picture
-                .briefed()
-                .iter()
-                .any(|b| b.standing && b.side != cx.side && b.kind != BriefedKind::Ordered);
+            let waiting = cx.picture.briefed().iter().any(|b| {
+                b.standing
+                    && b.side != cx.side
+                    && b.side != Side(0)
+                    && b.kind != BriefedKind::Ordered
+                    && cx.mates.iter().filter(|id| **id == b.id).count()
+                        >= targeting::STRIKE_ATTACKER_ALLOWANCE as usize
+                    && can_attack_target(
+                        &inputs.stores,
+                        inputs.class,
+                        target_facts(cx.picture, b.id),
+                        spot_assured(cx, b.id),
+                    )
+            });
             if waiting && cx.picture.ordered().is_none() {
                 self.enter(Phase::Wait, cx.tick);
             } else {
@@ -1253,13 +1262,37 @@ impl Strike {
                 } else {
                     &inputs.stores
                 };
-                choose_store(
-                    stores,
-                    inputs.class,
-                    threat,
-                    facts,
-                    spot_assured(cx, target) || manual,
-                )
+                // A wingman sent at a specific object uses a carried seeker
+                // before an unguided bomb. Strike-role wings keep their existing
+                // load priorities and threat-dependent tactics.
+                let precision =
+                    (cx.picture.role() == super::engagement::StrikeRole::Cap).then(|| {
+                        stores
+                            .iter()
+                            .copied()
+                            .filter(|s| s.kind.seeker())
+                            .collect::<Vec<_>>()
+                    });
+                precision
+                    .as_ref()
+                    .and_then(|stores| {
+                        choose_store(
+                            stores,
+                            inputs.class,
+                            threat,
+                            facts,
+                            spot_assured(cx, target) || manual,
+                        )
+                    })
+                    .or_else(|| {
+                        choose_store(
+                            stores,
+                            inputs.class,
+                            threat,
+                            facts,
+                            spot_assured(cx, target) || manual,
+                        )
+                    })
             }),
         };
         // A laser bomb dropped by hand is an unguided bomb to the pass: a
@@ -1309,6 +1342,17 @@ impl Strike {
                 return;
             }
             PassChoice::Pass(pass) => pass,
+        };
+        let pass = if cx.picture.role() == super::engagement::StrikeRole::Cap
+            && self.forced.is_none()
+            && self.takeover.is_none()
+            && pass == Pass::Straight
+            && store.kind == StoreKind::Bomb
+            && !store.retarded()
+        {
+            Pass::Level
+        } else {
+            pass
         };
         self.pass = Some(pass);
         self.pass_number += 1;
@@ -1449,6 +1493,17 @@ impl Strike {
         let mut candidates = cx
             .picture
             .strike_candidates(own, cx.side, &attackers, &usable);
+        // A surface store is not necessarily usable on this particular object.
+        // In particular, an anti-radiation missile cannot attack a truck.
+        for candidate in &mut candidates {
+            candidate.usable &= candidate.side != Side(0);
+            candidate.usable &= can_attack_target(
+                stores,
+                cx.inputs.class,
+                target_facts(cx.picture, candidate.id.0),
+                spot_assured(cx, candidate.id.0) || manual || unbound,
+            );
+        }
         if !manual
             && !unbound
             && self.carries_only_laser(cx)
@@ -2424,6 +2479,21 @@ pub fn choose_store(
     })
 }
 
+/// Whether the carried stores can attack this object, before assigning a pass.
+/// Helicopters and gunships retain their family-specific employment rules.
+pub fn can_attack_target(
+    stores: &[Store],
+    class: StrikeClass,
+    target: TargetFacts,
+    designator: bool,
+) -> bool {
+    if matches!(class, StrikeClass::Helicopter | StrikeClass::Gunship) {
+        has_usable_store(stores, designator, class)
+    } else {
+        choose_store(stores, class, ThreatLevel::Clear, target, designator).is_some()
+    }
+}
+
 /// The SEAD order of an anti-radiation carrier's targets (spec, "SEAD";
 /// John, decision 15): the objective's SAM radars, then AAA with radar,
 /// then any other radar, each nearest first, standing and hostile, with
@@ -2437,7 +2507,7 @@ pub fn sead_order(
     let mut ranked: Vec<(u8, f64, u32)> = picture
         .briefed()
         .iter()
-        .filter(|b| b.standing && b.side != side)
+        .filter(|b| b.standing && b.side != side && b.side != Side(0))
         .filter(|b| attackers(b.id) < targeting::STRIKE_ATTACKER_ALLOWANCE)
         .filter_map(|b| {
             let facts = b.defense?;

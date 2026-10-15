@@ -961,6 +961,27 @@ two to an object, designator carriers lase).
 | (no key) | Attack on contact keeps no key of its own: it is Alt+W with no ground target designated and Alt+F with nothing in the sight, both retail's meanings | opinionated (agent): recommended by this slice, John may want it back on a key |
 | Others | Unchanged. A wingman with no usable surface store (or only laser stores with no spot assured: no designator of its own or in its wing, and no same-side spot on the ordered object, so a laser-only wingman takes Alt+E/R while its lead lases the target; slice ST-L's rule, integration) refuses with the reason shown ("no usable surface store") and says "Winchester" (text only, no recording). Every bombing class takes ground orders since slice ST-F: a helicopter's AT-2 and the gunship's linked guns count as usable stores | spec-derived, line opinionated (agent) |
 
+Explicit ground attack orders check each wingman's remaining weapons against
+the ordered objects. Friendly and neutral objects are excluded for every ground
+class. With no hostile ground anchor from the designation or sight pin, an
+explicitly selected invalid object is refused rather than converted to an air
+attack order. An anti-radiation missile alone is not a usable weapon against a truck;
+the order requires a radar emission for that weapon. An unsupported order clears
+an earlier ground assignment and uses the existing text-only "Winchester" reply.
+A class assignment with no remaining usable target ends instead of waiting for
+another attacker indefinitely. Waiting is for targets occupied by two other
+wingmen, not for an incompatible or empty inventory.
+
+For a CAP-role wingman explicitly ordered onto the ground, a suitable seeker
+weapon takes priority over unguided bombs. With only slick bombs, a straight-run
+choice becomes a level pass at the existing release floor. The skill circle,
+release gates, bomb prediction and bomb motion are unchanged. Strike-role wings,
+forced development passes and human takeovers retain their own tactics. These
+are fitted agent decisions for John's A-7 wingman report of 2026-10-15: the old
+straight bombing run repeatedly missed the Ace release window while carrying
+unused Mavericks. They are not a claim about retail weapon preference.
+Validation is in the [wingman order baseline](../baselines/ai-wing-attack-orders.md).
+
 A wingman that took a ground order keeps it until its object (or every object of the class) is gone, then ends it and rejoins the formation; a Strike-role wing goes home instead. A later order that is not a setting (formation, spacing, stacking and wing control keep it) replaces it, and Disengage ends it. Every order is a rebindable action in the controls screen (keyboard, joystick and gamepad); the new ones are `key:Alt-f`, `key:Alt-w` (its action is unchanged, its meaning is retail's) and `key:Alt-g`.
 
 Alt+F: the retail manual calls Alt+F "attack on contact" and the executable's
