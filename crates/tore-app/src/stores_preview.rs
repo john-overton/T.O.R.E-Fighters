@@ -410,7 +410,7 @@ fn counts(short: &str) -> Vec<(usize, u16)> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn render(
+pub(crate) fn render(
     gpu: &mut Gpu,
     scenery: &mut Scenery,
     world: &Terrain,

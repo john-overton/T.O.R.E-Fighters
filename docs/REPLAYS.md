@@ -518,6 +518,21 @@ picture its client drew. A recording made before them has none, so its
 aircraft fly without stores, as they always did. On a fighter's flight the
 events cost a few hundred bytes for the whole mission.
 
+The viewer loads shapes from both the projectile catalog and every
+`stores.station.shape`, including stores nobody fires. Saved and growing
+recordings use the same rule. Those meshes pass through the same size and
+fin-roll conversion as live flight, then the same pylon geometry and lighting.
+Pods and tanks keep their fitted bodies.
+
+Compatibility decision (agent, nr-repst): keep the recorded mount, location,
+underside heights and tip edge, including shoulder, tunnel and separate-pylon
+location bytes. Do not apply today's aircraft station table to old mounts:
+the recorded projectile origins would no longer meet them. New recordings
+already contain the positions produced by `placed_on` with the source
+hardpoint index. All recordings use the shared current rack drawing rules;
+this does not promise historical geometry for rules changed after recording.
+No replay format or network protocol changes are needed.
+
 ## Network flights
 
 A networked flight is not recorded live: the game on a client does not run the

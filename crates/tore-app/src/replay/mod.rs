@@ -30,6 +30,8 @@ pub mod png;
 pub mod recorder;
 pub mod screen;
 pub mod sound;
+pub(crate) mod store_art;
+pub(crate) mod stores_check;
 pub mod tracks;
 pub mod trails;
 pub mod trees;

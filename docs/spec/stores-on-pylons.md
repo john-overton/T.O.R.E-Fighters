@@ -123,6 +123,10 @@ service's rounds before the debit, which is what the release then debits).
 
 ## Drawing (opinionated, John 2026-10-12)
 
+In a replay, carried weapons use their own shapes even if that weapon type
+was never fired. The [replay stores contract](../REPLAYS.md#stores) describes
+shape loading and how old recordings retain their station placement.
+
 Retail draws no stores on aircraft (the A2G pass recorded this as decision 20,
 "stores on pylons stay undrawn"); John reversed that decision on 2026-10-12.
 Every number below is fitted (agent decision).
