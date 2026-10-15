@@ -3073,7 +3073,10 @@ again with an observer; the capture format did not change for it.
   31 since the gun lock and the centre's pause (slice nr-cona follow-up,
   [protocol 31](#protocol-31-the-gun-lock-and-the-centres-pause)): Console
   sub-code 5 (GunLock), the orbit's `still_s`, and the gun lock in the
-  readout's gunsight group.
+  readout's gunsight group;
+  32 since the airport merge (slice nr-apmerge): no message changes; the
+  shared world differs (paired theater airfields merged into single fields),
+  so a game of another world must not join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
