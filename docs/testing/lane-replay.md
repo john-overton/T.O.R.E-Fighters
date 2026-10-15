@@ -169,3 +169,21 @@ default), for up to 90 s. Before 2026-10-13 it counted from the game's process s
 the window opened 5 to 8 s later (1.7 s on an idle one), so the first keys were dropped with
 `send_shortcut: window not found` and `replay-keys-bookmarks` recorded 2 or 3 bookmarks instead of 4. The
 driver prints `driver: window up after N s`.
+
+## Unfired stores
+
+`replay-stores-unfired` runs `--replay-stores-check` without a window or GPU.
+It builds Su-27, F/A-18D, F-14, A-4E, Su-25 and F-4B loads from the import, records
+station and count events without any projectile catalog, and compares replayed
+store vertices with live flight in forward and reverse order. It also checks
+each release point against the hung stores, using the same numbers printed by
+`--stores-preview`. This covers missiles, bombs, pods, tanks, shoulder and
+tunnel rails, separate pylons and twin racks.
+
+`--replay-stores-check FILE` additionally checks every recorded layout's shape
+availability and reports which shapes the old projectile-only loader missed.
+Add `--render DIRECTORY` to draw before/after offscreen comparisons, one per
+aircraft type at its first recorded layout. These are posed store inspections
+in daylight over Ukraine, not captures of the recording's camera or terrain.
+The before pictures reproduce the old loader with the same recorded stores;
+the after pictures use the viewer's current loader. Use a private data profile.

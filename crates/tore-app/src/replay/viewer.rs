@@ -927,10 +927,7 @@ impl Viewer {
             }
         }
         let mut art = CombatArt::load(resources)?;
-        art.add_shapes(
-            recording.weapons().filter_map(|w| w.shape.as_deref()),
-            resources,
-        );
+        art.add_shapes(super::store_art::shapes(&recording), resources);
         let mut viewer = Self::assemble(
             path,
             recording,
@@ -1188,9 +1185,7 @@ impl Viewer {
             .grow(first.max(last.saturating_sub(LIVE_WINDOW_TICKS)), last);
         self.info = recording.aircraft().map(|a| (a.id, a.clone())).collect();
         if let Some(growth) = &mut self.growth {
-            let new: Vec<&str> = recording
-                .weapons()
-                .filter_map(|w| w.shape.as_deref())
+            let new: Vec<&str> = super::store_art::shapes(&recording)
                 .filter(|shape| growth.shapes.insert((*shape).to_owned()))
                 .collect();
             self.art.add_shapes(new, &growth.resources);

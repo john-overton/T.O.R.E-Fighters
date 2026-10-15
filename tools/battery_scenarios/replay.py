@@ -29,4 +29,11 @@ def scenarios() -> list[Scenario]:
     found += _replay_script.scenarios()
     found += _replay_misc.scenarios()
     found += _replay_misc.import_scenarios()
+    found.append(Scenario(
+        name="replay-stores-unfired",
+        lane="replay",
+        args=["--replay-stores-check"],
+        expect=["Replay stores: PASS"],
+        timeout=120,
+    ))
     return found

@@ -10070,6 +10070,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
         stores_preview::sizes()?;
         return Ok(Outcome::Done);
     }
+    if std::env::args().nth(1).as_deref() == Some("--replay-stores-check") {
+        replay::stores_check::run()?;
+        return Ok(Outcome::Done);
+    }
     if std::env::args().nth(1).as_deref() == Some("--stores-preview") {
         stores_preview::run()?;
         return Ok(Outcome::Done);
