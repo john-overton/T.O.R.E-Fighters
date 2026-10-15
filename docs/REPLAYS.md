@@ -601,8 +601,10 @@ What the replay is:
 
 What is not in it, known limits:
 
-- No cockpit readout, radar or HUD, and no AI thinking trees, reasons or state
-  checksums (the client does not have the host's AI).
+- No full cockpit readout, radar or HUD, and no AI thinking trees, reasons or
+  state checksums (the client does not have the host's AI). The limited
+  view-target and viewed-AI facts retained since 2026-10-15 are documented
+  with the [object banner](#selected-object-banner).
 - Other aircraft carry no fuel, G or stick (they read 0 lb, 1 G and idle),
   and their airspeed is the speed device or the ground speed.
 - A weapon's name and shape come from the host; its class is the mission's own
@@ -967,7 +969,7 @@ beyond them.
   placeholder.
 - A jump in ticks, for example if the recorder falls behind, starts a new
   chunk and reads back as a gap.
-- Replays converted from a network capture are version 1 files too: their
+- Replays converted from a network capture use the world's format too: their
   `net.*` events, header entries and result entries and `weapon.gun_burst`
   events are new names, which a reader that does not know them ignores.
 - New kinds of data arrive as new entries, fields and flag bits within the
@@ -1343,6 +1345,86 @@ on connected devices can also be assigned. Releases, focus loss, controller
 disconnect and opening the pause menu clear held movement. Other replay shortcuts
 remain built in.
 
+### Selected object banner
+
+The bottom banner is on by default, directly above the transport bar. This is
+an **opinionated addition requested by John on 2026-10-15**. The layout and
+selection rules below are agent decisions. Esc > Pref > **Object banner?**
+switches it independently; H also hides it with the rest of the interface.
+There is no new key binding. `--replay-ui banner` selects the banner alone
+alongside the transport bar, and `--replay-ui none` leaves it off.
+
+The banner follows the selected aircraft, the F6 wingman, the F12 weapon, or
+the Alt/Ctrl view reference. An object view shows the explicit ground/weapon
+**View from here** subject, otherwise its **Look at this** object. A drone
+opened beside a weapon keeps that weapon selected until another object or
+drone mode is selected. An absent object has no banner, so a finished weapon
+never leaves its last speed on screen. The camera's aircraft fallback shows
+that aircraft's banner.
+
+| Object | Banner facts |
+| --- | --- |
+| Aircraft, including helicopters | Recorded label, exact type and side; airspeed in kt, recorded Mach when present, altitude in ft MSL, heading; recorded AI activity and mission role, or `player` for a human (crashed, ejected and destroyed states take priority); target name and straight-line range when its position is known |
+| Missiles | Recorded weapon name, owner and side; speed in kt, altitude and direction of travel; recorded seeker state, or air-to-ground guidance mode; current target and range |
+| Bombs and rockets | The same weapon identity and motion; a bomb says `falling` while present unless a recorded guidance mode gives more detail; target from its live state, guidance event or release aim |
+| Moving vehicles and ships | Name and side; speed from consecutive recorded positions, heading and elevation; the most engaged recorded weapon station's phase and target, if any |
+| Stationary SAM/AAA sites | Name, side and elevation; the most engaged recorded station's phase and target. Speed is omitted without a moving track |
+| Other selectable scenery | Its existing replay name and elevation. Action, target, speed and orientation are omitted |
+
+Heading is **true**, clockwise from the recorded world's north, with `T`
+after the whole degree (000 through 359). This is the live HUD/view compass
+convention; no magnetic variation is applied. A vertically falling weapon
+has no heading. AGL and climb rate are omitted to keep the motion row short.
+Values describe the current simulation tick (120 Hz); display trees keep
+their recorded sampling rate. Pause, reverse, scrub and speed changes all
+read the same tick and latest prior events, never the last displayed frame.
+
+A dash means no recorded value or no target. The viewer does not invent a
+missile boost/terminal phase or an AI order from its movement. Unguided
+bomb/rocket targets are release aims, not locks that follow a moving target.
+Multi-station sites show fire, track, pause, prepare, then other phases in
+that priority order, with deterministic station-order ties.
+
+The single-player recorder, file version, sections, event vocabulary and
+network protocol are unchanged. Existing state, delta-coded display trees
+and change events supply these facts. Old format 2/3 recordings still load.
+Single-player recordings gain no bytes.
+
+Client capture conversion now retains the small subset of cockpit facts
+already on the wire: the player's view target, and the viewed AI aircraft's
+activity and whether that AI targets this seat. It emits existing
+`player.view_target`, `ai.activity` and `ai.target` events **only when these
+facts change**, with the optional `source=net.readout` field. Initial known
+facts are emitted too. Losing the viewed AI clears its activity to `-` and
+its target to absent; two seconds without usable cockpit target facts clears
+these scoped facts. A snapshot that omits an unchanged readout keeps them
+current. Other cockpit groups need not be complete. An AI targeting another aircraft has an unknown target,
+not an invented identity. No new wire fields, sections or version are needed.
+Protocol-compatible captures can be converted again to gain these fields; old replay files
+remain unchanged. Host AI thinking for other aircraft and full ground engagement phases do not
+reach this client path and stay a dash. Surface gun bursts do transmit a
+target: their existing `weapon.gun_burst` event now keeps that object, with
+`source=net.surface` and `last_tick` through the last shot known to have fired.
+The banner says `firing` with that target only over this bounded interval.
+For round k the wire specifies `ceil(k * span / rounds)` ticks after the
+start; an early-stop event's fired count limits the interval. It does not
+invent a search phase after firing. Weapon tracks already retain targets. New event bytes scale with decisions/selection changes,
+not the 120 Hz replay frame count.
+
+The banner uses the replay's imported font, title/pale text and dark transport
+background. Up to four rows occupy `rows * (font height + 3) + 8` logical
+pixels above y=430 in the 640x480 layer. Text fits within 616 pixels; long
+names are shortened with the replay's existing ellipsis helper. Cockpit
+messages, subtitles and debug panels move above that space. Esc hides the
+banner while its menu is open.
+
+`--replay-banner-check FILE [--out DIRECTORY]` is a CPU-only developer check.
+It checks every selectable identity, including weapons shorter-lived than a
+second, and samples continuing tracks once a second. With `--out`, it saves
+the actual banner/transport/message composition on a plain background at
+3840x2160, 1920x1080, 800x600 and 640x360. It preserves existing image files.
+This checks layout without pretending to validate the GPU scene.
+
 ### Keys and mouse
 
 The viewer's keys are built in, listed in the
@@ -1406,7 +1488,7 @@ imported tree the same rows are authored.
 | Pref > Sound... | The Sound/Music Prefs screen over the paused replay, as in flight |
 | Pref > Time > Paused | Closes the menu, leaving the replay paused if it was playing and playing if it was paused |
 | Pref > Time > Slow-motion, 1x, 2x, 4x, 8x | Playback at 0.5x to 8x forwards once the menu closes; the menu stays open, as flight's time rows do |
-| Pref > Name labels? / Mission timer? / Flight path trails? / Laser and bomb marks? / Comms panel? | The same switches as N, T, R, B and C, with On or Off beside them |
+| Pref > Name labels? / Mission timer? / Flight path trails? / Laser and bomb marks? / Comms panel? / Object banner? | The same switches as N, T, R, B and C, plus the object banner, with On or Off beside them |
 | Resume replay | Closes the menu |
 | Keyboard shortcuts | The replay's keys, as in the table above |
 
@@ -1764,7 +1846,7 @@ For checking the viewer without a keyboard:
 tore-app --watch-replay FILE --capture-replay OUT.ppm --replay-tick N \
     [--flight-view 0..11] [--replay-aircraft ID] [--replay-drone] \
     [--replay-look-at aircraft:ID|ground:ID|weapon:ID] \
-    [--replay-ui labels,timer,trails,marks,comms,subtitles] [--replay-clean] \
+    [--replay-ui labels,timer,trails,marks,banner,comms,subtitles] [--replay-clean] \
     [--replay-menu '?'|pref|time|help|graphics|sound|controls]
 ```
 
@@ -2358,3 +2440,9 @@ capture writes its speech as a stem beside the effects. `--reel-music DIR`
 exports the imported score phrases. The [TOML reel recipe](../tools/reel/README.md)
 drives these commands. Ordinary replay controls and recording behavior remain
 unchanged.
+
+For a still with the ordinary object-view camera and its banner, use
+`--replay-stills REPLAY FRAME_PLAN OUT_DIR --look-at weapon:ID` (or
+`aircraft:ID` / `ground:ID`). Use a plan row with view 3 and an aircraft
+anchor that exists at the chosen tick. This offscreen command needs a GPU;
+`--replay-banner-check` does not. It leaves existing director plans unchanged.

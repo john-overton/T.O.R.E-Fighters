@@ -34,6 +34,7 @@ pub const TRAILS: &str = "Flight path trails?";
 pub const COMMS: &str = "Comms panel?";
 /// The laser spots, designations and guided weapons of an air-to-ground pass,
 /// drawn in the 3D view: the same switch as the B key (slice FX-R).
+pub const BANNER: &str = "Object banner?";
 pub const MARKS: &str = "Laser and bomb marks?";
 /// The retail tab that opens the controls screen, as it does in flight.
 pub const CONTROL: &str = "Control";
@@ -141,7 +142,9 @@ pub fn tree(imported: &[MenuNode]) -> Vec<MenuNode> {
     if let Some(node) = prefs.iter_mut().find(|n| n.label == "Time") {
         node.children = kept(time, &TIME_ROWS);
     }
-    prefs.extend([NAME_LABELS, MISSION_TIMER, TRAILS, MARKS, COMMS].map(|label| row(label, "")));
+    prefs.extend(
+        [NAME_LABELS, MISSION_TIMER, TRAILS, MARKS, COMMS, BANNER].map(|label| row(label, "")),
+    );
     vec![
         MenuNode {
             label: question.map_or("?", |n| &n.label).into(),
@@ -168,6 +171,7 @@ pub fn state(ui: &Ui, label: &str) -> Option<&'static str> {
         MISSION_TIMER => ui.timer,
         TRAILS => ui.trails,
         MARKS => ui.marks,
+        BANNER => ui.banner,
         COMMS => ui.comms,
         _ => return None,
     };
@@ -218,6 +222,7 @@ pub enum Part {
     Timer,
     Trails,
     Marks,
+    Banner,
     Comms,
 }
 
@@ -592,6 +597,7 @@ impl Menu {
             MISSION_TIMER => Choice::Toggle(Part::Timer),
             TRAILS => Choice::Toggle(Part::Trails),
             MARKS => Choice::Toggle(Part::Marks),
+            BANNER => Choice::Toggle(Part::Banner),
             COMMS => Choice::Toggle(Part::Comms),
             _ => Choice::None,
         }
@@ -678,7 +684,8 @@ mod tests {
                 "Mission timer?|",
                 "Flight path trails?|",
                 "Laser and bomb marks?|",
-                "Comms panel?|"
+                "Comms panel?|",
+                "Object banner?|"
             ]
             .map(String::from)
             .to_vec()

@@ -64,6 +64,17 @@ impl Events {
         let mut out: Vec<(u64, Put)> = Vec::new();
         // Each surface unit's state as last told, for its changes.
         let mut told: BTreeMap<u32, crate::wire::events::SurfaceUnitView> = BTreeMap::new();
+        let burst_ends: BTreeMap<_, _> = seen
+            .events
+            .iter()
+            .filter_map(|received| {
+                if let WireEvent::SurfaceBurstEnd { unit, mount, fired } = received.event.event {
+                    Some(((received.event.tick, unit, mount), fired))
+                } else {
+                    None
+                }
+            })
+            .collect();
         for received in &seen.events {
             let mut tick = u64::from(received.event.tick);
             // Buildings already flat when the seat joined are told with the
@@ -264,13 +275,36 @@ impl Events {
                 // its hardpoint with the schedule's length (protocol 22; the
                 // recording's surface tracks are the replay slice's).
                 WireEvent::SurfaceBurst {
-                    unit, mount, span, ..
-                } => vec![Put::Event(
-                    replay::Event::new(kind::WEAPON_GUN_BURST)
+                    unit,
+                    mount,
+                    target,
+                    rounds,
+                    span,
+                    ..
+                } => {
+                    let mut event = replay::Event::new(kind::WEAPON_GUN_BURST)
                         .with_subject(*unit)
                         .with(field::STATION, i64::from(*mount))
-                        .with("length_ticks", i64::from(*span)),
-                )],
+                        .with("length_ticks", i64::from(*span));
+                    event.object = *target;
+                    let fired = burst_ends
+                        .get(&(received.event.tick, *unit, *mount))
+                        .copied()
+                        .unwrap_or(*rounds)
+                        .min(*rounds);
+                    if fired > 0 {
+                        // The wire defines round k at ceil(k * span / rounds).
+                        // Keep only the interval through the last known shot;
+                        // the exact controller stop time is not transmitted.
+                        let last_shot = tick
+                            + (u64::from(fired - 1) * u64::from(*span))
+                                .div_ceil(u64::from(*rounds));
+                        event = event
+                            .with(field::SOURCE, "net.surface")
+                            .with("last_tick", last_shot as i64);
+                    }
+                    vec![Put::Event(event)]
+                }
                 // A surface unit's state (protocol 22): its hit points while
                 // alive (its death is the Ground destroyed event's), and its
                 // stock as the single-player recorder writes it: every rail

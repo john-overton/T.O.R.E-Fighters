@@ -265,6 +265,7 @@ pub struct Model {
     /// How far above their usual place the subtitles sit, clear of the
     /// cockpit messages over the bar.
     pub subtitle_lift: i32,
+    pub banner: Vec<String>,
 }
 
 fn text(pixels: &mut [u8], font: &Font, color: [u8; 4], text: &str, at: (i32, i32)) {
@@ -350,6 +351,19 @@ fn labelled(pixels: &mut [u8], font: &Font, r: Rect, label: &str, lit: bool) {
     Editor::text(pixels, font, r, color, &label, (x, r.1 + 4));
 }
 
+/// Reserve exactly the banner's rows, plus padding and a separator.
+pub fn lines_height(font: &Font, count: usize) -> i32 {
+    if count == 0 {
+        0
+    } else {
+        count as i32 * (font.height as i32 + 3) + 8
+    }
+}
+
+pub fn banner_height(font: &Font, model: &Model) -> i32 {
+    lines_height(font, model.banner.len())
+}
+
 /// Draws the interface into a cleared 640x480 layer.
 pub fn draw(pixels: &mut [u8], font: &Font, model: &Model) {
     let lit = |control| {
@@ -358,6 +372,21 @@ pub fn draw(pixels: &mut [u8], font: &Font, model: &Model) {
             || model.hover == Some(control)
     };
     Canvas(pixels).rect(BAR, BAR_FILL);
+    let height = banner_height(font, model);
+    if height > 0 {
+        let top = BAR_TOP - height;
+        Canvas(pixels).rect((0, top, WIDTH as i32, height), BAR_FILL);
+        Canvas(pixels).rect((8, top, 624, 1), TITLE);
+        for (i, line) in model.banner.iter().enumerate() {
+            text(
+                pixels,
+                font,
+                if i == 0 { TITLE } else { PALE },
+                &fit(font, &super::panels::ascii(line), 616),
+                (12, top + 5 + i as i32 * (font.height as i32 + 3)),
+            );
+        }
+    }
     // Timeline: the played part, markers, then the playhead.
     Canvas(pixels).rect(TRACK, [70, 84, 104, 255]);
     let head = timeline_x(model.position, model.first, model.last).round() as i32;
@@ -433,6 +462,53 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn banner_stays_above_transport_and_messages_at_all_window_sizes() {
+        let font = font();
+        let model = Model {
+            banner: vec![
+                "Name".into(),
+                "450 kt | 20,000 ft MSL | HDG 090 T".into(),
+                "Action: intercept".into(),
+                "Target: Bandit (5.0 nm)".into(),
+            ],
+            ..Default::default()
+        };
+        let height = banner_height(&font, &model);
+        assert_eq!(height, 48);
+        let top = BAR_TOP - height;
+        let mut layer = vec![0; WIDTH * HEIGHT * 4];
+        draw(&mut layer, &font, &model);
+        for size in [
+            [3840, 2160],
+            [1920, 1080],
+            [800, 600],
+            [640, 360],
+            [480, 800],
+        ] {
+            let placement = Placement::new(size);
+            let scale = placement.scale();
+            let mut canvas = crate::flight_canvas::FlightCanvas::default();
+            canvas.blank(size);
+            canvas.anchored_layer(&layer);
+            let bar_y = f64::from(size[1]) - (HEIGHT as i32 - BAR_TOP) as f64 * scale;
+            let top_y = f64::from(size[1]) - (HEIGHT as i32 - top) as f64 * scale;
+            assert_eq!(
+                placement
+                    .layer([f64::from(size[0]) / 2., (bar_y + top_y) / 2.])
+                    .unwrap()
+                    .1
+                    .round(),
+                (top + height / 2) as f64
+            );
+            assert!(top_y >= 0. && top_y < bar_y && bar_y < f64::from(size[1]));
+            let last_text_bottom =
+                top_y + (5 + 3 * (font.height as i32 + 3) + font.height as i32) as f64 * scale;
+            assert!(last_text_bottom < bar_y);
+        }
+        assert_eq!(banner_height(&font, &Model::default()), 0);
     }
 
     #[test]

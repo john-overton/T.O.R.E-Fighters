@@ -128,6 +128,14 @@ impl Viewer {
         } else {
             None
         };
+        // Resolve mutable camera state before borrowing an aircraft model.
+        let object_camera = if frame.view == 3 && self.look_at.is_some() {
+            self.select(frame.anchor);
+            self.view = OBJECT;
+            Some(self.frame_camera(&picture, tick, 0., false))
+        } else {
+            None
+        };
         let watched_model = watched_pose
             .and_then(|p| p.aircraft)
             .and_then(|id| {
@@ -155,6 +163,9 @@ impl Viewer {
         camera.yaw = d[0].atan2(d[2]) as f32;
         camera.pitch = d[1].atan2(d[0].hypot(d[2])) as f32;
         camera.zoom = ((30f64).to_radians().tan() / (frame.fov / 2.).to_radians().tan()) as f32;
+        if let Some(object_camera) = object_camera {
+            camera = object_camera;
+        }
         if cockpit_view {
             let state = watched
                 .as_ref()
@@ -483,8 +494,10 @@ impl Viewer {
             });
         }
         if frame.view == 3 {
-            self.selected = frame.anchor;
-            self.view = 1;
+            self.select(frame.anchor);
+            if self.look_at.is_none() {
+                self.view = 1;
+            }
             self.ui = Ui {
                 marks: self.ui.marks,
                 ..Ui::default()

@@ -6,6 +6,7 @@
 //!
 //! The viewer owns its own world and aircraft models. Entering it points
 //! the renderer at them; leaving hands the renderer back to the game's.
+pub(crate) mod banner_check;
 mod director;
 use crate::aircraft::Airframe;
 use crate::flight;
@@ -78,17 +79,19 @@ pub struct Ui {
     /// Laser spots, designations and guided weapons drawn in the 3D view
     /// (B, FX-R); on at first, and only for a recording that has any.
     pub marks: bool,
+    pub banner: bool,
 }
 
 impl Ui {
     /// The interface parts named in a comma-separated list (labels, timer,
-    /// trails, marks, comms, subtitles), all others off; `none` for none.
+    /// trails, marks, banner, comms, subtitles), all others off; `none` for none.
     pub fn parse(list: &str) -> Result<Self, String> {
         let mut ui = Self {
             labels: false,
             timer: false,
             subtitles: false,
             marks: false,
+            banner: false,
             ..Self::default()
         };
         for part in list.split(',').map(str::trim) {
@@ -97,12 +100,13 @@ impl Ui {
                 "timer" => ui.timer = true,
                 "trails" => ui.trails = true,
                 "marks" => ui.marks = true,
+                "banner" => ui.banner = true,
                 "comms" => ui.comms = true,
                 "subtitles" => ui.subtitles = true,
                 "none" | "" => {}
                 other => {
                     return Err(format!(
-                        "unknown replay interface part {other:?}: use labels, timer, trails, marks, comms or subtitles"
+                        "unknown replay interface part {other:?}: use labels, timer, trails, marks, banner, comms or subtitles"
                     ));
                 }
             }
@@ -122,6 +126,7 @@ impl Default for Ui {
             trails: false,
             trail_length: trails::DEFAULT_LENGTH,
             marks: true,
+            banner: true,
         }
     }
 }
@@ -472,7 +477,10 @@ fn compose(
             messages.font,
             messages.color,
             messages.lines.iter().map(String::as_str),
-            f64::from(overlay::HEIGHT as i32 - overlay::BAR_TOP),
+            f64::from(
+                overlay::HEIGHT as i32 - overlay::BAR_TOP
+                    + overlay::banner_height(font, interface.model),
+            ),
         );
     }
     if interface.bar {
@@ -780,6 +788,8 @@ pub struct Viewer {
     missiles: BTreeMap<u32, (u32, String)>,
     panels: Panels,
     trees: RecordedTrees,
+    banner: super::banner::Inspector,
+    drone_subject: Option<Target>,
     menu: Option<Menu>,
     /// A right-button press being watched for a click, and where it went
     /// down in view pixels.
@@ -1056,6 +1066,8 @@ impl Viewer {
             comms: Vec::new(),
             panels: Panels::default(),
             trees: RecordedTrees::default(),
+            banner: super::banner::Inspector::default(),
+            drone_subject: None,
             menu: None,
             right_click: None,
             point: None,
@@ -1292,6 +1304,7 @@ impl Viewer {
     /// missiles.
     fn select(&mut self, id: u32) {
         self.from = None;
+        self.drone_subject = None;
         if id != self.selected {
             self.selected = id;
             self.anchor = None;
@@ -1700,6 +1713,7 @@ impl Viewer {
     /// Backquote: from a flight view to the follow drone, then the free
     /// drone, then back. `Some(mode)` switches straight to that drone.
     pub fn drone_mode(&mut self, mode: Option<Mode>) {
+        self.drone_subject = None;
         let tick = self.clock.tick();
         let recorded = self.playback.aircraft(tick, self.selected);
         let anchor = recorded.as_ref().map(|a| a.position);
@@ -1788,6 +1802,7 @@ impl Viewer {
                     Part::Timer => self.ui.timer = !self.ui.timer,
                     Part::Trails => self.ui.trails = !self.ui.trails,
                     Part::Marks => self.ui.marks = !self.ui.marks,
+                    Part::Banner => self.ui.banner = !self.ui.banner,
                     Part::Comms => {
                         self.panels.toggle_comms();
                         self.ui.comms = self.panels.comms_open();
@@ -2502,6 +2517,7 @@ impl Viewer {
                 match found {
                     Some((position, heading)) => {
                         self.drone = Some(Drone::beside(Mode::Free, position, heading));
+                        self.drone_subject = Some(Target::Missile(id));
                         self.camera_error = None;
                     }
                     None => self.toast("That missile is not in the recording now"),
@@ -2976,6 +2992,106 @@ impl Viewer {
             .collect()
     }
 
+    /// The object explicitly viewed, with aircraft selection as the drone fallback.
+    fn banner_subject(&mut self, tick: u64) -> Target {
+        if self.drone.is_some() {
+            return self
+                .drone_subject
+                .unwrap_or(Target::Aircraft(self.selected));
+        }
+        if self.view == OBJECT {
+            // View from a weapon or ground object keeps that explicit subject.
+            return self
+                .from
+                .filter(|t| !matches!(t, Target::Aircraft(_)))
+                .or(self.look_at)
+                .unwrap_or_else(|| self.from());
+        }
+        if self.camera_error.is_some() {
+            return Target::Aircraft(self.selected);
+        }
+        if self.view == flight_views::MISSILE {
+            let missile = match self.rig.reference {
+                Reference::Aircraft(id) if id == self.selected => self.selected_missile,
+                Reference::Target | Reference::Aircraft(_) => {
+                    let owner = match self.rig.reference {
+                        Reference::Target => self.view_target(tick),
+                        Reference::Aircraft(id) => Some(id),
+                        _ => None,
+                    };
+                    self.playback.frame(tick).and_then(|(frames, at)| {
+                        frames[at]
+                            .projectiles
+                            .iter()
+                            .filter(|p| {
+                                Some(p.owner) == owner
+                                    && self
+                                        .recording
+                                        .weapon_info(p.weapon)
+                                        .is_none_or(|w| w.class != WeaponClass::Gun)
+                            })
+                            .map(|p| p.id)
+                            .max()
+                    })
+                }
+                _ => self.rig.missile_subject(),
+            };
+            return missile.map_or(Target::Aircraft(self.selected), Target::Missile);
+        }
+        if self.view == flight_views::WING {
+            return Target::Aircraft(self.rig.wingman().unwrap_or(self.selected));
+        }
+        match self.rig.reference {
+            Reference::Target => self
+                .view_target(tick)
+                .map_or(Target::Aircraft(self.selected), Target::Aircraft),
+            Reference::Missile => self
+                .rig
+                .missile_subject()
+                .map_or(Target::Aircraft(self.selected), Target::Missile),
+            Reference::Aircraft(id) => Target::Aircraft(id),
+            Reference::Player => Target::Aircraft(self.player),
+        }
+    }
+
+    fn object_banner(&mut self, tick: u64) -> Option<super::banner::Banner> {
+        let subject = self.banner_subject(tick);
+        if let Target::Ground(id) = subject
+            && self.tracks.destroyed(tick).contains(&id)
+        {
+            return None;
+        }
+        let ground = if let Target::Ground(id) = subject {
+            self.world
+                .airport_scene
+                .objects
+                .iter()
+                .find(|o| o.id == id)
+                .map(|o| super::banner::Ground {
+                    active: self
+                        .world
+                        .surface
+                        .unit(tore_world::surface::UnitId(id))
+                        .is_some_and(|u| {
+                            u.kind == tore_world::surface::UnitKind::Active || u.route.is_some()
+                        }),
+                    name: self.object_name(subject),
+                    position: o.bounds.center,
+                })
+        } else {
+            None
+        };
+        let previous = tick.checked_sub(1).and_then(|t| self.playback.frame(t));
+        let (frames, at) = self.playback.frame(tick)?;
+        self.banner.inspect(
+            &self.recording,
+            &frames[at],
+            previous.as_ref().map(|(frames, at)| &frames[*at]),
+            subject,
+            ground,
+        )
+    }
+
     /// The interface model for this frame.
     fn model(&self, tick: u64) -> Model {
         let active = if self.clock.paused() {
@@ -3029,6 +3145,7 @@ impl Viewer {
             } else {
                 Vec::new()
             },
+            banner: Vec::new(),
             subtitle_lift: crate::flight_ui::message_band(&self.ownship.hud_font).ceil() as i32,
         }
     }
@@ -3290,7 +3407,25 @@ impl Viewer {
         // prints them above the window's edge; the debug panels and the
         // subtitles stay clear of the seven lines they can fill.
         let band = crate::flight_ui::message_band(&self.ownship.hud_font);
-        self.layout = panels::REPLAY.clear_of(overlay::BAR_TOP, band);
+        let banner = if self.ui.banner && !self.ui.hidden && !self.pause.is_open() {
+            self.object_banner(tick)
+                .map_or_else(Vec::new, |b| b.lines())
+        } else {
+            Vec::new()
+        };
+        let banner_height = overlay::lines_height(&self.ownship.font, banner.len());
+        let subtitle_rows = if self.ui.subtitles && !self.panels.comms_open() {
+            self.subtitles(tick).len()
+        } else {
+            0
+        };
+        let subtitle_band = if subtitle_rows > 0 {
+            29 + (subtitle_rows as i32 - 1) * (self.ownship.font.height as i32 + 10)
+        } else {
+            0
+        };
+        self.layout =
+            panels::REPLAY.clear_of(overlay::BAR_TOP - banner_height - subtitle_band, band);
         let messages = if self.ui.subtitles && !self.ui.hidden {
             self.messages(tick)
         } else {
@@ -3324,7 +3459,10 @@ impl Viewer {
                 menu_rect = Some(menu.rect());
             }
             self.ui.comms = self.panels.comms_open();
-            self.model(tick)
+            let mut model = self.model(tick);
+            model.banner = banner;
+            model.subtitle_lift += banner_height;
+            model
         };
         compose(
             canvas,
@@ -3409,6 +3547,34 @@ impl Viewer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn banner_follows_selected_aircraft_weapons_and_explicit_objects() {
+        let dir = TempDir::new("viewer-banner-selection");
+        let mut v = viewer(&dir, &Options::default());
+        v.clock.seek(180.);
+        assert_eq!(v.banner_subject(180), Target::Aircraft(v.player));
+        v.select(1);
+        assert_eq!(v.banner_subject(180), Target::Aircraft(1));
+        v.select(0);
+        v.set_view(flight_views::MISSILE);
+        assert_eq!(v.banner_subject(180), Target::Missile(f::MISSILE));
+        v.from = Some(Target::Ground(9001));
+        v.look_at = Some(Target::Aircraft(1));
+        v.object_view();
+        assert_eq!(v.banner_subject(180), Target::Ground(9001));
+        v.from = None;
+        v.look_at = Some(Target::Missile(f::MISSILE));
+        assert_eq!(v.banner_subject(180), Target::Missile(f::MISSILE));
+        v.drone_mode(Some(Mode::Free));
+        v.drone_subject = Some(Target::Missile(f::MISSILE));
+        assert_eq!(v.banner_subject(180), Target::Missile(f::MISSILE));
+        v.select(0);
+        assert_eq!(v.banner_subject(180), Target::Aircraft(0));
+        assert!(Ui::default().banner);
+        assert!(!Ui::parse("none").unwrap().banner);
+        assert!(Ui::parse("banner").unwrap().banner);
+    }
 
     #[test]
     fn f12_and_object_menu_follow_overlapping_recorded_weapon_lifetimes() {
@@ -3900,7 +4066,7 @@ mod tests {
         // Back up to the Pref rows, then the ? tab.
         press(&mut v, "Escape");
         press(&mut v, "Escape");
-        assert_eq!(v.pause.widget.rows(&v.pause.tree).len(), 8);
+        assert_eq!(v.pause.widget.rows(&v.pause.tree).len(), 9);
         click(&mut v, QUESTION_TAB);
         assert_eq!(
             v.pause.widget.rows(&v.pause.tree)[0].label,
@@ -3933,6 +4099,10 @@ mod tests {
         assert_eq!(state(&v, pause::MARKS), Some("Off"));
         assert!(v.panels.comms_open());
         assert_eq!(state(&v, pause::COMMS), Some("On"));
+        assert_eq!(state(&v, pause::BANNER), Some("On"));
+        assert_eq!(click(&mut v, menu_row(8)), Command::Click);
+        assert_eq!(state(&v, pause::BANNER), Some("Off"));
+        assert!(!v.ui.banner);
         assert_eq!(state(&v, "Graphics..."), None);
     }
 

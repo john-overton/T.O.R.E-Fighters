@@ -187,3 +187,13 @@ aircraft type at its first recorded layout. These are posed store inspections
 in daylight over Ukraine, not captures of the recording's camera or terrain.
 The before pictures reproduce the old loader with the same recorded stores;
 the after pictures use the viewer's current loader. Use a private data profile.
+
+## Selected object banner
+
+`replay-banner-objects` records an air fight and a falling-bomb pass, then runs
+`--replay-banner-check` on each without a GPU. The check visits every selectable
+identity and samples continuing tracks once a second. Unit tests additionally
+cover missing old fields, guidance and engagement changes, backward seeks,
+selection and menu toggling. `--out DIRECTORY` writes CPU UI layout images at
+4K, 1080p and small-window sizes; full scene renders still need a GPU. See
+[the banner contract](../REPLAYS.md#selected-object-banner).

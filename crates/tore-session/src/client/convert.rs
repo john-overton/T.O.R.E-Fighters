@@ -31,6 +31,7 @@ use tore_sim::{ejection, wreck};
 use tore_world::snapshot::DEVICES;
 use tore_world::world::World;
 
+pub(crate) mod banner;
 pub(crate) mod events;
 pub(crate) mod smooth;
 pub mod stores;
@@ -635,6 +636,9 @@ impl Conversion {
             }
         }
         let mut stores_watch = stores::StoresWatch::default();
+        let mut banner_watch = banner::Watch::default();
+        let mut readouts = seen.banner.iter().peekable();
+        let mut banner_facts = None;
         // The tick each aircraft's pilot was first seen out of it.
         let pilot_from: BTreeMap<u32, u32> = seen
             .states
@@ -747,6 +751,13 @@ impl Conversion {
                 }
             }
             events.fill(tick, &mut frame);
+            while let Some((&at, &facts)) = readouts.next_if(|(at, _)| u64::from(**at) <= tick) {
+                banner_facts = Some((u64::from(at), facts));
+            }
+            let facts = banner_facts
+                .filter(|(at, _)| tick.saturating_sub(*at) <= banner::HOLD_TICKS)
+                .map(|(_, facts)| facts);
+            frame.events.extend(banner_watch.events(facts));
             while let Some((_, event)) = net.next_if(|(t, _)| *t <= tick) {
                 frame.events.push(event);
             }
