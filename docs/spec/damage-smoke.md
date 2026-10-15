@@ -198,6 +198,45 @@ attenuated by fog and dense cloud. They do not write depth or cast shadows.
 The halo simulates optical glow; it does not illuminate nearby aircraft or
 terrain. No original tracer glow or dispersion value is claimed.
 
+### Night tracer visibility
+
+John requested twice the brightness and about three times the visible distance
+at night on 2026-10-15 (opinionated). All flagged gun rounds use one presentation
+rule, including surface AAA and ship guns, small arms, aircraft and helicopter
+cannon, and all three AC-130 guns, in live, network and replay views. Flak and
+tank shells remain untraced. Their cadence, flight, lifetime and damage do not
+change. Impact sparks retain their existing presentation.
+
+The following details are agent decisions, fitted. Use the existing light
+adaptation signal: `night = 1 - smoothstep(sin(-6 degrees), sin(2 degrees),
+sun elevation sine)`, with the renderer's existing rounded constants
+-0.104528 and 0.0348995. Multiply linear emitted radiance by `1 + night` and
+evaluate haze and aerial opacity at `distance / (1 + 2 * night)`. At the
+middle of the transition these factors are 1.5 and 2; at night they are 2
+and 3. This scales the existing weather-dependent visibility envelope, not
+an absolute nautical-mile cutoff. Dense cloud transmission and solid geometry
+occlusion still use the actual distance. The world far plane stays 2,200,000 ft.
+No extra rounds are retained or sent over the network.
+
+At night the ribbon's full halo width and projected length are at least
+2 render pixels, including end-on ribbons. Interpolate from the original dimensions
+through twilight. As width becomes unresolved, smoothly broaden the bright core
+inside that same halo (Gaussian coefficient 120 toward 6), giving a distant
+point a core about 0.68 pixels wide at half maximum. This preserves small dots
+and streaks, rather than adding a large glow sprite. The floor uses each view's
+actual render resolution and zoom. The 105 mm retains its 1.5 radiance factor
+and 1.75 physical width factor. Daytime dimensions, light and attenuation stay
+unchanged. A 1080-pixel-high, 60-degree view at 4 nm changes the ordinary halo
+from 0.0924 pixels across to 2 pixels; its radiance factor changes from 1 to 2.
+This is emitted radiance, not a promise of twice the final display value:
+additive highlights may saturate and pixel coverage also improves.
+
+TV and ordinary seeker views use visible-light adaptation. NVG receives that
+visible scene through its existing logarithmic gain and bloom, without an extra
+tracer-specific NVG multiplier. WHOT/BHOT and thermal seeker views retain their
+existing tracer geometry, attenuation and heat conversion, with no night boost.
+GPU appearance and cost require validation on a display-capable host.
+
 ### Individual cannon rounds
 
 John requested a steady stream of individual bullets and intermittent tracers

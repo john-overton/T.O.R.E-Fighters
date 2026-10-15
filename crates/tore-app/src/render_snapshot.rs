@@ -411,7 +411,7 @@ pub fn combat_geometry(
             );
         }
         if p.gun && p.tracer {
-            tracer(
+            gun_tracer(
                 &mut v,
                 local(p.previous),
                 local(p.position),
@@ -628,6 +628,17 @@ fn encoded(linear: f64) -> f32 {
 /// Camera-facing luminous ribbon over the actual swept gun segment, at
 /// `brightness` times the ordinary tracer's radiance and `width` times its
 /// width.
+fn gun_tracer(
+    out: &mut Vec<f32>,
+    previous: Vector,
+    position: Vector,
+    camera: &Camera,
+    brightness: f64,
+    width: f64,
+) {
+    ribbon(out, previous, position, camera, brightness, width, true);
+}
+
 fn tracer(
     out: &mut Vec<f32>,
     previous: Vector,
@@ -636,6 +647,23 @@ fn tracer(
     brightness: f64,
     width: f64,
 ) {
+    ribbon(out, previous, position, camera, brightness, width, false);
+}
+
+// Gun vertices reuse the ribbon payload: RGB is side * width, index is
+// -(2 + radiance + 10 if end-on); UV.x is signed projected half-length.
+// Sparks retain the ordinary color payload.
+// The shared object shader expands this in the actual view's pixel units.
+#[allow(clippy::too_many_arguments)]
+fn ribbon(
+    out: &mut Vec<f32>,
+    previous: Vector,
+    position: Vector,
+    camera: &Camera,
+    brightness: f64,
+    width: f64,
+    gun: bool,
+) {
     let level = encoded(brightness);
     let segment: Vector = std::array::from_fn(|i| position[i] - previous[i]);
     if tore_sim::attitude::dot(segment, segment) < 1e-12 {
@@ -643,9 +671,9 @@ fn tracer(
     }
     let view: Vector = std::array::from_fn(|i| camera.position[i] - position[i]);
     let cross = cross(segment, view);
-    let (start, ribbon, side) = if tore_sim::attitude::dot(cross, cross)
-        > 0.25 * tore_sim::attitude::dot(view, view).max(1e-12)
-    {
+    let end_on = tore_sim::attitude::dot(cross, cross)
+        <= 0.25 * tore_sim::attitude::dot(view, view).max(1e-12);
+    let (start, ribbon, side) = if !end_on {
         (previous, segment, unit(cross))
     } else {
         // Viewed along its path, retain a small glow instead of collapsing
@@ -656,6 +684,12 @@ fn tracer(
             basis.up.map(|v| v * 0.5 * width),
             basis.right,
         )
+    };
+    let projected_length = if end_on {
+        0.5 * width
+    } else {
+        (tore_sim::attitude::dot(cross, cross) / tore_sim::attitude::dot(view, view).max(1e-12))
+            .sqrt()
     };
     for [along, across] in [
         [0., -1.],
@@ -671,13 +705,21 @@ fn tracer(
             pos[0] as f32,
             pos[1] as f32,
             pos[2] as f32,
-            along as f32,
+            if gun {
+                ((along - 0.5) * projected_length) as f32
+            } else {
+                along as f32
+            },
             across as f32,
             -8.,
-            level,
-            level,
-            level,
-            -1.,
+            if gun { (side[0] * width) as f32 } else { level },
+            if gun { (side[1] * width) as f32 } else { level },
+            if gun { (side[2] * width) as f32 } else { level },
+            if gun {
+                -(2. + brightness + if end_on { 10. } else { 0. }) as f32
+            } else {
+                -1.
+            },
         ]);
     }
 }
@@ -701,6 +743,229 @@ fn vertex(out: &mut Vec<f32>, pos: Vector, color: [f32; 3]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // CPU mirror of the shader, for measurable headless presentation checks.
+    fn night_rule(sun: f64, thermal: bool) -> (f64, f64, f64) {
+        let t = ((sun + 0.104528) / (0.0348995 + 0.104528)).clamp(0., 1.);
+        let night = if thermal {
+            0.
+        } else {
+            1. - t * t * (3. - 2. * t)
+        };
+        (night, 1. + night, 1. + 2. * night)
+    }
+
+    fn pixel_width(distance: f64, night: f64, width: f64) -> f64 {
+        let pixel = 2. * distance / (1080. * 1.7320508);
+        2. * (1.2 * width + night * (pixel - 1.2 * width).max(0.)) / pixel
+    }
+
+    #[test]
+    fn tracer_night_factors_and_pixel_floor() {
+        assert_eq!(night_rule(1., false), (0., 1., 1.));
+        assert_eq!(night_rule(-1., false), (1., 2., 3.));
+        assert_eq!(night_rule(-1., true), (0., 1., 1.));
+        let middle = (-0.104528 + 0.0348995) / 2.;
+        assert_eq!(night_rule(middle, false), (0.5, 1.5, 2.));
+        for edge in [-0.104528, 0.0348995] {
+            assert!(
+                (night_rule(edge - 1e-7, false).0 - night_rule(edge + 1e-7, false).0).abs() < 1e-9
+            );
+        }
+        for nm in [1., 3., 4., 5., 12.] {
+            let distance = nm * 6076.12;
+            let before = pixel_width(distance, 0., 1.);
+            let after = pixel_width(distance, 1., 1.);
+            assert!((after - 2.).abs() < 1e-12);
+            println!(
+                "tracer {nm} nm: halo {before:.4} -> {after:.4} px; linear gain 1 -> 2; haze distance {distance:.1} -> {:.1} ft; additive alpha 0 -> 0",
+                distance / 3.
+            );
+        }
+        // Synthetic haze ramp, 6,000 to 12,000 ft. The same visibility
+        // moves to exactly triple the distance, without changing alpha.
+        let visibility = |distance: f64| 1. - ((distance - 6000.) / 6000.).clamp(0., 1.);
+        for distance in [0., 6000., 9000., 12000., 18000.] {
+            assert_eq!(
+                visibility(distance),
+                visibility(distance * 3. / night_rule(-1., false).2)
+            );
+        }
+        for nm in [3., 4., 5.] {
+            let d = nm * 6076.12;
+            println!(
+                "synthetic haze {nm} nm: visibility {:.4} -> {:.4}; peak red radiance {:.4} -> {:.4}",
+                visibility(d),
+                visibility(d / 3.),
+                3.65 * visibility(d),
+                7.3 * visibility(d / 3.)
+            );
+        }
+        let shader = include_str!("terrain.wgsl");
+        assert!(shader.contains("in.distance/(1.0+2.0*night)"));
+        assert!(shader.contains("in.color.g*(1.0+night)"));
+        assert!(shader.contains("max(1.2*width,pixel)"));
+        assert!(shader.contains("max(2.0*pixel-projected_length,0.0)"));
+    }
+
+    #[test]
+    fn every_gun_family_uses_the_same_payload_and_sparks_do_not() {
+        let camera = Camera::new();
+        for weapon in [
+            "ZSU23", "ZSU57", "M163", "SHIP", "SMLARMS", "M61A1.GN", "GSH23.GN", "HELI", "C_25.JT",
+            "C_40.JT", "C_105.JT",
+        ] {
+            for end in [[20., 0., 0.], camera.position] {
+                let mut vertices = Vec::new();
+                gun_tracer(
+                    &mut vertices,
+                    [0.; 3],
+                    end,
+                    &camera,
+                    tracer_brightness(weapon),
+                    tracer_width(weapon),
+                );
+                assert_eq!(vertices.len(), 60);
+                for v in vertices.chunks_exact(10) {
+                    assert_eq!(v[5], -8.);
+                    assert!(v[9] < -2.);
+                    let brightness = -v[9] - 2. - if v[9] < -12. { 10. } else { 0. };
+                    assert_eq!(brightness, tracer_brightness(weapon) as f32);
+                    assert!(
+                        (v[6..9].iter().map(|x| x * x).sum::<f32>().sqrt()
+                            - tracer_width(weapon) as f32)
+                            .abs()
+                            < 1e-5
+                    );
+                }
+            }
+        }
+        let mut spark = Vec::new();
+        tracer(&mut spark, [0.; 3], [20., 0., 0.], &camera, 2.2, 0.5);
+        assert_eq!(spark[9], -1.);
+    }
+
+    #[test]
+    fn live_and_recorded_rounds_share_geometry_in_every_view() {
+        use crate::replay::convert;
+        use crate::snapshot::ProjectilePose;
+        let world = tore_world::test_support::terrain();
+        let scenery = crate::scenery::tests::scenery();
+        let models = crate::combat_view::render_hash_tests::models();
+        let art = CombatArt::synthetic(Default::default());
+        for weapon in [
+            "M61A1.GN", "GSH23.GN", "ZSU23", "ZSU57", "M163", "SHIP", "SMLARMS", "HELI", "C_25.JT",
+            "C_40.JT", "C_105.JT",
+        ] {
+            let info = tore_replay::WeaponInfo {
+                id: 1,
+                source: weapon.into(),
+                shape: None,
+                name: weapon.into(),
+                class: tore_replay::WeaponClass::Gun,
+            };
+            let pose = ProjectilePose {
+                id: 1,
+                owner: 0,
+                weapon: weapon.into(),
+                shape: None,
+                gun: true,
+                tracer: true,
+                position: [20., 500., 24000.],
+                previous: [0., 500., 24000.],
+                direction: [1., 0., 0.],
+                target: None,
+                incoming: false,
+                speed_f8: 1000,
+                powered: false,
+            };
+            // net/observe uses this same conversion when recording a client.
+            let recorded = convert::projectile_pose(
+                &convert::projectile_state(&pose, 1, 1, None),
+                Some(&info),
+            );
+            let live = RenderSnapshot {
+                projectiles: vec![pose],
+                ..Default::default()
+            };
+            let replay = RenderSnapshot {
+                projectiles: vec![recorded],
+                ..Default::default()
+            };
+            for mut camera in crate::combat_view::render_hash_tests::cameras() {
+                for thermal in [false, true] {
+                    camera.thermal = thermal;
+                    let draw = |snapshot| {
+                        combat_geometry(
+                            snapshot,
+                            &art,
+                            &models[0],
+                            &flight::State::new(
+                                &tore_world::test_support::profile(),
+                                [0., 5000., 0.],
+                            )
+                            .unwrap(),
+                            &camera,
+                            &world,
+                            &scenery,
+                        )
+                        .vertices
+                    };
+                    let vertices = draw(&live);
+                    assert_eq!(vertices.len(), 60);
+                    assert!(vertices.chunks_exact(10).all(|v| v[9] < -2.));
+                    assert_eq!(vertices, draw(&replay));
+                }
+            }
+            let mut untraced = live;
+            untraced.projectiles[0].tracer = false;
+            assert!(
+                combat_geometry(
+                    &untraced,
+                    &art,
+                    &models[0],
+                    &flight::State::new(&tore_world::test_support::profile(), [0., 5000., 0.])
+                        .unwrap(),
+                    &Camera::new(),
+                    &world,
+                    &scenery
+                )
+                .vertices
+                .is_empty()
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "manual CPU cost measurement, no GPU"]
+    fn tracer_busy_scene_cpu_cost() {
+        let camera = Camera::new();
+        for gun in [false, true] {
+            let start = std::time::Instant::now();
+            let mut vertices = Vec::with_capacity(5000 * 60);
+            for _ in 0..200 {
+                vertices.clear();
+                for round in 0..5000 {
+                    let z = 6076.12 * (3. + (round % 300) as f64 / 100.);
+                    ribbon(
+                        &mut vertices,
+                        [0., 0., z],
+                        [20., 0., z],
+                        &camera,
+                        1.,
+                        1.,
+                        gun,
+                    );
+                }
+                std::hint::black_box(&vertices);
+            }
+            println!(
+                "5000 simultaneous tracers gun={gun}: {:.3} ms/frame, {} bytes, one existing draw",
+                start.elapsed().as_secs_f64() * 1000. / 200.,
+                vertices.len() * 4
+            );
+        }
+    }
 
     fn formation(count: usize, mixed: bool) -> RenderSnapshot {
         let mut snapshot = RenderSnapshot {
