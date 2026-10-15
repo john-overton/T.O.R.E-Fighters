@@ -125,7 +125,7 @@ pub(crate) struct Options {
     ai: ai::Config,
 }
 
-const USAGE: &str = "--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND [--from NM] [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S] [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S] [--defenses AAA SAM] [--surface-seed N] [--unit ID] [--designate ag|ir|harm|visual|none] [--break-at S] [--skill N] [--render OUT.png] [--record PATH [--verify-render]] [--laser-off S] [--buddy ID [--buddy-ai]] [--turn-away S] [--condition clear|cloudy|foggy|night] [--orbit-sight pin|track|free] [--orbit-slew S] [--orbit-close S] | --a2g-run THEATER STEM --pilot ai [--aircraft ID] [--load REC] [--target N] [--skill 0..3] [--profile straight|popup|fasthigh|dive|level|orbit|standoff|laydown|strafe] [--handback S [--mode ccip|lvl] [--trigger] [--laser] [--take-back S]] [--order KIND [--order-at S]] [--quick-wing] [--choose-store] [--buddy ID] [--render OUT.png --render-at S] [--mission-altitude FT] [--render-scene DIR] [--console-scene DIR --console-at S,...] [--condition clear|cloudy|foggy|night] [--offset FT] [--sead-at S]; player kinds also take [--render-scene DIR --scene-at S,...] [--condition clear|cloudy|foggy|night] [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG] [--seconds S]";
+const USAGE: &str = "--a2g-run THEATER STEM --aircraft ID --load REC --attack KIND [--from NM] [--altitude FT] [--speed KT] [--dive DEG] [--heading DEG] [--seconds S] [--target N] [--station N] [--count N] [--hold S] [--repeat N] [--gap S] [--defenses AAA SAM] [--surface-seed N] [--unit ID] [--designate ag|ir|harm|visual|none] [--break-at S] [--skill N] [--render OUT.png] [--record PATH [--verify-render]] [--laser-off S] [--buddy ID [--buddy-ai]] [--turn-away S] [--condition clear|cloudy|foggy|night] [--orbit-sight pin|track|free] [--orbit-slew S] [--orbit-close S] | --a2g-run THEATER STEM --pilot ai [--aircraft ID] [--load REC] [--target N] [--skill 0..3] [--profile straight|popup|fasthigh|dive|level|orbit|standoff|laydown|strafe] [--handback S [--mode ccip|lvl] [--trigger] [--laser] [--take-back S]] [--order KIND [--order-at S]] [--quick-wing [--clear-air-at S]] [--choose-store] [--buddy ID] [--render OUT.png --render-at S] [--mission-altitude FT] [--render-scene DIR] [--console-scene DIR --console-at S,...] [--condition clear|cloudy|foggy|night] [--offset FT] [--sead-at S]; player kinds also take [--render-scene DIR --scene-at S,...] [--condition clear|cloudy|foggy|night] [--from NM] [--altitude FT] [--speed KT] [--heading DEG] [--dive DEG] [--seconds S]";
 
 fn options() -> AppResult<Options> {
     let args: Vec<String> = std::env::args().skip(2).collect();
@@ -225,6 +225,7 @@ fn options() -> AppResult<Options> {
             "--order" => o.ai.set_order(&next()?)?,
             "--order-at" => o.ai.order_at = next()?.parse()?,
             "--quick-wing" => o.ai.quick_wing = true,
+            "--clear-air-at" => o.ai.clear_air_at = Some(next()?.parse()?),
             "--mission-altitude" => o.ai.mission_altitude = Some(next()?.parse()?),
             "--render-scene" => o.ai.render_scene = Some(next()?.into()),
             "--console-scene" => o.ai.console_scene = Some(next()?.into()),

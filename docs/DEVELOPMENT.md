@@ -1989,3 +1989,11 @@ actual terrain mesh and its indexed textures. The near/far views span 32,768
 and 262,144 feet vertically, sampled through the live palette at the same
 camera altitudes. This mode needs no GPU. It omits objects, lighting, fog and
 GPU distance filtering, so it verifies artwork and palette colours only.
+
+### CAP and strike order regression counters
+
+AI probes with CAP assignments print `AI probe CAP` per aircraft: its first
+target tick, launch-request count and greatest distance from station in NM.
+The AI strike driver accepts `--quick-wing --clear-air-at SECONDS` to remove
+the last bandit during an explicitly ordered ground strike. See the
+[CAP and strike checks](testing/lane-ai.md#cap-orders-and-unfinished-strikes).

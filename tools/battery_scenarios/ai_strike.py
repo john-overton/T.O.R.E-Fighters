@@ -406,6 +406,21 @@ def lase_flown_problems(run: Run, label: str, ordered_at: float) -> list[str]:
     return problems
 
 
+def clear_air_strike_problems(output: str) -> list[str]:
+    runs = parse_runs(output)
+    if len(runs) != 1:
+        return [f"expected one strike run, got {len(runs)}"]
+    run = runs[0]
+    problems = consistency_problems(run, "HQ strike")
+    if not any(number(r.get("t")) > 10 for r in run.of("RELEASE")):
+        problems.append("no release after the air threat was removed")
+    if not any(k.get("victim", "").startswith("0x500000") for k in run.of("KILL")):
+        problems.append("the strike did not destroy a building at the HQ site")
+    if not run.of("EGRESS"):
+        problems.append("the strike did not egress")
+    return problems
+
+
 def quick_wing_problems(output: str) -> list[str]:
     """`qmc-strike-wing`: a Quick Mission's friendly wing 2 with a ground target set. Run 1 is
     bombers (an A-4E, bomber class): the mission gives them the Strike role and they release.
@@ -1236,6 +1251,24 @@ def scenarios() -> list[Scenario]:
                   "lead's Pave Spike on it (an F-16C's JDAM), Alt+W on a SAM of the defended column (the "
                   "wingman takes the site's SAMs as a class order), and Alt+E refused by a wingman with only air-to-air "
                   "stores. Each reports the reply and what the wingman holds; the takers release.",
+        ),
+        Scenario(
+            name="qmc-strike-a10-maverick-clear-air", lane="flight",
+            args=pilot_run("VLA", "QVCMHQ", "--aircraft", "a10", "--load", "AGM65G",
+                           "--quick-wing", "--choose-store", "--clear-air-at", "10", "--follow-egress", "--seconds", "480"),
+            timeout=900,
+            expect=[r"CLEAR_AIR .*count=1", r"RELEASE", r"IMPACT", r"EGRESS"],
+            check=clear_air_strike_problems,
+            notes="The A-10 chooses a Maverick for Vladivostok HQ and must finish the strike after the last bandit disappears.",
+        ),
+        Scenario(
+            name="qmc-strike-a10-clear-air", lane="flight",
+            args=pilot_run("VLA", "QVCMHQ", "--aircraft", "a10", "--load", "MK82",
+                           "--quick-wing", "--clear-air-at", "10", "--follow-egress", "--seconds", "480"),
+            timeout=900,
+            expect=[r"CLEAR_AIR .*count=1", r"RELEASE", r"IMPACT", r"EGRESS"],
+            check=clear_air_strike_problems,
+            notes="An A-10 Quick Mission strike wing must attack Vladivostok HQ after the last bandit is removed at ten seconds.",
         ),
         Scenario(
             name="qmc-strike-wing", lane="flight",

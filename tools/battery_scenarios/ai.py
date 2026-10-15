@@ -1543,6 +1543,38 @@ def scenarios() -> list[Scenario]:
                           "--probe-enemy-aircraft", ea, *where, "--probe-attack", f"{start}:10", *orders],
                          ticks=start + 16000, timeout=1800, check=orders_answered(12)))
 
+    # CAP must navigate before contact, on both sides, then fight intruders.
+    def cap_orders(output: str, patrol_only: bool, expected: int = 2) -> list[str]:
+        problems = probe_problems(output)
+        rows = re.findall(r"AI probe CAP: actor=(\d+) first_target_tick=(None|Some\(\d+\)) shots=(\d+) max_station_nm=([\d.]+)", output)
+        if len(rows) != expected:
+            problems.append(f"expected {expected} CAP leaders, got {len(rows)}")
+        for actor, first, shots, radius in rows:
+            if patrol_only and float(radius) > 13:
+                problems.append(f"CAP {actor} left its station by {radius} nm")
+            if not patrol_only and (first == "None" or int(shots) == 0):
+                problems.append(f"CAP {actor} failed to engage and fire: {first}, {shots} shots")
+        return problems
+
+    for label, separation, patrol_only in [("station", "150", True), ("engage", "5", False)]:
+        out.append(probe(f"objective-cap-orders-{label}",
+            fight(6, 1, "--probe-friendly-aircraft", "f15", "--probe-enemy-aircraft", "su27",
+                  "--probe-group", "2:2", "--probe-group", "4:2", "--separation", separation),
+            ticks=18000, check=lambda output, only=patrol_only: cap_orders(output, only),
+            notes="Friendly F-15 and enemy Su-27 CAP leaders patrol their own stations before contact and engage intruders."))
+
+    for label, args in [
+        ("friendly", fight(6, 1, "--probe-friendly-aircraft", "f15", "--probe-enemy-aircraft", "il76",
+                           "--probe-group", "2:2", "--probe-group", "4:8")),
+        ("enemy", fight(1, 1, "--aircraft", "il76", "--probe-enemy-aircraft", "su27",
+                        "--probe-group", "4:2")),
+    ]:
+        out.append(probe(f"objective-cap-intruder-{label}",
+            [*args, "--separation", "50", "--record-mission", "{work}/cap.tore-replay"],
+            ticks=72000, check=lambda output: cap_orders(output, False, 1),
+            outputs=["cap.tore-replay"],
+            notes="A transport enters the CAP station from 50 nm away; the patroller must acquire and fire without a player release order."))
+
     # 17. Creator objectives and required survival against the debrief.
     group_cases = [
         ("free", ["--probe-group", "1:1"]),

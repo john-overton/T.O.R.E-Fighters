@@ -37,11 +37,15 @@ your plane back mid-attack, the AI can finish the attack with your settings.
 Fighters, attack jets, heavy bombers, helicopters and the AC-130 all do it,
 each in a way that suits it.
 
-Today the AI carries bombs and Mavericks and never uses them ([AI
-behaviour](ai.md#b14-surface-attack-and-egress) records what the retail
-scripts say and what is open). This spec adds the missing behaviour on top of
-the player's own weapon systems in [air-to-ground](air-to-ground.md), which the
-AI now shares.
+The AI uses the player's weapon systems in [air-to-ground](air-to-ground.md).
+[AI behaviour](ai.md#b14-surface-attack-and-egress) records what the retail
+scripts establish and what remains open.
+
+An unfinished ground assignment survives the loss of the last hostile aircraft.
+The whole strike wing stays on that assignment until its strike controller
+finishes, including egress. Absence of air threats is not mission completion.
+Fuel, damage and explicit return orders still take priority. This implements
+John's correction of 2026-10-15; no new fuel threshold is introduced.
 
 ## How to read the labels
 

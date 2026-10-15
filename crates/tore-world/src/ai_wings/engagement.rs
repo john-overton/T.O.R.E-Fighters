@@ -96,7 +96,7 @@ impl AiWings {
                     slot.id,
                     actor_assignment(
                         preset,
-                        player_position,
+                        self.patrol_station(slot.side, slot.wing_number - 1, player_position),
                         primary_enemy,
                         slot,
                         &friendly_humans,
@@ -157,7 +157,7 @@ impl AiWings {
             let mut assignment = match objective {
                 GroupObjective::Inherit | GroupObjective::Strike => unreachable!(),
                 GroupObjective::Free => Assignment::default(),
-                GroupObjective::Cap => cap(player_position),
+                GroupObjective::Cap => cap(self.patrol_station(side, wing, player_position)),
                 GroupObjective::SelfDefense => self_defense(),
                 GroupObjective::Hold => hold(),
                 GroupObjective::Intercept(group) => {
@@ -240,6 +240,24 @@ impl AiWings {
                 .collect();
             actor.set_assignment(assignment);
         }
+    }
+
+    /// Fitted station for creator CAP: the wing leader's launch position.
+    /// A human-led wing uses the supplied human launch position.
+    fn patrol_station(&self, side: launch::Side, wing: u8, human_position: [f64; 3]) -> [f64; 3] {
+        if self
+            .humans
+            .iter()
+            .any(|h| h.side == side && h.wing == wing && h.member == 0)
+        {
+            return human_position;
+        }
+        self.slots
+            .iter()
+            .filter(|s| s.side == side && s.wing_number == wing + 1)
+            .min_by_key(|s| s.member_number)
+            .and_then(|s| self.mission.actor(s.id))
+            .map_or(human_position, |a| a.flight().position)
     }
 
     pub fn apply_group_survival(&mut self, groups: &[bool; 6]) {
@@ -596,6 +614,48 @@ mod tests {
             wings.mission.actor(1).unwrap().assignment().protected_ids,
             [PLAYER_ID]
         );
+    }
+
+    #[test]
+    fn creator_cap_uses_each_wings_station_on_both_sides() {
+        let (mut wings, _) = super::super::tests::build(None);
+        let positions: Vec<_> = wings
+            .slots
+            .iter()
+            .map(|s| {
+                (
+                    s.id,
+                    s.side,
+                    s.wing_number,
+                    s.member_number,
+                    wings.mission.actor(s.id).unwrap().flight().position,
+                )
+            })
+            .collect();
+        wings.apply_group_objectives(&[GroupObjective::Cap; 6], [12., 20000., 34.]);
+        for (id, side, wing, _, _) in &positions {
+            let center = if *side == launch::Side::Friendly && *wing == 1 {
+                [12., 20000., 34.]
+            } else {
+                positions
+                    .iter()
+                    .filter(|p| p.1 == *side && p.2 == *wing)
+                    .min_by_key(|p| p.3)
+                    .unwrap()
+                    .4
+            };
+            assert_eq!(
+                wings
+                    .mission
+                    .actor(*id)
+                    .unwrap()
+                    .assignment()
+                    .patrol
+                    .unwrap()
+                    .center_ft,
+                center
+            );
+        }
     }
 
     #[test]

@@ -276,6 +276,8 @@ pub(crate) struct Config {
     pub order_at: f64,
     /// `--quick-wing`.
     pub quick_wing: bool,
+    /// Remove the last enemy aircraft at this second, testing unfinished strikes.
+    pub clear_air_at: Option<f64>,
     /// `--render-at S` (with `--render OUT.png`): one offscreen picture of
     /// the striker and its target `S` seconds into the run (slice ST-F).
     pub render_at: Option<f64>,
@@ -365,7 +367,8 @@ impl Config {
         let flags = self.handback.is_some()
             || self.order.is_some()
             || self.mode.is_some()
-            || self.quick_wing;
+            || self.quick_wing
+            || self.clear_air_at.is_some();
         if !self.active {
             if self.profile.is_some() || flags {
                 return Err(
@@ -374,6 +377,11 @@ impl Config {
                 );
             }
             return Ok(());
+        }
+        if let Some(at) = self.clear_air_at
+            && (!self.quick_wing || !at.is_finite() || at < 0.)
+        {
+            return Err("--clear-air-at needs --quick-wing and a finite nonnegative second".into());
         }
         if self.quick_wing
             && (self.handback.is_some()
@@ -1643,6 +1651,11 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
             skill,
         };
     }
+    if cfg.clear_air_at.is_some() {
+        spec.objectives[1] = tore_sim::ai::engagement::GroupObjective::Strike;
+        spec.wings[3].count = 1;
+        spec.objectives[3] = tore_sim::ai::engagement::GroupObjective::Hold;
+    }
     let buddy_aircraft = buddy_option()?;
     if buddy_aircraft.is_some() && (ordering || cfg.handback.is_some() || quick || companion) {
         return Err(
@@ -1905,6 +1918,30 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
     let mut kept_line: Option<String> = None;
     let started = scene.seconds();
     for tick in 0..(o.seconds * 120.) as u64 {
+        if cfg
+            .clear_air_at
+            .is_some_and(|at| tick == (at * 120.) as u64)
+        {
+            let enemies: Vec<u32> = scene
+                .world
+                .ai_wings
+                .as_ref()
+                .into_iter()
+                .flat_map(|w| w.slots())
+                .filter(|s| s.side == tore_sim::ai::launch::Side::Enemy)
+                .map(|s| s.id)
+                .collect();
+            for target in &mut scene.world.combat.state.targets {
+                if enemies.contains(&target.id) {
+                    target.hp = 0;
+                }
+            }
+            println!(
+                "ai-strike: CLEAR_AIR t={:.3} count={}",
+                tick as f64 / 120.,
+                enemies.len()
+            );
+        }
         if human {
             leg_t = tick as f64 / 120.;
             pass.fly(&mut scene, leg_t);

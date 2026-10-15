@@ -8673,6 +8673,8 @@ fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<
     if let Some(path) = &script.track {
         invariants.track = Some(std::io::BufWriter::new(std::fs::File::create(path)?));
     }
+    // CAP-only diagnostics keep ordinary probe output stable.
+    let mut patrol = std::collections::BTreeMap::<u32, (Option<u64>, u64, f64)>::new();
     for tick in 0..ticks as u64 {
         if let Some(recording) = &mut recording {
             recording.start_tick(None, &mut mission.combat);
@@ -8787,6 +8789,29 @@ fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<
         stepped?;
         if let Some(wings) = &mission.ai_wings {
             print_opportunity_notes(tick, wings, &mut opportunity_notes);
+            for actor in
+                wings.mission().actors().iter().filter(|a| {
+                    a.assignment().role == tore_sim::ai::engagement::Role::CombatAirPatrol
+                })
+            {
+                let stats = patrol.entry(actor.id()).or_default();
+                if actor.controller().target().is_some() {
+                    stats.0.get_or_insert(tick);
+                }
+                stats.1 += wings
+                    .last_output()
+                    .launches
+                    .iter()
+                    .filter(|launch| launch.actor == actor.id())
+                    .count() as u64;
+                if let Some(region) = actor.assignment().patrol {
+                    let position = actor.flight().position;
+                    stats.2 = stats.2.max(
+                        (position[0] - region.center_ft[0])
+                            .hypot(position[2] - region.center_ft[2]),
+                    );
+                }
+            }
         }
         // The data link's journal is drained once: for the probe's lines,
         // the recording, or both.
@@ -9076,6 +9101,12 @@ fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<
     {
         println!(
             "AI probe encounter: actor={id} first_visual={visual:?} first_engage={engage:?} first_gun_defense={defense:?} peak_bank_deg={bank:.2}"
+        );
+    }
+    for (id, (engage, shots, radius)) in patrol {
+        println!(
+            "AI probe CAP: actor={id} first_target_tick={engage:?} shots={shots} max_station_nm={:.3}",
+            radius / 6076.
         );
     }
     println!(
