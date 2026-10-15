@@ -203,9 +203,13 @@ impl Ccip {
     /// A bomb's fall line as retail's dot trail draws it: its mean path every
     /// [`TRAIL_SECONDS`] from release to impact.
     pub fn trail(&self) -> impl Iterator<Item = Vector> + '_ {
-        let motion = ballistics::BombMotion::new(self.release);
+        let mut motion = ballistics::BombMotion::new(self.release);
         let steps = (self.seconds / TRAIL_SECONDS).floor().max(0.) as usize;
-        (0..=steps.min(4096)).map(move |k| motion.position(k as f64 * TRAIL_SECONDS))
+        (0..=steps.min(4096)).map(move |k| {
+            let seconds = k as f64 * TRAIL_SECONDS;
+            motion.advance((seconds * 120.).floor() as u64);
+            motion.position(seconds)
+        })
     }
 }
 

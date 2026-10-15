@@ -46,9 +46,14 @@ pub(super) fn run(scene: &mut Scene, o: &Options) -> AppResult<()> {
     // The pass runs through the point the release should happen at: for a
     // bomb, where its mean path meets the target; otherwise above it.
     let through = if bomb {
-        let release_speed = tore_sim::combat::launch_speed(&weapon.movement, (speed * 256.) as i32)
-            .map_or(0., f64::from);
-        ReleaseState::onto(aim, forward, release_speed, o.altitude).position
+        ReleaseState::onto_body(
+            aim,
+            forward,
+            speed,
+            o.altitude,
+            tore_sim::combat::bomb_flight::Body::of(&weapon),
+        )
+        .position
     } else {
         [aim[0], aim[1] + o.altitude, aim[2]]
     };
@@ -188,6 +193,7 @@ pub(super) fn run(scene: &mut Scene, o: &Options) -> AppResult<()> {
                 );
             }
             let actual = ReleaseState {
+                body: motion.body,
                 position: motion.origin,
                 velocity: motion.velocity(0.),
             };
@@ -327,24 +333,9 @@ fn bound_with_slack(bound: f64) -> f64 {
 /// Where a bomb's own path meets the terrain: its closed-form path stepped at
 /// the mission rate, the crossing bisected.
 fn path_impact(motion: &BombMotion, ground: &impl Fn(f64, f64) -> f64) -> Vector {
-    let below = |s: f64| {
-        let p = motion.position(s);
-        p[1] <= ground(p[0], p[2])
-    };
-    let mut s = 0.;
-    while s < 120. && !below(s + 1. / 120.) {
-        s += 1. / 120.;
-    }
-    let (mut low, mut high) = (s, s + 1. / 120.);
-    for _ in 0..30 {
-        let mid = (low + high) / 2.;
-        if below(mid) {
-            high = mid;
-        } else {
-            low = mid;
-        }
-    }
-    motion.position(high)
+    motion
+        .impact(ground)
+        .map_or(motion.origin, |impact| impact.position)
 }
 
 fn distance(a: Vector, b: Vector) -> f64 {

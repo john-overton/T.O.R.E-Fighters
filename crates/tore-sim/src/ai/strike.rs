@@ -72,6 +72,8 @@ pub const STRAIGHT_EXIT_FT: f64 = 2_000.;
 /// "Retail quirks", opinionated agent).
 pub const POPUP_OFFSET_FT: f64 = 500.;
 pub const POPUP_PULL_AT_FT: f64 = 10_000.;
+/// Extra pull distance for a bomb inheriting velocity rather than nose attitude.
+pub const BOMB_POPUP_PULL_LEAD_FT: f64 = 1_000.;
 pub const POPUP_PULL_DEG: f64 = 25.;
 pub const POPUP_PULL_TICKS: u64 = 4 * 120;
 pub const POPUP_EXIT_FT: f64 = 1_500.;
@@ -136,6 +138,12 @@ pub const CUE_TRIM_LIMIT_FT: f64 = 1_000.;
 /// pass and put it 44 ft off at the release, outside the gate; the pointing
 /// is one first-order loop on the miss itself and settles inside 4 s.
 pub const CUE_POINT_GAIN: f64 = 0.6;
+/// Fitted damping horizon for a velocity-based bomb cue, seconds.
+pub const BOMB_CUE_DAMPING_S: f64 = 1.;
+/// Fitted cue tracking gain for rolled bomb runs.
+pub const BOMB_CUE_TRACK_GAIN: f64 = 4.;
+/// A velocity-based bomb dive rolls out above the sight line, degrees.
+pub const BOMB_ROLLIN_LEAD_DEG: f64 = 5.;
 /// The cue's range the pointing divides by is never taken under this.
 pub const CUE_POINT_MIN_RANGE_FT: f64 = 1_500.;
 /// The input-only adapter closes a pitch error over 3 s (docs/spec/ai.md,
@@ -278,6 +286,8 @@ pub const FRAG_MARGIN: f64 = 1.1;
 /// motion is flown as before.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Handling {
+    /// Steer the ground-velocity heading, as a velocity-based bomb cue needs.
+    pub track_heading: bool,
     /// Roll the lift onto the wanted direction and pull: a nose-down change
     /// of more than a gentle push rolls inverted and pulls (retail's dive
     /// bomb roll-in), a smaller one unloads or pushes wings level. Flown for
@@ -297,17 +307,20 @@ pub struct Handling {
 impl Handling {
     /// The ordinary input-only adapter.
     pub const PLAIN: Self = Self {
+        track_heading: false,
         pull: false,
         planned_dive: false,
         strafe: false,
     };
     pub const PULL: Self = Self {
+        track_heading: false,
         pull: true,
         planned_dive: false,
         strafe: false,
     };
     /// A gun run's tracking (slice ST-G).
     pub const STRAFE: Self = Self {
+        track_heading: false,
         pull: true,
         planned_dive: true,
         strafe: true,
@@ -426,9 +439,10 @@ pub struct Store {
     /// A rocket's speed for its cue's drop, ft/s; `None` for a bomb, which
     /// leaves at the aircraft's speed.
     pub round_speed_fps: Option<f64>,
-    /// A bomb's speed at release as a share of the aircraft's (the record's
-    /// launch retard): below 1 for a drag bomb, which flies a laydown.
+    /// The record's launch-retard share, retained to classify laydown stores.
+    /// Bomb release velocity is no longer scaled by this value.
     pub release_speed_share: f64,
+    pub bomb_body: crate::combat::bomb_flight::Body,
     /// The fuze's arming time, seconds, and the fragments' reach, feet (the
     /// sight's LOW and FRAG rules).
     pub fuze_arm_s: f64,
@@ -440,7 +454,7 @@ pub struct Store {
 }
 
 impl Store {
-    /// A drag (retarded) bomb: it leaves slower than the aircraft.
+    /// A drag (retarded) bomb: its retarder slows it after release.
     pub fn retarded(&self) -> bool {
         self.kind == StoreKind::Bomb && self.release_speed_share < 0.95
     }
@@ -1387,7 +1401,7 @@ impl Strike {
             Pass::PopUp => target_at[1] + POPUP_OFFSET_FT,
             // The families' own passes are never a fighter's.
             Pass::Straight | Pass::Orbit | Pass::StandOff => target_at[1],
-            Pass::Laydown => target_at[1] + laydown_height_ft(&store, own.speed.0),
+            Pass::Laydown => target_at[1] + laydown_height_at(&store, own.speed.0, target_at[1]),
             Pass::Strafe => target_at[1] + STRAFE_HEIGHT_FT,
         });
         // A target behind is not attacked from where it stands: the exit
@@ -1853,7 +1867,7 @@ impl Strike {
         }
 
         // Steering.
-        let steer = match self.segment {
+        let mut steer = match self.segment {
             Segment::Approach => {
                 // Every approach is flown at the aim, so the cue starts in
                 // line with it (the aim is the target for a guided store).
@@ -1949,16 +1963,22 @@ impl Strike {
                 let (heading, pitch, rolling_in) = match solution.and_then(|s| s.impact) {
                     Some(impact) => {
                         let line = steering_frame(own.position, target).1;
+                        let rollin_line = line
+                            + if kind == StoreKind::Bomb && pass == Pass::Dive {
+                                BOMB_ROLLIN_LEAD_DEG
+                            } else {
+                                0.
+                            };
                         // A dive or a pop-up first rolls in onto its line
                         // (slice ST-T2): until the flight path is within
                         // [`ROLLIN_DONE_DEG`] of it, the cue is not flown.
                         let rolling_in = matches!(pass, Pass::Dive | Pass::PopUp)
                             && self.holding.is_none()
-                            && own.flight_path_pitch_deg > line + ROLLIN_DONE_DEG;
+                            && own.flight_path_pitch_deg > rollin_line + ROLLIN_DONE_DEG;
                         // While rolling in the cue swings with the attitude,
                         // so the heading is the bearing to the aim.
                         if rolling_in {
-                            (bearing_deg(own.position, aim), line, true)
+                            (bearing_deg(own.position, aim), rollin_line, true)
                         } else {
                             // The roll and pull tracks the cue onto the aim
                             // and holds it there, as a gun run does (slice
@@ -1981,6 +2001,7 @@ impl Strike {
                 // negative G for a pitch far below the flight path, where a
                 // banked push turns the wrong way; fitted, agent).
                 let handling = Handling {
+                    track_heading: false,
                     pull: rolling_in || matches!(pass, Pass::Dive | Pass::PopUp),
                     planned_dive: pass == Pass::Dive,
                     strafe: false,
@@ -2001,6 +2022,7 @@ impl Strike {
             }
             Segment::Climb | Segment::Guide => unreachable!("handled above"),
         };
+        steer.handling.track_heading = kind == StoreKind::Bomb;
         order.steer = Some(steer);
 
         // The release.
@@ -2106,10 +2128,31 @@ impl Strike {
         // The cue's miss across the track, feet (positive: the aim lies right).
         let right = [u[1], -u[0]];
         let cross = (aim[0] - impact[0]) * right[0] + (aim[2] - impact[2]) * right[1];
-        if self.pass.is_some_and(Pass::points_cue) {
+        // Bombs inherit ground velocity, so their cue follows the track.
+        // Point that cue directly; attitude-based integral trim adds a lag
+        // and can swing it past the unchanged skill gate before release.
+        let velocity_bomb = self.kind == Some(StoreKind::Bomb);
+        if velocity_bomb || self.pass.is_some_and(Pass::points_cue) {
             let range = horizontal(own.position, impact).max(CUE_POINT_MIN_RANGE_FT);
-            let turn = CUE_POINT_GAIN * cross.atan2(range).to_degrees();
-            let base = if on_track { track } else { own.heading_deg };
+            let gain = if velocity_bomb && on_track {
+                BOMB_CUE_TRACK_GAIN / own.flight_path_pitch_deg.to_radians().cos().max(0.25)
+            } else {
+                CUE_POINT_GAIN
+            };
+            let rate = if velocity_bomb {
+                self.cue_last.map_or(0., |(previous, _)| {
+                    let previous_cross = -previous[0] * right[0] - previous[1] * right[1];
+                    ((cross - previous_cross) * 120. / range).to_degrees()
+                })
+            } else {
+                0.
+            };
+            let turn = gain * (cross.atan2(range).to_degrees() + BOMB_CUE_DAMPING_S * rate);
+            let base = if velocity_bomb || on_track {
+                track
+            } else {
+                own.heading_deg
+            };
             return wrap_deg(base + turn.clamp(-30., 30.));
         }
         // The track is laid on a point the trim has moved across from the
@@ -2688,10 +2731,10 @@ pub fn energy_good(own: &OwnState) -> bool {
 
 /// Where a pop-up pulls up, feet from the target.
 fn popup_pull_at(kind: StoreKind) -> f64 {
-    if kind == StoreKind::Rocket {
-        ROCKET_POPUP_PULL_AT_FT
-    } else {
-        POPUP_PULL_AT_FT
+    match kind {
+        StoreKind::Rocket => ROCKET_POPUP_PULL_AT_FT,
+        StoreKind::Bomb => POPUP_PULL_AT_FT + BOMB_POPUP_PULL_LEAD_FT,
+        _ => POPUP_PULL_AT_FT,
     }
 }
 
@@ -2771,12 +2814,23 @@ pub fn planned_pitch_floor_with(own: &OwnState, clearance_ft: f64) -> f64 {
 /// release at `speed_fps` clears the sight's LOW rule (the fall lasts the
 /// fuze's arming time, with [`LOW_MARGIN`]) and its FRAG rule (the aircraft,
 /// flying on level, is beyond the fragments' reach when the bomb bursts,
-/// with [`FRAG_MARGIN`]), using the retail fall (16 t² ft) and the bomb's
-/// slower release speed.
+/// with [`FRAG_MARGIN`]), using the shared bomb flight model.
 pub fn laydown_height_ft(store: &Store, speed_fps: f64) -> f64 {
+    laydown_height_at(store, speed_fps, 0.)
+}
+
+fn laydown_height_at(store: &Store, speed_fps: f64, ground: f64) -> f64 {
     let safe = |height: f64| {
-        let fall = (height / 16.).sqrt();
-        let behind = speed_fps * fall * (1. - store.release_speed_share.clamp(0., 1.));
+        let release = crate::combat::ballistics::ReleaseState {
+            position: [0., ground + height, 0.],
+            velocity: [0., 0., speed_fps],
+            body: store.bomb_body,
+        };
+        let Some(impact) = crate::combat::ballistics::impact_at(release, ground) else {
+            return false;
+        };
+        let fall = impact.seconds;
+        let behind = speed_fps * fall - impact.position[2];
         fall >= LOW_MARGIN * store.fuze_arm_s
             && behind.hypot(height) >= FRAG_MARGIN * store.frag_radius_ft
     };

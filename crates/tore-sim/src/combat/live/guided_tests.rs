@@ -40,6 +40,7 @@ pub(crate) fn gbu10() -> Weapon {
         .weapon
         .clone();
     w.source = "GBU10.JT".into();
+    w.weight = 2_000;
     w.flags = 0x2a543;
     w.seeker.signature = 1;
     w.seeker.zones = [zone(16380, 0, 50_000), zone(8190, 0, 30_000)];
@@ -252,7 +253,7 @@ fn a_laser_bomb_with_its_own_spot_in_zone_one_guides_onto_the_tank() {
     assert_eq!(p.target, None, "the legacy pursuit never steers it");
     // Retard 90: 90 percent of 759 ft/s along the nose.
     let motion = p.motion.unwrap();
-    assert!((missiles::length(motion.velocity) - 683.).abs() < 2.);
+    assert!((missiles::length(motion.velocity) - 450. * KNOT).abs() < 2.);
     let f = flight(&s);
     assert_eq!(f.mode, GuidedMode::Guiding);
     assert_eq!(f.spot_owner, Some(0));
@@ -582,7 +583,7 @@ fn a_held_trigger_releases_a_jdam_once_at_the_bar_and_it_hits() {
     // The reach at 8,000 ft and 450 kt is about 8,000 to 19,000 ft; the bar
     // stands two fifths in from the far edge.
     assert!(
-        (13_000. ..16_500.).contains(&range),
+        (20_540. ..20_560.).contains(&range),
         "released at {range} ft after {t} s"
     );
     assert!(s.own().rounds(0) == 3);
@@ -821,4 +822,41 @@ fn a_late_first_laser_lock_checks_terrain_but_an_existing_lock_keeps_its_rules()
         GuidedMode::Guiding,
         "terrain does not break an established laser lock"
     );
+}
+
+#[test]
+fn a_guided_bombs_lifetime_ends_guidance_but_not_its_fall() {
+    let mut w = gbu29();
+    w.movement.remove_t = 4;
+    let mut s = scene(w, false, AHEAD);
+    designate(&mut s);
+    step(&mut s, true);
+    assert_eq!(s.projectiles.len(), 1);
+    for _ in 0..240 {
+        step(&mut s, false);
+    }
+    assert_eq!(s.projectiles.len(), 1);
+    assert_eq!(flight(&s).mode, GuidedMode::Blind);
+    fly_out(&mut s, 100.);
+    assert!(s.projectiles.is_empty());
+}
+
+#[test]
+fn compatibility_guided_weapons_keep_their_legacy_lifetime() {
+    let mut w = gbu29();
+    w.movement.remove_t = 4;
+    let mut s = scene(w, false, AHEAD);
+    s.weapon_rules = Rules::Compatibility;
+    designate(&mut s);
+    step(&mut s, true);
+    assert_eq!(s.projectiles.len(), 1);
+    assert!(s.projectiles[0].motion.is_none());
+    for _ in 0..60 {
+        step(&mut s, false);
+    }
+    assert_eq!(s.projectiles.len(), 1);
+    for _ in 0..120 {
+        step(&mut s, false);
+    }
+    assert!(s.projectiles.is_empty());
 }

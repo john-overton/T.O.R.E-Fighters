@@ -1430,6 +1430,10 @@ pub fn bomb_sight() -> tore_world::readout::BombSight {
         rocket: false,
         ccip: Some(Ccip {
             release: ReleaseState {
+                body: tore_sim::combat::bomb_flight::Body {
+                    area: 0.125,
+                    ..Default::default()
+                },
                 position: [30_000.5, 5_000.25, -20_000.125],
                 velocity: [800.5, -40.25, 12.015_625],
             },

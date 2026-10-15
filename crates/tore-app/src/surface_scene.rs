@@ -347,7 +347,8 @@ fn bomb_runway(
         let y = runway
             .support_height(x, z)
             .unwrap_or(runway.approach_center[1]);
-        let release = crate::surface_objective::dive_release([x, y, z], [0.; 3], runway.heading);
+        let release =
+            crate::surface_objective::dive_release(&bomb, [x, y, z], [0.; 3], runway.heading);
         let from = release.position;
         let speed = release.speed();
         state.projectiles.push(Projectile {

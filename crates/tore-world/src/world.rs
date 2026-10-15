@@ -1068,10 +1068,9 @@ impl World {
                 } => {
                     if let Some(&(_, seat)) = flown.iter().find(|(plane, _)| plane == aircraft)
                         && let Some(name) = self.combat.state.ownship(*aircraft).and_then(|own| {
-                            own.configuration().stations[*i]
-                                .weapon
-                                .fire_sound
-                                .as_deref()
+                            tore_sim::combat::release_sound(
+                                &own.configuration().stations[*i].weapon,
+                            )
                         })
                     {
                         out.releases.push(Release {

@@ -70,7 +70,7 @@ PASSES: list[tuple[str, list[str], bool]] = [
     ("cluster", COLUMN + ["--attack", "release", "--from", "1", "--aircraft", "a4e", "--load", "CBU87",
                           "--count", "2", "--altitude", "3000", "--speed", "450"], True),
     ("laser", COLUMN + ["--aircraft", "f16c"] + GBU10 + LASER_PASS, True),
-    ("blind", COLUMN + ["--aircraft", "f16c"] + GBU10 + LASER_PASS + ["--laser-off", "20"], True),
+    ("blind", COLUMN + ["--aircraft", "f16c"] + GBU10 + LASER_PASS + ["--laser-off", "10"], True),
     ("buddy", COLUMN + ["--aircraft", "f18"] + GBU10 + ["--altitude", "12000", "--speed", "450", "--from", "6",
                                                         "--seconds", "120", "--buddy", "su25"], False),
     ("jdam", ["TVIET", "QTTRUCK", "--attack", "jdam", "--aircraft", "f16c", "--load", "GBU30", "--station", "2",
@@ -247,7 +247,7 @@ def cluster_problems(work: Path, out: str) -> list[str]:
 
 def laser_problems(work: Path, out: str) -> list[str]:
     rows = events(work, "laser")
-    problems = verify_problems(out, "laser", 6_000)
+    problems = verify_problems(out, "laser", 5_200)
     lasing = [d for d in kind(rows, "player.laser") if d["fields"].get("state") == "lasing"]
     released = kind(rows, "weapon.guided", released=True)
     if not lasing or not released:
@@ -344,7 +344,7 @@ def buddy_problems(work: Path, out: str) -> list[str]:
 
 def jdam_problems(work: Path, out: str) -> list[str]:
     rows = events(work, "jdam")
-    problems = verify_problems(out, "jdam", 4_000)
+    problems = verify_problems(out, "jdam", 3_200)
     released = kind(rows, "weapon.guided", released=True)
     if not released:
         return problems + ["jdam: no guided release recorded"]

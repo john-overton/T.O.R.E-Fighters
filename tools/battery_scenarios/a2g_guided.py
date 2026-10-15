@@ -104,9 +104,9 @@ def laser_self_problems(output: str) -> list[str]:
         problems.append(f"{label}: released {release.group(0)}, want a laser bomb guiding on aircraft 0's spot")
     if release and abs(float(release.group(5)) - 15000) > 50:
         problems.append(f"{label}: released {release.group(5)} ft above the target, want 15,000")
-    # Retard 90: 90 percent of the aircraft's 480 kt (810 ft/s), along the nose.
-    if release and abs(float(release.group(6)) - 729) > 5:
-        problems.append(f"{label}: left at {release.group(6)} ft/s, want 90 percent of 810")
+    # Bombs inherit the full aircraft velocity: 480 kt, about 810 ft/s.
+    if release and abs(float(release.group(6)) - 810.144) > 5:
+        problems.append(f"{label}: left at {release.group(6)} ft/s, want the aircraft's 810.144")
     if sight and (sight.group(7), sight.group(6)) != ("Lasing", "no"):
         problems.append(f"{label}: the laser was {sight.group(7)} (buddy {sight.group(6)}) at release")
     if impact and (impact.group(2) != "Guiding" or float(impact.group(3)) > 40):
@@ -270,7 +270,7 @@ def scenarios() -> list[Scenario]:
     return [
         Scenario(
             name="a2g-laser-self", lane="flight", args=laser, timeout=300,
-            then=[Step(laser + ["--laser-off", "20"], timeout=300)],
+            then=[Step(laser + ["--laser-off", "10"], timeout=300)],
             check=laser_self_problems,
             notes="F-16C Pave Spike and a GBU-10 from 15,000 ft; again with the laser off mid-fall.",
         ),
@@ -292,7 +292,7 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="a2g-bar", lane="flight",
             args=["--a2g-run", "TVIET", "QTTRUCK", "--attack", "jdam", "--aircraft", "f16c", "--load", "GBU30",
-                  "--station", "2", "--count", "2", "--altitude", "12000", "--speed", "450", "--from", "9",
+                  "--station", "2", "--count", "2", "--altitude", "12000", "--speed", "450", "--from", "12",
                   "--seconds", "150", "--condition", "clear", "--release", "bar"],
             timeout=300,
             then=[Step(["--a2g-run", "UKR", "QUCOL", "--attack", "laser", "--aircraft", "f16c", "--load", "GBU10",

@@ -16,6 +16,7 @@ pub(super) fn mk82() -> Weapon {
         .weapon
         .clone();
     w.source = "MK82.JT".into();
+    w.weight = 500;
     w.flags = 0x22012;
     w.movement.minimum_speed = 0;
     w.movement.maximum_speed = 1466;
@@ -133,7 +134,7 @@ fn horizontal(a: Vector, b: Vector) -> f64 {
 }
 
 #[test]
-fn a_released_bomb_follows_the_parabola_nose_over_and_never_turns() {
+fn a_released_bomb_follows_the_shared_flight_model() {
     let mut s = carrying(mk82(), 4, [0.; 3]);
     let launcher = pass(5_000., 450., 0.);
     step(&mut s, true, launcher);
@@ -146,7 +147,7 @@ fn a_released_bomb_follows_the_parabola_nose_over_and_never_turns() {
         (motion.horizontal[0]
             .hypot(motion.horizontal[1])
             .hypot(motion.vertical)
-            - 759.)
+            - 450. * KNOT)
             .abs()
             < 1e-9
     );
@@ -161,11 +162,12 @@ fn a_released_bomb_follows_the_parabola_nose_over_and_never_turns() {
             assert!((axis - want).abs() < 1e-6, "tick {tick}");
         }
         // y0 + vz s - 16 s².
-        let height = 5_000. + motion.vertical * seconds - 16. * seconds * seconds;
+        let height = motion.position(seconds)[1];
         assert!((p.position[1] - height).abs() < 1e-6);
         // Pitch follows the velocity; heading stays the release heading.
         let pitch = p.direction[1].atan2(p.direction[0].hypot(p.direction[2]));
-        let falling = (motion.vertical - 32. * seconds).atan2(speed);
+        let velocity = motion.velocity(seconds);
+        let falling = velocity[1].atan2(velocity[0].hypot(velocity[2]));
         assert!((pitch - falling).abs() < 1e-9);
         assert!((p.direction[0].atan2(p.direction[2]) - heading).abs() < 1e-9);
         step(&mut s, false, away());
@@ -188,18 +190,16 @@ fn mk82_from_5000_ft_level_at_450_kt_lands_where_the_numbers_say() {
         },
     };
     let release = ReleaseState::from_station(&pass(5_000., 450., 0.), &station, 0);
-    assert_eq!(release.speed(), 759.);
+    assert_eq!(release.speed(), 450. * KNOT);
     let impact = predict_impact(release, |_, _| 0.).unwrap();
-    // sqrt(5,000 / 16) s of fall at 759 ft/s.
-    let fall = (5_000_f64 / 16.).sqrt();
-    assert!((impact.seconds - fall).abs() < 1e-9);
-    assert!((impact.position[2] - 759. * fall).abs() < 1., "{impact:?}");
-    assert!((impact.position[2] - 13_417.).abs() < 1.);
+    assert!(impact.seconds > (5_000_f64 / 16.).sqrt());
+    assert!(impact.seconds < 20.);
+    assert!(impact.position[2] > 12_000. && impact.position[2] < 13_417.);
     assert_eq!(impact.position[1], 0.);
 }
 
 #[test]
-fn retard_scales_only_the_release_speed_and_cluster_bombs_clamp_higher() {
+fn retard_deploys_after_release_and_all_bombs_inherit_aircraft_velocity() {
     let mut snakeye = mk82();
     snakeye.movement.launch_retard = 66;
     let mut cluster = mk82();
@@ -222,16 +222,16 @@ fn retard_scales_only_the_release_speed_and_cluster_bombs_clamp_higher() {
         ReleaseState::from_station(&pass(5_000., knots, 0.), &station, 0)
     };
     // 759 x 66 / 100, whole feet a second.
-    assert_eq!(at(&snakeye, 450.).speed(), 500.);
+    assert_eq!(at(&snakeye, 450.).speed(), 450. * KNOT);
     let slick = predict_impact(at(&mk82(), 450.), |_, _| 0.).unwrap();
     let retarded = predict_impact(at(&snakeye, 450.), |_, _| 0.).unwrap();
     // Same fall, a shorter throw: no drag after release.
-    assert!((slick.seconds - retarded.seconds).abs() < 1e-9);
-    assert!((retarded.position[2] / slick.position[2] - 500. / 759.).abs() < 1e-9);
+    assert!(retarded.seconds > slick.seconds);
+    assert!(retarded.position[2] < slick.position[2] * 0.75);
     // 2,000 kt: slick bombs stop at 1,466 ft/s, cluster bombs at 2,933.
-    assert_eq!(at(&mk82(), 2_000.).speed(), 1466.);
-    assert_eq!(at(&cluster, 2_000.).speed(), 2933.);
-    assert_eq!(at(&cluster, 450.).speed(), 683.);
+    assert_eq!(at(&mk82(), 2_000.).speed(), 2_000. * KNOT);
+    assert_eq!(at(&cluster, 2_000.).speed(), 2_000. * KNOT);
+    assert_eq!(at(&cluster, 450.).speed(), 450. * KNOT);
     // The cluster records' 0x40 speed command does not touch the path.
     let mut s = carrying(cluster, 1, [0.; 3]);
     step(&mut s, true, pass(5_000., 450., 0.));
@@ -295,6 +295,7 @@ fn every_bomb_scatters_within_one_and_a_half_degrees_and_lands_inside_the_predic
         let id = s.projectiles.last().unwrap().id;
         let motion = s.bomb_motion(id).unwrap();
         let release = ReleaseState {
+            body: motion.body,
             position: motion.origin,
             velocity: motion.velocity(0.),
         };
@@ -346,6 +347,7 @@ fn a_missions_first_bomb_takes_its_own_scatter_and_the_mean_has_no_bias() {
         let mean = ReleaseState::from_station(&launcher, &station, 0);
         let motion = s.bomb_motion(s.projectiles[0].id).unwrap();
         let release = ReleaseState {
+            body: motion.body,
             position: motion.origin,
             velocity: motion.velocity(0.),
         };
@@ -442,7 +444,7 @@ fn a_pack_releases_all_its_bombs_in_one_tick_for_one_round() {
                 .map(|v| v * v)
                 .sum::<f64>()
                 .sqrt()
-                - 500.)
+                - launcher.speed_fps)
                 .abs()
                 < 1e-9
         );
@@ -588,4 +590,203 @@ fn guided_bombs_keep_their_own_path() {
     step(&mut s, false, away());
     // Straight along the nose, as before this slice.
     assert!((s.projectiles[0].position[1] - before[1]).abs() < 1e-9);
+}
+
+#[test]
+fn release_sound_is_shared_by_every_bomb_class_except_novelty() {
+    for name in [
+        "MK82.JT",
+        "MK82P3.JT",
+        "MK82HD.JT",
+        "MK82P.JT",
+        "MK82AIR.JT",
+        "MK84.JT",
+        "CBU87.JT",
+        "CBU89.JT",
+        "MK20.JT",
+        "RBK250.JT",
+        "RBK500.JT",
+        "FAB250.JT",
+        "FAB500.JT",
+        "FAB1000.JT",
+    ] {
+        let mut w = mk82();
+        w.source = name.into();
+        w.fire_sound = Some("&bomb2.11k".into());
+        assert_eq!(crate::combat::release_sound(&w), Some("&bomb.11k"));
+    }
+    for name in [
+        "GBU10.JT",
+        "GBU10A.JT",
+        "PAVEWAY.JT",
+        "PAVEWA3.JT",
+        "GBU28.JT",
+        "GBU29.JT",
+        "GBU29P.JT",
+        "GBU30.JT",
+    ] {
+        let mut w = super::guided_tests::gbu10();
+        w.source = name.into();
+        assert_eq!(crate::combat::release_sound(&w), Some("&bomb.11k"));
+    }
+    for name in ["~BLDR.JT", "~MOOSE.JT"] {
+        let mut w = mk82();
+        w.source = name.into();
+        w.fire_sound = Some("&mothbf.11k".into());
+        assert_eq!(crate::combat::release_sound(&w), Some("&mothbf.11k"));
+    }
+    let mut rocket = lau61();
+    rocket.fire_sound = Some("rocket".into());
+    assert_eq!(crate::combat::release_sound(&rocket), Some("rocket"));
+}
+
+#[test]
+fn fitted_bomb_flight_acceptance_measurements() {
+    use crate::combat::bomb_flight::{Body, DT, Flight};
+    let mut gbu = super::guided_tests::gbu10();
+    gbu.weight = 2_000;
+    let mut air = mk82();
+    air.source = "MK82AIR.JT".into();
+    air.movement.launch_retard = 66;
+    for (w, height, range) in [
+        (gbu, 20_000., Some(24_000.)),
+        (mk82(), 20_000., None),
+        (air, 500., None),
+    ] {
+        let body = Body::of(&w);
+        let mut flight = Flight {
+            position: [0., height, 0.],
+            velocity: [0., 0., 450. * KNOT],
+        };
+        let target = range.map(|z| [0., 0., z]);
+        let predicted = target.and_then(|point| {
+            crate::combat::guided::time_to(
+                &w,
+                missiles::Motion::launch(&w, flight.velocity, height),
+                flight.position,
+                [0., 0., 1.],
+                point,
+                0,
+            )
+        });
+        let mut tick = 0;
+        while flight.position[1] > 0. && tick < 36_000 {
+            flight.step(body, tick, target);
+            tick += 1;
+        }
+        let speed = missiles::length(flight.velocity) / KNOT;
+        println!(
+            "bomb-acceptance {} release-kt=450 arrival-kt={speed:.3} seconds={:.5} range-ft={:.3} miss-ft={:.3}",
+            w.source,
+            tick as f64 * DT,
+            flight.position[2],
+            range.map_or(0., |r| (r - flight.position[2]).abs())
+        );
+        assert!(tick < 36_000);
+        if w.source == "GBU10.JT" {
+            assert!(speed > 300., "{speed}");
+            assert!((predicted.unwrap() - tick as f64 * DT).abs() <= DT);
+            assert!((flight.position[2] - range.unwrap()).abs() < 25.);
+        } else if height == 500. {
+            assert!(flight.position[2] < 450. * KNOT * tick as f64 * DT - 500.);
+        } else {
+            assert!(speed > 450.);
+            assert!(flight.position[2] > 20_000. && flight.position[2] < 30_000.);
+        }
+    }
+}
+
+#[test]
+fn bombs_follow_aircraft_velocity_even_when_the_nose_is_pitched_up() {
+    let mut launcher = pass(5_000., 450., 0.);
+    launcher.basis = Basis::new(0., 20_f64.to_radians(), 0.);
+    let s = carrying(mk82(), 1, [0.; 3]);
+    let release = ReleaseState::from_station(&launcher, &s.own().configuration().stations[0], 0);
+    assert_eq!(release.velocity, launcher.velocity);
+    assert_eq!(
+        crate::combat::guided::release_velocity(&super::guided_tests::gbu10(), &launcher),
+        launcher.velocity
+    );
+}
+
+#[test]
+fn per_store_bomb_flight_measurements() {
+    use crate::combat::bomb_flight::{Body, DT, Flight};
+    // Synthetic records with the reviewed mass, pack count and class metadata.
+    let stores = [
+        ("CBU87.JT", 0x82a052, 500, 90, 1),
+        ("CBU89.JT", 0x82a052, 700, 90, 1),
+        ("FAB1000.JT", 0x22012, 2272, 100, 1),
+        ("FAB250.JT", 0x22012, 550, 100, 1),
+        ("FAB500.JT", 0x22012, 1093, 100, 1),
+        ("GBU10.JT", 0x2a543, 2000, 90, 1),
+        ("GBU10A.JT", 0x2a543, 2000, 90, 1),
+        ("GBU28.JT", 0x2a543, 4500, 90, 1),
+        ("GBU29.JT", 0x2a043, 2000, 90, 1),
+        ("GBU29P.JT", 0x2a043, 2000, 90, 1),
+        ("GBU30.JT", 0x2a043, 1000, 90, 1),
+        ("MK20.JT", 0x82a052, 400, 90, 1),
+        ("MK82.JT", 0x22012, 500, 100, 1),
+        ("MK82AIR.JT", 0x22012, 3500, 66, 7),
+        ("MK82HD.JT", 0x22012, 500, 66, 1),
+        ("MK82P.JT", 0x22012, 3000, 66, 6),
+        ("MK82P3.JT", 0x22012, 1500, 100, 3),
+        ("MK84.JT", 0x22012, 2000, 100, 1),
+        ("PAVEWA3.JT", 0x2a543, 2000, 90, 1),
+        ("PAVEWAY.JT", 0x2a543, 2000, 90, 1),
+        ("RBK250.JT", 0x82a052, 500, 90, 1),
+        ("RBK500.JT", 0x82a052, 700, 90, 1),
+        ("~BLDR.JT", 0x22012, 300, 100, 1),
+        ("~MOOSE.JT", 0x22012, 300, 100, 1),
+    ];
+    for (name, flags, weight, retard, count) in stores {
+        let guided = flags & 0x10 == 0;
+        let mut w = if guided {
+            super::guided_tests::gbu10()
+        } else {
+            mk82()
+        };
+        w.source = name.into();
+        w.flags = flags;
+        w.weight = weight;
+        w.movement.launch_retard = retard;
+        w.burst.game_rounds_in_burst = count;
+        if name.starts_with("GBU29") || name == "GBU30.JT" {
+            w.seeker.signature = 0;
+        }
+        let body = Body::of(&w);
+        let mut flight = Flight {
+            position: [0., 20_000., 0.],
+            velocity: [0., 0., 450. * KNOT],
+        };
+        let mut tick = 0;
+        while flight.position[1] > 0. && tick < 36_000 {
+            flight.step(body, tick, guided.then_some([0., 0., 24_000.]));
+            tick += 1;
+        }
+        assert!(tick < 36_000);
+        println!(
+            "store-flight {name} release-kt=450 arrival-kt={:.3} seconds={:.5} range-ft={:.3}",
+            missiles::length(flight.velocity) / KNOT,
+            tick as f64 * DT,
+            flight.position[2]
+        );
+    }
+}
+
+#[test]
+fn a_retarded_bomb_keeps_falling_past_the_record_lifetime() {
+    let mut w = mk82();
+    w.source = "MK82AIR.JT".into();
+    w.movement.launch_retard = 66;
+    w.movement.remove_t = 4;
+    let mut s = carrying(w, 1, [0.; 3]);
+    step(&mut s, true, pass(20_000., 450., 0.));
+    for _ in 0..240 {
+        step(&mut s, false, away());
+    }
+    assert_eq!(s.projectiles.len(), 1);
+    fall(&mut s, 100.);
+    assert!(s.projectiles.is_empty());
+    assert_eq!(ground_bursts(&s).len(), 1);
 }

@@ -61,7 +61,7 @@ equipment. Rules, persistence and geometry limits live in the
 The air-to-ground round (plan decisions 13 and 16) put the free-fall, retarded,
 pack and cluster bombs and the LAU-10 rocket pod on the Load Ordnance page.
 The flight behaviour of each is in [air-to-ground](air-to-ground.md#bomb-motion):
-bombs fall on the retail bomb equation with its plus or minus 3 degree scatter,
+bombs use the shared fitted gravity and drag model with plus or minus 1.5 degree scatter,
 a pack releases all its bombs in one press, a rocket pod holds its real rocket
 count. Provenance: the records are retail data; listing them is spec-derived
 from the catalog rule above (a record is listed once its flight behaviour

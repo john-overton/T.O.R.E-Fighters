@@ -547,7 +547,7 @@ fn the_ai_judges_a_bomb_where_its_path_meets_the_terrain_not_the_ground_under_it
     // 600 to 800 ft beyond it.
     let flat = crate::combat::ballistics::predict_impact_flat(ccip.release, ground).unwrap();
     let long = flat.position[2] - plateau.position[2];
-    assert!(long > 600. && long < 800., "{long}");
+    assert!(long > 500. && long < 700., "{long}");
     let aim_at = |point: Vector| ReleaseAim {
         offset_ft: [point[0] - tank[0], point[2] - tank[2]],
         gate_ft: 20.,

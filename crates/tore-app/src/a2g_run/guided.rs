@@ -78,6 +78,7 @@ pub(super) struct Extra {
     condition: Option<Condition>,
     /// `--release bar`: hold the trigger in LVL.
     bar: bool,
+    near_max: bool,
 }
 
 fn extra() -> AppResult<Extra> {
@@ -93,11 +94,14 @@ fn extra() -> AppResult<Extra> {
             "--buddy" => e.buddy = Some(AircraftId::parse(value)?),
             "--turn-away" => e.turn_away = Some(value.parse()?),
             "--release" => {
+                e.near_max = value == "max";
                 e.bar = match value.as_str() {
                     "bar" => true,
-                    "cue" => false,
+                    "cue" | "max" => false,
                     other => {
-                        return Err(format!("unknown --release {other}; use cue or bar").into());
+                        return Err(
+                            format!("unknown --release {other}; use cue, bar or max").into()
+                        );
                     }
                 }
             }
@@ -228,6 +232,8 @@ struct Followed {
     flight: GuidedFlight,
     released: f64,
     reported: u64,
+    predicted: Option<f64>,
+    speed_fps: f64,
 }
 
 /// A pass: where the aircraft is at `t` seconds, and its heading.
@@ -559,7 +565,8 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
                     s.in_reach
                         && match (s.reach, s.ground_range_ft) {
                             (Some(reach), Some(range)) => {
-                                !guided::is_glide_bomb(&w) || reach.fraction(range) <= 0.75
+                                !guided::is_glide_bomb(&w)
+                                    || reach.fraction(range) <= if e.near_max { 0.98 } else { 0.75 }
                             }
                             _ => true,
                         }
@@ -619,6 +626,8 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
                     flight: *flight,
                     released: t,
                     reported: 0,
+                    predicted: flight.seconds,
+                    speed_fps: p.map_or(0., |p| f64::from(p.speed_f8) / 256.),
                 },
             );
         }
@@ -639,7 +648,13 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
                             flight.mode
                         );
                     }
+                    if f.predicted.is_none()
+                        && let Some(seconds) = flight.seconds
+                    {
+                        f.predicted = Some(seconds + scene.seconds() - f.released - 1. / 120.);
+                    }
                     f.last = p.position;
+                    f.speed_fps = f64::from(p.speed_f8) / 256.;
                     f.flight = *flight;
                     let second = (t - f.released) as u64;
                     if second >= f.reported {
@@ -661,6 +676,15 @@ pub(super) fn run(o: &Options, resources: &BTreeMap<String, Vec<u8>>) -> AppResu
         }
         for id in ended {
             let f = followed.remove(&id).expect("followed");
+            if let Some(predicted) = f.predicted {
+                let elapsed = scene.seconds() - f.released;
+                println!(
+                    "a2g-run: flight-measured id={id} predicted={predicted:.6} actual={elapsed:.6} error-ticks={:.3} arrival-kt={:.3}",
+                    (elapsed - predicted) * 120.,
+                    f.speed_fps / FPS_PER_KNOT
+                );
+            }
+
             let (miss, hp) = target.map_or((f64::NAN, -1), |(at, hp)| {
                 (guided::ground_range(f.last, at), hp)
             });

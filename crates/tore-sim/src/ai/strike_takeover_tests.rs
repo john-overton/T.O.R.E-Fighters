@@ -117,6 +117,7 @@ fn store(station: u8, kind: StoreKind, rounds: u32) -> Store {
         maximum_range_ft: 40_000.,
         round_speed_fps: None,
         release_speed_share: 1.,
+        bomb_body: Default::default(),
         fuze_arm_s: 0.,
         frag_radius_ft: 0.,
         falls_free: false,

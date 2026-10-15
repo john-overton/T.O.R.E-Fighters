@@ -147,7 +147,19 @@ impl State {
             // Agent-fitted separation push: 6 ft/s away from the belly.
             let velocity =
                 std::array::from_fn(|i| launcher.velocity[i] - launcher.basis.up[i] * 6.);
-            let motion = BombMotion::new(ReleaseState { position, velocity });
+            // An inert body falls on the shared bomb model: its own mass and
+            // size, no retarder and no guidance.
+            let body = crate::combat::bomb_flight::Body {
+                retarder: 0.,
+                steering: 0,
+                guidance_seconds: 0.,
+                ..crate::combat::bomb_flight::Body::of(&weapon)
+            };
+            let motion = BombMotion::new(ReleaseState {
+                body,
+                position,
+                velocity,
+            });
             let id = self.next_shot;
             self.next_shot += 1;
             self.bombs.insert(id, motion);
@@ -356,9 +368,18 @@ mod tests {
         assert_eq!(s.own().rounds(0), 0);
         assert!(s.own().payload_lbs() < mass);
         assert_eq!(s.own().external_fuel_lbs().iter().sum::<f64>(), 3000.);
-        let p = &s.projectiles[0];
-        let origin = p.position;
-        let seconds = (-6. + (36. + 64. * origin[1]).sqrt()) / 32.;
+        // The inert body lands when the shared bomb model says it does.
+        let motion = s.bomb_motion(s.projectiles[0].id).unwrap();
+        let impact = crate::combat::ballistics::predict_impact(
+            crate::combat::ballistics::ReleaseState {
+                body: motion.body,
+                position: motion.position(0.),
+                velocity: motion.velocity(0.),
+            },
+            |_, _| 0.,
+        )
+        .unwrap();
+        let seconds = impact.seconds;
         let mut ticks = 0;
         while !s.projectiles.is_empty() && ticks < 3600 {
             let events = s.step(
@@ -391,7 +412,8 @@ mod tests {
         assert!(
             s.marks
                 .iter()
-                .any(|m| (m.position[2] - origin[2] - 500. * seconds).abs() < 1.)
+                .any(|m| (m.position[0] - impact.position[0]).abs() < 1.
+                    && (m.position[2] - impact.position[2]).abs() < 1.)
         );
     }
     #[test]

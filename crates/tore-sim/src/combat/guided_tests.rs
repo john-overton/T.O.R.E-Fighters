@@ -52,31 +52,34 @@ fn the_kinds_come_from_the_signature_and_the_type_flags() {
 }
 
 #[test]
-fn a_guided_bomb_leaves_along_the_nose_at_ninety_percent_and_glides_to_278() {
-    let launcher = level(10_000., 450.);
-    let v = release_velocity(&gbu10(), &launcher);
-    // 450 kt is 759 ft/s whole; retard 90 gives 683.
-    assert_eq!(v, [0., 0., 683.]);
-    // Straight on, the glide covers its 60 s at 14 ft/s² down to 278 ft/s:
-    // 405 / 14 = 28.9 s slowing over 13,900 ft, then 278 ft/s.
-    let motion = Motion::launch(&gbu10(), v, 10_000.);
-    let slowing = 405. / 14.;
-    let slowed = (683. + 278.) / 2. * slowing;
-    let ahead = |d: f64| [0., 10_000., d];
-    let from = [0., 10_000., 0.];
-    let t = time_to(
-        &gbu10(),
-        motion,
-        from,
+fn a_guided_bomb_inherits_velocity_and_the_tti_matches_its_fall() {
+    use crate::combat::bomb_flight::{Body, DT, Flight};
+    let w = gbu10();
+    let launcher = level(20_000., 450.);
+    let velocity = release_velocity(&w, &launcher);
+    assert_eq!(velocity, launcher.velocity);
+    let point = [0., 0., 24_000.];
+    let predicted = time_to(
+        &w,
+        Motion::launch(&w, velocity, launcher.position[1]),
+        launcher.position,
         [0., 0., 1.],
-        ahead(slowed + HIT_FT),
+        point,
         0,
     )
     .unwrap();
-    assert!((t - slowing).abs() < 0.01, "{t}");
-    let far = slowed + 278. * (60. - slowing);
-    assert!(time_to(&gbu10(), motion, from, [0., 0., 1.], ahead(far - 200.), 0).is_some());
-    assert!(time_to(&gbu10(), motion, from, [0., 0., 1.], ahead(far + 200.), 0).is_none());
+    let mut flight = Flight {
+        position: launcher.position,
+        velocity,
+    };
+    let mut tick = 0;
+    while flight.position[1] > 0. {
+        flight.step(Body::of(&w), tick, Some(point));
+        tick += 1;
+    }
+    assert!((tick as f64 * DT - predicted).abs() < DT);
+    assert!(ground_range(flight.position, point) < HIT_FT);
+    assert!(missiles::length(flight.velocity) / KNOT > 300.);
 }
 
 #[test]
@@ -107,36 +110,56 @@ fn the_reach_starts_at_the_cone_and_ends_where_the_glide_runs_out() {
     let point = |range: f64| [0., 0., range];
     let fly = |range: f64| time_to(&w, motion, launcher.position, [0., 0., 1.], point(range), 0);
     assert!(fly(reach.maximum_ft - 50.).is_some());
-    assert!(fly(reach.maximum_ft + 50.).is_none());
+    assert!(
+        !in_release_zone(
+            &w,
+            launcher.position,
+            launcher.basis,
+            point(reach.maximum_ft + 50.),
+            1.
+        ) || fly(reach.maximum_ft + 50.).is_none()
+    );
     assert!(reach.contains(12_000.) && !reach.contains(5_000.));
     assert_eq!(reach.fraction(reach.minimum_ft), 0.);
     assert_eq!(reach.fraction(reach.maximum_ft), 1.);
 }
 
 #[test]
-fn the_reach_shrinks_with_height_and_grows_with_speed() {
-    // The guided glide has no fall (retail: no gravity flag), so its slant
-    // reach is fixed by its speeds and life: a higher release spends more of
-    // it going down, and the far edge comes in, while the cone's near edge
-    // goes out. A faster release reaches farther.
+fn the_reach_respects_the_release_zone_and_the_shared_flight() {
     let w = gbu10();
-    let mut last: Option<Reach> = None;
-    for altitude in [2_000., 5_000., 8_000., 11_000., 14_000.] {
-        let reach = reach(&w, &level(altitude, 450.), 0., 1.).unwrap();
-        if let Some(last) = last {
-            assert!(
-                reach.maximum_ft <= last.maximum_ft,
-                "{altitude}: {reach:?} {last:?}"
-            );
-            assert!(reach.minimum_ft >= last.minimum_ft);
+    for altitude in [2_000., 5_000., 8_000., 11_000., 14_000., 20_000.] {
+        for speed in [350., 450., 550.] {
+            let launcher = level(altitude, speed);
+            if let Some(reach) = reach(&w, &launcher, 0., 1.) {
+                for range in [
+                    reach.minimum_ft,
+                    (reach.minimum_ft + reach.maximum_ft) / 2.,
+                    reach.maximum_ft,
+                ] {
+                    let point = [0., 0., range];
+                    assert!(in_release_zone(
+                        &w,
+                        launcher.position,
+                        launcher.basis,
+                        point,
+                        1.
+                    ));
+                    assert!(
+                        time_to(
+                            &w,
+                            Motion::launch(&w, launcher.velocity, altitude),
+                            launcher.position,
+                            [0., 0., 1.],
+                            point,
+                            0
+                        )
+                        .is_some(),
+                        "{altitude} {speed} {range}"
+                    );
+                }
+            }
         }
-        last = Some(reach);
     }
-    let slow = reach(&w, &level(8_000., 350.), 0., 1.).unwrap();
-    let fast = reach(&w, &level(8_000., 550.), 0., 1.).unwrap();
-    assert!(fast.maximum_ft > slow.maximum_ft);
-    // Too high for the glide to reach anything inside the cone: no reach.
-    assert!(reach(&w, &level(20_000., 350.), 0., 1.).is_none());
 }
 
 #[test]
@@ -315,4 +338,97 @@ fn guiding_time_to_impact_cost() {
             );
         }
     }
+}
+
+#[test]
+fn guided_reach_memo_preserves_results_and_reports_cost() {
+    let w = gbu10();
+    REACH_MEMO.with(|memo| memo.borrow_mut().clear());
+    let launcher = level(20_000., 450.);
+    let start = std::time::Instant::now();
+    let expected = reach(&w, &launcher, 0., 1.);
+    let cold = start.elapsed();
+    let start = std::time::Instant::now();
+    for n in 0..120 {
+        let shifted = Launcher {
+            position: [100. * n as f64, 20_000., 200. * n as f64],
+            ..launcher
+        };
+        assert_eq!(reach(&w, &shifted, 0., 1.), expected);
+    }
+    println!(
+        "bomb-reach cold-us={} cached-120-us={}",
+        cold.as_micros(),
+        start.elapsed().as_micros()
+    );
+}
+
+#[test]
+fn the_high_altitude_release_window_does_not_disappear_between_samples() {
+    let w = gbu10();
+    for n in 0..120 {
+        let launcher = level(20_000. + n as f64 / 120., 450.);
+        let reach = reach(&w, &launcher, 25., 1.).expect("valid narrow release window");
+        assert!(reach.minimum_ft < 20_001. && reach.maximum_ft > 22_300.);
+    }
+}
+
+#[test]
+fn guided_tti_uses_object_height_and_still_times_a_miss() {
+    let w = gbu29();
+    let launcher = level(12_000., 450.);
+    let motion = Motion::launch(&w, launcher.velocity, launcher.position[1]);
+    let point = [0., 25., 27_000.];
+    let reached = time_to(
+        &w,
+        motion,
+        launcher.position,
+        launcher.basis.forward,
+        point,
+        0,
+    )
+    .unwrap();
+    let with_terrain = time_to_with_terrain(
+        &w,
+        motion,
+        launcher.position,
+        launcher.basis.forward,
+        point,
+        0,
+        Some(&|_, _| 0.),
+    )
+    .unwrap();
+    assert!((reached - with_terrain).abs() < 1e-9);
+    let missed = [0., 25., 200_000.];
+    assert!(
+        time_to(
+            &w,
+            motion,
+            launcher.position,
+            launcher.basis.forward,
+            missed,
+            0
+        )
+        .is_none()
+    );
+    let impact = time_to_with_terrain(
+        &w,
+        motion,
+        launcher.position,
+        launcher.basis.forward,
+        missed,
+        0,
+        Some(&|_, _| 0.),
+    )
+    .unwrap();
+    let mut flight = crate::combat::bomb_flight::Flight {
+        position: launcher.position,
+        velocity: launcher.velocity,
+    };
+    let mut tick = 0;
+    while flight.position[1] > 0. {
+        flight.step(crate::combat::bomb_flight::Body::of(&w), tick, Some(missed));
+        tick += 1;
+    }
+    assert!((impact - tick as f64 * DT).abs() <= DT);
 }

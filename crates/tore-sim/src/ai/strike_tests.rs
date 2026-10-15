@@ -110,6 +110,7 @@ pub(super) fn bomb(rounds: u32) -> Store {
         maximum_range_ft: 20_000.,
         round_speed_fps: None,
         release_speed_share: 1.,
+        bomb_body: Default::default(),
         fuze_arm_s: 1.,
         frag_radius_ft: 300.,
         falls_free: false,
@@ -1452,6 +1453,10 @@ fn a_drag_bomb_lays_down_clear_of_its_fuze_and_its_fragments() {
     // so the floor (500 ft) is safe: 5.6 s of fall, 1,330 ft behind.
     let snakeye = Store {
         release_speed_share: 0.66,
+        bomb_body: crate::combat::bomb_flight::Body {
+            retarder: 2.4,
+            ..Default::default()
+        },
         ..bomb(4)
     };
     assert!(snakeye.retarded());
@@ -1474,9 +1479,13 @@ fn a_drag_bomb_lays_down_clear_of_its_fuze_and_its_fragments() {
     let slow = Store {
         fuze_arm_s: 6.,
         release_speed_share: 0.66,
+        bomb_body: crate::combat::bomb_flight::Body {
+            retarder: 2.4,
+            ..Default::default()
+        },
         ..bomb(4)
     };
-    assert_eq!(laydown_height_ft(&slow, 700.), 850.);
+    assert_eq!(laydown_height_ft(&slow, 700.), 700.);
 }
 
 /// The cue's miss across the aircraft's track, feet (positive: the aim lies
@@ -2168,4 +2177,24 @@ fn ordered_slick_bomb_releases_from_level_pass_when_shared_solution_is_due() {
         order.release.map(|r| (r.station, r.target)),
         Some((StationId(1), TARGET))
     );
+}
+
+#[test]
+fn bomb_cue_steering_uses_ground_track_and_corrects_impact_error() {
+    let mut world = quiet_world();
+    world.own.heading_deg = 10.;
+    let cx = world.context(0);
+    for pass in [Pass::Dive, Pass::Level, Pass::FastHigh, Pass::Laydown] {
+        let mut strike = Strike::new(9);
+        strike.kind = Some(StoreKind::Bomb);
+        strike.pass = Some(pass);
+        let aim = [0., 0., 10_000.];
+        let aligned = strike.line_heading(&cx, aim, aim, false);
+        assert!(
+            aligned.abs() < 1e-9,
+            "aligned velocity cue must not follow nose offset"
+        );
+        let corrected = strike.line_heading(&cx, aim, [-50., 0., 10_000.], false);
+        assert!((0.0..1.).contains(&corrected), "{pass:?}: {corrected}");
+    }
 }

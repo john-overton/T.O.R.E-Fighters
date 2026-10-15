@@ -45,6 +45,7 @@ pub(super) fn run(scene: &mut Scene, o: &Options) -> AppResult<()> {
                     .ok_or("no inert fall")?;
                 let prediction = tore_sim::combat::ballistics::predict_impact(
                     tore_sim::combat::ballistics::ReleaseState {
+                        body: motion.body,
                         position: motion.position(0.),
                         velocity: motion.velocity(0.),
                     },

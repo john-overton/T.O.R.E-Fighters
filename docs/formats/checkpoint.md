@@ -546,3 +546,10 @@ Combat State now writes `jettisoned`, a map from projectile ID to `true`, after
 `bombs`. These IDs bypass guidance, weapon collision and damage. Their motion
 remains in `bombs`. Seat manual command 36 is `JettisonTanks`. This changes
 checkpoint compatibility; the lead must bump the multiplayer protocol.
+
+## Bomb flight state
+
+Bomb paths include body mass, effective drag area, deployed-retarder area,
+steering class and guidance duration, plus the last integrated tick, position
+and velocity. These fitted-model parameters are same-build checkpoint state.
+The release origin and initial velocity remain available for sight prediction.

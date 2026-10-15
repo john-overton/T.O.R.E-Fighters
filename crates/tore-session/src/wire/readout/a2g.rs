@@ -319,7 +319,7 @@ pub(super) fn laser_of(values: &[i64]) -> WireResult<Option<LaserReadout>> {
 const WARNINGS: [Warning; 3] = [Warning::Low, Warning::Frag, Warning::Overfly];
 
 /// Values of the CCIP part, after its flag.
-const CCIP_VALUES: usize = 3 + 3 + 3 + 5;
+const CCIP_VALUES: usize = 3 + 3 + 3 + 5 + 5;
 /// Values of the level release part, after its flag.
 const LEVEL_VALUES: usize = 3 + 7;
 
@@ -362,6 +362,11 @@ pub(super) fn bomb_values(sight: Option<&BombSight>) -> Vec<i64> {
                 q(c.slant_ft, COARSE_FT),
                 q(c.maximum_ft, COARSE_FT),
                 i64::from(c.arc),
+                q(c.release.body.mass, 1. / 16_777_216.),
+                q(c.release.body.area, 1. / 16_777_216.),
+                q(c.release.body.retarder, 1. / 16_777_216.),
+                i64::from(c.release.body.steering),
+                q(c.release.body.guidance_seconds, SECONDS),
             ]);
         }
     }
@@ -407,8 +412,24 @@ pub(super) fn bomb_of(values: &[i64]) -> WireResult<Option<BombSight>> {
     let ccip = (x[2] != 0)
         .then(|| -> WireResult<Ccip> {
             let impact = point_of(c, 0, SIGHT_FT);
+            if !(1..=16_777_216_000_000).contains(&c[14])
+                || !(0..=16_777_216_000).contains(&c[15])
+                || !(0..=16_777_216_000).contains(&c[16])
+                || !(0..=2).contains(&c[17])
+                || !(0..=19_200).contains(&c[18])
+            {
+                return Err(bad("bomb body"));
+            }
+
             Ok(Ccip {
                 release: ReleaseState {
+                    body: tore_sim::combat::bomb_flight::Body {
+                        mass: v(c[14], 1. / 16_777_216.),
+                        area: v(c[15], 1. / 16_777_216.),
+                        retarder: v(c[16], 1. / 16_777_216.),
+                        steering: u8::try_from(c[17]).map_err(|_| bad("bomb steering"))?,
+                        guidance_seconds: v(c[18], SECONDS),
+                    },
                     position: std::array::from_fn(|i| impact[i] + v(c[3 + i], SIGHT_FT)),
                     velocity: point_of(c, 6, FINE_FPS),
                 },

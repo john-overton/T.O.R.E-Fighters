@@ -6,7 +6,8 @@
 //! works out the cockpit's sight for the selected one.
 //!
 //! These weapons have no missile [`super::missiles::Profile`]: they fly on a
-//! `Motion` with their own guidance here, and the legacy pursuit never sees
+//! velocity state with their own guidance here. Unpowered bombs advance on
+//! `bomb_flight`; powered weapons advance on `Motion`. The legacy pursuit never sees
 //! them (their projectile target stays empty).
 //!
 //! - **Laser** (retail lock, TORE spot): at release a spot must lie inside
@@ -252,6 +253,7 @@ pub(super) fn release<G: Fn(f64, f64) -> f64>(
     if flight.mode != Mode::Guiding && guided::is_glide_bomb(w) {
         flight.fall = Some((
             BombMotion::new(ReleaseState {
+                body: crate::combat::bomb_flight::Body::of(w),
                 position,
                 velocity: fall_velocity,
             }),
@@ -288,11 +290,30 @@ pub(super) fn steer<G: Fn(f64, f64) -> f64>(
 ) -> Option<(BombMotion, u64)> {
     let glide = guided::is_glide_bomb(w);
     let was_guiding = flight.mode == Mode::Guiding;
+    if glide && p.age >= u64::from(w.movement.remove_t) * 30 && flight.mode != Mode::Blind {
+        flight.mode = Mode::Blind;
+        if let Some(motion) = p.motion {
+            flight.fall = Some((
+                BombMotion::new(ReleaseState {
+                    position: p.position,
+                    velocity: motion.velocity,
+                    body: crate::combat::bomb_flight::Body::of(w),
+                }),
+                p.age,
+            ));
+        }
+    }
+
     // Which way the weapon points now: a falling bomb along its fall.
-    let heading = match flight.fall {
-        Some((fall, start)) => fall.direction((p.age - start) as f64 / 120.),
-        None => p.direction,
-    };
+    if glide
+        && p.age == 0
+        && let Some((fall, _)) = flight.fall
+        && let Some(motion) = p.motion.as_mut()
+    {
+        motion.velocity = fall.velocity(0.);
+        p.direction = unit(motion.velocity);
+    }
+    let heading = p.direction;
     let nose = guided::nose(heading);
     match flight.mode {
         Mode::Waiting => {
@@ -331,11 +352,12 @@ pub(super) fn steer<G: Fn(f64, f64) -> f64>(
                 Some(point) => flight.point = Some(point),
                 None => {
                     flight.mode = Mode::Blind;
-                    if glide && let Some(motion) = &p.motion {
+                    if glide && let Some(motion) = p.motion {
                         flight.fall = Some((
                             BombMotion::new(ReleaseState {
                                 position: p.position,
                                 velocity: motion.velocity,
+                                body: crate::combat::bomb_flight::Body::of(w),
                             }),
                             p.age,
                         ));
@@ -348,22 +370,25 @@ pub(super) fn steer<G: Fn(f64, f64) -> f64>(
     if flight.mode == Mode::Guiding
         && let (Some(point), Some(motion)) = (flight.point, p.motion.as_mut())
     {
-        let aim = motion.aim_over_terrain(p.position, point, cx.ground);
-        let desired = missiles::commanded_heading(
-            p.direction,
-            motion.path(),
-            unit(missiles::sub(aim, p.position)),
-        );
-        let next = missiles::steer(&w.movement, p.age, p.direction, desired);
-        motion.turn(p.direction, next);
-        p.direction = next;
+        if !glide {
+            let aim = motion.aim_over_terrain(p.position, point, cx.ground);
+            let desired = missiles::commanded_heading(
+                p.direction,
+                motion.path(),
+                unit(missiles::sub(aim, p.position)),
+            );
+            let next = missiles::steer(&w.movement, p.age, p.direction, desired);
+            motion.turn(p.direction, next);
+            p.direction = next;
+        }
         // A cruise profile's fly-out samples the terrain on every step to
         // impact, so it is worked out on the first guiding tick and then
         // every SECONDS_REFRESH_TICKS (staggered by projectile id); between
         // those it counts down. Other weapons fly it every tick, as before
         // (review H1: every tick cost the square of the flight time).
         let refresh = !was_guiding
-            || motion.cruise.is_none()
+            || (!glide && motion.cruise.is_none())
+            || p.age == 0
             || (p.age + u64::from(p.id)).is_multiple_of(SECONDS_REFRESH_TICKS);
         flight.seconds = if refresh {
             guided::time_to_with_terrain(
@@ -378,6 +403,20 @@ pub(super) fn steer<G: Fn(f64, f64) -> f64>(
         } else {
             flight.seconds.map(|s| (s - missiles::DT).max(0.))
         };
+    } else if glide && let Some(motion) = p.motion {
+        if p.age == 0 || (p.age + u64::from(p.id)).is_multiple_of(SECONDS_REFRESH_TICKS) {
+            flight.seconds = crate::combat::ballistics::predict_impact(
+                ReleaseState {
+                    position: p.position,
+                    velocity: motion.velocity,
+                    body: crate::combat::bomb_flight::Body::of(w),
+                },
+                cx.ground,
+            )
+            .map(|i| i.seconds);
+        } else {
+            flight.seconds = flight.seconds.map(|s| (s - missiles::DT).max(0.));
+        }
     } else if let Some((fall, start)) = flight.fall {
         let elapsed = (p.age - start) as f64 / 120.;
         let here = fall.position(elapsed);
@@ -387,7 +426,7 @@ pub(super) fn steer<G: Fn(f64, f64) -> f64>(
     } else {
         flight.seconds = None;
     }
-    flight.fall
+    if glide { None } else { flight.fall }
 }
 
 /// An AT-2's target now, if it still guides: the launcher alive, the target

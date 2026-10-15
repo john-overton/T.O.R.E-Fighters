@@ -1,31 +1,5 @@
-//! Unguided bomb motion and the impact predictor the bomb sight uses.
-//!
-//! Spec-derived from the original's bomb routine as R1 read it
-//! (docs/formats/weapons.md, "Bomb motion"; docs/spec/air-to-ground.md). A
-//! record with the bomb type flag 0x10 never needs the gravity flag 0x4: the
-//! bomb flag alone gives it a closed-form vacuum parabola.
-//!
-//! - Height after `s` seconds is `y0 + vz s - 16 s²` (g = 32 ft/s²), with no
-//!   drag, no terminal speed and no retard after release.
-//! - Horizontal motion is linear at the release's horizontal speed, with no cap.
-//! - The drawn bomb pitches along its velocity; its heading stays the release
-//!   heading.
-//! - A bomb leaves along the aircraft's attitude (the nose, not the flight
-//!   path) at `max(launcher speed x launchRetard / 100, initialSpeed)`,
-//!   clamped by the record (0 to 1,466 ft/s for slick, retarded and packed
-//!   bombs, 0 to 2,933 ft/s for cluster bombs), with no ejection push, and
-//!   then turns by a uniform random error of up to [`BOMB_SCATTER_DEGREES`] in
-//!   heading and in pitch, every bomb its own.
-//! - A pack's bombs leave in one tick, each offset by [`pack_offset`].
-//!
-//! The predictor ([`predict_impact`]) runs the same equation without the
-//! scatter down to where the path meets the terrain (opinionated, John,
-//! 2026-10-11); the original's sight takes the ground under the release
-//! point for the whole fall ([`predict_impact_flat`]). Guided bombs (no 0x10)
-//! do not come here.
-//!
-//! Coordinates are the live adapter's: feet, x and z horizontal, y up, and
-//! headings measured from +z toward +x.
+//! Bomb release, scatter and prediction using the shared fitted flight model.
+use super::bomb_flight::{Body, DT, Flight, MAX_SECONDS};
 use super::live::{Launcher, Station};
 use crate::attitude::{Vector, unit};
 use tore_formats::weapons::Weapon;
@@ -134,25 +108,27 @@ pub fn scatter_stream(state: u32, tick: u64, round: u32) -> impl FnMut(u16) -> u
 /// Where a bomb leaves its aircraft and how fast it is going.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ReleaseState {
+    pub body: Body,
     pub position: Vector,
     /// Feet a second.
     pub velocity: Vector,
 }
 
 impl ReleaseState {
-    /// Leaving `position` along `direction` (any length) at `speed` ft/s.
+    /// Leaving `position` along `direction` at `speed` ft/s, with a nominal
+    /// 500 lb slick body. Store-aware callers set `body` or use `from_station`.
     pub fn new(position: Vector, direction: Vector, speed: f64) -> Self {
         let direction = unit(direction);
         Self {
+            body: Body::default(),
             position,
             velocity: direction.map(|v| v * speed),
         }
     }
 
-    /// What a station releases now, before the scatter: retail `PROJFire`.
+    /// What a station releases now, before scatter.
     /// The store leaves its mount rotated with the aircraft (bomb `index` of
-    /// a pack also its [`pack_offset`]), along the nose, at the record's
-    /// launch speed ([`super::launch_speed`]). The fire loop and the bomb
+    /// a pack also its [`pack_offset`]), with the aircraft's velocity. The fire loop and the bomb
     /// sight both start here, so the sight shows where a released bomb's
     /// mean path goes.
     pub fn from_station(launcher: &Launcher, station: &Station, index: usize) -> Self {
@@ -172,10 +148,11 @@ impl ReleaseState {
                 + basis.forward[i] * mount[2]
                 + [0., up, 0.][i]
         });
-        let speed =
-            super::launch_speed(&station.weapon.movement, (launcher.speed_fps * 256.) as i32)
-                .map_or(0., f64::from);
-        Self::new(position, basis.forward, speed)
+        Self {
+            position,
+            velocity: launcher.velocity,
+            body: Body::of(&station.weapon),
+        }
     }
 
     pub fn speed(&self) -> f64 {
@@ -201,6 +178,7 @@ impl ReleaseState {
         let (sh, ch) = heading.sin_cos();
         let (sp, cp) = pitch.sin_cos();
         Self {
+            body: self.body,
             position: self.position,
             velocity: [speed * cp * sh, speed * sp, speed * cp * ch],
         }
@@ -211,79 +189,132 @@ impl ReleaseState {
     /// height. For development drivers that place a bomb as a pass would
     /// have released it.
     pub fn onto(target: Vector, direction: Vector, speed: f64, height: f64) -> Self {
-        let aimed = Self::new([0., height, 0.], direction, speed);
-        let seconds = BombMotion::new(aimed).fall_time(0.).unwrap_or(0.);
+        Self::onto_body(target, direction, speed, height, Body::default())
+    }
+
+    pub fn onto_body(
+        target: Vector,
+        direction: Vector,
+        speed: f64,
+        height: f64,
+        body: Body,
+    ) -> Self {
+        let mut aimed = Self::new([0., target[1] + height, 0.], direction, speed);
+        aimed.body = body;
+        let impact = impact_at(aimed, target[1]);
+        let point = impact.map_or([0.; 3], |i| i.position);
         Self {
+            body,
             position: [
-                target[0] - aimed.velocity[0] * seconds,
+                target[0] - point[0],
                 target[1] + height,
-                target[2] - aimed.velocity[2] * seconds,
+                target[2] - point[2],
             ],
             velocity: aimed.velocity,
         }
     }
 }
 
-/// A released bomb's path: a vacuum parabola from its release.
+/// A released bomb and its last integrated tick. The cache avoids replaying
+/// the fall on every live tick; prediction uses the identical integrator.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BombMotion {
     pub origin: Vector,
-    /// Horizontal velocity, ft/s along x and z.
     pub horizontal: [f64; 2],
-    /// Vertical speed at release, ft/s, up positive.
     pub vertical: f64,
+    pub body: Body,
+    pub tick: u64,
+    pub flight: Flight,
 }
-
 impl BombMotion {
     pub fn new(release: ReleaseState) -> Self {
         Self {
             origin: release.position,
             horizontal: [release.velocity[0], release.velocity[2]],
             vertical: release.velocity[1],
+            body: release.body,
+            tick: 0,
+            flight: Flight {
+                position: release.position,
+                velocity: release.velocity,
+            },
         }
     }
-
-    /// Where the bomb is `seconds` after release.
+    pub fn advance(&mut self, tick: u64) {
+        if tick < self.tick {
+            self.tick = 0;
+            self.flight = Flight {
+                position: self.origin,
+                velocity: [self.horizontal[0], self.vertical, self.horizontal[1]],
+            };
+        }
+        while self.tick < tick {
+            self.flight.step(self.body, self.tick, None);
+            self.tick += 1;
+        }
+    }
+    fn at(&self, seconds: f64) -> Flight {
+        let mut motion = *self;
+        let ticks = seconds.max(0.) / DT;
+        motion.advance(ticks.floor() as u64);
+        let before = motion.flight;
+        motion.advance(motion.tick + 1);
+        let f = ticks.fract();
+        Flight {
+            position: std::array::from_fn(|i| {
+                before.position[i] + f * (motion.flight.position[i] - before.position[i])
+            }),
+            velocity: std::array::from_fn(|i| {
+                before.velocity[i] + f * (motion.flight.velocity[i] - before.velocity[i])
+            }),
+        }
+    }
     pub fn position(&self, seconds: f64) -> Vector {
-        let fall = GRAVITY_FPS2 / 2. * seconds * seconds;
-        [
-            self.origin[0] + self.horizontal[0] * seconds,
-            self.origin[1] + self.vertical * seconds - fall,
-            self.origin[2] + self.horizontal[1] * seconds,
-        ]
+        self.at(seconds).position
     }
-
-    /// Its velocity then, ft/s.
     pub fn velocity(&self, seconds: f64) -> Vector {
-        [
-            self.horizontal[0],
-            self.vertical - GRAVITY_FPS2 * seconds,
-            self.horizontal[1],
-        ]
+        self.at(seconds).velocity
     }
-
-    /// Which way it points then: along its velocity, so it noses over while
-    /// its heading stays the release heading.
     pub fn direction(&self, seconds: f64) -> Vector {
-        let v = self.velocity(seconds);
-        if v.iter().all(|c| c.abs() < 1e-12) {
-            [0., -1., 0.]
-        } else {
-            unit(v)
-        }
+        unit(self.velocity(seconds))
     }
-
-    /// Seconds until it comes down to the height `ground`, retail's
-    /// `(vz + sqrt(vz² + 64 h)) / 32` with h the release height above it.
-    /// `None` when the path never gets there.
     pub fn fall_time(&self, ground: f64) -> Option<f64> {
-        let height = self.origin[1] - ground;
-        let root = self.vertical * self.vertical + 2. * GRAVITY_FPS2 * height;
-        if root < 0. {
+        self.impact(&|_, _| ground).map(|i| i.seconds)
+    }
+    pub fn impact(&self, ground: &impl Fn(f64, f64) -> f64) -> Option<Impact> {
+        let mut m = *self;
+        let above = m.flight.position[1] - ground(m.flight.position[0], m.flight.position[2]);
+        if above <= 0. {
             return None;
         }
-        let seconds = (self.vertical + root.sqrt()) / GRAVITY_FPS2;
-        (seconds >= 0.).then_some(seconds)
+        while (m.tick as f64) < MAX_SECONDS / DT {
+            let before = m.flight.position;
+            m.advance(m.tick + 1);
+            let p = m.flight.position;
+            let next = p[1] - ground(p[0], p[2]);
+            if next <= 0. {
+                let mut low = 0.;
+                let mut high = 1.;
+                for _ in 0..32 {
+                    let mid = (low + high) * 0.5;
+                    let p: Vector = std::array::from_fn(|i| before[i] + mid * (p[i] - before[i]));
+                    if p[1] > ground(p[0], p[2]) {
+                        low = mid;
+                    } else {
+                        high = mid;
+                    }
+                }
+                let fraction = high;
+                let mut position =
+                    std::array::from_fn(|i| before[i] + fraction * (p[i] - before[i]));
+                position[1] = ground(position[0], position[2]);
+                return Some(Impact {
+                    position,
+                    seconds: (m.tick as f64 - 1. + fraction) * DT,
+                });
+            }
+        }
+        None
     }
 }
 
@@ -295,33 +326,15 @@ pub struct Impact {
     pub seconds: f64,
 }
 
-/// The bomb sight's prediction for `release`: the mean impact point (no
-/// scatter) where the bomb's path meets the terrain, worked along the whole
-/// fall ([`terrain_impact`]). Over flat ground this is the same point as
-/// retail's, which takes the ground under the release point for the whole
-/// fall ([`predict_impact_flat`]); over a rise or a hollow beyond the release
-/// point the bomb is shown where it will really land. Opinionated (John,
-/// 2026-10-11, after slice ST-LV); retail's rule is kept as the flat
-/// predictor. `None` when the path never gets down to the ground.
+/// Mean impact without scatter, at the first terrain crossing of the shared
+/// flight model. The release includes the selected store's body parameters.
 pub fn predict_impact(release: ReleaseState, ground: impl Fn(f64, f64) -> f64) -> Option<Impact> {
-    let under = ground(release.position[0], release.position[2]);
-    let flat = impact_at(release, under)?;
-    let Some(met) = terrain_impact(release, &ground) else {
-        return Some(flat);
-    };
-    // Flat terrain along the fall: exactly retail's answer.
-    if (met.position[1] - under).abs() < 1e-9 {
-        Some(flat)
-    } else {
-        Some(met)
-    }
+    terrain_impact(release, &ground)
 }
 
-/// Retail's predictor (docs/formats/weapons.md, "Bomb sight"): the mean
-/// impact with the ground taken as the height under the release point for
-/// the whole fall, so a target on a rise is bombed short and one in a hollow
-/// long. TORE's pipper no longer uses it ([`predict_impact`]); kept as the
-/// recorded retail rule and for development drivers.
+/// Flat-ground reference using the shared flight model and the height under
+/// the release for the whole fall. This preserves the original sight's
+/// terrain assumption, not its former vacuum equation, for diagnostics.
 pub fn predict_impact_flat(
     release: ReleaseState,
     ground: impl Fn(f64, f64) -> f64,
@@ -329,51 +342,9 @@ pub fn predict_impact_flat(
     impact_at(release, ground(release.position[0], release.position[2]))
 }
 
-/// How far apart the fall is sampled for the terrain, seconds: a bomb moving
-/// 800 ft/s covers 80 ft between samples, so a ridge thinner than that can be
-/// stepped over. The crossing found is then bisected to a nanosecond or so.
-const TERRAIN_STEP_S: f64 = 0.1;
-
-/// Where the mean path of `release` first meets the terrain: the fall is
-/// followed in [`TERRAIN_STEP_S`] steps until the bomb is at or below the
-/// ground there, then the crossing is bisected. `None` when the release is
-/// already inside the ground, or the path never gets down to it (a fall of
-/// more than a thousand feet under the lower of sea level and the ground
-/// under the release point is not followed).
+/// First terrain crossing on the shared integration grid.
 pub fn terrain_impact(release: ReleaseState, ground: &impl Fn(f64, f64) -> f64) -> Option<Impact> {
-    let motion = BombMotion::new(release);
-    let under = ground(release.position[0], release.position[2]);
-    let end = motion.fall_time(under.min(0.) - 1_000.)?;
-    let above = |seconds: f64| {
-        let p = motion.position(seconds);
-        p[1] - ground(p[0], p[2])
-    };
-    if above(0.) <= 0. {
-        return None;
-    }
-    let mut before = 0.;
-    while before < end {
-        let next = (before + TERRAIN_STEP_S).min(end);
-        if above(next) <= 0. {
-            let (mut low, mut high) = (before, next);
-            for _ in 0..40 {
-                let middle = (low + high) / 2.;
-                if above(middle) > 0. {
-                    low = middle;
-                } else {
-                    high = middle;
-                }
-            }
-            let mut position = motion.position(high);
-            position[1] = ground(position[0], position[2]);
-            return Some(Impact {
-                position,
-                seconds: high,
-            });
-        }
-        before = next;
-    }
-    None
+    BombMotion::new(release).impact(ground)
 }
 
 /// Where the mean path of `release` comes down to the height `height`: the
@@ -381,11 +352,7 @@ pub fn terrain_impact(release: ReleaseState, ground: &impl Fn(f64, f64) -> f64) 
 /// this way, so a target higher or lower than the ground under the release
 /// point is still hit (slice ST-LV). `None` when the path never gets there.
 pub fn impact_at(release: ReleaseState, height: f64) -> Option<Impact> {
-    let motion = BombMotion::new(release);
-    let seconds = motion.fall_time(height)?;
-    let mut position = motion.position(seconds);
-    position[1] = height;
-    Some(Impact { position, seconds })
+    BombMotion::new(release).impact(&|_, _| height)
 }
 
 #[cfg(test)]

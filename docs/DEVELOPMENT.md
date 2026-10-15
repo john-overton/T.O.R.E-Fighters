@@ -1855,7 +1855,13 @@ targeting's Ctrl+X), release on the HUD's IN RNG cue and follow each weapon
 to its end; `--laser-off S` turns the laser off S seconds after the release,
 `--buddy ID` puts a second aircraft on a second seat to lase for the
 attacker, `--turn-away S` turns the attacker away after the release and
-`--condition clear|cloudy|foggy|night` sets the weather.
+`--condition clear|cloudy|foggy|night` sets the weather. Guided attacks accept
+`--release cue` (the default, a quarter of the way into the reach),
+`--release bar` (hold for the level T) and `--release max` (98% of the range
+interval, for a near-limit check). The `flight-measured` line reports release
+TTI, elapsed flight time, their difference in ticks, and arrival speed in knots.
+The `a2g-bomb-flight-*` battery cases record the four shared-model acceptance
+passes and verify replay transforms on the CPU.
 
 ```sh
 TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --hud-guided-preview .local/hud-guided

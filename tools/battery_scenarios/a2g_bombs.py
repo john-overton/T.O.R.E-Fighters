@@ -1,24 +1,9 @@
-"""Lane: flight. Bomb and rocket motion (docs/formats/weapons.md, "Bomb motion";
-docs/spec/air-to-ground.md), through `--a2g-run`'s `release` attack.
+"""Lane: flight. Shared fitted bomb motion through real trigger releases.
 
-`a2g-bomb-motion` drops through the real trigger over the Ukraine armored
-column `~QUCOL`:
-
-* an A-4E's Mk 82 from a level pass, 5,000 ft at 450 kt, and an F-4B's Mk 82
-  from a 30 degree dive: the sight's solution obeys the bomb equation (fall
-  `(vz + sqrt(vz^2 + 64 h)) / 32` seconds, throw the horizontal speed times the
-  fall), every bomb bursts on its own path within 2 ft and inside the retail
-  scatter's reach of the mean point, and its scatter stays within 1.5 degrees (John halved retail's 3, 2026-10-11);
-* an A-4E's Mk 82 AIR 7-pack: one press releases all seven in one tick for one
-  round, staggered x 0, -2, +2, -4, +4, -6, +6 ft and y 0, -2, -6, -12, -20,
-  -30, -42 ft, at 66 percent of the aircraft's speed;
-* an A-4E's Snakeye (Mk 82 HD) from the same level pass: 66 percent of the
-  speed and the same fall, so a throw 66 percent of the slick bomb's.
-
-`a2g-rocket-pod` fires an A-4E's two LAU-61 pods: 38 rockets, one a press,
-four a second held (a quarter second apart on the game's quarter-second clock), all 38
-when held on; and a pair
-of LAU-10 pods (8 rockets) that fire once a press however long it is held.
+The four bomb passes check gravity/drag bounds, full aircraft release speed,
+pack offsets, unchanged scatter, and impact agreement within two feet of each
+predicted path. Retarders deploy after release and shorten horizontal travel.
+Rocket pod accounting and gun-key cases retain their existing checks.
 """
 import json
 import math
@@ -63,10 +48,10 @@ def _solution(run: str, label: str, problems: list[str]):
     vz = speed * math.sin(math.radians(pitch))
     vh = speed * math.cos(math.radians(pitch))
     expected = (vz + math.sqrt(vz * vz + 64 * height)) / 32
-    if abs(fall - expected) > 0.01:
-        problems.append(f"{label}: fall {fall} s, the bomb equation gives {expected:.3f} s")
-    if abs(throw - vh * expected) > 2:
-        problems.append(f"{label}: throw {throw} ft, the bomb equation gives {vh * expected:.1f} ft")
+    if fall < expected - 0.01 or fall > 300:
+        problems.append(f"{label}: fall {fall} s outside gravity/drag bounds ({expected:.3f}..300 s)")
+    if throw <= 0 or throw > vh * fall + 2:
+        problems.append(f"{label}: drag throw {throw} ft outside 0..{vh * fall:.1f} ft")
     return dict(height=height, speed=speed, pitch=pitch, fall=fall, throw=throw)
 
 
@@ -117,19 +102,19 @@ def bomb_problems(output: str) -> list[str]:
         n = int(b[0])
         if n < 7 and (abs(float(b[1]) - PACK_X[n]) > 0.01 or abs(float(b[2]) - PACK_Y[n]) > 0.01):
             problems.append(f"A-4E Mk 82 AIR: bomb {n} offset {b[1]} {b[2]}, want {PACK_X[n]} {PACK_Y[n]}")
-    if pack and level and abs(pack["speed"] - math.floor(level["speed"] * 0.66)) > 1.01:
-        problems.append(f"A-4E Mk 82 AIR: released at {pack['speed']} ft/s, want 66 percent of {level['speed']}")
+    if pack and level and abs(pack["speed"] - level["speed"]) > 1.01:
+        problems.append(f"A-4E Mk 82 AIR: released at {pack['speed']} ft/s, want aircraft speed {level['speed']}")
 
     snakeye = _solution(parts[3], "A-4E Snakeye", problems)
     _bombs(parts[3], "A-4E Snakeye", 1, problems)
     if snakeye and level:
-        if abs(snakeye["speed"] - math.floor(level["speed"] * 0.66)) > 1.01:
-            problems.append(f"A-4E Snakeye: released at {snakeye['speed']} ft/s, want 66 percent of {level['speed']}")
-        if abs(snakeye["fall"] - level["fall"]) > 0.05:
-            problems.append(f"A-4E Snakeye: falls {snakeye['fall']} s, the slick bomb {level['fall']} s; want the same")
+        if abs(snakeye["speed"] - level["speed"]) > 1.01:
+            problems.append(f"A-4E Snakeye: released at {snakeye['speed']} ft/s, want aircraft speed {level['speed']}")
+        if snakeye["fall"] <= level["fall"]:
+            problems.append("A-4E Snakeye: deployed drag must lengthen the fall")
         ratio = snakeye["throw"] / level["throw"]
-        if abs(ratio - snakeye["speed"] / level["speed"]) > 0.01 or ratio > 0.7:
-            problems.append(f"A-4E Snakeye: throw {snakeye['throw']} ft is {ratio:.3f} of the slick bomb's, want about 0.66")
+        if ratio >= 0.75:
+            problems.append(f"A-4E Snakeye: throw ratio {ratio:.3f}, expected below 0.75")
     return problems
 
 
