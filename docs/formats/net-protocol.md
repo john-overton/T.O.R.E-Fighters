@@ -3094,7 +3094,10 @@ again with an observer; the capture format did not change for it.
   37 since jettison (slice nr-jett): the extended live command 5
   (JettisonTanks), tank quantities in store stations 55 to 63, the
   sound-only jettison blast and inert falling bodies, so an older game must
-  not join.
+  not join;
+  38 since the bomb flight model (slice nr-bombphys): bombs carry their
+  body (mass, drag, retarder, steering) and fly one shared fitted model, and
+  sights read it, so an older game must not join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

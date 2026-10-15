@@ -210,7 +210,10 @@ pub fn path_words(path: Path) -> &'static str {
 /// (JettisonTanks), tank quantities in store stations 55 to 63, the
 /// sound-only jettison blast and inert falling bodies, so an older game must
 /// not join.
-pub const PROTOCOL_VERSION: u16 = 37;
+/// 38 since the bomb flight model (slice nr-bombphys): bombs carry their
+/// body (mass, drag, retarder, steering) and fly one shared fitted model, and
+/// sights read it, so an older game must not join.
+pub const PROTOCOL_VERSION: u16 = 38;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
