@@ -512,3 +512,13 @@ canonical runway references, one field's AI routes and one damage target.
 Legacy replay scenes retain their earlier world geometry. This does not
 extend the checkpoint container's existing same-build compatibility contract
 to arbitrary checkpoints from older builds.
+
+## Launch-call classification
+
+The AI chatter `Release` retains the same field order and widths: flags,
+seeker byte, boolean, optional target. The boolean is named `active_radar`
+since 2026-10-15; it formerly meant Phoenix only. This expands its meaning to
+all active-radar releases without changing the checkpoint layout. An old
+checkpoint's already-queued release retains its old boolean; recorded speech
+stems play as recorded. Fresh releases use the shared missile classification.
+No network protocol number or wire layout changed.

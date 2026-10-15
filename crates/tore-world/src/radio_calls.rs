@@ -106,8 +106,8 @@ pub struct Release {
     pub flags: u32,
     /// Seeker signature: 2 infrared, 3 radar.
     pub seeker: u8,
-    /// The AIM-54 Phoenix, the one "Fox three" store.
-    pub phoenix: bool,
+    /// An active-radar seeker, sharing the simulation classification.
+    pub active_radar: bool,
     pub target: Option<u32>,
 }
 impl Release {
@@ -115,7 +115,7 @@ impl Release {
         Self {
             flags: weapon.flags,
             seeker: weapon.seeker.signature,
-            phoenix: weapon.hud_name.eq_ignore_ascii_case("AIM-54"),
+            active_radar: weapon.seeker_kind() == tore_formats::weapons::SeekerKind::ActiveRadar,
             target,
         }
     }
@@ -129,7 +129,7 @@ impl Release {
         Store {
             flags: self.flags,
             seeker: self.seeker,
-            phoenix: self.phoenix,
+            active_radar: self.active_radar,
         }
     }
 }
@@ -450,7 +450,7 @@ impl Scene<'_> {
 /// How the launch call read its roll: the Fox chance, a generic variant, or
 /// nothing for the one-recording calls.
 fn launch_roll(roll: u32, release: &Release, aircraft: bool) -> Roll {
-    if release.phoenix || release.bomb() {
+    if (release.active_radar && aircraft) || release.bomb() {
         Roll::new("launch call with one recording", roll, Test::Unused)
     } else if matches!(release.seeker, 2 | 3) && aircraft {
         Roll::new(
@@ -532,7 +532,7 @@ fn cooled(
 /// The launch call wording for `roll`, before cooldowns. `aircraft` is
 /// whether the release's target is an aircraft.
 pub fn launch_phrase(phrases: &Phrases, roll: u32, release: &Release, aircraft: bool) -> Phrase {
-    if release.phoenix {
+    if release.active_radar && aircraft {
         return Phrase::stem(phrases, "^FOXTHR");
     }
     if release.bomb() {
@@ -543,11 +543,8 @@ pub fn launch_phrase(phrases: &Phrases, roll: u32, release: &Release, aircraft: 
         // `^FIRGUN` has no recording; text only. The separator is fitted.
         phrase = phrase.then(phrases, "^FIRGUN").raw(". ", None);
     }
-    let fox = match release.seeker {
-        3 => Some("^FOXONE"),
-        2 => Some("^FOXTWO"),
-        _ => None,
-    };
+    let fox = tore_formats::weapons::SeekerKind::from_fields(release.flags | 0x200, release.seeker)
+        .fox_stem();
     let stem = match fox {
         Some(fox) if roll < 50 && aircraft => fox,
         _ => Comms::pick(roll, &GENERIC_LAUNCH),
@@ -774,7 +771,7 @@ impl Radio {
             );
             return;
         }
-        if !release.phoenix {
+        if !release.active_radar {
             if release.bomb() {
                 if !comms.cooldown(BOMBS, scene.now, 4.) {
                     cooled(comms, scene, speaker, cause, Vec::new(), BOMBS, 4.);
@@ -1600,9 +1597,51 @@ mod tests {
     const IR: Release = Release {
         flags: 1,
         seeker: 2,
-        phoenix: false,
+        active_radar: false,
         target: Some(3),
     };
+
+    #[test]
+    fn launch_calls_use_store_guidance_even_when_the_hud_name_is_changed() {
+        let state = crate::test_support::combat_fixture(true);
+        let mut weapon = state.own().configuration().stations[0].weapon.clone();
+        let phrases = phrases();
+        for (name, signature, flags, stem) in [
+            ("AIM120.JT", 3, 0x1204f, "^FOXTHR"),
+            ("AIM54C.JT", 3, 0x1206f, "^FOXTHR"),
+            ("MICA.JT", 3, 0x1204f, "^FOXTHR"),
+            ("AA12.JT", 3, 0x1204f, "^FOXTHR"),
+            ("AAML.JT", 3, 0x1206f, "^FOXTHR"),
+            ("AIM7.JT", 3, 0x1234f, "^FOXONE"),
+            ("AIM7E.JT", 3, 0x1234f, "^FOXONE"),
+            ("AIM9M.JT", 2, 0x1204f, "^FOXTWO"),
+        ] {
+            weapon.source = name.into();
+            weapon.hud_name = "localized label".into();
+            weapon.seeker.signature = signature;
+            weapon.flags = flags;
+            let release = Release::of(&weapon, Some(3));
+            assert_eq!(
+                launch_phrase(&phrases, 0, &release, true).stems,
+                [stem],
+                "{name}"
+            );
+            if release.active_radar {
+                assert_eq!(launch_phrase(&phrases, 99, &release, true).stems, [stem]);
+                assert!(
+                    !launch_phrase(&phrases, 0, &release, false)
+                        .stems
+                        .contains(&"^FOXTHR".into())
+                );
+                let world = World::new();
+                let mut comms = Comms::new(1);
+                Radio::default().release(&mut comms, &world.scene(0.), PLAYER_ID, release);
+                let delivered = comms.due(1.);
+                assert_eq!(delivered.len(), 1);
+                assert_eq!(delivered[0].call.stems, [stem]);
+            }
+        }
+    }
 
     #[test]
     fn every_listed_recording_is_a_reviewed_stem() {
@@ -1637,12 +1676,15 @@ mod tests {
     #[test]
     fn launch_calls_follow_the_first_matching_rule() {
         let p = phrases();
-        let phoenix = Release {
-            phoenix: true,
+        let active_radar = Release {
+            active_radar: true,
             seeker: 3,
             ..IR
         };
-        assert_eq!(launch_phrase(&p, 99, &phoenix, true).stems, ["^FOXTHR"]);
+        assert_eq!(
+            launch_phrase(&p, 99, &active_radar, true).stems,
+            ["^FOXTHR"]
+        );
         let bomb = Release { flags: 0x10, ..IR };
         assert_eq!(launch_phrase(&p, 0, &bomb, false).stems, ["^BOMBAWY"]);
         let radar = Release { seeker: 3, ..IR };
@@ -2060,7 +2102,7 @@ mod tests {
                 store: Store {
                     flags: 1,
                     seeker: 2,
-                    phoenix: false
+                    active_radar: false
                 }
             }
         );

@@ -44,7 +44,42 @@ seeker observation or renewed launcher support permits steering again. This
 prevents orbiting a missed memory point without shortening the weapon's lifetime.
 Use current shared sensor support for S. A missile retains its own target ID;
 changing cockpit selection never redirects an existing shot. At most one target
-receives aircraft support at once. No aircraft combat AI is included.
+receives aircraft support at once. The same profiles now guide AI-owned shots;
+[AI warning and defense policy](ai-awareness.md) specifies their observations
+and defensive behavior.
+
+## Shared classification
+
+Implementation mode, 2026-10-15. `Weapon::seeker_kind` is the authority for
+missile guidance, launch speech and ordnance labels. For guided records (flag
+`0x1`), signature 2 means infrared, 3 with support flag `0x200` means
+semi-active radar, 3 without it means active radar, and 4 means passive emitter.
+Other signatures remain other guidance, not an invented Fox class. Raw records
+are unchanged. Reviewed flight eligibility and the fitted activation distances
+below remain separate from classification.
+
+The only store-name overrides preserve the existing fitted surface policy:
+`SA19.JT` and `SAN11.JT` are supported radar despite lacking `0x200`, as specified
+in [surface defenses](surface-defenses.md#sam-missiles). There are no A2A
+classification overrides. New exceptions belong in that one table in
+`tore-formats`, with their evidence here, never in HUD-name comparisons.
+
+John requested correct Fox terminology on 2026-10-15. Active A2A releases now
+say Fox three (`^FOXTHR`), including AIM-120, MICA, AA-12 and AAM-L. This is an
+**opinionated correction**, deliberately differing from the original's
+Phoenix-only rule. Semi-active and IR releases retain Fox one and Fox two and
+the original 50 percent generic-call alternative. Active releases use the
+Phoenix's existing always-Fox-three rule, an agent decision. Surface-target
+shots keep generic calls. See [radio](radio-chatter.md#weapon-launch-calls).
+
+The 22-record A2A census includes five catalog-only records: AA6, AA9, AEMP1,
+PL7 and PL10. These remain unavailable to loadouts. No new missile variant is
+invented. `AA10.JT` says AA-10T but specifies radar support: it remains supported
+radar pending John's decision to relabel it as R-27R or introduce an actual IR
+variant. MICA's radar record represents the EM role; no separate MICA-IR record
+exists. PL10 is the 1997 catalog identity, not a license to substitute the modern
+infrared weapon with that name. AAM-L and AEMP-1 have no verified real-world
+counterpart here. [Inventory and source evidence](../baselines/missile-classification.md).
 
 ## Manual-supported behavior
 

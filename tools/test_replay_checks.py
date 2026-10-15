@@ -165,3 +165,35 @@ class ShotOutcomeTests(unittest.TestCase):
             "reason": "it was decoyed by flare #7 from You but flew on and struck anyway"})
         problems = rr.invariant_problems(self.decoy_log(good, spoof, wrong))
         self.assertTrue(any("late hit names flare #7" in p for p in problems))
+
+
+class FoxLaunchTests(unittest.TestCase):
+    def test_recorded_call_must_match_the_amraam_shooter_and_time(self):
+        import json
+        import tempfile
+        from battery_scenarios._replay_record import fox_three_problems
+
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            (work / "log").mkdir()
+            rows = [
+                {"type": "weapon", "id": 4, "source": "AIM120.JT"},
+                {"type": "event", "kind": "weapon.launch", "subject": 0,
+                 "t": 3, "fields": {"weapon": 4}},
+                {"type": "event", "kind": "comms.radio", "subject": 0,
+                 "t": 3.5, "fields": {"outcome": "delivered", "stems": "^FOXONE"}},
+            ]
+
+            def check():
+                (work / "log" / "log.jsonl").write_text(
+                    "\n".join(json.dumps(row) for row in rows))
+                return fox_three_problems(work, "")
+
+            self.assertTrue(check(), "the old Fox one bug must fail")
+            rows[2]["fields"]["stems"] = "^FOXTHR"
+            self.assertEqual(check(), [])
+            rows[2]["subject"] = 1
+            self.assertTrue(check(), "another shooter's Fox three is not evidence")
+            rows[2]["subject"] = 0
+            rows[2]["t"] = 10
+            self.assertTrue(check(), "an unrelated later call is not evidence")

@@ -304,8 +304,38 @@ def record_scenario(
     )
 
 
+def fox_three_problems(work: Path, output: str) -> list[str]:
+    """Match a real AIM-120 release to its delivered, recorded launch call."""
+    log = work / "log" / "log.jsonl"
+    if not log.exists():
+        return ["missing Fox regression event log"]
+    rows = [json.loads(line) for line in log.read_text().splitlines()]
+    weapons = {row["id"] for row in rows if row["type"] == "weapon"
+               and row["source"] == "AIM120.JT"}
+    launches = [r for r in rows if r["type"] == "event" and r["kind"] == "weapon.launch"
+                and r.get("fields", {}).get("weapon") in weapons]
+    if not launches:
+        return ["no AIM-120 launch recorded"]
+    calls = [r for r in rows if r["type"] == "event" and r["kind"] == "comms.radio"
+             and r.get("fields", {}).get("outcome") == "delivered"]
+    for shot in launches:
+        for call in calls:
+            if (call.get("subject") == shot.get("subject")
+                    and 0 <= call["t"] - shot["t"] <= 2
+                    and "^FOXTHR" in call.get("fields", {}).get("stems", "").split()):
+                return []
+    return ["AIM-120 release has no matching delivered ^FOXTHR recording"]
+
+
 def scenarios() -> list[Scenario]:
     out: list[Scenario] = []
+    out.append(record_scenario(
+        "replay-rec-fox-three",
+        ["--aircraft", "f18", "--ai-probe-ticks", "7200", "--separation", "5",
+         "--probe-attack", "600:10"],
+        same_run=False, timeout=400, extra_check=fox_three_problems,
+        notes="AIM-120 launch is recorded as ^FOXTHR and survives replay export",
+    ))
 
     # AI fights of every size.
     for f, e in [(1, 1), (2, 2), (3, 3), (5, 5), (8, 8), (15, 15), (1, 15), (15, 1), (4, 9)]:

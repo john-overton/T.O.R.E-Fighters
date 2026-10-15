@@ -574,7 +574,7 @@ pub(crate) fn station_specs_loaded(
             tore_sim::ai::weapon_service::Delay::quarters(u32::from(w.guidance.track_t));
         spec.damage_vs_category = f64::from(w.damage.by_class[0]);
         spec.mount = station.mount;
-        spec.requires_radar = w.flags & 0x200 != 0;
+        spec.requires_radar = w.seeker_kind() == tore_formats::weapons::SeekerKind::SemiActiveRadar;
         spec.requires_sensor = w.flags & 0x400 != 0;
         let zone = w.seeker.zones[1];
         spec.minimum_range_ft = f64::from(zone.minimum_range);
@@ -6372,6 +6372,7 @@ mod tests {
         let mut combat = combat_fixture(true);
         let mut weapon = combat.own().configuration().stations[0].weapon.clone();
         weapon.source = "AIM120.JT".into();
+        weapon.flags = 0x41;
         weapon.seeker.signature = 3;
         weapon.seeker.chaff_flare_chance = 100;
         wings.device_effectiveness.insert(3, (100, 100));

@@ -144,7 +144,9 @@ word follows the retail label list: "unguided" for a record without the guided
 flag (every free-fall, retarded, pack and cluster bomb and the rocket pods);
 otherwise the seeker signature, 0 "optical", 1 "laser", 2 "IR", 3 "SARH" with
 the semi-active flag or "active rdr", 4 "passive rdr" (retail data,
-[missile formats](../formats/missiles.md)). Signature 0 guided records are the
+[missile formats](../formats/missiles.md)). The [shared classification](missiles.md#shared-classification)
+also applies its two existing surface exceptions, SA-19 and SA-N-11, so their
+cards say SARH consistently with their supported flight behavior. Signature 0 guided records are the
 JDAMs and the AT-2, so all of them read "optical". The AT-2 read "unguided" while
 it flew unguided; it reads "optical" from this round on, and the card
 describes the record, not today's flight model.

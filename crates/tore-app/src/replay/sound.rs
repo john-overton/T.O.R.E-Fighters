@@ -901,7 +901,7 @@ mod tests {
         };
         match tick {
             5 => vec![
-                heard(line(kind::COMMS_RADIO, "^FOX2 ^RED2", route::RADIO).with_subject(2)),
+                heard(line(kind::COMMS_RADIO, "^FOXTHR ^RED2", route::RADIO).with_subject(2)),
                 line(kind::COMMS_RADIO, "^CONTACT", route::RADIO)
                     .with(field::HEARD, false)
                     .with(field::OUTCOME, outcome::UNHEARD),
@@ -910,7 +910,7 @@ mod tests {
                 line(kind::COMMS_RADIO, "^SPLASH", route::RADIO)
                     .with(field::OUTCOME, outcome::QUEUED),
                 // Cut off after it was delivered: said once, at delivery.
-                line(kind::COMMS_RADIO, "^FOX2 ^RED2", route::RADIO)
+                line(kind::COMMS_RADIO, "^FOXTHR ^RED2", route::RADIO)
                     .with(field::HEARD, true)
                     .with(field::OUTCOME, outcome::INTERRUPTED),
             ],
@@ -1228,7 +1228,7 @@ mod tests {
         assert!(host.clock.paused(), "playback stops at the end");
         let expected: Vec<(u64, String)> = vec![
             (0, "seeker tone off".to_owned()),
-            (5, "radio ^FOX2 ^RED2".into()),
+            (5, "radio ^FOXTHR ^RED2".into()),
             (20, "radio ^CHECK6".into()),
             (30, "tower ^RWYFREE".into()),
             (40, "tower reply ^CLRLAND".into()),

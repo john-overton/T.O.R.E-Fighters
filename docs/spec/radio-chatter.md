@@ -144,7 +144,10 @@ are `<stem>.5K` in `FA_2.LIB`.
 - **Speaker and listeners.** The shooter, to its whole flight, after half a
   second. Silenced by radio silence.
 - **What is said.** The first matching rule wins:
-  1. AIM-54 Phoenix: "Fox three". This is the only weapon that gets "Fox three".
+  1. Active-radar missile against an aircraft: "Fox three", from the shared
+     [missile classification](missiles.md#shared-classification). Includes AIM-54,
+     AIM-120, AA-12, MICA and AAM-L. This corrects the original Phoenix-only rule
+     at John's request, 2026-10-15 (opinionated).
   2. Free-fall and cluster bombs (bomb flag), and laser-guided stores under a
      condition that is **unknown**: "Bombs away". Global cooldown 4 seconds;
      during the cooldown nothing is said.
@@ -152,12 +155,13 @@ are `<stem>.5K` in `FA_2.LIB`.
      gun", global cooldown 4 seconds. The recording `^FIRGUN` is absent from
      `FA_2.LIB`, so this is text only. The call then continues with rule 4.
   4. On a 50% roll, if the target is an aircraft: "Fox one" for a
-     radar-guided store (so the AIM-7 and AIM-120 get "Fox one") and "Fox two"
+     semi-active radar store (AIM-7, for example) and "Fox two"
      for an infrared store. In every other case: one of "I'm taking a shot",
      "Missile away" or "Firing missile".
 
   A gun burst therefore prints "I'm using my gun" followed by one of the three
-  generic lines. Provenance: executable-confirmed.
+  generic lines. Provenance: executable-confirmed except the active-radar
+  correction in rule 1. The original also called AIM-120 "Fox one".
 
 ### Hit calls
 
@@ -459,10 +463,10 @@ this pass.
 
 | Event | Recordings (stems) | Selection | Silenced? |
 | --- | --- | --- | --- |
-| Launch, Phoenix | `^FOXTHR` | fixed | yes |
+| Launch, active radar at aircraft | `^FOXTHR` | fixed | yes |
 | Launch, bombs | `^BOMBAWY` | 4 s global cooldown | yes |
 | Launch, unguided prefix | `^FIRGUN` (absent, text only) | 4 s global cooldown | yes |
-| Launch, radar / IR at aircraft | `^FOXONE` / `^FOXTWO` | 50% roll | yes |
+| Launch, semi-active radar / IR at aircraft | `^FOXONE` / `^FOXTWO` | 50% roll | yes |
 | Launch, generic | `^IMSHOT`, `^MISSAWY`, `^FIRMISS` | 1 of 3 | yes |
 | Hit, guided | `^BULLS1`, `^IMPACT`, `^OHYEAH`, `^ALRIGHT`, `^GDSHOT` | 1 of 5 | yes |
 | Hit, unguided | `^BULLS1`, `^HEDAMGE`, `^MULTHIT`, `^OHYEAH`, `^FRAGGED`, `^HOTLEAD`, `^DEBRIS`, `^HURTIN` | 1 of 8, 4 s global cooldown | yes |
@@ -540,7 +544,7 @@ Everything below is **spec-derived** unless the fitted table says otherwise.
   `RIO` or `CO-PILOT` in a multi-crew aircraft (the F/A-18D speaks as the RIO,
   the Rafale C as `YOU`).
 - **The player's own calls**, voiced at once: launch, hit, kill and "I'm hit".
-- **Launch calls** for the player and every AI release: Phoenix "Fox three",
+- **Launch calls** for the player and every AI release: active-radar A2A "Fox three",
   bombs with the 4 second cooldown, the text-only "I'm using my gun", the 50%
   "Fox one"/"Fox two" at aircraft and the generic 1 of 3. A release with no
   target is announced only for a bomb.

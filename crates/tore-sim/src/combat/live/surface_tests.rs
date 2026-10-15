@@ -85,6 +85,17 @@ fn record(source: &str) -> Weapon {
         .weapon
         .clone();
     w.source = source.into();
+    if missiles::SURFACE_SUPPORTED.contains(&source) || source == "SSN9.JT" {
+        w.flags = match source {
+            "SA19.JT" => 0x141,
+            "SAN11.JT" => 0x41,
+            _ => 0x241,
+        };
+        w.seeker.signature = 3;
+    } else if missiles::SURFACE_INFRARED.contains(&source) {
+        w.flags = 0x41;
+        w.seeker.signature = 2;
+    }
     w
 }
 fn constant(speed: i16, remove_t: u16) -> Movement {

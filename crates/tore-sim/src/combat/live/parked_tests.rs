@@ -130,11 +130,13 @@ fn a_parked_aircraft_is_a_surface_target_on_the_ground_with_its_engines_off() {
         obscured: &|_, _| false,
     };
     let mut maverick = record("AGM65G.JT", 100);
+    maverick.flags |= 1;
     maverick.seeker.signature = 2;
     let profile = Profile::for_weapon(&maverick).unwrap();
     assert!(profile.accepts(t));
     assert!(seeker::observe(&maverick, profile, &view, t).is_some());
     let mut sidewinder = record("AIM9M.JT", 100);
+    sidewinder.flags |= 1;
     sidewinder.seeker.signature = 2;
     assert!(!Profile::for_weapon(&sidewinder).unwrap().accepts(t));
     // A duplicate or dead registration is refused.

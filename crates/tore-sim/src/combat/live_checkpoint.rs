@@ -793,6 +793,7 @@ mod tests {
         {
             let weapon = &mut state.own_mut().config.stations[0].weapon;
             weapon.source = "AIM120.JT".into();
+            weapon.flags = 0x41;
             weapon.seeker.signature = 3;
         }
         let weapon = state.own().configuration().stations[0].weapon.clone();

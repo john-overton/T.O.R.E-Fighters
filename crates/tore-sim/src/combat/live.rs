@@ -6770,6 +6770,16 @@ mod tests {
             ),
         ] {
             weapon.source = source.into();
+            weapon.flags = if guidance == missiles::Guidance::Supported {
+                0x241
+            } else {
+                0x41
+            };
+            weapon.seeker.signature = match guidance {
+                missiles::Guidance::Infrared => 2,
+                missiles::Guidance::Emitter => 4,
+                _ => 3,
+            };
             weapon.movement.remove_t = removal;
             let profile = missiles::Profile::for_weapon(&weapon).unwrap();
             profile.validate().unwrap();
@@ -10278,6 +10288,11 @@ mod tests {
     fn guided_weapon(state: &State, source: &str, signature: u8) -> Weapon {
         let mut weapon = state.own().config.stations[0].weapon.clone();
         weapon.source = source.into();
+        weapon.flags = if matches!(source, "AIM7.JT" | "R530.JT") {
+            0x241
+        } else {
+            0x41
+        };
         weapon.seeker.signature = signature;
         for zone in &mut weapon.seeker.zones {
             zone.minimum_range = 0;

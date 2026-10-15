@@ -7,6 +7,63 @@ use crate::{
 };
 use std::collections::BTreeMap;
 
+/// Shared gameplay classification of a guided store's seeker. The raw record
+/// remains intact. See docs/spec/missiles.md, "Shared classification".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeekerKind {
+    SemiActiveRadar,
+    ActiveRadar,
+    Infrared,
+    PassiveRadar,
+    Other,
+}
+
+impl SeekerKind {
+    pub fn from_fields(flags: u32, signature: u8) -> Self {
+        if flags & 1 == 0 {
+            return Self::Other;
+        }
+        match signature {
+            2 => Self::Infrared,
+            3 if flags & 0x200 != 0 => Self::SemiActiveRadar,
+            3 => Self::ActiveRadar,
+            4 => Self::PassiveRadar,
+            _ => Self::Other,
+        }
+    }
+
+    pub fn fox_stem(self) -> Option<&'static str> {
+        match self {
+            Self::SemiActiveRadar => Some("^FOXONE"),
+            Self::Infrared => Some("^FOXTWO"),
+            Self::ActiveRadar => Some("^FOXTHR"),
+            _ => None,
+        }
+    }
+}
+
+/// Existing fitted surface guidance policy, not a real-world identification.
+/// These lack the support bit. Preserve docs/spec/surface-defenses.md's
+/// supported-radar rule; no A2A override is currently justified.
+const SEEKER_OVERRIDES: &[(&str, SeekerKind)] = &[
+    ("SA19.JT", SeekerKind::SemiActiveRadar),
+    ("SAN11.JT", SeekerKind::SemiActiveRadar),
+];
+
+impl Weapon {
+    /// Shared classification, with the existing surface-defense exceptions.
+    /// Ambiguous A2A variants stay data-defined, never guessed from HUD text.
+    pub fn seeker_kind(&self) -> SeekerKind {
+        SEEKER_OVERRIDES
+            .iter()
+            .find(|(source, _)| self.source.eq_ignore_ascii_case(source))
+            .map_or_else(
+                || SeekerKind::from_fields(self.flags, self.seeker.signature),
+                |(_, kind)| *kind,
+            )
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Zone {
     pub heading: i16,
@@ -462,6 +519,45 @@ impl Weapon {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn every_inventoried_air_to_air_missile_has_the_right_seeker_and_fox_call() {
+        use SeekerKind::*;
+        // Synthetic records carrying only the audited classification fields.
+        // No retail bytes: complete 22-record A2A inventory, 2026-10-15.
+        let rows = [
+            ("AA10.JT", 3, 0x1234f, SemiActiveRadar, "^FOXONE"),
+            ("AA11.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
+            ("AA11B.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
+            ("AA12.JT", 3, 0x1204f, ActiveRadar, "^FOXTHR"),
+            ("AA2.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
+            ("AA6.JT", 3, 0x1234f, SemiActiveRadar, "^FOXONE"),
+            ("AA8.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
+            ("AA9.JT", 3, 0x1234f, SemiActiveRadar, "^FOXONE"),
+            ("AAML.JT", 3, 0x1206f, ActiveRadar, "^FOXTHR"),
+            ("AEMP1.JT", 3, 0x1204f, ActiveRadar, "^FOXTHR"),
+            ("AIM120.JT", 3, 0x1204f, ActiveRadar, "^FOXTHR"),
+            ("AIM54C.JT", 3, 0x1206f, ActiveRadar, "^FOXTHR"),
+            ("AIM7.JT", 3, 0x1234f, SemiActiveRadar, "^FOXONE"),
+            ("AIM7E.JT", 3, 0x1234f, SemiActiveRadar, "^FOXONE"),
+            ("AIM9B.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
+            ("AIM9M.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
+            ("AIM9X.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
+            ("MICA.JT", 3, 0x1204f, ActiveRadar, "^FOXTHR"),
+            ("PL10.JT", 3, 0x1236f, SemiActiveRadar, "^FOXONE"),
+            ("PL7.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
+            ("R530.JT", 3, 0x1234f, SemiActiveRadar, "^FOXONE"),
+            ("R550.JT", 2, 0x1204f, Infrared, "^FOXTWO"),
+        ];
+        for (name, signature, flags, expected, stem) in rows {
+            let actual = SeekerKind::from_fields(flags, signature);
+            assert_eq!(actual, expected, "{name}");
+            assert_eq!(actual.fox_stem(), Some(stem), "{name}");
+        }
+        assert_eq!(SeekerKind::from_fields(0, 3), Other);
+        assert_eq!(SeekerKind::from_fields(1, 0).fox_stem(), None);
+        assert_eq!(SeekerKind::from_fields(1, 4), PassiveRadar);
+    }
+
     #[test]
     fn rear_sensor_and_countermeasure_words_preserve_source_bits() {
         let make = |schema: &[(&str, &str)], sensor: bool| {

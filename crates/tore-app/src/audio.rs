@@ -2839,6 +2839,8 @@ mod tests {
             .weapon
             .clone();
         missile.source = "AIM9M.JT".into();
+        missile.flags |= 1;
+        missile.seeker.signature = 2;
         combat.state.projectiles[0].weapon = Some(missile);
         let live = spatial_sources(&combat.state, combat.own_id(), &player);
         let replay = snapshot_sources(&combat.snapshot(combat.own_id(), &player, None));

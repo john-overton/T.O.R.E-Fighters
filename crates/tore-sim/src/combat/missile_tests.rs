@@ -6,9 +6,25 @@ fn weapon(name: &str) -> Weapon {
         .weapon
         .clone();
     w.source = name.into();
+    w.flags = if matches!(
+        name,
+        "AIM7.JT"
+            | "AIM7E.JT"
+            | "AA10.JT"
+            | "R530.JT"
+            | "AS7.JT"
+            | "AS15.JT"
+            | "SA6.JT"
+            | "SEA_SPAR.JT"
+    ) {
+        0x241
+    } else {
+        0x41
+    };
     w.seeker.signature = match name {
         "AGM45.JT" | "AGM88.JT" => 4,
-        "AIM9M.JT" | "AGM65G.JT" => 2,
+        "AIM9M.JT" | "AIM9B.JT" | "AIM9X.JT" | "AA11.JT" | "AA11B.JT" | "AA2.JT" | "AA8.JT"
+        | "R550.JT" | "AGM65G.JT" | "AGM65A.JT" | "AGM84E.JT" => 2,
         _ => 3,
     };
     w
@@ -624,8 +640,15 @@ fn strongest_heat_ties_dwell_reset_and_exact_memory_boundary() {
 }
 #[test]
 fn supported_update_freezes_on_radar_shutdown_and_cockpit_switch() {
+    check_update_freezes("AIM7.JT", 0x241);
+    check_update_freezes("AIM120.JT", 0x41);
+}
+
+fn check_update_freezes(source: &str, flags: u32) {
     let mut s = fixture(true);
     let mut w = range_weapon();
+    w.source = source.into();
+    w.flags = flags;
     for z in &mut w.seeker.zones {
         z.maximum_range = 100000;
     }
@@ -686,7 +709,10 @@ fn supported_update_freezes_on_radar_shutdown_and_cockpit_switch() {
         .unwrap()
         .last_intercept
         .unwrap();
-    assert!(!s.projectiles[0].guidance.as_ref().unwrap().enabled);
+    assert_eq!(
+        s.projectiles[0].guidance.as_ref().unwrap().enabled,
+        source == "AIM7.JT"
+    );
     l.radar = false;
     s.targets[0].position = [100000., 1000., 90000.];
     s.command(0, Command::ClearDesignation, l);
@@ -2680,7 +2706,7 @@ fn a_range_estimate_flies_a_bounded_number_of_ticks() {
 /// The same known stationary target is supplied to live guidance and prediction.
 fn sagging_air_shot(name: &str, height: f64, holds_path: bool) -> (f64, bool) {
     let mut w = weapon(name);
-    w.flags = missiles::SAG_FLAG;
+    w.flags = (w.flags & 0x201) | missiles::SAG_FLAG;
     w.movement.ignite_t = 0;
     w.movement.fuel_t = 8;
     w.movement.remove_t = 400;

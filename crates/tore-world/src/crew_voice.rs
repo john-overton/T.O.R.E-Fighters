@@ -2081,7 +2081,7 @@ mod tests {
                     let release = Release {
                         flags: 1,
                         seeker: 2,
-                        phoenix: false,
+                        active_radar: false,
                         target: Some(3),
                     };
                     radio.release(&mut comms, &scene, 1, release);

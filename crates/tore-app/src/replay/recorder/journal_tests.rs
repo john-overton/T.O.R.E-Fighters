@@ -217,7 +217,7 @@ fn comms_entries_become_radio_order_hud_and_music_events() {
             store: Store {
                 flags: 1,
                 seeker: 2,
-                phoenix: false,
+                active_radar: false,
             },
         },
     )

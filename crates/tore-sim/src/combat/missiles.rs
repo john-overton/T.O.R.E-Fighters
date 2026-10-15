@@ -220,27 +220,26 @@ impl Profile {
         Ok(())
     }
 
-    /// Guidance and active-seeker range, in nautical miles, of each reviewed
-    /// identity, by weapon record name.
-    fn reviewed_guidance(source: &str) -> Option<(Guidance, Option<f64>)> {
-        if SURFACE_SUPPORTED.contains(&source) || SURFACE_TO_SURFACE.contains(&source) {
-            return Some((Guidance::Supported, None));
-        }
-        if SURFACE_INFRARED.contains(&source) {
-            return Some((Guidance::Infrared, None));
+    /// Reviewed profile eligibility and fitted activation distances in nmi.
+    /// Guidance itself comes only from `Weapon::seeker_kind`.
+    fn reviewed_activation(source: &str) -> Option<Option<f64>> {
+        if SURFACE_SUPPORTED.contains(&source)
+            || SURFACE_TO_SURFACE.contains(&source)
+            || SURFACE_INFRARED.contains(&source)
+        {
+            return Some(None);
         }
         Some(match source {
-            "AIM120.JT" | "MICA.JT" | "AA12.JT" => (Guidance::Active, Some(5.)),
-            "AAML.JT" | "AGM84A.JT" | "AM39.JT" => (Guidance::Active, Some(8.)),
-            "AIM54C.JT" => (Guidance::Active, Some(10.)),
-            "AEMP1.JT" => (Guidance::Active, Some(3.)),
-            "AS16.JT" => (Guidance::Active, Some(2.)),
-            "R530.JT" | "AS7.JT" | "AS15.JT" | "AA10.JT" | "AIM7.JT" | "AIM7E.JT" => {
-                (Guidance::Supported, None)
+            "AIM120.JT" | "MICA.JT" | "AA12.JT" => Some(5.),
+            "AAML.JT" | "AGM84A.JT" | "AM39.JT" => Some(8.),
+            "AIM54C.JT" => Some(10.),
+            "AEMP1.JT" => Some(3.),
+            "AS16.JT" => Some(2.),
+            "R530.JT" | "AS7.JT" | "AS15.JT" | "AA10.JT" | "AIM7.JT" | "AIM7E.JT" | "AA11.JT"
+            | "AA11B.JT" | "AA2.JT" | "AA8.JT" | "AIM9M.JT" | "AIM9X.JT" | "R550.JT"
+            | "AGM65G.JT" | "AGM65A.JT" | "AGM84E.JT" | "AIM9B.JT" | "AGM45.JT" | "AGM88.JT" => {
+                None
             }
-            "AA11.JT" | "AA11B.JT" | "AA2.JT" | "AA8.JT" | "AIM9M.JT" | "AIM9X.JT" | "R550.JT"
-            | "AGM65G.JT" | "AGM65A.JT" | "AGM84E.JT" | "AIM9B.JT" => (Guidance::Infrared, None),
-            "AGM45.JT" | "AGM88.JT" => (Guidance::Emitter, None),
             _ => return None,
         })
     }
@@ -249,12 +248,25 @@ impl Profile {
     /// [`Profile::for_weapon`] decides: for presentation that knows a
     /// weapon only by name, such as a mission replay's sound.
     pub fn reviewed(source: &str) -> bool {
-        Self::reviewed_guidance(source).is_some()
+        Self::reviewed_activation(source).is_some()
     }
 
     /// Explicit reviewed identities only. This does not expand store allowlists.
     pub fn for_weapon(w: &Weapon) -> Option<Self> {
-        let (guidance, active) = Self::reviewed_guidance(&w.source)?;
+        let active = Self::reviewed_activation(&w.source)?;
+        use tore_formats::weapons::SeekerKind;
+        let guidance = match w.seeker_kind() {
+            SeekerKind::SemiActiveRadar => Guidance::Supported,
+            SeekerKind::ActiveRadar => Guidance::Active,
+            SeekerKind::Infrared => Guidance::Infrared,
+            SeekerKind::PassiveRadar => Guidance::Emitter,
+            SeekerKind::Other => return None,
+        };
+        let active = if guidance == Guidance::Active {
+            Some(active?)
+        } else {
+            None
+        };
         let role = if SURFACE_ROLE.contains(&w.source.as_str())
             || SURFACE_TO_SURFACE.contains(&w.source.as_str())
         {
