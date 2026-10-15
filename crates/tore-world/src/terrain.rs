@@ -57,6 +57,10 @@ pub struct Terrain {
     /// template too (B14, airfield scene 2): always with the redrawn
     /// airports, except in a replay of a recording flown on scene 1.
     pub redrawn_templates: bool,
+    /// Single-field replacement of paired retail airports (airfield scene 3).
+    pub merged_airports: bool,
+    /// Ground-art cells repaired from their own ground texels, retaining source water cutouts.
+    pub neutral_airfield_ground: BTreeSet<(i32, i32)>,
 }
 
 /// Launch settings that replace the mission's own weather start time, wind
@@ -230,6 +234,8 @@ pub struct Recorded {
     /// Rebuild with the template's runway piece redrawn too (airfield scene
     /// 2, B14); a scene 1 recording keeps it retail.
     pub redrawn_templates: bool,
+    /// Single-field replacement of paired retail airports (airfield scene 3).
+    pub merged_airports: bool,
     /// Rebuild with the city fill: the recording's city fill scene (a
     /// recording from before the fill was the default has none).
     pub city_fill: bool,
@@ -1161,12 +1167,16 @@ impl Terrain {
             redrawn: Vec::new(),
             redrawn_airports: false,
             redrawn_templates: false,
+            merged_airports: false,
+            neutral_airfield_ground: BTreeSet::new(),
         };
         out.redrawn_airports = recorded.map_or(overrides.redrawn_airports, |r| r.redrawn_airports);
         out.redrawn_templates =
             out.redrawn_airports && recorded.is_none_or(|r| r.redrawn_templates);
         let mut plans = redrawn::Plans::new(out.redrawn_airports)?;
         plans.retail_templates = !out.redrawn_templates;
+        out.merged_airports = out.redrawn_airports && recorded.is_none_or(|r| r.merged_airports);
+        plans.legacy_pairs = !out.merged_airports;
         out.build_airport_scene(
             resources,
             code.trim_end_matches(".MM"),
@@ -1174,6 +1184,19 @@ impl Terrain {
             area,
             &plans,
         )?;
+        // Replace source land artwork, retaining the original coast masks in
+        // the environment. Scenery repairs opaque markings while retaining those masks.
+        for built in &out.redrawn {
+            for p in &built.replaced_centres {
+                let key = (
+                    ((p[0] / f64::from(CELL_FEET)).floor() as i32) & !3,
+                    ((p[2] / f64::from(CELL_FEET)).floor() as i32) & !3,
+                );
+                if out.environment.textures.contains_key(&key) {
+                    out.neutral_airfield_ground.insert(key);
+                }
+            }
+        }
         if recorded.map_or(overrides.city_fill, |r| r.city_fill) {
             let cap = match recorded {
                 Some(_) => None,
@@ -1212,18 +1235,59 @@ impl Terrain {
         // Experiment AP1: redrawn airports move and add their buildings
         // after the surface has placed, so its layout is the retail one.
         let mut parked = std::mem::take(&mut self.surface.parked);
-        let built = redrawn::apply(resources, &mut sources, plans, &mut parked, |x, z| {
-            f64::from(self.height(x as f32, z as f32))
-        });
+        let built = redrawn::apply(
+            resources,
+            &mut sources,
+            plans,
+            &mut parked,
+            |x, z| f64::from(self.height(x as f32, z as f32)),
+            Some(self),
+        );
         self.surface.parked = parked;
         self.redrawn = built?;
+        // Keep the target identity while moving a template's airport buildings.
+        for (id, p) in &sources.surface {
+            if let Some((_, old)) = self
+                .surface
+                .placements
+                .iter_mut()
+                .find(|(old, _)| old.0 == *id)
+            {
+                *old = p.clone();
+            }
+            if let Some(unit) = self.surface.units.iter_mut().find(|u| u.id.0 == *id) {
+                unit.position = p.position;
+                unit.angles = p.angles;
+            }
+        }
         let mut objects = Vec::new();
         let mut slope_lifts = BTreeMap::new();
         let mut runways = Vec::new();
         let mut airports = Vec::new();
+        let mut aliases = BTreeMap::new();
+        let mut airport_ordinals = BTreeMap::new();
+        for placed in sources.placed() {
+            let (id, p) = placed?;
+            if sources.definitions[&p.object_type]
+                .callbacks
+                .iter()
+                .any(|c| c == "_STRIPProc")
+            {
+                airport_ordinals.insert(id, airport_ordinals.len() as u32 + 1);
+            }
+        }
+        for built in &self.redrawn {
+            if let Some(old) = built.merged_from {
+                aliases.insert(old, built.strip_id);
+                aliases.insert(airport_ordinals[&old], airport_ordinals[&built.strip_id]);
+            }
+        }
         let mut anchors = BTreeMap::new();
         for placed in sources.placed() {
             let (id, placement) = placed?;
+            if aliases.contains_key(&id) {
+                continue;
+            }
             let definition = &sources.definitions[&placement.object_type];
             self.static_manifest.push((
                 id,
@@ -1289,7 +1353,7 @@ impl Terrain {
                 max_visible: definition.max_visible,
             });
             if runway {
-                let airport_id = u32::try_from(airports.len() + 1)?;
+                let airport_id = airport_ordinals[&id];
                 // The whole airport mesh includes aprons and parallel strips.
                 // Use source anchor0x11 for the fitted primary approach line,
                 // rather than steering onto the overall mesh's midpoint.
@@ -1351,7 +1415,9 @@ impl Terrain {
                     surface: bounds,
                     approach_center,
                     // ILS datum remains authored airport ground, independent of rendering bias.
-                    elevation_ft: ground,
+                    elevation_ft: redraw
+                        .filter(|b| b.merged_from.is_some())
+                        .map_or(ground, |b| b.surface.center[1]),
                     heading: runway_heading,
                     length_ft,
                 });
@@ -1410,7 +1476,19 @@ impl Terrain {
             objects,
             runways,
             airports,
+            aliases,
         };
+        // Template auto-start ranking may contain either old half. Keep only
+        // one canonical runway, preserving the source ranking of other fields.
+        if let Some(starts) = &mut self.surface.starts {
+            for ids in [&mut starts.blue_airfields, &mut starts.red_airfields] {
+                let mut seen = BTreeSet::new();
+                for id in ids.iter_mut() {
+                    *id = self.airport_scene.canonical_id(*id);
+                }
+                ids.retain(|id| seen.insert(*id));
+            }
+        }
         // Every point must stand on the airport's landable surface.
         let scene = &self.airport_scene;
         anchors.retain(|_, found: &mut tore_sim::ai::airfield::AirfieldAnchors| {
@@ -1541,7 +1619,7 @@ impl Terrain {
     pub fn runway_view(&self, object: u32) -> Option<tore_sim::ai::airfield::RunwayView> {
         self.airport_scene.runway(object).map(|runway| {
             tore_sim::ai::airfield::RunwayView::from(runway)
-                .with_anchors(self.airfield_anchors.get(&object).copied())
+                .with_anchors(self.airfield_anchors.get(&runway.object).copied())
         })
     }
 

@@ -415,6 +415,12 @@ def scenarios() -> list[Scenario]:
                   "one of them, auto and AI homes the same; North Vietnam has none for Blue.",
         )
     )
+    out.append(Scenario(
+        name="merged-airport-audit", lane="menus",
+        args=["--airfield-audit", "--merged", "--no-audio"], timeout=600,
+        expect=[r"merged-airport: fields=84 problems=0"],
+        forbid=[r"flat=false|inside=false|four_slots=false|alias=false"],
+        notes="Every paired theater field has one long runway, valid ground slots and legacy-ID redirects."))
     # The redrawn airports for the AI (slice CL-AP, John 2026-10-11): every
     # AI ground route of every runway object of every layout on the drawn
     # pavement, every runway end reachable from parking, every runway line
@@ -426,7 +432,7 @@ def scenarios() -> list[Scenario]:
             lane="menus",
             args=["--airfield-audit", "--no-audio"],
             timeout=600,
-            expect=[r"airfield-audit: 75 theaters, \d+ airfields, 1458 runway objects, \d+ routes, 0 problems"],
+            expect=[r"airfield-audit: 75 theaters, \d+ airfields, 1028 runway objects, \d+ routes, 0 problems"],
             forbid=[r"PROBLEM"],
             notes="AI taxi routes, runway-end reachability and runway lines at every redrawn airport of every layout.",
         )

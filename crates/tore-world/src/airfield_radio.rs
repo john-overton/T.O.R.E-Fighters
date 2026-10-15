@@ -706,6 +706,7 @@ mod tests {
             bank: 0.,
         };
         world.airport_scene = Scene {
+            aliases: Default::default(),
             objects: vec![StaticObject {
                 id: 1000,
                 source: SourceKey {

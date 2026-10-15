@@ -165,6 +165,7 @@ pub(super) fn airport() -> Scene {
         bank: 0.,
     };
     Scene {
+        aliases: Default::default(),
         objects: vec![StaticObject {
             id: 1000,
             source: SourceKey {

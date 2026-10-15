@@ -1997,3 +1997,17 @@ target tick, launch-request count and greatest distance from station in NM.
 The AI strike driver accepts `--quick-wing --clear-air-at SECONDS` to remove
 the last bandit during an explicitly ordered ground strike. See the
 [CAP and strike checks](testing/lane-ai.md#cap-orders-and-unfinished-strikes).
+
+## CPU paired-airfield comparison
+
+`TORE_DATA_DIR=<isolated profile> tore-app --airfield-sheets <output directory> --cpu-merged`
+produces eight windowless diagnostic PNGs: Southampton and Spassk Dalniy,
+before and after merging, overhead and from an orthographic approach angle.
+It reads the real terrain and static scenery buffers and indexed texture
+pages. It omits GPU lighting, city-fill instances, weather and moving objects.
+Use it when the graphics backend cannot create an offscreen renderer; it
+checks layout and artwork, not full GPU presentation.
+
+The headless AI probe accepts up to 288,000 ticks (40 simulation minutes).
+This allows four-ship landing and parking checks on the 12,000 ft merged
+fields to finish their long taxi returns; normal flight duration is unchanged.

@@ -492,6 +492,7 @@ pub fn ground_layout(
     object: u32,
     count: usize,
 ) -> crate::WorldResult<GroundLayout> {
+    let object = world.airport_scene.canonical_id(object);
     let runway = world
         .airport_scene
         .runway(object)

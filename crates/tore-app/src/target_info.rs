@@ -630,6 +630,7 @@ mod tests {
             length_ft: 8_000.,
         };
         let scene = tore_sim::airport::Scene {
+            aliases: Default::default(),
             objects: vec![],
             runways: vec![runway(1), runway(2), runway(3)],
             airports: vec![

@@ -503,3 +503,12 @@ initial_ammo, range, open, clean_recording}`, `AiWings::{airfields,
 flight_model, mission_preset}` and `Watch::{names, seats}`. Local:
 `Combat::{tape, notes, last_launcher, terrain_tti}` (the last the readout's kept
 fly-out times, cleared on a load). Everything else is coded.
+
+## Paired-airport replacement
+
+nr-apmerge adds no checkpoint field or coder change. The immutable airport
+alias map is rebuilt from the mission layout. Current checkpoints contain
+canonical runway references, one field's AI routes and one damage target.
+Legacy replay scenes retain their earlier world geometry. This does not
+extend the checkpoint container's existing same-build compatibility contract
+to arbitrary checkpoints from older builds.

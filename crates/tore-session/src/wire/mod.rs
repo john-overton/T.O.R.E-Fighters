@@ -189,7 +189,10 @@ pub fn path_words(path: Path) -> &'static str {
 /// 31 since the gun lock and the centre's pause (slice nr-cona follow-up):
 /// Console sub-code 5 (GunLock), the orbit's `still_s` in the exact
 /// own-plane state, and the gun lock in the readout's gunsight group.
-pub const PROTOCOL_VERSION: u16 = 31;
+/// 32 since the airport merge (slice nr-apmerge): no message changes, but
+/// the shared world differs (84 paired theater airfields are single fields
+/// with new runways and ids aliased), so an older game must not join.
+pub const PROTOCOL_VERSION: u16 = 32;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

@@ -227,6 +227,8 @@ pub fn terrain() -> Terrain {
         redrawn: Vec::new(),
         redrawn_airports: false,
         redrawn_templates: false,
+        merged_airports: false,
+        neutral_airfield_ground: Default::default(),
         layout: "TEST.MM".into(),
         condition: None,
         weather: tore_sim::environment::Environment::new(

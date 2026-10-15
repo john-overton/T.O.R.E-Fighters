@@ -230,3 +230,27 @@ samples. The renderer splits triangles along each oriented airport footprint,
 retains the original texture coordinates, and lowers only the inside surface
 beneath the fixed runway plane. See [airport integration](../spec/airports.md#integration-choices)
 and [the visibility regression](../baselines/airfield-radio.md#ground-visibility).
+
+## Merged-airfield ground pictures
+
+The scene-3 paired-airport replacement marks `tmap` cells intersecting the
+source strip footprints as neutral airfield ground. Scenery retains the tile's
+own ground texels, using the existing terrain green ramps (192 to 197 and
+208 to 215). Other opaque texels inherit the nearest original ground texel
+by Manhattan distance on the wrapping 256-square tile. A multi-source queue
+starts in row order, expands left, right, up, down, and resolves ties by first
+arrival. Original ground texels and index-255 or masked water stay unchanged.
+A tile without a ground donor is an explicit error. Rotation stays unchanged.
+
+This is an agent-selected **fitted** cleanup rule, not a recovered airfield-art
+classifier. It also removes non-ground road or built-up markings within the
+selected source tiles. It avoids importing the unrelated LAND plane's palette
+ramp and large-scale blotches into otherwise continuous ground. The merged
+headless audit prints means, population variances and dominant palette indices
+for each repaired tile and adjacent untouched tiles, and checks exact ground
+and water preservation. Those statistics describe indexed source pixels, not
+lit GPU colors. No protocol, checkpoint or contact surface changes accompany
+this presentation repair.
+The imported T2 and MM bytes remain unchanged. Ground-picture water queries
+retain that same source mask, so neutralization does not fill coastal sea.
+See [merged airports](redrawn-airports.md#merged-pairs-airfield-scene-3).

@@ -337,6 +337,8 @@ pub struct Scene {
     pub objects: Vec<StaticObject>,
     pub runways: Vec<Runway>,
     pub airports: Vec<Airport>,
+    /// Legacy airport and runway IDs redirected to a merged field.
+    pub aliases: BTreeMap<u32, u32>,
 }
 impl Scene {
     pub fn validate(&self) -> Result<(), &'static str> {
@@ -367,7 +369,15 @@ impl Scene {
         }
         Ok(())
     }
+    pub fn canonical_id(&self, id: u32) -> u32 {
+        self.aliases.get(&id).copied().unwrap_or(id)
+    }
+    pub fn airport(&self, id: u32) -> Option<&Airport> {
+        let id = self.canonical_id(id);
+        self.airports.iter().find(|a| a.id == id)
+    }
     pub fn runway(&self, id: ObjectId) -> Option<&Runway> {
+        let id = self.canonical_id(id);
         self.runways.iter().find(|r| r.object == id)
     }
     /// Whether a runway object is on a short strip (see [`SHORT_STRIP_FT`]).
@@ -389,9 +399,7 @@ impl Scene {
     }
     /// Whether airport `id` is a short strip.
     pub fn airport_id_is_short_strip(&self, id: u32) -> bool {
-        self.airports
-            .iter()
-            .find(|a| a.id == id)
+        self.airport(id)
             .is_some_and(|a| self.airport_is_short_strip(a))
     }
     /// A vertical-landing pad (the DTSTRP type, type flags `$108021`), where
@@ -644,6 +652,7 @@ impl Service {
     /// to an aircraft finds NAV where it left it (slice FX-J). An airport
     /// the tower does not list is not selected. No clearance comes with it.
     pub fn reselect(&mut self, scene: &Scene, airport: u32) {
+        let airport = scene.canonical_id(airport);
         if scene.airports.iter().any(|a| a.id == airport)
             && !scene.airport_id_is_short_strip(airport)
         {
@@ -672,15 +681,16 @@ impl Service {
     ) -> Result<Self, &'static str> {
         let mut service = Self::new(scene)?;
         for id in out_of_action {
+            let id = scene.canonical_id(id);
             if let Some(hp) = service.health.get_mut(&id) {
                 *hp = 0;
                 service.destroyed.insert(id);
             }
         }
-        service.selected = selected;
+        service.selected = selected.map(|id| scene.canonical_id(id));
         service.clearance = clearance.map(|(airport, runway, end)| Clearance {
-            airport,
-            runway,
+            airport: scene.canonical_id(airport),
+            runway: scene.canonical_id(runway),
             end,
         });
         Ok(service)
@@ -742,6 +752,7 @@ impl Service {
     pub fn command(&mut self, scene: &Scene, aircraft: Aircraft, command: Command) -> Vec<Event> {
         let reply = match command {
             Command::SelectAirport(id) => {
+                let id = scene.canonical_id(id);
                 self.clearance = None;
                 self.landing_ticks = 0;
                 // A short strip is not on the tower's list (John, 2026-09-30).
@@ -1018,7 +1029,7 @@ mod tests {
         assert!(answered > 100, "{answered}");
     }
 
-    fn scene() -> Scene {
+    pub(super) fn scene() -> Scene {
         let bounds = OrientedBox {
             center: [0., 100., 0.],
             half: [100., 10., 5000.],
@@ -1027,6 +1038,7 @@ mod tests {
             bank: 0.,
         };
         Scene {
+            aliases: Default::default(),
             objects: vec![StaticObject {
                 id: 1000,
                 source: SourceKey {
@@ -1521,3 +1533,26 @@ mod tests {
 // Exact checkpoints (docs/formats/checkpoint.md).
 #[path = "airport_checkpoint.rs"]
 mod checkpoint;
+
+#[cfg(test)]
+mod merged_identity_tests {
+    use super::*;
+    #[test]
+    fn old_airport_and_runway_ids_select_the_single_field() {
+        let mut scene = super::tests::scene();
+        let airport = scene.airports[0].id;
+        let runway = scene.runways[0].object;
+        scene.aliases.insert(91, airport);
+        scene.aliases.insert(0x4000_0091, runway);
+        assert_eq!(scene.airport(91).unwrap().id, airport);
+        assert_eq!(scene.runway(0x4000_0091).unwrap().object, runway);
+        let mut service = Service::new(&scene).unwrap();
+        service.reselect(&scene, 91);
+        assert_eq!(service.selected(), Some(airport));
+        assert_eq!(scene.airports.len(), 1);
+        assert_eq!(scene.runways.len(), 1);
+        let destroyed = Service::presented(&scene, Some(91), None, [0x4000_0091]).unwrap();
+        assert!(!destroyed.usable(runway));
+        assert_eq!(destroyed.out_of_action().collect::<Vec<_>>(), vec![runway]);
+    }
+}

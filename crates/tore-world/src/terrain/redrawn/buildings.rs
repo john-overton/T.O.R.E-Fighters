@@ -365,7 +365,7 @@ pub fn relay(
 
 /// Whether a world point belongs to the airfield of strips `own`: inside one
 /// of their grown footprints and nearer to one of them than to any other.
-fn belongs(x: f64, z: f64, own: &[usize], strips: &[Strip]) -> bool {
+pub(super) fn belongs(x: f64, z: f64, own: &[usize], strips: &[Strip]) -> bool {
     let own_strips = || strips.iter().filter(|s| own.contains(&s.index));
     if !own_strips().any(|s| s.zone_contains(x, z)) {
         return false;

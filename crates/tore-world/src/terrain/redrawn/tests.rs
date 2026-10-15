@@ -230,6 +230,7 @@ fn synthetic_plan(text: &str) -> Plans {
     Plans {
         plans: vec![Plan::parse(text, &defaults).unwrap()],
         retail_templates: false,
+        legacy_pairs: true,
     }
 }
 
@@ -345,7 +346,7 @@ fn a_templates_own_runway_piece_is_redrawn_too() {
     };
     let plans = synthetic_plan(SYNTHETIC);
     let mut sources = with_template();
-    let built = apply(&map, &mut sources, &plans, &mut [], |_, _| 0.).unwrap();
+    let built = apply(&map, &mut sources, &plans, &mut [], |_, _| 0., None).unwrap();
     let mut ids: Vec<u32> = built.iter().map(|b| b.strip_id).collect();
     ids.sort_unstable();
     assert_eq!(ids, [AIRPORT_RUNWAY, template_id]);
@@ -358,7 +359,7 @@ fn a_templates_own_runway_piece_is_redrawn_too() {
     let mut plans = plans;
     plans.retail_templates = true;
     let mut sources = with_template();
-    let built = apply(&map, &mut sources, &plans, &mut [], |_, _| 0.).unwrap();
+    let built = apply(&map, &mut sources, &plans, &mut [], |_, _| 0., None).unwrap();
     assert!(Built::for_runway(&built, template_id).is_none());
     assert!(Built::for_runway(&built, AIRPORT_RUNWAY).is_some());
 }
@@ -708,6 +709,8 @@ fn assembled(
     }
     let continues = super::continued_runways(&runways, tile.map(|t| t.0), links);
     let built = Built {
+        merged_from: None,
+        replaced_centres: Vec::new(),
         plan: base.applies_to.clone(),
         strip_id: 1,
         frame,
@@ -718,6 +721,7 @@ fn assembled(
         lights: Vec::new(),
         runways,
         moved: Vec::new(),
+        moved_surface: Vec::new(),
         added: Vec::new(),
         snapped: 0,
         runway_line: None,
@@ -911,4 +915,32 @@ fn a_lone_tile_is_marked_at_both_ends_and_a_dirt_strip_is_unlit() {
     let (materials, patches) = compose(&parts, None, 0.);
     assert!(lights::lights(&parts, None, &patches, &materials, &frame, &|_, _| 0.).is_empty());
     assert!(single(&plans, "STRIP7A.OT").lights);
+}
+
+#[test]
+fn merged_plan_keeps_all_nine_parking_routes_on_one_long_runway() {
+    let defaults = plan::default_materials(DEFAULTS).unwrap();
+    let plan = Plan::parse(include_str!("../../../airports/merged.toml"), &defaults).unwrap();
+    let (built, objects) = assembled(&plan, None, None);
+    assert_eq!(built.runways.len(), 1);
+    assert_eq!(built.runways[0].length, 12000.);
+    for (runway, anchors) in objects {
+        let anchors = anchors.unwrap();
+        let routes = audit::routes(&anchors, &runway);
+        assert_eq!(routes.len(), 19);
+        for route in routes {
+            assert!(
+                audit::walk(std::slice::from_ref(&built), &route).is_empty(),
+                "{}",
+                route.name
+            );
+        }
+    }
+}
+
+#[test]
+fn paired_identity_handles_unnamed_tiles_and_wrapped_headings() {
+    let layout = tore_formats::mission::Layout::parse("NSK.MM",b"textFormat\nmap NSK.T2\nobj\n type STRIP6.OT\n pos 10000 0 10000\n angle -180 0 0\n name \x01Field\x01\n .\nobj\n type STRIP6A.OT\n pos 19000 0 10000\n angle 180 0 0\n .\n").unwrap();
+    let aliases = pair_aliases(&layout);
+    assert_eq!(aliases.get(&0x4000_0001), Some(&0x4000_0000));
 }

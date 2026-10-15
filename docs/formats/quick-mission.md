@@ -556,3 +556,20 @@ names HAWK, ROLAND, MIS, SA-7, SA-9, SA-13, SA-14, SA-15, SA-16, Iowa, Kitty Haw
 Wasp or Sacramento directly; most can be drawn by a placeholder (HAWK, SA-16 and
 Kitty Hawk cannot). KS-12, KS-19 and `A_M1939` appear only in North Vietnam
 layouts and missions.
+
+## Local creator draft airport-list revision
+
+The local `quick-mission-v1.conf` file now writes `tore-quick-draft 2`.
+The filename is retained so existing profiles are discovered. Version 1 is
+accepted: airport-choice positions are resolved through the former
+side-filtered list, then former second-half runway IDs map to the merged
+field. Version 2 positions use the merged lists. Mission text and network
+mission fields still use the existing runway object IDs, with old IDs
+accepted by the world. This is a local draft revision, not a wire-format
+change. See [airport selection compatibility](../spec/quick-mission-menu.md#paired-airport-selection-compatibility).
+
+Custom-loadout history keeps its existing file format. New mission fingerprints
+use draft revision 2. Backward lookup reconstructs the equivalent revision-1
+keys by source runway identity, preventing an index shift from selecting an
+unrelated airport's loadout. A saved revision-2 load takes precedence; otherwise
+the most recently flown compatible old load is restored.

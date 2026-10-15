@@ -736,7 +736,6 @@ per-theater rows separate unavailable shapes and authored footing exceptions.
 See [grounding](../formats/objects-and-shapes.md#grounding-every-object-stands-on-the-bottom-of-its-shape).
 
 ## CAP orders and unfinished strikes
-
 `ai-objective-cap-orders-station` flies friendly F-15 and enemy Su-27 CAP
 leaders 150 nm apart. Each stays within 13 nm of its own 10 nm station,
 allowing a turn outside the boundary. `ai-objective-cap-orders-engage` starts
@@ -746,7 +745,6 @@ start a transport 50 nm away and require the patroller to acquire and fire
 when it enters the station. Both fail with zero shots before the fix.
 `AI probe CAP` reports first target tick, launch requests and maximum station
 distance for each patroller. These are observations, never inputs to the AI.
-
 `qmc-strike-a10-clear-air` uses the Vladivostok command HQ and an A-10 strike
 wing. The driver's `--quick-wing --clear-air-at 10` gives the wing an explicit
 strike order and removes its one enemy aircraft at ten seconds through combat
@@ -754,3 +752,14 @@ health. The wing must still release, impact and egress.
 `qmc-strike-a10-maverick-clear-air` repeats it with a Maverick and lets the AI
 choose its store. The fixture does not
 alter AI decisions or expectation thresholds to keep an early return passing.
+## Merged-airfield regression flights
+`ai-merged-airfield-{f18,c130}-wing{2,4}` flies a two- or four-ship group.
+The F/A-18D uses Southampton (FRA 14 or old half 24); the C-130 uses Spassk
+Dalniy (VLA 6 or old half 22). One scripted leader takes off, then the AI
+members depart, receive a landing order and must return and park without a
+ground tick off the pavement. The Hornet orders arrive at 100 or 200 seconds;
+the C-130 order arrives at 300 seconds. Southampton leaves room for the
+scripted jet leader's straight departure. Spassk's northern map edge is too
+close for that long jet departure. The 264,000-tick run leaves time for the
+last aircraft to taxi back from the far end of a 12,000 ft runway. The
+existing taxi/landing checker requires every AI member to park.

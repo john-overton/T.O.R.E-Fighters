@@ -27,6 +27,8 @@ pub const REDRAWN_AIRFIELD_SCENE: u32 = 1;
 /// target's pavement, landable box and AI points moved, so it takes its own
 /// number and a scene 1 recording keeps the template's retail strip.
 pub const REDRAWN_TEMPLATES_AIRFIELD_SCENE: u32 = 2;
+/// Paired airports replaced by one long runway.
+pub const MERGED_AIRFIELD_SCENE: u32 = 3;
 /// The header's city fill scene for a world without the city fill: what
 /// every recording before the fill became the default holds (docs/REPLAYS.md,
 /// "The city fill scene").
@@ -87,9 +89,15 @@ pub fn recorded(identity: &tore_replay::World) -> AppResult<Recorded> {
         wind: wind_setting(identity.wind_fps)?,
         cloud_altitude,
         weather_seed,
-        redrawn_airports: [REDRAWN_AIRFIELD_SCENE, REDRAWN_TEMPLATES_AIRFIELD_SCENE]
+        redrawn_airports: [
+            REDRAWN_AIRFIELD_SCENE,
+            REDRAWN_TEMPLATES_AIRFIELD_SCENE,
+            MERGED_AIRFIELD_SCENE,
+        ]
+        .contains(&identity.airfield_scene),
+        redrawn_templates: [REDRAWN_TEMPLATES_AIRFIELD_SCENE, MERGED_AIRFIELD_SCENE]
             .contains(&identity.airfield_scene),
-        redrawn_templates: identity.airfield_scene == REDRAWN_TEMPLATES_AIRFIELD_SCENE,
+        merged_airports: identity.airfield_scene == MERGED_AIRFIELD_SCENE,
         city_fill: identity.city_fill_scene == CITY_FILL_SCENE,
         target: identity
             .ground_target
@@ -223,7 +231,9 @@ pub fn of(terrain: &Terrain) -> tore_replay::World {
             .as_ref()
             .map(|site| recorded_target(&site.settings)),
         area_defense: terrain.surface.area.as_ref().map(recorded_area),
-        airfield_scene: if terrain.redrawn_templates {
+        airfield_scene: if terrain.merged_airports {
+            MERGED_AIRFIELD_SCENE
+        } else if terrain.redrawn_templates {
             REDRAWN_TEMPLATES_AIRFIELD_SCENE
         } else if terrain.redrawn_airports {
             REDRAWN_AIRFIELD_SCENE
@@ -258,6 +268,7 @@ pub fn terrain(
         RETAIL_AIRFIELD_SCENE,
         REDRAWN_AIRFIELD_SCENE,
         REDRAWN_TEMPLATES_AIRFIELD_SCENE,
+        MERGED_AIRFIELD_SCENE,
     ]
     .contains(&identity.airfield_scene)
     {
@@ -357,6 +368,7 @@ mod tests {
                     weather_seed: 1,
                     redrawn_airports: false,
                     redrawn_templates: false,
+                    merged_airports: false,
                     city_fill: false,
                     target: None,
                     area: None,
@@ -439,6 +451,11 @@ mod tests {
         let rebuilt = recorded(&redrawn).unwrap();
         assert!(rebuilt.redrawn_airports && rebuilt.redrawn_templates);
 
+        w.merged_airports = true;
+        let (_, merged) = through_a_file("merged", of(&w));
+        assert_eq!(merged.airfield_scene, MERGED_AIRFIELD_SCENE);
+        assert!(recorded(&merged).unwrap().merged_airports);
+        w.merged_airports = false;
         w.redrawn_templates = false;
         let (_, scene_1) = through_a_file("scene-1", of(&w));
         assert_eq!(scene_1.airfield_scene, REDRAWN_AIRFIELD_SCENE);

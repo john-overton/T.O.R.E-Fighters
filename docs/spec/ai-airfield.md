@@ -32,7 +32,9 @@ by its centre, heading and length) the AI uses the fitted runway-only fallback
 described in each section. With the redrawn airports (the default) the points
 come from the airport's plan, and since slice CL-AP every runway but the dirt
 strips (vertical pads, which no conventional AI uses) has them, second tiles
-included ([the AI's points](../formats/redrawn-airports.md#the-ais-points)).
+included. Merged pairs share one route and nine parking slots
+([single-field replacements](airports.md#single-fields-replacing-paired-tiles));
+legacy scenes retain both routes ([the AI's points](../formats/redrawn-airports.md#the-ais-points)).
 
 ## Short strips
 

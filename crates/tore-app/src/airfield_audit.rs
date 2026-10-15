@@ -57,6 +57,7 @@ pub fn run() -> AppResult<()> {
     let mut theaters = Vec::new();
     let usage = "--airfield-audit [--svg DIRECTORY] [--track FILE ...] [--field CODE:AIRPORT ...] [--parked] [THEATER ...]";
     let mut parked = false;
+    let mut merged = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--svg" => svg_dir = Some(PathBuf::from(args.next().ok_or(usage)?)),
@@ -70,12 +71,16 @@ pub fn run() -> AppResult<()> {
                 ));
             }
             "--parked" => parked = true,
+            "--merged" => merged = true,
             "--no-audio" => {}
             other if other.starts_with("--") => return Err(usage.into()),
             other => theaters.push(other.to_ascii_uppercase()),
         }
     }
     let resources = crate::reel::load_assets()?.theater_resources;
+    if merged {
+        return merged_audit(&resources);
+    }
     if parked {
         return parked_sweep(&resources, &theaters);
     }
@@ -440,6 +445,221 @@ fn parked_sweep(resources: &BTreeMap<String, Vec<u8>>, wanted: &[String]) -> App
     );
     if problems > 0 {
         return Err(format!("airfield-audit: {problems} parked aircraft off the pavement").into());
+    }
+    Ok(())
+}
+
+/// Indexed statistics deliberately precede palette lighting and detail texture.
+fn ground_statistics(pixels: &[u8]) -> String {
+    let mut histogram = [0usize; 256];
+    for &p in pixels {
+        histogram[p as usize] += 1;
+    }
+    let water = histogram[255];
+    histogram[255] = 0;
+    let count = histogram.iter().sum::<usize>() as f64;
+    let mean = histogram
+        .iter()
+        .enumerate()
+        .map(|(i, n)| i as f64 * *n as f64)
+        .sum::<f64>()
+        / count.max(1.);
+    let variance = histogram
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (i as f64 - mean).powi(2) * *n as f64)
+        .sum::<f64>()
+        / count.max(1.);
+    let mut dominant: Vec<_> = histogram
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| **n > 0)
+        .collect();
+    dominant.sort_by_key(|(i, n)| (std::cmp::Reverse(**n), *i));
+    format!(
+        "mean={mean:.6} variance={variance:.6} water={water} dominant={:?}",
+        &dominant[..dominant.len().min(6)]
+    )
+}
+
+fn merged_ground_audit(
+    resources: &BTreeMap<String, Vec<u8>>,
+    world: &tore_world::terrain::Terrain,
+    code: &str,
+) -> AppResult<()> {
+    for key in &world.neutral_airfield_ground {
+        let Some(placement) = world.environment.textures.get(key) else {
+            continue;
+        };
+        let name = placement.resource_name(code);
+        let source = tore_formats::Pic::parse(&resources[&name])?;
+        let mut before = Vec::new();
+        let mut after = Vec::new();
+        crate::scenery::append_ground_texture(&mut before, &source)?;
+        crate::scenery::append_neutral_ground_texture(&mut after, &source)?;
+        let changed = before.iter().zip(&after).filter(|(a, b)| a != b).count();
+        if before.iter().zip(&after).any(|(&a, &b)| {
+            (a == 255) != (b == 255) || (matches!(a,192..=197 | 208..=215) && a != b)
+        }) {
+            return Err(
+                format!("{code} {key:?}: neutralization changed original ground/water").into(),
+            );
+        }
+        println!(
+            "merged-ground: {code} {key:?} {name} changed={changed}/65536 before {} after {}",
+            ground_statistics(&before),
+            ground_statistics(&after)
+        );
+        for neighbor in [
+            (key.0 - 4, key.1),
+            (key.0 + 4, key.1),
+            (key.0, key.1 - 4),
+            (key.0, key.1 + 4),
+        ] {
+            if world.neutral_airfield_ground.contains(&neighbor) {
+                continue;
+            }
+            let Some(p) = world.environment.textures.get(&neighbor) else {
+                continue;
+            };
+            let name = p.resource_name(code);
+            let pic = tore_formats::Pic::parse(&resources[&name])?;
+            let mut pixels = Vec::new();
+            crate::scenery::append_ground_texture(&mut pixels, &pic)?;
+            println!(
+                "merged-ground-neighbor: {code} {key:?} neighbor={neighbor:?} {name} {}",
+                ground_statistics(&pixels)
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Fast, headless inventory and acceptance checks for the single-field replacements.
+fn merged_audit(resources: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
+    use tore_sim::airport::ApproachEnd;
+    let mut count = 0;
+    let mut problems = 0;
+    for code in tore_formats::quick_template::tables::THEATERS {
+        let world = crate::scenery::launch_terrain(resources, code, None)?;
+        merged_ground_audit(resources, &world, code)?;
+        let sources = tore_world::terrain::Placements::load(resources, code)?;
+        let original_environment =
+            tore_formats::theater::Environment::parse(&resources[&format!("{code}.MM")])?;
+        let texel = tore_world::city::mask::ground_texel(resources, &world.environment, code);
+        for built in &world.redrawn {
+            let Some(old) = built.merged_from else {
+                continue;
+            };
+            count += 1;
+            let r = world
+                .airport_scene
+                .runway(built.strip_id)
+                .ok_or("missing merged runway")?;
+            let near = r.threshold(ApproachEnd::Near);
+            let far = r.threshold(ApproachEnd::Far);
+            let flat = (0..=48).all(|k| {
+                let f = f64::from(k) / 48.;
+                let x = near[0] + (far[0] - near[0]) * f;
+                let z = near[2] + (far[2] - near[2]) * f;
+                (f64::from(world.height(x as f32, z as f32)) - near[1]).abs() < 0.1
+            });
+            let inside = world.edge_distance_nm(near[0], near[2]) == 0.
+                && world.edge_distance_nm(far[0], far[2]) == 0.;
+            let slots = tore_world::mission_layout::ground_layout(&world, old, 4).is_ok();
+            let before: Vec<_> = sources
+                .placed()
+                .filter_map(Result::ok)
+                .filter(|(id, _)| *id == old || *id == built.strip_id)
+                .map(|(id, p)| format!("{id}:{:?}@{:?}/{}", p.name, p.position, p.angles[0]))
+                .collect();
+            let tile_keys: std::collections::BTreeSet<_> = built
+                .replaced_centres
+                .iter()
+                .map(|p| {
+                    (
+                        ((p[0] / 8192.).floor() as i32) & !3,
+                        ((p[2] / 8192.).floor() as i32) & !3,
+                    )
+                })
+                .collect();
+            let tiles: Vec<_> = tile_keys
+                .iter()
+                .filter_map(|key| {
+                    let before = original_environment.textures.get(key)?;
+                    Some(format!(
+                        "{key:?}:{}->local ground repair (source water mask)",
+                        before.resource_name(code)
+                    ))
+                })
+                .collect();
+            println!(
+                "merged-airport-tiles: {code} airport={} {}",
+                r.airport,
+                tiles.join(";")
+            );
+            let routes_clear = built.anchors.is_some_and(|a| {
+                audit::routes(&a, r)
+                    .iter()
+                    .all(|route| audit::walk(std::slice::from_ref(built), route).is_empty())
+            });
+            let wet = audit::water(built, &|x, z| {
+                world.over_water(x, z)
+                    || match texel(x as i64, z as i64) {
+                        Some(index) => index == 255,
+                        None => world.drawn_as_water(x, z),
+                    }
+            });
+            let dry = wet.runway.1 + wet.other.1 == 0;
+            let art_clear = built.replaced_centres.iter().all(|p| {
+                let key = (
+                    ((p[0] / 8192.).floor() as i32) & !3,
+                    ((p[2] / 8192.).floor() as i32) & !3,
+                );
+                !world.environment.textures.contains_key(&key)
+                    || world.neutral_airfield_ground.contains(&key)
+            });
+            let clear = (0..=48).all(|k| {
+                let f = f64::from(k) / 48.;
+                let x = near[0] + (far[0] - near[0]) * f;
+                let z = near[2] + (far[2] - near[2]) * f;
+                world
+                    .solid_contact(
+                        [x, near[1] + 5., z],
+                        [x, near[1] + 5., z],
+                        world
+                            .airport_scene
+                            .objects
+                            .iter()
+                            .filter(|o| !o.runway)
+                            .map(|o| o.id),
+                    )
+                    .is_none()
+            });
+            let alias = world
+                .airport_scene
+                .runway(old)
+                .is_some_and(|a| a.object == r.object);
+            if !flat || !inside || !slots || !alias || !routes_clear || !dry || !art_clear || !clear
+            {
+                problems += 1;
+            }
+            println!(
+                "merged-airport: {code} airport={} name={:?} old_object={} canonical={} before={} center={:?} heading_deg={:.0} length_ft={} width_ft=200 flat={flat} inside={inside} four_slots={slots} alias={alias} dry={dry} clear={clear} routes={routes_clear} art_clear={art_clear}",
+                r.airport,
+                r.name,
+                old,
+                r.object,
+                before.join(";"),
+                r.approach_center,
+                r.heading.to_degrees(),
+                r.length_ft
+            );
+        }
+    }
+    println!("merged-airport: fields={count} problems={problems}");
+    if problems != 0 {
+        return Err("merged airport audit failed".into());
     }
     Ok(())
 }

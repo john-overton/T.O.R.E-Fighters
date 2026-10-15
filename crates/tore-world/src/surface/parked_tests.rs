@@ -127,6 +127,7 @@ fn weapons_meet_a_runway_at_its_pavement_and_other_objects_at_their_box() {
         runway,
     };
     let scene = Scene {
+        aliases: Default::default(),
         objects: vec![object(1, true), object(2, false)],
         runways: vec![Runway {
             object: 1,

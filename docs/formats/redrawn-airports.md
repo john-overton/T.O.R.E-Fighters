@@ -30,6 +30,27 @@ while aircraft and buildings are drawn at real size
 The redraw keeps each runway where retail put it and redraws the rest at real
 size.
 
+## Merged pairs, airfield scene 3
+
+The default now follows [single-field replacements](../spec/airports.md#single-fields-replacing-paired-tiles).
+`merged.toml` replaces both pair plans with one 12,000 ft runway. The base
+object owns pavement and damage; the second object and airport number are
+aliases, excluded from scene iteration and rendering. The immutable alias
+map is rebuilt from source data, not serialized in checkpoints.
+
+Scenery reads the world's neutral-ground cell set: ground texture
+placements intersecting the original strip boxes use
+[local ground repair](theater.md#merged-airfield-ground-pictures), retaining
+the source ground grain, water cutouts and rotation. This removes non-ground tile
+markings as well as suppressing the second retail shape. No retail bytes or
+replacement texture assets are stored in the repository.
+
+The earlier plan and pair contracts below describe standalone fields and
+legacy recording scenes 1 and 2. Their compiled plans remain available.
+New recordings use scene 3; old recordings rebuild the scene they name.
+There is no wire field or checkpoint coder change. The simulation geometry
+changes, so the lead must account for this when numbering compatible builds.
+
 ## What changes and what stays
 
 | Part | With the switch on | Source |

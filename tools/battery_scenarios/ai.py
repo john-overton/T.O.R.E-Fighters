@@ -1429,6 +1429,22 @@ def scenarios() -> list[Scenario]:
             "--theater", theater, "--ground-start", airport, *extra, "--probe-wing-size", size, "--maneuver", "takeoff",
             "--probe-wing-order", f"{order}:land-selected", "--separation", "200", "--probe-wing-only", "--probe-pavement"],
             ticks=216000 if size == "4" else 108000, timeout=2400, check=on_pavement(landers)))
+    # nr-apmerge: both old IDs of a merged field lead to the same pavement.
+    # Southampton leaves room for the scripted Hornet leader's departure;
+    # Spassk Dalniy's northern map edge is too close for a long straight jet flight.
+    for aircraft in ("f18", "c130"):
+        for size in (2, 4):
+            theater = "FRA" if aircraft == "f18" else "VLA"
+            airport = ("14" if size == 2 else "24") if aircraft == "f18" else ("6" if size == 2 else "22")
+            order = 12000 * size // 2 if aircraft == "f18" else 36000
+            out.append(probe(f"merged-airfield-{aircraft}-wing{size}", [
+                "--theater", theater, "--ground-start", airport,
+                "--aircraft", aircraft, "--probe-friendly-aircraft", aircraft,
+                "--probe-wing-size", str(size), "--maneuver", "takeoff",
+                "--probe-wing-order", f"{order}:land-selected", "--separation", "200",
+                "--probe-wing-only", "--probe-pavement"],
+                ticks=264000, timeout=2400, check=on_pavement(size-1),
+                notes="Two/four aircraft at merged Southampton or Spassk Dalniy, including the old second-half ID."))
     # An enemy ground start in single player (slice CL-R): Enemy Wing 1 parks
     # at Kharkiv (UKR 6, a Redfor field) while the player's wing leaves Odesa;
     # the AI pair must start on the ground and be flying at the end.
