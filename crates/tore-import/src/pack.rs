@@ -255,6 +255,7 @@ pub fn read_pack(path: &Path) -> ImportResult<Resources> {
     if cursor.read(&mut [0])? != 0 {
         return Err("trailing menu pack bytes".into());
     }
+    tore_formats::weapons::corrections::extend_resources(&mut resources);
     Ok(resources)
 }
 

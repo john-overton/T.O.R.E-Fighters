@@ -482,9 +482,9 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                         |_, _| 0.,
                     );
                     let close_reason = too_close.own_view().readiness(l);
-                    if close_reason != live::Readiness::MinimumRange {
+                    if close_reason != live::Readiness::Ready {
                         return Err(format!(
-                            "source minimum-range launch was not inhibited: slot={} minimum={} reason={close_reason:?} mode={:?} designated={:?}",
+                            "close-range launch was inhibited: slot={} minimum={} reason={close_reason:?} mode={:?} designated={:?}",
                             index + 1,
                             weapon.seeker.zones[1].minimum_range,
                             too_close.own().launch_mode,
@@ -499,8 +499,8 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                         }],
                         |_, _| 0.,
                     );
-                    if too_close.own().rounds(index) != initial {
-                        return Err("minimum-range inhibited shot consumed ammunition".into());
+                    if too_close.own().rounds(index) >= initial {
+                        return Err("close-range shot did not consume ammunition".into());
                     }
                 }
                 let mut tracking = combat.state.clone();

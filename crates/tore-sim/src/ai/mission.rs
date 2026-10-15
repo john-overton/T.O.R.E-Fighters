@@ -111,6 +111,8 @@ pub struct StationSpec {
     /// Maximum employment range, feet. `None` leaves the bound unrestricted.
     pub maximum_range_ft: Option<f64>,
     pub minimum_range_ft: f64,
+    /// All-aspect flag and nominal IR seeker reach, absent for other stores.
+    pub infrared_envelope: Option<(bool, f64)>,
     pub requires_radar: bool,
     pub requires_sensor: bool,
     pub employment_zone: Option<tore_formats::weapons::Zone>,
@@ -134,6 +136,8 @@ impl StationSpec {
 /// `human_controlled` set; it is never a special case in the decision path.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WorldObject {
+    /// Sensor input only; copied into a target view when the object is observed.
+    pub infrared_strength: f64,
     pub id: u32,
     pub side: super::targeting::Side,
     pub position: [f64; 3],
@@ -4906,6 +4910,7 @@ impl AiActor {
             maximum_speed: object.maximum_speed,
             is_aircraft: object.is_aircraft,
             is_fighter: object.is_fighter,
+            infrared_strength: object.infrared_strength,
             human_controlled: object.human_controlled,
             valid: object.alive && !object.destroyed,
             type_allowed: true,
@@ -4973,6 +4978,7 @@ impl AiActor {
                         .then_some(pointing),
                     minimum_range_ft: s.minimum_range_ft,
                     maximum_range_ft: s.maximum_range_ft,
+                    infrared_envelope: s.infrared_envelope,
                     requires_radar: s.requires_radar,
                     requires_sensor: s.requires_sensor,
                     employment_zone: s.employment_zone,
@@ -5514,6 +5520,7 @@ pub fn simple_stations(
                 startup: Delay::seconds(0),
             },
             minimum_range_ft: 0.0,
+            infrared_envelope: None,
             requires_radar: false,
             requires_sensor: false,
             employment_zone: None,
@@ -5544,6 +5551,7 @@ pub fn simple_stations(
                 startup: Delay::seconds(0),
             },
             minimum_range_ft: 0.0,
+            infrared_envelope: None,
             requires_radar: false,
             requires_sensor: false,
             employment_zone: None,
@@ -5678,6 +5686,7 @@ mod tests {
 
     pub(super) fn object(actor: &AiActor, side: u32) -> WorldObject {
         WorldObject {
+            infrared_strength: 1.,
             id: actor.id(),
             side: Side(side),
             position: actor.flight().position,

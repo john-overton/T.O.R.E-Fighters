@@ -37,6 +37,14 @@ fn fingerprint(data: &BTreeMap<String, Vec<u8>>) -> u64 {
     // guard only (not a cryptographic integrity guarantee).
     let mut h = 0xcbf29ce484222325u64;
     for (name, bytes) in data {
+        // Virtual donor aliases are a loader feature, not changed retail
+        // media. Preserve old tapes' import identity; explicit different
+        // variant bytes still participate in the asset guard.
+        if tore_formats::weapons::corrections::R27_DERIVED.contains(&name.as_str())
+            && data.get("AA10.JT") == Some(bytes)
+        {
+            continue;
+        }
         for b in name.bytes().chain([0]).chain(bytes.iter().copied()) {
             h = (h ^ u64::from(b)).wrapping_mul(0x100000001b3);
         }
@@ -490,6 +498,19 @@ fn replay_reader(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn virtual_stores_preserve_old_tape_assets_but_changed_records_do_not() {
+        let mut data = std::collections::BTreeMap::from([
+            ("AA10.JT".into(), vec![1, 2, 3]),
+            ("OTHER".into(), vec![4, 5]),
+        ]);
+        let original = super::fingerprint(&data);
+        tore_formats::weapons::corrections::extend_resources(&mut data);
+        assert_eq!(super::fingerprint(&data), original);
+        data.get_mut("R27ER.JT").unwrap().push(6);
+        assert_ne!(super::fingerprint(&data), original);
+    }
+
     use super::*;
     use crate::combat_tape::command_name;
     use tore_sim::combat::live::Command;

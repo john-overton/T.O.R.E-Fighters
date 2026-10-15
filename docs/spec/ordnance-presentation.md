@@ -410,3 +410,12 @@ limit, no fuel cue plays. Sound-effects Off and `--no-audio` silence these cues.
 Playback uses the imported unsigned PCM8 mono samples at the existing reader's
 5,512 Hz / 11,025 Hz rates. Original device volume and shell repeat cadence are
 unverified; the host retains its current effects mix and discrete edit events.
+
+## R-27 identity and carriage
+
+John's 2026-10-15 correction keeps AA10.JT as R-27R and adds R27ER/T/ET
+virtual stores from the user-owned donor record. Cards show the R-27 variant;
+selecting one shows its full NATO name in the existing notice band. The HUD
+uses AA-10A/B/C/D. See the single [missile definition](missiles.md#corrected-identities-and-r-27-stores)
+for names, aircraft, rail compatibility and fitted envelopes. These catalog
+changes require matching host/client builds and a protocol bump by the lead.

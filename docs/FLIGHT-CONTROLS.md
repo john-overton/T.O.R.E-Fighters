@@ -599,7 +599,7 @@ target direction/speed, altitude-dependent motor performance and turning losses
 change it. Active-radar shots can be cued beyond the imported nominal launch
 maximum and acquire with their own seeker later. Other guidance types still
 require prelaunch acquisition within seeker range. The lower scale value remains
-the imported minimum range. Onboard seeker limits are unchanged. The percentage and IN RNG use the predicted
+the imported minimum range as an advisory. Onboard seeker angle and maximum-range limits remain. The percentage and IN RNG use the predicted
 intercept. Target evasion and future loss of guidance are not predicted.
 Two short horizontal bars inside the vertical scale mark the favorable firing
 window. They move with the estimated engagement and disappear when no favorable
@@ -625,7 +625,8 @@ label is clickable only while the panel is shown (**Pref → Weapon diagnostics?
 turn off; armed A2A IR missiles retain bore search and guidance; weapon selection still permits an unguided release. That missile stays unguided
 after radar power returns. Selecting the passive IR channel alone does not turn
 off the power switch. Supported radar weapons need aircraft lock for guided shots.
-A detected bore target inside minimum range displays MIN RANGE and blocks release.
+Minimum range is advisory: a missile can fire inside it and attempts to guide.
+The range scale and IN RNG still describe the recommended envelope.
 AGM-65 and other surface profiles cannot engage the practice aircraft or use A2A
 BORESIGHT. Surface designation is still deferred. See the
 [minimum range and target-role rules](spec/missiles.md#minimum-engagement-and-target-role).

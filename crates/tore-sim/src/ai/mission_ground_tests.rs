@@ -407,6 +407,7 @@ fn the_threat_inputs_hold_known_defences_and_fighters_within_30_nm() {
     // next rebuild; one beyond is not.
     let fighter = |id: u32, ahead_nmi: f64| Observation {
         target: TargetView {
+            infrared_strength: 1.,
             id,
             side: Side(2),
             position: [0., 20_000., ahead_nmi * NMI],

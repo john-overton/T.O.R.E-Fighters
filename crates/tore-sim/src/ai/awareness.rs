@@ -393,6 +393,7 @@ mod tests {
 
     fn target(id: u32, side: u32, position: [f64; 3]) -> TargetView {
         TargetView {
+            infrared_strength: 1.,
             id,
             side: Side(side),
             position,

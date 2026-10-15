@@ -169,6 +169,14 @@ pub const SEEKER_VIEW: [&str; 12] = [
     "AT2.JT",
 ];
 
+/// These records are not player stores. Keep their existing launch-origin
+/// qualification and sensor minimum while revising aircraft release rules.
+pub fn surface_launched(source: &str) -> bool {
+    SURFACE_SUPPORTED.contains(&source)
+        || SURFACE_INFRARED.contains(&source)
+        || SURFACE_TO_SURFACE.contains(&source)
+}
+
 /// The seeker-view weapons that home on a laser spot rather than on an
 /// object: the laser bombs and the laser missiles (class 4 and 12). Their
 /// picture marks the spot (the laser, docs/spec/air-to-ground.md).
@@ -235,11 +243,10 @@ impl Profile {
             "AIM54C.JT" => Some(10.),
             "AEMP1.JT" => Some(3.),
             "AS16.JT" => Some(2.),
-            "R530.JT" | "AS7.JT" | "AS15.JT" | "AA10.JT" | "AIM7.JT" | "AIM7E.JT" | "AA11.JT"
-            | "AA11B.JT" | "AA2.JT" | "AA8.JT" | "AIM9M.JT" | "AIM9X.JT" | "R550.JT"
-            | "AGM65G.JT" | "AGM65A.JT" | "AGM84E.JT" | "AIM9B.JT" | "AGM45.JT" | "AGM88.JT" => {
-                None
-            }
+            "R27ER.JT" | "R27T.JT" | "R27ET.JT" | "R530.JT" | "AS7.JT" | "AS15.JT" | "AA10.JT"
+            | "AIM7.JT" | "AIM7E.JT" | "AA11.JT" | "AA11B.JT" | "AA2.JT" | "AA8.JT"
+            | "AIM9M.JT" | "AIM9X.JT" | "R550.JT" | "AGM65G.JT" | "AGM65A.JT" | "AGM84E.JT"
+            | "AIM9B.JT" | "AGM45.JT" | "AGM88.JT" => None,
             _ => return None,
         })
     }
@@ -850,9 +857,10 @@ pub fn flown_ticks() -> u64 {
     FLOWN_TICKS.with(|flown| flown.get())
 }
 
-/// Imported minimum/angle/altitude limits, without the obsolete fixed launch max.
+/// Player launch angles/altitude, without advisory minimum or fixed maximum.
 pub fn launch_geometry(w: &Weapon) -> Zone {
     Zone {
+        minimum_range: 0,
         maximum_range: i32::MAX,
         ..w.seeker.zones[1]
     }
@@ -1431,7 +1439,7 @@ pub mod seeker;
 pub struct Flight {
     pub unguided: bool,
     pub launch_origin: Vector,
-    /// Qualification survives terminal closure; minR is not a retention range.
+    /// SAM qualification metadata; aircraft-launched missiles no longer use it.
     pub qualified_target: Option<u32>,
     pub profile: Profile,
     pub mode: LaunchMode,
@@ -1443,7 +1451,8 @@ pub struct Flight {
 impl Flight {
     pub fn eligible(&self, w: &Weapon, target: &super::live::Target) -> bool {
         self.profile.accepts(target)
-            && (self.qualified_target == Some(target.id)
+            && (!surface_launched(&w.source)
+                || self.qualified_target == Some(target.id)
                 || length(sub(target.position, self.launch_origin))
                     >= f64::from(w.seeker.zones[1].minimum_range.max(0)))
     }

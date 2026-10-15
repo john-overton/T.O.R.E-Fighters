@@ -147,7 +147,7 @@ pub fn warhead_lb(record: &str) -> Option<f64> {
         "AA6" => 154.,
         "AA8" => 7.,
         "AA9" => 103.,
-        "AA10" => 86.,
+        "AA10" | "R27ER" | "R27T" | "R27ET" => 86.,
         "AA11" | "AA11B" => 16.,
         "AA12" => 49.,
         "AAML" => 150.,

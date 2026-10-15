@@ -234,7 +234,8 @@ impl Inspector {
                 }
                 out.name = format!(
                     "{}  |  {} from {}",
-                    info.name,
+                    tore_formats::weapons::corrections::identity(&info.source)
+                        .map_or(info.name.as_str(), |(_, long)| long),
                     info.class.name(),
                     name(recording, state.owner)
                 );
@@ -430,7 +431,7 @@ mod tests {
             Some("player")
         );
         let missile = inspect(Target::Missile(7));
-        assert!(missile.name.contains("AA10") && missile.name.contains("missile"));
+        assert!(missile.name.contains("R-27R") && missile.name.contains("missile"));
         assert!(missile.target.as_deref().unwrap().contains("You"));
         assert_eq!(
             inspect(Target::Missile(13)).action.as_deref(),

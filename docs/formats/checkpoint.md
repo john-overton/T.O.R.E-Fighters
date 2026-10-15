@@ -477,7 +477,7 @@ drift; the coders, not this table, are the record.
 | AI mission | `AiMission`, `AiActor` and its airfield sequence, memory, threats, defense, assignment, a striker's ground picture (with a class order's targets, slice ST-O), its decision seed and strike state (`Strike`, slice ST-T; with the human's attack it continues after a give-back, `Takeover`, slice ST-K; the lase in progress, whether it has a designator and laser rounds, and whether the AI turned its laser on, slice ST-L; a gun run's burst, burst opening and recovery, the cue's sideways trim and last pass (since nr-cue the last pass is where the cue lay from the aim, two f64 feet, and whether it was still closing, not a distance and an inside flag), and the height it was tasked at, slice ST-T2; new enum values: passes `Orbit` 5 and `StandOff` 6, store `Gun` 8 (the gunship's linked guns and a striker's strafing gun) and segment `Guide`, slice ST-F, passes `Laydown` 7 and `Strafe` 8, slice ST-T2, phase `Lase`, slice ST-L; the no-laze decision, its store, target and whether the radio has said it, `NoLaze` and `NoLazeCall`, slice ST-G; a helicopter's threat state `HeliThreat` after `tasked_agl_ft`: its hold-off point and start, whether the hold-off was called, whether it waited out the three minutes, the ambush ring (`Ring`) and its last engagement, the stand-off firing point and range, and the last decision (`Call`, `Decision`), with the new phase `HoldOff` 9, slice H4; the radars painting aircraft that the host hands the AI each step are not coded, `AiWings::painting` is set again before every step) and the controller's defence motion (`DefenseMotion`, which gained `rotorcraft` after `pitch_deg`, slice ST-H: a helicopter's defence is flown at maximum speed) and the object it was ordered to lase (slice ST-O); after it the rotor adapter's memory (`RotorAdapter`: the rotor laws' `autopilot::Loops` and the `Regime`, Forward 0, Pointing 1, Hover 2) and the jet-lift law's (`JetLift`: its `Loops`), slice H1 of the helicopter and VTOL AI pass; `Loops` gained a checkpoint coder beside its exact one; the airfield sequence (`Sequence`) gained, after `ground_trim`, its `lift` (`Lift`: Conventional 0, Rotor 1, Jet 2, ShortJet 3) and `hover_heading` (f64), and `Phase` the vertical values `VerticalHold` 12, `VerticalClimb` 13, `Transition` 14, `HoverApproach` 15, `VerticalDescent` 16, `Settle` 17, `AirTaxi` 18 (slice H2; additive, same-build); the wing status report memory (part 7) stores the same `Phase` values | 45 | 100 to 200 KB | Actors are inserted and removed by handoff. Two random streams per actor besides the controller's |
 | AI controller | `Controller` and its manoeuvre, intents, gunnery, formation guidance, weapon service | 40 | about 20 KB | Already `Clone + PartialEq`, with traces and draw logs outside equality |
 | AI wings | `AiWings`, its reports, chatter watch, result trackers, the air-to-ground tasking kept for each aircraft a human flies (`handed_tasking`, slice ST-K, after the handed-over skills: role, ordered target, class order targets and lase order) | 12 | a few KB, plus configurations as shared records | Two random streams; `ai_shots` grows with every AI round in the default rules: code it, measure it |
-| Radio | `Comms`, `Radio`, `WingStatus`, `AirfieldRadio`, `CrewVoice` | 16 | under 1 KB idle | One random stream; seven `&'static str` cooldown keys |
+| Radio | `Comms`, `Radio`, `WingStatus`, `AirfieldRadio`, `CrewVoice` | 16 | under 1 KB idle | One random stream; eleven `&'static str` cooldown keys |
 | Data link and score | `DataLink`, `score::Recorder` | 20 | under 1 KB | No random stream. The link is rebuilt from the world every tick except the pictures (every 30th tick), the locks' first-held ticks and the assignments, so it is coded whole. The wing, side and player-order types belong to `tore-sim`, so their coders are functions |
 
 The skip list the surveys support, with the class of each: why-records:
@@ -522,3 +522,20 @@ all active-radar releases without changing the checkpoint layout. An old
 checkpoint's already-queued release retains its old boolean; recorded speech
 stems play as recorded. Fresh releases use the shared missile classification.
 No network protocol number or wire layout changed.
+
+## Missile and IR correction (2026-10-15)
+
+The radio cooldown key table appends radio-bore-active, radio-bore-ir and
+radio-bore-supported, indices 8, 9 and 10. Existing indices stay fixed.
+AI StationSpec appends an optional (all-aspect bool, nominal seeker feet f64)
+IR envelope after employment_zone. TargetView adds infrared_strength f64
+following human_controlled, the observed signature times engine heat.
+These change same-build checkpoint semantics and require the lead's protocol
+bump. Old saved replay event streams and AA10.JT resource references remain
+readable; old checkpoints are not promised cross-build compatibility.
+
+Combat input tapes keep version 8 and their original imported-media fingerprint
+when the three virtual R-27 entries are byte-for-byte AA10 donor aliases. A
+variant supplied with different bytes is still hashed. This keeps old tapes
+readable without weakening the guard against actual changed imports. Mission
+recordings still retain their recorded event stems and frame data.

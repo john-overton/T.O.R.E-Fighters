@@ -1664,6 +1664,7 @@ fn remember_hostile(mission: &mut AiMission, id: u32, position: [f64; 3]) {
     let tick = mission.tick();
     let actor = mission.actor_mut(1).unwrap();
     let target = TargetView {
+        infrared_strength: 1.,
         id,
         side: Side(2),
         position,

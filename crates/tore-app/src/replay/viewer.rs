@@ -538,7 +538,13 @@ fn missiles(recording: &Recording) -> BTreeMap<u32, (u32, String)> {
                 .id(vocab::field::WEAPON)
                 .and_then(|w| recording.weapon_info(w))
                 .filter(|w| !w.name.is_empty())
-                .map_or_else(|| "Missile".to_owned(), |w| w.name.clone());
+                .map_or_else(
+                    || "Missile".to_owned(),
+                    |w| {
+                        tore_formats::weapons::corrections::identity(&w.source)
+                            .map_or_else(|| w.name.clone(), |(_, long)| long.into())
+                    },
+                );
             Some((projectile, (shooter, weapon)))
         })
         .collect()

@@ -34,23 +34,59 @@ pub struct Observation {
     pub off_axis: f64,
     pub range: f64,
 }
-pub fn heat_quality(target: &Target, observer: Vector, nominal: f64) -> f64 {
-    if nominal <= 0. {
+/// Shared fitted aircraft IR response. Aspect changes detection distance, not
+/// the lock threshold: a visible head-on fighter can actually acquire.
+pub fn infrared_quality(
+    all_aspect: bool,
+    nominal: f64,
+    strength: f64,
+    facing: f64,
+    distance: f64,
+) -> f64 {
+    if nominal <= 0. || strength <= 0. || (!all_aspect && facing > -std::f64::consts::FRAC_1_SQRT_2)
+    {
         return 0.;
     }
+    let aspect_range = if all_aspect {
+        0.7 - 0.3 * facing.clamp(-1., 1.)
+    } else {
+        1.
+    };
+    let reach = nominal * aspect_range * strength.sqrt();
+    if distance > reach {
+        return 0.;
+    }
+    strength / (1. + (distance / reach).powi(2))
+}
+
+pub fn heat_quality(w: &Weapon, target: &Target, observer: Vector, nominal: f64) -> f64 {
     let direction = unit(sub(observer, target.position));
     let facing = dot(target.basis.forward, direction).clamp(-1., 1.);
-    let aspect = if facing < 0. {
-        0.5 - 0.5 * facing
-    } else {
-        0.5 - 0.25 * facing
-    };
-    let heat = target.signature.infrared.max(0.) / 100. * aspect * target.heat.factor();
-    let distance = length(sub(target.position, observer));
-    if distance > nominal * heat.sqrt().min(1.) {
-        return 0.;
+    let strength = target.signature.infrared.max(0.) / 100. * target.heat.factor();
+    // This pass tunes the reviewed A2A inventory. Preserve the separate SAM
+    // profiles' prior heat response until their aspect contracts are reviewed.
+    if tore_formats::weapons::corrections::infrared_aspect(&w.source).is_none() {
+        let aspect = if facing < 0. {
+            0.5 - 0.5 * facing
+        } else {
+            0.5 - 0.25 * facing
+        };
+        let heat = target.signature.infrared.max(0.) / 100. * aspect * target.heat.factor();
+        let distance = length(sub(target.position, observer));
+        return if nominal > 0. && distance <= nominal * heat.sqrt().min(1.) {
+            (heat / (1. + (distance / nominal).powi(2))).max(0.)
+        } else {
+            0.
+        };
     }
-    (heat / (1. + (distance / nominal).powi(2))).max(0.)
+
+    infrared_quality(
+        w.infrared_all_aspect(),
+        nominal,
+        strength,
+        facing,
+        length(sub(target.position, observer)),
+    )
 }
 pub struct View<'a> {
     pub position: Vector,
@@ -64,9 +100,12 @@ pub fn observe(
     view: &View<'_>,
     target: &Target,
 ) -> Option<Observation> {
-    let zone = &w.seeker.zones[0];
+    let mut zone = w.seeker.zones[0];
+    if !surface_launched(&w.source) {
+        zone.minimum_range = 0;
+    }
     if !profile.accepts(target)
-        || !geometry(zone, view.position, view.basis, target.position, view.cap)
+        || !geometry(&zone, view.position, view.basis, target.position, view.cap)
         || (view.obscured)(view.position, target.position)
     {
         return None;
@@ -81,7 +120,7 @@ pub fn observe(
             }
             contrast / (1. + (range / nominal).powi(2))
         }
-        Guidance::Infrared => heat_quality(target, view.position, nominal),
+        Guidance::Infrared => heat_quality(w, target, view.position, nominal),
         Guidance::Active | Guidance::Supported => {
             let signature = target.signature.effective_radar(
                 &target.basis,

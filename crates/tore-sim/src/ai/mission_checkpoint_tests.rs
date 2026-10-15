@@ -597,6 +597,7 @@ fn awareness_defense_and_assignment_values_round_trip() {
     same(mission.actor(1).unwrap().awareness.clone());
     same(Snapshot {
         target: crate::ai::controller::TargetView {
+            infrared_strength: 1.,
             id: 2,
             side: Side(2),
             position: [1., 2., 3.],

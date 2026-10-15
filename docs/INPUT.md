@@ -1241,7 +1241,9 @@ IR boresight growl follows the actively tracked bore target and its displayed
 percentage without designation. Empty bore and lost tracks are silent. A radar
 missile in boresight sounds its lock tone on the bore return without
 designation, cued seekers sound only while tracking, and radar tones fall
-silent inside minimum range.
+silent inside minimum range. Minimum range does not block missile release.
+All-aspect IR can growl and lock head-on within its shorter acquisition range;
+see [missile aspect rules](spec/missiles.md#infrared-aspect-and-acquisition).
 [Behavior and current route limitations](spec/weapon-navigation-selection.md).
 
 ## Ownship damage report

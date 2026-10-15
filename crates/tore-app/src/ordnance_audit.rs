@@ -20,7 +20,7 @@ use tore_world::mission::{LoadoutSpec, MissionSpec};
 const AIRCRAFT: usize = 36;
 const RECOVERED_STATIONS: usize = 9;
 const TANK_RECORDS: usize = 4;
-const WEAPON_PLACEMENTS: usize = 3146;
+const WEAPON_PLACEMENTS: usize = 3118;
 const TANK_PLACEMENTS: usize = 146;
 /// Station and novelty-record pairs the Cheat loading accepts and the normal
 /// loading refuses (A2G decision 16).
@@ -41,6 +41,26 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
         .find(|name| !data.contains_key(**name))
     {
         return Err(format!("ordnance audit missing supported weapon record {name}").into());
+    }
+    for (source, bytes) in data.iter().filter(|(source, _)| source.ends_with(".JT")) {
+        let w = Weapon::parse(source, bytes)?;
+        if w.flags & 0x10001 == 0x10001 && w.movement.fuel_t > 0 {
+            println!(
+                "missile catalog: {} HUD={} name={} seeker={:?} Fox={:?} aspect={} min={} max={} seeker_max={} mass={} burn={} removal={}",
+                source,
+                w.hud_name,
+                w.name,
+                w.seeker_kind(),
+                w.seeker_kind().fox_stem(),
+                w.infrared_all_aspect(),
+                w.seeker.zones[1].minimum_range,
+                w.seeker.zones[1].maximum_range,
+                w.seeker.zones[0].maximum_range,
+                w.weight,
+                (f64::from(w.movement.fuel_t) - f64::from(w.movement.ignite_t)) / 4.,
+                f64::from(w.movement.remove_t) / 4.
+            );
+        }
     }
     let weapons = data
         .iter()
@@ -196,6 +216,18 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                     loading::Store::weapon(weapon),
                     source.store.as_deref() == Some(weapon.source.as_str()),
                 );
+                let r27 = matches!(
+                    weapon.source.as_str(),
+                    "AA10.JT" | "R27ER.JT" | "R27T.JT" | "R27ET.JT"
+                );
+                let expected = if r27 {
+                    rows.iter()
+                        .find(|r| r.hardpoint == hardpoint)
+                        .and_then(|r| r.weapon)
+                        .map_or(0, |slot| standard.capacity(slot, weapon))
+                } else {
+                    expected
+                };
                 if !(1..32767).contains(&expected) {
                     continue;
                 }
@@ -266,6 +298,23 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                     tank_cases += 1;
                 }
             }
+        }
+        if matches!(
+            id,
+            AircraftId::Su27 | AircraftId::Su35 | AircraftId::Mig29 | AircraftId::Yak141
+        ) {
+            let expected: &[&str] =
+                if matches!(id, AircraftId::Su27 | AircraftId::Su35 | AircraftId::Mig29) {
+                    &["AA10.JT", "R27ER.JT", "R27T.JT", "R27ET.JT"]
+                } else {
+                    &["AA10.JT", "R27T.JT"]
+                };
+            for source in expected {
+                if !offered.contains(*source) {
+                    return Err(format!("{} lacks requested R-27 store {source}", id.pt()).into());
+                }
+            }
+            println!("R-27 loadout {}: {}", id.pt(), expected.join(", "));
         }
         let (normal_catalog, cheat_catalog) = check_catalog(&standard, &offered, data, id.pt())?;
         total_weapons += weapon_cases;
@@ -547,6 +596,6 @@ mod tests {
     #[test]
     fn the_pinned_counts_match_the_reviewed_roster() {
         assert_eq!(AircraftId::ALL.len(), AIRCRAFT);
-        assert_eq!(SUPPORTED_WEAPONS.len(), 72);
+        assert_eq!(SUPPORTED_WEAPONS.len(), 75);
     }
 }

@@ -126,6 +126,7 @@ impl Pursuit {
         let [vx, vy, vz] = self.velocity;
         let level = vx.hypot(vz);
         Some(TargetView {
+            infrared_strength: object.infrared_strength,
             id: self.target,
             side: object.side,
             position,

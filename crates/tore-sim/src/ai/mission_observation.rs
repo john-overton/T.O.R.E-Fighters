@@ -274,6 +274,7 @@ impl Context {
             maximum_speed: object.maximum_speed,
             is_aircraft: object.is_aircraft,
             is_fighter: object.is_fighter,
+            infrared_strength: object.infrared_strength,
             human_controlled: object.human_controlled,
             valid: object.alive && !object.destroyed,
             type_allowed: true,

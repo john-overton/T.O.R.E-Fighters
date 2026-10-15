@@ -119,6 +119,14 @@ impl Release {
             target,
         }
     }
+    fn fox_stem(&self) -> Option<&'static str> {
+        if self.active_radar {
+            Some("^FOXTHR")
+        } else {
+            tore_formats::weapons::SeekerKind::from_fields(self.flags | 0x200, self.seeker)
+                .fox_stem()
+        }
+    }
     fn bomb(&self) -> bool {
         self.flags & 0x10 != 0
     }
@@ -450,7 +458,10 @@ impl Scene<'_> {
 /// How the launch call read its roll: the Fox chance, a generic variant, or
 /// nothing for the one-recording calls.
 fn launch_roll(roll: u32, release: &Release, aircraft: bool) -> Roll {
-    if (release.active_radar && aircraft) || release.bomb() {
+    if (release.active_radar && aircraft)
+        || release.bomb()
+        || (release.fox_stem().is_some() && release.target.is_none())
+    {
         Roll::new("launch call with one recording", roll, Test::Unused)
     } else if matches!(release.seeker, 2 | 3) && aircraft {
         Roll::new(
@@ -532,6 +543,7 @@ fn cooled(
 /// The launch call wording for `roll`, before cooldowns. `aircraft` is
 /// whether the release's target is an aircraft.
 pub fn launch_phrase(phrases: &Phrases, roll: u32, release: &Release, aircraft: bool) -> Phrase {
+    let aircraft = aircraft || release.target.is_none();
     if release.active_radar && aircraft {
         return Phrase::stem(phrases, "^FOXTHR");
     }
@@ -543,10 +555,9 @@ pub fn launch_phrase(phrases: &Phrases, roll: u32, release: &Release, aircraft: 
         // `^FIRGUN` has no recording; text only. The separator is fitted.
         phrase = phrase.then(phrases, "^FIRGUN").raw(". ", None);
     }
-    let fox = tore_formats::weapons::SeekerKind::from_fields(release.flags | 0x200, release.seeker)
-        .fox_stem();
+    let fox = release.fox_stem();
     let stem = match fox {
-        Some(fox) if roll < 50 && aircraft => fox,
+        Some(fox) if aircraft && (roll < 50 || release.target.is_none()) => fox,
         _ => Comms::pick(roll, &GENERIC_LAUNCH),
     };
     phrase.then(phrases, stem)
@@ -758,7 +769,7 @@ impl Radio {
             target: release.target,
             store: release.store(),
         };
-        if release.target.is_none() && !release.bomb() {
+        if release.target.is_none() && !release.bomb() && release.fox_stem().is_none() {
             held(
                 comms,
                 scene,
@@ -784,8 +795,23 @@ impl Radio {
                 return;
             }
         }
+        // Fitted targetless ripple throttle, per seeker class.
+        // Keep targeted launches and unrelated weapons' existing cooldowns.
+        if release.target.is_none() && release.fox_stem().is_some() {
+            let key = if release.active_radar {
+                "radio-bore-active"
+            } else if release.seeker == 2 {
+                "radio-bore-ir"
+            } else {
+                "radio-bore-supported"
+            };
+            if !comms.cooldown(key, scene.now, 2.) {
+                cooled(comms, scene, speaker, cause, Vec::new(), key, 2.);
+                return;
+            }
+        }
         let roll = comms.roll();
-        let aircraft = release.target.is_some_and(|t| scene.aircraft(t));
+        let aircraft = release.target.is_none_or(|t| scene.aircraft(t));
         let phrase = launch_phrase(scene.phrases, roll, &release, aircraft);
         let rolls = vec![launch_roll(roll, &release, aircraft)];
         self.say(
@@ -1439,14 +1465,13 @@ pub fn step(
             && let Some(own) = state.ownship(*aircraft)
         {
             let weapon = &own.configuration().stations[*station].weapon;
-            // The round's own target, else the designation.
+            // A present uncued round must not borrow an unrelated designation.
             let target = state
                 .projectiles
                 .iter()
                 .rev()
                 .find(|p| p.owner == *aircraft && p.station == *station)
-                .and_then(|p| p.target)
-                .or(own.designated());
+                .map_or_else(|| own.designated(), |p| p.target);
             radio.release(comms, &scene, *aircraft, Release::of(weapon, target));
         }
     }
@@ -1602,19 +1627,65 @@ mod tests {
     };
 
     #[test]
+    fn targetless_fox_calls_cover_all_guidance_and_throttle_a_ripple() {
+        let world = World::new();
+        for (seeker, active_radar, stem) in [
+            (2, false, "^FOXTWO"),
+            (3, false, "^FOXONE"),
+            (3, true, "^FOXTHR"),
+        ] {
+            let release = Release {
+                flags: 1,
+                seeker,
+                active_radar,
+                target: None,
+            };
+            for speaker in [PLAYER_ID, 1] {
+                let mut radio = Radio::default();
+                let mut comms = Comms::new(1);
+                radio.release(&mut comms, &world.scene(0.), speaker, release);
+                let delivered = comms.due(1.);
+                assert_eq!(delivered.len(), 1);
+                assert_eq!(delivered[0].call.stems, [stem]);
+                radio.release(&mut comms, &world.scene(0.1), speaker, release);
+                assert!(comms.due(1.5).is_empty());
+                radio.release(&mut comms, &world.scene(2.), speaker, release);
+                assert_eq!(comms.due(3.)[0].call.stems, [stem]);
+            }
+        }
+    }
+
+    #[test]
     fn launch_calls_use_store_guidance_even_when_the_hud_name_is_changed() {
         let state = crate::test_support::combat_fixture(true);
         let mut weapon = state.own().configuration().stations[0].weapon.clone();
         let phrases = phrases();
         for (name, signature, flags, stem) in [
+            ("AA10.JT", 3, 0x1234f, "^FOXONE"),
+            ("R27ER.JT", 3, 0x1234f, "^FOXONE"),
+            ("R27T.JT", 2, 0x1204f, "^FOXTWO"),
+            ("R27ET.JT", 2, 0x1204f, "^FOXTWO"),
+            ("AA11.JT", 2, 0x1204f, "^FOXTWO"),
+            ("AA11B.JT", 2, 0x1204f, "^FOXTWO"),
+            ("AA12.JT", 3, 0x1204f, "^FOXTHR"),
+            ("AA2.JT", 2, 0x1204f, "^FOXTWO"),
+            ("AA6.JT", 3, 0x1234f, "^FOXONE"),
+            ("AA8.JT", 2, 0x1204f, "^FOXTWO"),
+            ("AA9.JT", 3, 0x1234f, "^FOXONE"),
+            ("AAML.JT", 3, 0x1206f, "^FOXTHR"),
+            ("AEMP1.JT", 3, 0x1204f, "^FOXTHR"),
             ("AIM120.JT", 3, 0x1204f, "^FOXTHR"),
             ("AIM54C.JT", 3, 0x1206f, "^FOXTHR"),
-            ("MICA.JT", 3, 0x1204f, "^FOXTHR"),
-            ("AA12.JT", 3, 0x1204f, "^FOXTHR"),
-            ("AAML.JT", 3, 0x1206f, "^FOXTHR"),
             ("AIM7.JT", 3, 0x1234f, "^FOXONE"),
             ("AIM7E.JT", 3, 0x1234f, "^FOXONE"),
+            ("AIM9B.JT", 2, 0x1204f, "^FOXTWO"),
             ("AIM9M.JT", 2, 0x1204f, "^FOXTWO"),
+            ("AIM9X.JT", 2, 0x1204f, "^FOXTWO"),
+            ("MICA.JT", 3, 0x1204f, "^FOXTHR"),
+            ("PL10.JT", 3, 0x1236f, "^FOXONE"),
+            ("PL7.JT", 2, 0x1204f, "^FOXTWO"),
+            ("R530.JT", 3, 0x1234f, "^FOXONE"),
+            ("R550.JT", 2, 0x1204f, "^FOXTWO"),
         ] {
             weapon.source = name.into();
             weapon.hud_name = "localized label".into();
@@ -1719,7 +1790,7 @@ mod tests {
         assert_eq!(radio.made, 2, "bombs away has a 4 s global cooldown");
         let targetless = Release { target: None, ..IR };
         radio.release(&mut comms, &w.scene(5.), PLAYER_ID, targetless);
-        assert_eq!(radio.made, 2, "no target, not a bomb: no call");
+        assert_eq!(radio.made, 3, "targetless guided missile calls Fox two");
         let gun = Release {
             flags: 0x80,
             seeker: 0,
@@ -1728,9 +1799,9 @@ mod tests {
         for t in 0..40 {
             radio.release(&mut comms, &w.scene(10. + f64::from(t) / 10.), 1, gun);
         }
-        assert_eq!(radio.made, 3, "one gun call per 4 s");
+        assert_eq!(radio.made, 4, "one gun call per 4 s");
         // The player's calls play at once; a wingman's after half a second.
-        assert_eq!(lines(&mut comms, 10.).len(), 2);
+        assert_eq!(lines(&mut comms, 10.).len(), 3);
         assert_eq!(lines(&mut comms, 10.5).len(), 1);
     }
 
