@@ -399,7 +399,7 @@ friendly aircraft and wrecks. Enter selects the visible radar or infrared
 contact nearest the nose. A mouse click on the scope designates a contact
 directly. A target the scope loses drops completely
 ([rules](spec/radar.md#target-selection-keys)); only the F4, F7 and F8 views
-keep following it while it is within visual range (10 nmi). SAFE/EMPTY/STATION FAILED and the sensor and range inhibits are shown
+keep following it while it is within visual range (10 nmi). SAFE/EMPTY/STATION FAILED and the sensor and range advisories are shown
 separately from lock; a terrain-masked target now reports NO TARGET, because
 masking clears the contact rather than inhibiting the launch. The systems continuation below adds automatic source-weighted failures
 for supported equipment. Quick Mission AI integration is described in the [AI spec](spec/ai.md).
@@ -597,8 +597,7 @@ The upper range-scale value is now an estimated maximum for the observed
 engagement, refreshed twice per simulation second. Launcher speed and attitude,
 target direction/speed, altitude-dependent motor performance and turning losses
 change it. Active-radar shots can be cued beyond the imported nominal launch
-maximum and acquire with their own seeker later. Other guidance types still
-require prelaunch acquisition within seeker range. The lower scale value remains
+maximum and acquire with their own seeker later. Player missiles may also fire without acquisition or a predicted intercept. The lower scale value remains
 the imported minimum range as an advisory. Onboard seeker angle and maximum-range limits remain. The percentage and IN RNG use the predicted
 intercept. Target evasion and future loss of guidance are not predicted.
 Two short horizontal bars inside the vertical scale mark the favorable firing
@@ -622,10 +621,13 @@ diagnostic panel when it is shown, to clear
 selection. The manual's targeting list does not establish a retail release key.
 `weapon-seeker-mode` remains rebindable but has no default key; the panel's mode
 label is clickable only while the panel is shown (**Pref → Weapon diagnostics?**). With radar power off, radar-missile bore, tones and target cues
-turn off; armed A2A IR missiles retain bore search and guidance; weapon selection still permits an unguided release. That missile stays unguided
-after radar power returns. Selecting the passive IR channel alone does not turn
+turn off; armed A2A IR missiles retain bore search and guidance; active missiles release maddog with their own seeker searching immediately. SARH
+flies unguided until launcher illumination begins, including unsupported
+surface SARH releases waiting for the A-G track. Selecting the passive IR channel alone does not turn
 off the power switch. Supported radar weapons need aircraft lock for guided shots.
-Minimum range is advisory: a missile can fire inside it and attempts to guide.
+Minimum and maximum range are advisory. A missile can fire outside them and
+attempts to guide. CUED IR without lock starts BORE search. Active maddog
+search uses the full imported seeker cone and can lock friendlies.
 The range scale and IN RNG still describe the recommended envelope.
 AGM-65 and other surface profiles cannot engage the practice aircraft or use A2A
 BORESIGHT. Surface designation is still deferred. See the

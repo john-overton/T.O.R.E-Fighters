@@ -314,7 +314,7 @@ pub fn run() -> AppResult<()> {
     match o.attack.as_str() {
         "release" => release::run(&mut scene, &o)?,
         "cluster" => cluster::run(&mut scene, &o)?,
-        kind @ ("maverick" | "harm" | "antiship" | "sarh") => {
+        kind @ ("maverick" | "harm" | "antiship" | "sarh" | "sarh-uncued") => {
             missile::run(&mut scene, &o, kind, &resources)?
         }
         "strafe" => {
@@ -332,7 +332,7 @@ pub fn run() -> AppResult<()> {
         }
         other => {
             return Err(format!(
-                "unknown --attack {other}; kinds: release, cluster, ccip, level, rocket, strafe, orbit, maverick, harm, antiship, sarh, laser, jdam, at2"
+                "unknown --attack {other}; kinds: release, cluster, ccip, level, rocket, strafe, orbit, maverick, harm, antiship, sarh, sarh-uncued, laser, jdam, at2"
             )
             .into());
         }

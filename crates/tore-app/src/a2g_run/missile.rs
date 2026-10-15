@@ -55,6 +55,7 @@ pub(super) fn run(
     let weapon = scene.station().weapon.clone();
     let profile = Profile::for_weapon(&weapon)
         .ok_or_else(|| format!("{} has no missile profile", weapon.source))?;
+    let unsupported = kind == "sarh-uncued";
     let how = o
         .designate
         .clone()
@@ -112,7 +113,10 @@ pub(super) fn run(
         let own = scene.world.combat.state.own();
         // Enter picks among the page's visible ground contacts, so `visual`
         // turns the A-G page on too.
-        if matches!(how.as_str(), "ag" | "visual") && !air_ground_sent && t >= 0.5 {
+        if matches!(how.as_str(), "ag" | "visual")
+            && !air_ground_sent
+            && t >= if unsupported { 3. } else { 0.5 }
+        {
             scene
                 .commands
                 .push(SeatCommand::Combat(Command::ToggleAirGround));
@@ -165,7 +169,9 @@ pub(super) fn run(
             });
         // In BORE with `--unit` the trigger waits until the cue's candidate
         // is that unit.
-        let wanted = if how == "none" {
+        let wanted = if unsupported {
+            t >= 0.5
+        } else if how == "none" {
             o.unit.is_none()
                 || scene
                     .world
@@ -188,7 +194,16 @@ pub(super) fn run(
                 .sensors
                 .tick()
                 .is_multiple_of(60);
-        if pressed.is_none() && wanted && lit && scene.selected() && readiness == Readiness::Ready {
+        if pressed.is_none()
+            && wanted
+            && lit
+            && scene.selected()
+            && (readiness == Readiness::Ready
+                || (unsupported && readiness.player_missile_may_fire(&weapon)))
+        {
+            if unsupported {
+                println!("a2g-run: unsupported release t={t:.3} readiness {readiness:?}");
+            }
             let own = scene.world.combat.state.own();
             println!(
                 "a2g-run: ready t={t:.3} mode {} candidate {} designated {} seeker {:?} target {}",

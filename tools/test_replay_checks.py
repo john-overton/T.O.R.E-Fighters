@@ -197,3 +197,34 @@ class FoxLaunchTests(unittest.TestCase):
             rows[2]["subject"] = 0
             rows[2]["t"] = 10
             self.assertTrue(check(), "an unrelated later call is not evidence")
+
+
+class UnlockedMissileTests(unittest.TestCase):
+    def test_max_range_requires_launch_advisory_and_physical_outcome(self):
+        import json
+        import tempfile
+        from battery_scenarios import _replay_record as rr
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            (work / "log").mkdir()
+            log = work / "log" / "log.jsonl"
+            log.write_text("")
+            self.assertTrue(rr.unlocked_release_problems(work, "readiness=MaximumRange", mode="max-range"))
+            rows = [{"kind": "weapon.launch", "subject": 0}, {"kind": "weapon.outcome", "subject": 0}]
+            log.write_text("\n".join(json.dumps(r) for r in rows))
+            self.assertEqual(rr.unlocked_release_problems(work, "readiness=MaximumRange", mode="max-range"), [])
+            self.assertTrue(rr.unlocked_release_problems(work, "readiness=Ready", mode="max-range"))
+            rows.append({"kind": "combat.hit", "subject": 0})
+            log.write_text("\n".join(json.dumps(r) for r in rows))
+            self.assertTrue(rr.unlocked_release_problems(work, "readiness=MaximumRange", mode="max-range"))
+
+
+class UncuedSurfaceSarhTests(unittest.TestCase):
+    def test_probe_requires_search_then_guidance(self):
+        from battery_scenarios.a2g_missiles import uncued_sarh_problems
+        launch = "a2g-run: unsupported release t=0.500 readiness NoTarget\na2g-run: launch t=0.508 id 0 target none mode BORE seeker Search acquired false unguided false rounds 1\n"
+        search = "a2g-run: flight t=1.000 id 0 range 20000 altitude 3000 Search target none unguided 0\n"
+        lock = "a2g-run: flight t=4.000 id 0 range 17000 altitude 2800 Locked target 0x50000001 unguided 0\n"
+        self.assertEqual(uncued_sarh_problems(launch + search + lock), [])
+        self.assertTrue(uncued_sarh_problems(launch + search))
+        self.assertTrue(uncued_sarh_problems(launch + lock))

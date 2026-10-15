@@ -247,6 +247,20 @@ def sarh_problems(output: str) -> list[str]:
     return problems
 
 
+def uncued_sarh_problems(output: str) -> list[str]:
+    problems = []
+    if "unsupported release" not in output:
+        problems.append("no unsupported manual trigger")
+    if not re.search(r"a2g-run: launch .* target none mode BORE.* acquired false unguided false", output):
+        problems.append("SARH did not launch with no target and a recoverable seeker")
+    flights = FLIGHT.findall(output)
+    if not any(f[1] == "Search" and f[2] == "none" and f[3] == "0" for f in flights):
+        problems.append("no recorded unsupported straight-flight interval")
+    if not any(f[1] == "Locked" and f[2] != "none" and f[3] == "0" for f in flights):
+        problems.append("later A-G illumination did not acquire a target")
+    return problems
+
+
 def terrain_cruise_problems(output: str) -> list[str]:
     problems: list[str] = []
     _cued_kill(output, "Maverick ridge clearance", problems)
@@ -268,6 +282,13 @@ def scenarios() -> list[Scenario]:
     fleet = run + ["UKR", "QUSFLT", "--unit", KRIVAK, "--attack", "antiship", "--from", "15", "--altitude", "5000",
                    "--speed", "450", "--seconds", "90"]
     return [
+        Scenario(
+            name="a2g-sarh-uncued", lane="flight",
+            args=col + ["--aircraft", "mig23", "--load", "AS7", "--attack", "sarh-uncued",
+                        "--from", "4", "--altitude", "3000", "--speed", "400"],
+            timeout=300, check=uncued_sarh_problems,
+            notes="Player surface SARH launches with no A-G support and acquires when illumination begins later",
+        ),
         Scenario(
             name="a2g-missile-burnout", lane="flight",
             args=col + ["--aircraft", "a10", "--load", "AGM65G", "--attack", "maverick", "--from", "6",

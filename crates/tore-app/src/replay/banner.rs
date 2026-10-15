@@ -248,20 +248,28 @@ impl Inspector {
                 let guidance = self
                     .trees
                     .tree(recording, id, channel::WEAPON_GUIDANCE, tick);
-                let seeker =
-                    value(guidance.as_ref().map(|(_, t)| t), "Seeker").and_then(Value::as_str);
+                let seeker = value(guidance.as_ref().map(|(_, t)| t), "Seeker")
+                    .and_then(Value::as_str)
+                    .filter(|s| *s != "none");
                 let guided = self.latest(recording, id, kind::WEAPON_GUIDED, tick);
-                out.action = Some(
-                    if let Some(mode) = guided.and_then(|e| e.event.string(field::MODE)) {
-                        mode.into()
-                    } else if let Some(seeker) = seeker {
-                        format!("seeker {seeker}")
-                    } else if info.class == WeaponClass::Bomb {
-                        "falling".into()
-                    } else {
-                        "-".into()
-                    },
-                );
+                out.action = Some(if let Some(seeker) = seeker {
+                    let mode = value(guidance.as_ref().map(|(_, t)| t), "Mode")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    let maddog = mode.eq_ignore_ascii_case("boresight")
+                        && guidance.as_ref().is_some_and(|(_, tree)| {
+                            tree.node("Weapon")
+                                .is_some_and(|n| n.note == "active radar guidance")
+                        });
+                    let mode = if maddog { "MADDOG" } else { mode };
+                    format!("{mode} seeker {seeker}").trim().to_owned()
+                } else if let Some(mode) = guided.and_then(|e| e.event.string(field::MODE)) {
+                    mode.into()
+                } else if info.class == WeaponClass::Bomb {
+                    "falling".into()
+                } else {
+                    "-".into()
+                });
                 if let Some(side) = recording
                     .aircraft_info(state.owner)
                     .map(|i| i.side)
@@ -590,6 +598,11 @@ mod tests {
                     channel: channel::WEAPON_GUIDANCE.into(),
                     nodes: vec![Node::new(0, "Seeker", "tracking")],
                 });
+                frame.trees.push(TreeSample {
+                    subject: 2,
+                    channel: channel::WEAPON_GUIDANCE.into(),
+                    nodes: vec![Node::new(0, "Seeker", "none")],
+                });
             }
             if tick == 1 {
                 frame.events.push(
@@ -600,6 +613,15 @@ mod tests {
                 );
             }
             if tick == 2 {
+                frame.trees.push(TreeSample {
+                    subject: 2,
+                    channel: channel::WEAPON_GUIDANCE.into(),
+                    nodes: vec![
+                        Node::new(0, "Weapon", "AIM-120").with_note("active radar guidance"),
+                        Node::new(0, "Mode", "BORESIGHT"),
+                        Node::new(0, "Seeker", "PITBULL"),
+                    ],
+                });
                 frame.events.push(
                     Event::new(kind::SURFACE_PHASE)
                         .with_subject(unit)
@@ -673,6 +695,14 @@ mod tests {
             assert!(banner.target.unwrap().starts_with(target));
             assert!(banner.motion.contains(&"1000 kt".into()));
         }
+        let pitbull = inspector
+            .inspect(&recording, &frames[2], None, Target::Missile(2), None)
+            .unwrap();
+        assert_eq!(
+            pitbull.action.as_deref(),
+            Some("MADDOG seeker PITBULL"),
+            "recorded seeker state must override an old guidance event"
+        );
         let before = inspector
             .inspect(&recording, &frames[0], None, Target::Missile(2), None)
             .unwrap();

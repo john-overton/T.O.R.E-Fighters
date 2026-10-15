@@ -1278,80 +1278,69 @@ fn surface_weapons_reject_aircraft_and_maverick_uses_surface_contrast() {
 }
 
 #[test]
-fn radar_power_off_disables_bore_and_latches_unguided_release() {
+fn player_radar_off_active_searches_and_sarh_waits_for_illumination() {
     for name in ["AIM120.JT", "R530.JT"] {
         let mut s = fixture(true);
         s.own_mut().config.stations[0].weapon = weapon(name);
-        s.targets.push(target(7, [0., 1000., 5000.], 200, 0x80));
+        s.targets.push(target(7, [100., 1000., 5000.], 200, 0x80));
         let mut l = range_launcher();
-        for _ in 0..DWELL + 1 {
-            s.step(
-                &[OwnshipInput {
-                    aircraft: 0,
-                    held: false,
-                    launcher: l,
-                }],
-                |_, _| 0.,
-            );
-        }
         l.radar = false;
         l.radar_power = false;
         s.step(
             &[OwnshipInput {
                 aircraft: 0,
-                held: false,
+                held: true,
                 launcher: l,
             }],
             |_, _| 0.,
         );
-        s.command(0, Command::ToggleSeekerMode, l);
-        assert_eq!(s.own().launch_mode, LaunchMode::Cued);
-        assert!(s.own().bore_observation.is_none());
-        assert!(s.own().mounted.observation.is_none());
-        assert!(s.own_view().seeker_tone(l).is_none());
-        assert!(s.own_view().weapon_observation(l).is_none());
-        assert!(!s.own_view().can_lock(l));
-        assert_eq!(s.own_view().readiness(l), Readiness::Ready);
-        assert!(
-            s.step(
-                &[OwnshipInput {
-                    aircraft: 0,
-                    held: true,
-                    launcher: l
-                }],
-                |_, _| 0.
-            )
-            .contains(&Event::Fired {
-                aircraft: 0,
-                station: 0
-            })
-        );
+        assert_eq!(s.projectiles.len(), 1, "{name}");
         let mut p = s.projectiles[0].clone();
+        assert!(!p.guidance.as_ref().unwrap().unguided);
         let direction = p.direction;
         let w = s.own().config.stations[0].weapon.clone();
-        assert!(p.motion.is_some());
-        assert!(p.guidance.as_ref().unwrap().unguided);
-        assert!(!p.guidance.as_ref().unwrap().enabled);
-        l.radar = true;
-        l.radar_power = true;
         for _ in 0..DWELL + 1 {
-            s.step(
-                &[OwnshipInput {
-                    aircraft: 0,
-                    held: false,
-                    launcher: l,
-                }],
-                |_, _| 0.,
+            guide_owned(
+                &mut p,
+                &w,
+                &s.targets,
+                std::iter::empty(),
+                None,
+                &|_, _| false,
+                &|_, _| 0.,
             );
-            guide(&mut p, &w, &s.targets, &s.own().sensors, &|_, _| false);
         }
-        assert_eq!(p.target, None);
-        assert_eq!(p.direction, direction);
-        let f = p.guidance.as_ref().unwrap();
-        assert_eq!(f.seeker.status, Status::Unguided);
-        assert!(f.last_intercept.is_none());
-        if f.profile.supports_boresight() {
-            assert_eq!(s.own().launch_mode, LaunchMode::Boresight);
+        if name == "AIM120.JT" {
+            assert_eq!(p.guidance.as_ref().unwrap().seeker.status, Status::Pitbull);
+        } else {
+            assert_eq!(p.direction, direction);
+            assert!(p.guidance.as_ref().unwrap().last_intercept.is_none());
+            let support = ActorSupport {
+                owner: 0,
+                supported: true,
+                radar_emitting: true,
+                radar_position: l.position,
+                observation: Some(seeker::Observation {
+                    id: 7,
+                    position: s.targets[0].position,
+                    velocity: [0.; 3],
+                    quality: 1.,
+                    off_axis: 0.,
+                    range: 5000.,
+                }),
+            };
+            guide_owned(
+                &mut p,
+                &w,
+                &s.targets,
+                std::iter::empty(),
+                Some(&support),
+                &|_, _| false,
+                &|_, _| 0.,
+            );
+            assert_eq!(p.guidance.as_ref().unwrap().seeker.status, Status::Locked);
+            assert_eq!(p.target, Some(7));
+            assert_ne!(p.direction, direction);
         }
     }
 }
@@ -2133,7 +2122,7 @@ fn cued_radar_release_uses_predicted_reach_not_nominal_launch_max() {
         }],
         |_, _| 0.,
     );
-    assert_eq!(s.own().ammo, ammo);
+    assert!(s.own().ammo[0] < ammo[0], "MAX RANGE remains advisory");
 }
 
 /// `missiles::maximum_range` as it was before fly-outs were skipped where the
@@ -2946,5 +2935,274 @@ fn cued_close_releases_cover_sarh_active_and_ir() {
         let shot = &s.projectiles[0];
         assert_eq!(shot.target, Some(7), "{name}");
         assert!(!shot.guidance.as_ref().unwrap().unguided, "{name}");
+    }
+}
+
+#[test]
+fn player_maximum_range_is_an_advisory_in_both_adapters() {
+    for (rules, closed_bay) in [Rules::Spec, Rules::Compatibility]
+        .into_iter()
+        .flat_map(|r| [false, true].map(|b| (r, b)))
+    {
+        let mut s = fixture(true);
+        let mut w = weapon("AIM120.JT");
+        w.seeker.zones[1].maximum_range = 1000;
+        s.own_mut().config.stations[0].weapon = w;
+        s.weapon_rules = rules;
+        let mut fleeing = target(7, [0., 1000., 20000.], 200, 0x80);
+        fleeing.velocity = [0., 0., 10000.];
+        s.targets.push(fleeing);
+        let mut l = range_launcher();
+        l.bay_ready = !closed_bay;
+        for tick in 0..180 {
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            );
+            if tick == 1 {
+                s.command(0, Command::DesignateTarget(7), l);
+            }
+        }
+        assert_eq!(
+            s.own_view().readiness(l),
+            Readiness::MaximumRange,
+            "{rules:?}"
+        );
+        let rounds = s.own().rounds(0);
+        let mut events = s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: true,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
+        if closed_bay {
+            assert_eq!(s.own().rounds(0), rounds);
+            assert!(s.bay_demand(0));
+            l.bay_ready = true;
+            events = s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            );
+        }
+        assert!(s.own().rounds(0) < rounds);
+        assert!(events.contains(&Event::Fired {
+            aircraft: 0,
+            station: 0
+        }));
+    }
+}
+
+#[test]
+fn player_cued_ir_without_lock_searches_without_inheriting_designation() {
+    let mut s = fixture(true);
+    s.own_mut().config.stations[0].weapon = weapon("AIM9M.JT");
+    s.targets.push(target(7, [800., 1000., 5000.], 200, 0x80));
+    let l = range_launcher();
+    s.step(
+        &[OwnshipInput {
+            aircraft: 0,
+            held: false,
+            launcher: l,
+        }],
+        |_, _| 0.,
+    );
+    s.command(0, Command::DesignateTarget(7), l);
+    s.own_mut().mounted = Seeker::default();
+    s.step(
+        &[OwnshipInput {
+            aircraft: 0,
+            held: true,
+            launcher: l,
+        }],
+        |_, _| 0.,
+    );
+    assert_eq!(s.projectiles.len(), 1);
+    let mut p = s.projectiles[0].clone();
+    assert_eq!(p.target, None);
+    let w = s.own().config.stations[0].weapon.clone();
+    for _ in 0..DWELL + 1 {
+        guide_owned(
+            &mut p,
+            &w,
+            &s.targets,
+            std::iter::empty(),
+            None,
+            &|_, _| false,
+            &|_, _| 0.,
+        );
+    }
+    assert_eq!(p.target, None);
+    s.targets[0].position[0] = 0.;
+    for _ in 0..DWELL + 1 {
+        guide_owned(
+            &mut p,
+            &w,
+            &s.targets,
+            std::iter::empty(),
+            None,
+            &|_, _| false,
+            &|_, _| 0.,
+        );
+    }
+    assert_eq!(p.target, Some(7));
+    assert_eq!(p.guidance.as_ref().unwrap().seeker.status, Status::Locked);
+}
+
+#[test]
+fn player_maddog_uses_full_seeker_cone_and_can_acquire_a_friendly() {
+    for radar_power in [false, true] {
+        for friendly in [false, true] {
+            let mut s = fixture(true);
+            let mut w = weapon("AIM120.JT");
+            w.seeker.zones[0].maximum_range = 100000;
+            s.own_mut().config.stations[0].weapon = w;
+            let a = 15f64.to_radians();
+            s.targets.push(target(
+                7,
+                [
+                    a.sin() * 8. * missiles::NMI,
+                    1000.,
+                    a.cos() * 8. * missiles::NMI,
+                ],
+                200,
+                0x80,
+            ));
+            if friendly {
+                s.own_mut().friendlies.insert(7);
+            }
+            let l = Launcher {
+                radar_power,
+                radar: radar_power,
+                ..range_launcher()
+            };
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            );
+            assert_eq!(s.projectiles.len(), 1);
+            let mut p = s.projectiles[0].clone();
+            let w = s.own().config.stations[0].weapon.clone();
+            assert!(p.guidance.as_ref().unwrap().enabled);
+            assert_eq!(p.guidance.as_ref().unwrap().mode, LaunchMode::Boresight);
+            for _ in 0..DWELL + 1 {
+                guide_owned(
+                    &mut p,
+                    &w,
+                    &s.targets,
+                    std::iter::empty(),
+                    None,
+                    &|_, _| false,
+                    &|_, _| 0.,
+                );
+            }
+            assert_eq!(p.target, Some(7), "radar={radar_power} friendly={friendly}");
+            assert_eq!(p.guidance.as_ref().unwrap().seeker.status, Status::Pitbull);
+        }
+    }
+}
+
+#[test]
+fn player_advisories_preserve_hardware_and_surface_restrictions() {
+    for name in [
+        "AIM120.JT",
+        "AIM54C.JT",
+        "AA12.JT",
+        "MICA.JT",
+        "AAML.JT",
+        "AEMP1.JT",
+        "AGM84A.JT",
+        "AM39.JT",
+        "AS16.JT",
+        "AIM9M.JT",
+        "AIM7.JT",
+    ] {
+        let w = weapon(name);
+        for advisory in [
+            Readiness::MaximumRange,
+            Readiness::NoTarget,
+            Readiness::RadarAcquiring,
+            Readiness::RadarOff,
+            Readiness::RadarFailed,
+            Readiness::NoRadar,
+            Readiness::RadarCoverage,
+        ] {
+            assert!(advisory.player_missile_may_fire(&w), "{name} {advisory:?}");
+        }
+        for gate in [
+            Readiness::Safe,
+            Readiness::Empty,
+            Readiness::StationFailed,
+            Readiness::LauncherLost,
+            Readiness::Capacity,
+            Readiness::BayClosed,
+            Readiness::WrongTarget,
+            Readiness::TerrainMask,
+            Readiness::NoEmitter,
+            Readiness::Altitude,
+        ] {
+            assert!(!gate.player_missile_may_fire(&w), "{name} {gate:?}");
+        }
+    }
+    for name in ["AGM65G.JT", "AGM88.JT"] {
+        assert!(!Readiness::NoTarget.player_missile_may_fire(&weapon(name)));
+    }
+}
+
+#[test]
+fn every_human_seat_can_launch_an_active_store_without_radar_or_target() {
+    for aircraft in [0, 42] {
+        for name in [
+            "AIM120.JT",
+            "AIM54C.JT",
+            "AA12.JT",
+            "MICA.JT",
+            "AAML.JT",
+            "AEMP1.JT",
+            "AGM84A.JT",
+            "AM39.JT",
+            "AS16.JT",
+        ] {
+            let config = fixture(true).own().config.clone();
+            let mut s = State::without_ownships();
+            s.add_ownship(Ownship::new(aircraft, Side(0), config, true).unwrap())
+                .unwrap();
+            s.own_mut().armed = true;
+            s.own_mut().config.stations[0].weapon = weapon(name);
+            let l = Launcher {
+                radar: false,
+                radar_power: false,
+                ..range_launcher()
+            };
+            s.step(
+                &[OwnshipInput {
+                    aircraft,
+                    held: true,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            );
+            assert_eq!(s.projectiles.len(), 1, "{aircraft} {name}");
+            let shot = &s.projectiles[0];
+            assert_eq!(shot.owner, aircraft);
+            let flight = shot.guidance.as_ref().unwrap();
+            assert!(flight.enabled && !flight.unguided);
+            assert_eq!(flight.mode, LaunchMode::Boresight);
+            assert_eq!(flight.seeker.status, Status::Search);
+            assert_eq!(shot.target, None);
+        }
     }
 }

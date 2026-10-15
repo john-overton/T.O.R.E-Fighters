@@ -1012,8 +1012,8 @@ including the original imported warning samples.
 
 ## Missile seeker control
 
-Radar power OFF disables radar-missile bore and tones; IR remains independent; weapon selection permits a permanently
-unguided DUMB release. Selecting passive IR alone does not switch power off.
+Radar power OFF disables radar-missile bore and tones; IR remains independent; active missiles launch maddog, searching immediately with their own seeker.
+SARH flies unguided until illumination begins. Selecting passive IR alone does not switch power off.
 Surface weapons cannot use the A2A bore toggle; surface designation remains deferred.
 Armed independent air-to-air missiles automatically enter BORESIGHT when radar power is on and no target is
 selected. IR also supports bore with radar power off. A selected track takes
@@ -1027,7 +1027,10 @@ direction chevron; the Easy targeting cheat keeps it after sensor coverage is
 lost, which grants no weapon lock. [HUD target rules](spec/gunsight-targeting.md).
 `weapon-seeker-mode` is on Ctrl+M (delivery mode, [key placement](#key-placement)) and
 rebindable; the diagnostic panel's mode label is clickable only while the panel
-is shown (**Escape → Pref → Weapon diagnostics?**). Supported radar weapons still need aircraft lock.
+is shown (**Escape → Pref → Weapon diagnostics?**). Supported radar weapons need aircraft illumination to guide, not to release.
+MAX RANGE and ACQUIRING are advisory. Radar missiles can also release without
+support, including surface SARH waiting for later A-G illumination. Unlocked IR shots search as BORE;
+active maddog seekers can acquire friendlies. See [release rules](spec/missiles.md#player-release-advisories-and-maddog).
 
 BORE uses a five-degree circular half-angle. Its blinking diamond marks a
 provisional contact, not a guaranteed lock; the blinking triangle on the range

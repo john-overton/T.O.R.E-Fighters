@@ -8324,7 +8324,14 @@ fn ai_probe_run(
         ProbeAttacker::new(attack, &combat, &bridge, script.guns)
     });
     if let Some(mode) = script.missile_release {
-        let source = if mode == 2 { "AIM9M.JT" } else { "AIM120.JT" };
+        if mode == 5 {
+            flight.sensors.range_index = 5;
+        }
+        let source = if matches!(mode, 2 | 4) {
+            "AIM9M.JT"
+        } else {
+            "AIM120.JT"
+        };
         let selected = combat
             .state
             .own()
@@ -8343,17 +8350,27 @@ fn ai_probe_run(
                 .iter()
                 .find(|t| t.hp > 0)
                 .ok_or("close missile probe needs an enemy")?;
-            let forward = attitude::Basis::new(flight.yaw, 0., 0.).forward;
-            flight.position = std::array::from_fn(|i| {
-                target.position[i] - forward[i] * if mode == 2 { 3. * 6076. } else { 0.2 * 6076. }
-            });
+            let angle = match mode {
+                3 => 15f64.to_radians(),
+                4 => 6f64.to_radians(),
+                _ => 0.,
+            };
+            let distance = match mode {
+                2 => 3. * 6076.,
+                3 => 8. * 6076.,
+                4 => 3. * 6076.,
+                5 => 100. * 6076.,
+                _ => 0.2 * 6076.,
+            };
+            let forward = attitude::Basis::new(flight.yaw + angle, 0., 0.).forward;
+            flight.position = std::array::from_fn(|i| target.position[i] - forward[i] * distance);
             if mode == 1 {
                 flight.velocity = target.velocity;
             }
             println!(
                 "missile release probe: target={} initial_range_ft={} min_ft={}",
                 target.id,
-                if mode == 2 { 3. * 6076. } else { 0.2 * 6076. },
+                distance,
                 combat.state.own().configuration().stations[selected]
                     .weapon
                     .seeker
@@ -8749,23 +8766,28 @@ fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<
                 &mut commands,
             );
         }
-        if script.missile_release == Some(2)
-            && tick == 1
+        if ((matches!(script.missile_release, Some(2 | 5)) && tick == 1)
+            || (script.missile_release == Some(4) && tick == 59))
             && let Some(target) = mission.combat.state.targets.first()
         {
             commands.push(seats::SeatCommand::Combat(
                 tore_sim::combat::live::Command::DesignateTarget(target.id),
             ));
         }
-        if script.missile_release.is_some() && (tick == 60 || tick == 61) {
-            commands.push(trigger_key(tick == 60));
-            if tick == 60 {
+        let release_tick = if script.missile_release == Some(5) {
+            600
+        } else {
+            60
+        };
+        if script.missile_release.is_some() && (tick == release_tick || tick == release_tick + 1) {
+            commands.push(trigger_key(tick == release_tick));
+            if tick == release_tick {
                 let own = mission.combat.state.own();
                 let readout = mission.combat.state.own_view();
                 let launcher = combat::launcher(&mission.cockpits[OWN].flight);
                 println!("missile release tone: {:?}", readout.seeker_tone(launcher));
                 println!(
-                    "missile release probe: fire tick=60 mode={:?} designated={:?} readiness={:?} rounds={}",
+                    "missile release probe: fire tick={release_tick} mode={:?} designated={:?} readiness={:?} rounds={}",
                     own.launch_mode,
                     readout.designated(),
                     readout.readiness(launcher),
@@ -10562,7 +10584,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 Some("empty") => 0,
                 Some("close") => 1,
                 Some("head-ir") => 2,
-                _ => return Err("--probe-missile-release needs empty, close or head-ir".into()),
+                Some("maddog") => 3,
+                Some("unlocked-ir") => 4,
+                Some("max-range") => 5,
+                _ => return Err("--probe-missile-release needs empty, close, head-ir, maddog, unlocked-ir or max-range".into()),
             }),
             "--probe-attack" => probe_script.attack = Some(ProbeScript::parse_attack(
                 &args.next().ok_or("--probe-attack needs TICK or TICK:REPEAT_SECONDS")?,

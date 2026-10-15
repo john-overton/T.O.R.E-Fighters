@@ -457,8 +457,9 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                 // Seeker service may validly switch a supported weapon into
                 // boresight during the step. The captured release gate, not the
                 // stale pre-service readiness, decides whether any debit was legal.
-                if no_target.own().release_readiness != live::Readiness::Ready
-                    && no_target.own().ammo[index] != initial
+                if !no_target.own().release_readiness.player_missile_may_fire(
+                    &no_target.own().configuration().stations[index].weapon,
+                ) && no_target.own().ammo[index] != initial
                 {
                     return Err("inhibited targetless launch consumed ammo".into());
                 }
@@ -568,9 +569,8 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                     .signature
                     == 3
                 {
-                    // Passive channel: the switch stays on but nothing is
-                    // transmitting, so a radar weapon that needs the aircraft's
-                    // lock is inhibited.
+                    // Passive channel leaves the power switch on but gives no
+                    // radar support. Player missiles may still leave the rail.
                     let mut radar_off = combat.state.clone();
                     let off = Launcher { radar: false, ..l };
                     radar_off.step(
@@ -584,28 +584,11 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                     let profile = tore_sim::combat::missiles::Profile::for_weapon(
                         &combat.state.own().configuration().stations[index].weapon,
                     );
-                    let guided_by_radar = profile.is_none_or(|p| {
-                        p.guidance == tore_sim::combat::missiles::Guidance::Supported
-                    });
-                    if guided_by_radar
-                        // Losing the radar track may also drop the designation,
-                        // so any reason but Ready is a valid inhibit.
-                        && (radar_off.own().ammo[index] != initial
-                            || radar_off.own_view().readiness(off) == live::Readiness::Ready)
-                    {
-                        return Err(format!(
-                            "radar-off launch was not inhibited: slot={} weapon={} ammo={} initial={initial} readiness={:?} mode={:?}",
-                            index + 1,
-                            combat.state.own().configuration().stations[index].weapon.source,
-                            radar_off.own().ammo[index],
-                            radar_off.own_view().readiness(off),
-                            radar_off.own().launch_mode
-                        )
-                        .into());
+                    if profile.is_some() && radar_off.own().ammo[index] != initial - 1 {
+                        return Err("unsupported radar missile did not release".into());
                     }
-                    // Power switch off: a reviewed radar missile may still be
-                    // released, permanently unguided (docs/features.md, "Uncued
-                    // launch with the onboard seeker enabled").
+                    // Power off: active missiles search immediately; supported
+                    // missiles wait for illumination without permanent disablement.
                     if profile.is_some() {
                         let mut dumb = combat.state.clone();
                         let off = Launcher {
@@ -622,10 +605,17 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                             |_, _| 0.,
                         );
                         if dumb.own().ammo[index] != initial - 1
-                            || dumb.projectiles.iter().any(|p| p.target.is_some())
+                            || dumb.projectiles.iter().any(|p| {
+                                p.guidance.as_ref().is_none_or(|f| {
+                                    f.unguided
+                                        || (f.profile.guidance
+                                            == tore_sim::combat::missiles::Guidance::Active
+                                            && !f.enabled)
+                                })
+                            })
                         {
                             return Err(format!(
-                                "radar-power-off release was not an unguided shot: slot={} ammo={} initial={initial}",
+                                "radar-power-off release did not preserve seeker search: slot={} ammo={} initial={initial}",
                                 index + 1,
                                 dumb.own().ammo[index]
                             )
