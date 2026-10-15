@@ -682,11 +682,12 @@ pub const ENTRIES: &[Entry] = &[
         Weapons,
         &["Ctrl-Delete"],
     ),
+    cmd("jettison-tanks", "Jettison tanks", Weapons, &["Shift-k"]),
     cmd(
         "jettison",
-        "Jettison selected stores",
+        "Jettison selected store",
         Weapons,
-        &["Shift-k"],
+        &["Ctrl-Shift-k"],
     ),
     cmd(
         "range-target",

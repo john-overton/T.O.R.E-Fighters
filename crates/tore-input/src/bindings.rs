@@ -237,6 +237,7 @@ impl Action {
                 | "clear-designation"
                 | "master-arm"
                 | "jettison"
+                | "jettison-tanks"
                 | "range-target"
                 | "damage-class"
                 | "fail-station"

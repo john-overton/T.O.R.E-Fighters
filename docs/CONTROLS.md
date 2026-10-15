@@ -196,7 +196,8 @@ and a gamepad's View+stick defaults avoid the problem.
 | Release flare | Delete | - | View + D-pad right |
 | Release chaff (AC-130 console) | Ctrl+Insert | - | View + B (in the AC-130 console) |
 | Release flare (AC-130 console) | Ctrl+Delete | - | View + A (in the AC-130 console) |
-| Jettison selected stores | Shift+K | - | View + Right stick press |
+| Jettison tanks | Shift+K | - | - |
+| Jettison selected store | Ctrl+Shift+K | - | View + Right stick press |
 | Reset range target | Ctrl+Shift+Backslash | - | View + D-pad up |
 | IFF squawk on the target | U | - | - |
 | Incoming missile (range) | Ctrl+Shift+I | - | View + Xbox |

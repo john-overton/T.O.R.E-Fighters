@@ -63,6 +63,7 @@ mod gunship_impact_tests;
 mod gunship_tests;
 pub use gunship_fire::{AiGunRound, GunTrain, NoShot, ai_gun_due, ai_gun_slow, ai_gun_train};
 mod handoff;
+mod jettison;
 #[cfg(test)]
 mod kept_tests;
 mod observation;
@@ -314,6 +315,7 @@ pub enum Command {
     SightPinGround,
     ToggleArm,
     Jettison,
+    JettisonTanks,
     ReplaceTarget,
     CycleClass,
     FailStation,
@@ -1681,6 +1683,7 @@ pub struct State {
     /// fall on the closed-form bomb equation ([`super::ballistics`]), so a
     /// bomb keeps its release rather than a velocity. Mission state.
     bombs: BTreeMap<u32, super::ballistics::BombMotion>,
+    jettisoned: BTreeMap<u32, bool>,
     /// The guidance of each guided air-to-ground weapon an ownship released
     /// and is in flight, by projectile number ([`guided`]). Mission state.
     guided: BTreeMap<u32, guided::GuidedFlight>,
@@ -3061,6 +3064,7 @@ impl State {
             surface_rounds: BTreeMap::new(),
             next_surface_shot: SURFACE_PROJECTILE_ID_BASE,
             bombs: BTreeMap::new(),
+            jettisoned: BTreeMap::new(),
             guided: BTreeMap::new(),
             guided_impacts: BTreeMap::new(),
             kept: BTreeMap::new(),
@@ -3726,25 +3730,8 @@ impl State {
                 own.armed = !own.armed && !own.config.stations.is_empty();
                 own.release();
             }
-            Command::Jettison => {
-                if own
-                    .config
-                    .stations
-                    .get(own.selected)
-                    .is_some_and(|s| !s.internal)
-                {
-                    unload(&mut own.ammo[own.cockpit.selected], 0);
-                    if own
-                        .config
-                        .gun_pods
-                        .iter()
-                        .any(|pod| pod.station == own.selected)
-                    {
-                        own.ever_loaded[own.cockpit.selected] = false;
-                    }
-                    own.release();
-                }
-            }
+            Command::Jettison => self.jettison(own, launcher, false),
+            Command::JettisonTanks => self.jettison(own, launcher, true),
             Command::ReplaceTarget => self.range_target_of(own, launcher),
             Command::CycleClass => {
                 self.range_category = [own.config.target_category, 0x2000, 0x100, 0x400, 0x40]
@@ -5176,6 +5163,34 @@ impl State {
             let w = owned.as_ref().unwrap_or_else(|| {
                 &owner_configuration(&ships, p.owner).stations[p.station].weapon
             });
+            // Inert stores never enter guidance, fuzing, collision damage or scoring.
+            if self.jettisoned.contains_key(&p.id) {
+                let Some(motion) = self.bombs.get(&p.id).copied() else {
+                    return false;
+                };
+                p.previous = p.position;
+                p.age += 1;
+                let seconds = p.age as f64 / 120.;
+                p.position = motion.position(seconds);
+                p.direction = motion.direction(seconds);
+                p.speed_f8 = (missiles::length(motion.velocity(seconds)) * 256.) as i32;
+                if let Some(at) = terrain_hit(p.previous, p.position, &ground) {
+                    let mut position = std::array::from_fn(|i| {
+                        p.previous[i] + (p.position[i] - p.previous[i]) * at
+                    });
+                    position[1] = ground(position[0], position[2]);
+                    let wet = water(position[0], position[2]);
+                    impacts.push((
+                        position,
+                        EffectKind::Ground,
+                        if wet { 17 } else { 15 },
+                        (!wet).then_some(super::blast::POCK),
+                        super::blast_scale::INERT,
+                    ));
+                    return false;
+                }
+                return true;
+            }
             let by_ownship = ships.iter().any(|o| o.aircraft == p.owner);
             let easy = self.cheats.easy_aiming && by_ownship && p.incoming.is_none();
             let eased = (easy && !is_gun(w)).then(|| eased_weapon(w));
@@ -5988,6 +6003,7 @@ impl State {
             self.rewinds.retain(|id, _| flying.contains(id));
             self.surface_rounds.retain(|id, _| flying.contains(id));
             self.bombs.retain(|id, _| flying.contains(id));
+            self.jettisoned.retain(|id, _| flying.contains(id));
             // A guided weapon that is gone marks its aircraft's last impact.
             let (tick, impacts) = (self.tick, &mut self.guided_impacts);
             self.guided.retain(|id, flight| {
@@ -6091,7 +6107,12 @@ impl State {
         for (p, kind, explosion, crater, scale) in impacts {
             self.blast(p, kind, explosion, scale);
             if let Some(size) = crater {
-                self.crater(p, size, scale, super::blast::FOREVER);
+                let mark_scale = if scale == super::blast_scale::INERT {
+                    jettison::CRATER_SCALE
+                } else {
+                    scale
+                };
+                self.crater(p, size, mark_scale, super::blast::FOREVER);
             }
         }
         self.burn_wrecks();

@@ -180,7 +180,7 @@ subtracts the source aircraft-class entry from source target HP. Native hit
 probability, subsystem damage, immunity, debris and water effects remain open;
 collateral is now read (see [Collateral damage](#collateral-damage)). Ordinary free flight stays externally clean; explicit live range
 loads the PT weapon counts and auxiliary external equipment mass. Tank fuel is
-carried mass only, with no transfer/jettison. Released stores reduce payload
+carried mass with [in-flight jettison](../spec/jettison.md). Released stores reduce payload
 through the existing aircraft-owned model; rack pairing, weapon-specific drag
 and carried-store rendering are not recovered.
 

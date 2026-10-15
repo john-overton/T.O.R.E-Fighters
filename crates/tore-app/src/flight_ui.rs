@@ -184,7 +184,7 @@ fn flight_help(tree: &[MenuNode]) -> Vec<String> {
         "Insert: chaff | Delete: flare (keypad 0 and . also work)".into(),
         "Click a contact to designate it; ; or L clears the designation".into(),
         "D damage report | Range: Ctrl-Shift-I incoming | Shift-Y target ECM".into(),
-        "[ / ] NAV/weapons | Shift-K jettison | Tab: fire the gun (hold)".into(),
+        "[ / ] NAV/weapons | Shift-K tanks / Ctrl-Shift-K selected store | Tab: fire the gun (hold)".into(),
         "Ctrl-R or Shift-R: ground radar | Ctrl-M: delivery mode".into(),
         "Sight: \\ designate | Shift-\\ pin | / next | Alt-arrows slew".into(),
         "Shift-' / Shift-; sight zoom | Ctrl-L: laser | Ctrl-X: nearest ground".into(),
@@ -948,6 +948,9 @@ impl FlightUi {
         if let Some(node) = find(tree, &shortcut) {
             return self.activate(&node.label, &node.shortcut);
         }
+        if ctrl && shift && !alt && key == "k" {
+            return Command::Combat(tore_sim::combat::live::Command::Jettison);
+        }
         if ctrl || alt {
             return Command::None;
         }
@@ -960,9 +963,8 @@ impl FlightUi {
                     self.hud = !self.hud;
                     Command::Click
                 }
-                // FA Shift-K dumps the air-to-ground stores; T.O.R.E drops
-                // the selected external group.
-                "k" => Command::Combat(tore_sim::combat::live::Command::Jettison),
+                // John, 2026-10-15: Shift-K drops tanks.
+                "k" => Command::Combat(tore_sim::combat::live::Command::JettisonTanks),
                 // FA keys whose features T.O.R.E does not have yet.
                 "j" => self.unavailable("Jettison external fuel"),
                 "i" => self.unavailable("Airbase inventory"),
@@ -2019,7 +2021,7 @@ mod tests {
             ("Insert", false, Command::Chaff),
             ("Delete", false, Command::Flare),
             ("o", false, Command::Toggle(Switch::Bay)),
-            ("k", true, Command::Combat(C::Jettison)),
+            ("k", true, Command::Combat(C::JettisonTanks)),
             (";", false, Command::Combat(C::ClearDesignation)),
             ("w", false, Command::Waypoint(true)),
             ("w", true, Command::Waypoint(false)),
@@ -2198,7 +2200,7 @@ mod tests {
         assert!(!ui.hud);
         assert_eq!(
             ui.key("k", true, false, false, &[]),
-            Command::Combat(tore_sim::combat::live::Command::Jettison)
+            Command::Combat(tore_sim::combat::live::Command::JettisonTanks)
         );
         for (shift, ctrl, alt) in [(false, true, false), (false, false, true)] {
             for key in ["u", "k"] {

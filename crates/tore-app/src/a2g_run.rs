@@ -76,6 +76,7 @@ mod cluster;
 mod console_render;
 mod guided;
 pub mod guided_preview;
+mod jettison;
 mod level;
 mod missile;
 mod orbit;
@@ -329,6 +330,7 @@ pub fn run() -> AppResult<()> {
     let mut scene = Scene::new(&o, &resources)?;
     match o.attack.as_str() {
         "release" => release::run(&mut scene, &o)?,
+        "jettison" => jettison::run(&mut scene, &o)?,
         "cluster" => cluster::run(&mut scene, &o)?,
         kind @ ("maverick" | "harm" | "antiship" | "sarh" | "sarh-uncued") => {
             missile::run(&mut scene, &o, kind, &resources)?

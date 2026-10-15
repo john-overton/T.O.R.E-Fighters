@@ -1275,7 +1275,8 @@ round. The generated [controls list](../CONTROLS.md) and the
 | Delivery mode: CCIP and LVL for bombs, BORE and CUED for missiles | Ctrl+M (the existing seeker-mode action gains a key) | none | opinionated (agent) |
 | Fire the gun whatever is selected (hold) | Tab ([the gun key](#the-gun-key)) | none | retail key, rules opinionated (agent) |
 | Nearest ground target (Easy targeting cheat) | Ctrl+X | none | retail cheat |
-| Jettison air-to-ground stores | Shift+K | as today | retail, exists |
+| Jettison selected external store | Ctrl+Shift+K | inert fall and small impacts | [Jettison](jettison.md), John 2026-10-15 |
+| Jettison tanks | Shift+K | all installed tanks and remaining external fuel | [Jettison](jettison.md), John 2026-10-15 |
 | Bay doors | O | as today | retail, exists |
 | Remote ground targeting (Shift+G), wingman engage IR/laser target (Alt+F) | not provided | none | out of scope this round |
 

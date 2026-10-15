@@ -598,6 +598,7 @@ impl Checkpoint for State {
             surface_rounds,
             next_surface_shot,
             bombs,
+            jettisoned,
             guided,
             guided_impacts,
             kept,
@@ -643,6 +644,7 @@ impl Checkpoint for State {
         surface_rounds.save(s, None)?;
         next_surface_shot.save(s, None)?;
         bombs.save(s, None)?;
+        jettisoned.save(s, None)?;
         guided.save(s, None)?;
         guided_impacts.save(s, None)?;
         kept.save(s, None)?;
@@ -706,6 +708,7 @@ impl Checkpoint for State {
             surface_rounds: Checkpoint::load(l, None)?,
             next_surface_shot: Checkpoint::load(l, None)?,
             bombs: Checkpoint::load(l, None)?,
+            jettisoned: Checkpoint::load(l, None)?,
             guided: Checkpoint::load(l, None)?,
             guided_impacts: Checkpoint::load(l, None)?,
             kept: Checkpoint::load(l, None)?,
@@ -740,6 +743,20 @@ mod tests {
         "combat::blast::Mark",
         "combat::blast::Rolls",
     ];
+
+    #[test]
+    fn jettison_checkpoint_keeps_the_inert_path() {
+        let mut state = super::super::tests::fixture(true);
+        state.command(0, super::super::Command::Jettison, shooter());
+        assert!(!state.jettisoned.is_empty());
+        let mut copy: State = round_trip(&state, &Models::default()).unwrap();
+        assert_eq!(copy.jettisoned, state.jettisoned);
+        for _ in 0..1200 {
+            step(&mut state, false, 0);
+            step(&mut copy, false, 0);
+        }
+        assert_eq!(text(&copy), text(&state));
+    }
 
     fn shooter() -> Launcher {
         Launcher {

@@ -20,7 +20,9 @@ four a second held (a quarter second apart on the game's quarter-second clock), 
 when held on; and a pair
 of LAU-10 pods (8 rockets) that fire once a press however long it is held.
 """
+import json
 import math
+from pathlib import Path
 import re
 
 from battery import Scenario, Step
@@ -203,9 +205,42 @@ def strafe_problems(output: str) -> list[str]:
     return problems
 
 
+def jettison_recording_problems(work: Path, output: str) -> list[str]:
+    rows = [json.loads(line) for line in (work / "log/log.jsonl").read_text().splitlines()]
+    sounds = [row.get("fields", {}).get("sound") for row in rows
+              if row.get("kind") == "audio.effect"]
+    problems = []
+    if sounds.count("blast39") != 2:
+        problems.append(f"jettison replay has {sounds.count('blast39')} release sounds, expected 2")
+    thuds = sum(sound in ("blast15", "blast16") for sound in sounds)
+    if thuds != 5:
+        problems.append(f"jettison replay has {thuds} thuds, expected 5")
+    if any(sound not in ("blast39", "blast15", "blast16") for sound in sounds):
+        problems.append(f"unexpected jettison sounds: {sounds}")
+    launches = [row for row in rows if row.get("kind") == "weapon.launch"]
+    if len(launches) != 5 or any(row.get("fields", {}).get("class") != "other" for row in launches):
+        problems.append("jettison replay must contain five inert, non-weapon bodies")
+    if "verify-render: PASS ticks=3601 missing=0 differing=0" not in output:
+        problems.append("jettison replay scene verification did not pass")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     run = ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1"]
     return [
+        Scenario(
+            name="a2g-jettison", lane="flight",
+            args=["--a2g-run", "UKR", "QUCOL", "--attack", "jettison",
+                  "--aircraft", "f16c", "--load", "MK82", "--altitude", "5000",
+                  "--speed", "300", "--seconds", "30", "--defenses", "0", "0",
+                  "--record", "{work}/jettison.tore-replay", "--verify-render"],
+            timeout=300,
+            expect=[r"jettison: PASS released [1-9]\d* .* no-explosion"],
+            then=[Step(["--recording-info", "{work}/jettison.tore-replay"]),
+                  Step(["--recording-log", "{work}/jettison.tore-replay", "--out", "{work}/log", "--rate", "5"])],
+            check_work=jettison_recording_problems,
+            notes="Tanks then selected bombs at 5,000 ft, inert fall, small craters, recorded sounds and replay picture verification.",
+        ),
         Scenario(
             name="a2g-bomb-motion", lane="flight",
             args=run + ["--aircraft", "a4e", "--load", "MK82", "--altitude", "5000", "--speed", "450"],

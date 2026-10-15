@@ -130,6 +130,7 @@ pub(crate) fn works_outside_range(command: Live) -> bool {
             | Live::ToggleSeekerMode
             | Live::NextGunGroup
             | Live::ToggleGunGroup
+            | Live::JettisonTanks
             | Live::Jettison
     )
 }
@@ -471,6 +472,15 @@ impl World {
             self.refresh_picture();
         }
         let flight = &mut self.cockpits[cockpit].flight;
+        if command == Live::JettisonTanks
+            && self
+                .combat
+                .state
+                .ownship(aircraft)
+                .is_some_and(|own| own.configuration().tanks.iter().all(|t| t.quantity == 0))
+        {
+            flight.systems.fuel.jettison_all();
+        }
         let payload = self
             .combat
             .state

@@ -163,7 +163,7 @@ pub use tore_sim::combat::store_sizes::{POD_BODY, pod_body, tank_body};
 /// from the aircraft's loadout ([`store_poses_of`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct StationStores {
-    /// The loadout's station index (`Configuration::stations`).
+    /// Weapon station 0..31, or 55 + hardpoint (0..8) for a tank row.
     pub station: u8,
     /// Whole stores still on it (pods and single stores).
     pub items: u16,
@@ -180,7 +180,7 @@ pub fn station_stores(
     loaded: impl Fn(usize) -> bool,
 ) -> Vec<StationStores> {
     use tore_sim::combat::live;
-    config
+    let mut loads: Vec<_> = config
         .stations
         .iter()
         .enumerate()
@@ -194,7 +194,13 @@ pub fn station_stores(
                 items: u16::try_from(rounds(index).div_ceil(per_item)).unwrap_or(u16::MAX),
             })
         })
-        .collect()
+        .chain(config.tanks.iter().map(|tank| StationStores {
+            station: 55 + tank.hardpoint as u8,
+            items: tank.quantity,
+        }))
+        .collect();
+    loads.sort_by_key(|load| load.station);
+    loads
 }
 
 /// The stations `config` draws as the loadout built them: every station
@@ -272,7 +278,11 @@ pub fn store_poses_of(
     // pairs when there are two (fitted).
     stores.extend(config.tanks.iter().filter_map(|tank| {
         let store = tank.store.as_ref()?;
-        (tank.quantity > 0).then(|| StorePose {
+        let quantity = loads
+            .iter()
+            .find(|load| load.station == 55 + tank.hardpoint as u8)
+            .map_or(tank.quantity, |load| load.items);
+        (quantity > 0).then(|| StorePose {
             hardpoint: u8::try_from(tank.hardpoint).unwrap_or(u8::MAX),
             mount: tank.mount,
             rack: Rack {
@@ -292,7 +302,7 @@ pub fn store_poses_of(
             },
             shape: None,
             look: StoreLook::Tank,
-            items: tank.quantity,
+            items: quantity,
             loaded: tank.quantity,
             body: tank_body(f64::from(store.tank.fuel_weight)),
         })

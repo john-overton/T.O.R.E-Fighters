@@ -15,8 +15,8 @@ tanks to select or remove. The requested outcome is explicit tank selection
 and separate internal and external fuel. Tank selection, removal, separate
 mass/fuel accounting and accepted-load persistence are implemented. Source-backed
 headless validation and synthetic checks are recorded in the
-[tank baseline](../baselines/external-fuel-tanks.md). Original-game comparison
-and in-flight tank jettison remain unavailable.
+[tank baseline](../baselines/external-fuel-tanks.md). Original-game comparison remains unavailable. In-flight removal now follows
+[the jettison contract](jettison.md).
 
 ## Current implementation
 
@@ -60,7 +60,7 @@ original contract is not recovered.
 | No external tanks selected | Start with exactly 0 lb of external fuel and 0 lb of tank shell mass |
 | Tanks selected | Derive capacity from those exact GAS records and quantities; show internal fuel, external fuel and total mass consistently |
 | Default load | Source-default tanks may remain, but must appear in the editable accepted loadout; never silently restore a removed tank at launch |
-| Fuel consumption | Reduce remaining fuel and total mass consistently; burning a tank dry preserves empty shell mass, while separate tank geometry remains unresolved |
+| Fuel consumption | Reduce remaining fuel and total mass consistently; burning a tank dry preserves empty shell mass, with fitted tank geometry as described in [stores on pylons](stores-on-pylons.md) |
 | Tank removal | Setup removal clears the selected quantity, fuel capacity and shell mass together |
 | Restart and multiplayer | Preserve accepted tank selections and starting fuel across restart, lobby edits, server validation and replay; seat handoff preserves current fuel and installed tanks |
 
@@ -104,9 +104,8 @@ GAS supplies mass, capacity and compatibility flags but no shape pointer. This
 pass adds no separate tank mesh or tank drag rule. Exact source tank geometry
 and conditional attachment behavior remain unknown; the next research step is
 to identify the original shape/loadout consumer. Source aircraft shapes remain
-the visual inputs. In-flight tank/fuel jettison is not implemented by this pass.
-Shift+J is confirmed research evidence but has no current runtime binding.
-Shift+K remains selected weapon-store jettison.
+the visual inputs. The subsequent [jettison contract](jettison.md) governs
+in-flight removal and the current bindings. Shift+J remains retail evidence.
 
 `--loadout none` removes weapons and tanks together. `--loadout guns` removes
 non-gun weapons while retaining the selected tank equipment.
@@ -128,8 +127,8 @@ non-gun weapons while retaining the selected tank equipment.
 | --- | --- |
 | F-14 with tanks removed | 0 lb external fuel at launch; correct internal fuel and mass; no residual tank store; same accepted configuration after restart |
 | F-14 with source tanks | Reviewed quantity and capacity, correct loaded mass and visible source station in the editor; internal/external readouts agree with state |
-| Empty installed tank | 0 lb remaining tank fuel while shell mass remains; aircraft rendering is unchanged |
-| Burn, damage and jettison | Fuel never becomes negative or exceeds installed capacity; mass follows the specified equipment outcome; in-flight tank jettison remains deferred |
+| Empty installed tank | 0 lb remaining tank fuel while shell mass remains; the fitted tank body stays until jettison |
+| Burn, damage and jettison | Fuel never becomes negative or exceeds installed capacity; mass follows the specified equipment outcome; in-flight tank removal follows [jettison](jettison.md) |
 | Invalid loads | Compatibility and maximum takeoff weight enforced without changing the previously accepted load |
 | Multiplayer and replay | Host/client configuration agrees; restart restores starting selections and handoff retains current state |
 | Aircraft switching | No F-14 tank or fuel state leaks into another type; repeat on the F-4 family and an aircraft with no default tank |

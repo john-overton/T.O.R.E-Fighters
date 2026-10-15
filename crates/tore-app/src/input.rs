@@ -39,6 +39,8 @@ bind keyboard Ctrl-Shift-a stability-level press\n\
 bind keyboard Ctrl-7 weapon-group-next press\n\
 bind keyboard Ctrl-8 weapon-group-toggle press\n\
 bind keyboard Ctrl-9 sensor-console press\n\
+bind keyboard Shift-k jettison-tanks press\n\
+bind keyboard Ctrl-Shift-k jettison press\n\
 bind keyboard \\ sight-designate press\n\
 bind keyboard Shift-\\ sight-pin press\n\
 bind keyboard p sight-pin-toggle press\n\
@@ -89,7 +91,9 @@ pub fn fa_throttle_step(throttle: f64, burner: bool, delta: f64) -> (f64, bool) 
 fn complete(custom: &Profile) -> Result<Profile, String> {
     let mut profile = Profile::parse(DEFAULTS)?;
     profile.bindings.retain(|b| {
-        !custom
+        let overridden_jettison = matches!(&b.action, Action::Ui(name) if name == "jettison" || name == "jettison-tanks")
+            && custom.bindings.iter().any(|c| c.device == b.device && c.control == b.control);
+        !overridden_jettison && !custom
             .disabled
             .contains(&(b.device.clone(), b.control.clone()))
     });
@@ -1588,6 +1592,35 @@ mod tests {
                     "{key} ({action}) is listed but not bound in the stock profile"
                 );
             }
+        }
+    }
+    #[test]
+    fn custom_jettison_binding_overrides_the_new_stock_tank_key() {
+        let custom =
+            Profile::parse("tore-input 1\nbind keyboard Shift-k jettison press\n").unwrap();
+        let profile = complete(&custom).unwrap();
+        let keys: Vec<_> = profile
+            .bindings
+            .iter()
+            .filter(|b| b.device == "keyboard" && b.control == "Shift-k")
+            .collect();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].action, Action::Ui("jettison".into()));
+    }
+    #[test]
+    fn jettison_stock_keys_follow_the_real_key_path() {
+        let mut i = Input::new(None, false).unwrap();
+        for (modifiers, action) in [
+            (M::SHIFT, "jettison-tanks"),
+            (M::CONTROL | M::SHIFT, "jettison"),
+        ] {
+            assert!(i.key("k", true, modifiers));
+            assert_eq!(
+                i.resolver.drain(),
+                vec![("keyboard".into(), Action::Ui(action.into()))]
+            );
+            i.key("k", false, M::empty());
+            i.resolver.drain();
         }
     }
     #[test]
