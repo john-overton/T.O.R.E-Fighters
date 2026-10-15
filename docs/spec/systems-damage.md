@@ -68,7 +68,7 @@ agent choices, not tuning requested by John. Healthy state is unchanged.
   engine-off cooling is 2 points/second. At 100% temperature the engine fails.
   Internal fuel leaks lose 4 lb/second per hit. External tank failures empty
   the actual tank. External fuel feeds engine consumption before internal fuel;
-  empty tank mass remains until a future tank-jettison implementation.
+  empty tank mass remains until [tank jettison](jettison.md).
 - Fire raises temperature 10 percentage points per second and destroys the
   aircraft after 10 seconds; imminent explosion after 5.
   Hydraulic fire also exhausts hydraulic fluid. Fire does not auto-extinguish.

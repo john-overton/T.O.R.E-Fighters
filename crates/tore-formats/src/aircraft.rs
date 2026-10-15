@@ -985,6 +985,7 @@ pub fn dependencies(
 /// FA GRAPHICInit (0x442c00) and shared effect audio references.
 /// Filenames only: all bytes are read from the user's media at runtime.
 pub const COMBAT_RESOURCES: &[&str] = &[
+    "&BOMB.11K", // Store/tank jettison, independent of the loaded weapons.
     "CRATER.SH",
     "SMOKE.SH",
     "FIRE.SH",

@@ -63,6 +63,7 @@ impl Kind {
     /// type's pair is its full-level and silent distances.
     pub fn parameters(self) -> (f64, f64, f64) {
         match self {
+            Self::Blast(crate::combat::blast::JETTISON) => (100., 7000., FULL_LEVEL),
             Self::Blast(kind) => crate::combat::blast::explosion(kind)
                 .map_or((1000., REFUSED_BEYOND_FT, FULL_LEVEL), |e| {
                     (f64::from(e.full_ft), f64::from(e.silent_ft), FULL_LEVEL)

@@ -124,7 +124,7 @@ are implemented; the F-14 source probe checks zero, one and two tanks.
 The follow-up [ordnance matrix](../formats/aircraft-ordnance.md) covers all
 reviewed aircraft, omitted weapon stations and shared tank/weapon rows. John
 limited that pass to the editor and weapon availability, with aircraft rendering
-unchanged. Separate tank geometry and in-flight tank jettison remain open.
+unchanged. Tank rendering and [in-flight jettison](jettison.md) use fitted store geometry.
 This is shared import/loadout work, not another aircraft in the 23-aircraft count.
 
 ## F-4 family contract

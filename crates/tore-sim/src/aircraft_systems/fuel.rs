@@ -13,6 +13,11 @@ impl Fuel {
             leaks: 0,
         }
     }
+    /// Remove external fuel and its original capacity without counting it as burn.
+    pub fn jettison_all(&mut self) {
+        self.external = [0.; 9];
+        self.initial_external = 0.;
+    }
     pub fn external_lbs(&self) -> f64 {
         self.external.iter().sum()
     }
@@ -45,3 +50,20 @@ crate::flight::exact::exact_struct!(Fuel {
     initial_external,
     leaks,
 });
+
+#[cfg(test)]
+mod jettison_tests {
+    use super::*;
+    #[test]
+    fn jettison_preserves_internal_fuel_and_resets_burn_bookkeeping() {
+        let mut fuel = Fuel::new([100.; 9]);
+        let mut internal = 500.;
+        fuel.consume(&mut internal, 70.);
+        fuel.jettison_all();
+        assert_eq!(internal, 500.);
+        assert_eq!(fuel.external_lbs(), 0.);
+        assert_eq!(fuel.used_lbs(), 0.);
+        fuel.consume(&mut internal, 10.);
+        assert_eq!(internal, 490.);
+    }
+}

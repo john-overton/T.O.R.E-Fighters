@@ -307,6 +307,9 @@ pub fn weapon_info(id: u32, weapon: &tore_formats::weapons::Weapon) -> replay::W
 /// - an unguided rocket (a pod of several rockets, no seeker) is a rocket,
 ///   where it used to be recorded as other.
 pub fn weapon_class(weapon: &tore_formats::weapons::Weapon) -> replay::WeaponClass {
+    if weapon.source.starts_with("JETTISON-") {
+        return replay::WeaponClass::Other;
+    }
     use tore_sim::combat::{guided, ledger::ShotKind};
     if live::is_gun(weapon) {
         return replay::WeaponClass::Gun;

@@ -1147,6 +1147,7 @@ const SIGHT_NEXT: u64 = 2;
 /// Tab down and up, the gun fires whatever is selected (slice FX-T).
 const GUN_KEY_DOWN: u64 = 3;
 const GUN_KEY_UP: u64 = 4;
+const JETTISON_TANKS: u64 = 5;
 
 /// A combat command's code, exhaustively, so a new command cannot go
 /// uncoded.
@@ -1168,6 +1169,7 @@ fn live_code(command: live::Command) -> u64 {
         C::ClearDesignation => 12,
         C::ToggleArm => 13,
         C::Jettison => 14,
+        C::JettisonTanks => EXTENDED,
         C::ReplaceTarget => 15,
         C::CycleClass => 16,
         C::FailStation => 17,
@@ -1201,6 +1203,7 @@ fn write_live(w: &mut BitWriter, command: live::Command) {
         live::Command::SightNext => w.write_varint(SIGHT_NEXT),
         live::Command::GunKeyDown => w.write_varint(GUN_KEY_DOWN),
         live::Command::GunKeyUp => w.write_varint(GUN_KEY_UP),
+        live::Command::JettisonTanks => w.write_varint(JETTISON_TANKS),
         _ => {}
     }
 }
@@ -1221,6 +1224,7 @@ fn read_live(r: &mut BitReader<'_>) -> WireResult<live::Command> {
             SIGHT_NEXT => live::Command::SightNext,
             GUN_KEY_DOWN => live::Command::GunKeyDown,
             GUN_KEY_UP => live::Command::GunKeyUp,
+            JETTISON_TANKS => live::Command::JettisonTanks,
             _ => return Err(WireError::Invalid("extended combat command")),
         },
         code => *LIVE
@@ -1327,6 +1331,15 @@ mod tests {
     /// Every top-level command code is its own and fits the 5-bit field, and
     /// combat's value-less codes end where its valued ones begin; two
     /// branches once both took 22 and 23, which a decoder reads as the first.
+    #[test]
+    fn jettison_tanks_extended_command_roundtrips() {
+        let mut w = BitWriter::new();
+        write_live(&mut w, live::Command::JettisonTanks);
+        let bytes = w.finish();
+        let mut r = BitReader::new(&bytes);
+        assert_eq!(read_live(&mut r).unwrap(), live::Command::JettisonTanks);
+    }
+
     #[test]
     fn command_codes_are_unique_and_fit_their_fields() {
         let codes = [

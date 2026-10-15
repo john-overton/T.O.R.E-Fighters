@@ -873,6 +873,7 @@ impl Record {
             outcomes: &out.outcomes,
             journal: out.journal.as_ref(),
         });
+        self.recorder.sounds(&out.emissions, &[]);
         self.recorder.end(None, &mut world.combat);
         if let Some(pictures) = &mut self.pictures {
             pictures.push(world.combat.render_snapshot().clone());

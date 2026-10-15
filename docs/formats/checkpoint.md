@@ -539,3 +539,10 @@ when the three virtual R-27 entries are byte-for-byte AA10 donor aliases. A
 variant supplied with different bytes is still hashed. This keeps old tapes
 readable without weakening the guard against actual changed imports. Mission
 recordings still retain their recorded event stems and frame data.
+
+## Inert stores
+
+Combat State now writes `jettisoned`, a map from projectile ID to `true`, after
+`bombs`. These IDs bypass guidance, weapon collision and damage. Their motion
+remains in `bombs`. Seat manual command 36 is `JettisonTanks`. This changes
+checkpoint compatibility; the lead must bump the multiplayer protocol.

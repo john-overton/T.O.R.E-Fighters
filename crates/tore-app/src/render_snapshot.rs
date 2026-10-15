@@ -396,6 +396,19 @@ pub fn combat_geometry(
         if Some(p.id) == camera.hidden_projectile {
             continue;
         }
+        if let Some(body) = p.shape.as_deref().and_then(procedural_store_body) {
+            let right = if p.direction[0].hypot(p.direction[2]) < 1e-9 {
+                [1., 0., 0.]
+            } else {
+                unit([p.direction[2], 0., -p.direction[0]])
+            };
+            let basis = Basis {
+                right,
+                up: cross(p.direction, right),
+                forward: p.direction,
+            };
+            crate::pylons::body(&mut v, &basis, local(p.position), body, [0.45; 3]);
+        }
         if !p.gun
             && let Some(shape) = p.shape.as_ref().and_then(|name| art.shapes.get(name))
         {
@@ -511,6 +524,9 @@ impl CombatArt {
         data: &BTreeMap<String, Vec<u8>>,
     ) {
         for name in names {
+            if procedural_store_body(name).is_some() {
+                continue;
+            }
             let shape = data
                 .get(name)
                 .and_then(|bytes| Shape::parse(bytes).ok())
@@ -738,6 +754,15 @@ fn vertex(out: &mut Vec<f32>, pos: Vector, color: [f32; 3]) {
         color[2],
         -1.,
     ]);
+}
+
+/// Bounded host-generated tank/pod geometry, carried in the shape identity.
+fn procedural_store_body(name: &str) -> Option<[f64; 2]> {
+    let (length, diameter) = name.strip_prefix("TORE-BODY:")?.split_once(':')?;
+    let body = [length.parse::<f64>().ok()?, diameter.parse::<f64>().ok()?];
+    body.iter()
+        .all(|v| v.is_finite() && *v > 0. && *v <= 100.)
+        .then_some(body)
 }
 
 #[cfg(test)]

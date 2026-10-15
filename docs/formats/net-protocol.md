@@ -3159,3 +3159,13 @@ watch the network can read it. What the protocol does guard against:
   only: games of the same session, trusted as the host is. A client races
   only the addresses its host's Succession named, and resumes only with a
   host that answers with the session's id.
+
+## Inert jettison integration
+
+The next protocol must include extended combat command 5, `JettisonTanks`,
+and interpret Stores IDs 55 through 63 as tank quantities at hardpoints 0
+through 8. Sound-only blast ID 39 plays `&BOMB.11K`. Projectile identities
+prefixed `JETTISON-` are inert; `TORE-BODY:length:diameter` shape identifiers
+request fitted bodies with length and diameter in feet, each finite, positive
+and at most 100. The combat checkpoint layout also changes.
+See [jettison](../spec/jettison.md). Protocol numbering belongs to the lead.

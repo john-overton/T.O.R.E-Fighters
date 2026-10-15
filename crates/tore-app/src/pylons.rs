@@ -636,7 +636,7 @@ fn block(
 /// A fitted round body (tank or pod) centred on `centre`: an eight-sided
 /// tube of `[length, diameter]` along the aircraft's forward axis, with
 /// pointed ends a fifth of its length each.
-fn body(
+pub(crate) fn body(
     out: &mut Vec<f32>,
     basis: &Basis,
     centre: Vector,

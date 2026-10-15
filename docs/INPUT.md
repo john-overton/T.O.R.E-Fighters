@@ -547,7 +547,8 @@ Deliberate differences from FA:
 | Ctrl+A | Waypoint autopilot | Find-nearest cheat, when the Multi menu allows it | John requested the two autopilot modes on 2026-09-17 |
 | Z / X | Rudder, alongside End / Page Down; on the AV-8 and Yak-141 the nozzle steps, as in FA | Wing sweep and, on the VTOL jets, nozzle steps (Shift+Z / Shift+X presets) | Laptops lack End and Page Down; T.O.R.E sweeps the F-14 automatically. The jets' nozzle keys are John's choice of 2026-10-08 |
 | M | Cycle sensor channels | HARM seeker | No HARM channel yet |
-| Shift+K | Jettison the selected external group, in any flight (an aircraft with nothing external, the AC-130 among them, is unchanged) | Jettison all air-to-ground ordnance | Fitted jettison; works outside the live-fire range since John, 2026-10-10 |
+| Shift+K | Jettison all external tanks and their remaining fuel | Retail used Shift+J for tanks | Opinionated, John 2026-10-15; [jettison](spec/jettison.md) |
+| Ctrl+Shift+K | Jettison the selected external store group | Retail Shift+K dropped all air-to-ground ordnance | Opinionated, John 2026-10-15 |
 | L | Clear designation, alongside ; | Unused | Earlier T.O.R.E key, kept |
 | Shift+/ | Center view, alongside keypad 5 | Unused | Laptops lack a keypad |
 | Shift+B | Afterburner switch, alongside 6 | Unused | Gamepad Y uses the same switch |
@@ -914,7 +915,7 @@ new bindings or regenerate a profile deliberately. No saved file is overwritten.
 | West (X) | [ previous NAV/weapon |
 | North (Y) | J: own jammer toggle |
 | Left-stick click | R: radar toggle |
-| Right-stick click | Shift-K: selected external group jettison |
+| Right-stick click | Ctrl+Shift+K: selected external group jettison |
 | Right stick (AC-130) | Slew the gunsight; other aircraft keep their uses of it (look, nozzles, collective) |
 | D-pad up | Ctrl-Shift-Backslash: replace range target; on the vectoring jets and the V-22, neutral nozzles or nacelles; on the AC-130, Ctrl-7 (next gun candidate) |
 | D-pad down | Explicit `damage-player` developer fixture; keyboard D reports damage; on the AC-130, Ctrl-8 (link or unlink the candidate gun) |

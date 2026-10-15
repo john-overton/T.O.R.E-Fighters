@@ -96,6 +96,9 @@ const TABLE: [Explosion; 24] = [
     row(250, 1, false, &["&EMPEXP.11K", "&EMPEXP.11K"], 1000, 25000),
 ];
 
+/// Host sound-only type: retail jettison recording, never a drawn explosion.
+pub const JETTISON: u8 = 39;
+pub const JETTISON_SOUND: &str = "&BOMB.11K";
 pub fn explosion(kind: u8) -> Option<&'static Explosion> {
     TABLE.get(usize::from(kind.checked_sub(FIRST)?))
 }
@@ -260,6 +263,9 @@ pub fn rolled_size(kind: u8, position: Vector) -> u8 {
 
 /// The recording one explosion plays.
 pub fn recording(kind: u8, position: Vector) -> Option<&'static str> {
+    if kind == JETTISON {
+        return Some(JETTISON_SOUND);
+    }
     let e = explosion(kind)?;
     Some(e.sounds[usize::from(pick(position, 2, e.sounds.len() as u16))])
 }
