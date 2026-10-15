@@ -767,7 +767,7 @@ pub struct NetSession {
     gun_key: bool,
     /// Each weapon record's motor, parsed once.
     motors: RefCell<BTreeMap<String, Option<Motor>>>,
-    /// Each non-gun weapon record's launch sound and reach, for other
+    /// Each weapon record's firing sound and reach, for other
     /// aircraft's launches, which the wire names by record only.
     launches: crate::audio::LaunchSounds,
     /// Session events not yet taken by the game.

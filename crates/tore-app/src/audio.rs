@@ -1,6 +1,7 @@
 //! Original PCM, local avionics and physically delayed spatial effects.
 use crate::{AppResult, menu::Action, situation};
 pub mod music;
+pub mod other;
 mod seeker;
 mod spatial;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -138,6 +139,7 @@ pub struct Audio {
 /// listener's own, who fired it and from where.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Launch<'a> {
+    pub gun: bool,
     /// The recording, the weapon record's `fireSound`.
     pub name: &'a str,
     /// The record's `maxSndDist` in feet; 0 when it is not known, as in a
@@ -159,9 +161,14 @@ impl<'a> Launch<'a> {
     pub fn new(name: &'a str, max_distance_ft: i16) -> Self {
         Self {
             name,
+            gun: false,
             max_distance_ft,
             shooter: None,
         }
+    }
+    pub fn with_gun(mut self, gun: bool) -> Self {
+        self.gun = gun;
+        self
     }
     /// A launch whose record is not at hand.
     pub fn named(name: &'a str) -> Self {
@@ -225,39 +232,65 @@ pub fn nearest_launches<'a>(
     heard.truncate(limit);
     heard.into_iter().map(|(_, launch)| launch).collect()
 }
-/// Each non-gun weapon record's launch sound and reach, by record name
+/// Each weapon record's launch sound and reach, by record name
 /// (`AGM65A.JT`), for the launches whose record is not at hand: a
 /// multiplayer client and a replay name the weapon and nothing more.
 #[derive(Clone, Debug, Default)]
 pub struct LaunchSounds {
     by_record: BTreeMap<String, (String, i16)>,
+    guns: std::collections::BTreeSet<String>,
 }
 impl LaunchSounds {
     /// Reads every weapon record in `resources`.
     pub fn of(resources: &BTreeMap<String, Vec<u8>>) -> Self {
+        let mut guns = std::collections::BTreeSet::new();
         let by_record = resources
             .iter()
             .filter(|(name, _)| name.ends_with(".JT"))
             .filter_map(|(name, bytes)| {
                 let weapon = tore_formats::weapons::Weapon::parse(name, bytes).ok()?;
                 if tore_sim::combat::live::is_gun(&weapon) {
-                    return None;
+                    guns.insert(name.clone());
                 }
                 let sound = weapon.fire_sound?;
                 Some((name.clone(), (sound, weapon.effects.max_sound_distance)))
             })
             .collect();
-        Self { by_record }
+        Self { by_record, guns }
+    }
+    /// Shared network/replay lookup, also used by device-free checks.
+    pub fn heard(&self, record: &str, shooter: u32, position: [f64; 3]) -> Option<Heard> {
+        let (sound, max_distance_ft) = self.get(record)?;
+        Some(Heard {
+            shooter,
+            position,
+            sound: sound.to_owned(),
+            max_distance_ft,
+            gun: self.is_gun(record),
+        })
+    }
+    pub fn is_gun(&self, record: &str) -> bool {
+        self.guns.contains(record)
     }
     /// A table of `(record, recording, feet)` rows, for tests.
     #[cfg(test)]
     pub fn from_rows(rows: &[(&str, &str, i16)]) -> Self {
         Self {
+            guns: Default::default(),
             by_record: rows
                 .iter()
                 .map(|(record, sound, feet)| (record.to_string(), (sound.to_string(), *feet)))
                 .collect(),
         }
+    }
+    #[cfg(test)]
+    pub fn from_gun_rows(rows: &[(&str, &str, i16)]) -> Self {
+        let mut table = Self::from_rows(rows);
+        table.guns = rows
+            .iter()
+            .map(|(record, _, _)| record.to_string())
+            .collect();
+        table
     }
     /// The recording a launch of `record` plays and how far it is heard.
     pub fn get(&self, record: &str) -> Option<(&str, i16)> {
@@ -295,7 +328,7 @@ pub fn shooter_position(
 }
 /// Tells the launches new in a tick's combat state, for the sound of every
 /// shooter but the listener's own: aircraft and surface units alike (John
-/// 2026-10-12). Gun rounds, surface guns' included, keep their own audio.
+/// 2026-10-12). The shared mixer groups gun rounds into bounded bursts.
 #[derive(Clone, Debug, Default)]
 pub struct LaunchWatch {
     known: std::collections::BTreeSet<u32>,
@@ -304,12 +337,41 @@ pub struct LaunchWatch {
 /// record's recording and reach.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Heard {
+    pub gun: bool,
     pub shooter: u32,
     pub position: [f64; 3],
     pub sound: String,
     pub max_distance_ft: i16,
 }
 impl LaunchWatch {
+    /// Clients reconstruct rounds from GunBurst/SurfaceBurst messages. Those
+    /// rounds have no WireEvent::Launch, but carry the original weapon name.
+    pub fn fresh_guns(
+        &mut self,
+        picture: &crate::snapshot::RenderSnapshot,
+        own: u32,
+        catalog: &LaunchSounds,
+    ) -> Vec<Heard> {
+        let heard = picture
+            .projectiles
+            .iter()
+            .filter(|p| p.gun && p.owner != own && !self.known.contains(&p.id))
+            .filter_map(|p| {
+                catalog.heard(
+                    &p.weapon,
+                    p.owner,
+                    shooter_position(picture, p.owner, Some(p.id)).unwrap_or(p.previous),
+                )
+            })
+            .collect();
+        self.known = picture
+            .projectiles
+            .iter()
+            .filter(|p| p.gun)
+            .map(|p| p.id)
+            .collect();
+        heard
+    }
     /// The launches of the projectiles new since the last call, except those
     /// of `own`, in id order.
     pub fn fresh(&mut self, state: &tore_sim::combat::live::State, own: u32) -> Vec<Heard> {
@@ -326,10 +388,8 @@ impl LaunchWatch {
             .filter(|p| p.owner != own)
             .filter_map(|p| {
                 let weapon = state.weapon(p);
-                if live::is_gun(weapon) {
-                    return None;
-                }
                 Some(Heard {
+                    gun: live::is_gun(weapon),
                     shooter: p.owner,
                     position: p.position,
                     sound: weapon.fire_sound.clone()?,
@@ -1577,16 +1637,7 @@ impl Mixer {
             }
             // Other aircraft's launches are heard from where they were,
             // inside a cockpit through the canopy: the nearest few.
-            for launch in nearest_launches(&sounds, listener, OTHER_LAUNCH_VOICES) {
-                if let (Some(shooter), Some(clip)) = (launch.shooter, clips.get(launch.name)) {
-                    self.spatial.weapon(
-                        clip.clone(),
-                        launch.max_distance_ft,
-                        shooter.position,
-                        listener,
-                    );
-                }
-            }
+            self.spatial.other_weapons(clips, listener, &sounds);
         }
         self.spatial
             .tick(clips, listener, sources, emissions, enabled);
@@ -1996,7 +2047,7 @@ mod tests {
     }
 
     #[test]
-    fn the_watch_finds_each_new_aircraft_launch_once_and_skips_guns_and_the_listener() {
+    fn the_watch_finds_other_aircraft_and_surface_guns_and_launches() {
         use tore_sim::combat::{FallState, live::Projectile};
         let mut state = tore_world::test_support::combat_fixture(true);
         let mut weapon = state.ownships()[0].configuration().stations[0]
@@ -2024,11 +2075,11 @@ mod tests {
             gun_round: None,
             tracer: false,
         };
-        // A gun record: not a launch.
+        // A gun record: grouped into bursts by the shared mixer.
         let mut gun = weapon.clone();
         gun.source = "M61.JT".into();
         gun.fire_sound = Some("&GUN.11K".into());
-        // A surface unit's missile sounds like any launch; its gun does not.
+        // Surface guns and missiles both reach the shared mixer.
         state.projectiles = vec![
             round(1, 40, &weapon),
             round(2, 40, &weapon),
@@ -2037,6 +2088,26 @@ mod tests {
             round(6, 0x4000_0002, &weapon),
             round(8, 0x4000_0002, &gun),
         ];
+        // Every store uses its own sound, including rockets and bombs.
+        for (id, record, sound) in [
+            (10, "ZUNI.JT", "rocket"),
+            (11, "MK82.JT", "bomb"),
+            (
+                12,
+                tore_formats::aircraft::AircraftId::Ah64.guns()[0],
+                "&GUN.11K",
+            ),
+            (
+                13,
+                tore_formats::aircraft::AircraftId::Ac130.guns()[0],
+                "cannon",
+            ),
+        ] {
+            let mut store = weapon.clone();
+            store.source = record.into();
+            store.fire_sound = Some(sound.into());
+            state.projectiles.push(round(id, id + 100, &store));
+        }
         let mut watch = LaunchWatch::default();
         let heard = watch.fresh(&state, 7);
         let heard_by: Vec<(u32, &str)> = heard
@@ -2049,11 +2120,80 @@ mod tests {
             "a unit's"
         );
         assert!(
-            heard.iter().all(|h| h.position != [8., 0., 0.]),
-            "no unit gun"
+            heard.iter().any(|h| h.position == [8., 0., 0.] && h.gun),
+            "unit gun"
         );
         assert!(heard.iter().all(|h| h.shooter != 7), "not the listener's");
-        assert!(heard.iter().all(|h| h.sound != "&GUN.11K"), "no gun");
+        assert_eq!(heard.iter().filter(|h| h.gun).count(), 4);
+        for sound in ["rocket", "bomb", "&GUN.11K", "cannon"] {
+            assert!(heard.iter().any(|h| h.sound == sound));
+        }
+        // A network client/replay resolves the same record names to the
+        // same plain-data inputs, before the shared burst policy.
+        let mut catalog = LaunchSounds::default();
+        for projectile in &state.projectiles {
+            let weapon = state.weapon(projectile);
+            catalog.by_record.insert(
+                weapon.source.clone(),
+                (
+                    weapon.fire_sound.clone().unwrap(),
+                    weapon.effects.max_sound_distance,
+                ),
+            );
+            if tore_sim::combat::live::is_gun(weapon) {
+                catalog.guns.insert(weapon.source.clone());
+            }
+        }
+        for h in &heard {
+            let projectile = state
+                .projectiles
+                .iter()
+                .find(|p| p.position == h.position)
+                .unwrap();
+            let weapon = state.weapon(projectile);
+            assert_eq!(
+                catalog.get(&weapon.source),
+                Some((h.sound.as_str(), h.max_distance_ft))
+            );
+            assert_eq!(
+                catalog
+                    .heard(&weapon.source, h.shooter, h.position)
+                    .as_ref(),
+                Some(h)
+            );
+        }
+        let picture = crate::snapshot::RenderSnapshot {
+            projectiles: state
+                .projectiles
+                .iter()
+                .map(|p| {
+                    let weapon = state.weapon(p);
+                    crate::snapshot::ProjectilePose {
+                        id: p.id,
+                        owner: p.owner,
+                        weapon: weapon.source.clone(),
+                        shape: None,
+                        gun: tore_sim::combat::live::is_gun(weapon),
+                        tracer: false,
+                        powered: false,
+                        position: p.position,
+                        previous: p.previous,
+                        direction: p.direction,
+                        target: None,
+                        incoming: false,
+                        speed_f8: 0,
+                    }
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let mut client = LaunchWatch::default();
+        let network = client.fresh_guns(&picture, 7, &catalog);
+        assert_eq!(
+            network,
+            heard.iter().filter(|h| h.gun).cloned().collect::<Vec<_>>()
+        );
+        assert!(client.fresh_guns(&picture, 7, &catalog).is_empty());
         assert_eq!(heard.iter().filter(|h| h.shooter == 40).count(), 2);
         assert!(heard.iter().all(|h| h.max_distance_ft == 7000));
         // Nothing new the next tick; a new round sounds once.

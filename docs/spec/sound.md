@@ -93,10 +93,12 @@ it sounds when the listener is within that distance of the firing aircraft
 (John asked for this on 2026-10-12). So an AI wingman's Sidewinder, an enemy's
 bomb release and another player's Maverick online are heard.
 
-- **Same rule as the external view.** Full within 100 ft of the firing
+- **Same distance rule as the external view.** Full within 100 ft of the firing
   aircraft, a straight-line fade to silence at the record's `maxSndDist`,
   nothing beyond, starting at once. In a cockpit it is heard through the
-  canopy (40 percent, no treble), as every outside sound is.
+  canopy (40 percent, no treble), as every outside sound is. Other shooters'
+  weapons use 65 percent of the own external weapon level (fitted agent
+  choice, 2026-10-15), before canopy and preference volumes.
 - **One sound per aircraft per release.** A seven-bomb pack from one AI
   aircraft is one thump. Two aircraft releasing in the same tick are two
   sounds, even for the same recording.
@@ -110,14 +112,30 @@ bomb release and another player's Maverick online are heard.
   them silent. Every surface missile record names a recording (`&SALTMIS.11K`,
   `&SAHVMIS.11K`, `&LTMISS.11K`, `&HVYMISS.11K`), so none needs a fitted
   default.
-- **Guns.** Gun fire, surface guns included, keeps its own audio.
-- **Voices.** At most the four nearest launches sound in a tick (agent
+- **Guns.** Aircraft, helicopters, AC-130 guns, AAA and ship guns use their
+  own weapon record's `fireSound`. The previous gun exclusions made these
+  shooters silent. New rounds start a burst of at most 0.25 seconds; rounds
+  from the same shooter and recording cannot start another until 30 simulation
+  ticks have passed. Sustained fire repeats those bursts, not one sound per
+  round. At most four bursts are active, with nearer new sources chosen first;
+  an active burst holds its slot until the quarter second ends. Gun reach is
+  the record's positive distance capped at 6,000 ft, or 4,500 ft when absent.
+  The first 5 ms fade in and last 30 ms fade out to avoid clicks. These burst,
+  cap and range rules are fitted agent choices (2026-10-15), not recovered
+  retail behavior. Slow cannon reports can be shortened by the burst limit.
+- **Voices.** At most the four nearest non-gun launches sound in a tick (agent
   decision); the placed-sound pool still drops the quietest when it is full.
 - **Online and replays.** The wire and a recording name the weapon (and the
   shooter), not the recording or the reach, so the game looks the weapon up in
   its own weapon catalog by name: the same `fireSound` and `maxSndDist` the
   host used. Where a weapon is not in the catalog it is silent. Position is the
-  firing aircraft's at that tick. No protocol change.
+  firing aircraft's at that tick. Surface replays fall back to the recorded
+  unit position if the new projectile is absent. Clients also sound the gun
+  rounds reconstructed from existing gun/surface burst messages; converted
+  network replays use newly born recorded gun rounds if no launch event exists.
+  Flak has no reconstructed rounds, so the host now sends its report as an
+  existing Launch event. Wire layout and protocol number are unchanged; old
+  clients ignore these gun sounds. The lead decides the release protocol.
 
 Retail evidence for surface launches: `PROJFire` (`0x4c2170`) and
 `PROJFireSound` (`0x4c26f0`) test no object class before the sound request,
@@ -156,10 +174,10 @@ FA_2.LIB, static reads only; nothing was played.
   recordings, distances and level for the player, AI aircraft, online and
   replays (the sound is made by the simulation when the shell bursts and
   carried as a sound event).
-- **Not changed, and where it may differ from retail:** the volume is the
+- **Limits and unverified aspects:** the volume is the
   generic explosion curve (straight line from full to silent), not measured;
-  the gun's own report (`fireSound` `&expl3.5k`, heard to 15,000 ft) is not
-  played, because surface guns keep their own audio, which today is none.
+  the gun's own report (`fireSound` `&expl3.5k`, retail reach 15,000 ft) is
+  subject to the fitted gun burst and range limits above.
   Whether the burst you heard as wrong was the KS-19's or the missing report
   needs John's ear.
 

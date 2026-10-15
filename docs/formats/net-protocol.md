@@ -909,7 +909,7 @@ snapshot's tick.
 | Order reply | the seat | What became of a wing order |
 | Weapon cycled | the seat | The weapon page turns |
 | Release | the seat | Weapon release sound and station |
-| Launch | everyone | Shooter, projectile number, weapon: every missile, rocket and bomb launch, so the view rig and the F12 view see a missile that lives less than one snapshot |
+| Launch | everyone | Shooter, projectile number, weapon: every missile, rocket and bomb launch, plus surface flak gun reports (the shell itself is still omitted from snapshots). No new fields or event tags. For guided stores, the view rig and the F12 view see a missile that lives less than one snapshot |
 | Feedback | the seat | A rumble event |
 | Your aircraft exploded | the seat | Which wording ("exploded", "exploded on impact") |
 | Wing ejection | everyone | Aircraft, HUD line, friendly |

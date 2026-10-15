@@ -21,7 +21,8 @@
 //! aircraft's: a surface gun's burst is one Surface burst event with its
 //! schedule (from the surface tick's burst notes), closed early by a Surface
 //! burst end when the controller stops short of it; flak shells are never
-//! sent, since each burst in the air is an Effect; a surface missile is a
+//! sent as projectiles, but a Launch names each gun report and an Effect
+//! names each burst in the air; a surface missile is a
 //! Launch like any other, its shooter the unit.
 
 use crate::wire::events::{StationStores, SurfaceUnitView, WireEvent};
@@ -192,8 +193,20 @@ impl Tracker {
         for projectile in fresh {
             let weapon = state.weapon(projectile);
             if state.surface_round(projectile.id).is_some() && live::is_gun(weapon) {
-                // Flak shells are told by their bursts' Effects; other
-                // rounds by the surface burst events below.
+                // Flak has no reconstructed round or SurfaceBurst on clients.
+                // Its report still needs the existing launch event. This names
+                // the gun without adding a projectile to the wire picture.
+                if live::is_flak(weapon) {
+                    push(
+                        tick,
+                        Wide::Launch {
+                            shooter: projectile.owner,
+                            projectile: projectile.id,
+                            weapon: weapon.source.clone(),
+                        },
+                    );
+                }
+                // Other rounds use the surface burst events below.
                 *surface_rounds
                     .entry((projectile.owner, projectile.station))
                     .or_default() += 1;
@@ -565,6 +578,47 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn flak_reports_emit_existing_launch_event_once() {
+        let mut world = world();
+        let mut tracker = Tracker::new(&world);
+        let fixture = tore_world::test_support::combat_fixture(true);
+        let mut weapon = fixture.ownships()[0].configuration().stations[0]
+            .weapon
+            .clone();
+        weapon.source = "KS12.JT".into();
+        weapon.damage.collateral_radius = 100;
+        weapon.damage.collateral_percent = 50;
+        let owner = SURFACE_UNIT_BASE + 6;
+        let id = world
+            .combat
+            .state
+            .fire_surface(live::SurfaceShot {
+                owner,
+                weapon,
+                mount: 0,
+                position: [0., 10., 0.],
+                direction: [0., 1., 0.],
+                velocity: [0.; 3],
+                target: None,
+                observation: None,
+                ordinal: 0,
+                end_tick: Some(120),
+            })
+            .unwrap();
+        let events = tracker.sort(&world, &TickOutput::default(), Vec::new(), 1);
+        assert!(events.iter().any(
+            |t| matches!(&t.event, Wide::Launch { shooter, projectile, weapon }
+            if *shooter == owner && *projectile == id && weapon == "KS12.JT")
+        ));
+        assert!(
+            !tracker
+                .sort(&world, &TickOutput::default(), Vec::new(), 2)
+                .iter()
+                .any(|t| matches!(t.event, Wide::Launch { .. }))
+        );
     }
 
     /// A surface gun's burst is told once with its schedule, apart from the
