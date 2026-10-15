@@ -1,5 +1,6 @@
 """Tests for the menus lane's image checks (tools/battery_scenarios/menus.py)."""
 import sys
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -62,6 +63,32 @@ class ImageCheckTests(unittest.TestCase):
     def test_a_missing_capture_is_reported(self):
         self.assertEqual(menus.scene_problems(0)("nothing here"), ["no capture written"])
 
+
+
+class WingLoadoutRecordingTests(unittest.TestCase):
+    def test_records_are_checked_for_every_plane_and_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for label in ("before", "after", "ground"):
+                events = []
+                for plane in range(4):
+                    stores = [(6, "MK82.SH", 2), (8, "SIDEM.SH", 2)]
+                    if label == "before" and plane:
+                        stores = [(6, "MAVRK.SH", 4), (7, "AMRAM.SH", 2), (8, "SIDEM.SH", 2), (5, "tank", 1)]
+                    for hardpoint, shape, items in stores:
+                        events.append({"kind": "stores.station", "tick": 0, "subject": plane,
+                                       "fields": {"hardpoint": hardpoint, "shape": shape, "look": "store", "items": items}})
+                path = root / "wing-loadout" / f"{label}.toreplay-log" / "log.jsonl"
+                path.parent.mkdir(parents=True)
+                path.write_text("\n".join(json.dumps(e) for e in events))
+            self.assertEqual(menus.wing_loadout_recording_problems(root, ""), [])
+            events[-1]["fields"]["items"] = 1
+            path.write_text("\n".join(json.dumps(e) for e in events))
+            self.assertTrue(any("ground plane 3" in p for p in menus.wing_loadout_recording_problems(root, "")))
+
+    def test_missing_export_is_a_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(len(menus.wing_loadout_recording_problems(Path(directory), "")), 3)
 
 if __name__ == "__main__":
     unittest.main()

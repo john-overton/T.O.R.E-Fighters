@@ -938,7 +938,15 @@ impl Host {
                 self.respawn_waits(root, label, "has no original spawn to respawn at".into());
                 continue;
             };
-            let chosen = self.spec.plane_loadouts.get(&root.0).cloned();
+            // The built flight includes loads inherited from its human lead.
+            // Keep the accepted start load, not the AI's spent stores.
+            let chosen = self
+                .world
+                .setup
+                .ai
+                .as_ref()
+                .and_then(|ai| ai.loadouts.get(&root.0))
+                .map(tore_world::mission::LoadoutSpec::of);
             let spawn = self
                 .world
                 .respawn_spawn(root, origin, heading, &taken, chosen.as_ref(), weapons)

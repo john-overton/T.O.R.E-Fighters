@@ -1070,3 +1070,92 @@ mod sides_tests;
 // The lobby pass's Autobalance (slice A1) drives this file's rig.
 #[path = "balance_tests.rs"]
 mod balance_tests;
+
+#[test]
+fn each_human_flight_shares_its_load_on_host_clients_and_ai_respawn() {
+    let mut mission = spec(4, 3);
+    // An authored wingman load is never overwritten.
+    let mut authored = standard();
+    authored.stations[1].quantity = 1;
+    mission.plane_loadouts.insert(3, authored.clone());
+    // Host::new accepts authored plane loads, unlike changing the lobby mission.
+    let mut rig = Rig::hosted(mission);
+    let blue = rig.join("Viper");
+    let red = rig.join("Cobra");
+    rig.gather(&[blue, red]);
+    rig.change(
+        blue,
+        &[
+            (number::MODE, Mode::Pvp.value()),
+            (number::LOCK_SIDES, 0),
+            (number::RESPAWN, crate::settings::Respawn::Revive.value()),
+            (number::REVIVE_DELAY, 0),
+        ],
+    );
+    let mut blue_load = standard();
+    blue_load.stations[1].quantity = 0;
+    blue_load.fuel_lbs *= 0.5;
+    let mut red_load = standard();
+    red_load.stations[0].quantity = 123;
+    for (client, plane, load) in [(blue, 0, blue_load.clone()), (red, 4, red_load.clone())] {
+        rig.client(client).take_slot(plane);
+        assert!(rig.run_until(Duration::from_secs(2), |r| {
+            r.lobby(client)
+                .is_some_and(|l| l.me().is_some_and(|p| p.slot == Some(plane)))
+        }));
+        rig.client(client).send_loadout(Some(load));
+        rig.run(Duration::from_millis(200));
+        assert!(
+            rig.refusals(client).is_empty(),
+            "{:?}",
+            rig.refusals(client)
+        );
+        assert_eq!(rig.lobby(client).unwrap().me().unwrap().slot, Some(plane));
+        rig.client(client).set_ready(true);
+    }
+    rig.run(Duration::from_millis(200));
+    rig.client(blue).start_mission();
+    assert!(rig.run_until(Duration::from_secs(3), |r| r.seated(blue) && r.seated(red)));
+    for world in std::iter::once(rig.host.world())
+        .chain(rig.players.iter().map(|p| p.client.mission().unwrap()))
+    {
+        let loads = &world.setup.ai.as_ref().unwrap().loadouts;
+        for id in [0, 1, 2] {
+            assert_eq!(tore_world::mission::LoadoutSpec::of(&loads[&id]), blue_load);
+        }
+        assert_eq!(tore_world::mission::LoadoutSpec::of(&loads[&3]), authored);
+        for id in [4, 5, 6] {
+            assert_eq!(tore_world::mission::LoadoutSpec::of(&loads[&id]), red_load);
+        }
+    }
+    rig.host
+        .world
+        .combat
+        .state
+        .targets
+        .iter_mut()
+        .find(|t| t.id == 1)
+        .unwrap()
+        .hp = 0;
+    assert!(rig.run_until(
+        Duration::from_secs(3),
+        |r| r.host.world.lineage_head(PlaneId(1)) != PlaneId(1)
+    ));
+    let revived = rig.host.world.lineage_head(PlaneId(1));
+    rig.run(Duration::from_millis(200));
+    for world in std::iter::once(rig.host.world())
+        .chain(rig.players.iter().map(|p| p.client.mission().unwrap()))
+    {
+        let actor = world
+            .ai_wings
+            .as_ref()
+            .unwrap()
+            .mission()
+            .actor(revived.0)
+            .unwrap();
+        assert_eq!(
+            actor.stations()[1].store.rounds,
+            tore_sim::ai::weapon_service::Rounds::Finite(0)
+        );
+    }
+}

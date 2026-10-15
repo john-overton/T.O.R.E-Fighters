@@ -2896,6 +2896,29 @@ impl Host {
                 spec.plane_loadouts.insert(plane.0, load.clone());
             }
         }
+        // AI members follow the first human slot in their wing. Explicit
+        // mission loads and every human slot keep their own choices.
+        let held: std::collections::BTreeSet<_> = self
+            .peers
+            .values()
+            .filter(|peer| !matches!(peer.stage, Stage::Closing { .. }))
+            .filter_map(|peer| peer.lobby.slot.map(|p| p.0))
+            .collect();
+        let planes = spec.open_planes();
+        for plane in &planes {
+            if held.contains(&plane.id) || self.spec.plane_loadouts.contains_key(&plane.id) {
+                continue;
+            }
+            if let Some(leader) = planes
+                .iter()
+                .filter(|p| p.wing == plane.wing && held.contains(&p.id))
+                .min_by_key(|p| p.member)
+                && leader.aircraft == plane.aircraft
+                && let Some(load) = spec.plane_loadouts.get(&leader.id).cloned()
+            {
+                spec.plane_loadouts.insert(plane.id, load);
+            }
+        }
         if !spec.plane_loadouts.is_empty() || self.world.tick() != 0 || self.ticks_run != 0 {
             match self.build(&spec) {
                 Ok((world, manifest)) => {

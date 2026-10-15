@@ -1067,6 +1067,10 @@ impl AiWings {
             };
             if let Some(load) = loaded {
                 actor.flight_mut().fuel = load.fuel_lbs;
+                actor.flight_mut().systems = tore_sim::aircraft_systems::Systems::new(
+                    config.engines,
+                    config.external_fuel_lbs,
+                );
             }
             for (index, station) in config.stations.iter().enumerate() {
                 bridge
@@ -1585,6 +1589,8 @@ impl AiWings {
         } = new;
         let stations = station_specs_loaded(&config, &quantities, guns_only);
         flight.fuel = fuel_lbs;
+        flight.systems =
+            tore_sim::aircraft_systems::Systems::new(config.engines, config.external_fuel_lbs);
         flight.set_payload(payload_lbs(&config, &stations))?;
         let own = experience
             .or_else(|| self.experience_for(id, side, wing))

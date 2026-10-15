@@ -2035,3 +2035,13 @@ checks layout and artwork, not full GPU presentation.
 The headless AI probe accepts up to 288,000 ticks (40 simulation minutes).
 This allows four-ship landing and parking checks on the 12,000 ft merged
 fields to finish their long taxi returns; normal flight duration is unchanged.
+
+### QMC wing loadout probe
+
+`TORE_DATA_DIR=<private-profile> target/debug/tore-app --validate-wing-loadout <output-directory> --no-audio`
+builds a QMC four-ship F-16C flight with Mk 82s, AIM-9s, no tanks and 60 percent
+internal fuel. It writes mission text and tick-zero recordings under the output
+directory, first with the previous default-wing policy and then with sharing.
+It asserts the accepted load survives airborne and ground starts and restart.
+The battery scenario is `qmc-wing-loadout`. This probe requires imported media
+but no display; do not point it at a shared profile.

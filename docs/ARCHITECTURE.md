@@ -10940,3 +10940,15 @@ pictures remain local. The [aircraft import guide](aircraft-import.md) describes
 the workflow; the [fleet audit](baselines/aircraft-animations.md) records bounded
 acceptance and remaining source gaps. These probes do not replace GPU, human
 handling or retail-runtime comparison.
+
+### QMC and human-flight load sharing
+
+The QMC mission opts into `share-flight-loadout` before the accepted ordnance
+is attached. `World::build` copies that checked load into `AiSetup::loadouts`
+for same-type player-wing members; `World::restart` uses that same setup.
+The host expands lobby choices into `plane_loadouts` for unoccupied same-wing
+slots, leaving explicit authored AI loads intact, then sends its normal
+FlightLoadouts message. AI respawn reads the built setup's accepted load.
+[The behavior contract](spec/quick-mission-menu.md#the-players-flight-loadout)
+and [multiplayer ownership](spec/multiplayer.md#human-flight-loadouts) define
+scope and provenance.

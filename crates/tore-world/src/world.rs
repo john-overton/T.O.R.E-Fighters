@@ -201,9 +201,8 @@ pub struct AiSetup {
     /// The mission names a ground target, which decides which wings strike
     /// ([`ai_wings::AiWings::apply_strike_roles`]).
     pub ground_target: bool,
-    /// The loadouts the players chose for planes of an open mission, by
-    /// plane, checked ([`crate::mission::LoadoutSpec::check_for_plane`]);
-    /// every other AI aircraft carries its standard load.
+    /// Accepted per-plane loads: multiplayer choices or QMC player-wing
+    /// copies. Every other AI aircraft carries its standard load.
     pub loadouts: std::collections::BTreeMap<u32, tore_sim::combat::loadout::Loadout>,
 }
 
