@@ -809,3 +809,70 @@ fn remembered_investigation_stops_when_the_mission_role_forbids_it() {
     mission.step(&lost_world, &flat, TimeOfDay(0)).unwrap();
     assert_eq!(mission.actor(1).unwrap().search_target, None);
 }
+
+#[test]
+fn cap_patrols_before_contact_and_engages_from_outside_station() {
+    for side in [1, 2] {
+        let mut mission = AiMission::new();
+        let mut config = setup(1, side, 0, [0., 20_000., -70000.], 0.);
+        config.sensors = perception_actor(Experience::Ace).sensors;
+        let mut actor = AiActor::new(config).unwrap();
+        enable_test_radar(&mut actor);
+        actor.set_assignment(engagement::Assignment {
+            role: engagement::Role::CombatAirPatrol,
+            patrol: Some(engagement::PatrolRegion {
+                center_ft: [0., 20_000., 0.],
+                radius_ft: 60760.,
+            }),
+            ..Default::default()
+        });
+        mission.push(actor);
+        mission.start_in_formation();
+        mission
+            .step(&world_with(&mission, []), &flat, TimeOfDay(0))
+            .unwrap();
+        assert_eq!(mission.actor(1).unwrap().activity(), Activity::Rejoining);
+        let mut target = visible_object(mission.actor(1).unwrap(), 2, [0., 20_000., -59000.]);
+        target.side = Side(3 - side);
+        for tick in 1..5 {
+            mission
+                .step(
+                    &world_with(&mission, [target.clone()]),
+                    &flat,
+                    TimeOfDay(tick),
+                )
+                .unwrap();
+        }
+        let actor = mission.actor(1).unwrap();
+        assert_eq!(actor.controller().target(), Some(2));
+        assert_ne!(actor.activity(), Activity::Rejoining);
+        // A live bandit outside the station must not extend the patrol's chase.
+        target = visible_object(mission.actor(1).unwrap(), 2, [0., 20_000., -61000.]);
+        target.side = Side(3 - side);
+        // Let the ordinary radar scan refresh the measured position.
+        for tick in 5..365 {
+            mission
+                .step(
+                    &world_with(&mission, [target.clone()]),
+                    &flat,
+                    TimeOfDay(tick),
+                )
+                .unwrap();
+        }
+        assert_eq!(mission.actor(1).unwrap().controller().target(), None);
+        assert_eq!(mission.actor(1).unwrap().activity(), Activity::Rejoining);
+        // The last bandit's loss ends the engagement, not the patrol duty.
+        mission
+            .step(&world_with(&mission, []), &flat, TimeOfDay(365))
+            .unwrap();
+        assert!(!mission.actor(1).unwrap().controller().mission_complete());
+        mission
+            .order(1, WingRequest::TargetAssignment(TargetOrder::HoldFire))
+            .unwrap()
+            .unwrap();
+        mission
+            .step(&world_with(&mission, []), &flat, TimeOfDay(366))
+            .unwrap();
+        assert_ne!(mission.actor(1).unwrap().activity(), Activity::Rejoining);
+    }
+}

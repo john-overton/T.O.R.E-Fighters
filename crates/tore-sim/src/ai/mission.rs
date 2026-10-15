@@ -2061,7 +2061,8 @@ impl AiMission {
     /// holds there, the wingmen in formation on the leader. Nothing happens while any hostile aircraft
     /// remains, or while any aircraft on the side is still departing. A wing
     /// led by the player stays with the player, whose own mission may still be
-    /// open.
+    /// open. CAP remains on station, and a wing with unfinished strike work
+    /// waits for its strike controller to finish the ground assignment.
     fn return_when_done(&mut self, world: &[WorldObject]) {
         let alive_on = |side: super::targeting::Side| {
             world
@@ -2105,7 +2106,20 @@ impl AiMission {
                 .map(|a| a.identity.wing)
                 .filter(|wing| self.external_leader(side, *wing).is_some())
                 .collect();
-            self.send_home(|a| a.identity.side == side && !human_led.contains(&a.identity.wing));
+            // Air superiority does not finish a ground assignment. Keep the
+            // whole wing together until its strike controller finishes.
+            let striking_wings: Vec<u8> = self
+                .actors
+                .iter()
+                .filter(|a| a.identity.side == side && a.strikes() && !a.strike_home())
+                .map(|a| a.identity.wing)
+                .collect();
+            self.send_home(|a| {
+                a.identity.side == side
+                    && !human_led.contains(&a.identity.wing)
+                    && !striking_wings.contains(&a.identity.wing)
+                    && a.assignment.role != engagement::Role::CombatAirPatrol
+            });
         }
     }
 
@@ -3500,7 +3514,11 @@ impl AiMission {
                         .total_cmp(&distance(own.position, b.position))
                 })
                 .map(|p| p.position)
-        } else if !actor.neutral && actor.assignment.role == engagement::Role::CombatAirPatrol {
+        } else if actor.assignment.role == engagement::Role::CombatAirPatrol
+            && selection.is_none()
+            && (!actor.neutral
+                || (actor.identity.is_leader() && actor.formation_order_tick.is_none()))
+        {
             actor
                 .assignment
                 .patrol

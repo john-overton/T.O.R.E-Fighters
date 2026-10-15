@@ -2005,3 +2005,26 @@ fn with_no_enemy_found_the_new_lead_flies_the_wings_waypoints_then_returns_to_ba
         Some(LandingReason::Ordered)
     );
 }
+
+#[test]
+fn a_strike_wing_keeps_its_ground_mission_after_the_last_bandit_dies() {
+    let mut mission = AiMission::new();
+    let mut leader = hornet(1, 0, [0., 6_000., -60_000.], 0.);
+    leader.set_home_runway(Some(runway()));
+    leader.set_strike_role(engagement::StrikeRole::Strike);
+    leader.set_strike_objective(engagement::StrikeObjective {
+        targets: vec![100],
+        defenses: Vec::new(),
+        point: Some([0., 0., 100_000.]),
+    });
+    mission.push(leader);
+    let mut hostile = object(mission.actor(1).unwrap(), 2);
+    hostile.id = 50;
+    hostile.position = [0., 6_000., 200_000.];
+    step(&mut mission, Some(hostile.clone()));
+    hostile.alive = false;
+    hostile.destroyed = true;
+    step(&mut mission, Some(hostile));
+    assert_eq!(mission.actor(1).unwrap().landing_order(), None);
+    assert!(!mission.actor(1).unwrap().controller.mission_complete());
+}

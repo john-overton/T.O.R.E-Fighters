@@ -667,8 +667,12 @@ alive or any aircraft on the side is still waiting or taking off (its landing
 traffic would hold the runway), and a mission that never had a hostile
 aircraft does not end this way.
 A wing led by the player stays with the player, whose own mission may still be
-open. The AI's objectives are air objectives (patrol, intercept, escort), so
-no hostile aircraft left means they are complete.
+open. A wing with unfinished ground work stays on its strike assignment until
+its strike controller finishes; see [AI strike](ai-strike.md). A CAP assignment
+continues patrolling after the last bandit dies; see
+[CAP navigation](ai-awareness.md#assignment-delivery-and-observed-attack-reports).
+These exceptions implement John's correction of 2026-10-15. Intercept and escort
+wings without remaining ground work keep the return rule.
 
 ### Normal formation variation and transitions
 
@@ -1232,7 +1236,7 @@ fuel reaches zero is lost. The route ends in a Land goal, so the aircraft lands
 and stays parked; the takeoff and landing sequences are specified in
 [AI airfield sequences](ai-airfield.md). With a home runway, leaders,
 singletons and wingmen of a human leader land the same way (fitted).
-Damage-triggered disengagement is open. When no hostile aircraft remains, the
+When no hostile aircraft remains and no ground strike or CAP duty remains, the
 same landing and return path end the mission
 ([return to base](#return-to-base-when-the-mission-is-over), opinionated).
 

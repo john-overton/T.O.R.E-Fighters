@@ -734,3 +734,23 @@ authored site and relocated seed 1, with 0.05 ft clearance tolerance. Its
 per-theater rows separate unavailable shapes and authored footing exceptions.
 `surface-grounding-radar-render` draws the Cuba radar installation (QCLST, GCI) offscreen.
 See [grounding](../formats/objects-and-shapes.md#grounding-every-object-stands-on-the-bottom-of-its-shape).
+
+## CAP orders and unfinished strikes
+
+`ai-objective-cap-orders-station` flies friendly F-15 and enemy Su-27 CAP
+leaders 150 nm apart. Each stays within 13 nm of its own 10 nm station,
+allowing a turn outside the boundary. `ai-objective-cap-orders-engage` starts
+5 nm apart and requires both CAP leaders to select a target and fire.
+`ai-objective-cap-intruder-friendly` and `ai-objective-cap-intruder-enemy`
+start a transport 50 nm away and require the patroller to acquire and fire
+when it enters the station. Both fail with zero shots before the fix.
+`AI probe CAP` reports first target tick, launch requests and maximum station
+distance for each patroller. These are observations, never inputs to the AI.
+
+`qmc-strike-a10-clear-air` uses the Vladivostok command HQ and an A-10 strike
+wing. The driver's `--quick-wing --clear-air-at 10` gives the wing an explicit
+strike order and removes its one enemy aircraft at ten seconds through combat
+health. The wing must still release, impact and egress.
+`qmc-strike-a10-maverick-clear-air` repeats it with a Maverick and lets the AI
+choose its store. The fixture does not
+alter AI decisions or expectation thresholds to keep an early return passing.
