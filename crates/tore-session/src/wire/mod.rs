@@ -192,7 +192,11 @@ pub fn path_words(path: Path) -> &'static str {
 /// 32 since the airport merge (slice nr-apmerge): no message changes, but
 /// the shared world differs (84 paired theater airfields are single fields
 /// with new runways and ids aliased), so an older game must not join.
-pub const PROTOCOL_VERSION: u16 = 32;
+/// 33 since the missile identities pass (slice nr-fox2): no message
+/// changes, but the store catalog (new R-27 variants, corrected names and
+/// carrier rules), IR seeker response and radio cooldown keys differ, so an
+/// older game must not join.
+pub const PROTOCOL_VERSION: u16 = 33;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

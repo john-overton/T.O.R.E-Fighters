@@ -3076,7 +3076,11 @@ again with an observer; the capture format did not change for it.
   readout's gunsight group;
   32 since the airport merge (slice nr-apmerge): no message changes; the
   shared world differs (paired theater airfields merged into single fields),
-  so a game of another world must not join.
+  so a game of another world must not join;
+  33 since the missile identities pass (slice nr-fox2): no message changes;
+  the store catalog (R-27 variants, corrected names, carrier rules), IR
+  seeker response and radio cooldown keys differ, so an older game must not
+  join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
