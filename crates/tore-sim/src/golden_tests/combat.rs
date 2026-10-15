@@ -32,8 +32,8 @@ const OWN: u32 = 0;
 // Present wrecks now receive physical hits, remain observable/selectable, and
 // missiles stop orbiting passed memory points. Measured on Apple Silicon CI.
 const GUNS_AND_DAMAGE: u64 = 0x51ef_d933_d2ee_7734;
-const GUIDED_MISSILES: u64 = 0xcbbf_afda_33ca_12a5;
-const PLAYER_COUNTERMEASURES: u64 = 0x1bab_4b40_93d3_19c9;
+const GUIDED_MISSILES: u64 = 0xc52d_e5e2_8f38_0279;
+const PLAYER_COUNTERMEASURES: u64 = 0xc074_eb8a_7423_b3ca;
 
 #[test]
 fn combat_guns_and_damage_match_recorded_fingerprint() {
