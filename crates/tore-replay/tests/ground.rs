@@ -159,6 +159,23 @@ fn events() -> Vec<(u64, Event)> {
         (250, impact),
         (260, cluster),
         (300, outcome),
+        // A surface gun's round on the unit names no victim; the unit's
+        // wreck names the gun as its killer.
+        (
+            300,
+            Event::new(kind::WEAPON_OUTCOME)
+                .with_subject(0x5000_0002)
+                .with(field::PROJECTILE, Value::Id(50))
+                .with(field::RESULT, vocab::outcome::HIT)
+                .with(field::DAMAGE, 100),
+        ),
+        (
+            300,
+            Event::new(kind::SURFACE_WRECK)
+                .with_subject(0x5000_0001)
+                .with_object(0x5000_0002)
+                .with(field::REASON, "it was hit by a gun"),
+        ),
     ]
 }
 
@@ -247,6 +264,9 @@ fn the_exports_say_what_the_pilot_and_the_weapons_did() {
         "shot 40 from You landed: it landed 940 ft from the point it was steering for",
         "shot 30 from You burst and scattered its submunitions",
         "shot 40 from You: hit, damage 200 because it was guided on Friendly 1-2's laser",
+        // A surface hit is only the shot's outcome and its kill only the
+        // unit's wreck: both still count for the shooter.
+        "surface object 0x50000002\n  shots 0 | hits 1 | kills 1",
     ] {
         assert!(summary.contains(line), "missing {line:?} in:\n{summary}");
     }

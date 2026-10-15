@@ -1033,7 +1033,9 @@ names them.
 A plain-English text file: the mission, conditions, result and length; each
 aircraft's airborne time, highest and lowest G, lowest height above sea
 level and above the ground (when telemetry records it), stalls, spins, fuel
-used, shots, hits, kills, chaff and flares released, final state and time in each AI activity; a table
+used, shots, hits, kills (hits and kills on surface units count too: a shot's
+`weapon.outcome` hit on anything but an aircraft, and each `surface.wreck`'s
+killer), chaff and flares released, final state and time in each AI activity; a table
 of every shot (launch geometry, time of flight, peak speed, closest approach
 to the intended target, outcome and why); the communication transcript
 with triggers, outcomes and reasons, including the music's changes; the

@@ -180,6 +180,11 @@ pub fn write_summary(
     let mut surface_counts: BTreeMap<u32, SurfaceCounts> = BTreeMap::new();
     let mut shots: Vec<Shot> = Vec::new();
     let mut shot_by_projectile: HashMap<u32, usize> = HashMap::new();
+    // A hit on an aircraft is a `combat.hit`; a hit on a surface unit (a
+    // vehicle, ship, site or parked aircraft) is only the shot's
+    // `weapon.outcome` (a bomb's blast or a gun round names no victim), and
+    // its kill only the unit's `surface.wreck`.
+    let aircraft: std::collections::BTreeSet<u32> = recording.aircraft().map(|a| a.id).collect();
     for frame in recording.frames(0, u64::MAX) {
         let frame = frame?;
         let tick = frame.tick;
@@ -250,6 +255,12 @@ pub fn write_summary(
                     {
                         shots[*i].outcome = Some((tick, e.clone()));
                     }
+                    if e.string(field::RESULT) == Some("hit")
+                        && let Some(id) = subject
+                        && !e.object.is_some_and(|victim| aircraft.contains(&victim))
+                    {
+                        stats.entry(id).or_default().hits += 1;
+                    }
                 }
                 kind::COMBAT_HIT => {
                     if let Some(id) = subject {
@@ -274,6 +285,9 @@ pub fn write_summary(
                 kind::SURFACE_WRECK => {
                     if let Some(id) = subject {
                         surface_counts.entry(id).or_default().destroyed = Some(tick);
+                    }
+                    if let Some(killer) = e.object {
+                        stats.entry(killer).or_default().kills += 1;
                     }
                 }
                 kind::COMBAT_COUNTERMEASURE => {
