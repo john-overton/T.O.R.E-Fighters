@@ -463,6 +463,56 @@ fn initial_stick_and_commands_do_not_rewrite_ticks_before_the_host_can_receive_t
     }
 }
 
+/// A game that hears its seating late, the host already some ticks past
+/// the seating tick (a slow frame as the mission loads; the strict hosted
+/// test on the Linux CI runner, nr-ci2), finds its clock behind the host and
+/// jumps ahead. The host has had no input from it yet and flies the plane
+/// neutral until the first arrives, so the ticks the jump passes over are
+/// neutral in the prediction too, and the first live input is one the host
+/// can still receive in time: no mismatch and no correction.
+#[test]
+fn a_seating_heard_late_predicts_the_hosts_neutral_ticks_and_mismatches_nothing() {
+    for (rtt_ms, late_ms) in [(20, 40), (20, 60), (60, 45), (120, 30)] {
+        let mut rig = Rig::new(
+            spec(1, 1, 20),
+            LinkConfig::for_round_trip(rtt_ms * MS, 0., 0., 0.),
+            5,
+        );
+        let player = rig.join(
+            |_| {},
+            Box::new(|_, _, _| Controls {
+                pilot: PilotInput {
+                    roll: 0.4,
+                    yaw: 0.3,
+                    ..Default::default()
+                },
+                ..Controls::default()
+            }),
+        );
+        assert!(rig.run_until(Duration::from_secs(3), |r| {
+            r.logs.iter().any(|l| matches!(l, HostLog::Seated { .. }))
+        }));
+        // The game misses its frames while the host flies on.
+        rig.players[player].stalled = true;
+        rig.run(late_ms * MS);
+        rig.players[player].stalled = false;
+        assert!(rig.run_until(Duration::from_secs(1), |r| r.seated(player)));
+        rig.run(Duration::from_secs(3));
+        let client = &rig.players[player].client;
+        let stats = client.clone_stats();
+        assert!(stats.hashes_compared > 60);
+        assert_eq!(
+            stats.mismatches,
+            0,
+            "rtt={rtt_ms} late={late_ms}: {:?}",
+            client.corrections()
+        );
+        assert_eq!(stats.corrections, 0);
+        let flight = &client.prediction().unwrap().plane().flight;
+        assert!(flight.aileron > 0.3, "live inputs were lost");
+    }
+}
+
 /// Flies one client for `seconds` on a clean link and checks that, after
 /// seating settles, the prediction equals the host at every snapshot.
 fn prediction_matches_the_host(seconds: u64) {
