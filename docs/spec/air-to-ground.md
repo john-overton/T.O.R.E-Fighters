@@ -61,8 +61,8 @@ Knife pods.
 - **Missiles.** Mavericks lock a designated ground target, or the hottest one
   near the bore. Harpoon and Exocet go after ships. AS-7 and AS-15 ride the
   radar track. The laser missiles ride the spot.
-- **Bomb motion that matches the game**, read from the original's own bomb
-  routine (a plain parabola with a small random scatter); multi-bomb packs
+- **Bomb motion with gravity and drag**, using the fitted shared model
+  and the existing small random scatter; multi-bomb packs
   released in one instant with their retail offsets; pods holding their real
   rocket count; cluster bombs with their retail wide burst.
 
@@ -461,7 +461,7 @@ above:
   cone, checked every tick. A new designation moves the laser to the new
   target, so the weapon follows it if it lies inside the cone and goes blind if
   not: retail's retargeting, with no separate rule.
-- **Not guiding**, a laser bomb (waiting or blind) falls on the bomb equation
+- **Not guiding**, a laser bomb (waiting or blind) falls with the shared bomb model
   from where it is (fitted; see [unknowns](#unknowns)); a laser missile flies
   straight on with its motor and sag.
 - The spot a weapon homes on is its aircraft's or a buddy's by aircraft id and
@@ -752,28 +752,11 @@ good hit probability" (retail manual p. 125) and no release range cue.
 
 Built (slice W1, `combat::guided`, `weapon_hud/guided.rs`), agent choices:
 
-- **The glide** (retail data): a laser bomb or JDAM leaves along the nose at
-  the record's launch speed (`launchRetard` 90: 90 percent of the aircraft's
-  speed), slows at 14 ft/s squared toward 278 ft/s and turns at 6,370 units a
-  second (about 35 degrees a second), and does not fall while it guides (the
-  records have neither the bomb flag 0x10 nor the gravity flag 0x4). Its life
-  is 60 s. So the reach is a slant distance fixed by the release speed: about
-  22,500 ft from 450 kt, a little more from faster releases. A higher release
-  spends more of it going down: from 8,000 ft level at 450 kt the reach runs
-  8,000 to about 19,000 ft ahead, from 15,000 ft at 480 kt 15,000 to about
-  18,100 ft, and above about 20,000 ft at 350 kt nothing ahead is reachable.
-- **The reach**: the ground ranges straight ahead along the ground track that
-  lie inside zone 1 at release (45 degrees in heading and pitch about the
-  nose, the record's range times the laser weather share for a laser weapon)
-  and that the glide reaches within its life. The fly-out flies the turn tick
-  by tick, as the bomb does, then works out the straight rest from the
-  record's slowdown. 32 samples across the zone's ground range, then 12
-  bisections on each edge of the first good stretch. The near edge is the 45
-  degree cone (in level flight, the height), the far edge the glide. A laser
-  missile or the AT-2 shows its zone 1 instead (no fly-out; fitted). Slice
-  H1's `Reach::search` starts from the unguided throw, which a glide with no
-  fall does not make good, so W1 searches the samples instead and returns
-  H1's `Reach` type.
+- **The glide and reach:** the shared [bomb motion](#bomb-motion) model
+  supplies gravity, drag and limited steering. The release range search flies
+  that model within the record's release cone and range. Its near and far
+  edges bound the first reachable stretch. Missiles retain their existing
+  powered flight and range rules.
 - **The aim**: the laser spot (the plane's own, else a buddy's), the JDAM's
   point (the designated ground object, else the sight's held point) or the
   AT-2's designated object. `R` is its ground range. IN RNG means the aim
@@ -1091,10 +1074,10 @@ record-by-record table).
 
 | # | Class | Records | Carriers | How it works | Status |
 | --- | --- | --- | --- | --- | --- |
-| 1 | Free-fall bombs | MK82, MK84, FAB250, FAB500, FAB1000, MK82P3 (3-pack) | 20 to 26 | Retail bomb motion; CCIP and LVL; fuze, splash and craters exist | Built (B1, H1, X1) |
-| 2 | Retarded bombs | MK82HD, MK82P (6-pack), MK82AIR (7-pack) | 17 to 26 | As 1; the launch retard 66 only lowers the release speed to 66 percent of the aircraft's, then the same parabola; packs leave in one instant with stepped offsets | Built (B1, H1, X1) |
+| 1 | Free-fall bombs | MK82, MK84, FAB250, FAB500, FAB1000, MK82P3 (3-pack) | 20 to 26 | Shared fitted gravity and drag; CCIP and LVL; fuze, splash and craters exist | Built (B1, H1, X1) |
+| 2 | Retarded bombs | MK82HD, MK82P (6-pack), MK82AIR (7-pack) | 17 to 26 | As 1; full aircraft velocity at release, then a deploying retarder adds drag; packs leave in one instant with stepped offsets | Built (B1, H1, X1) |
 | 3 | Cluster bombs | CBU87, CBU89, MK20, RBK250, RBK500 | 26 each | As 1 (the 278 ft/s speed command does not change a bomb's path); retail wide splash; presentation-only bomblet flashes | Built (B1, H1, X1), with the flashes ([ordnance presentation](ordnance-presentation.md#cluster-bomb-flashes)) |
-| 4 | Laser-guided bombs | GBU10, GBU10A, PAVEWAY, PAVEWA3, GBU28 | 24 (GBU28: 5) | Retail: homes on the release target while its own launcher's designator works and the target stays inside 45 degrees; never reacquires. TORE: homes on the spot (own, or a buddy's, opinionated). Loss: holds heading and pitch and slows to 278 ft/s (retail), with a fitted ballistic fall | Built (W1) |
+| 4 | Laser-guided bombs | GBU10, GBU10A, PAVEWAY, PAVEWA3, GBU28 | 24 (GBU28: 5) | Retail: homes on the release target while its own launcher's designator works and the target stays inside 45 degrees; never reacquires. TORE: homes on the spot (own, or a buddy's, opinionated). All phases use the shared gravity and drag model; loss removes steering | Built (W1) |
 | 5 | JDAM | GBU29, GBU29P, GBU30 | 25 to 26 | Retail "optical": home on the object designated at release, follow it, fire and forget, release range cut by visibility. TORE (opinionated, John): GPS, fly to the point designated at release, any weather, a moving target is missed | Built (W1) |
 | 6 | Rocket pods | LAU61, B8, B13, LAU10 | 24 to 26 | A pod holds its real rockets (19, 19, 5, 4); each press fires one rocket and a held trigger repeats four a second (LAU-10 one per press); rocket pipper | Built (B1, H1, X1) |
 | 7 | Optical rocket | AT2 | 27 (Mi-24 default) | Retail: steers at the designated object until impact (cruise profile), needs its launcher alive, zone 1 500 to 18,000 ft and 45 degrees; a switch does not retarget it. Without a target it flies unguided | Built (W1: command guidance while the launcher keeps the target in its sight) |
@@ -1204,37 +1187,66 @@ seconds). In LVL a held trigger auto-releases once at 0 s.
 
 ### Bomb motion
 
-Retail data, [bomb motion](../formats/weapons.md#bomb-motion). Implemented
-(B1): `tore_sim::combat::ballistics` (`BombMotion`, `ReleaseState`,
-`predict_impact`). Pack offsets are laid along the aircraft's lateral axis
-(fitted), and a pod's weight falls by one rocket's share per rocket (fitted).
+Opinionated behaviour requested by John on 2026-10-15: every bomb inherits
+its aircraft's velocity and falls under gravity, including guided bombs. The
+numerical model below is fitted, an agent decision, not measured retail parity.
+Retail's former vacuum parabola and fixed-speed guided glide remain research
+facts in [weapons](../formats/weapons.md#bomb-motion).
 
-| Fact | Retail |
-| --- | --- |
-| Release position and direction | The station position with the aircraft's attitude: the bomb leaves along the **nose** (heading and pitch), not along the flight path, plus the station slew (zero on every imported bomb station). Successive releases alternate sides of a paired station |
-| Release speed | The aircraft's speed times `launchRetard` / 100, at least the record's initial speed (0), clamped to 0 to 1,466 ft/s for slick, retarded and pack bombs and 0 to 2,933 ft/s for cluster. `launchRetard`: 100 slick, 66 Snakeye, 6-pack and 7-pack, 90 cluster and guided. No ejection push |
-| Path | A vacuum parabola: gravity **32 ft/s squared**, no drag, no terminal speed, no retard after release. The bomb noses over along its velocity; heading stays fixed |
-| Scatter | Retail: each bomb adds a uniform random plus or minus **3.0 degrees** (546 units) to its heading and to its pitch, the player's too. **TORE: plus or minus 1.5 degrees (273 units), opinionated (John, 2026-10-11)**, for every bomb, player and AI. The earlier "keep the player's retail 3 degrees" note (2026-10-10) is superseded. Each bomb rolls its error from combat's random state mixed with the release tick and the round's number (agent, slice ST-LV): rolled from combat's stream alone, a mission's first bomb, released before anything else had rolled it, took the same error every time (1.25 degrees left and 1.31 degrees low, about 330 ft short of a 5,000 ft level release), which read as a sight that bombs short |
-| Hits | Whatever terrain or object the normal collision finds; the fuze arm time and radius apply, and a bomb that reaches the ground unarmed is a dud ([warnings](#warnings)) |
-| Pods | As [Rockets](#rockets) |
+All bomb motion and prediction use `combat::bomb_flight`: explicit midpoint
+integration at **120 Hz**, gravity **32 ft/s squared**, density
+`0.002377 exp(-max(altitude, 0) / 30000)` slugs per cubic foot. There is no wind
+term. Record weight divided by the release count gives pounds per bomb, with a
+50 lb floor for malformed or synthetic records. Mass is weight / 32 slugs.
+Effective drag area is `0.1323 (weight / 500)^(2/3)` square feet, multiplied
+by 1.3 for guided kits. Drag acceleration is dynamic pressure times effective
+area divided by mass. These are size classes scaled by mass, not measured
+individual aerodynamic tables.
 
-The sight is the same calculation without the scatter. A test checks the mean
-path (scatter off, flat ground, within a foot of the pipper) and the scatter
-bounds (1.5 degrees) separately.
+Retarded bomb records have flag 0x10, no cluster flag 0x800000 and launch
+retard below 100. They inherit full aircraft velocity, then deploy additional
+drag linearly from 0.25 to 0.75 seconds: **2.4 square feet**, or **5.5** for
+MK82AIR. Launch retard now identifies this class, it does not reduce launch
+speed. Cluster and novelty stores use the same gravity and drag model.
 
-**A guided bomb with no target** (laser bomb after losing its lock, JDAM released
-with none) has neither the bomb flag nor gravity: it holds its heading and pitch
-and slows to its final speed of 278 ft/s (retail data). Whether anything makes it
-fall is an [unknown](#unknowns); the fitted fallback is the bomb parabola from its
-current state.
+Guidance supplies acceleration normal to velocity, limited to four g and
+`dynamic pressure * effective area * 15 / mass`. The command is velocity
+pursuit with gain 4 and gravity compensation, with a minimum 0.25 second
+time to target. GBU10, GBU10A and PAVEWAY use full available steering above a
+2 ft/s squared threshold, with proportional steering below it; PAVEWA3, GBU28 and coordinate bombs use proportional
+steering. Steering drag is acceleration squared divided by
+`max(dynamic pressure / mass * 12, 1)`, multiplied by 0.15 for bang-bang
+steering and 0.08 for proportional steering. Record lifetime limits guidance;
+without guidance bombs continue falling. A 300 second safety lifetime bounds
+bad inputs. Existing laser acquisition, lock loss and coordinate rules apply.
+
+CCIP, level release, guided reach and TTI use this same step. Terrain crossings
+are located inside the final tick. Guided reach first locates the release geometry with 64 cheap samples and
+16 boundary refinements, then flies eight samples inside that interval and
+bisects each energy boundary eight times. An exact bounded memo reuses
+identical non-translational launch states. In-flight guided TTI refreshes every 15 ticks
+and counts down between refreshes. Client CCIP trails receive the body
+parameters in the readout, so peers must agree on these parameters and this
+model. Checkpoints include the integrated bomb state. Recorded transforms
+continue to drive replay playback.
+
+Scatter stays plus or minus **1.5 degrees**, with the same random stream,
+release count and pack offsets. Guided releases with no spot retain their
+existing scatter rule. AI skill offsets and release tolerances are unchanged.
+Laydown safety height uses the same fall and horizontal travel as the bomb.
+Hit testing, fuzes, damage and impact sounds are unchanged.
+
+All bomb releases use `&bomb.11k`, except ~BLDR and ~MOOSE, which retain their
+record's novelty sound. See [sound](sound.md#weapon-launch-and-bomb-release).
+Measured speeds, prediction errors and replay checks are in the
+[bomb-flight validation](../baselines/bomb-flight.md).
 
 ## The AI and these weapons
 
-Specified 2026-10-11, **not built yet**; the full behaviour is in [AI
-strike](ai-strike.md). What it means here:
+Implemented; the full behaviour is in [AI strike](ai-strike.md). What it means here:
 
 - **One cockpit, two pilots.** The ground-attack state (target, selected store,
-  CCIP or LVL, seeker mode, sight, laser) becomes one record per aircraft that a
+  CCIP or LVL, seeker mode, sight, laser) is one record per aircraft that a
   human edits with keys and the AI edits from its strike controller. When the AI
   takes a plane it continues the human's attack, if it thinks it is safe; a human
   taking an AI striker finds its target, store, mode and laser.
@@ -1443,11 +1455,11 @@ records (ranges, weights, counts) are in the inventory above.
 | LVL impact | the mean path brought down to the target's ground; a moving object led by the fall | opinionated (agent, slice ST-LV) |
 | CCIP impact | where the mean path first meets the terrain along the fall (retail: the ground under the release point for the whole fall) | opinionated (John, 2026-10-11; retail rule kept as `predict_impact_flat`) |
 | Sight release point | the pylon the next store leaves (its side of a paired station), for CCIP, the level T, the rocket pipper and the AI's release gate | opinionated (John, 2026-10-12, slice BP3) |
-| Unguided fall of a laser bomb | a laser glide bomb let go with no spot falls on the bomb equation with a dumb bomb's scatter (up to 1.5 degrees in heading and pitch, each bomb its own) and waits for a spot | opinionated (John, 2026-10-12), scatter slice ST-G |
+| Unguided fall of a laser bomb | a laser glide bomb let go with no spot falls with the shared bomb model with a dumb bomb's scatter (up to 1.5 degrees in heading and pitch, each bomb its own) and waits for a spot | opinionated (John, 2026-10-12), scatter slice ST-G |
 | Release range scale | x=390, the missile scale | spec-derived |
-| Guided bomb glide | along the nose at 90 percent of the speed; 14 ft/s squared down to 278 ft/s; 6,370 units a second (about 35 degrees a second); no fall while guiding; 60 s life | retail data |
+| Guided bomb glide | Aircraft velocity at release, gravity and drag with limited steering and energy loss, as [bomb motion](#bomb-motion) | fitted model, agent constants; requested behaviour John 2026-10-15 |
 | Level T for guided bombs: bar | the reach's far edge less 2/5 of the reach; hold releases within 3 ticks of the bar, aim within 10 degrees of the track | opinionated (agent; John asked for release at the bar) |
-| Guided reach search | 32 samples across zone 1's ground range, 12 bisections an edge; a missile shows its zone 1 | opinionated (agent) |
+| Guided reach search | 8 samples across zone 1's ground range, 8 bisections an edge; a missile shows its zone 1 | opinionated (agent) |
 | AT-2 launcher sight | the target inside the launcher's 45 degree zone-1 cone with a clear line (the 25 ft rule), every tick; any loss permanent | opinionated (lead ruling, 2026-10-10) on retail data |
 | Guided weapons in flight listed for the time to impact | 4, oldest first | plan section 9 |
 | HUD TTI row | under the laser rows from y=307, x=207, 12 px steps; oldest known time, `X3` count, IMPACT for 1 s | opinionated (John, 2026-10-11); layout agent |
@@ -1491,7 +1503,7 @@ found these promised or specified items unbuilt:
 - A bomb released below its arm time: LOW before the release, and the bomb lands
   a dud (a puff of dirt, no burst or splash).
 - A moving target with a GPS bomb: the bomb hits the stored point and misses.
-- A bomb falls on its parabola with up to 1.5 degrees of scatter: the pipper marks
+- A bomb falls with gravity and drag and up to 1.5 degrees of scatter: the pipper marks
   the mean, so a single bomb can land beside it. Every bomb takes its own error,
   the first of a mission included.
 - A target on higher or lower ground than the ground under the release point:
@@ -1520,7 +1532,7 @@ filled in with something plausible.
 | How the page treats a designated emitter that stops emitting | It leaves the list at the next rebuild; the designation drops past the seeker's memory | As the retention row |
 | Whether the RWR reads the same radar emission fields as the HARM seeker (so A-G is silent) | The RWR keeps today's behaviour | Trace the RWR consumers |
 | Whether "LASER SEEKER DAMAGED" zeroes the designator | The designator works while its aircraft lives | Trace the damage writer that indexes the message table |
-| How a guided bomb moves after losing its target: it holds attitude and slows to 278 ft/s; whether anything makes it fall | The bomb parabola from its current state (fitted) | Trace motion types 1 and 2 in the move routine |
+| How a guided bomb moves after losing its target: it holds attitude and slows to 278 ft/s; whether anything makes it fall | The shared gravity and drag model from its current state (fitted) | Trace motion types 1 and 2 in the move routine |
 | Which objects carry night flag 0x1000000 | No night rule | Scan the object type flags |
 | What a player sees firing an optical weapon (JDAM, AT-2) with no target | Release refused with NO TARGET (opinionated, agent, the warnings table; slice W1) | Trace the fire path before the release routine and the HUD readiness |
 | Whether the release-point ground height differs from the ground directly below (a cache detail) | Ground directly below the release point | Trace the height cache writers |

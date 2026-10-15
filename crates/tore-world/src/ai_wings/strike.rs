@@ -437,6 +437,7 @@ pub(super) fn describe(
                 maximum_range_ft: f64::from(zone.maximum_range.max(0)),
                 round_speed_fps: (kind == StoreKind::Rocket)
                     .then(|| f64::from(w.movement.maximum_speed)),
+                bomb_body: tore_sim::combat::bomb_flight::Body::of(w),
                 release_speed_share: match w.movement.launch_retard {
                     0 => 1.,
                     retard => f64::from(retard) / 100.,

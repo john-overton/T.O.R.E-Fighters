@@ -433,7 +433,7 @@ flowchart LR
         S[combat::sight<br/>targeting sight] --> H
     end
     subgraph delivery[Delivery]
-        B[combat::ballistics<br/>bomb equation, packs, pods]
+        B[combat::ballistics and bomb_flight<br/>shared bomb integration, packs, pods]
         D[combat::delivery<br/>CCIP, LVL, warnings, reach]
         L[combat::laser<br/>laser state and spots]
         U[combat::guided<br/>laser, GPS and command flight]
@@ -453,18 +453,23 @@ flowchart LR
 - `sensors::track::ground` keeps one ground list for the A-G page, the IR
   page's ground objects and the HARM page, rebuilt on the retail timers. The
   fire loop and the HUD read it through the sensors, never the world.
-- `combat::ballistics` is the retail bomb equation (32 ft/s squared, no drag,
-  released along the nose with a random error of 1.5 degrees, retail's 3 halved), the pack and pod
-  rules and the impact predictor. Bomb paths live in `live::State::bombs`, not
-  on `Projectile`.
+- `combat::bomb_flight` supplies the fitted 120 Hz gravity, drag, retarder and
+  steering integrator shared by live bombs and every bomb predictor.
+  `combat::ballistics` owns release state, unchanged scatter and pack/pod rules,
+  terrain crossing and cached unguided paths in `live::State::bombs`. Bomb
+  attack inputs select ground-track heading feedback in the ordinary bank
+  controller; this per-tick handling flag is rebuilt after a checkpoint.
+  Target choice, skill draws and release gates remain in the strike controller.
+  Guided bombs use the same integrator through `live::guided`; powered weapons
+  keep their missile motion. Constants are in [bomb motion](spec/air-to-ground.md#bomb-motion).
 - `combat::delivery` rebuilds the CCIP, level-release and rocket solutions every
   step from that step's launcher (skipped in the checkpoint, so nothing depends
   on history) and owns `Reach`. `combat::guided` flies the laser bombs, JDAMs,
   laser missiles and the AT-2 (`live::guided` holds each flight) and gives the
   same `Reach` from its fly-out. `live::agm` holds the HARM cue, surface-seeker
   support, retargeting and blinding.
-- Only a human seat's ownship uses these paths. The AI keeps its stores, does
-  not attack the ground and does not lase (the AI strike round, built since, uses the strike cockpit instead).
+- Human seats and AI strikers share the strike cockpit and the same weapon
+  and delivery paths. The AI supplies ordinary flight and release inputs.
 - The host builds `bomb_sight`, `guided`, `weapon_tti`, the HARM cue and the
   ground pages into the readout; `weapon_hud/{bombs,guided,agm,laser}.rs` and
   `instruments/targeting.rs` draw them. These fields are host-built and not on

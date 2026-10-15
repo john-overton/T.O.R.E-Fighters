@@ -539,3 +539,10 @@ when the three virtual R-27 entries are byte-for-byte AA10 donor aliases. A
 variant supplied with different bytes is still hashed. This keeps old tapes
 readable without weakening the guard against actual changed imports. Mission
 recordings still retain their recorded event stems and frame data.
+
+## Bomb flight state
+
+Bomb paths include body mass, effective drag area, deployed-retarder area,
+steering class and guidance duration, plus the last integrated tick, position
+and velocity. These fitted-model parameters are same-build checkpoint state.
+The release origin and initial velocity remain available for sight prediction.

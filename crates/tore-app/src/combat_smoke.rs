@@ -627,11 +627,9 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
             // Replay the same authoritative host tick inputs in a second state.
             // Presentation/pause never calls this path and cannot advance either copy.
             let mut replay = combat.state.clone();
-            if let Some(name) = combat.state.own().configuration().stations[index]
-                .weapon
-                .fire_sound
-                .as_deref()
-            {
+            if let Some(name) = tore_sim::combat::release_sound(
+                &combat.state.own().configuration().stations[index].weapon,
+            ) {
                 let pcm = tore_formats::pcm::Pcm::parse(
                     name,
                     data.get(name).ok_or("missing firing PCM")?,

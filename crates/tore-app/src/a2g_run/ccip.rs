@@ -56,10 +56,13 @@ impl Pass {
             let ground = scene.ground(aim[0], aim[2]);
             let point = [aim[0], ground, aim[2]];
             let fall = if ballistics::is_bomb(weapon) {
-                let release_speed =
-                    tore_sim::combat::launch_speed(&weapon.movement, (speed * 256.) as i32)
-                        .map_or(0., f64::from);
-                let release = ReleaseState::onto(point, forward, release_speed, o.altitude);
+                let release = ReleaseState::onto_body(
+                    point,
+                    forward,
+                    speed,
+                    o.altitude,
+                    tore_sim::combat::bomb_flight::Body::of(weapon),
+                );
                 through = release.position;
                 tore_sim::combat::ballistics::predict_impact(release, |_, _| ground)
                     .map_or(0., |impact| impact.seconds)

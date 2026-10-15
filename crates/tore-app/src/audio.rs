@@ -243,7 +243,7 @@ impl LaunchSounds {
                 if tore_sim::combat::live::is_gun(&weapon) {
                     return None;
                 }
-                let sound = weapon.fire_sound?;
+                let sound = tore_sim::combat::release_sound(&weapon)?.to_owned();
                 Some((name.clone(), (sound, weapon.effects.max_sound_distance)))
             })
             .collect();
@@ -332,7 +332,7 @@ impl LaunchWatch {
                 Some(Heard {
                     shooter: p.owner,
                     position: p.position,
-                    sound: weapon.fire_sound.clone()?,
+                    sound: tore_sim::combat::release_sound(weapon)?.to_owned(),
                     max_distance_ft: weapon.effects.max_sound_distance,
                 })
             })

@@ -48,14 +48,12 @@ decisions): the sizes and the choice of recordings are not retail.
 
 ## Weapon launch and bomb release
 
-Every weapon plays the recording its own record names when it leaves the
-aircraft, and nothing else chooses it. A Maverick (AGM-65A and AGM-65G) plays
-`&ASHVMIS.11K`, the recording it shares with the Shrike, Harpoon, SLAM, HARM,
-Exocet, Kedge, Kickback, AS 30L and Kerry; the MK-82 family and MK-84 play
-`&BOMB2.11K`; the cluster and guided bombs play `&BOMB.11K`. Retail has no
-second recording for any of them, so the Maverick sound is a loud, heavy one by
-design: its energy builds to a peak about half a second in, and it is the
-loudest missile launch in the game.
+Bombs use `&bomb.11k` on release, including slick, retarded, cluster, packed,
+laser and coordinate stores (opinionated, John, 2026-10-15). The novelty
+~BLDR and ~MOOSE keep their own `&mothbf.11k`. One shared `release_sound`
+helper supplies cockpit, other-aircraft, multiplayer and replay playback.
+Impact sounds are unchanged. Other weapons keep their record's firing sound:
+a Maverick, for example, plays `&ASHVMIS.11K`.
 
 - **One sound per release.** The sound is asked for once per trigger call,
   after the call has made all its projectiles. A 3-, 6- or 7-bomb pack is one

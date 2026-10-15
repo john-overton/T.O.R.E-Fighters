@@ -825,6 +825,7 @@ fn strike_inputs() -> crate::ai::strike::Inputs {
             maximum_range_ft: 20_000.,
             round_speed_fps: None,
             release_speed_share: 1.,
+            bomb_body: Default::default(),
             fuze_arm_s: 1.,
             frag_radius_ft: 300.,
             falls_free: false,

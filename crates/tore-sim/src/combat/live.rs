@@ -5225,7 +5225,11 @@ impl State {
                     .launch(p.id, p.owner, p.incoming.or(p.target), ShotKind::of(w));
             }
             let m = &w.movement;
-            if if p.motion.is_some() {
+            if if super::ballistics::is_bomb(w)
+                || (super::guided::is_glide_bomb(w) && p.motion.is_some())
+            {
+                p.age >= 36_000 || p.position[1] > 100_000.
+            } else if p.motion.is_some() {
                 missiles::removed(m, p.age) || p.position[1] > 100000.
             } else {
                 removal_due(m, now, p.launched_t, (p.position[1] * 256.) as i32)
@@ -5403,7 +5407,24 @@ impl State {
                     },
                 )
             });
-            if let Some(Some((fall, start))) = guided_fall {
+            if super::guided::is_glide_bomb(w)
+                && let Some(motion) = p.motion.as_mut()
+            {
+                let target = self
+                    .guided
+                    .get(&p.id)
+                    .filter(|f| f.guiding())
+                    .and_then(|f| f.point);
+                let mut flight = super::bomb_flight::Flight {
+                    position: p.position,
+                    velocity: motion.velocity,
+                };
+                flight.step(super::bomb_flight::Body::of(w), p.age, target);
+                p.position = flight.position;
+                motion.velocity = flight.velocity;
+                p.direction = unit(flight.velocity);
+                p.speed_f8 = (missiles::length(flight.velocity) * 256.) as i32;
+            } else if let Some(Some((fall, start))) = guided_fall {
                 let seconds = (p.age + 1 - start) as f64 / 120.;
                 p.position = fall.position(seconds);
                 p.direction = fall.direction(seconds);
@@ -5418,20 +5439,20 @@ impl State {
                 }
                 p.speed_f8 = (missiles::length(motion.velocity) * 256.) as i32;
             } else if super::ballistics::is_bomb(w) {
-                // A bomb record falls on its closed-form path. One placed in
+                // A bomb record advances on the shared integration grid. One placed in
                 // flight without a release (a driver's or a test's round)
                 // starts its path where it is, at its own speed.
-                let motion = *self.bombs.entry(p.id).or_insert_with(|| {
-                    super::ballistics::BombMotion::new(super::ballistics::ReleaseState::new(
-                        p.position,
-                        p.direction,
-                        f64::from(p.speed_f8) / 256.,
-                    ))
+                let motion = self.bombs.entry(p.id).or_insert_with(|| {
+                    super::ballistics::BombMotion::new(super::ballistics::ReleaseState {
+                        position: p.position,
+                        velocity: p.direction.map(|v| v * f64::from(p.speed_f8) / 256.),
+                        body: super::bomb_flight::Body::of(w),
+                    })
                 });
-                let seconds = (p.age + 1) as f64 / 120.;
-                p.position = motion.position(seconds);
-                p.direction = motion.direction(seconds);
-                p.speed_f8 = (missiles::length(motion.velocity(seconds)) * 256.) as i32;
+                motion.advance(p.age + 1);
+                p.position = motion.flight.position;
+                p.direction = unit(motion.flight.velocity);
+                p.speed_f8 = (missiles::length(motion.flight.velocity) * 256.) as i32;
             } else {
                 if w.flags & 0x40 != 0 {
                     let target =

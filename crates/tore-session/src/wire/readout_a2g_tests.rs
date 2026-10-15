@@ -336,3 +336,23 @@ fn a_laser_bombers_readout_comes_through_a_connection_as_the_host_built_it() {
         "the bomb flies a guided flight on the host"
     );
 }
+
+#[test]
+fn quantized_bomb_body_keeps_client_trail_dots_within_a_tenth_of_a_foot() {
+    let mut readout = samples::readout();
+    let ccip = readout.bomb_sight.as_mut().unwrap().ccip.as_mut().unwrap();
+    ccip.release.body = tore_sim::combat::bomb_flight::Body::default();
+    ccip.seconds = 40.;
+    let back = round_trip(&readout);
+    let host = readout.bomb_sight.as_ref().unwrap().ccip.as_ref().unwrap();
+    let client = back.bomb_sight.as_ref().unwrap().ccip.as_ref().unwrap();
+    for (a, b) in host.trail().zip(client.trail()) {
+        let distance = a
+            .iter()
+            .zip(b)
+            .map(|(x, y)| (x - y).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        assert!(distance < 0.1, "wire body moved trail {distance} ft");
+    }
+}

@@ -17,6 +17,7 @@ fn mk82() -> Weapon {
         .weapon
         .clone();
     w.source = "MK82.JT".into();
+    w.weight = 500;
     w.flags = 0x22012;
     w.movement.minimum_speed = 0;
     w.movement.maximum_speed = 1466;
@@ -270,7 +271,12 @@ fn a_held_trigger_releases_once_when_the_marker_meets_the_crossbar() {
     );
     assert!(cross.abs() < 1.);
     // The release came where the throw said: the mean impact on the target.
-    let throw = 759. * (5_000_f64 / 16.).sqrt();
+    let release = ReleaseState::from_station(
+        &pass(5_000., 0., 450., 0.),
+        &s.own().configuration().stations[1],
+        0,
+    );
+    let throw = predict_impact(release, |_, _| 0.).unwrap().position[2];
     assert!(
         ((20_000. - throw) / (450. * KNOT) - t).abs() < 0.05,
         "t {t}"

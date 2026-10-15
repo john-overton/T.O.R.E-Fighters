@@ -232,13 +232,10 @@ pub fn run() -> AppResult<()> {
                 let mut shots: Vec<(Weapon, [f64; 3], [f64; 3], f64)> = Vec::new();
                 match kind {
                     Strike::Bomb => {
-                        let release = crate::surface_objective::dive_release(center, [0.; 3], 0.);
-                        shots.push((
-                            weapon("MK82.JT")?,
-                            release.position,
-                            release.velocity,
-                            release.speed(),
-                        ));
+                        let bomb = weapon("MK82.JT")?;
+                        let release =
+                            crate::surface_objective::dive_release(&bomb, center, [0.; 3], 0.);
+                        shots.push((bomb, release.position, release.velocity, release.speed()));
                     }
                     Strike::Maverick => {
                         let w = weapon("AGM65G.JT")?;

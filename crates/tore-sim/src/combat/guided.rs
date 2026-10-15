@@ -6,15 +6,8 @@
 //! cones, the fly-out that says whether one can still reach a point and how
 //! long it takes, and the reach the HUD's release range scale shows.
 //!
-//! Motion (retail data, docs/formats/missiles.md, "Laser and designator" and
-//! "Optical"): the laser bombs and JDAMs have no motor, no bomb flag 0x10 and
-//! no gravity flag 0x4; they leave along the nose at the launch speed (retard
-//! 90), slow at 14 ft/s² toward 278 ft/s (the 0x40 speed command) and turn at
-//! 6,370 units a second, about 35 degrees a second, with no fall while they
-//! guide. The missiles keep their record's motor, sag and cruise profile, as
-//! the profiled missiles do. A guided bomb that is not guiding falls on the
-//! bomb equation (fitted: retail holds its attitude, and whether anything
-//! makes it fall is open, R1's addendum).
+//! Bombs use the fitted gravity, drag and steering model in `bomb_flight`.
+//! Powered weapons retain their missile motor and cruise profiles.
 use super::live::Launcher;
 use super::missiles::{self, DT, Guidance, Motion};
 use crate::attitude::{Basis, Vector, dot, unit};
@@ -25,10 +18,9 @@ use tore_formats::weapons::{Movement, Weapon, Zone};
 pub const HIT_FT: f64 = 25.;
 /// Samples of the reach search across the zone's ground range, before each
 /// edge is bisected.
-const REACH_SAMPLES: usize = 32;
-/// Bisection steps for each edge of the reach (about 1 part in 4,000 of
-/// the zone's range).
-const REACH_BISECTIONS: usize = 12;
+const REACH_SAMPLES: usize = 8;
+/// Bisection steps for each sampled inside/outside reach boundary.
+const REACH_BISECTIONS: usize = 8;
 /// The steering error, radians, below which a fly-out treats the rest of
 /// the path as straight and works it out from the record's speeds.
 const STRAIGHT_RAD: f64 = 0.002;
@@ -40,23 +32,14 @@ pub fn kind(w: &Weapon) -> Option<Guidance> {
 }
 
 /// A guided bomb: a guided air-to-ground record with no motor (the laser
-/// bombs and the JDAMs). It glides on its release speed.
+/// bombs and the JDAMs), advanced by the shared bomb integrator.
 pub fn is_glide_bomb(w: &Weapon) -> bool {
     kind(w).is_some() && w.movement.fuel_t <= w.movement.ignite_t
 }
 
-/// The velocity a guided weapon leaves its station with: a guided bomb
-/// along the nose at the record's launch speed (`launchRetard` 90 of the
-/// aircraft's speed), a missile with the aircraft's velocity, as a profiled
-/// missile leaves.
-pub fn release_velocity(w: &Weapon, launcher: &Launcher) -> Vector {
-    if is_glide_bomb(w) {
-        let speed = super::launch_speed(&w.movement, (launcher.speed_fps * 256.) as i32)
-            .map_or(0., f64::from);
-        launcher.basis.forward.map(|v| v * speed)
-    } else {
-        launcher.velocity
-    }
+/// Guided weapons inherit the aircraft's velocity at release.
+pub fn release_velocity(_w: &Weapon, launcher: &Launcher) -> Vector {
+    launcher.velocity
 }
 
 /// The frame of a weapon flying along `direction`, wings level: what its
@@ -164,13 +147,9 @@ fn straight_seconds(
     (age as f64 * DT + seconds <= end as f64 * DT).then_some(seconds)
 }
 
-/// Seconds a guided weapon flying `motion`, at `position` and pointing
-/// along `forward`, `age` ticks after its release, needs to reach `point`
-/// with its own turn and speeds: the turn is flown tick by tick, as the
-/// weapon flies it, until it points at the point; the straight rest comes
-/// from [`straight_seconds`]. `None` when its life ends first. Agent design
-/// for the reach and the time to impact (the missiles' maximum range flies
-/// the same physics).
+/// Predicted time to a fixed aim. Bombs use the shared 120 Hz integrator;
+/// powered weapons retain their turn and coast predictor. A bomb's guidance
+/// expires at record lifetime, but its fall continues to ground.
 pub fn time_to(
     w: &Weapon,
     motion: Motion,
@@ -193,6 +172,9 @@ pub fn time_to_with_terrain(
     age: u64,
     ground: Option<&dyn Fn(f64, f64) -> f64>,
 ) -> Option<f64> {
+    if is_glide_bomb(w) {
+        return bomb_time_to(w, position, motion.velocity, point, age, ground);
+    }
     let m = &w.movement;
     let end = life_ticks(m);
     for tick in age..end {
@@ -265,14 +247,62 @@ pub fn ground_track(launcher: &Launcher) -> Option<[f64; 2]> {
 ///
 /// Agent design: retail gives no release range cue (retail manual p. 125).
 /// Deterministic, in a bounded number of fly-outs.
+// A bounded memo of pure fly-outs. It has no effect on simulation state or
+// results and is intentionally absent from checkpoints. Horizontal translation
+// does not affect a flat-ground envelope; evaluate it at the origin every time.
+type ReachMemo = Vec<(Weapon, [f64; 15], Option<Reach>)>;
+thread_local! { static REACH_MEMO: std::cell::RefCell<ReachMemo> = const { std::cell::RefCell::new(Vec::new()) }; }
+
 pub fn reach(w: &Weapon, launcher: &Launcher, ground: f64, scale: f64) -> Option<Reach> {
+    let b = launcher.basis;
+    let key = [
+        launcher.position[1],
+        launcher.velocity[0],
+        launcher.velocity[1],
+        launcher.velocity[2],
+        b.forward[0],
+        b.forward[1],
+        b.forward[2],
+        b.right[0],
+        b.right[1],
+        b.right[2],
+        b.up[0],
+        b.up[1],
+        b.up[2],
+        ground,
+        scale,
+    ];
+    if let Some(cached) = REACH_MEMO.with(|memo| {
+        memo.borrow()
+            .iter()
+            .find(|(weapon, k, _)| weapon == w && *k == key)
+            .map(|(_, _, result)| *result)
+    }) {
+        return cached;
+    }
+    let launcher = Launcher {
+        position: [0., launcher.position[1], 0.],
+        ..*launcher
+    };
+    let result = reach_uncached(w, &launcher, ground, scale);
+    REACH_MEMO.with(|memo| {
+        let mut memo = memo.borrow_mut();
+        if memo.len() == 32 {
+            memo.remove(0);
+        }
+        memo.push((w.clone(), key, result));
+    });
+    result
+}
+
+fn reach_uncached(w: &Weapon, launcher: &Launcher, ground: f64, scale: f64) -> Option<Reach> {
     let track = ground_track(launcher)?;
     let height = launcher.position[1] - ground;
     let slant = zone_range(w, scale);
     if slant <= height.abs() {
         return None;
     }
-    let cap = (slant * slant - height * height).sqrt();
+    let cap = ((slant * slant - height * height).sqrt() - 0.01).max(0.);
     let velocity = release_velocity(w, launcher);
     let glide = is_glide_bomb(w);
     let motion = Motion::launch(w, velocity, launcher.position[1]);
@@ -284,17 +314,37 @@ pub fn reach(w: &Weapon, launcher: &Launcher, ground: f64, scale: f64) -> Option
             launcher.position[2] + track[1] * range,
         ]
     };
-    let good = |range: f64| {
-        let point = at(range);
-        in_release_zone(w, launcher.position, launcher.basis, point, scale)
-            && (!glide || time_to(w, motion, launcher.position, forward, point, 0).is_some())
-    };
-    let step = cap / REACH_SAMPLES as f64;
-    let samples: Vec<bool> = (0..=REACH_SAMPLES).map(|i| good(i as f64 * step)).collect();
-    let first = samples.iter().position(|ok| *ok)?;
-    let last = first + samples[first..].iter().take_while(|ok| **ok).count() - 1;
+    // Find the cheap geometric window first. Sampling the entire slant
+    // range can miss a narrow valid window at high altitude.
+    let zone = search_span(0., cap, 64, 16, |range| {
+        in_release_zone(w, launcher.position, launcher.basis, at(range), scale)
+    })?;
+    if !glide {
+        return Some(zone);
+    }
+    search_span(
+        zone.minimum_ft,
+        zone.maximum_ft,
+        REACH_SAMPLES,
+        REACH_BISECTIONS,
+        |range| time_to(w, motion, launcher.position, forward, at(range), 0).is_some(),
+    )
+}
+
+fn search_span(
+    start: f64,
+    end: f64,
+    samples: usize,
+    bisections: usize,
+    good: impl Fn(f64) -> bool,
+) -> Option<Reach> {
+    let step = (end - start) / samples as f64;
+    let at = |i: usize| start + i as f64 * step;
+    let values: Vec<bool> = (0..=samples).map(|i| good(at(i))).collect();
+    let first = values.iter().position(|ok| *ok)?;
+    let last = first + values[first..].iter().take_while(|ok| **ok).count() - 1;
     let edge = |mut inside: f64, mut outside: f64| {
-        for _ in 0..REACH_BISECTIONS {
+        for _ in 0..bisections {
             let middle = (inside + outside) / 2.;
             if good(middle) {
                 inside = middle;
@@ -304,20 +354,55 @@ pub fn reach(w: &Weapon, launcher: &Launcher, ground: f64, scale: f64) -> Option
         }
         inside
     };
-    let minimum = if first == 0 {
-        0.
-    } else {
-        edge(first as f64 * step, (first - 1) as f64 * step)
-    };
-    let maximum = if last == REACH_SAMPLES {
-        cap
-    } else {
-        edge(last as f64 * step, (last + 1) as f64 * step)
-    };
     Some(Reach {
-        minimum_ft: minimum,
-        maximum_ft: maximum,
+        minimum_ft: if first == 0 {
+            start
+        } else {
+            edge(at(first), at(first - 1))
+        },
+        maximum_ft: if last == samples {
+            end
+        } else {
+            edge(at(last), at(last + 1))
+        },
     })
+}
+
+/// Shared bomb fly-out. Reach and TTI integrate the same ticks as live flight.
+fn bomb_time_to(
+    w: &Weapon,
+    position: Vector,
+    velocity: Vector,
+    point: Vector,
+    age: u64,
+    ground: Option<&dyn Fn(f64, f64) -> f64>,
+) -> Option<f64> {
+    use super::bomb_flight::{Body, DT, Flight};
+    let body = Body::of(w);
+    let mut flight = Flight { position, velocity };
+    for tick in age..36_000 {
+        let before = flight.position;
+        flight.step(body, tick, Some(point));
+        let p = flight.position;
+        let floor = ground.map_or(point[1], |g| g(p[0], p[2]));
+        // A designated object's aim point can stand above terrain. Stop at
+        // that height when the path reaches the aim, rather than following
+        // it through the object and treating the later ground miss as no TTI.
+        if ground.is_some() && point[1] > floor && before[1] > point[1] && p[1] <= point[1] {
+            let f = (before[1] - point[1]) / (before[1] - p[1]);
+            let hit: Vector = std::array::from_fn(|i| before[i] + f * (p[i] - before[i]));
+            if ground_range(hit, point) <= HIT_FT {
+                return Some((tick - age) as f64 * DT + f * DT);
+            }
+        }
+        if p[1] <= floor {
+            let f = ((before[1] - floor) / (before[1] - p[1])).clamp(0., 1.);
+            let hit: Vector = std::array::from_fn(|i| before[i] + f * (p[i] - before[i]));
+            return (ground.is_some() || ground_range(hit, point) <= HIT_FT)
+                .then_some((tick - age) as f64 * DT + f * DT);
+        }
+    }
+    None
 }
 
 /// Horizontal distance between two points, feet.

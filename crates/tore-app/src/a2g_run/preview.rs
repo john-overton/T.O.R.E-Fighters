@@ -330,8 +330,6 @@ fn pose(scene: &Scene, shot: &Shot, speed: f64) -> AppResult<(Vector, f64)> {
     let target = scene.target_row().ok_or("no target row")?.position;
     let point = [target[0], scene.ground(target[0], target[2]), target[2]];
     let weapon = &scene.station().weapon;
-    let release_speed = tore_sim::combat::launch_speed(&weapon.movement, (speed * 256.) as i32)
-        .map_or(0., f64::from);
     Ok(match shot.place {
         Place::Dive {
             dive,
@@ -341,7 +339,14 @@ fn pose(scene: &Scene, shot: &Shot, speed: f64) -> AppResult<(Vector, f64)> {
             let pitch = -dive.to_radians();
             let forward = [0., pitch.sin(), pitch.cos()];
             let through = if tore_sim::combat::ballistics::is_bomb(weapon) {
-                ReleaseState::onto(point, forward, release_speed, altitude).position
+                ReleaseState::onto_body(
+                    point,
+                    forward,
+                    speed,
+                    altitude,
+                    tore_sim::combat::bomb_flight::Body::of(weapon),
+                )
+                .position
             } else {
                 let run = altitude / pitch.abs().tan().max(1e-3);
                 [point[0], point[1] + altitude, point[2] - run]
@@ -356,7 +361,14 @@ fn pose(scene: &Scene, shot: &Shot, speed: f64) -> AppResult<(Vector, f64)> {
             seconds,
             right,
         } => {
-            let through = ReleaseState::onto(point, [0., 0., 1.], release_speed, altitude).position;
+            let through = ReleaseState::onto_body(
+                point,
+                [0., 0., 1.],
+                speed,
+                altitude,
+                tore_sim::combat::bomb_flight::Body::of(weapon),
+            )
+            .position;
             (
                 [through[0] - right, through[1], through[2] - speed * seconds],
                 0.,

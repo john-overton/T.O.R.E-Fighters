@@ -206,7 +206,20 @@ crate::checkpoint_struct!(BombMotion {
     origin,
     horizontal,
     vertical,
+    body,
+    tick,
+    flight,
 });
+type BombBody = super::super::bomb_flight::Body;
+crate::checkpoint_struct!(BombBody {
+    mass,
+    area,
+    retarder,
+    steering,
+    guidance_seconds
+});
+type BombFlight = super::super::bomb_flight::Flight;
+crate::checkpoint_struct!(BombFlight { position, velocity });
 type GroundLook = super::GroundLook;
 crate::checkpoint_struct!(GroundLook {
     explosion,

@@ -35,36 +35,55 @@ fn the_scatter_is_273_units_either_way_from_the_sim_stream() {
 }
 
 #[test]
-fn a_level_release_falls_sixteen_s_squared() {
-    let motion = BombMotion::new(ReleaseState::new([10., 5_000., -20.], [0., 0., 1.], 759.));
-    for s in [0., 1., 2.5, 10.] {
-        let p = motion.position(s);
-        assert!((p[1] - (5_000. - 16. * s * s)).abs() < 1e-9);
-        assert!((p[2] - (-20. + 759. * s)).abs() < 1e-9);
-        assert_eq!(p[0], 10.);
-    }
+fn drag_delays_the_fall_and_reduces_horizontal_speed() {
+    let release = ReleaseState::new([10., 5_000., -20.], [0., 0., 1.], 759.);
+    let motion = BombMotion::new(release);
     let t = motion.fall_time(0.).unwrap();
-    assert!((t - (5_000_f64 / 16.).sqrt()).abs() < 1e-12);
-    // Past the predicted ground it keeps going at the same rate.
-    assert!((motion.position(t + 1.)[2] - motion.position(t)[2] - 759.).abs() < 1e-9);
+    assert!(t > (5_000_f64 / 16.).sqrt());
+    assert!(t < 20.);
+    assert!(motion.velocity(t)[2] < 759.);
+    assert!(motion.position(t)[1].abs() < 1e-6);
 }
 
 #[test]
-fn a_dive_release_uses_retails_fall_time() {
-    let pitch = -30_f64.to_radians();
-    let release = ReleaseState::new([0., 4_000., 0.], [0., pitch.sin(), pitch.cos()], 760.);
-    let motion = BombMotion::new(release);
-    let vz = 760. * pitch.sin();
-    let expected = (vz + (vz * vz + 64. * 4_000.).sqrt()) / 32.;
-    let t = motion.fall_time(0.).unwrap();
-    assert!((t - expected).abs() < 1e-12);
-    assert!(motion.position(t)[1].abs() < 1e-9);
-    // Its pitch is its velocity's, steepening as it falls.
-    let d0 = motion.direction(0.);
-    let d1 = motion.direction(t);
-    assert!((d0[1] - pitch.sin()).abs() < 1e-12);
-    assert!(d1[1] < d0[1]);
-    assert_eq!(d1[0], 0.);
+fn prediction_matches_tick_integration_across_release_conditions() {
+    for height in [500., 5_000., 20_000.] {
+        for knots in [250., 450., 600.] {
+            for dive in [0_f64, 30.] {
+                for retarder in [0., 2.4, 5.5] {
+                    let pitch = -dive.to_radians();
+                    let mut release = ReleaseState::new(
+                        [10., height, -20.],
+                        [0., pitch.sin(), pitch.cos()],
+                        knots * 1.6878,
+                    );
+                    release.body.retarder = retarder;
+                    let impact = predict_impact(release, |_, _| 0.).unwrap();
+                    let mut flight = Flight {
+                        position: release.position,
+                        velocity: release.velocity,
+                    };
+                    let mut tick = 0;
+                    while flight.position[1] > 0. {
+                        flight.step(release.body, tick, None);
+                        tick += 1;
+                    }
+                    assert!((tick as f64 * DT - impact.seconds).abs() <= DT);
+                    let miss = (flight.position[0] - impact.position[0])
+                        .hypot(flight.position[2] - impact.position[2]);
+                    assert!(
+                        miss <= release.speed() * DT + 0.01,
+                        "{height} {knots} {dive} {retarder}: {miss}"
+                    );
+                    println!(
+                        "bomb-flight height={height} kt={knots} dive={dive} retard={retarder} time={:.5} tick-miss={miss:.4} arrival-kt={:.2}",
+                        impact.seconds,
+                        flight.velocity.iter().map(|v| v * v).sum::<f64>().sqrt() / 1.6878
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[test]
@@ -73,10 +92,10 @@ fn retails_predictor_reads_the_ground_under_the_release_point() {
     // Ground 1,000 ft high under the release, 0 everywhere else.
     let ground = |x: f64, z: f64| if x.hypot(z) < 1. { 1_000. } else { 0. };
     let impact = predict_impact_flat(release, ground).unwrap();
-    let t = (2_000_f64 / 16.).sqrt();
+    let t = BombMotion::new(release).fall_time(1_000.).unwrap();
     assert!((impact.seconds - t).abs() < 1e-12);
     assert_eq!(impact.position[1], 1_000.);
-    assert!((impact.position[2] - 500. * t).abs() < 1e-9);
+    assert!((impact.position[2] - BombMotion::new(release).position(t)[2]).abs() < 1e-9);
     // Under the ground with nowhere to fall to: no impact.
     let low = ReleaseState::new([0., 10., 0.], [0., 0., 1.], 500.);
     assert!(predict_impact_flat(low, |_, _| 20.).is_none());

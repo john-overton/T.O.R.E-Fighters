@@ -180,7 +180,12 @@ fn wreck_lines(world: &tore_world::world::World, scenery: &mut crate::scenery::S
 
 /// The release that puts a bomb's path on a target at `position` moving at
 /// `velocity`: aimed where the target will be when the bomb gets there.
-pub(crate) fn dive_release(position: Vector, velocity: Vector, heading: f64) -> ReleaseState {
+pub(crate) fn dive_release(
+    weapon: &Weapon,
+    position: Vector,
+    velocity: Vector,
+    heading: f64,
+) -> ReleaseState {
     let dive = BOMB_DIVE_DEG.to_radians();
     let direction = [
         heading.sin() * dive.cos(),
@@ -188,10 +193,22 @@ pub(crate) fn dive_release(position: Vector, velocity: Vector, heading: f64) -> 
         heading.cos() * dive.cos(),
     ];
     let speed = BOMB_SPEED_KT * FPS_PER_KNOT;
-    let still = ReleaseState::onto(position, direction, speed, BOMB_HEIGHT_FT);
+    let still = ReleaseState::onto_body(
+        position,
+        direction,
+        speed,
+        BOMB_HEIGHT_FT,
+        tore_sim::combat::bomb_flight::Body::of(weapon),
+    );
     let fall = BombMotion::new(still).fall_time(position[1]).unwrap_or(0.);
     let ahead = std::array::from_fn(|i| position[i] + [velocity[0], 0., velocity[2]][i] * fall);
-    ReleaseState::onto(ahead, direction, speed, BOMB_HEIGHT_FT)
+    ReleaseState::onto_body(
+        ahead,
+        direction,
+        speed,
+        BOMB_HEIGHT_FT,
+        tore_sim::combat::bomb_flight::Body::of(weapon),
+    )
 }
 
 struct Options {
@@ -575,7 +592,7 @@ pub fn run() -> AppResult<()> {
                     continue;
                 };
                 // Released from a dive pass, aimed ahead of a moving unit.
-                let release = dive_release(row.position, row.velocity, heading);
+                let release = dive_release(&bomb, row.position, row.velocity, heading);
                 let from = release.position;
                 let state = &mut world.combat.state;
                 state
@@ -606,7 +623,7 @@ pub fn run() -> AppResult<()> {
             // The city strike, four a pass.
             let pass: Vec<Vector> = city_aims.drain(..city_aims.len().min(4)).collect();
             for at in pass {
-                let release = dive_release(at, [0.; 3], heading);
+                let release = dive_release(&city_bomb, at, [0.; 3], heading);
                 let from = release.position;
                 let state = &mut world.combat.state;
                 state.ledger.launch(next_bomb, owner, None, ShotKind::Bomb);

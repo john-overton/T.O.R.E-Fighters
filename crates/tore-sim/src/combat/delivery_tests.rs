@@ -11,6 +11,7 @@ const KNOT: f64 = 1.687_8;
 fn mk82() -> Weapon {
     let mut w = crate::combat::gunsight::tests::weapon();
     w.source = "MK82.JT".into();
+    w.weight = 500;
     w.hud_name = "MK-82".into();
     w.flags = 0x22012;
     w.movement.minimum_speed = 0;
@@ -147,7 +148,7 @@ fn ccip_is_the_bomb_predictors_mean_impact_with_its_glyph() {
     assert_eq!(c.seconds, impact.seconds);
     // 5,000 ft: 17.7 s of fall, 13,400 ft of throw, 14,300 ft away: the
     // retail distance puts it short of 20,000 ft with part of the arc.
-    assert!((c.seconds - (5_000_f64 / 16.).sqrt()).abs() < 1e-9);
+    assert!(c.seconds > (5_000_f64 / 16.).sqrt() && c.seconds < 20.);
     assert_eq!(c.range_ft, retail_distance(launcher.position, c.impact));
     assert!(c.in_range());
     assert_eq!(c.glyph(), 0x20 + arc_steps(c.range_ft, 20_000.));
@@ -226,7 +227,7 @@ fn the_level_t_brings_the_bomb_down_on_the_targets_ground() {
         // short of where it would land at sea level, beyond it in the hollow.
         let sea = predict_impact(release, |_, _| 0.).unwrap().position;
         let gap = sea[2] - lands[2];
-        assert!((gap.abs() - 520.).abs() < 60., "{height}: {gap}");
+        assert!((gap.abs() - 480.).abs() < 60., "{height}: {gap}");
         assert_eq!(gap > 0., height > 0.);
     }
 }

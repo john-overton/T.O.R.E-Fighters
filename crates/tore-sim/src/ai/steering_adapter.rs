@@ -130,11 +130,20 @@ impl ControlAdapter {
 
         let reference_bank_deg = steering::reference_bank_deg(maximum_bank_deg)?;
         let heading_request_deg = steering::wrap_heading(intent.heading_deg)?;
-        let turn = TurnDirection::toward(current.heading_deg, heading_request_deg);
+        let on_ground = state.research.as_ref().is_some_and(|r| r.on_ground);
+        let heading_reference = if self.strike_handling.track_heading
+            && !on_ground
+            && state.velocity[0].hypot(state.velocity[2]) > 1.
+        {
+            state.velocity[0].atan2(state.velocity[2]).to_degrees()
+        } else {
+            current.heading_deg
+        };
+        let turn = TurnDirection::toward(heading_reference, heading_request_deg);
         let bank_request_deg = match intent.bank {
             Bank::Explicit(deg) => f64::from(deg).clamp(-maximum_bank_deg, maximum_bank_deg),
             Bank::Unconstrained => {
-                let rate = heading_error_deg(current.heading_deg, heading_request_deg).to_radians()
+                let rate = heading_error_deg(heading_reference, heading_request_deg).to_radians()
                     / if self.gun_aim.is_some() {
                         0.6
                     } else {
@@ -153,7 +162,6 @@ impl ControlAdapter {
 
         // Contact is tracked by the hybrid adapter; without it the adapter
         // cannot see the ground from this signature and reports airborne.
-        let on_ground = state.research.as_ref().is_some_and(|r| r.on_ground);
         // Fitted (agent decision, 2026-09-28, overnight bug battery): an
         // airborne aircraft whose flight path is below the B44 terrain floor
         // levels its wings, so a steep turn cannot use the lift it needs to
@@ -693,6 +701,32 @@ mod tests {
                 dt_s,
             )
             .unwrap()
+    }
+
+    #[test]
+    fn bomb_tracking_keeps_a_correct_ground_track_when_the_nose_is_offset() {
+        let mut s = state();
+        s.yaw = 10_f64.to_radians();
+        let command = intent(0., 0., s.speed);
+        assert!(controls(&s, &command, SECONDS_PER_TICK).input.roll < 0.);
+        let mut adapter = ControlAdapter::new();
+        adapter.set_strike_handling(Handling {
+            track_heading: true,
+            ..Handling::PLAIN
+        });
+        let output = adapter
+            .controls(
+                &s,
+                &command,
+                &limits(),
+                G_LIMIT,
+                ROLL_LIMIT,
+                MAXIMUM_BANK,
+                None,
+                SECONDS_PER_TICK,
+            )
+            .unwrap();
+        assert!(output.input.roll.abs() < 1e-9);
     }
 
     #[test]

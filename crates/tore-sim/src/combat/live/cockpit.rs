@@ -545,8 +545,8 @@ impl State {
             .max_by_key(|(p, _)| p.id)
             .and_then(|(p, motion)| {
                 motion
-                    .fall_time(ground(p.position[0], p.position[2]))
-                    .map(|t| (t - p.age as f64 / 120.).max(0.))
+                    .impact(&ground)
+                    .map(|impact| (impact.seconds - p.age as f64 / 120.).max(0.))
             });
         delivery::solve(
             delivery::Situation {
@@ -891,9 +891,13 @@ impl State {
             if crate::combat::guided::is_glide_bomb(w) {
                 let (heading, pitch) =
                     ballistics::scatter(ballistics::scatter_stream(self.rng, self.tick, r.id));
-                ballistics::ReleaseState { position, velocity }
-                    .turned(heading, pitch)
-                    .velocity
+                ballistics::ReleaseState {
+                    position,
+                    velocity,
+                    body: super::super::bomb_flight::Body::of(w),
+                }
+                .turned(heading, pitch)
+                .velocity
             } else {
                 velocity
             }

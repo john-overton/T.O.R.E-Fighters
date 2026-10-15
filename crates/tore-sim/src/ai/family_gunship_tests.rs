@@ -137,6 +137,7 @@ fn gun(station: u8, rounds: u32) -> Store {
         maximum_range_ft: 13_000.,
         round_speed_fps: Some(3_450.),
         release_speed_share: 1.,
+        bomb_body: Default::default(),
         fuze_arm_s: 0.,
         frag_radius_ft: 0.,
         falls_free: false,
