@@ -527,6 +527,30 @@ A mission replay frame is captured the same way with `--watch-replay FILE --capt
 
 ## Headless development
 
+The stores preview also has a CPU-only geometry mode. On a private imported
+profile, `TORE_STORES_PREVIEW_CPU=1 TORE_STORES_PREVIEW_AIRCRAFT=f15,f16c
+ target/debug/tore-app --stores-preview OUT_DIR` writes below, side-front,
+front and top PNGs without a window or GPU (put the command on one line).
+It uses flight's airframe and pylon triangles with solid face colours and
+simple lighting, so textures and final GPU lighting still need offscreen
+review. Omit the aircraft filter to cover the selectable roster.
+
+Set `TORE_STORES_PREVIEW_AUDIT=1` with CPU mode to print station and model
+chord measurements instead of images. Optional rows use their configured
+candidate store and are labelled `loaded=0`. Set
+`TORE_STORES_PREVIEW_RECORDS=4=AIM7.JT:4` to select a source row's store and
+count through the normal ordnance compatibility checks.
+`TORE_STORES_PREVIEW_CHEAT=1` opts into the existing ordnance-screen Cheat
+for explicitly labelled geometry checks of unsupported combinations. A preview-only
+comparison, `TORE_STORES_PREVIEW_RECORDED_STATIONS=f15,f16c`, bypasses the
+per-aircraft station table for those aircraft and uses the generic source
+placement. It does not change flight, the import or saved loadouts.
+For a short GPU review, `TORE_STORES_PREVIEW_LOADED_ONLY=1` skips empty
+loads, close-ups and release frames, while `TORE_STORES_PREVIEW_VIEWS=below,side-front,ahead`
+limits the camera list.
+See [the stores specification](spec/stores-on-pylons.md#the-f-16c-and-fleet-rail-audit)
+for the audit's limits.
+
 For many runs at once with automatic checks (menus, flight, AI fights up to 15 against 15, replays) use the battery in [testing](testing/README.md).
 
 Run from the repository root with the pinned Rust toolchain and `--locked`.
