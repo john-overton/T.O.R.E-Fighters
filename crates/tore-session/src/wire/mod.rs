@@ -202,7 +202,11 @@ pub fn path_words(path: Path) -> &'static str {
 /// 35 since the F-15/F-16 stations pass (slice nr-f15): no message changes,
 /// but the F-15C, F-16C and Mi-24 store stations (release positions) moved,
 /// so an older game must not join.
-pub const PROTOCOL_VERSION: u16 = 35;
+/// 36 since the wingman loadouts pass (slice nr-wingload): no message
+/// changes, but AI wingmen take their human lead's loadout (more
+/// FlightLoadouts entries, mission text `share-flight-loadout`), so an
+/// older game must not join.
+pub const PROTOCOL_VERSION: u16 = 36;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
