@@ -404,6 +404,31 @@ def unlocked_release_problems(work: Path, output: str, *, mode: str) -> list[str
     return problems
 
 
+def other_weapon_sound_check(work: Path, output: str) -> list[str]:
+    import csv
+    path = work / "sound-log" / "weapon-sound.tsv"
+    if not path.exists():
+        return ["missing weapon sound audit"]
+    rows = list(csv.DictReader(path.open(), delimiter="\t"))
+    heard = [r for r in rows if r["selected"] == "true"]
+    problems = []
+    if not heard:
+        problems.append("no other shooter audible")
+    previous = {}
+    for row in heard:
+        if row["clip_present"] != "true" or not 0 < float(row["gain"]) <= 0.104001:
+            problems.append("missing recording or invalid cockpit gain")
+        if row["gun"] == "true":
+            key = (row["shooter"], row["sound"])
+            tick = int(row["tick"])
+            if tick - previous.get(key, -30) < 30:
+                problems.append("gun sound repeated per round")
+            previous[key] = tick
+    if "guns" in work.name and not previous:
+        problems.append("no audible gun burst")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     out: list[Scenario] = []
     for mode in ["maddog", "unlocked-ir", "max-range"]:
@@ -494,6 +519,18 @@ def scenarios() -> list[Scenario]:
                 same_run=False,
             )
         )
+
+    for mode, extra in [("guns", ["--probe-ai-guns-only", "--probe-guns"]), ("missiles", [])]:
+        out.append(Scenario(
+            name=f"replay-rec-other-weapon-sound-{mode}", lane="replay",
+            args=["--ai-probe-ticks", "7200", "--probe-fight", "2:2", "--separation", "1" if mode == "guns" else "5",
+                  "--probe-wing-order", "1:attack-on-contact", *extra,
+                  "--record-mission", "{work}/sound.tore-replay", "--no-audio"],
+            timeout=300, env={"TORE_WEAPON_SOUND_LOG": "1"},
+            then=[Step(["--recording-log", "{work}/sound.tore-replay", "--out", "{work}/sound-log", "--rate", "1"], timeout=300)],
+            check_work=other_weapon_sound_check,
+            expect=[r"Weapon sound audit:"],
+        ))
 
     # Guns, missiles, chaff and flares, threats, faults.
     out.append(record_scenario("replay-rec-guns", ["--ai-probe-ticks", "3600", "--separation", "2", "--probe-guns", "--probe-ai-guns-only", "--probe-attack", "300:5"]))

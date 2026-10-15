@@ -1745,6 +1745,16 @@ for the flight path trails (R). Both are drawn relative to the render origin,
 as the rest of the combat geometry is, so they sit on their aircraft however
 far from the map's corner the flight is.
 
+For a device-free weapon sound check, set `TORE_WEAPON_SOUND_LOG=1` when
+running `--recording-log FILE --out DIR`. With an imported profile in
+`TORE_DATA_DIR`, this also writes `weapon-sound.tsv`: source tick, sound,
+shooter, gun flag, distance, gain before preference volumes, burst selection,
+and whether the imported sound exists. It uses the viewer's source lookup and
+the mixer's shared burst selector. The listener follows the recorded player;
+`TORE_WEAPON_SOUND_SUBJECT=ID` follows another aircraft externally. The audit
+reads the entire recording regardless of log export filters. It neither plays
+sound nor changes the recording.
+
 ### Sound
 
 John asked on 2026-09-26 to hear the communication in a replay: the
@@ -1788,6 +1798,16 @@ scheduled is an agent design (2026-09-26); the code is
   as the cockpit does. A cut to another view, another aircraft or the drone
   starts the pass detector afresh, so a cut never sounds like something
   flying past.
+- **Other shooters:** every aircraft and surface weapon launch is resolved
+  through the imported weapon catalog, including gun rounds. The viewer's
+  camera hears all nearby shooters, with the same distance, canopy, burst and
+  voice limits as live play and multiplayer clients. See the
+  [sound spec](spec/sound.md#other-aircrafts-launches). Existing recordings
+  already contain these launches, so their format does not change. Converted
+  network captures also use newly born reconstructed gun rounds when individual
+  launch events are absent. Old network captures cannot recover flak reports
+  that the host never transmitted.
+
 - **Engine:** the engine and afterburner loops of the aircraft the camera
   follows, from its recorded engine, afterburner and throttle, and its
   start or stop sound when its engine lights or stops while it is watched.

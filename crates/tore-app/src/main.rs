@@ -825,6 +825,7 @@ impl TickPresenter<'_> {
                             &launch.sound,
                             launch.max_distance_ft,
                         )
+                        .with_gun(launch.gun)
                     }))
                     .collect::<Vec<_>>(),
                 flight.position,
@@ -11748,6 +11749,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 rate: recording_rate,
             },
         )?;
+        if std::env::var("TORE_WEAPON_SOUND_LOG").is_ok_and(|v| v == "1") {
+            replay::sound::audit(&path, &folder)?;
+        }
         println!("Recording log: {}", folder.join("log.jsonl").display());
         println!(
             "Recording summary: {}",

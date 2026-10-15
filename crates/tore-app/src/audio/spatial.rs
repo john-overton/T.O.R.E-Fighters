@@ -10,6 +10,8 @@ struct SpatialVoice {
     /// A weapon launch: its record's `maxSndDist`, which sets how it fades
     /// with distance in place of `kind`'s curve.
     launch_ft: Option<i16>,
+    other: bool,
+    gun: bool,
     position: [f64; 3],
     /// Heard inside the releasing aircraft's own cockpit: its mix never
     /// follows distance or direction.
@@ -131,6 +133,7 @@ pub(super) struct Scene {
     passes: Passes,
     voices: Vec<SpatialVoice>,
     loops: BTreeMap<(u8, u64), LoopVoice>,
+    other_fire: super::other::Fire,
 }
 impl Scene {
     pub fn clear(&mut self) {
@@ -229,10 +232,13 @@ impl Scene {
             return;
         }
         for voice in self.voices.iter_mut().filter(|v| !v.cockpit) {
-            let mix = match voice.launch_ft {
+            let mut mix = match voice.launch_ft {
                 Some(feet) => acoustics::launch_mix(voice.position, listener, feet),
                 None => acoustics::mix(voice.kind, voice.position, listener),
             };
+            if voice.other {
+                mix.gain *= super::other::LEVEL;
+            }
             if mix != voice.mix {
                 voice.mix = mix;
                 voice.filter_rate = 0.;
@@ -303,13 +309,60 @@ impl Scene {
             Some(max_sound_distance),
         );
     }
+    /// The same bounded burst selector for live flight, clients and replays.
+    pub fn other_weapons(
+        &mut self,
+        clips: &BTreeMap<String, Arc<Clip>>,
+        listener: Listener,
+        launches: &[super::Launch<'_>],
+    ) {
+        for launch in self.other_fire.step(launches, listener) {
+            let Some(clip) = clips.get(launch.name) else {
+                continue;
+            };
+            self.voices.retain(|v| !v.voice.finished());
+            if launch.gun
+                && self.voices.iter().filter(|v| v.gun).count() >= super::other::GUN_VOICES
+            {
+                let quietest = self
+                    .voices
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, v)| v.gun)
+                    .min_by(|(_, a), (_, b)| a.mix.gain.total_cmp(&b.mix.gain))
+                    .map(|(i, _)| i)
+                    .unwrap();
+                self.voices.remove(quietest);
+            }
+            let mix = super::other::mix(launch, listener);
+            let added = self.play_with(
+                Arrival {
+                    payload: clip.clone(),
+                    mix,
+                    kind: Kind::Impact,
+                    position: launch.shooter.unwrap().position,
+                },
+                false,
+                Some(super::other::range(launch)),
+            );
+            if added && let Some(voice) = self.voices.last_mut() {
+                voice.other = true;
+                voice.gun = launch.gun;
+            }
+        }
+    }
     fn play(&mut self, arrival: Arrival<Arc<Clip>>, cockpit: bool) {
         self.play_with(arrival, cockpit, None);
     }
-    fn play_with(&mut self, arrival: Arrival<Arc<Clip>>, cockpit: bool, launch_ft: Option<i16>) {
+    fn play_with(
+        &mut self,
+        arrival: Arrival<Arc<Clip>>,
+        cockpit: bool,
+        launch_ft: Option<i16>,
+    ) -> bool {
         self.voices.retain(|v| !v.voice.finished());
         if arrival.mix.gain <= 0. {
-            return;
+            return false;
         }
         if self.voices.len() == 16 {
             let (index, quietest) = self
@@ -319,7 +372,7 @@ impl Scene {
                 .min_by(|(_, a), (_, b)| a.mix.gain.total_cmp(&b.mix.gain))
                 .unwrap();
             if quietest.mix.gain >= arrival.mix.gain {
-                return;
+                return false;
             }
             self.voices.remove(index);
         }
@@ -331,6 +384,8 @@ impl Scene {
             mix: arrival.mix,
             kind: arrival.kind,
             launch_ft,
+            other: false,
+            gun: false,
             position: arrival.position,
             cockpit,
             filtered: 0.,
@@ -340,6 +395,7 @@ impl Scene {
             filter_alpha: 0.,
             gain_smoothing: 0.,
         });
+        true
     }
     #[cfg(test)]
     pub fn voice_count(&self) -> usize {
@@ -354,6 +410,15 @@ impl Scene {
             let time = v.voice.position / v.voice.clip.rate;
             let remaining =
                 (v.voice.clip.samples.len() as f64 - v.voice.position) / v.voice.clip.rate;
+            let remaining = if v.gun {
+                remaining.min(super::other::GUN_BURST_TICKS as f64 / 120. - time)
+            } else {
+                remaining
+            };
+            if remaining <= 0. {
+                v.voice.position = v.voice.clip.samples.len() as f64;
+                continue;
+            }
             let envelope = (time / 0.005).min(1.) * (remaining / 0.03).min(1.);
             let sample = v.voice.next(rate, false);
             if v.filter_rate != rate {
@@ -409,6 +474,32 @@ mod tests {
             }),
         )])
     }
+    #[test]
+    fn other_guns_have_four_voices_and_a_quarter_second_envelope() {
+        let clips = BTreeMap::from([(
+            "gun".into(),
+            Arc::new(Clip {
+                samples: vec![192; 8000],
+                rate: 8000.,
+            }),
+        )]);
+        let guns: Vec<_> = (1..10)
+            .map(|id| super::super::Launch::by(id, [100., 0., 0.], "gun", 6000).with_gun(true))
+            .collect();
+        let mut scene = Scene::default();
+        scene.other_weapons(&clips, listener(), &guns);
+        assert_eq!(scene.voice_count(), 4);
+        let mut energy = 0.;
+        for _ in 0..2000 {
+            energy += scene.sample(8000.).iter().map(|v| v.abs()).sum::<f32>();
+        }
+        assert!(energy > 1.);
+        assert_eq!(scene.sample(8000.), [0.; 2]);
+        scene.clear();
+        scene.other_weapons(&clips, listener(), &guns);
+        assert_eq!(scene.voice_count(), 4, "reset releases the burst slots");
+    }
+
     #[test]
     fn supersonic_pass_reaches_the_mixer_for_flyby_and_other_aircraft() {
         let mut clips = clips();

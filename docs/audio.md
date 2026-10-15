@@ -107,7 +107,9 @@ cockpit through the canopy like any outside sound; one sound plays per aircraft
 per release, and when more than four aircraft launch in one tick the four
 nearest sound. Surface units' missile launches (SAM sites, ships, any
 surface launcher) are heard the same way from the launcher's mount, one sound
-per launcher per release; surface guns keep their own audio. A multiplayer client and a replay find the record's reach by the
+per launcher per release. Aircraft and surface guns play bounded bursts of
+the gun's own recording, with at most four concurrent bursts. Other shooters'
+weapons use 65 percent of the own external level before canopy muffling. A multiplayer client and a replay find the record's reach by the
 weapon's name in the local weapon catalog
 ([spec](spec/sound.md#other-aircrafts-launches)).
 Cockpit avionics, radio and controls stay local; engine loops follow the view

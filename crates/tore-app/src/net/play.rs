@@ -1068,7 +1068,7 @@ impl TickPresenter<'_> {
         let mut releases: Vec<String> = Vec::new();
         // Other aircraft's launches: who, from where, the recording and its
         // reach.
-        let mut others: Vec<(u32, [f64; 3], String, i16)> = Vec::new();
+        let mut others = self.launch_watch.fresh_guns(frame.picture, plane, launches);
         let mut emissions: Vec<tore_sim::acoustics::Emission> = Vec::new();
         for received in events {
             match &received.event {
@@ -1124,8 +1124,7 @@ impl TickPresenter<'_> {
                 }
                 // The player's own launch is its Release; any other
                 // shooter's (aircraft or surface unit) is heard from where
-                // it fired, at the reach of the weapon's record (guns have
-                // no entry).
+                // it fired. The shared mixer groups gun rounds into bursts.
                 WireEvent::Launch {
                     shooter,
                     projectile,
@@ -1133,14 +1132,14 @@ impl TickPresenter<'_> {
                 } => {
                     if *shooter != plane
                         && let Some(record) = name(*weapon)
-                        && let Some((sound, feet)) = launches.get(&record)
                         && let Some(position) = crate::audio::shooter_position(
                             frame.picture,
                             *shooter,
                             Some(*projectile),
                         )
+                        && let Some(heard) = launches.heard(&record, *shooter, position)
                     {
-                        others.push((*shooter, position, sound.to_owned(), feet));
+                        others.push(heard);
                     }
                 }
                 WireEvent::Feedback { rumble } => self.input.feedback(rumble.event()),
@@ -1268,8 +1267,9 @@ impl TickPresenter<'_> {
             let own_releases: Vec<crate::audio::Launch> = releases
                 .iter()
                 .map(|sound| crate::audio::Launch::named(sound))
-                .chain(others.iter().map(|(who, at, sound, feet)| {
-                    crate::audio::Launch::by(*who, *at, sound, *feet)
+                .chain(others.iter().map(|h| {
+                    crate::audio::Launch::by(h.shooter, h.position, &h.sound, h.max_distance_ft)
+                        .with_gun(h.gun)
                 }))
                 .collect();
             for step in 0..ticks.max(1) {
