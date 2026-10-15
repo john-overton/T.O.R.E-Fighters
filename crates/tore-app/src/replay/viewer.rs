@@ -2867,6 +2867,13 @@ impl Viewer {
         self.ui.marks && self.marks.any()
     }
 
+    /// Whether the marks' shapes are drawn: H hides them (the designation
+    /// square, laser spots, weapon lines) with the rest of the interface
+    /// (John, 2026-10-15).
+    fn marks_drawn(&self) -> bool {
+        self.marks_shown() && !self.ui.hidden
+    }
+
     /// What the marks draw at `tick` in `picture`: laser spots, designations,
     /// guided weapons and landings, placed where the picture has their
     /// aircraft, weapons and ground objects.
@@ -3329,7 +3336,7 @@ impl Viewer {
                 &mut combat.vertices,
             );
         }
-        if self.marks_shown() {
+        if self.marks_drawn() {
             let prims = self.mark_prims(&picture, tick);
             ground_marks::geometry(
                 &prims,
@@ -3821,6 +3828,25 @@ mod tests {
         // A fresh press, with any previous press of this key released first.
         viewer.key(key, false, false, false);
         viewer.key(key, true, false, false)
+    }
+
+    #[test]
+    fn hide_ui_hides_the_designation_square_with_the_labels() {
+        let dir = TempDir::new("viewer-marks-hidden");
+        let mut v = viewer(&dir, &Options::default());
+        v.marks = ground_marks::Marks::from_events(&[TimedEvent {
+            tick: 0,
+            event: tore_replay::Event::new(vocab::kind::PLAYER_DESIGNATE)
+                .with_subject(0)
+                .with_object(0x5000_0001)
+                .with(vocab::field::CHANNEL, vocab::designate::RADAR),
+        }]);
+        v.ui.marks = true;
+        assert!(v.marks_drawn(), "the square shows with the interface");
+        press(&mut v, "h");
+        assert!(v.ui.hidden && !v.marks_drawn(), "H hides the square too");
+        press(&mut v, "h");
+        assert!(!v.ui.hidden && v.marks_drawn(), "and H brings it back");
     }
 
     #[test]

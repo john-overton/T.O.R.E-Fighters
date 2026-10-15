@@ -1687,8 +1687,10 @@ There is no cockpit, HUD, instrument panel or mirror in a replay.
   Colours and lengths are fitted.
 - **Laser and bomb marks** (B, on at first): see [below](#laser-and-bomb-marks).
 - **Hide UI** (H or the Hide button): hides the bar, labels, subtitles,
-  timer, debug panels, the right-click menu and the pointer; trails and the
-  marks' lines and shapes stay as chosen (their words go with the labels), and playback and camera keys keep working. H brings the
+  timer, debug panels, the right-click menu, the pointer and the laser and
+  bomb marks (their lines, shapes and words: the square on the player's
+  designated target goes too); trails stay as chosen, and playback and camera
+  keys keep working. H brings the
   interface back; the pause menu still opens over the hidden interface.
 - **Screenshots** (P): the 3D view without any interface, at the view's
   size (up to 1920x1080), saved as
