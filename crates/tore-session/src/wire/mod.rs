@@ -199,7 +199,10 @@ pub fn path_words(path: Path) -> &'static str {
 /// 34 since the player release pass (slice nr-fox3): no message changes,
 /// but player missile release outcomes (advisory MAX RANGE and lock, active
 /// maddog, SARH support recovery) differ, so an older game must not join.
-pub const PROTOCOL_VERSION: u16 = 34;
+/// 35 since the F-15/F-16 stations pass (slice nr-f15): no message changes,
+/// but the F-15C, F-16C and Mi-24 store stations (release positions) moved,
+/// so an older game must not join.
+pub const PROTOCOL_VERSION: u16 = 35;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

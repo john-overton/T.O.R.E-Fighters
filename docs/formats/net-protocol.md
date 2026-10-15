@@ -3083,7 +3083,10 @@ again with an observer; the capture format did not change for it.
   join;
   34 since the player release pass (slice nr-fox3): no message changes;
   player missile release outcomes (advisory MAX RANGE and lock, active
-  maddog, SARH support recovery) differ, so an older game must not join.
+  maddog, SARH support recovery) differ, so an older game must not join;
+  35 since the F-15/F-16 stations pass (slice nr-f15): no message changes;
+  the F-15C, F-16C and Mi-24 store stations (release positions) moved, so
+  an older game must not join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
