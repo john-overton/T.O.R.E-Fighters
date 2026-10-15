@@ -239,3 +239,113 @@ fn another_missile_the_station_takes_is_a_loadout_the_standard_load_never_reads(
         "AIM9X.JT"
     );
 }
+
+#[test]
+fn qmc_wing_loadout_copies_removed_stores_fuel_and_cheat_and_restarts() {
+    for ground in [false, true] {
+        for cheat in [false, true] {
+            let mut spec = spec();
+            spec.wings[0].count = 4;
+            spec.wings[1].count = 1;
+            spec.share_flight_loadout = true;
+            let mut chosen = light();
+            chosen.stations[1].quantity = 0;
+            chosen.cheat = cheat;
+            spec.loadout = Some(chosen.clone());
+            if ground {
+                spec.start = Start::GroundAuto {
+                    altitude_ft: 10_000,
+                };
+            }
+            assert_eq!(MissionSpec::from_text(&spec.to_text()).unwrap(), spec);
+            let map = if ground {
+                crate::test_support::resources::airport_resources()
+            } else {
+                resources()
+            };
+            let kind = aircraft_type::AircraftType::load(&map, AircraftId::F18).unwrap();
+            let mut world = World::new(&spec, &map, Seating::SinglePlayer).unwrap();
+            for _ in 0..2 {
+                let wings = world.ai_wings.as_ref().unwrap();
+                for id in 1..4 {
+                    let load = &world.setup.ai.as_ref().unwrap().loadouts[&id];
+                    assert_eq!(LoadoutSpec::of(load), chosen);
+                    let actor = wings.mission().actor(id).unwrap();
+                    assert_eq!(actor.flight().fuel, chosen.fuel_lbs);
+                    assert_eq!(
+                        actor.stations()[0].store.rounds,
+                        tore_sim::ai::weapon_service::Rounds::Finite(300)
+                    );
+                    assert_eq!(
+                        actor.stations()[1].store.rounds,
+                        tore_sim::ai::weapon_service::Rounds::Finite(0)
+                    );
+                    assert_eq!(
+                        wings.configuration(id).unwrap().stations[1].weapon.source,
+                        chosen.stations[1].weapon
+                    );
+                }
+                assert!(!world.setup.ai.as_ref().unwrap().loadouts.contains_key(&4));
+                assert!(!world.setup.ai.as_ref().unwrap().loadouts.contains_key(&5));
+                assert_eq!(
+                    wings.mission().actor(4).unwrap().flight().fuel,
+                    standard().fuel_lbs
+                );
+                let spent = world
+                    .ai_wings
+                    .as_mut()
+                    .unwrap()
+                    .mission_mut()
+                    .actor_mut(1)
+                    .unwrap();
+                spent.flight_mut().fuel = 1.;
+                spent.stations_mut()[0].store.rounds =
+                    tore_sim::ai::weapon_service::Rounds::Finite(0);
+                world.restart(&kind, &map).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn authored_single_player_load_does_not_change_wingmen() {
+    let mut spec = spec();
+    spec.loadout = Some(light());
+    let world = World::new(&spec, &resources(), Seating::SinglePlayer).unwrap();
+    assert!(world.setup.ai.as_ref().unwrap().loadouts.is_empty());
+    assert_eq!(
+        world
+            .ai_wings
+            .as_ref()
+            .unwrap()
+            .mission()
+            .actor(1)
+            .unwrap()
+            .flight()
+            .fuel,
+        standard().fuel_lbs
+    );
+}
+
+#[test]
+fn qmc_carries_a_store_even_without_ai_target_capabilities() {
+    // This synthetic missile has no air/surface target flags. It remains
+    // a valid carried store even though neither AI selector can employ it.
+    let mut spec = spec();
+    spec.share_flight_loadout = true;
+    spec.loadout = Some(light());
+    let world = World::new(&spec, &resources(), Seating::SinglePlayer).unwrap();
+    let station = &world
+        .ai_wings
+        .as_ref()
+        .unwrap()
+        .mission()
+        .actor(1)
+        .unwrap()
+        .stations()[1];
+    assert!(!station.capability.air && !station.capability.surface);
+    assert_eq!(
+        station.store.rounds,
+        tore_sim::ai::weapon_service::Rounds::Finite(1)
+    );
+}

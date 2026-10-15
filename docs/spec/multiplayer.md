@@ -418,3 +418,24 @@ measuring. The lead's survey of the same day (`.local/mp-notes/stage-ef/`) is
 where the pieces were first found; the
 [menu format notes](../formats/menu.md#multiplayer-connection-screens-dlg-records-panels-and-widget-pieces-ef0-2026-10-01)
 hold the byte layouts and the corrections to the survey.
+
+## Human flight loadouts
+
+**Opinionated, requested by John on 2026-10-15.** At mission start the host
+copies a human's accepted load to the unoccupied AI slots in that human's wing.
+Other wings keep their loads. A slot occupied by another human keeps that
+human's own load; an explicit mission-file plane load is never replaced for
+an AI slot. One aircraft type is selected per wing; a mismatched member keeps
+its type's default. Agent decision for a wing containing several humans: the
+human in the lowest member slot supplies the AI members' load. The lobby's
+slot, side, lead ownership and rest-of-flight rules are otherwise unchanged.
+
+The existing FlightLoadouts message carries the expanded per-plane choices to
+clients. The mission text sent to late joiners and the standby flight includes
+them too. AI respawn reads its original accepted load from the built mission,
+not its spent stores or the pre-flight lobby spec. Existing revival rules still
+restore full internal fuel and apply the King's revival weapons restriction.
+A new round rebuilds from the lobby and applies the humans' current choices.
+No message layout changes; QMC mission text gains `share-flight-loadout yes`.
+Older mission parsers do not understand that key, so the lead must account for
+compatibility when assigning the next protocol number.

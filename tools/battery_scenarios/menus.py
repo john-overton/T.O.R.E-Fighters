@@ -5,9 +5,10 @@ headless AI probe) run in parallel; the windowed ones (real flight captures at
 several window sizes) go through tools/agent-run.sh and are kept few.
 """
 import re
+import json
 from pathlib import Path
 
-from battery import Scenario
+from battery import Scenario, Step
 
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
 
@@ -316,8 +317,42 @@ def no_ordnance_leak(output: str) -> list[str]:
     return problems
 
 
+def wing_loadout_recording_problems(work: Path, output: str) -> list[str]:
+    """Check the recorded tick-zero external inventory, independently of setup."""
+    problems = []
+    for label in ("before", "after", "ground"):
+        path = work / "wing-loadout" / f"{label}.toreplay-log" / "log.jsonl"
+        if not path.is_file():
+            problems.append(f"missing {label} recording export")
+            continue
+        rows = {i: [] for i in range(4)}
+        for line in path.read_text().splitlines():
+            event = json.loads(line)
+            if event.get("kind") == "stores.station" and event.get("tick") == 0:
+                fields = event["fields"]
+                if fields.get("items", 0) and event.get("subject") in rows:
+                    rows[event["subject"]].append((fields["hardpoint"], fields.get("shape", fields["look"]), fields["items"]))
+        expected = [(6, "MK82.SH", 2), (8, "SIDEM.SH", 2)]
+        if rows[0] != expected:
+            problems.append(f"{label} player stores differ: {rows[0]}")
+        wing = [(6, "MAVRK.SH", 4), (7, "AMRAM.SH", 2), (8, "SIDEM.SH", 2), (5, "tank", 1)] if label == "before" else expected
+        for plane in range(1, 4):
+            if rows[plane] != wing:
+                problems.append(f"{label} plane {plane} stores differ from expected policy: {rows[plane]}")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     out: list[Scenario] = []
+    out.append(Scenario(
+        name="qmc-wing-loadout", lane="menus",
+        args=["--validate-wing-loadout", "{work}/wing-loadout", "--no-audio"],
+        expect=[r"qmc wing loadout: four F16 aircraft match, airborne, ground and restart passed", r"qmc wing loadout: one tank matches", r"qmc wing loadout: cheat Boulder carriage matches"],
+        outputs=[f"wing-loadout/{label}.toreplay" for label in ("before", "after", "ground")],
+        then=[Step(["--recording-log", f"{{work}}/wing-loadout/{label}.toreplay"]) for label in ("before", "after", "ground")],
+        check_work=wing_loadout_recording_problems,
+        notes="QMC four-ship F-16 custom Mk82/AIM9 load, removed tanks and reduced fuel, recorded before/after at start; airborne, ground and restart equality.",
+    ))
     out.append(
         Scenario(
             name="menus-ordnance-availability",

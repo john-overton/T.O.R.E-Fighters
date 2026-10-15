@@ -626,6 +626,9 @@ pub struct MissionSpec {
     pub fixture_wings: bool,
     /// The loadout of plane 0; see [`LoadoutSpec`].
     pub loadout: Option<LoadoutSpec>,
+    /// QMC: same-type AI members of the player flight share its accepted load.
+    /// Absent in authored missions unless explicitly requested.
+    pub share_flight_loadout: bool,
     /// The loadouts of an open mission's planes, by plane number, as the
     /// players who hold them chose them in the lobby (stage F, EF4). A plane
     /// with none carries its aircraft's standard load. Single player has
@@ -703,6 +706,7 @@ impl MissionSpec {
             enemy_skill: None,
             fixture_wings: false,
             loadout: None,
+            share_flight_loadout: false,
             plane_loadouts: BTreeMap::new(),
             friendly_fire: true,
             cheat_loadouts: false,
@@ -1204,6 +1208,9 @@ impl MissionSpec {
         if self.fixture_wings {
             line("fixture-wings yes".to_owned());
         }
+        if self.share_flight_loadout {
+            line("share-flight-loadout yes".to_owned());
+        }
         if let Some(load) = &self.loadout {
             for text in load_lines(load) {
                 line(format!("loadout {text}"));
@@ -1501,6 +1508,7 @@ struct Parser {
     ai_model: Option<AiFlightModel>,
     enemy_skill: Option<Option<EnemySkillOverride>>,
     fixture_wings: Option<bool>,
+    share_flight_loadout: Option<bool>,
     load: LoadParts,
     plane_loads: BTreeMap<u32, LoadParts>,
     friendly_fire: Option<bool>,
@@ -1811,6 +1819,16 @@ impl Parser {
                 once(
                     &mut self.fixture_wings,
                     "`fixture-wings`",
+                    yes_no_word(value, key)?,
+                )
+            }
+            "share-flight-loadout" => {
+                let [value] = arguments(words, 1, "share-flight-loadout yes/no")? else {
+                    unreachable!("one argument")
+                };
+                once(
+                    &mut self.share_flight_loadout,
+                    "`share-flight-loadout`",
                     yes_no_word(value, key)?,
                 )
             }
@@ -2217,6 +2235,7 @@ impl Parser {
         spec.ai_flight_model = self.ai_model.unwrap_or(AiFlightModel::AllHybrid);
         spec.enemy_skill = self.enemy_skill.unwrap_or(None);
         spec.fixture_wings = self.fixture_wings.unwrap_or(false);
+        spec.share_flight_loadout = self.share_flight_loadout.unwrap_or(false);
         spec.friendly_fire = self.friendly_fire.unwrap_or(true);
         spec.cheat_loadouts = self.cheat_loadouts.unwrap_or(false);
         spec.ground_target = self.ground_target;

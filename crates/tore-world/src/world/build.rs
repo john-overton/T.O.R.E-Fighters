@@ -267,6 +267,16 @@ impl World {
         // aircraft each plane flies (the types are loaded by now), under the
         // mission's loadout rule.
         let mut loadouts = std::collections::BTreeMap::new();
+        if !open && spec.share_flight_loadout {
+            let planes = spec.open_planes();
+            let player_wing = planes[0].wing;
+            for plane in planes {
+                if plane.id != 0 && plane.wing == player_wing && plane.aircraft == player.profile.id
+                {
+                    loadouts.insert(plane.id, load.clone());
+                }
+            }
+        }
         for (plane, load) in &spec.plane_loadouts {
             let aircraft = spec
                 .open_planes()

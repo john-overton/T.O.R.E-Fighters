@@ -1833,3 +1833,12 @@ design is built on ([questions](ARCHITECTURE.md#questions-for-john-stage-k)):
   Winchester, Alt+Shift+B Bingo fuel, Alt+Shift+H Need help
   ([keys](CONTROLS.md#multiplayer-phase-2)). John answered
   on 2026-10-05 (all as recommended); the keys exist since slice F2-C.
+
+### AI wingmen's starting load
+
+Each human flight's AI members start with that human's accepted ordnance,
+including empty stations, tanks and fuel. Other human slots keep their own
+loads; explicit mission-file AI loads stay intact. With multiple humans in one
+wing, the lowest member slot supplies its AI load. Revival retains the chosen
+stores under the existing full-fuel and revival-weapons rules. See the
+[loadout contract](spec/multiplayer.md#human-flight-loadouts).

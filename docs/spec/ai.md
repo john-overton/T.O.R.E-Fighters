@@ -1616,7 +1616,10 @@ are behavior fixes, not evidence of retail combat parity. Validation lives in
   choice. Equal and lower-priority reasons preserve an active maneuver.
 - Imported AI actors carry their own PT default weapons and ECM counts. Using
   the PT default loadout when Quick Mission provides no AI loadout is an
-  opinionated agent choice. A projectile owns its selected weapon record; guns
+  opinionated agent choice. The player's wing instead shares its accepted
+  [QMC load](quick-mission-menu.md#the-players-flight-loadout), including empty
+  stations and fuel; human multiplayer flights follow the
+  [same-wing rule](multiplayer.md#human-flight-loadouts). A projectile owns its selected weapon record; guns
   remain unguided. Live guns authorize individual rounds, then debit at physical
   emission after capacity and barrel checks. Their fitted tracking and authored
   burst policy are specified in [gun employment](ai-gun-employment.md). Synthetic

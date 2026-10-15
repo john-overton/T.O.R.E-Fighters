@@ -259,6 +259,34 @@ Opinionated, requested by John; the choices below are agent decisions.
 - **The multiplayer lobby** has a separate ordnance path (its Accept sends the
   load to the lobby) and is unchanged.
 
+## The player's flight loadout
+
+**Opinionated, requested by John on 2026-10-15.** Every AI aircraft in the
+player's QMC wing starts with the accepted player load: identical weapon
+records, station capacities and quantities (including zero), designator pods,
+external tank choices and quantities, and internal fuel. Standard and Custom
+loads follow the same rule, including Cheat loading. Airborne and ground starts
+and a flight restart preserve it. Other wings retain their own default loads.
+QMC selects one aircraft type per wing. A different-type member, if a future
+creator permits one, keeps its own default instead of receiving incompatible
+stores. The fixture-only development path is unchanged.
+
+The loadout memory described above supplies the accepted load before sharing.
+Sharing does not add AI employment logic: a carried store that no AI weapon
+selection rule can employ stays aboard. Existing orders and weapon eligibility
+still decide what the AI can release, and an order with no usable store can
+receive Winchester. An unarmed load is not silently replaced.
+
+The creator writes `share-flight-loadout yes` in its mission text. An authored
+mission without this setting retains its existing loads. Multiplayer uses
+per-plane loads and the [human-flight rule](multiplayer.md#human-flight-loadouts).
+
+Retail QMC load sharing is **unknown**. The current recovered creator and AI
+specifications do not establish how an accepted custom load is distributed to
+wing members. Next research: trace the accepted QMC ordnance data into the
+retail wing member initializer, recording the executable build identity and
+station/count writes. This implementation is not a retail parity claim.
+
 ## Mission wings
 
 Guns only applies to the player and every member of all six wings, on both
