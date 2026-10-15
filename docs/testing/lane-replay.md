@@ -173,7 +173,7 @@ driver prints `driver: window up after N s`.
 ## Unfired stores
 
 `replay-stores-unfired` runs `--replay-stores-check` without a window or GPU.
-It builds Su-27, F/A-18D, F-14, A-4E, Su-25 and F-4B loads from the import, records
+It builds Su-27, F/A-18D, F-14, F-15C, F-16C, Mi-24, A-4E, Su-25 and F-4B loads from the import, records
 station and count events without any projectile catalog, and compares replayed
 store vertices with live flight in forward and reverse order. It also checks
 each release point against the hung stores, using the same numbers printed by
@@ -187,6 +187,14 @@ aircraft type at its first recorded layout. These are posed store inspections
 in daylight over Ukraine, not captures of the recording's camera or terrain.
 The before pictures reproduce the old loader with the same recorded stores;
 the after pictures use the viewer's current loader. Use a private data profile.
+
+`replay-stores-release-f15` and `replay-stores-release-f16c` fly each
+aircraft's combat-smoke slots and round-trip their combat tapes after the
+2026-10-15 station moves. Evidence stays inside the scenario's work
+directory. The Mi-24 has no such scenario: its combat smoke already fails
+on the base (the AT-2 guidance probe reports no target).
+`replay-stores-unfired` checks the moved coordinates of all three. The geometry rules are in
+the [stores specification](../spec/stores-on-pylons.md#the-f-16c-and-fleet-rail-audit).
 
 ## Selected object banner
 

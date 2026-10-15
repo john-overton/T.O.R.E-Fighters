@@ -51,19 +51,20 @@ const AIRCRAFT: [(AircraftId, &str); 22] = [
 
 /// Camera eye and look point, feet right, up and forward of the aircraft,
 /// and the vertical field of view in degrees.
-const VIEWS: [(&str, [f64; 3], [f64; 3], f64); 6] = [
+const VIEWS: [(&str, [f64; 3], [f64; 3], f64); 7] = [
     ("front-low", [-38., -16., 62.], [0., -3., 0.], 40.),
     ("below-side", [55., -40., -20.], [0., -3., -2.], 45.),
     ("rear-high", [-30., 18., -75.], [0., -2., 0.], 40.),
     // Straight up at the belly from a little ahead, as a pass overhead
     // shows it (John's F-14 picture, 2026-10-14).
-    ("below", [0.5, -62., 14.], [0., -3., 2.], 50.),
+    ("below", [0.5, -95., 14.], [0., -3., 6.], 50.),
     // From the left, a little ahead and below, level with the wing: the
     // pylons under the wing seen side on (John's Yak-141 reference,
     // 2026-10-14).
-    ("side-front", [-48., -7., 30.], [0., -1.5, -3.], 38.),
+    ("side-front", [-75., -12., 35.], [0., -1.5, 4.], 40.),
     // Straight ahead and a little below (John's A-10 picture, 2026-10-14).
     ("ahead", [0., -6., 75.], [0., -2.5, 0.], 34.),
+    ("top", [0.5, 95., 14.], [0., 0., 6.], 50.),
 ];
 
 pub fn run() -> AppResult<()> {
@@ -95,23 +96,118 @@ pub fn run() -> AppResult<()> {
     };
     let world = Terrain::for_mission(resources, "UKR", None, &overrides)?;
     let mut scenery = Scenery::build(resources, &world)?;
-    let mut gpu = pollster::block_on(Gpu::new(&scenery))?;
+    let cpu = std::env::var_os("TORE_STORES_PREVIEW_CPU").is_some();
+    let mut gpu = if cpu {
+        None
+    } else {
+        Some(pollster::block_on(Gpu::new(&scenery))?)
+    };
     // `TORE_STORES_PREVIEW_AIRCRAFT=f14,f15` draws only those.
     let only: Option<Vec<String>> = std::env::var("TORE_STORES_PREVIEW_AIRCRAFT")
         .ok()
         .map(|list| list.split(',').map(str::to_owned).collect());
-    for (id, short) in AIRCRAFT
+    let fleet: Vec<_> = AircraftId::SELECTABLE
+        .into_iter()
+        .map(|id| {
+            let short = AIRCRAFT.iter().find(|(known, _)| *known == id).map_or_else(
+                || {
+                    id.selection_key()
+                        .trim_end_matches(".PT")
+                        .to_ascii_lowercase()
+                },
+                |(_, short)| (*short).to_owned(),
+            );
+            (id, short)
+        })
+        .collect();
+    for (id, short) in fleet
         .into_iter()
         .filter(|(_, short)| only.as_ref().is_none_or(|o| o.iter().any(|s| s == short)))
     {
         let airframe = crate::aircraft::Airframe::load(resources, id)?;
         let profile = Aircraft::parse(resources.get(id.pt()).ok_or("missing aircraft record")?)?;
-        let mut config = live::Configuration::from_source(&profile, |name| {
+        let mut loadout = tore_sim::combat::loadout::Loadout::new(&profile, |name| {
             resources
                 .get(name)
                 .cloned()
                 .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
         })?;
+        // Opt-in to the existing ordnance-screen Cheat for geometry checks
+        // of real carriage that the retail compatibility masks disallow.
+        loadout.cheat = std::env::var_os("TORE_STORES_PREVIEW_CHEAT").is_some();
+        // Development fixtures use the ordnance screen's compatibility and
+        // selection path, keyed by source row, not by weapon-slot index.
+        for entry in std::env::var("TORE_STORES_PREVIEW_RECORDS")
+            .unwrap_or_default()
+            .split(',')
+            .filter(|s| !s.is_empty())
+        {
+            let (row, load) = entry.split_once('=').ok_or("expected ROW=STORE:COUNT")?;
+            let row = row.parse::<usize>()?;
+            let (store, count) = load.split_once(':').ok_or("expected STORE:COUNT")?;
+            let count = count.parse::<u16>()?;
+            let bytes = resources.get(store).ok_or("missing fixture store")?;
+            if store.ends_with(".GAS") {
+                let slot = loadout
+                    .configuration
+                    .tanks
+                    .iter()
+                    .position(|t| t.hardpoint == row)
+                    .ok_or("no tank row")?;
+                loadout.select_tank(slot, live::TankStore::parse(store, bytes)?)?;
+                if count > loadout.configuration.tanks[slot].quantity {
+                    return Err("tank count above capacity".into());
+                }
+                loadout.configuration.tanks[slot].quantity = count;
+                loadout.refresh_equipment()?;
+            } else {
+                let slot = loadout
+                    .configuration
+                    .hardpoint_slots
+                    .get(row)
+                    .copied()
+                    .flatten()
+                    .ok_or("no weapon row")?;
+                loadout.select(slot, tore_formats::weapons::Weapon::parse(store, bytes)?)?;
+                if count > loadout.quantities[slot] {
+                    return Err("weapon count above capacity".into());
+                }
+                loadout.quantities[slot] = count;
+            }
+        }
+        for (station, count) in loadout
+            .configuration
+            .stations
+            .iter_mut()
+            .zip(&loadout.quantities)
+        {
+            station.count = *count;
+        }
+        let mut config = loadout.configuration;
+        // Preview only: compare new table entries to generic placement of
+        // the recorded stations. This never changes flight configuration.
+        if std::env::var("TORE_STORES_PREVIEW_RECORDED_STATIONS")
+            .is_ok_and(|list| list == "1" || list.split(',').any(|name| name == short))
+        {
+            let shape = tore_formats::shape::Shape::parse(
+                resources.get(&profile.shape).ok_or("missing shape")?,
+            )?;
+            let model = tore_sim::combat::hardpoints::Underside::of(
+                &shape,
+                tore_sim::combat::debris::scale(profile.id),
+            );
+            for (row, h) in profile.hardpoints.iter().enumerate() {
+                let (mount, rack) = tore_sim::combat::hardpoints::placed(h, Some(&model));
+                if let Some(slot) = config.hardpoint_slots[row] {
+                    config.stations[slot].mount = mount;
+                    config.stations[slot].rack = rack;
+                }
+                for tank in config.tanks.iter_mut().filter(|t| t.hardpoint == row) {
+                    tank.mount = mount;
+                    tank.rack = rack;
+                }
+            }
+        }
         // `TORE_STORES_PREVIEW_COUNTS=f18d:2=8,a10:1=6` loads those
         // stations with that many stores (a rack close-up); the output
         // names carry `-n<station>x<count>` for each.
@@ -149,7 +245,7 @@ pub fn run() -> AppResult<()> {
         for (index, h) in profile.hardpoints.iter().enumerate() {
             println!(
                 "Stores preview: {short} hardpoint {index} at {:?} pylon top {:?}",
-                h.position,
+                (h.position, h.location, h.flags, &h.store, h.count),
                 airframe.pylon_top(index)
             );
         }
@@ -215,6 +311,10 @@ pub fn run() -> AppResult<()> {
             ("empty", store_poses(&config, |_| 0, loaded)),
         ];
         clip_report(short, &airframe, &art, &loads[1].1);
+        if std::env::var_os("TORE_STORES_PREVIEW_AUDIT").is_some() {
+            audit(short, &profile, &config, &airframe, &art, &loads[1].1);
+            continue;
+        }
         let mut state = airframe.start(&world);
         let ground = f64::from(world.height(state.position[0] as f32, state.position[2] as f32));
         state.position[1] = ground.max(0.) + HEIGHT_FT;
@@ -223,15 +323,37 @@ pub fn run() -> AppResult<()> {
         state.yaw = 0.;
         state.pitch = 0.;
         state.bank = 0.;
-        let close_only = std::env::var_os("TORE_STORES_PREVIEW_CLOSE").is_some();
-        for (load, stores) in &loads {
+        if cpu {
             for (view, eye, look, fov) in VIEWS {
-                if close_only {
+                if ["below", "side-front", "ahead", "top"].contains(&view) && preview_view(view) {
+                    cpu_render(
+                        &mut scenery,
+                        &world,
+                        &art,
+                        &airframe,
+                        &state,
+                        &loads[1].1,
+                        (eye, look, fov),
+                        &out.join(format!("{short}-loaded-{view}.png")),
+                    )?;
+                }
+            }
+            continue;
+        }
+        let gpu = gpu.as_mut().expect("GPU preview initialized");
+        let close_only = std::env::var_os("TORE_STORES_PREVIEW_CLOSE").is_some();
+        let loaded_only = std::env::var_os("TORE_STORES_PREVIEW_LOADED_ONLY").is_some();
+        for (load, stores) in &loads {
+            if loaded_only && *load != "loaded" {
+                continue;
+            }
+            for (view, eye, look, fov) in VIEWS {
+                if close_only || !preview_view(view) {
                     continue;
                 }
                 let name = format!("{short}-{load}-{view}.png");
                 render(
-                    &mut gpu,
+                    gpu,
                     &mut scenery,
                     &world,
                     &art,
@@ -243,6 +365,9 @@ pub fn run() -> AppResult<()> {
                     &out.join(&name),
                 )?;
             }
+        }
+        if loaded_only {
+            continue;
         }
         // Close-ups of the loaded aircraft's joins: the outermost station
         // (a wingtip rail where there is one) and the busiest wing station,
@@ -321,7 +446,7 @@ pub fn run() -> AppResult<()> {
             };
             for (view, eye) in views {
                 render(
-                    &mut gpu,
+                    gpu,
                     &mut scenery,
                     &world,
                     &art,
@@ -377,7 +502,7 @@ pub fn run() -> AppResult<()> {
                 let stores = store_poses(&config, |i| rounds[i], loaded);
                 let (_, eye, look, fov) = VIEWS[0];
                 render(
-                    &mut gpu,
+                    gpu,
                     &mut scenery,
                     &world,
                     &art,
@@ -393,6 +518,11 @@ pub fn run() -> AppResult<()> {
         }
     }
     Ok(())
+}
+
+fn preview_view(view: &str) -> bool {
+    std::env::var("TORE_STORES_PREVIEW_VIEWS")
+        .map_or(true, |views| views.split(',').any(|wanted| wanted == view))
 }
 
 /// The `TORE_STORES_PREVIEW_COUNTS` entries for aircraft `short`:
@@ -880,5 +1010,270 @@ fn clip_report(
             worst.1[1],
             worst.1[2]
         );
+    }
+}
+
+/// CPU geometry review using the flight airframe and pylon triangles. Solid
+/// face colours and depth only: textures, weather and GPU lighting need the
+/// offscreen GPU preview. This path never creates an adapter or a window.
+#[allow(clippy::too_many_arguments)]
+fn cpu_render(
+    scenery: &mut Scenery,
+    world: &Terrain,
+    art: &CombatArt,
+    airframe: &crate::aircraft::Airframe,
+    state: &crate::flight::State,
+    stores: &[StorePose],
+    (eye, look, fov): ([f64; 3], [f64; 3], f64),
+    path: &Path,
+) -> AppResult<()> {
+    let mut camera = Camera::new();
+    camera.position = std::array::from_fn(|i| state.position[i] + eye[i]);
+    let d: [f64; 3] = std::array::from_fn(|i| look[i] - eye[i]);
+    camera.yaw = d[0].atan2(d[2]) as f32;
+    camera.pitch = d[1].atan2(d[0].hypot(d[2])) as f32;
+    scenery.resolve_palette(world, camera.position[1]);
+    scenery.set_origin(camera.position);
+    let mut vertices = airframe.vertices(state, &camera, world, scenery);
+    vertices.extend(crate::pylons::for_flown(
+        stores, state, airframe, art, scenery,
+    ));
+    let basis = Basis::new(f64::from(camera.yaw), f64::from(camera.pitch), 0.);
+    let eye_relative = scenery.relative(camera.position);
+    let (width, height) = (1600usize, 900usize);
+    let focal = height as f64 / (2. * (fov / 2.).to_radians().tan());
+    let mut rgba = [88, 98, 110, 255].repeat(width * height);
+    let mut depth = vec![f64::INFINITY; width * height];
+    for triangle in vertices.chunks_exact(30) {
+        let a = std::array::from_fn(|k| f64::from(triangle[10 + k] - triangle[k]));
+        let b = std::array::from_fn(|k| f64::from(triangle[20 + k] - triangle[k]));
+        let normal = tore_sim::attitude::unit(tore_sim::attitude::cross(a, b));
+        let light = tore_sim::attitude::unit([-0.45, -0.8, 0.35]);
+        let lit = 0.5 + 0.5 * tore_sim::attitude::dot(normal, light).abs();
+        let p: [[f64; 3]; 3] = std::array::from_fn(|i| {
+            let v = &triangle[i * 10..];
+            let dot = |axis: [f64; 3]| {
+                (0..3)
+                    .map(|k| (f64::from(v[k]) - eye_relative[k]) * axis[k])
+                    .sum::<f64>()
+            };
+            let z = dot(basis.forward);
+            [
+                width as f64 / 2. + focal * dot(basis.right) / z,
+                height as f64 / 2. - focal * dot(basis.up) / z,
+                z,
+            ]
+        });
+        if p.iter().any(|q| q[2] <= 1.) {
+            continue;
+        }
+        let edge = |a: [f64; 3], b: [f64; 3], x: f64, y: f64| {
+            (b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0])
+        };
+        let area = edge(p[0], p[1], p[2][0], p[2][1]);
+        if area.abs() < 1e-8 {
+            continue;
+        }
+        let limits = |axis: usize, max: usize| {
+            let low = p
+                .iter()
+                .map(|q| q[axis])
+                .fold(f64::INFINITY, f64::min)
+                .floor()
+                .max(0.) as usize;
+            let high = p
+                .iter()
+                .map(|q| q[axis])
+                .fold(f64::NEG_INFINITY, f64::max)
+                .ceil()
+                .max(0.) as usize;
+            (low.min(max), high.min(max))
+        };
+        let (x0, x1) = limits(0, width - 1);
+        let (y0, y1) = limits(1, height - 1);
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let weights = [
+                    edge(p[1], p[2], x as f64 + 0.5, y as f64 + 0.5) / area,
+                    edge(p[2], p[0], x as f64 + 0.5, y as f64 + 0.5) / area,
+                    edge(p[0], p[1], x as f64 + 0.5, y as f64 + 0.5) / area,
+                ];
+                if weights.iter().any(|w| *w < 0.) {
+                    continue;
+                }
+                let z = 1. / (0..3).map(|i| weights[i] / p[i][2]).sum::<f64>();
+                let at = y * width + x;
+                if z >= depth[at] {
+                    continue;
+                }
+                depth[at] = z;
+                for k in 0..3 {
+                    let c = (0..3)
+                        .map(|i| weights[i] * f64::from(triangle[i * 10 + 6 + k]))
+                        .sum::<f64>();
+                    rgba[at * 4 + k] = (c.clamp(0., 1.).sqrt() * lit * 255.) as u8;
+                }
+            }
+        }
+    }
+    std::fs::write(
+        path,
+        crate::replay::png::encode_rgba(width as u32, height as u32, &rgba)?,
+    )?;
+    println!("Stores CPU preview: {}", path.display());
+    Ok(())
+}
+
+/// Geometry screening, not a claim of real-aircraft certification. Chords
+/// are sampled every quarter foot, at the pylon span, from the nearest
+/// continuous model surface. Separate tails/canards do not lengthen a wing.
+fn audit(
+    short: &str,
+    profile: &Aircraft,
+    config: &live::Configuration,
+    airframe: &crate::aircraft::Airframe,
+    art: &CombatArt,
+    stores: &[StorePose],
+) {
+    use tore_sim::combat::hardpoints::{Location, placed_on};
+    let surface = |x: f64, z: f64, ceiling: f64| {
+        [-20., -8., 4.]
+            .into_iter()
+            .filter_map(|from| airframe.underside(x, z, from, 0))
+            .filter(|up| *up <= ceiling)
+            .reduce(f64::min)
+    };
+    for (row, h) in profile.hardpoints.iter().enumerate() {
+        let location = Location::from_byte(h.location);
+        let gun = config
+            .hardpoint_slots
+            .get(row)
+            .copied()
+            .flatten()
+            .and_then(|slot| config.stations.get(slot))
+            .is_some_and(|s| live::is_gun(&s.weapon));
+        let equipment = h
+            .store
+            .as_deref()
+            .is_some_and(|name| name.ends_with(".SEE") || name.ends_with(".ECM"));
+        // Some real external weapon rows carry flag 8 too (Mi-24 AT-2).
+        if !location.external() || gun || equipment {
+            println!("Audit row: {short} {row} internal/equipment");
+            continue;
+        }
+        let (mount, rack) = placed_on(profile.id, row, h, None);
+        let active: Vec<_> = stores
+            .iter()
+            .filter(|s| usize::from(s.hardpoint) == row)
+            .collect();
+        println!(
+            "Audit row: {short} {row} {:?} source={:?} table={mount:.2?} loaded={}",
+            rack.location(),
+            h.position,
+            active.iter().map(|s| s.items).sum::<u16>()
+        );
+        // Empty optional rows use their configured candidate weapon, labelled
+        // loaded=0 above. This does not change or simulate the loadout.
+        let candidate_count = u16::try_from(h.count).unwrap_or(1).max(1);
+        let fallback = config
+            .hardpoint_slots
+            .get(row)
+            .copied()
+            .flatten()
+            .and_then(|slot| config.stations.get(slot))
+            .map(|s| StorePose {
+                hardpoint: row as u8,
+                mount: s.mount,
+                rack: s.rack,
+                shape: s.weapon.shape.clone(),
+                look: crate::snapshot::StoreLook::Store,
+                items: candidate_count,
+                loaded: candidate_count,
+                body: [0.; 2],
+            });
+        let mut candidates = active;
+        if candidates.is_empty()
+            && let Some(ref pose) = fallback
+        {
+            candidates.push(pose);
+        }
+        if candidates.is_empty() {
+            println!(
+                "Audit empty: {short} row={row} no configured weapon; position={mount:.2?}, needs a compatible load to measure hanger"
+            );
+        }
+        for store in candidates {
+            let mut hangers = Vec::new();
+            let empty = StorePose {
+                items: 0,
+                ..store.clone()
+            };
+            crate::pylons::vertices(
+                &mut hangers,
+                &[empty],
+                [0.; 3],
+                [0.; 3],
+                Some(airframe),
+                art,
+                &[[128; 3]; 256],
+            );
+            for place in crate::pylons::hung(store)
+                .into_iter()
+                .filter(|p| p.held && p.side == 0)
+            {
+                let [x, up, z] = place.pylon.point;
+                // Do not mistake a helicopter rotor disk for a stub wing.
+                let ceiling = if profile.id.is_helicopter() {
+                    (up + store.size().top + 4.).min(2.)
+                } else {
+                    up + store.size().top + 4.
+                };
+                let spans: Vec<_> = (-640..=640)
+                    .filter_map(|k| {
+                        let f = f64::from(k) * 0.25;
+                        surface(x, f, ceiling).map(|_| f)
+                    })
+                    .collect();
+                let nearest = spans
+                    .iter()
+                    .copied()
+                    .min_by(|a, b| (a - z).abs().total_cmp(&(b - z).abs()));
+                let chord = nearest.map(|near| {
+                    let mut ends = [near; 2];
+                    for (i, sign) in [(0, -1.), (1, 1.)] {
+                        for step in 1..=1280 {
+                            let f = near + sign * f64::from(step) * 0.25;
+                            if surface(x, f, ceiling).is_none() {
+                                break;
+                            }
+                            ends[i] = f;
+                        }
+                    }
+                    ends
+                });
+                let front = hangers
+                    .chunks_exact(10)
+                    .filter(|v| (f64::from(v[0]) - x).abs() < 1.5)
+                    .map(|v| f64::from(v[2]))
+                    .reduce(f64::max);
+                // Retail mesh origins need not be the longitudinal centre.
+                // AMRAM.SH's nose is 9.33 ft ahead of its release origin,
+                // not half its 12 ft length. Measure the drawn mesh.
+                let nose_offset = store
+                    .shape
+                    .as_deref()
+                    .and_then(|name| art.shape(name))
+                    .and_then(crate::store_sizes::body)
+                    .map_or(store.size().length / 2., |b| b.along[1]);
+                let nose = place.centre[2] + nose_offset;
+                println!(
+                    "Audit pylon: {short} row={row} shape={} centre={:.2?} pylon={:.2?} chord={chord:.2?} hanger_front={front:.2?} store_front={nose:.2} ahead={:.2}",
+                    store.shape.as_deref().unwrap_or("body"),
+                    place.centre,
+                    place.pylon.point,
+                    chord.map_or(f64::NAN, |c| nose - c[1])
+                );
+            }
+        }
     }
 }
