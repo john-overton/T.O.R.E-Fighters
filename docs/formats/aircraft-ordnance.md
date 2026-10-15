@@ -375,6 +375,13 @@ omitted; Count is the default quantity):
 | `A10.PT` | 7 | Wing | `0x0585` | 40 / -10 / 0 | 13.3 / -3.3 / 0.0 | yes | AGM65G.JT | 2 |
 | `A10.PT` | 8 | Wing | `0x0185` | 55 / -10 / 0 | 18.3 / -3.3 / 0.0 | yes | AGM65G.JT | 2 |
 
+The F-15C and F-16C rows above are source coordinates. Their current
+fitted placement is documented in [F-15C stores](../spec/stores-on-pylons.md#the-f-15c)
+and [F-16C stores](../spec/stores-on-pylons.md#the-f-16c-and-fleet-rail-audit).
+The Mi-24 row 2 also reads its attachment from below the stub wing
+([placement](../spec/stores-on-pylons.md#mi-24-lower-wing-attachment)).
+No source rows or station capacities were added.
+
 ## Original icons and geometry candidates
 
 The four original tank thumbnails `$F150.PIC`, `$F250.PIC`, `$F350.PIC` and

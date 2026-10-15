@@ -717,6 +717,9 @@ pub enum Hang {
     /// As the record's location hangs them, under the surface straight
     /// above the pylon.
     AsRecorded,
+    /// Read the underside from a known point below the body when the
+    /// source record lies inside it (the F-15's intake ducts).
+    FromBelow { up: f64 },
     /// Under the lowest surface over the store's length, `half` feet either
     /// side of the station, so a store under a part that slopes along it (an
     /// F-14 tank under its intake ramp) does not cut into it.
@@ -797,6 +800,20 @@ const F14_SHOULDER_FORWARD: f64 = 6.0;
 /// are its inner and outer underwing pylons, both well inside the swept
 /// wing's chord, each rail's front at the leading edge, so the missiles'
 /// noses reach a little ahead of it ([`YAK141_INNER`], [`YAK141_OUTER`]).
+///
+/// The F-15C (John 2026-10-15: "the fuselage mounts for the missiles appear
+/// under the wing instead of on the bottom of the fuselage", "the wing
+/// pylons are a little too far forward"): record 4's four AIM-7/AIM-120s
+/// on the lower outer corners of the intake ducts, 5 ft out, two in tandem
+/// a side centred 1 ft back, their underside read from 8 ft below the
+/// reference point because the record lies inside the duct
+/// ([`Hang::FromBelow`]); record 5's twin-rail wing pylon 5.5 ft back, at
+/// mid-chord. The F-16C's middle (row 6) and outer (row 7) underwing
+/// pylons move aft under the chord (John 2026-10-15: the pylons and stores
+/// stuck out ahead of the leading edge). The Mi-24's AT-2 row (agent
+/// decision under the same fleet review) hangs under the stub wing, 12 ft
+/// out and 5 ft back, instead of from the rotor disk above its record. The
+/// numbers are agent decisions read from the models.
 pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
     let at = |location, right, forward, hang| {
         Some(StationMove {
@@ -807,6 +824,20 @@ pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
         })
     };
     match (id, hardpoint) {
+        // F-15C, John 2026-10-15: lower outer intake corners, two missiles
+        // in tandem per side; wing dual rails a little further aft.
+        (AircraftId::F15, 4) => at(Location::Fuselage, 5., -1., Hang::FromBelow { up: -8. }),
+        (AircraftId::F15, 5) => at(Location::Wing, 50. / 3., -5.5, Hang::AsRecorded),
+        // Mi-24's source row is ahead of the stub wing, so it sees the
+        // rotor disk. Put the twin rails near the outer stub-wing ends,
+        // behind the leading edge and clear of the baked-in pods.
+        (AircraftId::Mi24, 2) => at(Location::Wing, 12., -5., Hang::AsRecorded),
+        // F-16C source rows represent middle (3/7), outer (2/8) and tip
+        // (1/9) stations. The wet inner pair (4/6) has no source row.
+        // Origins include each mesh's forward bias: the AMRAAM body's
+        // centre is 3.33 ft ahead of its origin, the Maverick's 0.34 ft.
+        (AircraftId::F16C, 6) => at(Location::Wing, 32. / 3., -3., Hang::AsRecorded),
+        (AircraftId::F16C, 7) => at(Location::Wing, 43. / 3., -7., Hang::AsRecorded),
         (AircraftId::F14, 4) => at(Location::Fuselage, 1.25, F14_PALLETS_FORWARD, Hang::Pallets),
         (AircraftId::F14, 5) => at(
             Location::Fuselage,
@@ -953,7 +984,10 @@ pub fn placed_on(
         _ => (moved.right, mount[2]),
     };
     if let Some(model) = model {
-        let from = mount[1];
+        let from = match moved.hang {
+            Hang::FromBelow { up } => up,
+            _ => mount[1],
+        };
         rack.over = sample_points(pylon, forward)
             .map(|(r, f)| model.height(r, f, from, 6).map(|h| h as f32));
         if moved.hang == Hang::Separate {
@@ -1679,6 +1713,136 @@ mod tests {
             store: Some(store.into()),
             count,
             weight_class: 0,
+        }
+    }
+
+    #[test]
+    fn the_f15_uses_the_lower_intake_corners_and_aft_wing_pylons() {
+        // A duct belly below the source record, and a wing above it.
+        // A search starting at the old -3.33 ft height misses the belly.
+        let face = |x0, x1, up| tore_formats::shape::Face {
+            positions: vec![[x0, -60., up], [x1, -60., up], [x1, 60., up], [x0, 60., up]],
+            colors: vec![1; 4],
+            fog: Default::default(),
+            uv: Vec::new(),
+            texture: String::new(),
+            subtype: 0x20,
+            normal: None,
+            address: 0,
+        };
+        let shape = Shape {
+            faces: vec![face(6., 15.3, -12.6), face(0., 66., 3.)],
+            lines: Vec::new(),
+            billboards: Vec::new(),
+            state_words: Default::default(),
+        };
+        let model = Underside::of(&shape, 1. / 3.);
+        let row = |location, position| Hardpoint {
+            location,
+            position,
+            flags: 0x07e5,
+            count: 4,
+            store: Some("AIM120.JT".into()),
+            weight_class: 0,
+        };
+        let source = row(1, [25, -10, 0]);
+        let (mount, rack) = placed_on(AircraftId::F15, 4, &source, Some(&model));
+        assert_eq!([mount[0], mount[2]], [5., -1.]);
+        for name in ["AMRAM.SH", "SPAR.SH"] {
+            let size = StoreSize::of_shape(Some(name));
+            let points: Vec<_> = (0..4)
+                .map(|slot: u16| rack.store_point(mount, 4, usize::from(slot % 2), slot / 2, size))
+                .collect();
+            for p in &points {
+                assert_eq!(p[0].abs(), 5.);
+                assert!((p[1] + size.top + 4.2 + RAIL_DEPTH).abs() < 1e-5);
+            }
+            assert!((points[2][2] - points[0][2] - size.length - TANDEM_GAP).abs() < 1e-9);
+            assert!((points[2][2] + points[0][2] + 2.).abs() < 1e-9);
+        }
+        let (mount, rack) = placed_on(AircraftId::F15, 5, &row(4, [50, -20, 0]), Some(&model));
+        assert_eq!([mount[0], mount[2]], [50. / 3., -5.5]);
+        let size = StoreSize::of_shape(Some("SIDEM.SH"));
+        assert_eq!(rack.pylons(2), 1, "one twin-rail pylon per wing");
+        for side in 0..2 {
+            let pair = [0, 1].map(|slot| rack.store_point(mount, 4, side, slot, size));
+            assert!((pair[0][0].abs() + pair[1][0].abs() - 100. / 3.).abs() < 1e-9);
+            assert!(
+                pair.iter()
+                    .all(|p| p[2] == -5.5 && (p[1] + size.top).abs() < 1e-6)
+            );
+        }
+        for (index, x, forward) in [(6, 32, -3.), (7, 43, -7.)] {
+            let (mount, rack) =
+                placed_on(AircraftId::F16C, index, &row(4, [x, -10, 0]), Some(&model));
+            assert_eq!([mount[0], mount[2]], [f64::from(x) / 3., forward]);
+            assert_eq!(rack.location(), Location::Wing);
+        }
+        let tip = row(5, [54, 2, -14]);
+        assert_eq!(
+            placed_on(AircraftId::F16C, 8, &tip, Some(&model)),
+            placed(&tip, Some(&model))
+        );
+        // Edited records with a different location and other aircraft keep
+        // the generic placement. No F-15 offset leaks into the F-14.
+        let edited = row(4, [25, -10, 0]);
+        assert_eq!(
+            placed_on(AircraftId::F15, 4, &edited, Some(&model)),
+            placed(&edited, Some(&model))
+        );
+        assert_eq!(station_move(AircraftId::F15, 3), None);
+    }
+
+    #[test]
+    fn the_hind_hangs_missiles_under_the_stub_wing_not_the_rotor() {
+        let face = |positions| tore_formats::shape::Face {
+            positions,
+            colors: vec![1; 4],
+            fog: Default::default(),
+            uv: Vec::new(),
+            texture: String::new(),
+            subtype: 0x20,
+            normal: None,
+            address: 0,
+        };
+        let shape = Shape {
+            faces: vec![
+                face(vec![
+                    [30., -21., -3.75],
+                    [42., -21., -3.75],
+                    [42., -9., -3.75],
+                    [30., -9., -3.75],
+                ]),
+                face(vec![
+                    [0., -60., 24.],
+                    [60., -60., 24.],
+                    [60., 60., 24.],
+                    [0., 60., 24.],
+                ]),
+            ],
+            lines: Vec::new(),
+            billboards: Vec::new(),
+            state_words: Default::default(),
+        };
+        let model = Underside::of(&shape, 1. / 3.);
+        let source = Hardpoint {
+            location: 4,
+            flags: 392,
+            position: [25, -10, 0],
+            store: Some("AT2.JT".into()),
+            count: 4,
+            weight_class: 0,
+        };
+        let size = StoreSize::of_shape(Some("SWATR.SH"));
+        let (old_mount, old_rack) = placed(&source, Some(&model));
+        assert!(old_rack.store_point(old_mount, 4, 0, 0, size)[1] > 6.);
+        let (mount, rack) = placed_on(AircraftId::Mi24, 2, &source, Some(&model));
+        assert_eq!([mount[0], mount[2]], [12., -5.]);
+        for side in 0..2 {
+            for slot in 0..2 {
+                let point = rack.store_point(mount, 4, side, slot, size);
+                assert!((point[1] + size.top + 1.25 + PYLON_DEPTH).abs() < 1e-6);
+            }
         }
     }
 

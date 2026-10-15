@@ -493,3 +493,107 @@ vertices a frame.
 - Scenarios: `a2g-release-origin`, `net-a2g-stores` (a client sees another
   player's and an AI's stores empty) and `replay-a2g` (the stores recorded
   and replayed) in the battery.
+
+## The F-15C
+
+John, 2026-10-15: move the wing pylons aft and put the four fuselage
+missiles on the lower outer intake corners, two in tandem on each side.
+This layout is **opinionated**, requested by John. The exact coordinates
+are **fitted**, agent decisions from the model and his supplied photograph,
+not recovered original-game behaviour.
+
+`F15.PT` is the roster's only F-15, the F-15C. No F-15E, ACTIVE or
+conformal-tank station record exists in the supported roster.
+
+| Source row | Before, feet out / forward | Fitted station, feet out / forward | Rule |
+| --- | --- | --- | --- |
+| 4, fuselage missiles | 8.33 / 0 | 5 / -1 | Lower outer intake corners; four missiles form two tandem pairs with the existing 1 ft nose-to-tail gap |
+| 5, wing stores | 16.67 / 0 | 16.67 / -5.5 | Under the wing chord; four Sidewinders keep one small twin-rail bar per wing |
+
+The duct bottom at 5 ft out is about 4.0 to 4.3 ft below the model's
+reference point between 14 ft forward and 6 ft aft. The old source height
+is only 3.33 ft below it, inside the duct. This row therefore reads the
+underside starting 8 ft below the reference, rather than from that source
+height. Its rails remain 2 inches deep; the upper fin tips may enter the
+body slightly, as accepted for fuselage rails. The four missile release
+origins are 5.5 ft forward and 7.5 ft aft, at 5 ft either side. The meshes
+are not all centred on those origins: the AIM-120 extends from -2.67 to
+9.33 ft relative to its origin, the Sparrow from -6 to 6 ft. Thus the
+front AIM-120 spans 2.83 to 14.83 ft forward, the rear -10.17 to 1.83 ft;
+the front Sparrow -0.5 to 11.5 ft, the rear -13.5 to -1.5 ft. Both keep
+the existing 1 ft nose-to-tail gap. The front pair leaves first.
+
+At the wing row's span the model chord runs approximately from 0 to 9 ft
+aft. The release origin is 5.5 ft aft. The Sidewinder mesh's centre
+is 1.21 ft forward of that origin, so the drawn pylon centre is 4.29 ft
+aft, near mid-chord. Pylon depth remains 1 ft, the twin bar
+and 45-degree fin roll remain unchanged, and tanks selected on this row
+use the same aft position.
+
+The source has no centreline carrier row. Its tank-capable rows are the
+two existing missile rows; selecting a tank replaces that row's weapons.
+Consequently the current loadout cannot carry eight missiles plus tanks,
+or a centreline tank. This slice does not invent a carrier row or promise
+centreline clearance for an unavailable load. Adding those stations is a
+separate loadout decision.
+
+The same table builds weapons, optional loads and tank positions. Flight,
+network seats and newly recorded store layouts use those positions;
+existing replays retain the positions saved in their recordings.
+
+## The F-16C and fleet rail audit
+
+John, 2026-10-15: put the F-16 underwing pylons under the wing, farther
+aft, and review every aircraft's rails for obvious overhang. The F-16
+changes are **opinionated**, requested by John; exact origins below are
+**fitted**, agent decisions using the model chord and drawn weapon extents.
+`F16C.PT` is the roster's only F-16 record.
+
+| Source row | Real station grouping | Before origin, feet out / forward | After origin | Behaviour |
+| --- | --- | --- | --- | --- |
+| 5 | Centreline 5 | 0 / 0 | Unchanged | One tank, under the fuselage |
+| 6 | Middle underwing 3/7 | 10.67 / -2.33 | 10.67 / -3 | One pylon per wing; paired stores retain the small twin bar |
+| 7 | Outer underwing 2/8 | 14.33 / -3.67 | 14.33 / -7 | One pylon per wing, farther aft under the chord |
+| 8 | Wingtip 1/9 | Source 18 / -4.67, fitted to the tip at 17 ft out | Unchanged | Stores sit on the model's tip launcher |
+
+The inner wet pair, real stations 4/6, has no source row. It is not
+invented by this placement fix. Tank selections on existing compatible
+rows retain their capacities and replace the weapons on that row.
+
+At 10.67 ft out the model wing runs from about 2.25 ft forward to 7 ft
+aft. The Maverick's drawn centre is 0.34 ft ahead of its release origin,
+so its pylon is about 2.66 ft aft, near the middle of that chord. At
+14.33 ft out the chord runs from 0.75 to 7 ft aft. The AIM-120's drawn
+centre is 3.33 ft ahead of its release origin, so the moved pylon lies
+3.67 ft aft, near the middle. Its nose remains about 3.08 ft ahead of
+the local leading edge: a 12 ft missile is longer than the 6.25 ft chord.
+The pylon itself stays under the wing.
+
+A geometry audit must measure **drawn mesh extents**, not assume that each
+mesh is centred on the release origin. `--stores-preview` with
+`TORE_STORES_PREVIEW_CPU=1 TORE_STORES_PREVIEW_AUDIT=1` prints each source
+row, actual carried-store origins, local model chord, drawn hanger front
+and drawn store front, without a GPU. It covers the selectable roster,
+including internal/equipment-only records and optional weapon rows.
+The quarter-foot chord samples are a screening tool. They do not establish
+real aircraft carriage clearance, variable-sweep clearance or certification.
+Long stores and tip launchers can extend ahead of a wing. Uncertain
+real-world station mappings require references and a design decision,
+not a blanket aft shift.
+
+### Mi-24 lower wing attachment
+
+The fleet audit also found `MI24.PT` row 2 hanging its four AT-2s from the
+rotor-height surface, at about +7.64 ft. Its source origin (8.33 ft out,
+0 ft forward) is ahead of the stub wing, so the upward search sees the
+rotor disk instead of triggering the generic off-wing fallback. The row
+now sits 12 ft out and 5 ft aft, near the outer stub-wing ends, clear of
+the model's fixed pods around 9.5 ft out. At that span the wing is about
+1.3 ft below the reference. The existing twin bar hangs 1 ft below it;
+its short AT-2 noses remain near the leading edge.
+
+This is **fitted**, an agent correction under John's 2026-10-15 fleet
+review request. The twin bar remains the game's simplified launcher;
+the [US Army Mi-24 reference](https://odin.t2com.army.mil/WEG/Asset/Mi-24_%28Hind%29_Russian_Attack_Helicopter)
+places the four AT-2s on two underwing rails. No rotor, flight controller,
+weapon capacity or guidance behaviour changes.
