@@ -8,7 +8,6 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-
 Implementation pass on base `ba9712a0`, 2026-10-15. Contract:
 [jettison](../spec/jettison.md). No retail comparison or GPU capture was run.
 

@@ -8,7 +8,6 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-
 Implementation specification. Opinionated request by John, 2026-10-15.
 
 ## Player behavior
