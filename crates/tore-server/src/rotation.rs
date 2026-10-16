@@ -132,6 +132,9 @@ impl Rotation {
                         .config
                         .set(name, value, dir)
                         .map_err(|e| fail(line, e))?;
+                    if name == "min-players" {
+                        entry.config.min_players_at = Some((crate::config::Source::Rotation, line));
+                    }
                     lines.push((line, name));
                 }
             }
@@ -431,6 +434,43 @@ mod tests {
     }
 
     #[test]
+    fn min_players_is_a_mission_override_checked_per_entry_and_does_not_leak() {
+        let r = parse(
+            "tore-rotation 1\nmission a.txt\nmin-players 3\nmission b.txt\nmission c.txt\nmin-players none",
+            "min-players 1\nmax-players 4",
+        )
+        .unwrap();
+        assert!(mission_setting("min-players"));
+        let min = |i: usize| {
+            r.entries[i]
+                .config
+                .settings
+                .iter()
+                .find(|(n, _)| *n == tore_session::settings::number::MIN_PLAYERS)
+                .map(|&(_, v)| v)
+        };
+        // The entry's own, the server's, and the entry that turns it off.
+        assert_eq!((min(0), min(1), min(2)), (Some(3), Some(1), Some(0)));
+        assert!(effective_settings(&r.entries[0].config).contains(&"  min-players 3".into()));
+        // An entry above the player limit is refused at its own line.
+        let error = parse(
+            "tore-rotation 1\nmission a.txt\nmission b.txt\nmin-players 5",
+            "max-players 4",
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("line 4:") && error.contains("max-players"),
+            "{error}"
+        );
+        // The refusal in the range names the entry's line too.
+        assert!(
+            parse("tore-rotation 1\nmission a.txt\nmin-players 31", "")
+                .unwrap_err()
+                .contains("line 3:")
+        );
+    }
+
+    #[test]
     fn overrides_layer_on_server_values_and_validate_effective_mode() {
         let r = parse("tore-rotation 1\nmission a.txt\n kill-limit 10\n time-limit 20\nmission a.txt\nfight free-for-all", "mode pvp\ntime-limit 5\nfriendly-fire off").unwrap();
         assert_eq!(r.entries[0].config.mission, Path::new("/config/maps/a.txt"));
@@ -591,6 +631,57 @@ mod integration_tests {
     };
     use std::{fs, time::Duration};
     use tore_session::{BuildId, Host, HostConfig, Phase};
+    #[test]
+    fn each_rotation_entry_has_its_own_minimum_and_it_applies_again_each_round() {
+        let dir = data_folder("rotation-min-players", true);
+        fs::write(dir.join("one.txt"), MISSION).unwrap();
+        fs::write(dir.join("two.txt"), MISSION).unwrap();
+        fs::write(
+            dir.join("server.conf"),
+            "rotation rotation.txt\nrestart-delay 1\nmax-players 4",
+        )
+        .unwrap();
+        fs::write(
+            dir.join("rotation.txt"),
+            "tore-rotation 1\nmission one.txt\nmin-players 2\nmission two.txt",
+        )
+        .unwrap();
+        let prepared = prepare::prepare(&Options::default(), &dir).unwrap();
+        assert!(
+            prepared
+                .rotation_report
+                .contains(&"  min-players 2".to_owned())
+        );
+        let rotation = Arc::new(Mutex::new(prepared.rotation.unwrap()));
+        let mut config = HostConfig::new(BuildId {
+            version: "test".into(),
+            commit: "test".into(),
+            release: false,
+        });
+        config.restart_delay = Duration::from_secs(1);
+        config.max_players = 4;
+        config.settings = prepared.config.settings;
+        let mut host = Host::new(prepared.spec, prepared.resources, config).unwrap();
+        host.set_mission_sequence(Box::new(Shared(rotation.clone())));
+        assert_eq!(host.settings().min_players(), 2);
+        assert_eq!(
+            host.start_wait_reason().as_deref(),
+            Some("Waiting for 2 more ready players (minimum 2).")
+        );
+        // The second entry has none; the third round is the first again.
+        host.end();
+        host.update(Duration::from_secs(1));
+        assert_eq!(rotation.lock().unwrap().current, 1);
+        assert_eq!(host.settings().min_players(), 0);
+        assert_eq!(host.start_wait_reason(), None);
+        host.end();
+        host.update(Duration::from_secs(2));
+        assert_eq!(rotation.lock().unwrap().current, 0);
+        assert_eq!(host.settings().min_players(), 2);
+        assert_eq!(host.phase(), Phase::Lobby);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn prepared_rotation_runs_in_process_and_runtime_file_errors_are_skipped() {
         let dir = data_folder("rotation-in-process", true);
