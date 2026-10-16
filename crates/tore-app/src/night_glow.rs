@@ -55,23 +55,50 @@ pub const EMBER_SHARE: f64 = 0.3;
 /// The point is at least this many pixels in radius, more for a bigger
 /// light (`0.8 + 0.45 * sqrt(flares)` times it), at most `GLOW_MAX_PX`.
 #[cfg_attr(not(test), allow(dead_code))]
-pub const GLOW_MIN_PX: f64 = 1.5;
+pub const GLOW_MIN_PX: f64 = 4.;
 #[cfg_attr(not(test), allow(dead_code))]
-pub const GLOW_MAX_PX: f64 = 4.5;
+pub const GLOW_MAX_PX: f64 = 9.;
 /// Its brightness: `GLOW_BASE * sqrt(flares)` within `GLOW_LEVEL`.
 #[cfg_attr(not(test), allow(dead_code))]
 pub const GLOW_BASE: f64 = 0.8;
 #[cfg_attr(not(test), allow(dead_code))]
-pub const GLOW_LEVEL: [f64; 2] = [0.4, 2.4];
+pub const GLOW_LEVEL: [f64; 2] = [1., 3.];
 /// The point takes over from the art as the art shrinks from
 /// `GLOW_SPRITE_PX[1]` to `GLOW_SPRITE_PX[0]` pixels across; nearer it is a
 /// halo `GLOW_HALO` times the art's width at `GLOW_NEAR` of its brightness.
 #[cfg_attr(not(test), allow(dead_code))]
 pub const GLOW_SPRITE_PX: [f64; 2] = [3., 16.];
 #[cfg_attr(not(test), allow(dead_code))]
-pub const GLOW_HALO: f64 = 0.8;
+pub const GLOW_HALO: f64 = 1.6;
 #[cfg_attr(not(test), allow(dead_code))]
-pub const GLOW_NEAR: f64 = 0.18;
+pub const GLOW_NEAR: f64 = 0.5;
+/// The halo's broad warm bloom, as a share of the level at its middle.
+#[cfg_attr(not(test), allow(dead_code))]
+pub const GLOW_BLOOM: f64 = 0.6;
+/// nr-nightfx visibility pass (opinionated, John 2026-10-15; values agent
+/// fitted on GPU renders). Glow sizes and levels above were raised from
+/// nr-fx3's 1.5 to 4.5 px (now 4 to 9), 0.4 to 2.4, 0.8 halo and 0.18 near level so a
+/// burning vehicle stays a clear point of light at 1 and 2 nm.
+///
+/// Fire and explosion art at night burns `1 + EFFECT_NIGHT_BOOST` times its
+/// daylight palette (terrain.wgsl `effect_fragment`).
+#[cfg_attr(not(test), allow(dead_code))]
+pub const EFFECT_NIGHT_BOOST: f64 = 0.6;
+/// Night firelight (surface_lighting.wgsl `fire_glow`): warm colour, gain,
+/// smallest light radius in feet, falloff scale and reach in radii, and the
+/// largest level (a full burning fire is level 1).
+#[cfg_attr(not(test), allow(dead_code))]
+pub const FIRE_GLOW_COLOR: [f64; 3] = [1., 0.46, 0.14];
+#[cfg_attr(not(test), allow(dead_code))]
+pub const FIRE_GLOW_GAIN: f64 = 12.;
+#[cfg_attr(not(test), allow(dead_code))]
+pub const FIRE_GLOW_MIN_RADIUS: f64 = 40.;
+#[cfg_attr(not(test), allow(dead_code))]
+pub const FIRE_GLOW_CORE: f64 = 3.;
+#[cfg_attr(not(test), allow(dead_code))]
+pub const FIRE_GLOW_REACH: f64 = 24.;
+#[cfg_attr(not(test), allow(dead_code))]
+pub const FIRE_GLOW_LEVEL_MAX: f64 = 4.;
 /// Haze dims a glow as it dims the ground at this share of the distance,
 /// counting only the haze ramp: on a clear night (the ramp ending at about
 /// 3.5 nm) a glow fades out by about 35 nm; in fog, far nearer.
@@ -82,6 +109,14 @@ pub const GLOW_HAZE_SHARE: f64 = 0.1;
 /// off).
 pub fn enabled() -> bool {
     std::env::var("TORE_NIGHT_GLOW").as_deref() != Ok("0")
+}
+
+/// Shared night adaptation from the visual sun elevation sine. The scene
+/// uniform carries this exact value to WGSL device_night(), including effects
+/// whose pipeline has only group 0. Keep the former shader's rounded endpoints.
+pub fn night_factor(sun_elevation_sine: f32) -> f32 {
+    let t = ((sun_elevation_sine - (-0.104528)) / (0.0348995 - (-0.104528))).clamp(0., 1.);
+    1. - t * t * (3. - 2. * t)
 }
 
 /// A fire `width` feet wide: its light in flares.
@@ -175,6 +210,28 @@ pub fn nearby_lights(lights: &[FlareLight], eye: Vector) -> Vec<FlareLight> {
     near.into_iter().map(|(_, light)| light).collect()
 }
 
+/// At night: the [`MAX_FIRE_LIGHTS`] of `lights` within [`FIRE_LIGHT_FT`]
+/// that reach farthest past their distance from `eye` (distance over the
+/// square root of strength, as their light's reach grows), so a full
+/// burning fire is kept over the nearer dying embers of spent blasts
+/// (nr-nightfx visibility pass). Day keeps [`nearby_lights`] unchanged.
+pub fn brightest_lights(lights: &[FlareLight], eye: Vector) -> Vec<FlareLight> {
+    let mut near: Vec<_> = lights
+        .iter()
+        .filter_map(|light| {
+            let d = distance(light.position, eye);
+            (light.strength > 0. && d <= FIRE_LIGHT_FT)
+                .then_some((d / (light.strength / FLARE_STRENGTH).sqrt(), *light))
+        })
+        .collect();
+    if near.len() > MAX_FIRE_LIGHTS {
+        near.select_nth_unstable_by(MAX_FIRE_LIGHTS - 1, |a, b| a.0.total_cmp(&b.0));
+        near.truncate(MAX_FIRE_LIGHTS);
+    }
+    near.sort_by(|a, b| a.0.total_cmp(&b.0));
+    near.into_iter().map(|(_, light)| light).collect()
+}
+
 /// What the shader draws of a glow point of `width` feet and `strength`
 /// flares at view depth `z` feet, for a picture `height` pixels tall at
 /// `zoom`, at full night and before haze: its radius in pixels and its
@@ -191,6 +248,32 @@ pub fn on_screen(width: f64, strength: f64, z: f64, height: f64, zoom: f64) -> (
     let level =
         (GLOW_NEAR + (1. - GLOW_NEAR) * far) * (GLOW_BASE * s).clamp(GLOW_LEVEL[0], GLOW_LEVEL[1]);
     (radius, level)
+}
+
+/// Night firelight reaching a surface `d` feet from a light of `strength`
+/// (flare units) and `radius` feet, at full night, facing it: the light and
+/// what a surface of `albedo` returns of it. A mirror of `fire_glow` and
+/// `fire_lit` in surface_lighting.wgsl, for tests.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn firelight(albedo: [f64; 3], d: f64, strength: f64, radius: f64) -> [f64; 3] {
+    if radius <= 0. {
+        return [0.; 3];
+    }
+    let level = (strength / FLARE_STRENGTH * 225. / (radius * radius)).min(FIRE_GLOW_LEVEL_MAX);
+    let size = radius.max(FIRE_GLOW_MIN_RADIUS);
+    let reach = FIRE_GLOW_REACH * size * level.max(1.).sqrt();
+    if level <= 0. || d >= reach {
+        return [0.; 3];
+    }
+    let x = d / (FIRE_GLOW_CORE * size);
+    let t = ((d - 0.5 * reach) / (0.5 * reach)).clamp(0., 1.);
+    let window = 1. - t * t * (3. - 2. * t);
+    let light = FIRE_GLOW_GAIN * level * window / (1. + x * x);
+    let l = 0.2126 * albedo[0] + 0.7152 * albedo[1] + 0.0722 * albedo[2];
+    std::array::from_fn(|i| {
+        let reflectance = (l + (albedo[i] - l) * 0.3).max(0.04);
+        1. - (-reflectance * FIRE_GLOW_COLOR[i] * light).exp()
+    })
 }
 
 /// The glow points' pipeline: additive points in the world pass, tested
@@ -312,6 +395,168 @@ mod tests {
     const NM: f64 = 6_076.12;
 
     #[test]
+    fn shared_night_factor_and_shader_uniform_agree() {
+        assert_eq!(night_factor(0.0348995), 0.);
+        assert_eq!(night_factor(-0.104528), 1.);
+        assert_eq!(night_factor(1.), 0.);
+        assert_eq!(night_factor(-1.), 1.);
+        assert!((night_factor((-0.104528 + 0.0348995) / 2.) - 0.5).abs() < 1e-6);
+        let values: Vec<_> = (-100..=100)
+            .map(|i| night_factor(i as f32 / 100.))
+            .collect();
+        assert!(values.windows(2).all(|v| v[0] >= v[1]));
+        // WGSL consumes the uploaded result without a second curve or sun input.
+        assert!(
+            include_str!("surface_lighting.wgsl")
+                .contains("fn device_night()->f32 {\n return scene.view.z;\n}")
+        );
+    }
+
+    #[test]
+    fn nightfx_shader_and_area_coverage() {
+        let source = [
+            include_str!("surface_lighting.wgsl"),
+            include_str!("terrain.wgsl"),
+            include_str!("spotting.wgsl"),
+            include_str!("countermeasures.wgsl"),
+            include_str!("gun_flash.wgsl"),
+            include_str!("airfield_lights.wgsl"),
+            include_str!("night_glow.wgsl"),
+        ]
+        .join("\n");
+        // Smoke and reflection probes compile the smaller shared shader too.
+        let small = [
+            include_str!("surface_lighting.wgsl"),
+            include_str!("terrain.wgsl"),
+        ]
+        .join("\n");
+        let small_module = wgpu::naga::front::wgsl::parse_str(&small).unwrap();
+        wgpu::naga::valid::Validator::new(
+            wgpu::naga::valid::ValidationFlags::all(),
+            wgpu::naga::valid::Capabilities::all(),
+        )
+        .validate(&small_module)
+        .unwrap();
+        let module = wgpu::naga::front::wgsl::parse_str(&source).unwrap();
+        wgpu::naga::valid::Validator::new(
+            wgpu::naga::valid::ValidationFlags::all(),
+            wgpu::naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .unwrap();
+        // Mirrors effect_fragment's blend, retaining atmospheric occlusion.
+        let emissive =
+            |clear: f64, emitted: f64, night: f64| clear * (1. - night) + emitted * night;
+        assert_eq!(emissive(0.2, 1., 0.), 0.2);
+        assert_eq!(emissive(0.2, 1., 1.), 1.);
+        assert_eq!(emissive(0.2, 1., 0.5), 0.6);
+        assert_eq!(emissive(0.2, 0., 1.), 0.);
+        // Closest distance to the finite source, shader mirror. Day is a point.
+        let distance = |d: f64, width: f64, night: f64| (d - width / 2. * night).max(1.);
+        assert_eq!(distance(100., 160., 0.), 100.);
+        assert_eq!(distance(100., 160., 1.), 20.);
+        assert_eq!(distance(100., 160., 0.5), 60.);
+        assert!(distance(100., 30., 1.) > distance(100., 160., 1.));
+        // The footprint stays fixed during burn-down; its intensity fades.
+        assert_eq!(fire_light(30.) * 0.5, 0.5);
+        assert_eq!(fire_light(30.) * 0., 0.);
+    }
+
+    #[test]
+    fn night_firelight_is_orange_smooth_and_reaches_past_the_fire() {
+        let wgsl = include_str!("surface_lighting.wgsl");
+        for line in [
+            format!(
+                "const FIRE_GLOW_COLOR:vec3<f32>=vec3<f32>({:.1},{},{});",
+                FIRE_GLOW_COLOR[0], FIRE_GLOW_COLOR[1], FIRE_GLOW_COLOR[2]
+            ),
+            format!("const FIRE_GLOW_GAIN:f32={FIRE_GLOW_GAIN:.1};"),
+            format!("const FIRE_GLOW_MIN_RADIUS:f32={FIRE_GLOW_MIN_RADIUS:.1};"),
+            format!("const FIRE_GLOW_CORE:f32={FIRE_GLOW_CORE:.1};"),
+            format!("const FIRE_GLOW_REACH:f32={FIRE_GLOW_REACH:.1};"),
+            format!("const FIRE_GLOW_LEVEL_MAX:f32={FIRE_GLOW_LEVEL_MAX:.1};"),
+        ] {
+            assert!(wgsl.contains(&line), "{line}");
+        }
+        let glow = include_str!("night_glow.wgsl");
+        for line in [
+            format!("const GLOW_MIN_PX:f32={GLOW_MIN_PX:.1};"),
+            format!("const GLOW_MAX_PX:f32={GLOW_MAX_PX:.1};"),
+            format!(
+                "const GLOW_LEVEL:vec2<f32>=vec2<f32>({:.1},{:.1});",
+                GLOW_LEVEL[0], GLOW_LEVEL[1]
+            ),
+            format!("const GLOW_HALO:f32={GLOW_HALO:.1};"),
+            format!("const GLOW_NEAR:f32={GLOW_NEAR:.1};"),
+            format!("const GLOW_BLOOM:f32={GLOW_BLOOM:.1};"),
+        ] {
+            assert!(glow.contains(&line), "{line}");
+        }
+        assert!(include_str!("terrain.wgsl").contains(&format!(
+            "const EFFECT_NIGHT_BOOST:f32={EFFECT_NIGHT_BOOST:.1};"
+        )));
+        // A 30 ft vehicle fire at full burn, on green grass (a typical
+        // terrain palette texel, linear).
+        let grass = [0.06, 0.16, 0.03];
+        let width = 30.;
+        let strength = fire_light(width) * FLARE_STRENGTH;
+        let at = |d: f64| firelight(grass, d, strength, width / 2.);
+        for k in [0.5, 1., 2., 3., 4., 5.] {
+            let c = at(k * width);
+            // Orange on green ground: red leads green leads blue.
+            assert!(c[0] > c[1] && c[1] > c[2], "{k} widths: {c:?}");
+        }
+        // Clearly lit at five widths (about 40 percent linear red, around
+        // 170 of 255 after sRGB encoding), fading out by the reach.
+        assert!(at(5. * width)[0] > 0.3, "{:?}", at(5. * width));
+        assert!(at(5. * width)[0] < 0.6 * at(0.)[0]);
+        assert_eq!(at(FIRE_GLOW_REACH * FIRE_GLOW_MIN_RADIUS), [0.; 3]);
+        // Smooth: no step between neighbouring feet anywhere along the way.
+        let mut last = at(0.);
+        for d in 1..400 {
+            let c = at(f64::from(d));
+            assert!(c[0] <= last[0] + 1e-12, "{d} ft");
+            assert!(last[0] - c[0] < 0.02, "{d} ft: {last:?} -> {c:?}");
+            last = c;
+        }
+        // Compressed, so the ground under the fire never clips.
+        assert!(at(0.)[0] < 1.);
+        // The same fire size-independent level: a 90 ft fire lights as
+        // brightly near itself, and farther.
+        let big = |d: f64| firelight(grass, d, fire_light(90.) * FLARE_STRENGTH, 45.);
+        assert!((big(0.)[0] - at(0.)[0]).abs() < 1e-9);
+        assert!(big(300.)[0] > at(300.)[0]);
+        // Half burnt, half the light.
+        let half = firelight(grass, 60., strength * 0.5, 15.);
+        assert!(half[0] < at(60.)[0] && half[0] > 0.);
+        // Points (radius 0: flares, muzzle flashes) never add firelight.
+        assert_eq!(firelight(grass, 10., strength, 0.), [0.; 3]);
+    }
+
+    #[test]
+    #[ignore = "manual CPU performance measurement"]
+    fn nightfx_many_burning_wrecks() {
+        let sources: Vec<_> = (0..10000)
+            .map(|i| FlareLight {
+                radius: 15.,
+                position: [i as f64, 10.5, 0.],
+                strength: FLARE_STRENGTH,
+            })
+            .collect();
+        let start = std::time::Instant::now();
+        for _ in 0..200 {
+            let selected = nearby_lights(std::hint::black_box(&sources), [0.; 3]);
+            let packed = crate::countermeasure_renderer::nearest(&selected, [0.; 3]);
+            assert_eq!(packed.len(), MAX_FIRE_LIGHTS);
+            assert!(packed.iter().all(|l| l[4] == 15.));
+        }
+        eprintln!(
+            "10000 fires, bounded selection/upload preparation: {:?}/frame",
+            start.elapsed() / 200
+        );
+    }
+
+    #[test]
     fn a_bigger_fire_glows_and_lights_more() {
         // City building fires 24 to 90 ft, fuel and ammunition to 160 ft.
         let widths = [24., 30., 60., 90., 160.];
@@ -388,6 +633,7 @@ mod tests {
         let sources: Vec<_> = fires
             .iter()
             .map(|&(p, width)| FlareLight {
+                radius: 0.,
                 position: [p[0], p[1] + width * FIRE_LIGHT_RISE, p[2]],
                 strength: fire_light(width) * FLARE_STRENGTH,
             })
@@ -410,6 +656,30 @@ mod tests {
             .collect();
         let bytes = instances(&glows, [0., 500., 20. * NM]);
         assert_eq!(bytes.len(), 40 * INSTANCE_BYTES);
+    }
+
+    #[test]
+    fn at_night_a_burning_fire_outranks_nearer_dying_embers() {
+        let ember = |x: f64| FlareLight {
+            radius: 10.,
+            position: [x, 10., 0.],
+            strength: 0.002 * FLARE_STRENGTH,
+        };
+        let mut sources: Vec<_> = (0..MAX_FIRE_LIGHTS)
+            .map(|k| ember(100. * k as f64))
+            .collect();
+        let fire = FlareLight {
+            radius: 15.,
+            position: [8_000., 10.5, 0.],
+            strength: fire_light(30.) * FLARE_STRENGTH,
+        };
+        sources.push(fire);
+        // By day the nearest eight stay, as before.
+        assert!(!nearby_lights(&sources, [0.; 3]).contains(&fire));
+        // At night the fire takes a slot.
+        let night = brightest_lights(&sources, [0.; 3]);
+        assert_eq!(night.len(), MAX_FIRE_LIGHTS);
+        assert!(night.contains(&fire));
     }
 
     #[test]

@@ -5,25 +5,14 @@
 // brightness, so a fire or a blast stays visible to the limit of the night
 // scene; close in, a soft halo around the art. Night and dusk only.
 // Mirrors of the constants in night_glow.rs.
-const GLOW_MIN_PX:f32=1.5;
-const GLOW_MAX_PX:f32=4.5;
+const GLOW_MIN_PX:f32=4.0;
+const GLOW_MAX_PX:f32=9.0;
 const GLOW_BASE:f32=0.8;
-const GLOW_LEVEL:vec2<f32>=vec2<f32>(0.4,2.4);
+const GLOW_LEVEL:vec2<f32>=vec2<f32>(1.0,3.0);
 const GLOW_SPRITE_PX:vec2<f32>=vec2<f32>(3.0,16.0);
-const GLOW_HALO:f32=0.8;
-const GLOW_NEAR:f32=0.18;
-const GLOW_HAZE_SHARE:f32=0.1;
-// How much of a glow reaches the eye through cloud, haze and air: a light
-// at night is seen through the haze about ten times as far as the ground
-// (fitted, nr-fx3), so the haze counts at a tenth of the distance, and only
-// its ramp counts (the haze already over everything near at night does not
-// dim a light). A cloud between hides it as it hides a flare.
-fn glow_clear(p:vec3<f32>,altitude:f32)->vec3<f32> {
- let cloud=clamp(cloud_occlusion(vec3<f32>(1.0),p,altitude)-cloud_occlusion(vec3<f32>(0.0),p,altitude),vec3<f32>(0.0),vec3<f32>(1.0));
- let d=length(p)*GLOW_HAZE_SHARE;
- let ramp=clamp((haze(d)-scene.fog.z)/max(scene.fog.w-scene.fog.z,0.001),0.0,1.0);
- return cloud*(1.0-ramp)*(1.0-air_opacity(d,altitude));
-}
+const GLOW_HALO:f32=1.6;
+const GLOW_NEAR:f32=0.5;
+const GLOW_BLOOM:f32=0.6;
 struct GlowOut {
  @builtin(position) clip:vec4<f32>,
  @location(0) local:vec2<f32>,
@@ -60,6 +49,7 @@ struct GlowOut {
  let window=clamp(1.0-r2*0.25,0.0,1.0);
  // Resolved art supplies its own core. Only distant, unresolved lights
  // need the bright point, otherwise it bleaches the fire's animation.
- let core=(exp(-r2*2.5)*2.0*in.radiance.a+exp(-r2*0.6)*0.35)*window*window;
+ // A warm bloom the size of the effect around the flames (nr-nightfx).
+ let core=(exp(-r2*2.5)*2.0*in.radiance.a+exp(-r2*1.0)*GLOW_BLOOM)*window*window;
  return thermal_light(vec4<f32>(in.radiance.rgb*core,0.0),0.8);
 }

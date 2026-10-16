@@ -775,6 +775,7 @@ fn glows_of(
         });
         if s.layer == FIRE_SHEET {
             fires.push(crate::countermeasure_renderer::FlareLight {
+                radius: width / 2.,
                 position: [
                     s.position[0],
                     s.position[1] + width * crate::night_glow::FIRE_LIGHT_RISE,
@@ -784,6 +785,7 @@ fn glows_of(
             });
         } else if s.ember > 0. {
             fires.push(crate::countermeasure_renderer::FlareLight {
+                radius: width / 2.,
                 position: [s.position[0], s.position[1] + lift, s.position[2]],
                 strength: f64::from(s.ember) * crate::countermeasure_renderer::FLARE_STRENGTH,
             });
@@ -915,8 +917,13 @@ impl EffectRenderer {
     pub fn sustained_lights(
         &self,
         eye: [f64; 3],
+        night: bool,
     ) -> Vec<crate::countermeasure_renderer::FlareLight> {
-        crate::night_glow::nearby_lights(&self.sustained_lights, eye)
+        if night {
+            crate::night_glow::brightest_lights(&self.sustained_lights, eye)
+        } else {
+            crate::night_glow::nearby_lights(&self.sustained_lights, eye)
+        }
     }
     /// Rebuild for a new anti-aliasing sample count; the next `prepare`
     /// recreates the bindings.
@@ -1181,6 +1188,8 @@ mod tests {
         assert_eq!(full.len(), 1);
         assert!((full[0].position[1] - 31.5).abs() < 1e-9);
         assert_eq!(half[0].position, full[0].position);
+        assert_eq!(full[0].radius, 45.);
+        assert_eq!(half[0].radius, full[0].radius);
         assert!(
             (full[0].strength - 9. * crate::countermeasure_renderer::FLARE_STRENGTH).abs() < 0.1
         );
@@ -1196,6 +1205,8 @@ mod tests {
         let middle = burst(120);
         assert_eq!(middle.len(), 1);
         assert!(middle[0].strength > 0.);
+        assert!(middle[0].radius > 0.);
+        assert_eq!(burst(60)[0].radius, middle[0].radius);
         assert!((burst(60)[0].strength / middle[0].strength - 0.25).abs() < 1e-6);
         assert!(burst(0).is_empty());
         let dud = EffectPose {

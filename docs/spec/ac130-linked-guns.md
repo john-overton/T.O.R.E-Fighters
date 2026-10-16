@@ -101,7 +101,8 @@ slow its cycle.
 How the record expresses it: a burst of `gameRoundsInBurst` x
 `actualRoundsPerGame` rounds takes `gameBurstT` quarter seconds, so the 25 is
 15 x 2 rounds in 1 s, the 40 is 5 x 2 in 6 s and the 105 is 1 x 2 in 12 s.
-`actualRoundsPerGame` stays 2, so every round carries the damage it did.
+`actualRoundsPerGame` stays 2, so cadence does not itself change damage per
+physical round. The separate damage correction is described below.
 
 Muzzle velocity is the record's `initialSpeed`; the maximum and final speeds
 follow it (the final speed is half the muzzle velocity, as in retail). A round
@@ -116,11 +117,19 @@ tracer ribbon (the 40 and the 105); the 25 keeps one round in three, as every
 retail gun does. A drawing layer can recognise the 105 by the projectile's
 weapon, `C_105.JT` (`ProjectilePose::weapon`).
 
-**Damage.** The cycle changes damage per second, not damage per hit. At the
-retail damage figures a 105 round (damage 150 over the gun scale of 3 and 2
-rounds per game round, 25 per hit) at 10 a minute delivers about a fiftieth of
-what it did at 480 a minute. John has not asked for a damage pass; it is the
-obvious next balance question.
+**Damage.** Opinionated, John, 2026-10-15: load-time corrections double
+all five damage-class fields of `C_40.JT` (50 to 100) and `C_105.JT`
+(150 to 300). `C_25.JT` is unchanged. This applies to every use of those
+records, including the base gun. Rates, velocities, collateral percentage,
+blast radius, crater and explosion art are unchanged. Direct and collateral
+damage consume the corrected fields. The imported three gun records have zero
+collateral radius and percent, so their blast damage remains zero. No new
+splash damage is introduced. Integer division is preserved: after the
+aircraft-gun divisor of three and two physical rounds per game round, the
+40 mm changes from 8/8 to 17/16 alternating points per hit; the 105 mm changes
+from 25/25 to 50/50. Truck, tank and SAM classes use the same figures in
+these records, before location, protection, falloff and remaining-health caps.
+This is a balance choice, not recovered original behaviour.
 
 **Readout.** The gun status line has no cycling state. `Ownship::gun_ready_in`
 gives the ticks until a gun's next round may leave, 0 when ready, as the hook

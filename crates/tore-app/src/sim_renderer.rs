@@ -1616,10 +1616,18 @@ impl SimRenderer {
                 .uniform(world.weather.ticks(), [true, false], pixel_angle)[1];
         reflection[3] = scenery.ocean_motion.environment_reflection;
         uniform.extend(reflection);
+        // Match SurfaceLighting::prepare even without celestial art or with
+        // legacy weather: scene.sun can use a different direction in that mode.
+        let night_sun = world
+            .weather
+            .sample(camera.position[1])
+            .and_then(|layer| crate::celestial::visual_sun_direction(&layer, &world.weather))
+            .unwrap_or([0., -1., 0.]);
+        let night = crate::night_glow::night_factor(night_sun[1]);
         uniform.extend([
             camera.near_clip,
             f32::from(camera.weather_slot == 4),
-            0.,
+            night,
             0.,
         ]);
         // Graphics options: spotting aid strength, terrain filtering and the
@@ -1676,7 +1684,7 @@ impl SimRenderer {
         self.glow_points
             .update(queue, self.effects.glows(), camera.position);
         let mut lights = self.countermeasures.lights.clone();
-        lights.extend(self.effects.sustained_lights(camera.position));
+        lights.extend(self.effects.sustained_lights(camera.position, night > 0.));
         self.smoke.update(
             queue,
             camera,

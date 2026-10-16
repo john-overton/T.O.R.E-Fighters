@@ -671,6 +671,202 @@ mod shader_tests {
         .unwrap_or_else(|e| panic!("{label}: {e:?}"));
     }
 
+    fn world_source() -> String {
+        [
+            include_str!("surface_lighting.wgsl"),
+            include_str!("terrain.wgsl"),
+            include_str!("spotting.wgsl"),
+            include_str!("countermeasures.wgsl"),
+            include_str!("gun_flash.wgsl"),
+            include_str!("airfield_lights.wgsl"),
+            include_str!("night_glow.wgsl"),
+        ]
+        .join("\n")
+    }
+
+    fn pipeline_bindings(source: &str, entries: &[&str]) -> std::collections::BTreeSet<(u32, u32)> {
+        let module = naga::front::wgsl::parse_str(source)
+            .unwrap_or_else(|e| panic!("{}", e.emit_to_string(source)));
+        let info = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .unwrap();
+        let mut used = std::collections::BTreeSet::new();
+        for name in entries {
+            let index = module
+                .entry_points
+                .iter()
+                .position(|e| e.name == *name)
+                .unwrap_or_else(|| panic!("missing entry point {name}"));
+            let entry = info.get_entry_point(index);
+            for (handle, global) in module.global_variables.iter() {
+                // Naga's entry-point analysis includes all transitively called functions.
+                if !entry[handle].is_empty()
+                    && let Some(binding) = &global.binding
+                {
+                    used.insert((binding.group, binding.binding));
+                }
+            }
+        }
+        used
+    }
+
+    #[test]
+    fn world_pipeline_bindings_fit_declared_and_bound_layouts() {
+        let world = world_source();
+        // Layout contracts from EffectRenderer::pipelines, SmokeRenderer::new,
+        // SimRenderer's surface/sky/rim layouts, and Countermeasure/Glow pipelines.
+        // Auto-layout smoke/effects bind ONLY group 0 at draw time. Checking the
+        // whole module's globals would incorrectly require all three groups.
+        let contracts: &[(&str, &[&str], u32)] = &[
+            (
+                "effect standing and flat",
+                &["effect_vertex", "effect_fragment"],
+                1,
+            ),
+            ("smoke", &["smoke_vertex", "smoke_fragment"], 1),
+            ("flares", &["flare_vertex", "flare_fragment"], 2),
+            ("chaff", &["chaff_vertex", "chaff_fragment"], 2),
+            (
+                "gun and surface flashes",
+                &["flash_vertex", "flash_fragment"],
+                2,
+            ),
+            ("night glow", &["glow_vertex", "glow_fragment"], 2),
+            ("tracers", &["object_vertex", "tracer_fragment"], 2),
+            ("glare", &["glare_vertex", "glare_fragment"], 3),
+            ("glare MSAA", &["glare_vertex_ms", "glare_fragment"], 3),
+            ("clouds", &["vertex", "cloud_fragment"], 2),
+            ("vapor", &["vapor_vertex", "vapor_fragment"], 2),
+            (
+                "terrain and water",
+                &["terrain_vertex", "terrain_fragment"],
+                2,
+            ),
+            ("objects", &["object_vertex", "fragment"], 2),
+            (
+                "airfield lights",
+                &["airfield_light_vertex", "airfield_light_fragment"],
+                2,
+            ),
+            ("sky", &["sky_vertex", "sky_fragment"], 2),
+            ("celestial", &["celestial_vertex", "celestial_fragment"], 2),
+            (
+                "canopy depth and blend",
+                &["object_vertex", "canopy_fragment"],
+                2,
+            ),
+            ("airport solid", &["vertex", "airport_solid_fragment"], 2),
+            ("airport decal", &["vertex", "airport_fragment"], 2),
+            (
+                "moving solid",
+                &["object_vertex", "airport_solid_fragment"],
+                2,
+            ),
+            ("moving decal", &["object_vertex", "airport_fragment"], 2),
+            ("scenery lines", &["vertex", "scenery_line_fragment"], 2),
+            ("rim dark", &["rim_vertex", "rim_dark_fragment"], 3),
+            ("rim light", &["rim_vertex", "rim_light_fragment"], 3),
+            ("rim dark MSAA", &["rim_vertex", "rim_dark_fragment_ms"], 3),
+            (
+                "rim light MSAA",
+                &["rim_vertex", "rim_light_fragment_ms"],
+                3,
+            ),
+            (
+                "shadow terrain",
+                &["shadow_vertex", "terrain_shadow_fragment"],
+                2,
+            ),
+            (
+                "shadow objects",
+                &["shadow_object_vertex", "shadow_fragment"],
+                2,
+            ),
+            ("fill solid", &["fill_vertex", "fill_solid_fragment"], 2),
+            ("fill fade", &["fill_vertex", "fill_solid_fade_fragment"], 2),
+            ("fill decal", &["fill_vertex", "airport_fragment"], 2),
+            (
+                "fill decal fade",
+                &["fill_vertex", "fill_decal_fade_fragment"],
+                2,
+            ),
+            ("fill distant", &["fill_box_vertex", "fill_far_fragment"], 2),
+            (
+                "fill shadow 0",
+                &["fill_shadow_vertex0", "shadow_fragment"],
+                2,
+            ),
+            (
+                "fill shadow 1",
+                &["fill_shadow_vertex1", "shadow_fragment"],
+                2,
+            ),
+            (
+                "fill shadow 2",
+                &["fill_shadow_vertex2", "shadow_fragment"],
+                2,
+            ),
+        ];
+        let module = naga::front::wgsl::parse_str(&world).unwrap();
+        for entry in &module.entry_points {
+            assert!(
+                contracts
+                    .iter()
+                    .any(|(_, names, _)| names.contains(&entry.name.as_str())),
+                "unaudited world entry point {}",
+                entry.name
+            );
+        }
+        for (label, entries, groups) in contracts {
+            let bindings = pipeline_bindings(&world, entries);
+            eprintln!("{label}: shader {bindings:?}; layout groups 0..{groups}");
+            for (group, binding) in bindings {
+                if label.contains("shadow") && group == 1 {
+                    assert_eq!(binding, 0, "shadow caster layout exposes only its uniform");
+                }
+                assert!(
+                    group < *groups,
+                    "{label}: unavailable group {group}, binding {binding}"
+                );
+                assert!(
+                    binding < [6, 3, 2][group as usize],
+                    "{label}: unavailable binding {binding}"
+                );
+            }
+        }
+        let small = [
+            include_str!("surface_lighting.wgsl"),
+            include_str!("terrain.wgsl"),
+        ]
+        .join("\n");
+        assert!(
+            pipeline_bindings(&small, &["smoke_vertex", "smoke_fragment"])
+                .iter()
+                .all(|(g, _)| *g == 0)
+        );
+        let reflection = format!(
+            "{small}\n@fragment fn reflection_probe(in:VertexOut)->@location(0) vec4<f32>{{return vec4<f32>(water_sun(vec3<f32>(0.05),normalize(vec3<f32>(1.0,-1.0,0.0)),scene.eye.xyz+in.direction,1000.0),1.0);}}"
+        );
+        let used = pipeline_bindings(&reflection, &["vertex", "reflection_probe"]);
+        eprintln!("reflection probe: shader {used:?}; layout groups 0..2");
+        assert!(used.iter().all(|(g, _)| *g < 2));
+
+        // Demonstrate this test catches the exact real-GPU regression even
+        // though Naga's ordinary module validator accepts the broken shader.
+        let broken = world.replace(
+            "return scene.view.z;",
+            "return 1.0-smoothstep(-0.104528,0.0348995,surface.reserved.y);",
+        );
+        let used = pipeline_bindings(&broken, &["effect_vertex", "effect_fragment"]);
+        assert!(
+            used.contains(&(1, 0)),
+            "fault injection must expose the missing surface binding"
+        );
+    }
+
     #[test]
     fn the_crt_pass_and_the_thermal_world_shaders_validate() {
         validate("crt.wgsl", include_str!("crt.wgsl"));
