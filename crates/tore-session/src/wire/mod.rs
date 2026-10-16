@@ -213,7 +213,9 @@ pub fn path_words(path: Path) -> &'static str {
 /// 38 since the bomb flight model (slice nr-bombphys): bombs carry their
 /// body (mass, drag, retarder, steering) and fly one shared fitted model, and
 /// sights read it, so an older game must not join.
-pub const PROTOCOL_VERSION: u16 = 38;
+/// 39 since the small guided bombs (slice nr-bombs2): GBU-12, GBU-16 and
+/// GBU-38 join the store catalog, so an older game must not join.
+pub const PROTOCOL_VERSION: u16 = 39;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
