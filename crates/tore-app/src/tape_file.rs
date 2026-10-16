@@ -508,11 +508,17 @@ mod tests {
             ("GBU29.JT".into(), vec![9, 10]),
             ("F15.PT".into(), vec![11]),
             ("F16C.PT".into(), vec![12]),
+            ("F22.PT".into(), vec![13]),
+            ("MIG29.PT".into(), vec![14]),
+            ("RAFALE.PT".into(), vec![15]),
         ]);
         let original = super::fingerprint(&data);
         tore_formats::weapons::corrections::extend_resources(&mut data);
         assert_eq!(super::fingerprint(&data), original);
-        for name in ["GBU12.JT", "GBU16.JT", "GBU38.JT", "F610.GAS", "F370.GAS"] {
+        for name in [
+            "GBU12.JT", "GBU16.JT", "GBU38.JT", "F610.GAS", "F370.GAS", "F600.GAS", "M396.GAS",
+            "R528.GAS",
+        ] {
             let mut changed = data.clone();
             changed.get_mut(name).unwrap().push(6);
             assert_ne!(super::fingerprint(&changed), original);

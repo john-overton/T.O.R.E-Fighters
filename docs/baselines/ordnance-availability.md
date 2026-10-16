@@ -82,6 +82,19 @@ three 610 gallon tanks; F-16C: two 370 gallon tanks beside its default load),
 checks fuel feed, Shift+K jettison, the F-16C wet row's selected-store jettison,
 mission and profile saves, and an old saved load restoring with the new rows empty.
 
+The [optional carriers of 2026-10-16](../spec/stores-on-pylons.md#optional-carriers-2026-10-16)
+turn the F-15C centreline row into a tank-or-bomb-rack station and add the
+F-22 inboard wing pair, the MiG-29 centreline and the Rafale C centreline,
+with three more authored tank records (600 gallon, 1,500 litre and 2,000
+litre). The audit now pins 12 recovered weapon rows (the F-15C centreline and
+F-22 wing rows take weapons), 3,401 weapon placements (+25 bombs on the F-15C
+centreline, +4 AIM-9/AIM-120 on the F-22 pair), 175 tank placements (+5
+F-22, +4 MiG-29, +5 Rafale C), 9 tank records and 166 Cheat-only novelty
+placements (Boulder and Moose on the F-15C centreline and F-22 rows, still
+refused without Cheat loading). For each new row it loads
+the full set, checks capacity, tank and weapon exclusion, fuel feed, Shift+K
+and selected-store jettison, saves, and an old saved load with the row empty.
+
 The F-14 probe separately covers zero, one and two F250 tanks, external fuel,
 shell mass, total mass, consumption order and accepted-load restoration. It is
 the reviewed F-14 contract only: `--validate-tanks` refuses any other

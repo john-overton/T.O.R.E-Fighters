@@ -359,15 +359,20 @@ def scenarios() -> list[Scenario]:
         expect=[
             r"derived stations F15.PT: 3 extra tanks, 12078 lb fuel, 1296 lb shells; feed, jettison, save and old load passed",
             r"derived stations F16C.PT: 2 extra tanks, 4884 lb fuel, 524 lb shells; feed, jettison, save and old load passed",
+            r"derived stations F22.PT: 2 extra tanks, 7920 lb fuel, 850 lb shells; feed, jettison, save and old load passed",
+            r"derived stations MIG29.PT: 1 extra tanks, 2614 lb fuel, 281 lb shells; feed, jettison, save and old load passed",
+            r"derived stations RAFALE.PT: 1 extra tanks, 3485 lb fuel, 374 lb shells; feed, jettison, save and old load passed",
+            r"derived weapons F15.PT row 6: MK82.JT:3, MK84.JT:2, .*GBU12.JT:3, .*GBU38.JT:3",
+            r"(?m)derived weapons F22.PT row 8: AIM9X.JT:4, AIM120.JT:4, AIM9M.JT:4, AIM9B.JT:4$",
         ],
-        notes="Derived Eagle and Falcon wet rows through normal selection, fuel, jettison, mission and profile saves, and old-load restoration.",
+        notes="Derived Eagle, Falcon, Raptor, Fulcrum-C and Rafale C rows through normal selection, capacity, fuel, jettison, mission and profile saves, and old-load restoration.",
     ))
     out.append(
         Scenario(
             name="menus-ordnance-availability",
             lane="menus",
             args=["--validate-ordnance", "--no-audio"],
-            expect=[r"ordnance audit: 36 aircraft, 10 recovered weapon stations, 3372 weapon placements, 161 tank placements, 78 weapon and 6 tank records; passed"],
+            expect=[r"ordnance audit: 36 aircraft, 12 recovered weapon stations, 3401 weapon placements, 175 tank placements, 78 weapon and 9 tank records; passed"],
             notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration. The audit fails when a supported weapon or tank record is missing or a pinned count moves (ordnance_audit.rs).",
         )
     )

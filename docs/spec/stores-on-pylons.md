@@ -616,7 +616,7 @@ start empty. Retail files are never edited.
 
 | Aircraft / appended row (zero based) | Real stations | Capacity | Origin, feet right / forward |
 | --- | --- | --- | --- |
-| F15.PT / 6 | Centreline 5 | One tank, 4,500 lb | 0 / -3 |
+| F15.PT / 6 | Centreline 5 | One tank or up to three bombs, 4,500 lb | 0 / -3 |
 | F15.PT / 7 | Wing pylons 2 and 8 | Two tanks, 9,000 lb total | +/-16.67 / -4.3 |
 | F16C.PT / 9 | Inner wet 4 and 6 | Two stores, 6,000 lb total | +/-7 / -1 |
 
@@ -627,9 +627,8 @@ pylon centre to clear the tank and the rolled fins. The F-16 row accepts
 two `F370.GAS` tanks or compatible bombs/missiles, including Mk 82 and
 AGM-65G, with one store per wing. It uses the existing loading masks,
 not a separate release path. Tank and weapon selections exclude each
-other on the F-16 wet row. F-15 centreline bombs are not added: exact
-F-15C carriage limits remain unknown; review a C-model loading manual
-before enabling them.
+other on the F-16 wet row. The [2026-10-16 addition](#optional-carriers-2026-10-16)
+enables F-15 centreline bombs as requested gameplay, with fitted limits.
 
 A 610 US gallon tank contains 4,026 lb fuel and a fitted 432 lb shell;
 a 370 US gallon tank contains 2,442 lb fuel and a fitted 262 lb shell.
@@ -666,19 +665,19 @@ describes three external tanks; [Kunsan maintenance](https://www.kunsan.af.mil/N
 identifies 370 gallon F-16 wing tanks. The requested 610 gallon Eagle
 class is used as John's requested size, not a measurement from the game.
 
-### Other light loadouts, review only
+### Source limitations behind the optional carriers
 
 The 2026-10-15 roster screen compared the 36 supported retail identities'
-source carrier rows with documented real tank carriage. No other aircraft
-is changed. This is a candidate list for a future opinionated correction,
+source carrier rows with documented real tank carriage. The [2026-10-16 addition](#optional-carriers-2026-10-16) implements selected
+candidates below. The table records the source limitations,
 not evidence of original-game behaviour or a certification review.
 
 | Aircraft | Source limitation | Real-carriage evidence and next step |
 | --- | --- | --- |
-| MIG29.PT, Fulcrum-C | Rows 5 to 7 are three wing pairs; no centreline carrier | The [German MiG-29 flight manual](https://jasonblair.net/wp-content/uploads/2015/06/MIG29-Flight-Manual-Pt-1.pdf) describes a 1,500 litre centreline tank. Confirm the roster C variant's tank and gun-clearance restrictions before adding it. |
+| MIG29.PT, Fulcrum-C | Rows 5 to 7 are three wing pairs; no centreline carrier | The [German MiG-29 flight manual](https://jasonblair.net/wp-content/uploads/2015/06/MIG29-Flight-Manual-Pt-1.pdf) describes a 1,500 litre centreline tank. C-variant gun-clearance restrictions remain unknown; the requested gameplay addition is specified below. |
 | A10.PT | Rows 5 to 8 are wing weapon groups; no centreline carrier and no tank permission bit on those rows | [USAF](https://www.127wg.ang.af.mil/Media/Articles/Article/865880/selfridge-angb-home-of-the-drop-tank/) confirms external tanks for long-distance flight. [Eglin](https://www.eglin.af.mil/News/Article-Display/Article/814477/40th-fts-expands-a-10-fuel-limitations-in-combat/) distinguishes the later 600 gallon combat-clearance work. Review period A-10A stations and ferry restrictions. |
-| RAFALE.PT, Rafale C | Centreline row 4 is occupied by AAS38.SEE and retained as equipment; wing rows 6/7 lack tank permission | [Dassault](https://www.dassault-aviation.com/en/defense/rafale/adapt-and-deliver/) specifies five heavy/wet stations. Resolve the retained pod and period C-model tank types; some missing capability is compatibility, not absent rows. |
-| F22.PT | Only internal carrier rows 5 to 7; none has tank permission | [USAF](https://www.af.mil/About-Us/Fact-Sheets/Display/Article/104506/f-22-raptor/) specifies two external wing fuel tanks. Review the game's prototype model geometry and period pylon configuration. Do not substitute F22N.PT or the opinionated FA-XX. |
+| RAFALE.PT, Rafale C | Centreline row 4 is occupied by AAS38.SEE and retained as equipment; wing rows 6/7 lack tank permission | [Dassault](https://www.dassault-aviation.com/en/defense/rafale/adapt-and-deliver/) specifies five heavy/wet stations. The addition below retains the sensor and adds an aft centreline tank carrier; exact period tank contours remain unknown. |
+| F22.PT | Only internal carrier rows 5 to 7; none has tank permission | [USAF](https://www.af.mil/About-Us/Fact-Sheets/Display/Article/104506/f-22-raptor/) specifies two external wing fuel tanks. The addition below fits the prototype model; F22N.PT and the opinionated FA-XX remain distinct. |
 
 F-14, F/A-18D, A-4E and F-4 family source groups already represent the
 centreline or independent tank positions relevant to this screen. A-7,
@@ -688,3 +687,74 @@ variant-specific review. Su-27/Su-35 and experimental/rotorcraft entries
 were not declared deficient merely because their row counts differ from
 real station counts. A grouped row can represent several physical
 stations. No claim of exhaustive real-world certification coverage is made.
+
+## Optional carriers, 2026-10-16
+
+Implementation specification, **opinionated**, requested by John on 2026-10-16.
+These additions are not claims about original-game behaviour or real aircraft
+certification. Limits, coordinates and tank shells below are **fitted agent
+choices**. A-10 and all default loads remain unchanged.
+
+- F15.PT centreline row 6 accepts one 610 gallon tank or up to three bombs,
+  within 4,500 lb total. The F-15C's source rows carry only air-to-air
+  missiles, so the rack's list is its own: the station mask 0x3c1 (tank 0x200,
+  unguided and optical 0x100, laser 0x80, SARH 0x40) filtered to bombs and
+  guided bombs only (`Loadout::capacity`). Normal loading accepts Mk 82 (3),
+  Mk 82 high drag, Mk 82 three-pack, Mk 20, CBU-87, CBU-89, FAB-250, FAB-500,
+  RBK-250, RBK-500, GBU-12, GBU-16, GBU-38 and GBU-30 (3 each), Mk 84,
+  GBU-10, GBU-10A, Paveway, Paveway III, GBU-29 and GBU-29/P (2, by weight),
+  and FAB-1000, GBU-28, Mk 82 pack and Mk 82 AIR (1, by weight). Missiles,
+  rocket pods and designator pods are refused; Boulder and Moose load only
+  under Cheat. A three-position rack has two bombs beside its bar and one
+  below, between the fuselage missiles.
+- F22.PT row 8 is a paired inboard wing carrier: two physical pylons represented
+  by one screen row, four AIM-120 or AIM-9 missiles (two per pylon), or two
+  600 gallon tanks (one per pylon), within 9,000 lb total. Tank and missile
+  selections exclude each other. No bomb or air-to-ground missile permission.
+- MIG29.PT row 8 adds the missing centreline carrier for one 1,500 litre tank,
+  within 3,000 lb. Rows 5, 6 and 7 already represent three pylons per wing.
+  No duplicate wing pylons are added. Later-variant wing-tank certification is
+  not assumed for the Fulcrum-C. Cannon operation is unchanged, an opinionated
+  omission of variant-specific tank/gun restrictions pending C-model evidence.
+- RAFALE.PT row 9 adds one centreline carrier for a 2,000 litre tank, within
+  4,000 lb. This uses one additional loadout row and supplies useful fuel
+  capacity while preserving the existing AAS38 sensor equipment and wing loads.
+- F22N.PT is unchanged. Its source weapon rows 5 to 7 are external fuselage
+  carriers, unlike F22.PT's internal bays. It is a separate hypothetical naval
+  identity, not a substitute for the requested F-22 or evidence of certification.
+
+| Aircraft / appended row (zero based) | Real stations | Capacity | Origin, feet right / forward | Surface read upward from |
+| --- | --- | --- | --- | --- |
+| F15.PT / 6 | Centreline 5 | One tank or three bombs, 4,500 lb | 0 / -3 | 8 ft below the origin |
+| F22.PT / 8 | Inboard underwing pair | Two tanks or four missiles, 9,000 lb total | +/-12 / -6 | 6 ft below the origin |
+| MIG29.PT / 8 | Centreline, between the engines | One tank, 3,000 lb | 0 / -2 | 8 ft below the origin |
+| RAFALE.PT / 9 | Centreline, behind the AAS-38 | One tank, 4,000 lb | 0 / -4 | 8 ft below the origin |
+
+The new rows also accept the retail tank records that fit the weight class
+(F150, F250 and F350 on all three; F500 on the F-22 and Rafale), as the
+F-15C and F-16C rows do. Tank counts are capped at one per physical pylon.
+
+Authored records are F600.GAS (600 US gal, 3,960 lb fuel, 425 lb shell),
+M396.GAS (1,500 litres rounded to 396 US gal, 2,614 lb fuel, 281 lb shell),
+and R528.GAS (2,000 litres rounded to 528 US gal, 3,485 lb fuel, 374 lb shell).
+Fuel is rounded to whole pounds using 6.6 lb/US gal; shells scale 248/350 lb
+per gallon. These are fitted game classes, not measured tank masses. Each is
+added only to a pack containing its carrier; explicit pack records win.
+Normal loading restricts each authored tank to its requested carrier row.
+
+Every source row must match its reviewed signature before appending rows.
+Old saved loads preserve existing indices and leave new rows empty. The
+nine fuel banks remain unchanged: Rafale row 9 uses bank 0, occupied by fixed
+sensor equipment rather than fuel. MiG-29 and F-22 row 8 use bank 8.
+Fuel consumption, tank and selected-store jettison, AI mission loadouts,
+network configuration and replay poses use the shared loadout paths. Peers
+must agree on the new resources, compatibility, capacities and station poses.
+The lead assigns the protocol change; this slice leaves protocol 43 unchanged.
+
+Real-carriage context: [USAF F-22 fact sheet](https://www.af.mil/About-Us/Fact-Sheets/Display/Article/104506/f-22-raptor/)
+identifies two external wing tanks. The [German MiG-29 flight manual](https://jasonblair.net/wp-content/uploads/2015/06/MIG29-Flight-Manual-Pt-1.pdf)
+describes a 1,500 litre centreline tank, but is not C-model certification.
+[Dassault](https://www.dassault-aviation.com/en/defense/rafale/adapt-and-deliver/)
+identifies 14 Rafale hardpoints, five suitable for heavy stores and tanks.
+John's requested configuration defines the gameplay scope where period or
+variant-specific evidence is incomplete.

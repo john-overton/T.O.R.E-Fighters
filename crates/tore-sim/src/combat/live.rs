@@ -913,7 +913,14 @@ impl Configuration {
             }
             let source_station = super::loading::Station::from_source(h)?;
             let compatible = |weapon: &Weapon| {
-                weapon.source != "SUU16.JT"
+                // The added Eagle carrier retains an empty bomb selection,
+                // even though its laser-bomb (0x80) and SARH (0x40) bits also match
+                // missiles; Loadout::capacity applies the same bomb-only rule.
+                (a.id != AircraftId::F15
+                    || hardpoint != 6
+                    || super::ballistics::is_bomb(weapon)
+                    || super::guided::is_glide_bomb(weapon))
+                    && weapon.source != "SUU16.JT"
                     && (1..32767).contains(
                         &source_station.allowed_count(super::loading::Store::weapon(weapon), false),
                     )
@@ -925,7 +932,7 @@ impl Configuration {
             if selected.is_none() {
                 let fallback = match (a.id, hardpoint) {
                     (AircraftId::Mig23, 5) => Some("AIM9M.JT"),
-                    (AircraftId::Mig17, 3) => Some("MK82.JT"),
+                    (AircraftId::Mig17, 3) | (AircraftId::F15, 6) => Some("MK82.JT"),
                     _ => None,
                 };
                 if let Some(name) = fallback {
@@ -6781,18 +6788,79 @@ mod tests {
     }
 
     #[test]
+    fn optional_bomb_and_dual_rail_rows_obey_type_count_and_weight_limits() {
+        use crate::combat::loadout::Loadout;
+        use tore_formats::aircraft::Hardpoint;
+        for (id, row, flags, count, weight) in [
+            (AircraftId::F15, 6, 0x3c1, 3, 45),
+            (AircraftId::F22, 8, 0x2a5, 4, 90),
+        ] {
+            let mut config = fixture(false).own().configuration().clone();
+            let mut weapon = config.stations[0].weapon.clone();
+            config.stations.truncate(1);
+            config.hardpoint_slots = vec![None; row + 1];
+            config.hardpoint_slots[row] = Some(0);
+            config.tanks.clear();
+            let mut load = Loadout {
+                aircraft: id,
+                configuration: config,
+                quantities: vec![0],
+                fuel_lbs: 0.,
+                internal_capacity_lbs: 5000.,
+                empty_lbs: 10000.,
+                maximum_lbs: 50000.,
+                hardpoints: vec![Hardpoint {
+                    location: if row == 6 { 0 } else { 4 },
+                    flags,
+                    position: [0; 3],
+                    store: None,
+                    count,
+                    weight_class: weight,
+                }],
+                tank_hardpoints: vec![],
+                cheat: false,
+            };
+            weapon.source = "MK82.JT".into();
+            weapon.flags = 0x12;
+            weapon.seeker.signature = 0;
+            weapon.burst.projectiles_in_pod = 1;
+            weapon.weight = 500;
+            assert_eq!(load.capacity(0, &weapon), if row == 6 { 3 } else { 0 });
+            weapon.weight = 2000;
+            assert_eq!(load.capacity(0, &weapon), if row == 6 { 2 } else { 0 });
+            weapon.weight = 4501;
+            assert_eq!(load.capacity(0, &weapon), 0);
+            weapon.source = "AIM120.JT".into();
+            weapon.flags = 2;
+            weapon.seeker.signature = 3;
+            weapon.weight = 350;
+            assert_eq!(load.capacity(0, &weapon), if row == 8 { 4 } else { 0 });
+            weapon.source = "AGM65G.JT".into();
+            assert_eq!(load.capacity(0, &weapon), 0);
+            load.cheat = true;
+            assert_eq!(load.capacity(0, &weapon), count);
+        }
+    }
+
+    #[test]
     fn derived_wet_rows_enforce_capacity_and_feed_without_changing_fuel_layout() {
         use crate::combat::{loading, loadout::Loadout};
         use tore_formats::aircraft::{Hardpoint, stations};
         let mut resources = std::collections::BTreeMap::from([
             ("F15.PT".to_owned(), Vec::new()),
             ("F16C.PT".to_owned(), Vec::new()),
+            ("F22.PT".to_owned(), Vec::new()),
+            ("MIG29.PT".to_owned(), Vec::new()),
+            ("RAFALE.PT".to_owned(), Vec::new()),
         ]);
         stations::extend_resources(&mut resources);
         for (id, row, name, count, limit) in [
             (AircraftId::F15, 6, "F610.GAS", 1, 45),
             (AircraftId::F15, 7, "F610.GAS", 2, 90),
             (AircraftId::F16C, 9, "F370.GAS", 2, 60),
+            (AircraftId::F22, 8, "F600.GAS", 2, 90),
+            (AircraftId::Mig29, 8, "M396.GAS", 1, 30),
+            (AircraftId::Rafale, 9, "R528.GAS", 1, 40),
         ] {
             let tank = TankStore::parse(name, &resources[name]).unwrap();
             let h = Hardpoint {
@@ -6800,7 +6868,11 @@ mod tests {
                 flags: 0x205,
                 position: [0; 3],
                 store: None,
-                count,
+                count: match (id, row) {
+                    (AircraftId::F15, 6) => 3,
+                    (AircraftId::F22, 8) => 4,
+                    _ => count,
+                },
                 weight_class: limit,
             };
             assert_eq!(
@@ -6832,6 +6904,15 @@ mod tests {
                 tank_hardpoints: vec![h],
                 cheat: false,
             };
+            let mut small = tank.clone();
+            small.source = "SYNTHETIC.GAS".into();
+            small.tank.fuel_weight = 100;
+            small.tank.empty_weight = 10;
+            assert_eq!(
+                load.tank_capacity(0, &small),
+                count,
+                "one tank per physical pylon"
+            );
             load.select_tank(0, tank.clone()).unwrap();
             load.validate().unwrap();
             let pounds = f64::from(count * tank.tank.fuel_weight);

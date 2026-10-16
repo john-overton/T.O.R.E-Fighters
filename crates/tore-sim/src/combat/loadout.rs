@@ -207,6 +207,18 @@ impl Loadout {
             })
             .unwrap_or(0)
             .clamp(0, 32766)
+            .min(if self.cheat {
+                32766
+            } else {
+                match (
+                    self.aircraft,
+                    self.configuration.tanks.get(slot).map(|s| s.hardpoint),
+                ) {
+                    (AircraftId::F15, Some(6)) => 1,
+                    (AircraftId::F22, Some(8)) => 2,
+                    _ => 32766,
+                }
+            })
     }
     /// Tanks start full. Filling an installed empty tank is a later UI feature.
     pub fn select_tank(&mut self, slot: usize, tank: live::TankStore) -> Result<()> {
@@ -278,6 +290,29 @@ impl Loadout {
         self.refresh_equipment()
     }
     pub fn capacity(&self, slot: usize, w: &Weapon) -> i32 {
+        let row = self
+            .configuration
+            .hardpoint_slots
+            .iter()
+            .position(|s| *s == Some(slot));
+        if !self.cheat {
+            if self.aircraft == AircraftId::F15
+                && row == Some(6)
+                && !super::ballistics::is_bomb(w)
+                && !super::guided::is_glide_bomb(w)
+            {
+                return 0;
+            }
+            if self.aircraft == AircraftId::F22
+                && row == Some(8)
+                && !matches!(
+                    w.source.as_str(),
+                    "AIM120.JT" | "AIM9B.JT" | "AIM9M.JT" | "AIM9X.JT"
+                )
+            {
+                return 0;
+            }
+        }
         // R-27 carriage is an explicit family policy, not generic IR rail
         // compatibility. Cheat keeps its existing unrestricted behavior.
         if !self.cheat

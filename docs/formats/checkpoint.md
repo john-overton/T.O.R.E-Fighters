@@ -557,6 +557,8 @@ The release origin and initial velocity remain available for sight prediction.
 The nine-bank external-fuel array retains its byte layout with the
 [derived F-16C wet row](../spec/stores-on-pylons.md#derived-f-15c-and-f-16c-stations).
 Source row 9 maps to fuel bank 0; source rows 0 to 8 keep their bank numbers.
-The F-16's row 0 is fixed sensor equipment and cannot contain a tank.
+The F-16 and Rafale C row 0 is fixed sensor equipment and cannot contain a tank.
+The [optional Rafale centreline](../spec/stores-on-pylons.md#optional-carriers-2026-10-16)
+also uses row 9; F-22 and MiG-29 additions use row and bank 8.
 Configuration validation rejects duplicate fuel-bank allocation. Tank records
 and store poses still carry source row 9, not the fuel-bank number.

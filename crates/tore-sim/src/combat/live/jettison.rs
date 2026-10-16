@@ -369,6 +369,35 @@ mod tests {
         State::new(config, true).unwrap()
     }
     #[test]
+    fn every_added_tank_row_drops_its_full_mass_without_weapons() {
+        for (row, name, count) in [
+            (6, "F610.GAS", 1),
+            (8, "F600.GAS", 2),
+            (8, "M396.GAS", 1),
+            (9, "R528.GAS", 1),
+        ] {
+            let mut config = loaded().own().configuration().clone();
+            config.tanks.truncate(1);
+            let bytes = tore_formats::aircraft::stations::resource(name).unwrap();
+            let tank = TankStore::parse(name, &bytes).unwrap();
+            let mass = f64::from(count)
+                * f64::from(tank.tank.fuel_weight + i32::from(tank.tank.empty_weight));
+            config.tanks[0].store = Some(tank);
+            config.tanks[0].hardpoint = row;
+            config.tanks[0].quantity = count;
+            config.refresh_tanks().unwrap();
+            let mut state = State::new(config, true).unwrap();
+            let ammo = state.own().ammo.clone();
+            let before = state.own().payload_lbs();
+            state.command(0, Command::JettisonTanks, launcher());
+            assert_eq!(state.own().external_fuel_lbs(), [0.; 9]);
+            assert_eq!(state.own().payload_lbs(), before - mass);
+            assert_eq!(state.own().ammo, ammo);
+            assert_eq!(state.projectiles.len(), usize::from(count));
+        }
+    }
+
+    #[test]
     fn appended_wet_row_jettisons_and_duplicate_fuel_banks_are_rejected() {
         let mut config = loaded().own().configuration().clone();
         config.tanks[0].hardpoint = 6;
