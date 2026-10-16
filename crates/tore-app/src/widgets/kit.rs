@@ -289,6 +289,7 @@ impl Kit {
 
     /// True when the kit has the piece (every required one is always there;
     /// the optional ones may not be).
+    #[cfg(test)]
     pub fn has(&self, name: &str) -> bool {
         let key = if name.ends_with(".PIC") {
             name.to_owned()

@@ -582,6 +582,8 @@ impl Host {
             joins,
             next_id,
             gives,
+            force_deadline: _,
+            force_shown: _,
         } = self;
         session_id.save(s, None)?;
         save_settings(s, settings)?;

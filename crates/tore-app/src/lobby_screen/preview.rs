@@ -15,7 +15,7 @@ use tore_sim::ai::launch::{Side, WingId};
 use tore_sim::cheats::{Cheats, Damage};
 
 /// The states a snapshot can show.
-pub const STATES: [&str; 47] = [
+pub const STATES: [&str; 49] = [
     "lobby-choice",
     "lobby-ai-off",
     "lobby-king",
@@ -81,6 +81,9 @@ pub const STATES: [&str; 47] = [
     "lobby-balanced",
     "lobby-pvp-balanced-wait",
     "lobby-pvp-unable",
+    // Force Start (nr-lobbyui): the King's button, and the countdown.
+    "lobby-force",
+    "lobby-force-count",
 ];
 
 /// A player of the sample lobby, on a platform picked by its id so the
@@ -167,6 +170,7 @@ pub(crate) fn sample(you: u8) -> LobbyState {
         settings: tore_session::settings::Store::defaults(tore_session::settings::Mode::Coop)
             .lobby_list(),
         mission_locked: false,
+        force_seconds: None,
     }
 }
 
@@ -512,6 +516,11 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
             lobby.players[5].unable =
                 Some("Pilot6's game has no F/A-18D Hornet, which this mission flies.".into());
         }
+        // Goose is ready, the King is not: the button reads Force Start.
+        "lobby-force" => {}
+        "lobby-force-count" => {
+            lobby.force_seconds = Some(7);
+        }
         _ => {}
     }
     let mut screen = LobbyScreen::sample(Arc::clone(&kit), lobby.clone(), hosting);
@@ -545,6 +554,9 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
     match state {
         // The same list scrolled to Redfor's five.
         "lobby-pvp-colours-red" => screen.slots.scroll_to(5),
+        "lobby-force-count" => {
+            screen.say("The King is force starting in 10 seconds.");
+        }
         "lobby-scroll" => {
             // Mid way down each list and back from the newest lines.
             screen.slots.scroll_to(4);

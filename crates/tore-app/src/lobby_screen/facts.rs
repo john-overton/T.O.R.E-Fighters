@@ -39,6 +39,11 @@ impl Show {
 pub enum FlyAs {
     /// Starts the mission.
     Fly,
+    /// Not everyone is ready, but a force start is allowed: the King counts
+    /// down 10 seconds (John, 2026-10-16).
+    ForceStart,
+    /// A force start is counting. `seconds` is 1 to 10, from the host.
+    Counting(u8),
     /// The mission is flying: the King ends it for everyone (*agent
     /// decision*: a King who never joined the flight would otherwise have no
     /// way to stop it from the lobby).
@@ -73,6 +78,13 @@ pub struct Facts {
     pub holders: usize,
     /// With AI off, the open slots no ready player holds yet.
     pub ai_waiting: usize,
+    /// With AI off, the open slots nobody holds. A force start waits for
+    /// these; a player who holds one and is not ready still holds it.
+    pub unheld: usize,
+    /// Ready players holding a slot whose game can play.
+    pub ready_holders: usize,
+    /// Seconds left on a force start, from the host. None when none runs.
+    pub force_seconds: Option<u8>,
     /// How many more ready players `min-players` needs (0 when met or none).
     pub min_waiting: usize,
     /// The minimum players the lobby waits for, as the host counts it:
@@ -106,6 +118,9 @@ impl Facts {
                 waiting: Vec::new(),
                 holders: 0,
                 ai_waiting: 0,
+                unheld: 0,
+                ready_holders: 0,
+                force_seconds: None,
                 min_waiting: 0,
                 min_players: 0,
                 pvp: false,
@@ -157,6 +172,20 @@ impl Facts {
                 .map(|p| p.callsign.clone())
                 .collect(),
             holders: holders.len(),
+            unheld: if lobby.settings.iter().any(|s| s.0 == number::AI && s.1 == 0) {
+                lobby
+                    .slots
+                    .iter()
+                    .filter(|s| {
+                        s.lock != Lock::Closed
+                            && !lobby.players.iter().any(|p| p.slot == Some(s.plane))
+                    })
+                    .count()
+            } else {
+                0
+            },
+            ready_holders,
+            force_seconds: lobby.force_seconds,
             ai_waiting: if lobby.settings.iter().any(|s| s.0 == number::AI && s.1 == 0) {
                 lobby
                     .slots
@@ -185,6 +214,19 @@ impl Facts {
     /// The King's Start is accepted now (the host's own rule).
     pub fn all_ready(&self) -> bool {
         self.holders > 0 && self.waiting.is_empty() && self.ai_waiting == 0 && self.min_waiting == 0
+    }
+
+    /// The King's Fly would be refused because someone holding a slot is
+    /// not ready, and a force start is allowed: at least one slot holder is
+    /// ready, the minimum is met, and with the AI off every open slot is
+    /// held. *Agent decision*: the minimum and an unheld plane are not
+    /// overridden.
+    pub fn force_start(&self) -> bool {
+        self.phase == LobbyPhase::Lobby
+            && self.ready_holders >= 1
+            && !self.waiting.is_empty()
+            && self.min_waiting == 0
+            && self.unheld == 0
     }
 }
 
@@ -244,11 +286,27 @@ pub fn buttons(facts: &Facts, target: bool) -> Buttons {
         },
         // Ready takes a slot; in flight it joins the flight.
         ready: on(may_play && facts.holds.is_some() && facts.phase != LobbyPhase::Ended),
-        fly: king_only(on(
-            facts.connected && ((lobby_phase && facts.all_ready()) || flying)
-        )),
+        fly: if let Some(seconds) = facts.force_seconds.filter(|_| lobby_phase) {
+            // Everyone sees the countdown. Only the King can cancel it.
+            let _ = seconds;
+            if facts.king {
+                Show::Enabled
+            } else if facts.connected {
+                Show::Disabled
+            } else {
+                Show::Hidden
+            }
+        } else {
+            king_only(on(facts.connected
+                && ((lobby_phase && (facts.all_ready() || facts.force_start()))
+                    || flying)))
+        },
         fly_as: if flying {
             FlyAs::EndMission
+        } else if let Some(seconds) = facts.force_seconds.filter(|_| lobby_phase) {
+            FlyAs::Counting(seconds)
+        } else if lobby_phase && facts.force_start() {
+            FlyAs::ForceStart
         } else {
             FlyAs::Fly
         },
@@ -266,6 +324,9 @@ pub fn fly_block(facts: &Facts) -> Option<String> {
         LobbyPhase::Flying => return None,
         LobbyPhase::Ended => return Some("The mission has just ended.".into()),
         LobbyPhase::Lobby => {}
+    }
+    if facts.force_seconds.is_some() && !facts.king {
+        return Some("The King is force starting.".into());
     }
     if facts.holders == 0 {
         return Some("Nobody holds a slot.".into());
@@ -285,7 +346,10 @@ pub enum DefaultButton {
 }
 
 pub fn default_button(facts: &Facts, buttons: &Buttons) -> Option<DefaultButton> {
-    if buttons.fly.is_enabled() && facts.phase == LobbyPhase::Lobby && facts.all_ready() {
+    if buttons.fly.is_enabled()
+        && facts.phase == LobbyPhase::Lobby
+        && (facts.all_ready() || facts.force_start() || facts.force_seconds.is_some())
+    {
         Some(DefaultButton::Fly)
     } else if buttons.ready.is_enabled() && !facts.ready {
         Some(DefaultButton::Ready)
@@ -339,7 +403,14 @@ pub fn ready_hint(facts: &Facts) -> Option<&'static str> {
             (StartRule::FirstReady, _) => {
                 "The mission starts as soon as the first player holding a slot is ready."
             }
-            // The King: Fly is theirs.
+            // The King: Fly is theirs. Force Start when someone is not ready
+            // and a countdown is allowed (John, 2026-10-16).
+            (StartRule::King, true) if facts.force_seconds.is_some() => {
+                "The force start is counting down. Press it again to cancel."
+            }
+            (StartRule::King, true) if facts.force_start() => {
+                "Someone is not ready: press Force Start to begin in 10 seconds."
+            }
             (StartRule::King, true) if facts.all_ready() => {
                 "Everyone is ready: press Fly to start the mission."
             }
@@ -347,6 +418,9 @@ pub fn ready_hint(facts: &Facts) -> Option<&'static str> {
             // A game with no King named (the crown is between players).
             (StartRule::King, false) if facts.server => {
                 "The mission starts when the King presses Fly and everyone holding a slot is ready."
+            }
+            (StartRule::King, false) if facts.force_seconds.is_some() => {
+                "The King is force starting. The mission begins when the count ends."
             }
             (StartRule::King, false) if facts.holds.is_none() => {
                 "Take a slot and press Ready so the King can start the mission."

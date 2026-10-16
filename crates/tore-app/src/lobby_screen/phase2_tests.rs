@@ -182,7 +182,7 @@ fn the_kings_seven_buttons_and_the_joiners_four_have_their_places() {
             "Players...",
             "Loadout",
             "Ready",
-            "Fly",
+            "Force Start",
             "Leave"
         ]
     );

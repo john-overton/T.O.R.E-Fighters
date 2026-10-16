@@ -43,7 +43,9 @@ fn the_king_in_a_lobby_has_every_button_and_the_joiner_only_his_own() {
     assert!(king.loadout.is_enabled(), "the King holds a slot");
     assert_eq!(king.loadout_as, LoadoutAs::Loadout);
     assert!(king.ready.is_enabled());
-    assert_eq!(king.fly, Show::Disabled, "the King is not ready yet");
+    // Goose is ready and Maverick is not: Fly reads Force Start.
+    assert_eq!(king.fly, Show::Enabled);
+    assert_eq!(king.fly_as, FlyAs::ForceStart);
     assert!(king.leave.is_enabled());
     assert!(
         facts::buttons(&Facts::of(Some(&state), None), true)
@@ -146,8 +148,14 @@ fn while_the_mission_flies_fly_ends_it_and_ready_joins_it() {
 fn the_blue_button_is_fly_when_it_can_be_pressed_else_ready() {
     let mut state = king();
     let screen = screen_of(&state, true);
+    // Goose is ready and the King is not, so the blue button is Force Start.
+    assert_eq!(screen.default_button(), Some(facts::DefaultButton::Fly));
+    assert_eq!(screen.buttons().fly_as, FlyAs::ForceStart);
+    state.players[1].ready = false;
+    let screen = screen_of(&state, true);
     assert_eq!(screen.default_button(), Some(facts::DefaultButton::Ready));
     state.players[0].ready = true;
+    state.players[1].ready = true;
     let screen = screen_of(&state, true);
     assert_eq!(screen.default_button(), Some(facts::DefaultButton::Fly));
     // A joiner who is ready has nothing to press.
@@ -348,12 +356,14 @@ fn players_opens_for_the_selected_player_and_kick_asks_for_a_reason() {
 
 #[test]
 fn a_button_that_cannot_be_pressed_says_why_when_clicked() {
-    let state = king();
+    let mut state = king();
+    // Nobody ready: Force Start is not offered, and Fly says who waits.
+    state.players[1].ready = false;
     let mut screen = screen_of(&state, true);
     assert_eq!(click(&mut screen, button_centre(5)), None);
     assert_eq!(
         screen.message_lines().last().map(String::as_str),
-        Some("Not ready: Maverick.")
+        Some("Not ready: Maverick, Goose.")
     );
 }
 
@@ -369,8 +379,8 @@ fn enter_in_the_chat_line_sends_it_and_an_empty_line_presses_the_blue_button() {
         Some(Request::Chat("hello all".into()))
     );
     assert_eq!(screen.typed(), "");
-    // Nothing typed: Enter is the blue button (Ready here).
-    assert_eq!(screen.key("Enter", false), Some(Request::SetReady(true)));
+    // Nothing typed: Enter is the blue button (Force Start here).
+    assert_eq!(screen.key("Enter", false), Some(Request::ForceStart));
 }
 
 #[test]
