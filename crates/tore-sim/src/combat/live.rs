@@ -6633,6 +6633,77 @@ mod tests {
     use tore_formats::weapons::*;
     use tore_formats::weapons::{Guidance, Seeker};
     #[test]
+    fn smaller_bombs_share_guidance_sound_and_allow_lighter_racks() {
+        use crate::combat::{bomb_flight::Body, loadout::Loadout};
+        use tore_formats::aircraft::Hardpoint;
+        let config = fixture(true).own().configuration().clone();
+        let mut load = Loadout {
+            aircraft: AircraftId::F18,
+            configuration: config,
+            quantities: vec![0],
+            fuel_lbs: 0.,
+            internal_capacity_lbs: 1000.,
+            empty_lbs: 100.,
+            maximum_lbs: 10000.,
+            hardpoints: vec![Hardpoint {
+                location: 4,
+                flags: 0x108,
+                position: [0; 3],
+                store: Some("PAVEWAY.JT".into()),
+                count: 4,
+                weight_class: 20,
+            }],
+            tank_hardpoints: vec![],
+            cheat: false,
+        };
+        for aircraft in AircraftId::ALL {
+            load.aircraft = aircraft;
+            for (source, donor, weight, _, shape) in tore_formats::weapons::corrections::SMALL_BOMBS
+            {
+                let mut w = load.configuration.stations[0].weapon.clone();
+                w.source = source.into();
+                w.shape = Some(shape.into());
+                w.weight = weight;
+                w.flags = if source == "GBU38.JT" {
+                    0x2a043
+                } else {
+                    0x2a543
+                };
+                w.seeker.signature = if source == "GBU38.JT" { 0 } else { 1 };
+                w.movement.fuel_t = 0;
+                w.movement.initial_speed = 0;
+                w.movement.ignite_t = 0;
+                w.movement.launch_retard = 100;
+                w.burst.projectiles_in_pod = 1;
+                w.burst.game_rounds_in_burst = 1;
+                load.hardpoints[0].store = Some(donor.into());
+                assert_eq!(load.capacity(0, &w), 2000 / weight, "{aircraft:?} {source}");
+                let body = Body::of(&w);
+                assert_eq!(body.mass, f64::from(weight) / 32.);
+                assert_eq!(body.steering, if source == "GBU38.JT" { 2 } else { 1 });
+                assert_eq!(crate::combat::release_sound(&w), Some("&bomb.11k"));
+                assert!(body.area < 0.1323 * 4_f64.powf(2. / 3.) * 1.3);
+                let mut larger = w.clone();
+                larger.source = donor.into();
+                larger.weight = 2000;
+                assert_eq!(body.steering, Body::of(&larger).steering);
+                assert_eq!(
+                    crate::combat::release_sound(&w),
+                    crate::combat::release_sound(&larger)
+                );
+                assert_eq!(
+                    crate::combat::blast_scale::of(&w),
+                    if weight == 500 { 100 } else { 126 }
+                );
+                assert!(crate::combat::store_sizes::StoreSize::of_weapon(&w).length < 14.2);
+                load.cheat = true;
+                assert!(load.capacity(0, &w) > 0);
+                load.cheat = false;
+            }
+        }
+    }
+
+    #[test]
     fn r27_loadout_family_and_rail_rules() {
         use crate::combat::loadout::Loadout;
         use tore_formats::aircraft::Hardpoint;

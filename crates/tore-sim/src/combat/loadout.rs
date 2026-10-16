@@ -326,7 +326,10 @@ impl Loadout {
             .and_then(|h| {
                 loading::Station::from_source(h).ok().map(|s| {
                     let store = loading::Store::weapon(w);
-                    let matches_default = h.store.as_deref() == Some(&w.source);
+                    let matches_default = h.store.as_deref() == Some(&w.source)
+                        || tore_formats::weapons::corrections::donor(&w.source)
+                            .filter(|_| w.source.starts_with("GBU"))
+                            .is_some_and(|donor| h.store.as_deref() == Some(donor));
                     if self.cheat {
                         s.cheat_count(store, matches_default, h.store.is_some())
                     } else {
@@ -648,6 +651,9 @@ pub const SUPPORTED_WEAPONS: &[&str] = &[
     // Guided air-to-ground weapons, slice W1 (docs/spec/air-to-ground.md,
     // "Weapon classes" 4, 5 and 12): the laser bombs, the JDAMs and the
     // laser missiles. The AT-2 above now flies command guidance.
+    "GBU12.JT",
+    "GBU16.JT",
+    "GBU38.JT",
     "GBU10.JT",
     "GBU10A.JT",
     "PAVEWAY.JT",

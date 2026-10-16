@@ -419,3 +419,11 @@ selecting one shows its full NATO name in the existing notice band. The HUD
 uses AA-10A/B/C/D. See the single [missile definition](missiles.md#corrected-identities-and-r-27-stores)
 for names, aircraft, rail compatibility and fitted envelopes. These catalog
 changes require matching host/client builds and a protocol bump by the lead.
+
+## Smaller guided stores
+
+GBU-12, GBU-16 and GBU-38 use private aliases of their donors' models, refitted
+in the shared store-size table for pylons, previews and released weapons.
+Their loadout cards reuse donor art and display their own GBU names. Sizes,
+damage, crater scaling and provenance are specified in
+[smaller guided bomb stores](missiles.md#smaller-guided-bomb-stores).

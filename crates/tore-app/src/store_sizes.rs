@@ -298,6 +298,19 @@ mod tests {
     }
 
     #[test]
+    fn smaller_bomb_aliases_refit_donor_geometry() {
+        for name in ["GB12.SH", "GB16.SH", "GB38.SH"] {
+            let size = real_size(name).unwrap();
+            let model = store(42.6, 4.5, 16.2);
+            let fitted = fitted(&model, &size, size.span);
+            let result = body(&fitted).unwrap();
+            assert!((result.length - size.length).abs() < 0.01);
+            assert!((result.half[0] * 2. - size.diameter).abs() < 0.01);
+            assert!((result.reach[0] * 2. - size.span).abs() < 0.01);
+        }
+    }
+
+    #[test]
     fn a_fat_store_is_refitted_to_its_real_body_fins_and_length() {
         // 27 units long (9 ft), 2 units across (0.67 ft), fins 6 (2 ft).
         let shape = store(27., 2., 6.);

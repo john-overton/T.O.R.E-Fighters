@@ -1686,11 +1686,7 @@ fn tank_thumbnail<'a>(
 }
 fn thumbnail<'a>(sprites: &'a BTreeMap<String, Sprite>, weapon: &Weapon) -> Option<&'a Sprite> {
     let source =
-        if tore_formats::weapons::corrections::R27_DERIVED.contains(&weapon.source.as_str()) {
-            "AA10.JT"
-        } else {
-            &weapon.source
-        };
+        tore_formats::weapons::corrections::donor(&weapon.source).unwrap_or(&weapon.source);
     sprites.get(&format!("${}.PIC", source.trim_end_matches(".JT")))
 }
 fn card_outline(c: &mut Canvas, x: i32, y: i32, selected: bool) {

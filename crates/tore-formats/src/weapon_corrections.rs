@@ -1,6 +1,35 @@
-//! Load-time store identities and fitted R-27 variants. No retail bytes live here.
-//! See docs/spec/missiles.md, "Corrected identities and R-27 stores".
+//! Load-time store identities and fitted missile/bomb variants. No retail bytes.
+//! See docs/spec/missiles.md for donor, scaling and provenance rules.
 use super::Weapon;
+
+/// Opinionated smaller guided stores, requested 2026-10-15. Ratios and
+/// dimensions are fitted game classes, not retail or aerodynamic measurements.
+pub const SMALL_BOMBS: [(&str, &str, i32, i16, &str); 3] = [
+    ("GBU12.JT", "PAVEWAY.JT", 500, 4, "GB12.SH"),
+    ("GBU16.JT", "PAVEWAY.JT", 1000, 2, "GB16.SH"),
+    ("GBU38.JT", "GBU29.JT", 500, 4, "GB38.SH"),
+];
+
+pub fn donor(source: &str) -> Option<&'static str> {
+    if R27_DERIVED.contains(&source) {
+        return Some("AA10.JT");
+    }
+    SMALL_BOMBS.iter().find(|v| v.0 == source).map(|v| v.1)
+}
+
+/// Source resource for a virtual record or its private, resized shape alias.
+pub fn resource_donor(
+    source: &str,
+    resources: &std::collections::BTreeMap<String, Vec<u8>>,
+) -> Option<String> {
+    if let Some(name) = donor(source) {
+        return Some(name.into());
+    }
+    let variant = SMALL_BOMBS.iter().find(|v| v.4 == source)?;
+    Weapon::parse(variant.1, resources.get(variant.1)?)
+        .ok()?
+        .shape
+}
 
 pub const R27_DERIVED: [&str; 3] = ["R27ER.JT", "R27T.JT", "R27ET.JT"];
 
@@ -8,6 +37,9 @@ pub const R27_DERIVED: [&str; 3] = ["R27ER.JT", "R27T.JT", "R27ET.JT"];
 /// are described honestly instead of assigning a modern missile's identity.
 pub fn identity(source: &str) -> Option<(&'static str, &'static str)> {
     Some(match source {
+        "GBU12.JT" => ("GBU-12", "GBU-12 Paveway II (500 lb)"),
+        "GBU16.JT" => ("GBU-16", "GBU-16 Paveway II (1000 lb)"),
+        "GBU38.JT" => ("GBU-38", "GBU-38 JDAM (500 lb)"),
         "AA10.JT" => ("AA-10A", "R-27R (AA-10A Alamo-A)"),
         "R27ER.JT" => ("AA-10C", "R-27ER (AA-10C Alamo-C)"),
         "R27T.JT" => ("AA-10B", "R-27T (AA-10B Alamo-B)"),
@@ -32,6 +64,14 @@ pub(super) fn apply(w: &mut Weapon) {
     if let Some((short, long)) = identity(&w.source) {
         w.hud_name = short.into();
         w.name = long.into();
+    }
+    if let Some((_, _, weight, divisor, shape)) = SMALL_BOMBS.iter().find(|v| v.0 == w.source) {
+        w.weight = *weight;
+        w.shape = Some((*shape).into());
+        w.damage.by_class = w.damage.by_class.map(|damage| damage / divisor);
+        w.damage.collateral_radius =
+            (f64::from(w.damage.collateral_radius) / f64::from(*divisor).cbrt()).round() as i16;
+        return;
     }
     if !R27_DERIVED.contains(&w.source.as_str()) {
         return;
@@ -63,6 +103,17 @@ pub(super) fn apply(w: &mut Weapon) {
 /// Add virtual donor records in memory when loading a user's pack. Parsing the
 /// virtual name applies its variant above. Existing explicit records win.
 pub fn extend_resources(resources: &mut std::collections::BTreeMap<String, Vec<u8>>) {
+    for (name, donor, _, _, shape) in SMALL_BOMBS {
+        if let Some(bytes) = resources.get(donor).cloned() {
+            if let Ok(weapon) = Weapon::parse(donor, &bytes)
+                && let Some(source) = weapon.shape
+                && let Some(model) = resources.get(&source).cloned()
+            {
+                resources.entry(shape.into()).or_insert(model);
+            }
+            resources.entry(name.into()).or_insert(bytes);
+        }
+    }
     if let Some(donor) = resources.get("AA10.JT").cloned() {
         for name in R27_DERIVED {
             resources

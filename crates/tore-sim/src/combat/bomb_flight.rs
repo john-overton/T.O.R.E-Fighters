@@ -46,7 +46,10 @@ impl Body {
             },
             steering: if !guided {
                 0
-            } else if matches!(w.source.as_str(), "GBU10.JT" | "GBU10A.JT" | "PAVEWAY.JT") {
+            } else if matches!(
+                w.source.as_str(),
+                "GBU10.JT" | "GBU10A.JT" | "PAVEWAY.JT" | "GBU12.JT" | "GBU16.JT"
+            ) {
                 1
             } else {
                 2

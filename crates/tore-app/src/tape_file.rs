@@ -40,8 +40,8 @@ fn fingerprint(data: &BTreeMap<String, Vec<u8>>) -> u64 {
         // Virtual donor aliases are a loader feature, not changed retail
         // media. Preserve old tapes' import identity; explicit different
         // variant bytes still participate in the asset guard.
-        if tore_formats::weapons::corrections::R27_DERIVED.contains(&name.as_str())
-            && data.get("AA10.JT") == Some(bytes)
+        if tore_formats::weapons::corrections::resource_donor(name, data)
+            .is_some_and(|donor| data.get(&donor) == Some(bytes))
         {
             continue;
         }
@@ -503,10 +503,17 @@ mod tests {
         let mut data = std::collections::BTreeMap::from([
             ("AA10.JT".into(), vec![1, 2, 3]),
             ("OTHER".into(), vec![4, 5]),
+            ("PAVEWAY.JT".into(), vec![7, 8]),
+            ("GBU29.JT".into(), vec![9, 10]),
         ]);
         let original = super::fingerprint(&data);
         tore_formats::weapons::corrections::extend_resources(&mut data);
         assert_eq!(super::fingerprint(&data), original);
+        for name in ["GBU12.JT", "GBU16.JT", "GBU38.JT"] {
+            let mut changed = data.clone();
+            changed.get_mut(name).unwrap().push(6);
+            assert_ne!(super::fingerprint(&changed), original);
+        }
         data.get_mut("R27ER.JT").unwrap().push(6);
         assert_ne!(super::fingerprint(&data), original);
     }
