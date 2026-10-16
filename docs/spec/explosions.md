@@ -310,6 +310,74 @@ splash in the water:
 
 ### Night glow
 
+Opinionated extension, John, 2026-10-15: the whole fire and explosion sheet
+emits its unshaded art, using the existing glow's atmospheric visibility at
+night. The common `device_night()` signal blends from day at +2 degrees sun
+elevation to night at -6 degrees. The CPU computes the common factor from
+the visual sun elevation sine and uploads it in the group-0 scene uniform;
+`device_night()` reads that value without requiring surface-light resources.
+Day retains the previous pixels. At the
+midpoint the sheet mixes ordinary haze visibility and glow visibility equally.
+Cloud occlusion remains. Cold crater art and dust stay non-emissive; flames
+over craters use the fire sheet. The existing additive halo is retained.
+
+Agent-fitted area lighting uses a sphere of radius half the drawn effect
+width for sustained fire, fireball embers and impact flashes. At night the
+light uses distance to the sphere instead of only its centre, with radius
+squared added to the inverse-square denominator to soften the footprint.
+Twilight scales the radius by the same night factor; daylight keeps the point
+law. Radius stays fixed during burn-down while existing strength fades to
+zero. This consumes one slot per effect, preserving the eight nearby sustained
+lights and sixteen total scene lights. No extra geometry or draw calls.
+
+Visibility pass (opinionated, John 2026-10-15: "at night the entire fire and
+explosion decals need to show bright and emit light"; every number below is
+an agent decision fitted on offscreen GPU renders of the `wreck` preview).
+All of it is night-only: every new term is multiplied by, or gated on,
+`device_night()`, so daylight frames stay byte-identical.
+
+- **Brighter art.** At night the fire and explosion sheets burn
+  `1 + 0.6 * night` times their daylight palette, so hot texels push toward
+  yellow-white (`EFFECT_NIGHT_BOOST`, terrain.wgsl `effect_fragment`).
+- **Warm firelight on everything around.** A light with a radius (fire,
+  fireball ember, impact flash) adds `fire_glow` in the shared surface
+  shading, so terrain, buildings, vehicles and aircraft alike are lit. Its
+  colour is a fixed warm orange (1, 0.46, 0.14), and a surface returns it
+  mostly by its brightness and only 30 % by its own hue, so green grass
+  glows orange rather than green; the result is compressed
+  (`1 - exp(-x)`) so the ground under a fire saturates smoothly instead of
+  clipping. Falloff is `1 / (1 + (d / 3r)^2)`, windowed smoothly to zero at
+  `24 r`, with `r` the source radius but at least 40 ft (so a 30 ft vehicle
+  fire lights the buildings 300 to 500 ft away), facing wrapped as
+  `0.2 + 0.8 cos`. Its level is the fire's strength over its area, so a full
+  fire of any size is level 1 and a burning-down fire dims; a bright flash
+  is up to level 4 and reaches up to twice as far. Gain 12. Firelight is
+  seen through the night haze as the glow is (`glow_clear`), so a lit pool
+  shows from 1 and 2 nm; cloud between still hides it.
+- **Twilight.** The fire's own flare-law light fades out as `1 - night`
+  while firelight fades in, and in twilight it also returns warm off any
+  ground (no green ring). Point lights (flares, muzzle and launch flashes)
+  are unchanged.
+- **Which fires light.** At night the eight sustained lights are the ones
+  that reach farthest past their distance (distance over the square root of
+  strength), so a full fire is kept over nearer dying embers of spent blasts;
+  by day the nearest eight, as before.
+- **Glow and distance floor.** The glow point is at least 4 px in radius
+  (`4 * (0.8 + 0.45 * sqrt(flares))`, at most 9) at a brightness of at least
+  1.0 (up to 3.0), so a burning vehicle is a clear point of light at 1 and
+  2 nm. Close in, the halo is 1.6 times the art's width at 50 % of the level
+  with a broad warm bloom (0.6 of the level at its middle) around the flames.
+
+Measured on the `wreck` preview (before: base 288bfdc9 with the same preview
+fixture): close night frames +48 to +55 % mean brightness, about 400,000
+pixels changed, the ground beside the fire from about (12, 17, 8) to
+(107, 82, 43) and the nearest houses from (72, 64, 48) to (125, 94, 62);
+1 nm night +2.4 to +3.2 % (about 40,000 pixels); 2 nm night +0.4 to +2.3 %
+(7,600 to 13,800 pixels); every day frame byte-identical. Thermal is
+unchanged in its rules: thermal pictures return before any of this shading,
+and the glow still passes through `thermal_light`.
+
+
 Opinionated, John, 2026-10-13 (nr-fx3): at night, explosions and fires
 glow at every distance, and a bigger fire glows more. The rules and numbers
 are agent decisions tuned on renders (fitted). Code:
@@ -333,12 +401,14 @@ are agent decisions tuned on renders (fitted). Code:
   Impacts still start no fire (John, 2026-10-12), so for a bomb "its fire"
   is its fireball.
 - **Visible at every distance.** Once the art shrinks below about 16
-  pixels the point takes over from it: at least 1.5 pixels in radius
-  (`1.5 * (0.8 + 0.45 * sqrt(flares))`, at most 4.5), and its brightness
-  `0.8 * sqrt(flares)` between 0.4 and 2.4, so it never fades for being
-  small. Closer in it is a soft halo 0.8 times the art's width at 18 % of
-  that brightness, with the bright point core suppressed so the resolved
-  flame artwork remains visible. Before this, a night explosion or fire
+  pixels the point takes over from it: at least 4 pixels in radius
+  (`4 * (0.8 + 0.45 * sqrt(flares))`, at most 9), and its brightness
+  `0.8 * sqrt(flares)` between 1.0 and 3.0, so it never fades for being
+  small. Closer in it is a soft halo 1.6 times the art's width at 50 % of
+  that brightness with a warm bloom, with the bright point core suppressed
+  so the resolved flame artwork remains visible (nr-fx3 had 1.5 to 4.5 px,
+  0.4 to 2.4, and a 0.8 halo at 18 %; raised in the 2026-10-15 visibility
+  pass above). Before this, a night explosion or fire
   shrank below a pixel and the night haze (which here reaches full by about 3.5 nm on a
   clear night) took it out by 5 to 10 miles.
 - **Haze.** A light is seen through the night air about ten times as far as

@@ -23,11 +23,6 @@ fn device_visibility(p:vec3<f32>,altitude:f32)->vec3<f32> {
  let cloud=clamp(cloud_occlusion(vec3<f32>(1.0),p,altitude)-cloud_occlusion(vec3<f32>(0.0),p,altitude),vec3<f32>(0.0),vec3<f32>(1.0));
  return cloud*(1.0-clamp(haze(distance),0.0,1.0))*(1.0-air_opacity(distance,altitude));
 }
-// 0 in full daylight, 1 at night, from the sun's elevation.
-fn device_night()->f32 {
- return 1.0-smoothstep(-0.104528,0.0348995,surface.reserved.y);
-}
-
 // ---- Burning flare: a white core inside an orange and yellow flame --------
 struct FlareOut {
  @builtin(position) clip:vec4<f32>,

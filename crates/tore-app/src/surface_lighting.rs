@@ -7,7 +7,7 @@ pub const MAP_SIZE: u32 = 2048;
 const EXTENTS: [f32; 3] = [256., 8192., 131072.];
 const DEPTH: f32 = 262144.;
 /// Shadow projections, sun, moon and parameters, then the flare lights.
-const UNIFORM_BYTES: usize = 64 * 4 + crate::countermeasure_renderer::MAX_FLARE_LIGHTS * 16;
+const UNIFORM_BYTES: usize = 64 * 4 + crate::countermeasure_renderer::MAX_FLARE_LIGHTS * 32;
 
 fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
     a.into_iter().zip(b).map(|(x, y)| x * y).sum()
@@ -357,7 +357,7 @@ impl SurfaceLighting {
         let count = flares.len();
         values.extend(flares.into_iter().flatten());
         values.resize(
-            values.len() + (crate::countermeasure_renderer::MAX_FLARE_LIGHTS - count) * 4,
+            values.len() + (crate::countermeasure_renderer::MAX_FLARE_LIGHTS - count) * 8,
             0.,
         );
         debug_assert_eq!(values.len() * 4, UNIFORM_BYTES);

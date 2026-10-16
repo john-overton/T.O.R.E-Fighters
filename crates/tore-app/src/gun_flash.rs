@@ -450,6 +450,7 @@ impl Tracker {
                 });
             }
             drawn.lights.push(FlareLight {
+                radius: 0.,
                 position: std::array::from_fn(|i| position[i] + direction[i] * length * LIGHT_OUT),
                 strength: look.light * intensity,
             });

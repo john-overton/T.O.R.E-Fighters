@@ -532,6 +532,7 @@ impl Tracker {
                 });
             }
             out.lights.push(FlareLight {
+                radius: 0.,
                 position: std::array::from_fn(|i| {
                     shot.muzzle[i] + shot.direction[i] * length * 0.3
                 }),
@@ -551,11 +552,18 @@ impl Tracker {
         newest.sort_by(|a, b| b.3.total_cmp(&a.3));
         let mut lit = 0;
         for (position, kind, scale, born) in newest {
+            let radius = f64::from(blast::rolled_size(kind, position))
+                * tore_sim::combat::blast_scale::factor(scale)
+                / 2.;
             if lit < MAX_IMPACT_LIGHTS
                 && let Some((position, strength)) =
                     crate::impact_fx::light(position, kind, scale, now - born)
             {
-                out.lights.push(FlareLight { position, strength });
+                out.lights.push(FlareLight {
+                    radius,
+                    position,
+                    strength,
+                });
                 lit += 1;
             }
             // Its dust and smoke, as big and as long as the weapon.
@@ -600,6 +608,7 @@ impl Tracker {
         if age < launch::LIGHT_TICKS {
             let t = age / launch::LIGHT_TICKS;
             out.lights.push(FlareLight {
+                radius: 0.,
                 position: launch.position,
                 strength: launch::LIGHT * (1. - t).powi(2),
             });
@@ -726,6 +735,7 @@ fn draw_burst(burst: &Burst, now: f64, out: &mut Drawn) {
     let strength = flak_light(burst.blast, age);
     if strength > 0. && age < FLAK_LIGHT_TICKS {
         out.lights.push(FlareLight {
+            radius: 0.,
             position: burst.position,
             strength,
         });

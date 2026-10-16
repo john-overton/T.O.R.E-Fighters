@@ -1,4 +1,5 @@
 struct Band { info:vec4<f32>, ramp:vec4<f32> }
+// scene.view.z is the shared CPU night factor (night_glow::night_factor).
 struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32>, ocean:vec4<f32>, cloud_reflection:vec4<f32>, view:vec4<f32>, quality:vec4<f32>, viewport:vec4<f32>, origin:vec4<f32>, local_eye:vec4<f32> }
 // quality: spotting aid strength (0 off), terrain filtering (0/1), thermal
 // sensor picture (0/1, see "Thermal sensor picture" at the end), the thermal
@@ -821,9 +822,9 @@ fn water_flares(color:vec3<f32>,ray:vec3<f32>,hit:vec3<f32>)->vec3<f32> {
  var glint=0.0;
  let mirror=reflect(ray,up);
  for(var i=0;i<i32(surface.reserved.w);i++) {
-  let to=surface.flares[i].xyz-relative;
+  let to=surface.flares[i].source.xyz-relative;
   let d2=dot(to,to);
-  glint+=surface.flares[i].w*pow(max(dot(mirror,to*inverseSqrt(max(d2,0.000001))),0.0),80.0)/(d2+FLARE_SOFTENING);
+  glint+=surface.flares[i].source.w*pow(max(dot(mirror,to*inverseSqrt(max(d2,0.000001))),0.0),80.0)/(d2+FLARE_SOFTENING);
  }
  // Night shade remaps leave the resolved water nearly black; a flare shows
  // a fitted dark sea color instead.
@@ -990,7 +991,11 @@ fn cloud_lighting(color:vec3<f32>,direction:vec3<f32>,altitude:f32)->vec3<f32> {
  if tex.a<0.5 {discard;}
  var flares=vec3<f32>(0.0);
  if thermal_on() {return scenery(thermal_grey(thermal_air(0.27,in.distance*0.5)));}
- if flares_burning() {flares=weather_tile(in.uv,i32(in.layer),base_row(),-1,-1,vec2<f32>(-1.0)).rgb*flare_light(in.direction,vec3<f32>(0.0));}
+ if flares_burning() {
+  let bare=weather_tile(in.uv,i32(in.layer),base_row(),-1,-1,vec2<f32>(-1.0)).rgb;
+  flares=bare*flare_light(in.direction,vec3<f32>(0.0));
+  if device_night()>0.0 {flares+=fire_lit(bare,fire_glow(in.direction,vec3<f32>(0.0)));}
+ }
  return scenery(cloud_lighting(tex.rgb+flares,in.direction,in.altitude));
 }
 
@@ -1063,13 +1068,37 @@ struct EffectOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>,
  out.clip=vec4<f32>(dot(p,scene.right.xyz)*f/scene.eye.w,dot(p,scene.up.xyz)*f,world_depth_clip(z),z);
  out.uv=uv;out.opacity=opacity;out.distance=length(p);out.direction=p;out.altitude=p.y+scene.eye.y;out.layer=i32(layer);out.emissive=emissive;out.tint=tint;return out;
 }
+const GLOW_HAZE_SHARE:f32=0.1;
+// Night brightening of fire and explosion art, night_glow::EFFECT_NIGHT_BOOST.
+const EFFECT_NIGHT_BOOST:f32=0.6;
+// How much of a glow reaches the eye through cloud, haze and air: a light
+// at night is seen through the haze about ten times as far as the ground
+// (fitted, nr-fx3), so the haze counts at a tenth of the distance, and only
+// its ramp counts (the haze already over everything near at night does not
+// dim a light). A cloud between hides it as it hides a flare.
+fn glow_clear(p:vec3<f32>,altitude:f32)->vec3<f32> {
+ let cloud=clamp(cloud_occlusion(vec3<f32>(1.0),p,altitude)-cloud_occlusion(vec3<f32>(0.0),p,altitude),vec3<f32>(0.0),vec3<f32>(1.0));
+ let d=length(p)*GLOW_HAZE_SHARE;
+ let ramp=clamp((haze(d)-scene.fog.z)/max(scene.fog.w-scene.fog.z,0.001),0.0,1.0);
+ return cloud*(1.0-ramp)*(1.0-air_opacity(d,altitude));
+}
 @fragment fn effect_fragment(in:EffectOut)->@location(0) vec4<f32> {
  let clear=1.0-clamp(haze(in.distance),0.0,1.0);
  if thermal_on() {return thermal_effect(in);}
  if in.emissive>0.5 {
   let color=sample_tile(in.uv,in.layer,base_row(),-1,-1,vec2<f32>(-1.0));
-  let alpha=color.a*in.opacity*clear;
-  return vec4<f32>(color.rgb*alpha,alpha);
+  if device_night()<=0.0 {
+   let alpha=color.a*in.opacity*clear;
+   return vec4<f32>(color.rgb*alpha,alpha);
+  }
+  // Preserve day exactly. At night the entire art emits through the same
+  // atmosphere as its additive halo, rather than retaining only a point.
+  // The art also burns brighter than its daylight palette (nr-nightfx
+  // visibility pass, agent fitted): hot texels push toward yellow-white.
+  let visibility=mix(vec3<f32>(clear),glow_clear(in.direction,in.altitude),device_night());
+  let alpha=color.a*in.opacity;
+  let hot=color.rgb*(1.0+EFFECT_NIGHT_BOOST*device_night());
+  return vec4<f32>(hot*alpha*visibility,alpha*max(visibility.r,max(visibility.g,visibility.b)));
  }
  let color=sample_tile(in.uv,in.layer,0,-1,-1,ray_rows(in.distance,in.altitude));
  let alpha=color.a*in.opacity*clear;

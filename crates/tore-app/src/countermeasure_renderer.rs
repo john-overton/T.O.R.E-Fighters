@@ -62,6 +62,8 @@ pub struct Afterburner {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FlareLight {
+    /// Finite luminous source radius in feet, used only at night.
+    pub radius: f64,
     pub position: [f64; 3],
     pub strength: f64,
 }
@@ -73,10 +75,12 @@ pub fn lights(devices: &Devices, afterburners: &[Afterburner]) -> Vec<FlareLight
         .iter()
         .filter(|f| f.intensity() > 0.)
         .map(|f| FlareLight {
+            radius: 0.,
             position: f.position,
             strength: FLARE_STRENGTH * f.intensity(),
         })
         .chain(afterburners.iter().map(|a| FlareLight {
+            radius: 0.,
             position: a.position,
             strength: FLARE_STRENGTH * a.share,
         }))
@@ -85,25 +89,34 @@ pub fn lights(devices: &Devices, afterburners: &[Afterburner]) -> Vec<FlareLight
 
 /// The flares that matter most at `origin`, relative to it, for the shared
 /// lighting uniform. Subtracting in f64 keeps precision far from the origin.
-pub fn nearest(lights: &[FlareLight], origin: [f64; 3]) -> Vec<[f32; 4]> {
+pub fn nearest(lights: &[FlareLight], origin: [f64; 3]) -> Vec<[f32; 8]> {
     let mut ranked: Vec<_> = lights
         .iter()
         .map(|light| {
             let offset: [f64; 3] = std::array::from_fn(|i| light.position[i] - origin[i]);
             let d2 = offset.iter().map(|v| v * v).sum::<f64>();
-            (light.strength / d2.max(1.), offset, light.strength)
+            (
+                light.strength / d2.max(1.),
+                offset,
+                light.strength,
+                light.radius,
+            )
         })
         .collect();
     ranked.sort_by(|a, b| b.0.total_cmp(&a.0));
     ranked
         .into_iter()
         .take(MAX_FLARE_LIGHTS)
-        .map(|(_, offset, strength)| {
+        .map(|(_, offset, strength, radius)| {
             [
                 offset[0] as f32,
                 offset[1] as f32,
                 offset[2] as f32,
                 strength as f32,
+                radius as f32,
+                0.,
+                0.,
+                0.,
             ]
         })
         .collect()
@@ -419,6 +432,7 @@ mod tests {
         // Lit by the flare law: a burst a hundred feet away lights a facing
         // surface as a flare at 40 feet does, four times as much at night.
         let lights = [FlareLight {
+            radius: 0.,
             position: [0., 0., 100.],
             strength: flak_light(27, 0.),
         }];
@@ -455,6 +469,7 @@ mod tests {
         let origin = [1_000_000.5, 5000., 0.];
         let mut all: Vec<_> = (0..20)
             .map(|n| FlareLight {
+                radius: 0.,
                 position: [origin[0] + 10. + f64::from(n) * 100., 5000., 0.],
                 strength: FLARE_STRENGTH,
             })
@@ -463,7 +478,10 @@ mod tests {
         all[19].strength *= 1000.;
         let chosen = nearest(&all, origin);
         assert_eq!(chosen.len(), MAX_FLARE_LIGHTS);
-        assert_eq!(chosen[0], [10., 0., 0., FLARE_STRENGTH as f32]);
+        assert_eq!(
+            chosen[0],
+            [10., 0., 0., FLARE_STRENGTH as f32, 0., 0., 0., 0.]
+        );
         assert_eq!(chosen[1][0], 1910.);
         let offsets: Vec<f32> = chosen[2..].iter().map(|c| c[0]).collect();
         assert_eq!(
@@ -475,6 +493,7 @@ mod tests {
     #[test]
     fn flare_glow_is_inverse_square_and_ends_at_fifteen_hundred_feet() {
         let light = [FlareLight {
+            radius: 0.,
             position: [0.; 3],
             strength: FLARE_STRENGTH,
         }];

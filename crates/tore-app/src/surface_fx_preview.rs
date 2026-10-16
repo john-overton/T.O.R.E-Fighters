@@ -95,6 +95,7 @@ enum View {
     Trail,
     /// Beside a destroyed unit, looking up its smoke column.
     Wreck,
+    WreckRange(f64),
     /// The flight map.
     Map,
     /// Standing on the ground this many feet from the scene's unit, looking
@@ -108,6 +109,7 @@ enum View {
 impl View {
     fn name(self) -> String {
         match self {
+            View::WreckRange(nm) => format!("wreck-{nm:.0}nm"),
             View::Close(range) => format!("close{range:.0}"),
             View::Unit(stem, range) => format!("{}{range:.0}", stem.to_ascii_lowercase()),
             View::Parked(range) => format!("parked{range:.0}"),
@@ -128,7 +130,7 @@ impl View {
             View::Trail => "trail",
             View::Wreck => "wreck",
             View::Map => "map",
-            View::Close(_) | View::Unit(..) | View::Parked(_) => "stand",
+            View::WreckRange(_) | View::Close(_) | View::Unit(..) | View::Parked(_) => "stand",
         }
     }
 }
@@ -326,7 +328,7 @@ const SCENES: [Scene; 13] = [
         seconds: 400.,
         trigger: Trigger::Time(20.),
         frames: &[2, 300, 1_800, 6_000],
-        views: &[View::Wreck],
+        views: &[View::Wreck, View::WreckRange(1.), View::WreckRange(2.)],
         fov: 50.,
         muzzle_class: 0,
         kill: true,
@@ -520,16 +522,19 @@ fn subject(world: &World, scene: &Scene) -> AppResult<UnitId> {
         .state
         .ownship(PLAYER)
         .map_or(live::DEFAULT_OWNSHIP_SIDE, |own| own.side);
-    world
-        .terrain
-        .surface
+    let surface = &world.terrain.surface;
+    let fire_seed = tore_world::surface::wreck::mission_seed(surface);
+    surface
         .units
         .iter()
         .filter(|u| {
-            u.resource
-                .split('.')
-                .next()
-                .is_some_and(|stem| stem.eq_ignore_ascii_case(scene.over))
+            // Keep the night-fire fixture on a wreck that actually burns.
+            // Normal missions retain their deterministic half-of-vehicles rule.
+            (scene.name != "wreck" || tore_world::surface::wreck::unit_fire(u, fire_seed).burns())
+                && u.resource
+                    .split('.')
+                    .next()
+                    .is_some_and(|stem| stem.eq_ignore_ascii_case(scene.over))
                 && u.side != player_side
         })
         .nth(scene.index)
@@ -876,6 +881,22 @@ fn render(
                         let eye = [pad[0] + 230., pad[1] + 22., pad[2] - 80.];
                         look_at(eye, [pad[0], pad[1] + 45., pad[2]], scene.fov)
                     }
+                }
+                View::WreckRange(nm) => {
+                    // A shallow approach (about 6 degrees down), raised
+                    // until the sight line clears the ground between by
+                    // 100 ft, so hills never hide the wreck.
+                    let run = nm * FEET_PER_NM;
+                    let target = [center[0], center[1] + 20., center[2]];
+                    let mut rise = run * 0.1;
+                    for i in 1..64 {
+                        let t = f64::from(i) / 64.;
+                        let x = center[0] + run * t;
+                        let ground = f64::from(world.terrain.height(x as f32, center[2] as f32));
+                        rise = rise.max((ground + 100. - target[1]) / t);
+                    }
+                    let eye = [center[0] + run, target[1] + rise, center[2]];
+                    look_at(eye, target, scene.fov)
                 }
                 View::Wreck => {
                     let eye = [center[0] + 330., center[1] + 40., center[2] - 240.];
