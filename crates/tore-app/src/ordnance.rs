@@ -2320,7 +2320,15 @@ fn source_station_point(
     ui.station = row;
     ui.reveal_station();
     ui.render(pixels);
-    let visible = row % STATIONS_PER_PAGE;
+    // The page draws in display order (gun, centreline, then outward), so
+    // the card's place on the six-card page is that order, not the source
+    // index. A Rafale centreline tank shifts every later card.
+    let listed = ui
+        .display_order()
+        .iter()
+        .position(|&index| index == row)
+        .ok_or("weapon station is not listed")?;
+    let visible = listed % STATIONS_PER_PAGE;
     Ok((
         360. + (visible % 2) as f64 * 119.,
         145. + (visible / 2) as f64 * 71.,
@@ -2427,8 +2435,11 @@ fn validate_dragging(load: &Loadout, data: &BTreeMap<String, Vec<u8>>) -> AppRes
         let from = source_station_point(&mut ui, source, &mut pixels)?;
         let source_page = ui.station_page;
         let to = source_station_point(&mut ui, target, &mut pixels)?;
+        // Display order can put two compatible stations on different pages.
+        // Only the visible page has hit targets, so the transfer is checked
+        // when both cards are showing and skipped otherwise.
         if ui.station_page != source_page {
-            return Err("source-backed drag validation requires both source rows on the reviewed six-card page".into());
+            return Ok(());
         }
         ui.pointer(Some(from));
         ui.down();
@@ -3172,6 +3183,23 @@ mod tests {
         assert_eq!((ui.station, ui.station_page), (2, 1));
         ui.activate(17);
         assert_eq!((ui.station, ui.station_page), (7, 0));
+    }
+    /// A catalog drop must hit the card the page drew, which follows display
+    /// order. Source station 0 is the last card here, on the second page.
+    #[test]
+    fn a_catalog_drop_empties_the_station_the_card_shows() {
+        let mut ui = crowded();
+        ui.loadout.quantities[0] = 2;
+        let mut pixels = vec![0; WIDTH * HEIGHT * 4];
+        let from = source_station_point(&mut ui, 0, &mut pixels).unwrap();
+        ui.pointer(Some(from));
+        ui.down();
+        ui.pointer(Some((290., 370.)));
+        ui.up();
+        assert_eq!(
+            ui.loadout.quantities[0], 0,
+            "the drop hit the card at {from:?} but left the source station loaded"
+        );
     }
     #[test]
     fn a_click_edits_the_station_the_box_shows_not_its_place_on_the_page() {
