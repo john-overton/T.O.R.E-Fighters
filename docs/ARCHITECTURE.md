@@ -6402,8 +6402,9 @@ In short:
   leaving passes the crown on.
 - **Death and revival** are two new mission commands: a lost plane is
   abandoned to the mission, and a revival either takes a free AI aircraft or
-  spawns a new aircraft of the same type at the revival distance from the
-  battle, with retail's revival weapons. The host counts lives and the delay.
+  spawns a new aircraft at the revival distance from the
+  battle, using the current type or an accepted Player Choice type, with the
+  configured revival weapons. The host counts lives and the delay.
 - **Scoring** is mission facts recorded by the mission core (who killed whom,
   with which pilot aboard; damage; losses) and tallies, limits and the end kept
   by the host. A kill limit ends the mission as a time limit does.
@@ -6860,12 +6861,15 @@ build settled, each an agent decision unless the design above says it:
   chaff its configuration fills, its wing's skill as the mission launched it
   (slice R1; a wingmate's or Average before), then taken by the handoff. `World::add_plane`
   makes the same plane in a client's copy.
-- **The loadout** names its weapons; the mission core takes each record from
-  the configurations the mission already holds (the standard loads, the AI's,
-  the humans'), since the world keeps no import. The base is the player's
-  lobby loadout when its slot is the same aircraft, else the standard load; a
-  lobby loadout that no longer resolves gives way to the standard load. Full
-  fuel is the aircraft's internal capacity. An **air-to-air missile** for
+- **The loadout** names its stores. Open worlds prepare an immutable bank of
+  optional imported simulation types, standard loads and store records outside
+  the initial mission identity and manifest. Host-validated revival choices can
+  therefore construct a new type, including after checkpoint restore. The base
+  is the accepted explicit draft, otherwise the player's matching lobby load
+  or standard load. Unedited revival fills internal fuel; explicit drafts retain
+  their chosen fuel. [Player Choice](spec/quick-mission-menu.md#multiplayer-player-choice)
+  defines the UI and [checkpoint formats](formats/checkpoint.md#player-choice-and-ai-off-additions-awaiting-integration)
+  define the pending state and replacement command. An **air-to-air missile** for
   `no-missiles` is what the retail debrief counts as one (guided, against
   aircraft); the creator's Guns only still empties every station but the gun.
 - **The revival point** measures distances horizontally. The altitude is the

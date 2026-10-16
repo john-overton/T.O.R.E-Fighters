@@ -177,7 +177,12 @@ impl QuickMission {
                 text += &format!("wing {field} {key}\n");
             }
         }
+        // New multiplayer-only defaults must not change existing mission/loadout keys.
+        let defaults = super::Draft::default();
         for field in (3..FIELDS).filter(|id| positional(*id)) {
+            if field >= super::CHOICE_BASE && self.draft.values[field] == defaults.values[field] {
+                continue;
+            }
             text += &format!("field {field} {}\n", self.draft.values[field]);
         }
         for group in 0..OBJECTIVE_COUNT {

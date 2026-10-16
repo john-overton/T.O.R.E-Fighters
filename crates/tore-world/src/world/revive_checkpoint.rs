@@ -21,12 +21,14 @@ tore_sim::checkpoint_struct!(LostPlane {
 impl Checkpoint for Book {
     fn save(&self, s: &mut Saver, _: Option<&Self>) -> Result<(), CheckpointError> {
         let Book {
+            despawned,
             lost,
             retired,
             added,
             roots,
             lead_hold,
         } = self;
+        despawned.save(s, None)?;
         lost.save(s, None)?;
         retired.save(s, None)?;
         added.save(s, None)?;
@@ -37,6 +39,7 @@ impl Checkpoint for Book {
 
     fn load(l: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
         let book = Book {
+            despawned: Checkpoint::load(l, None)?,
             lost: Checkpoint::load(l, None)?,
             retired: Checkpoint::load(l, None)?,
             added: Checkpoint::load(l, None)?,
@@ -91,6 +94,7 @@ mod tests {
     /// retired, and three planes added by revivals, one of them since lost.
     fn lived_in() -> Book {
         Book {
+            despawned: Default::default(),
             lost: vec![
                 LostPlane {
                     plane: PlaneId(0),

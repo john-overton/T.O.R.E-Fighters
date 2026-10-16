@@ -4,14 +4,14 @@ use super::*;
 use std::time::Duration;
 
 #[test]
-fn the_registry_is_numbered_one_to_twenty_three_in_order_with_unique_names() {
+fn the_registry_is_numbered_one_to_twenty_four_in_order_with_unique_names() {
     for (index, setting) in REGISTRY.iter().enumerate() {
         assert_eq!(usize::from(setting.number), index + 1, "{}", setting.name);
         assert_eq!(super::setting(setting.number), Some(setting));
         assert_eq!(by_name(setting.name), Some(setting));
     }
     assert_eq!(super::setting(0), None);
-    assert_eq!(super::setting(24), None);
+    assert_eq!(super::setting(25), None);
     assert_eq!(by_name("cheats"), None);
 }
 
@@ -121,7 +121,7 @@ fn the_registry_refuses_with_the_setting_and_its_values() {
         Some("max-players is 1 to 30.")
     );
     assert_eq!(refusal(0, 0).as_deref(), Some("There is no setting 0."));
-    assert_eq!(refusal(24, 0).as_deref(), Some("There is no setting 24."));
+    assert_eq!(refusal(25, 0).as_deref(), Some("There is no setting 25."));
     assert!(refusal(number::PASSWORD, 1).is_some());
     // Public is the registry's since stage I lists games; whether a host can
     // list is the host's question (slice F2-1).
@@ -412,7 +412,7 @@ fn setting_23_ai_respawn_is_on_by_default_and_needs_a_respawn_rule() {
     assert_eq!(ai.values_text(), "off or on");
     assert_eq!(
         REGISTRY.last().map(|s| s.number),
-        Some(number::AI_RESPAWN),
+        Some(number::AI),
         "last by number"
     );
 
@@ -444,4 +444,18 @@ fn the_sides_are_called_bluefor_and_redfor() {
     use tore_sim::ai::launch::Side;
     assert_eq!(side_name(Side::Friendly), "Bluefor");
     assert_eq!(side_name(Side::Enemy), "Redfor");
+}
+
+#[test]
+fn ai_off_disables_idle_handoffs_and_ai_respawns_without_erasing_preferences() {
+    let mut settings = Store::defaults(Mode::Coop);
+    settings
+        .apply(&[(number::RESPAWN, 2), (number::AI, 0)])
+        .unwrap();
+    assert!(!settings.ai());
+    assert!(!settings.ai_respawn());
+    assert_eq!(settings.idle_ai_seconds(), None);
+    settings.apply(&[(number::AI, 1)]).unwrap();
+    assert!(settings.ai_respawn());
+    assert_eq!(settings.idle_ai_seconds(), Some(300));
 }

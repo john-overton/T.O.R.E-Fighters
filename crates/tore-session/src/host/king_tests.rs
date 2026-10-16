@@ -303,6 +303,7 @@ fn each_setting_the_king_changes_reaches_every_lobby_state() {
     // setting 22, the snapshot rate, stays at 60 (slice R1).
     expected.push((number::HOST, 0));
     expected.push((number::SNAPSHOT_RATE, 60));
+    expected.push((number::AI, 1));
     expected.sort_unstable();
     for p in [king, cobra] {
         let lobby = rig.lobby(p).unwrap();
@@ -1158,4 +1159,392 @@ fn each_human_flight_shares_its_load_on_host_clients_and_ai_respawn() {
             tore_sim::ai::weapon_service::Rounds::Finite(0)
         );
     }
+}
+
+#[test]
+fn ai_off_waits_for_full_ready_slots_and_despawns_unheld_enemy_aircraft() {
+    let mut rig = Rig::hosted(spec(2, 2));
+    let king = rig.join("Viper");
+    let cobra = rig.join("Cobra");
+    rig.gather(&[king, cobra]);
+    rig.change(king, &[(number::AI, 0)]);
+    rig.client(king).take_slot(0);
+    rig.client(king).set_ready(true);
+    rig.run(300 * MS);
+    assert!(rig.host.ai_wait_reason().unwrap().contains("1 more"));
+    rig.host.start_now();
+    assert!(matches!(rig.host.life, Life::Lobby));
+    rig.client(cobra).take_slot(1);
+    rig.client(cobra).set_ready(true);
+    rig.run(300 * MS);
+    assert_eq!(rig.host.ai_wait_reason(), None);
+    rig.client(king).start_mission();
+    assert!(rig.run_until(Duration::from_secs(3), |r| r.seated(king)
+        && r.seated(cobra)));
+    assert!(rig.host.world.combat.state.targets.is_empty());
+    assert_eq!(
+        rig.host
+            .world
+            .ai_wings
+            .as_ref()
+            .unwrap()
+            .mission()
+            .actors()
+            .len(),
+        0
+    );
+    assert_eq!(rig.host.world.cockpits.len(), 2);
+}
+
+#[test]
+fn ai_off_departure_reopens_slot_and_a_late_join_uses_a_fresh_plane() {
+    let mut rig = Rig::hosted(spec(2, 0));
+    let king = rig.join("Viper");
+    let cobra = rig.join("Cobra");
+    rig.gather(&[king, cobra]);
+    rig.change(king, &[(number::AI, 0)]);
+    rig.client(king).take_slot(0);
+    rig.client(king).set_ready(true);
+    rig.client(cobra).take_slot(1);
+    rig.client(cobra).set_ready(true);
+    rig.run(300 * MS);
+    rig.client(king).start_mission();
+    assert!(rig.run_until(Duration::from_secs(3), |r| r.seated(king)
+        && r.seated(cobra)));
+    let now = rig.net.now();
+    rig.client(cobra).leave_game(now);
+    rig.run(Duration::from_secs(1));
+    assert!(
+        rig.host.world.combat.state.targets.is_empty(),
+        "targets: {:?}, actors: {}, cockpits: {}",
+        rig.host
+            .world
+            .combat
+            .state
+            .targets
+            .iter()
+            .map(|t| (t.id, t.hp))
+            .collect::<Vec<_>>(),
+        rig.host
+            .world
+            .ai_wings
+            .as_ref()
+            .unwrap()
+            .mission()
+            .actors()
+            .len(),
+        rig.host.world.cockpits.len()
+    );
+    assert_eq!(rig.host.world.cockpits.len(), 1);
+    let late = rig.join("Falcon");
+    rig.run(Duration::from_secs(1));
+    rig.client(late).take_slot(1);
+    rig.client(late).set_ready(true);
+    assert!(
+        rig.run_until(Duration::from_secs(3), |r| r.seated(late)),
+        "{:?}",
+        rig.refusals(late)
+    );
+    assert!(rig.players[late].client.seat().unwrap().1.0 > 1);
+    let order = rig
+        .host
+        .peers
+        .values()
+        .find(|p| p.callsign == "Falcon")
+        .unwrap()
+        .lobby
+        .order;
+    assert_eq!(rig.host.revival.players[&order].used, 0);
+}
+
+#[test]
+fn a_player_choice_is_built_as_the_chosen_aircraft_on_host_and_peers() {
+    let mut mission = spec(2, 1);
+    mission.player_choice[0] = true;
+    let mut rig = Rig::hosted(mission.clone());
+    // Use the existing, correctly identified synthetic gunship fixture.
+    let data = tore_world::test_support::resources::gunship_resources();
+    rig.resources = Arc::new(data);
+    rig.host = Host::new(mission, Arc::clone(&rig.resources), rig.host.config.clone()).unwrap();
+    let king = rig.join("Viper");
+    let cobra = rig.join("Cobra");
+    rig.gather(&[king, cobra]);
+    rig.change(
+        king,
+        &[
+            (number::RESPAWN, crate::settings::Respawn::Revive.value()),
+            (number::AI_RESPAWN, 1),
+            (number::IDLE_AI, 60),
+            (number::REVIVE_DELAY, 0),
+        ],
+    );
+    rig.client(king).take_slot(0);
+    rig.client(cobra).take_slot(1);
+    rig.run(200 * MS);
+    rig.client(king)
+        .send_aircraft_loadout(Some(AircraftId::Ac130), None);
+    rig.client(cobra)
+        .send_aircraft_loadout(Some(AircraftId::Ac130), None);
+    rig.run(200 * MS);
+    assert!(rig.refusals(cobra).is_empty(), "{:?}", rig.refusals(cobra));
+    assert_eq!(
+        rig.host.spec.plane_aircraft.get(&1),
+        Some(&AircraftId::Ac130)
+    );
+    rig.client(king).set_ready(true);
+    rig.client(cobra).set_ready(true);
+    rig.run(200 * MS);
+    rig.client(king).start_mission();
+    assert!(
+        rig.run_until(Duration::from_secs(3), |r| r.seated(king)
+            && r.seated(cobra)),
+        "{:?}",
+        rig.logs
+    );
+    assert_eq!(
+        rig.host.world.aircraft_of(PlaneId(1)),
+        Some(AircraftId::Ac130)
+    );
+    for player in [king, cobra] {
+        assert_eq!(
+            rig.players[player]
+                .client
+                .spec()
+                .unwrap()
+                .plane_aircraft
+                .get(&1),
+            Some(&AircraftId::Ac130)
+        );
+    }
+    rig.client(cobra).away();
+    rig.run(300 * MS);
+    assert_eq!(
+        rig.host.world.roster.plane(PlaneId(1)).unwrap().pilot,
+        Pilot::Ai
+    );
+    assert!(
+        !rig.host.world.head_lost(PlaneId(1)),
+        "going away keeps its selected plane"
+    );
+    assert_eq!(
+        rig.host.world.aircraft_of(PlaneId(1)),
+        Some(AircraftId::Ac130)
+    );
+    rig.client(cobra).back();
+    assert!(rig.run_until(Duration::from_secs(3), |r| r.seated(cobra)));
+    let now = rig.net.now();
+    rig.client(cobra).leave_game(now);
+    assert!(
+        rig.run_until(Duration::from_secs(3), |r| {
+            let head = r.host.world.lineage_head(PlaneId(1));
+            head != PlaneId(1) && r.host.world.aircraft_of(head) == Some(AircraftId::F18)
+        }),
+        "a Choice wing whose lead also chose AC-130 must return to the authored F/A-18D AI default"
+    );
+}
+
+#[test]
+fn choice_revive_loads_a_new_type_on_host_and_both_clients() {
+    let mut mission = spec(3, 1);
+    mission.player_choice[0] = true;
+    let mut rig = Rig::hosted(mission.clone());
+    rig.resources = Arc::new(tore_world::test_support::resources::gunship_resources());
+    rig.host = Host::new(mission, Arc::clone(&rig.resources), rig.host.config.clone()).unwrap();
+    let viper = rig.join("Viper");
+    let cobra = rig.join("Cobra");
+    rig.gather(&[viper, cobra]);
+    rig.change(
+        viper,
+        &[
+            (number::RESPAWN, crate::settings::Respawn::Revive.value()),
+            (number::REVIVE_DELAY, 0),
+        ],
+    );
+    for (player, slot) in [(viper, 0), (cobra, 1)] {
+        rig.client(player).take_slot(slot);
+        rig.client(player).set_ready(true);
+    }
+    rig.run(300 * MS);
+    rig.client(viper).start_mission();
+    assert!(rig.run_until(Duration::from_secs(3), |r| r.seated(viper)
+        && r.seated(cobra)));
+    rig.host
+        .world_for_test()
+        .cockpits
+        .iter_mut()
+        .find(|c| c.plane == PlaneId(0))
+        .unwrap()
+        .flight
+        .systems
+        .pilot
+        .dead = true;
+    rig.run(300 * MS);
+    let kind =
+        tore_world::aircraft_type::AircraftType::load(&*rig.resources, AircraftId::Ac130).unwrap();
+    let mut load = tore_sim::combat::loadout::Loadout::new(&kind.profile, |name| {
+        Ok(rig.resources[name].clone())
+    })
+    .unwrap();
+    load.quantities[0] /= 2;
+    let chosen = tore_world::mission::LoadoutSpec::of(&load);
+    // A malformed request must not stage either half of the selection.
+    let connection = *rig
+        .host
+        .peers
+        .iter()
+        .find(|(_, p)| p.callsign == "Viper")
+        .unwrap()
+        .0;
+    let previous = rig.host.peers[&connection].lobby.loadout.clone();
+    let mut invalid = chosen.clone();
+    invalid.stations.clear();
+    assert!(
+        rig.host
+            .revive_selected(connection, Some(AircraftId::Ac130), Some(invalid))
+            .is_err()
+    );
+    assert!(!rig.host.revival.pending.contains_key(&connection));
+    assert!(!rig.host.revival.choices.contains_key(&PlaneId(0)));
+    assert_eq!(rig.host.peers[&connection].lobby.loadout, previous);
+    rig.client(viper)
+        .revive_choice(Some(AircraftId::Ac130), Some(chosen.clone()));
+    assert!(
+        rig.run_until(Duration::from_secs(3), |r| r.players[viper]
+            .client
+            .seat()
+            .is_some_and(|(_, p)| p != PlaneId(0))),
+        "refused {:?}, logs {:?}, pending {:?}",
+        rig.refusals(viper),
+        rig.logs,
+        rig.host.revival.pending
+    );
+    rig.run(300 * MS);
+    let new = rig.players[viper].client.seat().unwrap().1;
+    assert_eq!(rig.host.world.aircraft_of(new), Some(AircraftId::Ac130));
+    for player in [viper, cobra] {
+        let client = &rig.players[player].client;
+        assert_eq!(
+            client.mission().unwrap().aircraft_of(new),
+            Some(AircraftId::Ac130)
+        );
+        let spawned = client.spawned().iter().find(|s| s.plane == new.0).unwrap();
+        assert_eq!(spawned.spawn.loadout.stations, chosen.stations);
+    }
+    let checksum = |player: usize| {
+        tore_codec::hash::fnv1a64(
+            &rig.players[player]
+                .client
+                .mission()
+                .unwrap()
+                .checkpoint()
+                .unwrap(),
+        )
+    };
+    assert_eq!(
+        checksum(viper),
+        checksum(cobra),
+        "both clients built the accepted runtime type and loadout identically"
+    );
+    // A later entrant without the runtime type stays unable in the lobby.
+    let mut missing = (*rig.resources).clone();
+    missing.remove("AC130.PT");
+    rig.resources = Arc::new(missing);
+    let late = rig.join("Missing");
+    rig.run(Duration::from_secs(1));
+    assert!(
+        rig.lobby(late)
+            .and_then(|l| l.me())
+            .and_then(|p| p.unable.as_ref())
+            .is_some()
+    );
+}
+
+#[test]
+fn choice_late_join_replaces_ai_and_departure_returns_the_default() {
+    let mut mission = spec(2, 1);
+    mission.player_choice[0] = true;
+    let data = tore_world::test_support::resources::gunship_resources();
+    let kind = tore_world::aircraft_type::AircraftType::load(&data, AircraftId::F18).unwrap();
+    let mut load =
+        tore_sim::combat::loadout::Loadout::new(&kind.profile, |name| Ok(data[name].clone()))
+            .unwrap();
+    load.quantities[0] /= 2;
+    let authored = tore_world::mission::LoadoutSpec::of(&load);
+    mission.plane_loadouts.insert(1, authored.clone());
+
+    let mut rig = Rig::hosted(mission.clone());
+    rig.resources = Arc::new(tore_world::test_support::resources::gunship_resources());
+    rig.host = Host::new(mission, Arc::clone(&rig.resources), rig.host.config.clone()).unwrap();
+    let king = rig.join("Viper");
+    rig.gather(&[king]);
+    rig.change(
+        king,
+        &[
+            (number::RESPAWN, crate::settings::Respawn::Revive.value()),
+            (number::AI_RESPAWN, 1),
+            (number::IDLE_AI, 60),
+            (number::REVIVE_DELAY, 0),
+        ],
+    );
+    rig.client(king).take_slot(0);
+    rig.client(king).set_ready(true);
+    rig.run(300 * MS);
+    rig.client(king).start_mission();
+    assert!(rig.run_until(Duration::from_secs(3), |r| r.seated(king)));
+    let old_pose = rig.host.world.plane_pose(PlaneId(1)).unwrap();
+    let late = rig.join("Cobra");
+    rig.run(Duration::from_secs(1));
+    rig.client(late).take_slot(1);
+    rig.run(200 * MS);
+    rig.client(late)
+        .send_aircraft_loadout(Some(AircraftId::Ac130), None);
+    rig.run(200 * MS);
+    rig.client(late).set_ready(true);
+    assert!(
+        rig.run_until(Duration::from_secs(3), |r| r.seated(late)),
+        "{:?}",
+        rig.refusals(late)
+    );
+    let new = rig.players[late].client.seat().unwrap().1;
+    assert_ne!(new, PlaneId(1));
+    assert_eq!(rig.host.world.aircraft_of(new), Some(AircraftId::Ac130));
+    assert!(
+        rig.host
+            .world
+            .ai_wings
+            .as_ref()
+            .unwrap()
+            .mission()
+            .actor(1)
+            .is_none()
+    );
+    assert_ne!(rig.host.world.plane_pose(new).unwrap().0, old_pose.0);
+    rig.client(late).away();
+    rig.run(300 * MS);
+    assert!(!rig.host.world.head_lost(new));
+    assert_eq!(rig.host.world.roster.plane(new).unwrap().pilot, Pilot::Ai);
+    let now = rig.net.now();
+    rig.client(late).leave_game(now);
+    assert!(
+        rig.run_until(Duration::from_secs(3), |r| {
+            let head = r.host.world.lineage_head(PlaneId(1));
+            head != new
+                && head != PlaneId(1)
+                && r.host.world.aircraft_of(head) == Some(AircraftId::F18)
+        }),
+        "{:?}",
+        rig.logs
+    );
+    let head = rig.host.world.lineage_head(PlaneId(1));
+    let returned = rig
+        .host
+        .revival
+        .spawned
+        .iter()
+        .find(|spawned| spawned.plane == head.0)
+        .unwrap();
+    assert_eq!(
+        returned.spawn.loadout.stations, authored.stations,
+        "a matching authored AI load survives Choice departure"
+    );
 }

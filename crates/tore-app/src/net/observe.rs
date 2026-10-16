@@ -703,7 +703,10 @@ impl Observing {
             let Some(world) = around.world else {
                 return;
             };
-            match Store::start(&self.folder, &header(&world.terrain, &frame.picture.models)) {
+            match Store::start(
+                &self.folder,
+                &header(&world.terrain, &world.available_aircraft()),
+            ) {
                 Ok(store) => self.store = Some(store),
                 Err(error) => {
                     log::warn!("Observer recording: {error}");
@@ -1033,6 +1036,28 @@ mod tests {
 
     fn ticks(out: &Out) -> Vec<u64> {
         out.frames.iter().map(|f| f.tick).collect()
+    }
+
+    #[test]
+    fn a_clean_despawn_vanishes_from_observer_replay_without_a_loss_event() {
+        let roster = roster(&[(0, true), (3, false)]);
+        let mut feeder = Feeder::new();
+        feed(
+            &mut feeder,
+            &frame(10., vec![plane(0, 0.), plane(3, 100.)]),
+            &roster,
+        );
+        let out = feed(&mut feeder, &frame(12., vec![plane(0, 20.)]), &roster);
+        let last = out.frames.last().unwrap();
+        assert!(last.aircraft.iter().all(|aircraft| aircraft.id != 3));
+        assert!(
+            out.frames
+                .iter()
+                .flat_map(|frame| &frame.events)
+                .all(|event| event.kind != vocab::kind::COMBAT_DESTROYED)
+        );
+        assert!(last.new_effects.is_empty());
+        assert!(last.debris.is_empty());
     }
 
     #[test]

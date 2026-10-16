@@ -272,6 +272,7 @@ pub fn label_of(kind: ItemKind, key: &str, resources: &Resources) -> Option<Stri
             .to_owned(),
         ItemKind::Theater => resources.theater_label(key).ok().flatten()?,
         // A laser designator pod (protocol 23) is named by its record.
+        ItemKind::Weapon if key.ends_with(".GAS") => key.to_owned(),
         ItemKind::Weapon if key.ends_with(".SEE") => {
             let bytes = resources.get(key)?;
             tore_sim::combat::sight::DesignatorStore::parse(key, bytes)
@@ -544,8 +545,14 @@ pub fn mission_items(spec: &MissionSpec) -> Vec<ItemKey> {
     for wing in spec.wings.iter().filter(|wing| wing.count > 0) {
         items.insert((ItemKind::Aircraft, wing.aircraft.selection_key().to_owned()));
     }
+    for aircraft in spec.plane_aircraft.values() {
+        items.insert((ItemKind::Aircraft, aircraft.selection_key().to_owned()));
+    }
     items.insert((ItemKind::Theater, spec.theater.clone()));
     for load in spec.loadout.iter().chain(spec.plane_loadouts.values()) {
+        for tank in load.tanks.iter().flatten() {
+            items.insert((ItemKind::Weapon, tank.tank.clone()));
+        }
         for station in &load.stations {
             if station.weapon.ends_with(".JT") || station.weapon.ends_with(".SEE") {
                 items.insert((ItemKind::Weapon, station.weapon.clone()));
@@ -1036,6 +1043,27 @@ impl super::Host {
             })
     }
 
+    /// A late entrant must also share types and stores introduced since launch.
+    pub(super) fn runtime_content_refusal(&self) -> Option<String> {
+        let mut items = Vec::new();
+        for aircraft in self.revival.choices.values() {
+            items.push((ItemKind::Aircraft, aircraft.selection_key().to_owned()));
+        }
+        for spawned in &self.revival.spawned {
+            items.push((
+                ItemKind::Aircraft,
+                spawned.aircraft.selection_key().to_owned(),
+            ));
+            for station in &spawned.spawn.loadout.stations {
+                items.push((ItemKind::Weapon, station.weapon.clone()));
+            }
+            for tank in spawned.spawn.loadout.tanks.iter().flatten() {
+                items.push((ItemKind::Weapon, tank.tank.clone()));
+            }
+        }
+        self.choice_refusal(&items)
+    }
+
     /// Why the King's mission `spec` is refused, when an aircraft or its
     /// theater is in a gap.
     pub(super) fn mission_gap_refusal(&self, spec: &MissionSpec) -> Option<String> {
@@ -1054,6 +1082,12 @@ impl super::Host {
             .iter()
             .filter(|station| station.weapon.ends_with(".JT") || station.weapon.ends_with(".SEE"))
             .map(|station| (ItemKind::Weapon, station.weapon.clone()))
+            .chain(
+                load.tanks
+                    .iter()
+                    .flatten()
+                    .map(|tank| (ItemKind::Weapon, tank.tank.clone())),
+            )
             .collect();
         self.choice_refusal(&weapons)
     }

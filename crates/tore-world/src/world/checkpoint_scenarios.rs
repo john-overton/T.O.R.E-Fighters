@@ -308,10 +308,16 @@ pub(super) fn open_handoffs() -> Scenario {
             .collect();
         for command in &commands {
             match *command {
-                MissionCommand::Take { seat, .. } | MissionCommand::ReviveLost { seat, .. } => {
-                    flying.push(seat)
-                }
+                MissionCommand::Take { seat, .. }
+                | MissionCommand::ReviveLost { seat, .. }
+                | MissionCommand::ReplacePlane { seat, .. } => flying.push(seat),
                 MissionCommand::GiveBack { seat } => flying.retain(|s| *s != seat),
+                MissionCommand::Despawn { plane } => flying.retain(|s| {
+                    world
+                        .roster
+                        .seat(*s)
+                        .is_none_or(|entry| entry.plane != Some(plane))
+                }),
                 MissionCommand::Settings(_)
                 | MissionCommand::Abandon { .. }
                 | MissionCommand::Revive { .. }
@@ -390,10 +396,16 @@ fn flying_after(world: &World, commands: &[MissionCommand]) -> Vec<SeatId> {
         .collect();
     for command in commands {
         match *command {
-            MissionCommand::Take { seat, .. } | MissionCommand::ReviveLost { seat, .. } => {
-                flying.push(seat)
-            }
+            MissionCommand::Take { seat, .. }
+            | MissionCommand::ReviveLost { seat, .. }
+            | MissionCommand::ReplacePlane { seat, .. } => flying.push(seat),
             MissionCommand::GiveBack { seat } => flying.retain(|s| *s != seat),
+            MissionCommand::Despawn { plane } => flying.retain(|s| {
+                world
+                    .roster
+                    .seat(*s)
+                    .is_none_or(|entry| entry.plane != Some(plane))
+            }),
             MissionCommand::Settings(_)
             | MissionCommand::Abandon { .. }
             | MissionCommand::Revive { .. }

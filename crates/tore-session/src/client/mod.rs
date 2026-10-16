@@ -1369,6 +1369,15 @@ impl Client {
     /// standard load). The host checks it with the Load Ordnance page's rules
     /// and refuses one they do not allow, with the reason.
     pub fn send_loadout(&mut self, loadout: Option<LoadoutSpec>) {
+        self.send_aircraft_loadout(None, loadout);
+    }
+
+    /// Select a human aircraft and its stores together.
+    pub fn send_aircraft_loadout(
+        &mut self,
+        aircraft: Option<tore_formats::aircraft::AircraftId>,
+        loadout: Option<LoadoutSpec>,
+    ) {
         let Some(plane) = self
             .lobby
             .as_ref()
@@ -1385,6 +1394,7 @@ impl Client {
         self.request(
             now,
             Message::Loadout(Box::new(crate::wire::messages::Loadout {
+                aircraft,
                 mission: self.number.unwrap_or(0),
                 plane,
                 loadout,
@@ -1468,12 +1478,29 @@ impl Client {
 
     /// Fly again after a loss, by the respawn rule: the answer is a
     /// [`ClientEvent::Seated`] or a [`ClientEvent::Refused`].
+    pub fn revive_choice(
+        &mut self,
+        aircraft: Option<tore_formats::aircraft::AircraftId>,
+        loadout: Option<tore_world::mission::LoadoutSpec>,
+    ) {
+        self.request(
+            self.now,
+            Message::Revive {
+                mission: self.number.unwrap_or(0),
+                aircraft,
+                loadout,
+            },
+        );
+    }
+
     pub fn revive(&mut self) {
         let now = self.now;
         self.request(
             now,
             Message::Revive {
                 mission: self.number.unwrap_or(0),
+                aircraft: None,
+                loadout: None,
             },
         );
     }
@@ -2294,6 +2321,7 @@ impl Client {
             return;
         }
         spec.plane_loadouts = flight.loadouts.into_iter().collect();
+        spec.plane_aircraft = flight.aircraft.into_iter().collect();
         self.build_mission(spec, number, Check::Added(&flight.manifest));
     }
 
@@ -2393,6 +2421,10 @@ impl Client {
     /// content difference, and stays in the lobby, marked unable.
     pub(crate) fn refuse_surface(&mut self, reason: String) {
         self.log("surface-refused", &[&reason]);
+        self.refuse_flight_content(reason);
+    }
+
+    pub(super) fn refuse_flight_content(&mut self, reason: String) {
         let number = self.number.unwrap_or_default();
         self.send(&Message::ContentRefused(ContentRefused {
             mission: number,
@@ -2443,11 +2475,7 @@ impl Client {
                     .map(|s| s.aircraft)
             });
         let kit = aircraft.and_then(|aircraft| {
-            let kind = world
-                .combat
-                .dummy_types()
-                .iter()
-                .find(|kind| kind.profile.id == aircraft)?;
+            let kind = world.aircraft_type(aircraft)?;
             let config = world
                 .ai_wings
                 .as_ref()

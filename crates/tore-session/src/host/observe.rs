@@ -327,6 +327,9 @@ impl Host {
         connection: ConnectionId,
         subject: Subject,
     ) -> Result<(), String> {
+        if let Some(why) = self.runtime_content_refusal() {
+            return Err(why);
+        }
         if !matches!(self.life, Life::Flying) {
             return Err("The mission is not flying; watch once it flies.".into());
         }

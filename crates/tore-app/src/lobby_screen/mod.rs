@@ -319,12 +319,12 @@ impl LobbyScreen {
             },
             Column {
                 x: 70,
-                width: 84,
+                width: 132,
                 align: Align::Left,
             },
             Column {
-                x: 156,
-                width: 126,
+                x: 204,
+                width: 78,
                 align: Align::Left,
             },
         ];

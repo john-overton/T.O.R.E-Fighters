@@ -723,6 +723,9 @@ unplug. When multiple absolute throttles are assigned, priorities determine the
 eligible owner rather than averaging positions.
 
 Menus and explicit/focus pause clear pending gameplay commands and held output.
+The running-flight respawn selector uses this same input context and menu bindings,
+while the network simulation continues. Closing it restores the flight context;
+see [multiplayer revival](MULTIPLAYER.md#ai-aircraft-and-player-choice).
 Physical state remains tracked. Neutral buttons/axes rearm on resume; controls
 still held must return to neutral/release first. Custom keyboard chords retain
 the original release owner even after modifiers change. Menu buttons cannot leak

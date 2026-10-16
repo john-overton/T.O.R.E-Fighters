@@ -345,6 +345,11 @@ impl World {
             )
         };
         let mut world = World {
+            choices: if open {
+                super::choices::Resources::load(resources, spec)
+            } else {
+                Default::default()
+            },
             setup,
             roster,
             cockpits,

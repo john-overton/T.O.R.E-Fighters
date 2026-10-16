@@ -303,6 +303,8 @@ pub fn observe(
             .iter()
             .map(|t| t.profile.id)
             .collect();
+        models.extend(run.client.spawned().iter().map(|s| s.aircraft));
+        models.sort_by_key(|id| *id as u8);
         models.dedup();
         models
     });

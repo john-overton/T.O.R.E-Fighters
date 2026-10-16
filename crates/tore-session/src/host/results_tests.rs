@@ -165,7 +165,11 @@ fn a_revival_lists_the_lost_plane_and_the_new_one_under_the_same_callsign() {
         .dead = true;
     rig.run(Duration::from_millis(300));
     let mission = rig.clients[viper].number();
-    rig.clients[viper].send(&Message::Revive { mission });
+    rig.clients[viper].send(&Message::Revive {
+        mission,
+        aircraft: None,
+        loadout: None,
+    });
     assert!(rig.run_until(Duration::from_secs(2), |r| {
         r.clients[viper]
             .seated
@@ -205,7 +209,11 @@ fn a_retired_planes_row_survives_in_the_message() {
         .dead = true;
     rig.run(Duration::from_millis(300));
     let mission = rig.clients[viper].number();
-    rig.clients[viper].send(&Message::Revive { mission });
+    rig.clients[viper].send(&Message::Revive {
+        mission,
+        aircraft: None,
+        loadout: None,
+    });
     assert!(rig.run_until(Duration::from_secs(2), |r| {
         r.clients[viper]
             .seated

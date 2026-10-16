@@ -67,10 +67,12 @@ enum Page {
     /// Load Ordnance for `plane` of mission `mission`. `shelved` is single
     /// player's own page, put back when this one closes.
     Loadout {
+        saved: Box<Saved>,
         plane: u32,
         mission: u32,
         shelved: Option<Box<Ordnance>>,
         sent: Option<Instant>,
+        choosing: bool,
     },
 }
 
@@ -82,6 +84,7 @@ pub struct Lobby {
     /// The loadout last chosen: its mission number, plane and page, so
     /// Loadout opens on it again.
     kept: Option<(u32, u32, Ordnance)>,
+    slot_seen: Option<(u32, u32)>,
 }
 
 impl Lobby {}
@@ -168,11 +171,28 @@ impl App {
                     .set_gaps(|kind, key| client.gap_refusal(kind, key));
             }
             Some(Page::Loadout { .. }) => {
+                self.quick
+                    .set_gaps(|kind, key| client.gap_refusal(kind, key));
                 if let Some(page) = self.quick.ordnance.as_mut() {
                     page.set_gaps(|source| client.gap_refusal(ItemKind::Weapon, source));
                 }
             }
             None => {}
+        }
+        let slot = client
+            .lobby()
+            .and_then(|l| l.me().and_then(|p| p.slot).map(|p| (l.mission, p)));
+        let new_choice = slot != self.lobby.slot_seen
+            && client.lobby().is_some_and(|l| {
+                !l.me().is_some_and(|p| p.flying)
+                    && l.slots
+                        .iter()
+                        .any(|s| Some((l.mission, s.plane)) == slot && s.choice.is_some())
+            });
+        self.lobby.slot_seen = slot;
+        if new_choice && self.lobby.page.is_none() {
+            self.open_loadout();
+            return;
         }
         // The pages are the only reason to look further.
         if self.lobby.page.is_none() {
@@ -193,17 +213,63 @@ impl App {
                 plane,
                 mission,
                 sent,
+                choosing,
                 ..
             }) => {
                 let holds = lobby.me().and_then(|m| m.slot);
                 let armed = lobby.me().is_some_and(|m| m.loadout);
                 let (plane, mission) = (*plane, *mission);
+                if *choosing {
+                    let Some(aircraft) = self.quick.slot_aircraft_result() else {
+                        return;
+                    };
+                    if let Some(page) = self
+                        .quick
+                        .ordnance
+                        .as_mut()
+                        .filter(|page| page.loadout.aircraft == aircraft)
+                    {
+                        page.visible = true;
+                        page.set_cheat_rule(cheat_allowed);
+                        *choosing = false;
+                        return;
+                    }
+                    let built =
+                        AircraftType::load(&*self.theater_resources, aircraft).and_then(|kind| {
+                            let load = Loadout::new(&kind.profile, |name| {
+                                self.theater_resources
+                                    .get(name)
+                                    .cloned()
+                                    .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
+                            })?;
+                            Ordnance::new(load, &self.theater_resources)
+                        });
+                    match built {
+                        Ok(mut page) => {
+                            page.lobby = true;
+                            page.visible = true;
+                            page.set_cheat_rule(cheat_allowed);
+                            if client.spec().is_some_and(|s| s.guns_only) {
+                                page.loadout.restrict_to_guns();
+                            }
+                            self.quick.ordnance = Some(page);
+                        }
+                        Err(error) => {
+                            self.quick.notice = Some(error.to_string());
+                            if let Some(page) = self.quick.ordnance.as_mut() {
+                                page.visible = true;
+                            }
+                        }
+                    }
+                    *choosing = false;
+                    return;
+                }
                 let closed = self.quick.ordnance.as_ref().is_none_or(|o| !o.visible);
                 // The King can change the loadout rule while the page is up.
                 if let Some(page) = self.quick.ordnance.as_mut() {
                     page.set_cheat_rule(cheat_allowed);
                 }
-                if lobby.phase != LobbyPhase::Lobby
+                if lobby.phase == LobbyPhase::Ended
                     || holds != Some(plane)
                     || lobby.mission != mission
                 {
@@ -356,6 +422,11 @@ impl App {
             self.say("The mission has not arrived yet.");
             return;
         };
+        let ai = lobby
+            .settings
+            .iter()
+            .find(|s| s.0 == tore_session::settings::number::AI)
+            .map_or(1, |s| s.1);
         let view = creator_view(lobby);
         let spec = spec.clone();
         let saved = Box::new(self.quick.save());
@@ -363,6 +434,7 @@ impl App {
             self.say(&format!("The mission cannot be shown here: {problem}"));
             return;
         }
+        self.quick.draft.values[crate::quick_mission::AI_AIRCRAFT] = ai as usize;
         self.lobby.page = Some(Page::Creator {
             saved,
             sent: None,
@@ -387,6 +459,11 @@ impl App {
             return;
         };
         let aircraft = slot.aircraft;
+        let choosing = self
+            .net
+            .as_ref()
+            .and_then(|s| s.client.spec())
+            .is_some_and(|s| s.player_choice[MissionSpec::wing_index(slot.wing)]);
         let guns_only = self
             .net
             .as_ref()
@@ -431,8 +508,15 @@ impl App {
             "Guns only: this mission allows the gun alone. Accept sends your loadout to the lobby."
                 .to_owned()
         });
+        let saved = Box::new(self.quick.save());
+        if choosing {
+            page.visible = false;
+            self.quick.open_slot_aircraft(aircraft);
+        }
         let shelved = self.quick.ordnance.replace(page).map(Box::new);
         self.lobby.page = Some(Page::Loadout {
+            saved,
+            choosing,
             plane,
             mission: lobby.mission,
             shelved,
@@ -455,11 +539,14 @@ impl App {
                 self.quick.leave_lobby();
             }
             Page::Loadout {
+                saved,
                 plane,
                 mission,
                 shelved,
                 ..
             } => {
+                self.quick.restore(*saved);
+                self.quick.cancel();
                 if let Some(mut page) =
                     std::mem::replace(&mut self.quick.ordnance, shelved.map(|page| *page))
                 {
@@ -520,6 +607,19 @@ impl App {
             }
         };
         let number = session.client.lobby().map(|l| l.mission);
+        let ai = self.quick.draft.values[crate::quick_mission::AI_AIRCRAFT] as u32;
+        if session.client.lobby().is_some_and(|l| {
+            l.settings
+                .iter()
+                .any(|s| s.0 == tore_session::settings::number::AI && s.1 != ai)
+        }) {
+            session
+                .client
+                .change_settings(tore_session::wire::messages::SettingsChange {
+                    values: vec![(tore_session::settings::number::AI, ai)],
+                    ..Default::default()
+                });
+        }
         session.client.change_mission(&spec);
         if let Some(Page::Creator { sent, .. }) = &mut self.lobby.page {
             *sent = number;
@@ -576,7 +676,17 @@ impl App {
             page.message = Some(reason);
             return;
         }
-        session.client.send_loadout(Some(spec));
+        let choice = mission
+            .and_then(|m| {
+                m.open_planes()
+                    .into_iter()
+                    .find(|p| p.id == plane)
+                    .map(|p| m.player_choice[MissionSpec::wing_index(p.wing)])
+            })
+            .unwrap_or(false);
+        session
+            .client
+            .send_aircraft_loadout(choice.then_some(aircraft), Some(spec));
         page.message = Some("Sending your loadout...".into());
         if let Some(Page::Loadout { sent, .. }) = &mut self.lobby.page {
             *sent = Some(Instant::now());

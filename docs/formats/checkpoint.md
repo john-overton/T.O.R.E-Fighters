@@ -565,3 +565,33 @@ The [optional Rafale centreline](../spec/stores-on-pylons.md#optional-carriers-2
 also uses row 9; F-22 and MiG-29 additions use row and bank 8.
 Configuration validation rejects duplicate fuel-bank allocation. Tank records
 and store poses still carry source row 9, not the fuel-bank number.
+
+## Player Choice and AI-off additions awaiting integration
+
+The nr-mpchoice slice adds mission command tag 10, `Despawn`, followed by
+`PlaneId`. The command removes live state without damage events and frees its
+seat. The revival section begins with a map from cleanly removed `PlaneId` to
+`AircraftId`, before the existing lost-plane list, preserving types for late joins.
+These empty aircraft can retire immediately when room is needed.
+
+Session revival pending tag 2 is `Join`, followed by seat and plane. It uses
+revival placement without charging a life. The per-tick `Made.uses_life` flag is
+scratch and is not checkpointed. The settings registry gains number 24. Mission
+strings preserve the Choice markers and per-plane aircraft map. Protocol and
+checkpoint compatibility require lead integration; no version is bumped here.
+
+
+The continuation adds mission command tag 11, `ReplacePlane`: seat, old PlaneId,
+AircraftId and Spawn, using the existing trait coders. Plane and member numbers
+are allocated when each command runs, so simultaneous revivals cannot reuse an ID.
+It preserves old command tags. A lost human plane stays a wreck; a living AI
+plane is removed without damage. The new plane joins the same lineage and seat.
+
+The session revival part writes a `PlaneId -> AircraftId` map immediately after
+its players map. This retains accepted aircraft choices while a revive is pending;
+its loadout is retained in the existing peer lobby loadout. The world checkpoint
+sections are unchanged by the continuation. Open worlds prepare optional imported
+simulation types and stores outside their mission identity and manifest. Their
+models are available before decoding a checkpoint, so a fresh build can restore
+an aircraft absent from the starting wings. Selected content still requires the
+host's common-content check. No retail bytes are embedded in commands or tapes.
