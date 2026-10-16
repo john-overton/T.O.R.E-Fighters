@@ -348,7 +348,7 @@ def scenarios() -> list[Scenario]:
     out.append(Scenario(
         name="qmc-wing-loadout", lane="menus",
         args=["--validate-wing-loadout", "{work}/wing-loadout", "--no-audio"],
-        expect=[r"qmc wing loadout: four F16 aircraft match, airborne, ground and restart passed", r"qmc wing loadout: one tank matches", r"qmc wing loadout: cheat Boulder carriage matches"],
+        expect=[r"qmc wing loadout: four F16 aircraft match, airborne, ground and restart passed", r"qmc wing loadout: one tank matches", r"qmc wing loadout: wingtip AIM-120 matches, restarts and passes the lobby check", r"qmc wing loadout: cheat Boulder carriage matches"],
         outputs=[f"wing-loadout/{label}.toreplay" for label in ("before", "after", "ground")],
         then=[Step(["--recording-log", f"{{work}}/wing-loadout/{label}.toreplay"]) for label in ("before", "after", "ground")],
         check_work=wing_loadout_recording_problems,
@@ -363,6 +363,7 @@ def scenarios() -> list[Scenario]:
             r"derived stations F22.PT: 2 extra tanks, 7920 lb fuel, 850 lb shells; feed, jettison, save and old load passed",
             r"derived stations MIG29.PT: 1 extra tanks, 2614 lb fuel, 281 lb shells; feed, jettison, save and old load passed",
             r"derived stations RAFALE.PT: 1 extra tanks, 3485 lb fuel, 374 lb shells; feed, jettison, save and old load passed",
+            r"F-16C wingtip AIM-120: two a load \(one a tip\), saved, restored and fired guided from each tip edge; every other tip store unchanged",
             r"derived weapons F15.PT row 6: MK82.JT:3, MK84.JT:2, .*GBU12.JT:3, .*GBU38.JT:3",
             r"(?m)derived weapons F22.PT row 8: AIM9X.JT:4, AIM120.JT:4, AIM9M.JT:4, AIM9B.JT:4$",
         ],
@@ -373,7 +374,7 @@ def scenarios() -> list[Scenario]:
             name="menus-ordnance-availability",
             lane="menus",
             args=["--validate-ordnance", "--no-audio"],
-            expect=[r"ordnance audit: 36 aircraft, 12 recovered weapon stations, 3401 weapon placements, 175 tank placements, 78 weapon and 9 tank records; passed"],
+            expect=[r"ordnance audit: 36 aircraft, 12 recovered weapon stations, 3402 weapon placements, 175 tank placements, 78 weapon and 9 tank records; passed"],
             notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration. The audit fails when a supported weapon or tank record is missing or a pinned count moves (ordnance_audit.rs).",
         )
     )
@@ -624,6 +625,7 @@ def scenarios() -> list[Scenario]:
     # F-16C, whose inner wet pair takes the 370 gallon tank and whose pod station blinks.
     for a, state in (
         ("f16c", "ordnance-authored-tank"),
+        ("f16c", "ordnance-tip-amraam"),
         ("f16c", "ordnance-pod"),
         ("f16c", "ordnance-pod-yellow"),
     ):
