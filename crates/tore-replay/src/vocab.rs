@@ -414,6 +414,29 @@ pub mod kind {
     /// any changed (a release, a jettison, a rearm). Subject: the aircraft.
     /// Fields: `items` (Ids: one count a station, in layout order).
     pub const STORES_ITEMS: &str = "stores.items";
+    /// The HUD the aircraft was showing, written when it changes
+    /// (nr-replayhud, John 2026-10-16). Subject: the aircraft. Object: the
+    /// display target, when there is one. Fields: `nav`, `armed`, `station`,
+    /// `weapon` (Text: the source name), `rounds`, `launch` (Text: cued or
+    /// bore), `seeker` (Text: the status label), `delivery` (Text, empty or
+    /// CCIP or LVL), `readiness` (Text), `guidance`, `in_range`, `hit` (Int,
+    /// percent), `max_ft`, `band_min`, `band_max` (`band_max` 0 means no
+    /// band), `radar`, and `mount_x`, `mount_y`, `mount_z` when the station
+    /// is not at the reference point. A recording made before this event
+    /// still plays: the HUD camera keeps the derived picture.
+    pub const AIRCRAFT_HUD: &str = "aircraft.hud";
+    /// The targeting sight or the AC-130 gunsight, written when it changes
+    /// and, for a slew, at most ten times a second (nr-replayhud). Subject:
+    /// the aircraft. Object: the tracked object, when the sight tracks one.
+    /// Fields: `gunship`, `az`, `el` (Num, radians), `zoom` (Int), `mode`
+    /// (Text: free, point, track or return), `x_ft`, `y_ft`, `z_ft` when a
+    /// point is held, and for a gunship `r0` `r1` `r2` (rounds), `link`,
+    /// `lead` (255 is none), `s0` `s1` `s2` (readiness labels), `radar`,
+    /// `range` (the range step), `h0` `e0` `h1` `e1` `h2` `e2` (train
+    /// radians, omitted when the trains were not known) and `lock_x`
+    /// `lock_y` `lock_z` when the guns are locked. Absent on an older
+    /// recording: the Sensor View keeps the derived line of sight.
+    pub const AIRCRAFT_SIGHT: &str = "aircraft.sight";
 
     /// Every kind above, in the order listed.
     pub const ALL: &[&str] = &[
@@ -505,6 +528,8 @@ pub mod kind {
         STORES_LAYOUT,
         STORES_STATION,
         STORES_ITEMS,
+        AIRCRAFT_HUD,
+        AIRCRAFT_SIGHT,
     ];
 }
 
@@ -626,6 +651,42 @@ pub mod field {
     pub const RESERVE: &str = "reserve";
     /// A wreck still burns.
     pub const BURNING: &str = "burning";
+    /// NAV is selected: the HUD shows the navigation picture.
+    pub const NAV: &str = "nav";
+    /// A weapon is armed.
+    pub const ARMED: &str = "armed";
+    /// Seeker launch mode: `cued` or `bore`.
+    pub const LAUNCH: &str = "launch";
+    /// The mounted seeker's status label.
+    pub const SEEKER: &str = "seeker";
+    /// The shot is inside the weapon's range.
+    pub const IN_RANGE: &str = "in_range";
+    /// Maximum range of the shot, feet. Zero means none was estimated.
+    pub const MAX_FT: &str = "max_ft";
+    /// Near edge of the firing band, feet.
+    pub const BAND_MIN: &str = "band_min";
+    /// Far edge of the firing band, feet. Zero means there is no band.
+    pub const BAND_MAX: &str = "band_max";
+    /// The station's mount, feet right, up and forward.
+    pub const MOUNT_X: &str = "mount_x";
+    pub const MOUNT_Y: &str = "mount_y";
+    pub const MOUNT_Z: &str = "mount_z";
+    /// The sight belongs to an AC-130 gunsight.
+    pub const GUNSHIP: &str = "gunship";
+    /// Sight azimuth, radians, body relative.
+    pub const AZ: &str = "az";
+    /// Sight elevation, radians, body relative.
+    pub const EL: &str = "el";
+    /// Sight or sensor zoom step.
+    pub const ZOOM: &str = "zoom";
+    /// Linked-gun membership, one bit a slot.
+    pub const LINK: &str = "link";
+    /// The lead gun's slot. 255 means none.
+    pub const LEAD: &str = "lead";
+    /// A weapon or gun readiness label.
+    pub const READINESS: &str = "readiness";
+    /// The radar range step, an index on the scope ladder.
+    pub const RANGE_STEP: &str = "range";
     /// A wreck fire's width, feet.
     pub const FIRE_FT: &str = "fire_ft";
     /// Hit points before a change.

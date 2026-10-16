@@ -10,6 +10,7 @@ mod checksum;
 mod chunk;
 mod city;
 mod codec;
+pub mod display;
 mod error;
 mod events;
 pub mod export;
@@ -30,6 +31,7 @@ mod writer;
 
 pub use checksum::state_checksum;
 pub use city::CityTrack;
+pub use display::{HudSample, SightSample, Track as DisplayTrack};
 pub use error::{Error, Result};
 pub use model::*;
 pub use predict::precision;
