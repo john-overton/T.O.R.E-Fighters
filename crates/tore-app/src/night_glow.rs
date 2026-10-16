@@ -478,8 +478,10 @@ mod tests {
             .collect();
         assert!(values.windows(2).all(|v| v[0] >= v[1]));
         // WGSL consumes the uploaded result without a second curve or sun input.
+        // Windows checks the shader out with CRLF line endings.
         assert!(
             include_str!("surface_lighting.wgsl")
+                .replace("\r\n", "\n")
                 .contains("fn device_night()->f32 {\n return scene.view.z;\n}")
         );
     }
