@@ -775,6 +775,7 @@ fn glows_of(
         });
         if s.layer == FIRE_SHEET {
             fires.push(crate::countermeasure_renderer::FlareLight {
+                sustained: true,
                 radius: width / 2.,
                 position: [
                     s.position[0],
@@ -785,6 +786,7 @@ fn glows_of(
             });
         } else if s.ember > 0. {
             fires.push(crate::countermeasure_renderer::FlareLight {
+                sustained: false,
                 radius: width / 2.,
                 position: [s.position[0], s.position[1] + lift, s.position[2]],
                 strength: f64::from(s.ember) * crate::countermeasure_renderer::FLARE_STRENGTH,
@@ -920,7 +922,19 @@ impl EffectRenderer {
         night: bool,
     ) -> Vec<crate::countermeasure_renderer::FlareLight> {
         if night {
-            crate::night_glow::brightest_lights(&self.sustained_lights, eye)
+            // Keep the existing three-mile effect-light range, including embers.
+            let nearby: Vec<_> = self
+                .sustained_lights
+                .iter()
+                .copied()
+                .filter(|light| {
+                    (0..3)
+                        .map(|i| (light.position[i] - eye[i]).powi(2))
+                        .sum::<f64>()
+                        <= crate::night_glow::FIRE_LIGHT_FT.powi(2)
+                })
+                .collect();
+            crate::night_glow::night_lights(&nearby, eye, crate::night_glow::MAX_FIRE_LIGHTS)
         } else {
             crate::night_glow::nearby_lights(&self.sustained_lights, eye)
         }
@@ -1186,6 +1200,8 @@ mod tests {
         let full = fire(1.);
         let half = fire(0.5);
         assert_eq!(full.len(), 1);
+        assert!(full[0].sustained);
+        assert_eq!([full[0].position[0], full[0].position[2]], [100., 200.]);
         assert!((full[0].position[1] - 31.5).abs() < 1e-9);
         assert_eq!(half[0].position, full[0].position);
         assert_eq!(full[0].radius, 45.);
@@ -1204,6 +1220,8 @@ mod tests {
         assert!(crate::impact_fx::light([100., 0., 200.], 35, 100, 120.).is_none());
         let middle = burst(120);
         assert_eq!(middle.len(), 1);
+        assert!(!middle[0].sustained);
+        assert_eq!([middle[0].position[0], middle[0].position[2]], [100., 200.]);
         assert!(middle[0].strength > 0.);
         assert!(middle[0].radius > 0.);
         assert_eq!(burst(60)[0].radius, middle[0].radius);

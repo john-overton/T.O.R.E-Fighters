@@ -10,9 +10,9 @@ const GLOW_MAX_PX:f32=9.0;
 const GLOW_BASE:f32=0.8;
 const GLOW_LEVEL:vec2<f32>=vec2<f32>(1.0,3.0);
 const GLOW_SPRITE_PX:vec2<f32>=vec2<f32>(3.0,16.0);
-const GLOW_HALO:f32=1.6;
-const GLOW_NEAR:f32=0.5;
-const GLOW_BLOOM:f32=0.6;
+const GLOW_HALO:f32=0.8;
+const GLOW_NEAR:f32=0.18;
+const GLOW_BLOOM:f32=0.35;
 struct GlowOut {
  @builtin(position) clip:vec4<f32>,
  @location(0) local:vec2<f32>,
@@ -49,7 +49,7 @@ struct GlowOut {
  let window=clamp(1.0-r2*0.25,0.0,1.0);
  // Resolved art supplies its own core. Only distant, unresolved lights
  // need the bright point, otherwise it bleaches the fire's animation.
- // A warm bloom the size of the effect around the flames (nr-nightfx).
- let core=(exp(-r2*2.5)*2.0*in.radiance.a+exp(-r2*1.0)*GLOW_BLOOM)*window*window;
+ // Original moderate halo around the full-bright artwork.
+ let core=(exp(-r2*2.5)*2.0*in.radiance.a+exp(-r2*0.6)*GLOW_BLOOM)*window*window;
  return thermal_light(vec4<f32>(in.radiance.rgb*core,0.0),0.8);
 }

@@ -450,6 +450,7 @@ impl Tracker {
                 });
             }
             drawn.lights.push(FlareLight {
+                sustained: false,
                 radius: 0.,
                 position: std::array::from_fn(|i| position[i] + direction[i] * length * LIGHT_OUT),
                 strength: look.light * intensity,
@@ -662,6 +663,11 @@ mod tests {
         assert_eq!(peak.flashes.len(), 1);
         assert_eq!(peak.flashes[0].intensity, 1.);
         assert_eq!(peak.lights[0].strength, LOOKS[2].light);
+        assert!(!peak.lights[0].sustained);
+        let (muzzle, direction) = mount.muzzle(2);
+        let expected =
+            std::array::from_fn(|i| muzzle[i] + direction[i] * peak.flashes[0].length * LIGHT_OUT);
+        assert_eq!(peak.lights[0].position, expected);
         assert_eq!(peak.puffs.len(), 3);
         let late = tracker.draw(12., lookup);
         assert!(late.lights[0].strength < 0.2 * LOOKS[2].light);

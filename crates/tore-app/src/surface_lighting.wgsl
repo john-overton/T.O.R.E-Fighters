@@ -148,87 +148,19 @@ const FLARE_NIGHT_GAIN:f32=4.0;
 const FLARE_SOFTENING:f32=25.0;
 const FLARE_COLOR:vec3<f32>=vec3<f32>(1.0,0.75,0.45);
 fn flare_light(relative:vec3<f32>,normal:vec3<f32>)->vec3<f32> {
- return flare_light_of(relative,normal,0);
-}
-// lights: 0 every light, 1 only points (flares, flashes without a radius),
-// 2 only lights with a radius (fires, fireballs, impact flashes).
-fn flare_light_of(relative:vec3<f32>,normal:vec3<f32>,lights:i32)->vec3<f32> {
  var total=0.0;
- let night=device_night();
  for(var i=0;i<i32(surface.reserved.w);i++) {
-  let area=surface.flares[i].extent.x>0.0;
-  if (lights==1 && area) || (lights==2 && !area) {continue;}
   let flare=surface.flares[i].source;
-  // Closest point on a luminous sphere: a broad footprint, one bounded light.
-  let radius=surface.flares[i].extent.x*night;
-  let delta=flare.xyz-relative;
-  var to=delta;
-  if radius>0.0 {
-   let distance=length(delta);
-   to=delta*(max(distance-radius,1.0)/max(distance,1.0));
-  }
+  let to=flare.xyz-relative;
   let d2=dot(to,to);
   let range2=FLARE_RANGE*FLARE_RANGE*max(flare.w/FLARE_UNIT,1.0);
   let edge=clamp(1.0-d2*d2/(range2*range2),0.0,1.0);
   var facing=1.0;
   if dot(normal,normal)>0.0 {facing=max(dot(normal,to)*inverseSqrt(max(d2,0.000001)),0.0);}
-  // At night a fire's own warm light (fire_glow) takes over from this
-  // white flare law, which tinted the ground with the art's colour.
-  var share=1.0;
-  if surface.flares[i].extent.x>0.0 {share=1.0-night;}
-  total+=share*flare.w*facing*edge*edge/(d2+FLARE_SOFTENING+radius*radius);
+  total+=flare.w*facing*edge*edge/(d2+FLARE_SOFTENING);
  }
+ let night=1.0-smoothstep(-0.104528,0.0348995,surface.reserved.y);
  return FLARE_COLOR*total*mix(1.0,FLARE_NIGHT_GAIN,night);
-}
-// nr-nightfx visibility pass (opinionated, John 2026-10-15; constants agent
-// fitted on the GPU): at night a fire, fireball or impact flash (a light with
-// a radius) casts warm orange light over about five times its width, onto
-// terrain and models alike. A smooth 1/(1+x^2) falloff in units of
-// FIRE_GLOW_CORE radii, windowed to zero at FIRE_GLOW_REACH radii (more for a
-// brighter flash). Small fires light as if FIRE_GLOW_MIN_RADIUS feet across,
-// so a burning vehicle reaches the buildings beside it. Zero in daylight.
-// Mirrored by night_glow.rs FIRE_GLOW_* (CPU contract tests).
-const FIRE_GLOW_COLOR:vec3<f32>=vec3<f32>(1.0,0.46,0.14);
-const FIRE_GLOW_GAIN:f32=12.0;
-const FIRE_GLOW_MIN_RADIUS:f32=40.0;
-const FIRE_GLOW_CORE:f32=3.0;
-const FIRE_GLOW_REACH:f32=24.0;
-const FIRE_GLOW_LEVEL_MAX:f32=4.0;
-fn fire_glow(relative:vec3<f32>,normal:vec3<f32>)->vec3<f32> {
- let night=device_night();
- if night<=0.0 {return vec3<f32>(0.0);}
- var total=0.0;
- for(var i=0;i<i32(surface.reserved.w);i++) {
-  let r=surface.flares[i].extent.x;
-  if r<=0.0 {continue;}
-  let flare=surface.flares[i].source;
-  // A full burning fire is level 1 at any size (its light grows as its
-  // width squared, night_glow::fire_light); a fading fire dims.
-  let level=min(flare.w/FLARE_UNIT*225.0/(r*r),FIRE_GLOW_LEVEL_MAX);
-  if level<=0.0 {continue;}
-  let size=max(r,FIRE_GLOW_MIN_RADIUS);
-  let to=flare.xyz-relative;
-  let d=length(to);
-  let reach=FIRE_GLOW_REACH*size*sqrt(max(level,1.0));
-  if d>=reach {continue;}
-  let x=d/(FIRE_GLOW_CORE*size);
-  let window=1.0-smoothstep(0.5*reach,reach,d);
-  var facing=1.0;
-  // Wrapped so grazing ground far from a low fire still catches it.
-  if dot(normal,normal)>0.0 {facing=clamp(0.2+0.8*dot(normal,to)/max(d,1.0),0.0,1.0);}
-  total+=level*facing*window/(1.0+x*x);
- }
- return FIRE_GLOW_COLOR*(FIRE_GLOW_GAIN*total*night);
-}
-// What a surface returns of firelight: mostly its brightness, a little of its
-// hue, so green grass glows orange rather than green. Compressed so the
-// ground under a fire saturates smoothly instead of clipping.
-fn fire_reflectance(albedo:vec3<f32>)->vec3<f32> {
- let l=dot(albedo,vec3<f32>(0.2126,0.7152,0.0722));
- return max(mix(vec3<f32>(l),albedo,0.3),vec3<f32>(0.04));
-}
-fn fire_lit(albedo:vec3<f32>,light:vec3<f32>)->vec3<f32> {
- return vec3<f32>(1.0)-exp(-fire_reflectance(albedo)*light);
 }
 // Derivatives recover triangle geometry, independent of original face flags.
 fn surface_normal(relative:vec3<f32>)->vec3<f32> {
@@ -257,13 +189,7 @@ fn surface_color(color:vec3<f32>,relative:vec3<f32>,normal:vec3<f32>,panels:bool
  }
  let night=vec3<f32>(mix(0.20,0.32,skyward)+0.30*max(dot(normal,surface.moon.xyz),0.0));
  let illumination=mix(night,ambient,day)+0.90*facing*visibility*tint;
- var lit=color*illumination;
- if device_night()<=0.0 {lit+=albedo*flare_light(relative,normal);}
- else {
-  // In twilight a fire's flare-law light returns warm off any ground, as its
-  // night firelight below does, never the art's own green.
-  lit+=albedo*flare_light_of(relative,normal,1)+fire_reflectance(albedo)*flare_light_of(relative,normal,2);
- }
+ var lit=color*illumination+albedo*flare_light(relative,normal);
  if panels {
   let view=normalize(-relative);
   let grazing=pow(1.0-clamp(dot(normal,view),0.0,1.0),3.0);
@@ -275,16 +201,7 @@ fn surface_color(color:vec3<f32>,relative:vec3<f32>,normal:vec3<f32>,panels:bool
   lit+=day*(sky*0.08*(0.25+0.75*grazing)+tint*highlight);
  }
  // Imported fog is already resolved; suppress lighting contrast in that fog.
- let shaded=mix(color,lit,1.0-clamp(haze(length(relative)),0.0,1.0));
- if device_night()<=0.0 {return shaded;}
- // Firelight is seen through the night haze as far as the fire's own glow
- // (glow_clear), not dimmed like the ground's own lighting contrast.
- // The callers' aerial perspective then mixes toward the horizon by the full
- // air opacity; divide that back out so the light keeps glow_clear's reach.
- let altitude=surface.origin.y+relative.y;
- var through=1.0;
- if smooth_weather() {through=max(1.0-air_opacity(length(relative),altitude),0.1);}
- return shaded+fire_lit(albedo,fire_glow(relative,normal))*glow_clear(relative,altitude)/through;
+ return mix(color,lit,1.0-clamp(haze(length(relative)),0.0,1.0));
 }
 fn water_shadow(color:vec3<f32>,hit:vec3<f32>)->vec3<f32> {
  if surface.sun.w<=0.0 {return color;}

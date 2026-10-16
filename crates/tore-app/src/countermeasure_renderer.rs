@@ -62,7 +62,9 @@ pub struct Afterburner {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FlareLight {
-    /// Finite luminous source radius in feet, used only at night.
+    /// Persistent fire, reserved ahead of transient flashes at night.
+    pub sustained: bool,
+    /// Source extent in feet, retained in the upload layout; lighting uses a point.
     pub radius: f64,
     pub position: [f64; 3],
     pub strength: f64,
@@ -75,11 +77,13 @@ pub fn lights(devices: &Devices, afterburners: &[Afterburner]) -> Vec<FlareLight
         .iter()
         .filter(|f| f.intensity() > 0.)
         .map(|f| FlareLight {
+            sustained: false,
             radius: 0.,
             position: f.position,
             strength: FLARE_STRENGTH * f.intensity(),
         })
         .chain(afterburners.iter().map(|a| FlareLight {
+            sustained: false,
             radius: 0.,
             position: a.position,
             strength: FLARE_STRENGTH * a.share,
@@ -432,6 +436,7 @@ mod tests {
         // Lit by the flare law: a burst a hundred feet away lights a facing
         // surface as a flare at 40 feet does, four times as much at night.
         let lights = [FlareLight {
+            sustained: false,
             radius: 0.,
             position: [0., 0., 100.],
             strength: flak_light(27, 0.),
@@ -469,6 +474,7 @@ mod tests {
         let origin = [1_000_000.5, 5000., 0.];
         let mut all: Vec<_> = (0..20)
             .map(|n| FlareLight {
+                sustained: false,
                 radius: 0.,
                 position: [origin[0] + 10. + f64::from(n) * 100., 5000., 0.],
                 strength: FLARE_STRENGTH,
@@ -493,6 +499,7 @@ mod tests {
     #[test]
     fn flare_glow_is_inverse_square_and_ends_at_fifteen_hundred_feet() {
         let light = [FlareLight {
+            sustained: false,
             radius: 0.,
             position: [0.; 3],
             strength: FLARE_STRENGTH,

@@ -532,6 +532,7 @@ impl Tracker {
                 });
             }
             out.lights.push(FlareLight {
+                sustained: false,
                 radius: 0.,
                 position: std::array::from_fn(|i| {
                     shot.muzzle[i] + shot.direction[i] * length * 0.3
@@ -560,6 +561,7 @@ impl Tracker {
                     crate::impact_fx::light(position, kind, scale, now - born)
             {
                 out.lights.push(FlareLight {
+                    sustained: false,
                     radius,
                     position,
                     strength,
@@ -608,6 +610,7 @@ impl Tracker {
         if age < launch::LIGHT_TICKS {
             let t = age / launch::LIGHT_TICKS;
             out.lights.push(FlareLight {
+                sustained: false,
                 radius: 0.,
                 position: launch.position,
                 strength: launch::LIGHT * (1. - t).powi(2),
@@ -735,6 +738,7 @@ fn draw_burst(burst: &Burst, now: f64, out: &mut Drawn) {
     let strength = flak_light(burst.blast, age);
     if strength > 0. && age < FLAK_LIGHT_TICKS {
         out.lights.push(FlareLight {
+            sustained: false,
             radius: 0.,
             position: burst.position,
             strength,
