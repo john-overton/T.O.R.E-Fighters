@@ -1521,9 +1521,9 @@ pub struct PodSymbology {
     pub mode: &'static str,
     pub zoom: u8,
     pub fov_deg: f64,
-    /// The aircraft's type and label, and the sensor's name.
+    /// The aircraft's type and label. The sensor itself is not named
+    /// (John, 2026-10-16: which device it is does not matter).
     pub aircraft: String,
-    pub pod: String,
     pub heading_deg: f64,
     pub agl_ft: f64,
     pub airspeed_kt: f64,
@@ -1608,7 +1608,6 @@ pub fn draw_pod(sym: &PodSymbology, camera: &Camera, size: [u32; 2]) -> Vec<u8> 
     );
     m.text(&format!("FOV {:.1}*", sym.fov_deg), left, top + row, s, 1);
     m.text(&sym.aircraft, left, top + 2 * row, s, 1);
-    m.text(&sym.pod, left, top + 3 * row, s, 1);
     // Top right: heading, height, airspeed, polarity.
     right_text(
         &mut m,

@@ -561,7 +561,7 @@ rules below are agent decisions (nr-replayviews, 2026-10-16).
 
 | Place | Shows |
 | --- | --- |
-| Top left | What the sight follows (`LSR` the laser spot, `TRK` a designated or targeted object, `PNT` a pinned point, the orbit or the rounds' bursts, `WPN` a guided weapon's aim, `IMP` a landing, `FWD` nothing recorded), the field (`NFOV`), the sensor (IR, TV, NVG); `FOV 7.5*`; the aircraft's label and type; the sensor's name (`PAVE SPIKE`, `AAS-38`) |
+| Top left | What the sight follows (`LSR` the laser spot, `TRK` a designated or targeted object, `PNT` a pinned point, the orbit or the rounds' bursts, `WPN` a guided weapon's aim, `IMP` a landing, `FWD` nothing recorded), the field (`NFOV`), the sensor (IR, TV, NVG); `FOV 7.5*`; the aircraft's label and type (the sensor itself is not named: John, 2026-10-16, which device it is does not matter) |
 | Top centre | Where the line of sight came from, since the recording does not hold it: `LOS FROM LASER SPOT`, `LOS FROM DESIGNATION`, `LOS FROM WEAPON AIM`, `LOS FROM RECORDED TARGET`, `LOS FROM ORBIT POINT`, `LOS FROM ROUND IMPACTS`, `LOS FROM BOMB IMPACT` or `NO LOS RECORDED` |
 | Bottom left | The laser: `LASE` in a box, blinking twice a second while lasing, else `LSR RDY`, `MASK` or `OFF`; `LSR 14513FT 2.4NM` (no code); `BUDDY FRIENDLY 1-2 2.8NM` when its weapon rides another aircraft's spot; `WPN GBU-12 ...` (the weapon it last released); `TTI 0:17`, with `X2` when several fly and `IMPACT` for a second (exact: the recording knows when each lands) |
 | Bottom centre | The status (`GIMBAL LIMIT` flashing, `LASE`, `MASK GIMBAL`, else the mode word), the slant range, and a landing's words for twenty seconds (`IMPACT 35 FT FROM AIM, 35 FT FROM TARGET`) |

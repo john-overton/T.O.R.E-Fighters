@@ -1652,7 +1652,8 @@ are agent choices (2026-09-28).
     the pipper (the status line gives the sight line's source instead), the
     A-G radar (`A-G OFF`).
   - **Other aircraft** show their own symbology on the same console: the
-    aircraft and its type, the pod or sensor's name, `LASE` (boxed and
+    aircraft and its type (not the pod or sensor's name: John, 2026-10-16),
+    `LASE` (boxed and
     blinking while lasing), `LSR RDY`, `MASK` or `OFF` with the laser's range
     in feet and nautical miles, `BUDDY 1-2 2.8NM` when its weapon follows
     another aircraft's spot, the weapon it last released, `TTI 0:22` (`X2`

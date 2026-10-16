@@ -662,7 +662,7 @@ impl Viewer {
                 };
                 sensor_console::draw(&sym, &camera, overlay_size)
             }
-            Sight::Pod { name, sensor } => {
+            Sight::Pod { sensor, .. } => {
                 let own_spot = scene.spots.iter().find(|s| s.owner == id);
                 let laser = sensor.laser.then(|| {
                     let (state_word, mask) =
@@ -732,7 +732,6 @@ impl Viewer {
                     zoom: step,
                     fov_deg,
                     aircraft: tore_formats::text::upper(&format!("{}  {kind}", self.label(id))),
-                    pod: name.clone(),
                     heading_deg,
                     agl_ft,
                     airspeed_kt,
