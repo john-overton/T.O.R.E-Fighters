@@ -3113,7 +3113,10 @@ again with an observer; the capture format did not change for it.
   older game must not join;
   44 since the second stations pass (slice nr-stations2): F-15C centreline
   bomb rack, F-22 wing stations, MiG-29 and Rafale centreline tanks and
-  three tank records, so an older game must not join.
+  three tank records, so an older game must not join;
+  45 since the ordnance page pass (slice nr-ordui): the Pave Knife is no
+  longer a weapon item and a loadout naming it loads the Pave Spike, so an
+  older game must not join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
