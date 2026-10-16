@@ -1603,3 +1603,180 @@ fn a_seated_loadout_counts_gun_pods_as_pods_and_names_its_tanks() {
     let load = super::carried_loadout(&config, &ammo, 5_000.);
     assert_eq!(load.stations[1].quantity, 0x8000 | 1);
 }
+
+/// A sequence is supplied by the dedicated-server adapter, not the wire.
+struct TestSequence {
+    remaining: usize,
+    broken: bool,
+}
+impl super::sequence::MissionSequence for TestSequence {
+    fn next(&mut self) -> Option<Result<super::sequence::Round, String>> {
+        if self.remaining == 0 {
+            return None;
+        }
+        self.remaining -= 1;
+        if std::mem::take(&mut self.broken) {
+            let missing =
+                MissionSpec::from_text(&spec(1, 0, 50).to_text().replace("F18.PT", "SU27.PT"))
+                    .unwrap();
+            return Some(Ok(super::sequence::Round {
+                spec: missing,
+                settings: vec![],
+                time_limit: None,
+            }));
+        }
+        Some(Ok(super::sequence::Round {
+            spec: spec(1, 0, 50),
+            settings: vec![],
+            time_limit: None,
+        }))
+    }
+    fn attempts(&self) -> usize {
+        2
+    }
+    fn notice(&mut self) -> Option<String> {
+        Some("Next mission: synthetic next round".into())
+    }
+    fn loaded(&mut self) {}
+    fn failed(&mut self, _: &str) {}
+}
+
+#[test]
+fn rotation_uses_every_end_reason_and_clears_slots_without_disconnects() {
+    for reason in [
+        EndReason::EveryoneLeft,
+        EndReason::TimeLimit,
+        EndReason::EndedByServer,
+        EndReason::KillLimit,
+    ] {
+        let mut rig = Rig::new(
+            spec(2, 2, 20),
+            HostConfig {
+                restart_delay: Duration::from_secs(1),
+                ..config()
+            },
+            LinkConfig::one_way(5 * MS),
+        );
+        let client = rig.join(|_| {});
+        assert!(rig.run_until(Duration::from_secs(3), |r| r.seated(client)));
+        rig.host.set_mission_sequence(Box::new(TestSequence {
+            remaining: 1,
+            broken: false,
+        }));
+        let old_number = rig.host.mission_number();
+        let next = rig.host.after_end();
+        rig.host.end_mission(reason, next);
+        assert!(rig.run_until(Duration::from_millis(500), |r| {
+            r.clients[client].debrief.is_some()
+        }));
+        assert_eq!(rig.host.mission_number(), old_number);
+        assert!(
+            rig.run_until(Duration::from_secs(2), |r| r.host.mission_number()
+                != old_number)
+        );
+        assert!(
+            rig.run_until(Duration::from_secs(1), |r| r.clients[client].number()
+                != old_number)
+        );
+        assert!(
+            rig.clients[client]
+                .notices
+                .iter()
+                .any(|n| n.starts_with("Next mission:"))
+        );
+        assert!(!rig.closed(client));
+        assert_eq!(rig.host.spec.separation_nm, 50);
+        for peer in rig.host.peers.values() {
+            assert_eq!(peer.lobby.slot, None);
+            assert_eq!(peer.lobby.loadout, None);
+            assert!(!peer.lobby.ready);
+        }
+        assert_eq!(rig.host.phase(), Phase::Lobby);
+        // The replacement used only this round, so the next boundary still consults the sequence.
+        rig.host.end();
+        assert!(rig.run_until(Duration::from_secs(3), |r| r.host.phase() == Phase::Stopped));
+    }
+}
+
+#[test]
+fn rotation_skips_failed_candidates_and_stops_when_all_fail() {
+    let mut host = Host::new(spec(1, 0, 20), Arc::new(resources()), config()).unwrap();
+    host.set_mission_sequence(Box::new(TestSequence {
+        remaining: 2,
+        broken: true,
+    }));
+    host.restart();
+    assert_eq!(host.spec.separation_nm, 50);
+    assert_eq!(host.phase(), Phase::Lobby);
+    struct Broken;
+    impl super::sequence::MissionSequence for Broken {
+        fn next(&mut self) -> Option<Result<super::sequence::Round, String>> {
+            Some(Err("missing aircraft".into()))
+        }
+        fn attempts(&self) -> usize {
+            2
+        }
+        fn notice(&mut self) -> Option<String> {
+            None
+        }
+        fn loaded(&mut self) {
+            panic!("broken mission loaded")
+        }
+        fn failed(&mut self, _: &str) {}
+    }
+    host.set_mission_sequence(Box::new(Broken));
+    host.restart();
+    assert_eq!(host.phase(), Phase::Stopped);
+    assert!(std::iter::from_fn(||host.poll_log()).any(|log| matches!(log, HostLog::Fault { text, .. } if text.contains("Every rotation entry failed"))));
+}
+
+#[test]
+fn kings_replacement_does_not_replace_the_operator_sequence() {
+    let mut rig = Rig::new(
+        spec(2, 2, 20),
+        HostConfig {
+            crown: CrownRule::FirstPlayer,
+            restart_delay: Duration::ZERO,
+            ..config()
+        },
+        LinkConfig::one_way(5 * MS),
+    );
+    let client = rig.join(|_| {});
+    rig.clients[client].ready = None;
+    assert!(rig.run_until(Duration::from_secs(2), |r| {
+        r.clients[client].mission.is_some()
+    }));
+    rig.host.set_mission_sequence(Box::new(TestSequence {
+        remaining: 1,
+        broken: false,
+    }));
+    let connection = *rig.host.peers.keys().next().unwrap();
+    rig.host
+        .change_mission(connection, &spec(1, 0, 10).to_text())
+        .unwrap();
+    assert_eq!(rig.host.spec.separation_nm, 10);
+    rig.host.end();
+    assert!(rig.run_until(Duration::from_secs(1), |r| r.host.spec.separation_nm == 50));
+    assert!(!rig.closed(client));
+}
+
+#[test]
+fn final_rotation_round_with_zero_delay_delivers_its_debrief_before_closing() {
+    let mut rig = Rig::new(
+        spec(2, 2, 20),
+        HostConfig {
+            restart_delay: Duration::ZERO,
+            ..config()
+        },
+        LinkConfig::one_way(5 * MS),
+    );
+    let client = rig.join(|_| {});
+    assert!(rig.run_until(Duration::from_secs(3), |r| r.seated(client)));
+    rig.host.set_mission_sequence(Box::new(TestSequence {
+        remaining: 0,
+        broken: false,
+    }));
+    rig.host.end();
+    assert!(rig.run_until(Duration::from_secs(3), |r| r.closed(client)));
+    assert!(rig.clients[client].debrief.is_some());
+}

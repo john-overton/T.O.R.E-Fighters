@@ -21,6 +21,8 @@ use tore_world::{
 
 /// What start-up loaded and checked.
 pub struct Prepared {
+    pub rotation: Option<crate::rotation::Rotation>,
+    pub rotation_report: Vec<String>,
     pub config: Config,
     pub data_dir: PathBuf,
     pub spec: MissionSpec,
@@ -76,6 +78,9 @@ pub fn load_config(options: &Options, data_dir: &Path) -> Result<Config, String>
         config.port = port;
     }
     if let Some(mission) = &options.mission {
+        if config.rotation.is_some() {
+            return Err("`--mission` and `rotation` are mutually exclusive".into());
+        }
         config.mission = mission.clone();
     }
     Ok(config)
@@ -144,8 +149,53 @@ pub fn prepare(options: &Options, data_dir: &Path) -> Result<Prepared, String> {
     let config = load_config(options, data_dir)?;
     let mut resources = load_resources(data_dir)?;
     add_source(data_dir, &mut resources);
-    let spec = load_mission(&config.mission)?;
-    build(config, data_dir, spec, resources)
+    if config.rotation.is_some() {
+        let mut rotation = crate::rotation::Rotation::read(&config)?;
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        rotation.start(seed);
+        let resources = Arc::new(resources);
+        let mut first = None;
+        let mut report = vec![rotation.heading()];
+        let mut errors = Vec::new();
+        for (i, entry) in rotation.entries.iter().enumerate() {
+            let prepared = match load_mission(&entry.config.mission).and_then(|spec| {
+                build_shared(entry.config.clone(), data_dir, spec, resources.clone())
+            }) {
+                Ok(prepared) => prepared,
+                Err(why) => {
+                    errors.push(format!(
+                        "Rotation entry {} (line {}): {why}",
+                        i + 1,
+                        entry.line
+                    ));
+                    continue;
+                }
+            };
+            report.push(format!(
+                "Rotation {}/{}: {}",
+                i + 1,
+                rotation.entries.len(),
+                prepared.spec.summary()
+            ));
+            report.extend(crate::rotation::effective_settings(&entry.config));
+            if i == rotation.current {
+                first = Some(prepared);
+            }
+        }
+        if !errors.is_empty() {
+            return Err(format!("{}\n{}", report.join("\n"), errors.join("\n")));
+        }
+        let mut prepared = first.unwrap();
+        prepared.rotation = Some(rotation);
+        prepared.rotation_report = report;
+        Ok(prepared)
+    } else {
+        let spec = load_mission(&config.mission)?;
+        build(config, data_dir, spec, resources)
+    }
 }
 
 /// Stage L: an import made before the import recorded its source has no
@@ -173,6 +223,20 @@ pub fn build(
     spec: MissionSpec,
     resources: Resources,
 ) -> Result<Prepared, String> {
+    build_shared(config, data_dir, spec, Arc::new(resources))
+}
+
+pub fn build_shared(
+    config: Config,
+    data_dir: &Path,
+    spec: MissionSpec,
+    resources: Arc<Resources>,
+) -> Result<Prepared, String> {
+    let mut settings = tore_session::settings::Store::defaults(tore_session::settings::Mode::Coop);
+    settings
+        .apply(&config.settings)
+        .map_err(|e| e.to_string())?;
+    let spec = tore_session::host::sequence::configured_spec(spec, &settings);
     let (world, manifest) = {
         let reads = ResourceReads::new(&resources);
         let world = World::new(&spec, &reads, Seating::Open).map_err(|error| {
@@ -188,7 +252,22 @@ pub fn build(
         })?;
         (world, reads.manifest())
     };
-    if let Some(problem) = crate::check::ground_start_problem(&spec, &world.terrain) {
+    validate_world(&config, &spec, &world)?;
+    Ok(Prepared {
+        rotation: None,
+        rotation_report: Vec::new(),
+        config,
+        data_dir: data_dir.to_owned(),
+        spec,
+        resources,
+        manifest,
+        world,
+    })
+}
+
+/// Checks shared by startup, reload, and a runtime rotation build.
+pub fn validate_world(config: &Config, spec: &MissionSpec, world: &World) -> Result<(), String> {
+    if let Some(problem) = crate::check::ground_start_problem(spec, &world.terrain) {
         return Err(format!(
             "The mission in {} {problem}.",
             config.mission.display()
@@ -203,14 +282,7 @@ pub fn build(
             ));
         }
     }
-    Ok(Prepared {
-        config,
-        data_dir: data_dir.to_owned(),
-        spec,
-        resources: Arc::new(resources),
-        manifest,
-        world,
-    })
+    Ok(())
 }
 
 #[cfg(test)]

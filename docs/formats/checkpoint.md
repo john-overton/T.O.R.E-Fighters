@@ -63,6 +63,9 @@ flowchart LR
 
 ## What it holds and what it leaves out
 
+The dedicated server's rotation sequence is local operator setup. The process
+keeps it across rounds; it is not serialized or migrated.
+
 Every field of every type reachable from `World` falls in exactly one class.
 The class decides how it is coded:
 

@@ -14,6 +14,7 @@ mod log;
 mod options;
 mod prepare;
 mod report;
+mod rotation;
 mod run;
 #[cfg(test)]
 mod session_test;

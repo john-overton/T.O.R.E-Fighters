@@ -65,6 +65,7 @@ mod observe_tests;
 mod results;
 mod revive;
 mod score;
+pub mod sequence;
 mod sides;
 mod sorting;
 #[cfg(test)]
@@ -571,6 +572,7 @@ struct Costs {
 
 /// The host session. See the module documentation.
 pub struct Host {
+    sequence: Option<Box<dyn sequence::MissionSequence>>,
     config: HostConfig,
     /// The King's settings in force (stage F phase 2): the configuration's
     /// to start with.
@@ -913,6 +915,7 @@ impl Host {
             .unwrap_or_else(|| content::GameContent::shared(&resources));
         let compat = content::Compat::new(own, &resources);
         let mut host = Host {
+            sequence: None,
             session_id,
             spec_text: spec.to_text(),
             number: 1,
@@ -3656,6 +3659,7 @@ impl Host {
             next_at: next.map(|delay| now + delay),
             stop_at: now + CLOSE_GRACE,
         };
+        self.sequence_notice();
         self.journal_ended(reason);
         let tick = self.world.tick();
         self.log(HostLog::MissionEnded { tick, reason });
@@ -3664,6 +3668,9 @@ impl Host {
     /// A fresh copy of the lobby's mission, from its spec: back to the
     /// lobby, or flying again for `start now`.
     fn next_mission(&mut self) {
+        if self.sequence_mission() {
+            return;
+        }
         let spec = self.spec.clone();
         match self.build(&spec) {
             Ok((world, manifest)) => {

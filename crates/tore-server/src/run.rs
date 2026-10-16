@@ -144,6 +144,13 @@ impl<'a> Loop<'a> {
                     Ok(line) => self.log_line(&format!("console: {line}")),
                     Err(reason) => self.log.print(&reason),
                 },
+                command @ (Command::Rotation
+                | Command::Next
+                | Command::Goto(_)
+                | Command::Reload) => match host.rotation_command(&command) {
+                    Ok(line) => self.log_line(&line),
+                    Err(why) => self.log.print(&why),
+                },
                 Command::Help => self.log.print(HELP),
                 Command::Invalid(message) => self.log.print(&message),
             }
@@ -155,7 +162,10 @@ impl<'a> Loop<'a> {
 /// The status line, with where the listing stands while the server
 /// broadcasts: `..., broadcast: listed, seen at 203.0.113.5:26900`.
 fn status_text(host: &mut dyn Host, now: Time) -> String {
-    let line = status_line(&host.status(now));
+    let mut line = status_line(&host.status(now));
+    if let Some(rotation) = host.rotation_status() {
+        line.push_str(&format!(", {rotation}"));
+    }
     match host.listing() {
         Some(listing) => format!("{line}, broadcast: {listing}"),
         None => line,

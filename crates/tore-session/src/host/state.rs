@@ -511,6 +511,8 @@ impl Host {
         let Host {
             // Setup: the host's own, which a new host builds from its game.
             config: _,
+            // Operator-owned dedicated-server sequence, never migrated.
+            sequence: _,
             resources: _,
             compat: _,
             // Rebuilt with the world from the spec.
