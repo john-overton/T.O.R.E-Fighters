@@ -480,6 +480,18 @@ impl Host {
             lobby_id,
             callsign,
         } = gone;
+        if self
+            .rejoin
+            .reserved
+            .get(&order)
+            .and_then(|r| self.world.roster.plane(r.plane))
+            .is_some_and(|p| {
+                self.spec.player_choice[tore_world::mission::MissionSpec::wing_index(p.slot.wing)]
+            })
+        {
+            self.rejoin.reserved.remove(&order);
+            return;
+        }
         if let Some(reserved) = self.rejoin.reserved.get_mut(&order) {
             reserved.away = false;
             reserved.returning = false;
@@ -492,6 +504,11 @@ impl Host {
         let (Stage::Seated, Some(seat), Some(plane)) = (stage, seat, plane) else {
             return;
         };
+        if self.world.roster.plane(plane).is_some_and(|p| {
+            self.spec.player_choice[tore_world::mission::MissionSpec::wing_index(p.slot.wing)]
+        }) {
+            return;
+        }
         // A lost plane cannot go to the AI: the revival rules have it.
         if self.world.can_give_back(seat).is_err() {
             return;

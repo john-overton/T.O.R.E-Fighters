@@ -360,7 +360,11 @@ fn a_mission_waits_for_a_player_who_lost_its_plane_while_away_and_may_revive() {
     rig.run(Duration::from_secs(3));
     assert_eq!(rig.host.phase(), Phase::Flying);
     let mission = rig.clients[viper].number();
-    rig.clients[viper].send(&Message::Revive { mission });
+    rig.clients[viper].send(&Message::Revive {
+        mission,
+        aircraft: None,
+        loadout: None,
+    });
     assert!(rig.run_until(Duration::from_secs(2), |r| {
         r.clients[viper]
             .seated

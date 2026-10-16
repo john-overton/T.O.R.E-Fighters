@@ -55,6 +55,18 @@ impl Checkpoint for MissionCommand {
                 seat.save(s, None)?;
                 plane.save(s, None)
             }
+            MissionCommand::ReplacePlane {
+                seat,
+                old,
+                aircraft,
+                spawn,
+            } => {
+                s.writer().write_varint(11);
+                seat.save(s, None)?;
+                old.save(s, None)?;
+                aircraft.save(s, None)?;
+                spawn.save(s, None)
+            }
             MissionCommand::Despawn { plane } => {
                 s.writer().write_varint(10);
                 plane.save(s, None)
@@ -134,6 +146,12 @@ impl Checkpoint for MissionCommand {
             9 => MissionCommand::Callsign {
                 seat: Checkpoint::load(l, None)?,
                 callsign: Checkpoint::load(l, None)?,
+            },
+            11 => MissionCommand::ReplacePlane {
+                seat: Checkpoint::load(l, None)?,
+                old: Checkpoint::load(l, None)?,
+                aircraft: Checkpoint::load(l, None)?,
+                spawn: Checkpoint::load(l, None)?,
             },
             10 => MissionCommand::Despawn {
                 plane: Checkpoint::load(l, None)?,

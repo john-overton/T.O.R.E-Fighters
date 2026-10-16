@@ -104,8 +104,11 @@ mod tick_tests;
 #[cfg(test)]
 mod touchdown_tests;
 
+pub mod choices;
+
 /// The whole mission. The app drives it and presents it.
 pub struct World {
+    pub choices: choices::Resources,
     /// What the flight is built from; a restart rebuilds it from this.
     pub setup: Setup,
     /// Terrain queries, the airport scene and the weather clock. What the
@@ -655,7 +658,9 @@ impl World {
             .collect();
         for command in mission {
             match *command {
-                MissionCommand::Take { seat, .. } | MissionCommand::ReviveLost { seat, .. }
+                MissionCommand::Take { seat, .. }
+                | MissionCommand::ReviveLost { seat, .. }
+                | MissionCommand::ReplacePlane { seat, .. }
                     if !flying.contains(&seat) =>
                 {
                     flying.push(seat)

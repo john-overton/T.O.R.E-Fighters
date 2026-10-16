@@ -124,11 +124,19 @@ impl Client {
         };
         match self.mission.as_mut().map(|m| m.world.add_plane(&new)) {
             Some(Ok(())) => self.log("spawned", &[&spawned.plane.to_string()]),
-            Some(Err(error)) => self.log(
-                "spawn-failed",
-                &[&spawned.plane.to_string(), &error.to_string()],
-            ),
+            Some(Err(error)) => {
+                self.refuse_flight_content(format!(
+                    "Cannot build revived plane {}: {error}",
+                    spawned.plane
+                ));
+                return;
+            }
             None => self.log("spawn-failed", &[&spawned.plane.to_string(), "no mission"]),
+        }
+        if let Some(mission) = &mut self.mission
+            && !mission.models.contains(&spawned.aircraft)
+        {
+            mission.models.push(spawned.aircraft);
         }
         self.spawned.push((*spawned).clone());
         self.event(ClientEvent::Spawned(spawned));

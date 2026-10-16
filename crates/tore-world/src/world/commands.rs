@@ -34,6 +34,13 @@ pub enum MissionCommand {
     GiveBack { seat: SeatId },
     /// Removes an aircraft without damage, debris or score credit.
     Despawn { plane: PlaneId },
+    /// A validated replacement for a lost human plane or a live Choice AI.
+    ReplacePlane {
+        seat: SeatId,
+        old: PlaneId,
+        aircraft: tore_formats::aircraft::AircraftId,
+        spawn: Box<super::revive::Spawn>,
+    },
     /// Stage F phase 2: frees `seat` from its lost plane, whose pilot
     /// becomes [`crate::seats::Pilot::Lost`] (docs/ARCHITECTURE.md, "Death,
     /// revival and lives"; [`World::abandon_plane`]). The seat sends no input
@@ -160,6 +167,16 @@ impl World {
                 self.take_plane(*seat, *plane)?;
                 // A player back from away retakes the lead it owns (R2).
                 self.lead_taken(*seat, *plane);
+            }
+            MissionCommand::ReplacePlane {
+                seat,
+                old,
+                aircraft,
+                spawn,
+            } => {
+                let new = self.replacement_plane(*old, *aircraft, spawn)?;
+                self.replace_plane(*seat, *old, &new)?;
+                self.lead_taken(*seat, *old);
             }
             MissionCommand::Despawn { plane } => {
                 self.despawn_plane(*plane)?;

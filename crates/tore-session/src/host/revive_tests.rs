@@ -73,7 +73,11 @@ fn lose(rig: &mut Rig, client: usize) -> Revival {
 /// Asks to fly again (message 28).
 fn revive(rig: &mut Rig, client: usize) {
     let mission = rig.clients[client].number();
-    rig.clients[client].send(&Message::Revive { mission });
+    rig.clients[client].send(&Message::Revive {
+        mission,
+        aircraft: None,
+        loadout: None,
+    });
 }
 
 /// Runs until `client` is seated in a plane other than `old`.

@@ -708,3 +708,23 @@ fn real_data_a_1_0_import_and_a_1_02f_import_have_the_same_content() {
         );
     }
 }
+
+#[test]
+fn runtime_tank_choices_have_individual_content_items() {
+    let mut authored = Map::from([("F16C.PT".to_owned(), Vec::new())]);
+    tore_formats::aircraft::stations::extend_resources(&mut authored);
+    let mut map = resources();
+    map.insert("F370.GAS".into(), authored["F370.GAS"].clone());
+    let content = Content::of(&map);
+    let tank = content.get(Kind::Weapon, "F370.GAS").unwrap();
+    assert_eq!(tank.names().collect::<Vec<_>>(), ["F370.GAS"]);
+    let original = tank.digest;
+    map.get_mut("F370.GAS").unwrap().extend_from_slice(b"\n");
+    assert_ne!(
+        Content::of(&map)
+            .get(Kind::Weapon, "F370.GAS")
+            .unwrap()
+            .digest,
+        original
+    );
+}

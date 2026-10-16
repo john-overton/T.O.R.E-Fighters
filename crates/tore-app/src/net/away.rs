@@ -341,7 +341,10 @@ impl App {
     /// Whether the controls count as neutral this frame, for the idle rule: a
     /// menu or a screen is over the flight, or the window lacks focus.
     fn idle_held(&self) -> bool {
-        self.screen != Screen::Flight || self.flight_ui.frozen() || !self.focused
+        self.screen != Screen::Flight
+            || self.flight_ui.frozen()
+            || self.respawn_open()
+            || !self.focused
     }
 
     /// Whether the observer screen shows the player's own aircraft while it

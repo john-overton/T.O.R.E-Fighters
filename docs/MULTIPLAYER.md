@@ -1841,7 +1841,8 @@ Each human flight's AI members start with that human's accepted ordnance,
 including empty stations, tanks and fuel. Other human slots keep their own
 loads; explicit mission-file AI loads stay intact. With multiple humans in one
 wing, the lowest member slot supplies its AI load. Revival retains the chosen
-stores under the existing full-fuel and revival-weapons rules. See the
+stores under the revival-weapons rule. Unedited revivals fill internal fuel; an
+explicit in-flight selection keeps its chosen fuel. See the
 [loadout contract](spec/multiplayer.md#human-flight-loadouts).
 
 ## AI aircraft and Player Choice
@@ -1859,6 +1860,22 @@ opens the existing aircraft dialog then Load Ordnance. Loadout reopens the flow.
 Slots name the selected aircraft or AI default. Accepted choices pass the shared
 content check and travel with the flight build.
 
-This slice is incomplete: changing type on a late join or revival and the
-in-flight ordnance overlay remain outstanding. See the
-[requirements and agent decisions](spec/quick-mission-menu.md#multiplayer-player-choice).
+A late join to a Choice slot removes its AI aircraft cleanly and creates the
+accepted player aircraft at revival placement. Departure returns the lineage to
+its wing AI default under the existing AI respawn delay and lives rules, at its
+original spawn. These removals award no kill or loss.
+
+With `respawn revive`, the flight continues beneath a menu while waiting, using the in-flight
+Escape menu widget. Loadout lists stations in Load Ordnance display order, then
+internal fuel, Standard load and Done. Enter or a click cycles a station's legal
+stores and quantities; arrows and the wheel move through rows. Choice slots also
+have a paged Aircraft tab. The menu uses the existing controller menu bindings.
+Done keeps a draft for the next Enter-to-revive request. The `ai-slot` rule
+continues to take an existing aircraft with its existing revival weapon cut. Escape closes without
+accepting edits. The revive timer remains visible; closing or reviving releases
+menu input. Aircraft and loadout are validated together by the host, including
+shared content, normal/cheat loading, weight and revival-weapons restrictions.
+Explicit choices retain their selected internal fuel; an unedited legacy revive
+still starts with full fuel. The host distributes the accepted spawn and every
+peer prepares the same simulation resources, including checkpoint restores.
+See the [requirements and decisions](spec/quick-mission-menu.md#multiplayer-player-choice).

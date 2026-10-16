@@ -1247,7 +1247,8 @@ impl App {
         use flight_ui::Command;
         let name = match action {
             tore_input::Action::Pilot(command) => {
-                if self.screen == Screen::Flight && !self.flight_ui.frozen() {
+                if self.screen == Screen::Flight && !self.flight_ui.frozen() && !self.respawn_open()
+                {
                     if matches!(
                         command,
                         tore_input::PilotCommand::Toggle(tore_input::Switch::Hook)
@@ -1318,6 +1319,9 @@ impl App {
             };
             let result = screen.key(key, false, false);
             return self.replays_result(result);
+        }
+        if self.screen == Screen::Flight && self.respawn_open() {
+            return key.map_or(Action::None, |key| self.respawn_key(key));
         }
         if self.screen != Screen::Flight {
             return match (self.screen, key) {
@@ -3416,6 +3420,13 @@ impl App {
             self.action(event_loop, action);
             return Action::None;
         }
+        if self.screen == Screen::Flight && self.respawn_open() {
+            if event.pressed {
+                let action = self.respawn_key(&name);
+                self.action(event_loop, action);
+            }
+            return Action::None;
+        }
         // The chat line of a networked flight (net/chat.rs) takes the keyboard
         // while it is open.
         if self.chat_key(&event, &name) {
@@ -3820,6 +3831,13 @@ impl ApplicationHandler for App {
                     internet_screen::app::pointer_moved(&mut self.lobby, &mut self.internet, point);
                     return;
                 }
+                if self
+                    .net_flight
+                    .as_ref()
+                    .is_some_and(|f| f.respawn_menu.is_some())
+                {
+                    return;
+                }
                 if self.controls.is_some()
                     || self.graphics_screen.is_some()
                     || (self.screen == Screen::Main && self.replays_screen.is_some())
@@ -3888,7 +3906,9 @@ impl ApplicationHandler for App {
                 if notches == 0 {
                     return;
                 }
-                if let Some(screen) = &mut self.sound_screen {
+                if self.screen == Screen::Flight && self.respawn_open() {
+                    self.respawn_key(if notches > 0 { "ArrowUp" } else { "ArrowDown" })
+                } else if let Some(screen) = &mut self.sound_screen {
                     let outcome = screen.wheel(notches);
                     self.sound_result(outcome)
                 } else if let Some(editor) = &mut self.controls {
@@ -4020,6 +4040,22 @@ impl ApplicationHandler for App {
             }
             // The lobby's right button: the King's slot locks and the Settings
             // panel's turn back (slice F2-L).
+            WindowEvent::MouseInput { state, button, .. }
+                if self.screen == Screen::Flight
+                    && self
+                        .net_flight
+                        .as_ref()
+                        .is_some_and(|f| f.respawn_menu.is_some()) =>
+            {
+                let point = self
+                    .pointer
+                    .and_then(|(x, y)| renderer.viewport().point(x, y));
+                if button == MouseButton::Left {
+                    self.respawn_pointer(point, state == ElementState::Pressed)
+                } else {
+                    Action::None
+                }
+            }
             WindowEvent::MouseInput {
                 state,
                 button: MouseButton::Right,
@@ -4108,7 +4144,17 @@ impl ApplicationHandler for App {
                 } else {
                     None
                 };
-                if let Some(view) = live {
+                if self.screen == Screen::Flight
+                    && self
+                        .net_flight
+                        .as_ref()
+                        .is_some_and(|f| f.respawn_menu.is_some())
+                {
+                    let point = self
+                        .pointer
+                        .and_then(|(x, y)| renderer.viewport().point(x, y));
+                    self.respawn_pointer(point, state == ElementState::Pressed)
+                } else if let Some(view) = live {
                     view.map_or(Action::None, |view| self.live_view(view))
                 } else if self.screen == Screen::Flight
                     && self.flight_ui.map.open
@@ -5295,13 +5341,19 @@ impl ApplicationHandler for App {
                             && self.flight_ui.weapon_diagnostics_shown(self.flight_view);
                         // A debug panel or menu over an instrument takes the
                         // pointer, so the scope's crosshair stays away.
-                        let covered = self.flight_ui.debug_panels && self.live_debug.covers();
+                        let respawn_open = self
+                            .net_flight
+                            .as_ref()
+                            .is_some_and(|flight| flight.respawn_menu.is_some());
+                        let covered = (self.flight_ui.debug_panels && self.live_debug.covers())
+                            || respawn_open;
                         self.instruments.hover(
                             self.pointer.filter(|_| !covered),
                             [f64::from(window.width), f64::from(window.height)],
                         );
                         renderer.window.set_cursor_visible(
                             self.instruments.crosshair.is_none()
+                                || respawn_open
                                 || self.flight_ui.menu
                                 || self.flight_ui.map.open
                                 || self.live_debug.menu.is_some(),
@@ -5709,6 +5761,18 @@ impl ApplicationHandler for App {
                             &self.hornet.font,
                             net::play::menu(&self.hornet, &self.net_flight),
                         );
+                        if let Some(menu) = self
+                            .net_flight
+                            .as_ref()
+                            .and_then(|f| f.respawn_menu.as_ref())
+                        {
+                            let prompt = self
+                                .net
+                                .as_ref()
+                                .and_then(|s| s.client.revival_prompt())
+                                .unwrap_or_default();
+                            menu.draw(&mut self.menu.pixels, &self.hornet.font, &prompt);
+                        }
                         if let Some(editor) = &self.controls {
                             editor.draw(&mut self.menu.pixels, &self.hornet.font);
                         }
@@ -6011,19 +6075,20 @@ impl ApplicationHandler for App {
                         continue;
                     }
                     let was_frozen = self.flight_ui.frozen();
+                    let was_respawn = self.respawn_open();
                     if self.replay.is_some() && self.controls.is_none() {
                         continue;
                     }
                     let result = self.input_action(action);
                     self.action(event_loop, result);
-                    if was_frozen != self.flight_ui.frozen() {
+                    if was_frozen != self.flight_ui.frozen() || was_respawn != self.respawn_open() {
                         self.camera.keys.clear();
                         self.release_trigger();
                         self.flight_clock.remainder = 0.;
                         let own = &mut self.world.cockpits[OWN];
                         own.previous_flight.clone_from(&own.flight);
                         self.frame_time = Instant::now();
-                        self.input.context(self.flight_ui.frozen(), self.focused);
+                        self.input.context(self.input_paused(), self.focused);
                         break; // Remaining events belong to the previous context.
                     }
                 }
@@ -8419,6 +8484,7 @@ fn ai_probe_run(
         parked.as_ref().map(|ground| ground.airport),
     ));
     let mission = world::World {
+        choices: Default::default(),
         terrain,
         roster: seats::Roster::single_player(
             comms::crew(&hornet.profile),
@@ -13362,6 +13428,43 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             for p in menu.pixels.chunks_exact(4) {
                 f.write_all(&p[..3])?;
             }
+        } else if snapshot_state.starts_with("respawn-") {
+            let spec = tore_world::mission::MissionSpec::new(
+                &world.layout,
+                tore_formats::aircraft::AircraftId::F18,
+            );
+            let allowed = tore_formats::aircraft::AircraftId::SELECTABLE
+                .into_iter()
+                .filter(|id| {
+                    tore_world::aircraft_type::AircraftType::load(&theater_resources, *id).is_ok()
+                })
+                .collect();
+            let mut overlay = net::respawn::Menu::new(
+                tore_formats::aircraft::AircraftId::F18,
+                allowed,
+                &theater_resources,
+                &spec,
+                tore_world::world::revive::RevivalWeapons::Missiles,
+                |_| false,
+            )?;
+            for (index, pixel) in menu.pixels.chunks_exact_mut(4).enumerate() {
+                let sky = 55 + (index / 640 / 8) as u8;
+                pixel.copy_from_slice(&[sky, sky + 20, sky + 35, 255]);
+            }
+            if snapshot_state == "respawn-aircraft" {
+                overlay.preview_aircraft();
+            }
+            overlay.draw(
+                &mut menu.pixels,
+                &hornet.font,
+                "You can fly again in 0:25 (2 lives left)",
+            );
+            use std::io::Write;
+            let mut f = std::fs::File::create(&path)?;
+            write!(f, "P6\n640 480\n255\n")?;
+            for pixel in menu.pixels.chunks_exact(4) {
+                f.write_all(&pixel[..3])?;
+            }
         } else if snapshot_state.starts_with("lobby") {
             // The lobby screen with a synthetic lobby and lines.
             lobby_screen::preview::render(&menu.kit_source, &snapshot_state, &mut menu.pixels)?;
@@ -14319,6 +14422,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     let mut airfield_radio = airfield_radio::AirfieldRadio::default();
     airfield_radio.reset(ground_start.and_then(|id| world.runway_view(id)));
     let world = world::World {
+        choices: Default::default(),
         setup: world::Setup {
             mission: None,
             ground_start,

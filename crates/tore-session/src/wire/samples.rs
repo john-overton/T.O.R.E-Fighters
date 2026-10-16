@@ -1112,7 +1112,11 @@ pub fn phase_two_messages() -> Vec<Message> {
             plane: 5,
             lock: Lock::Open,
         })),
-        Message::Revive { mission: 7 },
+        Message::Revive {
+            mission: 7,
+            aircraft: None,
+            loadout: None,
+        },
         Message::Revival(Box::new(Revival {
             rule: Respawn::Revive,
             lives: Some(2),

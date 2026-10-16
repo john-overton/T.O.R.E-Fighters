@@ -184,7 +184,7 @@ impl App {
             .and_then(|l| l.me().and_then(|p| p.slot).map(|p| (l.mission, p)));
         let new_choice = slot != self.lobby.slot_seen
             && client.lobby().is_some_and(|l| {
-                l.phase == LobbyPhase::Lobby
+                !l.me().is_some_and(|p| p.flying)
                     && l.slots
                         .iter()
                         .any(|s| Some((l.mission, s.plane)) == slot && s.choice.is_some())
@@ -269,7 +269,7 @@ impl App {
                 if let Some(page) = self.quick.ordnance.as_mut() {
                     page.set_cheat_rule(cheat_allowed);
                 }
-                if lobby.phase != LobbyPhase::Lobby
+                if lobby.phase == LobbyPhase::Ended
                     || holds != Some(plane)
                     || lobby.mission != mission
                 {

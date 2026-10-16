@@ -284,6 +284,12 @@ twice.
 | `share-flight-loadout yes/no` | QMC single-player same-wing sharing, off when omitted in an authored mission. Multiplayer expands human choices into per-plane loads, preserving explicit AI loads. See [load sharing](spec/multiplayer.md#human-flight-loadouts). |
 | `plane-loadout PLANE fuel POUNDS`, `plane-loadout PLANE cheat no`, `plane-loadout PLANE station N WEAPON COUNT QUANTITY` | The loadout a player chose in the lobby for one plane of a networked mission, the same lines as `loadout` with the plane number first. *Built (EF4).* The host writes them into the mission it sends when a flight starts, so every player builds the same aircraft; a server's own file normally leaves them out, and a plane with none carries its aircraft's standard load. Each is checked as the [lobby's loadout rule](#the-lobby) says, and single player refuses them |
 
+When a player takes a Choice slot, the log identifies the accepted type:
+`Viper took plane 6 (Player choice): F-16C`. Late Choice joins replace the AI
+cleanly at revival placement. Departures return to the wing AI default under
+`ai-respawn`, at the original spawn. With `ai off`, no AI replacement appears.
+
+
 *Status of the ground target lines:* they are read, checked against the
 theater's targets, carried to every player and shown in the lobby's creator,
 but the surface units themselves (the target's buildings, vehicles, SAMs and
@@ -345,7 +351,8 @@ The **mission-scoped settings** are the King's table above except `visibility`,
 plus `time-limit`: `mode`, `join-in-progress`, `friendly-fire`, `lock-sides`,
 `loadouts`, `respawn`, `lives`, `revive-delay`, `revive-distance`, `revive-weapons`,
 `fight`, `tally`, `kill-limit`, `kill-owner`, `observer-delay`, `ai-respawn`,
-and `idle-ai`. New mission settings use the same shared registry and validation.
+`idle-ai`, and `ai`. An entry may use `ai off`; the next entry inherits the
+server value again. New mission settings use the same shared registry and validation.
 Server-wide settings, including name, port, address, password, player capacity,
 visibility, broadcast, master, telemetry, port mapping, snapshot rate, King,
 start rule, restart delay and empty timeout, are refused inside entries.

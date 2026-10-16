@@ -114,6 +114,7 @@ pub(in crate::host) fn save_revivals(
         // step, for its log (slice R2).
         lead_before: _,
         players,
+        choices,
         held,
         pending,
         waiting,
@@ -124,6 +125,7 @@ pub(in crate::host) fn save_revivals(
         awaiting,
     } = revivals;
     players.save(s, None)?;
+    choices.save(s, None)?;
     by_order(saving, held.iter().map(|(c, seat)| (*c, *seat))).save(s, None)?;
     let pending = by_order(saving, pending.iter().map(|(c, p)| (*c, *p)));
     s.count(pending.len());
@@ -149,6 +151,7 @@ pub(in crate::host) fn load_revivals(
     restoring: &mut Restoring<'_>,
 ) -> Result<Revivals> {
     let players = Checkpoint::load(l, None)?;
+    let choices = Checkpoint::load(l, None)?;
     let held: BTreeMap<u64, tore_world::seats::SeatId> = Checkpoint::load(l, None)?;
     let held = held
         .into_iter()
@@ -178,6 +181,7 @@ pub(in crate::host) fn load_revivals(
         .map(|(order, root)| (restoring.connection(order), root))
         .collect();
     Ok(Revivals {
+        choices,
         players,
         held,
         pending,
@@ -210,6 +214,7 @@ mod tests {
     fn full_revivals_restore_by_join_order() {
         let c = ConnectionId;
         let revivals = Revivals {
+            choices: BTreeMap::from([(PlaneId(3), tore_formats::aircraft::AircraftId::Ac130)]),
             players: BTreeMap::from([
                 (
                     1,
@@ -307,6 +312,7 @@ mod tests {
             ])
         );
         assert_eq!(restored.waiting, [c(102), c(101)]);
+        assert_eq!(restored.choices, revivals.choices);
         assert_eq!(restored.starts, revivals.starts);
         assert_eq!(restored.spawned, revivals.spawned);
         assert_eq!(restored.players[&1].used, 2);

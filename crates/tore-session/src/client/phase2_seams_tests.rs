@@ -180,9 +180,14 @@ fn every_new_request_is_refused_in_words_until_its_slice_lands() {
 
     // A request meant for an earlier mission is refused as one.
     let now = rig.players[cobra].client.now;
-    rig.players[cobra]
-        .client
-        .request(now, Message::Revive { mission: 999 });
+    rig.players[cobra].client.request(
+        now,
+        Message::Revive {
+            mission: 999,
+            aircraft: None,
+            loadout: None,
+        },
+    );
     let now = rig.players[king].client.now;
     rig.players[king].client.request(
         now,
@@ -208,10 +213,34 @@ fn every_new_request_is_refused_in_words_until_its_slice_lands() {
 fn the_client_passes_the_hosts_new_messages_on_as_events() {
     let (mut rig, _, cobra) = gathered();
     let client = &mut rig.players[cobra].client;
-    for message in samples::phase_two_messages()
+    for mut message in samples::phase_two_messages()
         .into_iter()
         .filter(|m| (kind::REVIVAL..=kind::OBSERVING).contains(&m.kind()) && !m.from_player())
     {
+        if let Message::Spawned(spawned) = &mut message {
+            let world = client.mission().unwrap();
+            let spawn = world
+                .revival_spawn_as(
+                    tore_formats::aircraft::AircraftId::F18,
+                    [0., 10_000., 0.],
+                    12_000.,
+                    None,
+                    tore_world::world::revive::RevivalWeapons::Missiles,
+                )
+                .unwrap();
+            let new = world
+                .replacement_plane(
+                    tore_world::seats::PlaneId(0),
+                    tore_formats::aircraft::AircraftId::F18,
+                    &spawn,
+                )
+                .unwrap();
+            spawned.plane = new.plane.0;
+            spawned.wing = new.slot.wing;
+            spawned.member = new.slot.member;
+            spawned.aircraft = new.aircraft;
+            spawned.spawn = new.spawn;
+        }
         client.message(message);
     }
     let mut kinds = Vec::new();

@@ -744,9 +744,11 @@ Opinionated requirements from John, 2026-10-16:
   powered-lift aircraft and heavies. Existing content checks apply.
 - Taking a Choice slot opens the existing aircraft selector, then Load Ordnance.
   Loadout reopens this flow. All peers build the accepted per-plane types.
-- Every player waiting to revive gets Load Ordnance over the running flight,
-  with timer and revive prompt visible. Choice slots also offer the aircraft
-  selector. The host applies revive-weapons and loadouts own/any. Escape cancels
+- Every player waiting to revive gets loadout controls over the running flight,
+  with timer and revive prompt visible. Choice slots also offer aircraft
+  selection. John updated the in-flight presentation on 2026-10-16: use the
+  in-game Escape menu widget, font, panel, highlight, sounds and input controls;
+  the lobby continues to use the retail dialogs. The host applies revive-weapons and loadouts own/any. Escape cancels
   edits and input returns to flight after revival.
 - Taking a Choice slot from its AI default removes that aircraft and spawns the
   chosen one at the existing revival distance, side bearing, altitude and speed.
@@ -758,5 +760,11 @@ and proceeds to its ordnance page; cancelling ordnance sends nothing.
 
 Current implementation uses a Fixed/Player choice control beside each wing's
 existing aircraft field, which serves as its AI default, and an AI aircraft
-control above the wing rows when hosting. The in-flight overlay and changed-type
-late-join/revival path are not implemented yet. Visual layout is unverified.
+control above the wing rows when hosting. The in-flight menu uses station display
+order from the shared loadout model, cycles legal stores and quantities, and
+provides internal fuel, Standard load and Done. Capacity and weight validation
+use the same loadout code as the lobby and host. The host applies revive-weapons
+to the accepted choice. Agent presentation decision: aircraft lists use pages of
+12; quantities cycle in single units up to a capacity of 20, otherwise in
+ten-percent steps. Internal fuel cycles from 10 to 100 percent in ten-percent
+steps. Done stages a choice for the normal revive request; Escape discards edits.

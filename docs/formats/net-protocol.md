@@ -1684,7 +1684,7 @@ Refused (kind 20) with its words.
 | 23 | Pass crown | the King to host | The player's lobby id (8 bits) |
 | 24 | Settings | the King to host | A count (varint, 0 to 64), then each setting's number (8 bits) and value (varint); a presence bit and the game's name (a string); a presence bit and the password: 1 bit (0 clear it, 1 set it, then a string of 1 to 255 bytes). The host applies all or none: the first that fails refuses the whole message |
 | 27 | Slot lock | the King to host | The mission's number (varint), the plane (varint), the lock (2 bits: 0 open, 1 closed, 2 reserved) and, when reserved, the callsign (a string) |
-| 28 | Revive | client to host | The mission's number (varint): fly again after a loss, by the respawn rule |
+| 28 | Revive | client to host | Mission number (varint), optional aircraft and optional loadout: fly again after a loss with an atomically validated choice |
 | 29 | Revival | host to client | The seat's plane is lost: the rule (2 bits: 0 none, 1 AI slot, 2 revive), the lives left (1 bit unlimited, else 4 bits, 0 to 10), the seconds until it may fly again (varint), and a presence bit and a line of why it waits or cannot ("No lives left.", "Waiting for room for another aircraft.") |
 | 30 | Spawned | host to every player | A revival's new plane, which every client adds to its copy of the mission: the plane (varint), the tick (32 bits), its wing (side 1 bit, index 2 bits), its member (8 bits), its aircraft (6 bits, the roster's index), its position (three 64-bit floats, feet), heading and speed (64-bit floats, radians and feet a second), and its loadout as Seated codes one |
 | 31 | Scores | host to client | The tally (2 bits: kills 0, damage 1, ratio 2), the fight (1 bit: sides 0, free for all 1), a presence bit and the seconds left (varint), the kill limit (4 bits, 0 for none), the kill owner (2 bits: total 0, side 1, player 2); the players (a count, at most 64; each: lobby id 8 bits, callsign a string, a presence bit and its side 1 bit, kills, losses and damage in thousandths of an aircraft, each a varint); each side's kills, losses and damage (six varints); and the winner (2 bits: 0 none yet, 1 a side then 1 bit, 2 a player then 8 bits, 3 a draw) |
@@ -3202,7 +3202,7 @@ See [jettison](../spec/jettison.md). Protocol numbering belongs to the lead.
 
 ### Player Choice wire changes awaiting integration
 
-The nr-mpchoice slice leaves the protocol constant at 44 for the lead to bump.
+The nr-mpchoice continuation leaves the protocol constant at 46 for the lead to bump.
 Loadout (13) adds an optional aircraft after the plane number: one presence bit,
 then the existing six-bit aircraft code when present, before the optional loadout.
 FlightLoadouts (22) adds a counted list of `(plane varint, aircraft six bits)`
@@ -3210,4 +3210,11 @@ before its loadout list, limited to 64 entries. LobbySlot adds an optional
 six-bit AI-default aircraft immediately after its wing, before its member byte.
 Presence denotes Player Choice. The aircraft field remains the current selection.
 Mission text adds `wing-choice SIDE N` and `plane-aircraft PLANE AIRCRAFT`.
-No changed revive-request message has been implemented yet.
+Revive (28) now carries the mission varint, an optional aircraft (presence bit,
+then six-bit code), then an optional loadout (presence bit, then the existing
+loadout grammar). The host validates the pair atomically. Content catalogue
+Weapon items also include parsed `.GAS` tank records, so changed tanks use the
+same common-content check as weapons and designator pods. Spawned retains its
+existing aircraft and accepted spawn/loadout fields. No tape header or frame
+format changes; existing replay files retain their grammar. The wire golden and
+protocol number are refreshed by the lead at integration.

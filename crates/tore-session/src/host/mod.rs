@@ -1273,6 +1273,14 @@ impl Host {
     }
 
     /// The mission's world.
+    /// The accepted aircraft of a Player Choice slot, for server presentation.
+    pub fn choice_aircraft(&self, plane: u32) -> Option<tore_formats::aircraft::AircraftId> {
+        let entry = self.world.roster.plane(PlaneId(plane))?;
+        self.spec.player_choice[MissionSpec::wing_index(entry.slot.wing)]
+            .then(|| self.world.aircraft_of(PlaneId(plane)))
+            .flatten()
+    }
+
     pub fn world(&self) -> &World {
         &self.world
     }
@@ -1702,7 +1710,7 @@ impl Host {
             Message::Loadout(m) => Some(m.mission),
             Message::SetReady(m) => Some(m.mission),
             Message::SlotLock(m) => Some(m.mission),
-            Message::Revive { mission } => Some(*mission),
+            Message::Revive { mission, .. } => Some(*mission),
             _ => None,
         };
         if mission.is_some_and(|number| number != self.number) {
@@ -1799,8 +1807,10 @@ impl Host {
                 let result = self.lock_slot(connection, lock.plane, &lock.lock);
                 self.answer(connection, kind::SLOT_LOCK, "a slot lock", result);
             }
-            Message::Revive { .. } => {
-                let result = self.revive_request(connection);
+            Message::Revive {
+                aircraft, loadout, ..
+            } => {
+                let result = self.revive_selected(connection, aircraft, loadout);
                 self.answer(connection, kind::REVIVE, "a revival", result);
             }
             Message::Observe(observe) => {
@@ -2087,6 +2097,19 @@ impl Host {
         self.spec
             .open_planes()
             .into_iter()
+            .map(|mut plane| {
+                if matches!(self.life, Life::Flying) {
+                    let head = self.world.lineage_head(PlaneId(plane.id));
+                    plane.aircraft = self
+                        .revival
+                        .choices
+                        .get(&head)
+                        .copied()
+                        .or_else(|| self.world.aircraft_of(head))
+                        .unwrap_or(plane.aircraft);
+                }
+                plane
+            })
             .filter(|plane| {
                 self.config.open_planes.allows_in(
                     plane.id,
@@ -2221,6 +2244,14 @@ impl Host {
             self.spec.plane_aircraft = old;
             return Err(error);
         }
+        if matches!(self.life, Life::Flying) {
+            let selected = self.spec.plane_aircraft.get(&plane).copied();
+            self.spec.plane_aircraft = old;
+            if let Some(aircraft) = selected {
+                let head = self.world.lineage_head(PlaneId(plane));
+                self.revival.choices.insert(head, aircraft);
+            }
+        }
         self.lobby_dirty = true;
         Ok(())
     }
@@ -2231,7 +2262,16 @@ impl Host {
         plane: u32,
         loadout: Option<tore_world::mission::LoadoutSpec>,
     ) -> Result<(), String> {
-        if !matches!(self.life, Life::Lobby) {
+        let late_choice =
+            matches!(self.life, Life::Flying)
+                && self
+                    .peers
+                    .get(&connection)
+                    .is_some_and(|p| p.stage == Stage::Lobby)
+                && self.spec.open_planes().iter().any(|p| {
+                    p.id == plane && self.spec.player_choice[MissionSpec::wing_index(p.wing)]
+                });
+        if !matches!(self.life, Life::Lobby) && !late_choice {
             return Err("Loadouts are chosen in the lobby, before the mission flies.".into());
         }
         let peer = self.peers.get(&connection).ok_or("")?;
@@ -2357,6 +2397,11 @@ impl Host {
     /// next tick: `wanted`, or its slot's, or the first free friendly one
     /// (Friendly Wing 1's lead first), then any.
     fn take_now(&mut self, connection: ConnectionId, wanted: Option<u32>) {
+        if let Some(why) = self.runtime_content_refusal() {
+            self.refuse_seat(connection, why);
+            return;
+        }
+
         let Some(peer) = self.peers.get(&connection) else {
             return;
         };
@@ -2391,6 +2436,22 @@ impl Host {
             return;
         };
         let wanted = wanted.or(held.map(|p| p.0));
+        if let Some(plane) = wanted.map(PlaneId)
+            && let Some(slot) = self
+                .spec
+                .open_planes()
+                .into_iter()
+                .find(|p| p.id == self.root_of(plane).0)
+            && self.spec.player_choice[MissionSpec::wing_index(slot.wing)]
+        {
+            let head = self.world.lineage_head(self.root_of(plane));
+            if let Some(why) = self.refusal(seat, head, connection) {
+                self.refuse_seat(connection, why);
+            } else {
+                self.join_empty(connection, seat, head);
+            }
+            return;
+        }
         if !self.settings.ai()
             && let Some(plane) = wanted.map(PlaneId)
         {
@@ -3166,7 +3227,20 @@ impl Host {
                 given.push(seat);
                 continue;
             }
-            if !self.settings.ai() && self.world.can_give_back(seat).is_ok() {
+            let choice_departure = self
+                .world
+                .roster
+                .seat(seat)
+                .and_then(|s| s.plane)
+                .and_then(|p| self.world.roster.plane(p))
+                .is_some_and(|p| {
+                    self.spec.player_choice[MissionSpec::wing_index(p.slot.wing)]
+                        && !self
+                            .rejoin
+                            .reserved_plane(p.id)
+                            .is_some_and(|(_, kept)| kept.away)
+                });
+            if (!self.settings.ai() || choice_departure) && self.world.can_give_back(seat).is_ok() {
                 if let Some(plane) = self.world.roster.seat(seat).and_then(|s| s.plane) {
                     commands.push(MissionCommand::Despawn { plane });
                 }
@@ -3177,6 +3251,29 @@ impl Host {
             } else {
                 self.revive_keep(seat, &mut commands);
                 given.push(seat);
+            }
+        }
+
+        // A Choice player may leave while already away. Its reserved AI
+        // aircraft then returns to the authored default through normal respawn.
+        if tick > 0 && self.settings.ai() && self.spec.player_choice.iter().any(|choice| *choice) {
+            for (_, head) in self.world.lineage_heads() {
+                let Some(plane) = self.world.roster.plane(head) else {
+                    continue;
+                };
+                let wing = MissionSpec::wing_index(plane.slot.wing);
+                if self.spec.player_choice[wing]
+                    && plane.pilot == Pilot::Ai
+                    && !self.world.head_lost(head)
+                    && self.world.aircraft_of(head) != Some(self.spec.wings[wing].aircraft)
+                    && matches!(self.lineage_holder(head), revive::Holder::Ai)
+                    && !self
+                        .peers
+                        .values()
+                        .any(|p| matches!(p.stage, Stage::Taking { plane, .. } if plane == head))
+                {
+                    commands.push(MissionCommand::Despawn { plane: head });
+                }
             }
         }
 

@@ -439,7 +439,11 @@ fn spawn_in_aircraft_after_a_loss_while_away_is_the_revival_rules_revive() {
         ["The AI is not flying your aircraft."]
     );
     let mission = rig.clients[viper].number();
-    rig.clients[viper].send(&Message::Revive { mission });
+    rig.clients[viper].send(&Message::Revive {
+        mission,
+        aircraft: None,
+        loadout: None,
+    });
     assert!(rig.run_until(Duration::from_secs(3), |r| {
         r.clients[viper]
             .seated
@@ -464,7 +468,11 @@ fn spawn_in_aircraft_under_no_revival_is_refused_in_the_rules_words() {
     }));
     assert_eq!(rig.clients[viper].revivals[0].rule, Respawn::None);
     let mission = rig.clients[viper].number();
-    rig.clients[viper].send(&Message::Revive { mission });
+    rig.clients[viper].send(&Message::Revive {
+        mission,
+        aircraft: None,
+        loadout: None,
+    });
     rig.run(Duration::from_millis(500));
     assert_eq!(peer(&rig, "Viper").stage, Stage::Lobby);
     assert!(

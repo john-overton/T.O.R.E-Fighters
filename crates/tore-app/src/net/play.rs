@@ -101,6 +101,12 @@ pub struct NetFlight {
     /// When the revival prompt was last said, and whether it said the
     /// player may fly again (stage F phase 2, slice F2-V).
     revival_said: Option<(Instant, bool)>,
+    pub(crate) respawn_menu: Option<super::respawn::Menu>,
+    pub(crate) respawn_seen: bool,
+    pub(crate) respawn_choice: Option<(
+        tore_formats::aircraft::AircraftId,
+        tore_world::mission::LoadoutSpec,
+    )>,
     /// The AI flies the plane while the player is away (slice F2-A).
     pub(crate) idle: crate::net::away::Idle,
     /// The surface units' states last put into the game's copy of the
@@ -418,6 +424,13 @@ impl App {
             ClientEvent::Spawned(spawned) => {
                 if self.net_flight.is_some() {
                     add_spawned(&mut self.world, std::slice::from_ref(&spawned));
+                    if let Err(error) = self.combat_view.prepare_spawn(
+                        &self.world,
+                        &spawned,
+                        &self.theater_resources,
+                    ) {
+                        log::warn!("Network: revival art could not be loaded: {error}");
+                    }
                 }
             }
             // The slices that build each part show them.
@@ -587,8 +600,13 @@ impl App {
                 .take_plane(SEAT, crate::seats::PlaneId(plane))
                 .map_err(|error| error.to_string())?;
             let hornet = Airframe::load(&resources, aircraft)?;
-            let view = CombatView::with_models(&world.combat, plane, &resources, models)
+            let mut view = CombatView::with_models(&world.combat, plane, &resources, models)
                 .map_err(|error| error.to_string())?;
+            if let Some(session) = &self.net {
+                for spawned in session.client.spawned() {
+                    view.prepare_spawn(&world, spawned, &resources)?;
+                }
+            }
             let scenery = scenery::Scenery::build(&resources, &world.terrain)?;
             Ok((hornet, view, scenery))
         })();
@@ -661,6 +679,9 @@ impl App {
             was_burning: false,
             score_board: false,
             revival_said: None,
+            respawn_menu: None,
+            respawn_seen: false,
+            respawn_choice: None,
             idle: Default::default(),
             surface_units: Default::default(),
         });
@@ -843,6 +864,7 @@ impl App {
     /// 0:45"), said again every few seconds and when the player may fly
     /// again (slice F2-V).
     fn revival_prompt(&mut self) {
+        self.open_respawn_menu();
         let Some(session) = &self.net else {
             return;
         };
@@ -879,7 +901,15 @@ impl App {
             return false;
         };
         if session.client.may_fly_again() {
-            session.client.revive();
+            if let Some((aircraft, loadout)) = self
+                .net_flight
+                .as_mut()
+                .and_then(|f| f.respawn_choice.take())
+            {
+                session.client.revive_choice(Some(aircraft), Some(loadout));
+            } else {
+                session.client.revive();
+            }
             self.flight_ui.message("Flying again...");
         } else {
             self.flight_ui.message(text);

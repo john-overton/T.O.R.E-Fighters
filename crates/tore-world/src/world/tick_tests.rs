@@ -265,6 +265,7 @@ pub(super) fn mission() -> World {
         ai_planes(&wings).collect::<Vec<_>>(),
     );
     World {
+        choices: Default::default(),
         terrain,
         roster,
         cockpits: vec![Cockpit {

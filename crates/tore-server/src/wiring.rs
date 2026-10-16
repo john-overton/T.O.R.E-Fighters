@@ -340,10 +340,16 @@ impl SessionHost {
                     callsign,
                     plane,
                     ..
-                } => Event::Seated {
-                    seat,
-                    callsign,
-                    plane,
+                } => match self.host.choice_aircraft(plane) {
+                    Some(aircraft) => Event::Note(format!(
+                        "{callsign} took plane {plane} (Player choice): {}",
+                        aircraft.short_label()
+                    )),
+                    None => Event::Seated {
+                        seat,
+                        callsign,
+                        plane,
+                    },
                 },
                 HostLog::Left {
                     seat,

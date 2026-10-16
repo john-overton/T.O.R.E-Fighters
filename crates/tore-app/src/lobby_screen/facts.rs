@@ -481,8 +481,10 @@ pub fn slot_rows(lobby: &LobbyState) -> Vec<Row> {
                         )
                     }),
                     Cell::Text(match slot.choice {
-                        Some(ai) if slot.holder.is_none() => format!("Choice (AI: {})", ai.label()),
-                        Some(_) => format!("Choice: {}", slot.aircraft.label()),
+                        Some(ai) if slot.holder.is_none() => {
+                            format!("Choice AI: {}", ai.short_label())
+                        }
+                        Some(_) => format!("Choice: {}", slot.aircraft.short_label()),
                         None => slot.aircraft.label().to_owned(),
                     }),
                     Cell::Text(slot_holder_text(slot, holder)),

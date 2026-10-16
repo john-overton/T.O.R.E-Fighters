@@ -1018,6 +1018,8 @@ pub enum Message {
     /// mission's number. Answered by a Seated message or a Refused.
     Revive {
         mission: u32,
+        aircraft: Option<AircraftId>,
+        loadout: Option<LoadoutSpec>,
     },
     /// The seat's plane is lost (host to client).
     Revival(Box<Revival>),
@@ -2637,7 +2639,21 @@ impl Message {
                 w.write_varint(u64::from(lock.plane));
                 write_lock(&mut w, &lock.lock);
             }
-            Self::Revive { mission } => w.write_varint(u64::from(*mission)),
+            Self::Revive {
+                mission,
+                aircraft,
+                loadout,
+            } => {
+                w.write_varint(u64::from(*mission));
+                w.write_bool(aircraft.is_some());
+                if let Some(aircraft) = aircraft {
+                    let _ = w.write_bits(aircraft_code(*aircraft), 6);
+                }
+                w.write_bool(loadout.is_some());
+                if let Some(loadout) = loadout {
+                    write_loadout(&mut w, loadout)?;
+                }
+            }
             Self::Revival(revival) => write_revival(&mut w, revival)?,
             Self::Spawned(spawned) => write_spawned(&mut w, spawned)?,
             Self::Scores(scores) => write_scores(&mut w, scores)?,
@@ -2858,6 +2874,8 @@ impl Message {
             })),
             kind::REVIVE => Self::Revive {
                 mission: read_u32(r)?,
+                aircraft: bits::read_option(r, read_aircraft)?,
+                loadout: bits::read_option(r, read_loadout)?,
             },
             kind::REVIVAL => Self::Revival(Box::new(read_revival(r)?)),
             kind::SPAWNED => Self::Spawned(Box::new(read_spawned(r)?)),
