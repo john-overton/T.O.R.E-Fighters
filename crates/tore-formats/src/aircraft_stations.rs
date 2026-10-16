@@ -1,0 +1,163 @@
+//! Opinionated extra stations requested by John, 2026-10-15.
+//! Guarded additions only; source rows and their indices are preserved.
+//! Contract and fitted coordinates: docs/spec/stores-on-pylons.md.
+use super::{AircraftId, Hardpoint};
+
+pub const F15_CENTER: usize = 6;
+pub const F15_WING_TANKS: usize = 7;
+pub const F16_WET: usize = 9;
+
+/// These names have authored GAS records, generated in memory at pack load.
+/// Fuel uses the game's 6.6 lb/US gal convention; shell weights are fitted by
+/// scaling the 350 gallon class (248 lb), rounded to whole pounds.
+pub const TANKS: [(&str, u16, i32, u16); 2] =
+    [("F610.GAS", 610, 4026, 432), ("F370.GAS", 370, 2442, 262)];
+
+/// Canonical authored bytes, also used by the old combat-tape media guard.
+pub fn resource(name: &str) -> Option<Vec<u8>> {
+    let (_, gallons, fuel, shell) = TANKS.iter().find(|t| t.0 == name)?;
+    Some(format!("[brent's_relocatable_format]\nbyte 8\nptr si_names\nword {shell}\nbyte 1\ndword {fuel}\n:si_names\nstring \"{gallons} gallon tank\"\nstring \"{gallons} Gallon External Fuel Tank\"\nstring \"{name}\"\nend\n").into_bytes())
+}
+
+pub fn extend_resources(resources: &mut std::collections::BTreeMap<String, Vec<u8>>) {
+    for (name, ..) in TANKS {
+        resources
+            .entry(name.into())
+            .or_insert_with(|| resource(name).expect("known authored tank"));
+    }
+}
+
+/// Index in the existing nine fuel banks. F-16 row 9 uses bank 0, which its
+/// fixed visual sensor cannot fuel. Configuration rejects bank collisions.
+/// No serialized array or previous aircraft's fuel bank changes.
+pub fn fuel_bank(hardpoint: usize) -> Option<usize> {
+    match hardpoint {
+        0..=8 => Some(hardpoint),
+        F16_WET => Some(0),
+        _ => None,
+    }
+}
+
+/// Restrict the new tank identities to the requested real carriers. Existing
+/// GAS types retain the game's compatibility rules, including Cheat loading.
+pub fn tank_allowed(id: AircraftId, row: usize, name: &str) -> bool {
+    match name {
+        "F610.GAS" => id == AircraftId::F15 && matches!(row, F15_CENTER | F15_WING_TANKS),
+        "F370.GAS" => id == AircraftId::F16C && row == F16_WET,
+        _ => true,
+    }
+}
+
+type Signature = (u8, i32, [i32; 3], &'static str, i32, i32);
+
+fn signature(id: AircraftId) -> &'static [Signature] {
+    // Check every source row, not just the identity. Edited records keep
+    // their own station definitions; repeated application is a no-op.
+    match id {
+        AircraftId::F15 => &[
+            (1, 8, [0, 0, 0], "VIS340.SEE", 1, 0),
+            (1, 8, [0, 0, 0], "F15R.SEE", 1, 0),
+            (1, 8, [0, 0, -50], "F15.ECM", 1, 0),
+            (1, 8, [5, -5, -5], "M61.JT", 940, 0),
+            (1, 0x7e5, [25, -10, 0], "AIM120.JT", 4, 60),
+            (4, 0x7e5, [50, -20, 0], "AIM9M.JT", 4, 14),
+        ],
+        AircraftId::F16C => &[
+            (1, 8, [0, 0, 0], "VIS340.SEE", 1, 0),
+            (1, 8, [0, 0, 0], "F18R.SEE", 1, 0),
+            (1, 8, [0, 0, -50], "F18.ECM", 1, 0),
+            (1, 8, [0, 0, 50], "PAVESPK.SEE", 1, 0),
+            (2, 8, [-11, 3, 31], "M61.JT", 500, 0),
+            (0, 0x601, [0, -20, 0], "F150.GAS", 1, 26),
+            (4, 0x7e5, [32, -10, -7], "AGM65G.JT", 4, 27),
+            (4, 0x185, [43, -10, -11], "AIM120.JT", 2, 13),
+            (5, 0x85, [54, 2, -14], "AIM9M.JT", 2, 4),
+        ],
+        _ => &[],
+    }
+}
+
+pub fn append(id: AircraftId, rows: &mut Vec<Hardpoint>) {
+    let signature = signature(id);
+    if signature.is_empty() {
+        return;
+    }
+    if rows.len() != signature.len()
+        || !rows.iter().zip(signature).all(|(h, s)| {
+            (
+                h.location,
+                h.flags,
+                h.position,
+                h.store.as_deref(),
+                h.count,
+                h.weight_class,
+            ) == (s.0, s.1, s.2, Some(s.3), s.4, s.5)
+        })
+    {
+        return;
+    }
+    let row = |location, flags, position, count, weight_class| Hardpoint {
+        location,
+        flags,
+        position,
+        count,
+        weight_class,
+        store: None,
+    };
+    match id {
+        AircraftId::F15 => {
+            rows.push(row(0, 0x201, [0, -24, -9], 1, 45));
+            rows.push(row(4, 0x205, [50, -20, -16], 2, 90));
+        }
+        AircraftId::F16C => rows.push(row(4, 0x3e5, [21, -18, -3], 2, 60)),
+        _ => unreachable!(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn additions_are_empty_guarded_and_idempotent() {
+        for (id, total) in [(AircraftId::F15, 8), (AircraftId::F16C, 10)] {
+            let original: Vec<_> = signature(id)
+                .iter()
+                .map(|s| Hardpoint {
+                    location: s.0,
+                    flags: s.1,
+                    position: s.2,
+                    store: Some(s.3.into()),
+                    count: s.4,
+                    weight_class: s.5,
+                })
+                .collect();
+            let mut rows = original.clone();
+            append(id, &mut rows);
+            assert_eq!(rows.len(), total);
+            assert!(rows[original.len()..].iter().all(|h| h.store.is_none()));
+            append(id, &mut rows);
+            assert_eq!(rows.len(), total);
+            for index in 0..original.len() {
+                let mut edited = original.clone();
+                edited[index].position[0] += 1;
+                append(id, &mut edited);
+                assert_eq!(edited.len(), original.len());
+            }
+        }
+    }
+    #[test]
+    fn authored_tanks_parse_and_explicit_records_win() {
+        let mut data = std::collections::BTreeMap::new();
+        extend_resources(&mut data);
+        for (name, _, fuel, shell) in TANKS {
+            let t = crate::weapons::Tank::parse(&data[name]).unwrap();
+            assert_eq!((t.fuel_weight, t.empty_weight), (fuel, shell));
+        }
+        data.insert("F610.GAS".into(), b"edited".to_vec());
+        extend_resources(&mut data);
+        assert_eq!(data["F610.GAS"], b"edited");
+        assert_eq!(fuel_bank(F16_WET), Some(0));
+        assert_eq!(fuel_bank(10), None);
+        assert!(!tank_allowed(AircraftId::F18, 7, "F610.GAS"));
+    }
+}

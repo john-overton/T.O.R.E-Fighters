@@ -605,7 +605,9 @@ pub fn equipment_damage_report(config: &live::Configuration, ro: &CockpitReadout
         .filter(|i| ro.damage.subsystem_counts[*i] > 0)
         .map(|i| {
             let hardpoint = i - 36;
-            if config.external_fuel_lbs[hardpoint] > 0. {
+            if config.tanks.iter().any(|tank| tank.hardpoint == hardpoint)
+                && config.external_fuel_lbs[hardpoint] > 0.
+            {
                 format!("External tank {} damaged", hardpoint + 1)
             } else if let Some(Some(slot)) = config.hardpoint_slots.get(hardpoint) {
                 format!("{} station failed", config.stations[*slot].weapon.hud_name)

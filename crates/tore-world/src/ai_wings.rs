@@ -2819,7 +2819,9 @@ impl AiWings {
         };
         let mut equipment = EquipmentFaults::default();
         for h in hardpoints {
-            if config.external_fuel_lbs[h] > 0. {
+            if config.tanks.iter().any(|tank| tank.hardpoint == h)
+                && config.external_fuel_lbs[h] > 0.
+            {
                 actor.flight_mut().systems.fuel.external[h] = 0.;
             } else if let Some(&Some(station)) = config.hardpoint_slots.get(h) {
                 let station = station as u8;

@@ -353,12 +353,21 @@ def scenarios() -> list[Scenario]:
         check_work=wing_loadout_recording_problems,
         notes="QMC four-ship F-16 custom Mk82/AIM9 load, removed tanks and reduced fuel, recorded before/after at start; airborne, ground and restart equality.",
     ))
+    out.append(Scenario(
+        name="menus-derived-stations", lane="menus",
+        args=["--validate-ordnance", "--no-audio"],
+        expect=[
+            r"derived stations F15.PT: 3 extra tanks, 12078 lb fuel, 1296 lb shells; feed, jettison, save and old load passed",
+            r"derived stations F16C.PT: 2 extra tanks, 4884 lb fuel, 524 lb shells; feed, jettison, save and old load passed",
+        ],
+        notes="Derived Eagle and Falcon wet rows through normal selection, fuel, jettison, mission and profile saves, and old-load restoration.",
+    ))
     out.append(
         Scenario(
             name="menus-ordnance-availability",
             lane="menus",
             args=["--validate-ordnance", "--no-audio"],
-            expect=[r"ordnance audit: 36 aircraft, 9 recovered weapon stations, 3319 weapon placements, 146 tank placements, 78 weapon and 4 tank records; passed"],
+            expect=[r"ordnance audit: 36 aircraft, 10 recovered weapon stations, 3372 weapon placements, 161 tank placements, 78 weapon and 6 tank records; passed"],
             notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration. The audit fails when a supported weapon or tank record is missing or a pinned count moves (ordnance_audit.rs).",
         )
     )

@@ -175,6 +175,17 @@ impl Loadout {
         })
     }
     pub fn tank_capacity(&self, slot: usize, tank: &live::TankStore) -> i32 {
+        if !self.cheat
+            && self.configuration.tanks.get(slot).is_none_or(|station| {
+                !tore_formats::aircraft::stations::tank_allowed(
+                    self.aircraft,
+                    station.hardpoint,
+                    &tank.source,
+                )
+            })
+        {
+            return 0;
+        }
         self.tank_hardpoints
             .get(slot)
             .and_then(|h| {

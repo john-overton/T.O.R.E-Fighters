@@ -72,6 +72,16 @@ load/save, catalog and mission-validation checks. Tank placements remain 146.
 R-27 family/rail restrictions replace generic compatibility. All four family
 carriers pass saved-load roundtrips; see [missile identities](../spec/missiles.md#corrected-identities-and-r-27-stores).
 
+The [derived F-15C and F-16C stations](../spec/stores-on-pylons.md#derived-f-15c-and-f-16c-stations)
+(John, 2026-10-15) add the F-15C centreline and wing tank rows and the F-16C
+inner wet pair, with two authored tank records (610 and 370 gallon). The audit
+now pins 10 recovered weapon rows, 3,372 weapon placements, 161 tank placements,
+6 tank records and 162 Cheat-only novelty placements. For both aircraft it also
+loads the full requested set (F-15C: four fuselage missiles, four AIM-9M and
+three 610 gallon tanks; F-16C: two 370 gallon tanks beside its default load),
+checks fuel feed, Shift+K jettison, the F-16C wet row's selected-store jettison,
+mission and profile saves, and an old saved load restoring with the new rows empty.
+
 The F-14 probe separately covers zero, one and two F250 tanks, external fuel,
 shell mass, total mass, consumption order and accepted-load restoration. It is
 the reviewed F-14 contract only: `--validate-tanks` refuses any other

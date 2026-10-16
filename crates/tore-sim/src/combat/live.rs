@@ -624,10 +624,12 @@ impl Configuration {
         let mut fuel = [0.; 9];
         let mut used = [false; 9];
         for station in &self.tanks {
-            if station.hardpoint >= fuel.len() || station.mount.iter().any(|v| !v.is_finite()) {
+            let bank = tore_formats::aircraft::stations::fuel_bank(station.hardpoint)
+                .ok_or_else(|| super::invalid("invalid tank fuel bank"))?;
+            if station.mount.iter().any(|v| !v.is_finite()) {
                 return Err(super::invalid("invalid tank station"));
             }
-            if std::mem::replace(&mut used[station.hardpoint], true) {
+            if std::mem::replace(&mut used[bank], true) {
                 return Err(super::invalid("duplicate tank station"));
             }
             if let Some(store) = &station.store {
@@ -642,8 +644,7 @@ impl Configuration {
                                 + i64::from(store.tank.fuel_weight)),
                     )
                     .ok_or_else(|| super::invalid("tank mass overflow"))?;
-                fuel[station.hardpoint] +=
-                    f64::from(station.quantity) * f64::from(store.tank.fuel_weight);
+                fuel[bank] += f64::from(station.quantity) * f64::from(store.tank.fuel_weight);
             } else if station.quantity != 0 {
                 return Err(super::invalid("tank quantity has no selected type"));
             }
@@ -759,7 +760,7 @@ impl Configuration {
             super::hardpoints::placed_on(a.id, index, h, model.as_ref())
         };
         let mut tanks = Vec::new();
-        for (index, h) in hardpoints.iter().enumerate().take(9) {
+        for (index, h) in hardpoints.iter().enumerate() {
             let default = h.store.as_deref().filter(|name| name.ends_with(".GAS"));
             let retained_equipment = h
                 .store
@@ -769,7 +770,12 @@ impl Configuration {
                 && !retained_equipment
                 && (h.flags & 0x200 != 0 || default.is_some())
             {
-                let (mount, rack) = place(index, h);
+                let (mount, mut rack) = place(index, h);
+                // Replacing the Eagle's old missile row with a tank retains
+                // its under-pylon position, not the missiles' shoulder height.
+                if a.id == AircraftId::F15 && index == 5 {
+                    rack.location = super::hardpoints::Location::Wing.byte();
+                }
                 tanks.push(TankStation {
                     hardpoint: index,
                     mount,
@@ -6771,6 +6777,74 @@ mod tests {
                 );
                 load.hardpoints[0].flags = 0xc0;
             }
+        }
+    }
+
+    #[test]
+    fn derived_wet_rows_enforce_capacity_and_feed_without_changing_fuel_layout() {
+        use crate::combat::{loading, loadout::Loadout};
+        use tore_formats::aircraft::{Hardpoint, stations};
+        let mut resources = std::collections::BTreeMap::new();
+        stations::extend_resources(&mut resources);
+        for (id, row, name, count, limit) in [
+            (AircraftId::F15, 6, "F610.GAS", 1, 45),
+            (AircraftId::F15, 7, "F610.GAS", 2, 90),
+            (AircraftId::F16C, 9, "F370.GAS", 2, 60),
+        ] {
+            let tank = TankStore::parse(name, &resources[name]).unwrap();
+            let h = Hardpoint {
+                location: if row == 6 { 0 } else { 4 },
+                flags: 0x205,
+                position: [0; 3],
+                store: None,
+                count,
+                weight_class: limit,
+            };
+            assert_eq!(
+                loading::Station::from_source(&h)
+                    .unwrap()
+                    .allowed_count(loading::Store::tank(tank.tank), false),
+                count
+            );
+            let mut config = fixture(false).own().configuration().clone();
+            config.stations.clear();
+            config.hardpoint_slots = vec![None; row + 1];
+            config.tanks = vec![TankStation {
+                hardpoint: row,
+                mount: [7., -5., -1.],
+                rack: crate::combat::hardpoints::Rack::from_source(&h),
+                store: None,
+                quantity: 0,
+            }];
+            config.refresh_tanks().unwrap();
+            let mut load = Loadout {
+                aircraft: id,
+                configuration: config,
+                quantities: vec![],
+                fuel_lbs: 5000.,
+                internal_capacity_lbs: 5000.,
+                empty_lbs: 10000.,
+                maximum_lbs: 50000.,
+                hardpoints: vec![],
+                tank_hardpoints: vec![h],
+                cheat: false,
+            };
+            load.select_tank(0, tank.clone()).unwrap();
+            load.validate().unwrap();
+            let pounds = f64::from(count * tank.tank.fuel_weight);
+            assert_eq!(
+                load.configuration.external_fuel_lbs[stations::fuel_bank(row).unwrap()],
+                pounds
+            );
+            let mut fuel = crate::aircraft_systems::Fuel::new(load.configuration.external_fuel_lbs);
+            let mut internal = load.fuel_lbs;
+            fuel.consume(&mut internal, pounds + 5.);
+            assert_eq!(internal, 4995.);
+            load.configuration.tanks[0].quantity += 1;
+            load.refresh_equipment().unwrap();
+            assert!(load.validate().is_err());
+            load.aircraft = AircraftId::F18;
+            assert_eq!(load.tank_capacity(0, &tank), 0);
         }
     }
 
