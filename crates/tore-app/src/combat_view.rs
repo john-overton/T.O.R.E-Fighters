@@ -744,11 +744,11 @@ pub(crate) mod render_hash_tests {
         // including the Hornet's retained main-gear art at full stow. Combat,
         // camera and ejection outputs below are unchanged by that repair.
         0x6031_e577_f39a_cffe,
-        // nr-tracer (2026-10-15): gun ribbons now carry side, projected
-        // length and radiance for per-view night expansion in the shader.
+        // nr-tracer2 (2026-10-16): green gun records add a colour-family
+        // tag to the existing ribbon payload; red vertices stay unchanged.
         // Only these two combat vertex payload hashes change.
-        0xf271_346d_6b57_3054,
-        0xb573_b89e_d63b_0d7d,
+        0xa794_e952_1a4c_8664,
+        0x1165_c33e_7716_7f4d,
         0x7ddb_79bb_1315_bf69,
         0x7e3f_dcdd_a149_201d,
     ];
