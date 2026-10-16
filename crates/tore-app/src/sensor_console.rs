@@ -95,6 +95,36 @@ pub enum SensorMode {
     NightVision,
 }
 impl SensorMode {
+    /// Every picture, in the cycling key's order.
+    pub const ALL: [Self; 4] = [Self::WhiteHot, Self::BlackHot, Self::Tv, Self::NightVision];
+    /// The direct key's action for this picture (nr-replayviews,
+    /// 2026-10-16: John asked for shortcuts straight to each picture in
+    /// every sensor view; the keys, Shift+F5 to Shift+F8 in this order, are
+    /// an agent decision).
+    pub fn action(self) -> &'static str {
+        match self {
+            Self::WhiteHot => "sight-whot",
+            Self::BlackHot => "sight-bhot",
+            Self::Tv => "sight-tv",
+            Self::NightVision => "sight-nvg",
+        }
+    }
+    /// The picture a direct key's action chooses.
+    pub fn of_action(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|m| m.action() == name)
+    }
+    /// The picture of a function key held with Shift: F5 white hot, F6
+    /// black hot, F7 TV, F8 night vision (the replay viewer reads its keys
+    /// itself; flight binds the same keys in the stock profile).
+    pub fn of_function_key(name: &str) -> Option<Self> {
+        match name {
+            "F5" => Some(Self::WhiteHot),
+            "F6" => Some(Self::BlackHot),
+            "F7" => Some(Self::Tv),
+            "F8" => Some(Self::NightVision),
+            _ => None,
+        }
+    }
     /// The next mode on the key.
     pub fn cycled(self) -> Self {
         match self {
@@ -1447,6 +1477,325 @@ fn gimbal(m: &mut Mask, sym: &Symbology, c: (f64, f64), r: f64, t: i32, s: i32) 
     if sym.gimbal_limit && sym.blink {
         centred(m, "LIMIT", (c.1 + r) as i32 + 3 * s + ROW * s);
     }
+}
+
+// ---------------------------------------------------------------------------
+// A targeting sight outside the AC-130: the replay's Sensor View
+// (nr-replayviews, 2026-10-16). The same picture modes, CRT and drawing as
+// the console, with the aircraft's own symbology instead of the gunship's:
+// what it is and whose, the pod, the laser and a buddy's, the weapon and its
+// time to impact. Layout and wording are agent decisions.
+// ---------------------------------------------------------------------------
+
+/// The laser as the pod view shows it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PodLaser {
+    /// LASE (lasing), LSR RDY, MASK or OFF.
+    pub state: &'static str,
+    /// From the sensor to the spot, feet, while there is one.
+    pub range_ft: Option<f64>,
+    /// Why it is masked (gimbal, range, terrain).
+    pub mask: Option<String>,
+}
+
+/// What a mark on the pod picture is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PodMark {
+    /// A laser spot: the aircraft's own, or another's (a buddy's).
+    Spot { own: bool },
+    /// The designated target.
+    Designated,
+    /// Where a guided weapon steers.
+    Aim,
+    /// Where a bomb landed.
+    Impact,
+}
+
+/// Everything the pod view's symbology shows, in plain numbers.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PodSymbology {
+    pub sensor: SensorMode,
+    /// What the line of sight follows: LSR (the laser spot), TRK (a
+    /// designated object), PNT (a designated point), WPN (a guided weapon's
+    /// aim), IMP (a bomb's landing) or FWD (the sight's default look).
+    pub mode: &'static str,
+    pub zoom: u8,
+    pub fov_deg: f64,
+    /// The aircraft's type and label, and the sensor's name.
+    pub aircraft: String,
+    pub pod: String,
+    pub heading_deg: f64,
+    pub agl_ft: f64,
+    pub airspeed_kt: f64,
+    /// The sensor's body-relative [heading, elevation], radians.
+    pub look: [f64; 2],
+    pub los_deg: f64,
+    pub slant_ft: Option<f64>,
+    pub gimbal_limit: bool,
+    /// The aircraft's own laser, when it has one.
+    pub laser: Option<PodLaser>,
+    /// A buddy's spot this aircraft's weapon follows: `BUDDY 1-2 2.3NM`.
+    pub buddy: Option<String>,
+    pub target: Option<TargetLine>,
+    /// The weapon last released or in flight: `WPN GBU-10`.
+    pub weapon: Option<String>,
+    /// `TTI 0:12`, with `X2` for several, or `IMPACT`.
+    pub tti: Option<String>,
+    /// The latest landing's words, for twenty seconds.
+    pub impact: Option<String>,
+    /// A line under the status: where the sight line came from when the
+    /// recording does not hold it.
+    pub notice: Option<String>,
+    pub marks: Vec<(Vector, PodMark)>,
+    pub blink: bool,
+}
+
+impl PodSymbology {
+    /// The status line: the gimbal limit, else the laser's state, else the
+    /// sight's.
+    pub fn status(&self) -> String {
+        if self.gimbal_limit {
+            return "GIMBAL LIMIT".into();
+        }
+        match &self.laser {
+            Some(PodLaser {
+                state: "MASK",
+                mask: Some(why),
+                ..
+            }) => format!("MASK {}", tore_formats::text::upper(why)),
+            Some(laser) if laser.state != "OFF" => laser.state.into(),
+            _ => self.mode.into(),
+        }
+    }
+}
+
+/// The text of a laser range: feet, then nautical miles.
+pub fn laser_range(feet: f64) -> String {
+    format!(
+        "LSR {:.0}FT {:.1}NM",
+        feet.max(0.),
+        feet.max(0.) / tore_sim::sensors::FEET_PER_NAUTICAL_MILE
+    )
+}
+
+/// The pod view's overlay for `camera` at `size`: straight-alpha sRGB RGBA.
+pub fn draw_pod(sym: &PodSymbology, camera: &Camera, size: [u32; 2]) -> Vec<u8> {
+    let mut m = Mask::new(size);
+    let (w, h) = (f64::from(size[0]), f64::from(size[1]));
+    let s = text_scale(size[1]);
+    let t = ((h / 540.).round() as i32).max(1);
+    let o = t;
+    let row = ROW * s;
+    let left = (w * 0.06) as i32;
+    let right = (w * 0.94) as i32;
+    let top = (h * 0.10) as i32;
+    let right_text = |m: &mut Mask, text: &str, y: i32| {
+        m.text(text, right - text_width(text, s), y, s, 1);
+    };
+    // Top left: what the sight follows, the field, the sensor; the aircraft
+    // and the pod.
+    m.text(
+        &format!(
+            "{}  {}  {}",
+            sym.mode,
+            field_name(sym.zoom),
+            sym.sensor.sensor()
+        ),
+        left,
+        top,
+        s,
+        1,
+    );
+    m.text(&format!("FOV {:.1}*", sym.fov_deg), left, top + row, s, 1);
+    m.text(&sym.aircraft, left, top + 2 * row, s, 1);
+    m.text(&sym.pod, left, top + 3 * row, s, 1);
+    // Top right: heading, height, airspeed, polarity.
+    right_text(
+        &mut m,
+        &format!("HDG {:03.0}", sym.heading_deg.rem_euclid(360.)),
+        top,
+    );
+    right_text(&mut m, &format!("{:.0} AGL", sym.agl_ft.max(0.)), top + row);
+    right_text(
+        &mut m,
+        &format!("{:.0} KTAS", sym.airspeed_kt.max(0.)),
+        top + 2 * row,
+    );
+    right_text(&mut m, sym.sensor.label(), top + 3 * row);
+    // Left, middle: the sensor's angles.
+    let mid = (h * 0.42) as i32;
+    m.text(
+        &format!("AZ {:03.0}", sym.look[0].to_degrees().rem_euclid(360.)),
+        left,
+        mid,
+        s,
+        1,
+    );
+    m.text(
+        &format!("EL {:+03.0}", sym.look[1].to_degrees()),
+        left,
+        mid + row,
+        s,
+        1,
+    );
+    m.text(
+        &format!("LOS {:03.0}", sym.los_deg),
+        left,
+        mid + 2 * row,
+        s,
+        1,
+    );
+    // Right, middle: the target.
+    if let Some(target) = &sym.target {
+        let name: String = target.name.chars().take(14).collect();
+        right_text(&mut m, &format!("TGT {name}"), mid);
+        right_text(
+            &mut m,
+            &format!(
+                "RNG {:.1}NM",
+                target.range_ft / tore_sim::sensors::FEET_PER_NAUTICAL_MILE
+            ),
+            mid + row,
+        );
+        right_text(
+            &mut m,
+            &format!("BRG {:03.0}", target.bearing_deg),
+            mid + 2 * row,
+        );
+        if !target.clock.is_empty() {
+            right_text(&mut m, &target.clock, mid + 3 * row);
+        }
+    }
+    // Bottom left: the laser, a buddy's spot, the weapon and its time.
+    let mut y = (h * 0.68) as i32;
+    if let Some(laser) = &sym.laser {
+        // LASE in a box, blinking twice a second as the HUD's LSR does.
+        if laser.state == "LASE" {
+            if sym.blink {
+                let width = text_width("LASE", s);
+                m.rect(left - 2 * s, y - 2 * s, width + 4 * s, 11 * s, 1);
+                m.text("LASE", left, y, s, 2);
+            }
+        } else {
+            m.text(laser.state, left, y, s, 1);
+        }
+        y += row + s;
+        if let Some(range) = laser.range_ft {
+            m.text(&laser_range(range), left, y, s, 1);
+            y += row;
+        }
+    }
+    for line in [&sym.buddy, &sym.weapon, &sym.tti].into_iter().flatten() {
+        m.text(line, left, y, s, 1);
+        y += row;
+    }
+    // Bottom centre: the status, the slant range, a landing, a notice.
+    let bottom = (h * 0.84) as i32;
+    let centred = |m: &mut Mask, text: &str, y: i32| {
+        m.text(text, (w / 2.) as i32 - text_width(text, s) / 2, y, s, 1);
+    };
+    let status = sym.status();
+    if !sym.gimbal_limit || sym.blink {
+        centred(&mut m, &status, bottom);
+    }
+    let slant = sym.slant_ft.map_or("RNG ----".into(), |ft| {
+        format!(
+            "RNG {:.0}FT {:.1}NM",
+            ft,
+            ft / tore_sim::sensors::FEET_PER_NAUTICAL_MILE
+        )
+    });
+    centred(&mut m, &slant, bottom + row);
+    if let Some(impact) = &sym.impact {
+        centred(&mut m, impact, bottom + 2 * row);
+    }
+    if let Some(notice) = &sym.notice {
+        centred(&mut m, notice, top - row - s);
+    }
+    reticle(&mut m, (w / 2., h / 2.), h, t);
+    // The marks: a laser spot as a cross in a diamond (a buddy's dashed
+    // ring round it), the designated target's box, a weapon's aim as a
+    // small diamond and a landing as an X.
+    for (point, mark) in &sym.marks {
+        let Some(Locate::On(p)) = camera.locate(size, *point) else {
+            continue;
+        };
+        let c = (p[0], p[1]);
+        match mark {
+            PodMark::Spot { own } => {
+                let r = h * 0.016;
+                diamond(&mut m, c, r, t);
+                m.line((c.0 - r * 0.5, c.1), (c.0 + r * 0.5, c.1), t);
+                m.line((c.0, c.1 - r * 0.5), (c.0, c.1 + r * 0.5), t);
+                if !own {
+                    m.circle(c, r * 1.7, (t / 2).max(1), true);
+                }
+            }
+            PodMark::Designated => {
+                if box_shows(c, size) {
+                    square(&mut m, c, h * BOX_HALF, t, true);
+                }
+            }
+            PodMark::Aim => diamond(&mut m, c, h * 0.008, t),
+            PodMark::Impact => {
+                let r = h * 0.014;
+                m.line((c.0 - r, c.1 - r), (c.0 + r, c.1 + r), t);
+                m.line((c.0 - r, c.1 + r), (c.0 + r, c.1 - r), t);
+            }
+        }
+    }
+    pod_gimbal(&mut m, sym, (w * 0.86, h * 0.72), h * GIMBAL_RADIUS, t, s);
+    m.pixels(o)
+}
+
+/// The pod's gimbal graphic: a plan view about the aircraft, the nose up,
+/// straight down at the centre and the horizon at the rim, the dashed ring
+/// 45 degrees down, an arm to the sensor's look; LIMIT flashes under it at
+/// the gimbal's edge.
+fn pod_gimbal(m: &mut Mask, sym: &PodSymbology, c: (f64, f64), r: f64, t: i32, s: i32) {
+    let thin = (t / 2).max(1);
+    m.circle(c, r, thin, false);
+    m.circle(c, r * 0.5, thin, true);
+    let k = r * 0.1;
+    m.line((c.0, c.1 - k), (c.0, c.1 + k), thin);
+    m.line((c.0 - k * 0.8, c.1), (c.0 + k * 0.8, c.1), thin);
+    let down = (-sym.look[1]).clamp(0., std::f64::consts::FRAC_PI_2);
+    let reach = r * (1. - down / std::f64::consts::FRAC_PI_2);
+    let p = (
+        c.0 + reach * sym.look[0].sin(),
+        c.1 - reach * sym.look[0].cos(),
+    );
+    m.line(c, p, thin);
+    square(m, p, r * 0.07, thin, false);
+    let centred = |m: &mut Mask, text: &str, y: i32| {
+        m.text(
+            text,
+            (c.0 - f64::from(text_width(text, s)) / 2.) as i32,
+            y,
+            s,
+            1,
+        );
+    };
+    centred(m, "GIMBAL", (c.1 - r) as i32 - ROW * s);
+    if sym.gimbal_limit && sym.blink {
+        centred(m, "LIMIT", (c.1 + r) as i32 + 3 * s);
+    }
+}
+
+/// A caption layer in the console's font (the HUD camera's recorder
+/// lines): each text at its top left, `scale` font pixels, over a
+/// transparent `size`.
+pub fn captions(size: [u32; 2], lines: &[(String, i32, i32)], scale: i32) -> Vec<u8> {
+    let mut m = Mask::new(size);
+    for (text, x, y) in lines {
+        m.text(text, *x, *y, scale, 1);
+    }
+    m.pixels(scale.max(1))
+}
+
+/// The width of `text` in the console font at `scale`.
+pub fn caption_width(text: &str, scale: i32) -> i32 {
+    text_width(text, scale)
 }
 
 #[cfg(test)]

@@ -41,6 +41,20 @@ pub fn identity(key: &str) -> Option<AircraftId> {
     AircraftId::parse(key).ok()
 }
 
+/// The aircraft type whose display name is exactly `name`: an identity
+/// for an aircraft recorded without its PT name (the air-to-ground driver's
+/// two-seat buddy runs and its A-10 record the player's type by name only;
+/// nr-replayviews). An empty or unknown name is no identity.
+pub fn by_label(name: &str) -> Option<AircraftId> {
+    if name.trim().is_empty() {
+        return None;
+    }
+    AircraftId::SELECTABLE
+        .into_iter()
+        .chain(AircraftId::ALL)
+        .find(|id| id.label() == name)
+}
+
 /// Header extra listing the loaded aircraft models in draw order.
 pub const MODELS_KEY: &str = "draw.models";
 /// Header extra: aircraft up to this id draw with their own model.
@@ -826,7 +840,12 @@ impl Identities {
         Self {
             aircraft: recording
                 .aircraft()
-                .filter_map(|info| Some((info.id, identity(&info.pt)?)))
+                .filter_map(|info| {
+                    Some((
+                        info.id,
+                        identity(&info.pt).or_else(|| by_label(&info.name))?,
+                    ))
+                })
                 .collect(),
             weapons: recording
                 .weapons()
@@ -1211,6 +1230,14 @@ pub fn difference(live: &RenderSnapshot, replayed: &RenderSnapshot) -> Option<St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_aircraft_recorded_by_name_only_is_known_by_its_exact_label() {
+        assert_eq!(by_label("A-10 Thunderbolt"), Some(AircraftId::A10));
+        assert_eq!(by_label("F- 16C Falcon"), Some(AircraftId::F16C));
+        assert_eq!(by_label(""), None);
+        assert_eq!(by_label("A-10"), None, "only the exact label");
+    }
     use crate::combat_view::render_hash_tests as fixture;
     use crate::replay::tests::TempDir;
     use crate::{

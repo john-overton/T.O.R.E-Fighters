@@ -69,6 +69,7 @@ impl Roster {
             wing: info.map_or(0, |a| a.wing),
             member: info.map_or(0, |a| a.member),
             ai: self.ai.contains(&id),
+            sight: false,
         }
     }
 }
@@ -463,6 +464,8 @@ impl Live {
             | Action::ViewFrom(_)
             | Action::LookAt(_)
             | Action::Camera(_)
+            | Action::HudCamera(_)
+            | Action::SensorView(_)
             | Action::DroneMode(_) => {}
         }
         None

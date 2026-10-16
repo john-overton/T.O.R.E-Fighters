@@ -380,6 +380,7 @@ for Backslash, Shift+Backslash and the zoom keys.
 | Next gun candidate / link or unlink it | Ctrl+7 / Ctrl+8 | View + D-pad up / down |
 | Open or close the sensor console (orbit hold) | Ctrl+9 | View + Xbox |
 | In the console: picture white hot, black hot, TV, night vision | Ctrl+Backslash | none |
+| In the console: straight to white hot / black hot / TV / night vision | Shift+F5 / F6 / F7 / F8 | none |
 | In the console: radar range 5, 10, 25 nm | Ctrl+0 | none |
 | In the console: next / previous radar target the sensor sees, zoomed to fill | T / Shift+T | as T |
 | Live-fire range reset (developer fixture) | Ctrl+Shift+Backslash | none |

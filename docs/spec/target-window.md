@@ -372,7 +372,11 @@ are [the console's keys](ac130-linked-guns.md#the-consoles-keys)).
 
 **Picture modes.** **Ctrl+Backslash** steps the picture through white hot,
 black hot, TV and night vision, then back to white hot (the key does nothing
-outside the console). The label at the top right says WHOT, BHOT, TV or NVG,
+outside the console), and **Shift+F5**, **Shift+F6**, **Shift+F7** and
+**Shift+F8** go straight to white hot, black hot, TV and night vision (John
+asked on 2026-10-16 for shortcuts to each picture in every sensor view; the
+keys are an agent decision: Shift with the function keys is free in flight,
+next to the view keys; the gamepad keeps its D-pad left step). The label at the top right says WHOT, BHOT, TV or NVG,
 and the sensor word at the top left says IR for the two thermal modes, TV
 and NVG (the same word as the label, so the two never disagree). The symbology is the same in all four. The real AC-130U
 carries a FLIR and an all-light-level television (from memory of public
@@ -529,6 +533,46 @@ radar range setting, `--console-cycle S,...` presses the console's T at
 those seconds through the game's own rule and checks the designation, the
 track and the zoom (battery `flight-ac130-orbit-console-radar`), and
 `--console-fire FROM,TO` links the 105 mm and holds the trigger. With `--orbit-sight free` and `--console-cycle` the run opens the console searching and checks that T leaves the search for the orbit (battery `flight-ac130-orbit-console-search-t`).
+
+### Sensor View in a replay
+
+Opinionated, requested by John on 2026-10-16: "the Sensor View, which is
+available if the aircraft has a targeting pod installed ... the same console
+view from the AC-130 from the aspect of the aircraft ... if from the AC-130
+make it identical; when not from the AC-130 show aircraft-specific info and if
+they are lasing, TTI on release of ordnance, buddy lasing etc." The replay
+viewer's Shift+V ([the viewer's Sensor View](../REPLAYS.md#sensor-view)) shows
+this console from the selected aircraft's targeting sight: the same world
+picture, picture modes, CRT and drawing as above. Layout, wording and the
+rules below are agent decisions (nr-replayviews, 2026-10-16).
+
+- **Who.** The aircraft with a sight ([who has a sight](air-to-ground.md#who-has-a-sight)):
+  the AC-130, an aircraft with its own laser or FLIR record, and one the
+  recording shows lasing (a loaded Pave Spike).
+- **AC-130.** This console, unchanged, filled from the recording: heading,
+  height, airspeed, the sight's angles, the line of sight, the slant range,
+  the designated target's lines and box, the orbit's state from
+  `player.orbit`, the gimbal graphic. The guns' rounds, readiness and pipper
+  and the A-G radar are not recorded and show empty; the status line says
+  where the line of sight came from (`LOS FROM ORBIT POINT`).
+- **Other aircraft.** The same reticle, angles, heading block, gimbal
+  graphic (the sensor's arm on the plan, without guns or radar) and status
+  and range lines, with the aircraft's own lines:
+
+| Place | Shows |
+| --- | --- |
+| Top left | What the sight follows (`LSR` the laser spot, `TRK` a designated or targeted object, `PNT` a pinned point, the orbit or the rounds' bursts, `WPN` a guided weapon's aim, `IMP` a landing, `FWD` nothing recorded), the field (`NFOV`), the sensor (IR, TV, NVG); `FOV 7.5*`; the aircraft's label and type; the sensor's name (`PAVE SPIKE`, `AAS-38`) |
+| Top centre | Where the line of sight came from, since the recording does not hold it: `LOS FROM LASER SPOT`, `LOS FROM DESIGNATION`, `LOS FROM WEAPON AIM`, `LOS FROM RECORDED TARGET`, `LOS FROM ORBIT POINT`, `LOS FROM ROUND IMPACTS`, `LOS FROM BOMB IMPACT` or `NO LOS RECORDED` |
+| Bottom left | The laser: `LASE` in a box, blinking twice a second while lasing, else `LSR RDY`, `MASK` or `OFF`; `LSR 14513FT 2.4NM` (no code); `BUDDY FRIENDLY 1-2 2.8NM` when its weapon rides another aircraft's spot; `WPN GBU-12 ...` (the weapon it last released); `TTI 0:17`, with `X2` when several fly and `IMPACT` for a second (exact: the recording knows when each lands) |
+| Bottom centre | The status (`GIMBAL LIMIT` flashing, `LASE`, `MASK GIMBAL`, else the mode word), the slant range, and a landing's words for twenty seconds (`IMPACT 35 FT FROM AIM, 35 FT FROM TARGET`) |
+| On the picture | The laser spot (a cross in a diamond; another aircraft's in a dashed ring), the designated target's box (hidden under the reticle as above), the weapon's aim (a small diamond) and a landing (an X) |
+
+- **Picture.** White hot at first; 1 to 4, Shift+F5 to Shift+F8 and
+  Backslash change it in the viewer.
+- **Camera.** At the sensor's eye (the AC-130's dome; a pod 4 ft under the
+  aircraft; a built-in sensor at its centre), along the line of sight held
+  inside the sight's gimbal, at the default zoom step (7.5 degrees); the
+  viewer's + and - zoom it.
 
 ## Targeting page
 
