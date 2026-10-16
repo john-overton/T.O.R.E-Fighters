@@ -755,8 +755,8 @@ The long burn values in the table are likewise the current game's timing choice.
 Decided by John on 2026-10-10: every weapon whose record carries a collateral
 radius and percent does splash damage, whatever fired it. That is every
 air-to-air and air-to-ground missile, every bomb and rocket, the SAMs and the
-flak. No gun record carries one, so guns (the AC-130's 105 mm included) do
-none.
+flak. The authored [AC-130 105 mm correction](ac130-linked-guns.md#105-mm-fragmentation-splash)
+also enables splash, with armor resistance. Other AC-130 guns retain zero splash.
 
 What a player sees:
 

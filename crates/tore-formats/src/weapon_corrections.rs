@@ -67,6 +67,12 @@ pub(super) fn apply(w: &mut Weapon) {
             *amount = amount.saturating_mul(2);
         }
     }
+    // Opinionated, John 2026-10-15: roughly 30 m fragmentation reach.
+    // Percentage is agent-fitted; armor filtering is splash-only below.
+    if w.source == "C_105.JT" {
+        w.damage.collateral_radius = 100;
+        w.damage.collateral_percent = 35;
+    }
     if let Some((short, long)) = identity(&w.source) {
         w.hud_name = short.into();
         w.name = long.into();
@@ -138,4 +144,17 @@ pub fn infrared_aspect(source: &str) -> Option<bool> {
         | "R27T.JT" | "R27ET.JT" => Some(true),
         _ => None,
     }
+}
+
+/// Splash-only class shares, leaving direct-hit damage intact. Class order:
+/// aircraft/fallback, ships, structures, armor, soft surface targets.
+/// Opinionated fragmentation rule; docs/spec/ac130-linked-guns.md.
+pub fn collateral_damage(w: &Weapon) -> [i16; 5] {
+    const FRAGMENTATION: [i32; 5] = [100, 0, 100, 0, 100];
+    if w.source != "C_105.JT" {
+        return w.damage.by_class;
+    }
+    std::array::from_fn(|class| {
+        (i32::from(w.damage.by_class[class]) * FRAGMENTATION[class] / 100) as i16
+    })
 }

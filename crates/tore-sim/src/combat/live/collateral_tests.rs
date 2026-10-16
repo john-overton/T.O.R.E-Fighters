@@ -812,3 +812,85 @@ fn gunship_corrected_damage_reaches_collateral_without_changing_coverage() {
         }
     }
 }
+
+fn howitzer() -> Weapon {
+    let mut w = sparrow();
+    w.source = "C_105.JT".into();
+    w.flags = 0x300c0;
+    w.damage.by_class = [300; 5];
+    w.damage.fuze_radius = 0;
+    w.damage.collateral_radius = 100;
+    w.damage.collateral_percent = 35;
+    w
+}
+
+#[test]
+fn howitzer_fragmentation_by_class_and_distance() {
+    let w = howitzer();
+    let ground = burst(&w, Detonation::Ground);
+    let air = burst(&w, Detonation::Air);
+    for (distance, on_ground, in_air) in [
+        (0., 51, 105),
+        (25., 39, 81),
+        (50., 27, 54),
+        (75., 12, 27),
+        (99., 0, 3),
+        (100., 0, 0),
+        (110., 0, 0),
+    ] {
+        for category in [0x8000, 0x2000, 0x100, 0x400, 0x40, 0x200, 0x800, 0x1000] {
+            let armored = matches!(damage_class(category), 1 | 3);
+            assert_eq!(
+                ground.nominal(category, distance),
+                if armored { 0 } else { on_ground }
+            );
+            assert_eq!(
+                air.nominal(category, distance),
+                if armored { 0 } else { in_air }
+            );
+        }
+    }
+    assert_eq!(w.damage.by_class, [300; 5], "direct-hit fields stay intact");
+    for name in ["C_25.JT", "C_40.JT"] {
+        let mut other = w.clone();
+        other.source = name.into();
+        other.damage.collateral_radius = 0;
+        other.damage.collateral_percent = 0;
+        let b = burst(&other, Detonation::Ground);
+        assert!(!b.collateral());
+        for category in [0x8000, 0x2000, 0x100, 0x400, 0x200] {
+            assert_eq!(b.nominal(category, 0.), 0);
+        }
+    }
+}
+
+#[test]
+fn howitzer_mixed_group_splash_applies_for_player_and_ai_shells() {
+    for owner in [0, SHOOTER] {
+        for enabled in [false, true] {
+            let mut s = scene();
+            let mut w = howitzer();
+            if !enabled {
+                w.damage.collateral_radius = 0;
+                w.damage.collateral_percent = 0;
+            }
+            // Synthetic hit boxes, no world shapes or terrain placement.
+            for (id, category, x) in [
+                (1, 0x200, 40.),
+                (2, 0x400, -40.),
+                (3, 0x400, 40.),
+                (4, 0x200, 125.),
+            ] {
+                ground_object(&mut s, id, [x, 8., 0.], 200, RED);
+                s.targets.iter_mut().find(|t| t.id == id).unwrap().category = category;
+            }
+            s.projectiles
+                .push(round(100, owner, &w, [0., 100., 0.], [0.; 3]));
+            run_from(&mut s, 60, far());
+            assert_eq!(hp(&s, 1), if enabled { 161 } else { 200 });
+            for id in [2, 3, 4] {
+                assert_eq!(hp(&s, id), 200, "armor and out-of-range truck");
+            }
+        }
+    }
+}
