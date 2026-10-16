@@ -57,7 +57,7 @@ pub(crate) fn bytes(values: &[f32]) -> Vec<u8> {
 }
 /// The shared `Scene` uniform, ending with the graphics `quality` and
 /// `viewport` vectors.
-const UNIFORM_BYTES: u64 = 1424;
+const UNIFORM_BYTES: u64 = 1440;
 type AircraftBatch = (wgpu::BindGroup, wgpu::Buffer, u32);
 /// One other aircraft inside a geometry batch, for the spotting aid: its
 /// vertex range, presented position and airframe extent in feet.
@@ -166,6 +166,8 @@ pub struct SimRenderer {
     samples: u32,
     /// CF0 city fill buildings, when the scenery has them.
     pub fill: Option<crate::fill_renderer::FillRenderer>,
+    /// Exploratory vegetation, when the scenery has an atlas.
+    pub vegetation: Option<crate::vegetation_renderer::Renderer>,
     /// The fires of the fill's knocked-down buildings
     /// ([`crate::city_fires`]).
     city_fires: crate::city_fires::CityFires,
@@ -718,6 +720,19 @@ impl SimRenderer {
         if let Some(fill) = &mut fill {
             fill.set_options(&options);
         }
+        let vegetation = scenery.vegetation.as_ref().map(|atlas| {
+            let mut vegetation = crate::vegetation_renderer::Renderer::new(
+                device,
+                &shader,
+                format,
+                samples,
+                &material_layout,
+                &lighting.layout,
+                Arc::clone(atlas),
+            );
+            vegetation.set_options(&options);
+            vegetation
+        });
         let celestial_vertices = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Celestial vertices"),
             size: 256 * 1024,
@@ -886,6 +901,7 @@ impl SimRenderer {
             options,
             samples,
             fill,
+            vegetation,
             city_fires: crate::city_fires::CityFires::new(),
             city_clock: None,
             city_report: crate::city_fires::Report::default(),
@@ -1320,6 +1336,9 @@ impl SimRenderer {
         if let Some(fill) = &mut self.fill {
             fill.set_options(&options);
         }
+        if let Some(vegetation) = &mut self.vegetation {
+            vegetation.set_options(&options);
+        }
         if samples == self.samples {
             return;
         }
@@ -1332,6 +1351,16 @@ impl SimRenderer {
             &self.material_layout,
             &self.lighting.layout,
         );
+        if let Some(vegetation) = &mut self.vegetation {
+            vegetation.rebuild(
+                device,
+                &self.shader,
+                self.format,
+                samples,
+                &self.material_layout,
+                &self.lighting.layout,
+            );
+        }
         if let Some(fill) = &mut self.fill {
             fill.rebuild(
                 device,
@@ -1651,6 +1680,21 @@ impl SimRenderer {
         let [x, y, z] = scenery.origin.map(|v| v as f32);
         let [ex, ey, ez] = scenery.local(camera.position);
         uniform.extend([x, y, z, 0., ex, ey, ez, 0.]);
+        // Ground detail: mode, distance in feet, unused, theater climate.
+        // Objects are a separate pass. `TORE_VEGETATION=0` leaves both off
+        // because the scenery then has no atlas and the mode stays 0.
+        let veg_mode = if scenery.vegetation.is_none() {
+            0.
+        } else {
+            self.options.ground_texture.mode()
+        };
+        let veg_reach = self.options.ground_texture_distance_nm as f32 * 6_076.115_5;
+        uniform.extend([
+            veg_mode,
+            veg_reach,
+            0.,
+            crate::vegetation::climate_id(&world.layout) as f32,
+        ]);
         debug_assert_eq!(uniform.len() * 4, UNIFORM_BYTES as usize);
         queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
         // The burning city fill buildings: the nearest fires and columns of
@@ -1756,6 +1800,9 @@ impl SimRenderer {
         // The fill's cull runs first: its lists feed the shadow maps too.
         if let Some(fill) = &mut self.fill {
             fill.prepare(queue, encoder, camera, scenery.origin, size);
+        }
+        if let Some(vegetation) = &mut self.vegetation {
+            vegetation.prepare(queue, encoder, camera, world, scenery.origin, size);
         }
         if self
             .lighting
@@ -1876,6 +1923,9 @@ impl SimRenderer {
         pass.set_vertex_buffer(0, self.vertices.slice(..));
         pass.set_vertex_buffer(1, self.terrain_normals.slice(..));
         pass.draw(0..self.count, 0..1);
+        if let Some(vegetation) = &self.vegetation {
+            vegetation.draw(&mut pass, &self.bind);
+        }
         if let Some((bind, buffer, count)) = &self.escapees {
             pass.set_pipeline(&self.p.pipeline);
             pass.set_bind_group(0, bind, &[]);

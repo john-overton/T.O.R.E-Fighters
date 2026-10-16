@@ -88,6 +88,8 @@ pub struct Scenery {
     pub origin: [f64; 3],
     /// The CF0 city fill's art, when the terrain carries a fill.
     pub fill: Option<Arc<crate::fill_renderer::FillArt>>,
+    /// Exploratory vegetation tiles. `None` when `TORE_VEGETATION=0`.
+    pub vegetation: Option<Arc<crate::vegetation::Atlas>>,
 }
 
 /// The launch overrides the environment asks for: `TORE_WEATHER_TIME` as
@@ -440,6 +442,7 @@ impl Scenery {
             haze: [0; 3],
             origin: [0.; 3],
             fill: None,
+            vegetation: None,
             climate: crate::blast_climate::Climate {
                 humidity: terrain.humidity(),
             },
@@ -456,6 +459,7 @@ impl Scenery {
             land_texture,
         );
         out.build_static_geometry(resources, terrain, code)?;
+        out.vegetation = crate::vegetation::Atlas::build(resources, terrain)?.map(Arc::new);
         if let Some(fill) = &terrain.city_fill {
             let terrain_bytes = out.texture_indices.len();
             out.fill = Some(Arc::new(crate::fill_renderer::FillArt::build(
@@ -1071,6 +1075,7 @@ pub(crate) mod tests {
             haze: [0; 3],
             origin: [0.; 3],
             fill: None,
+            vegetation: None,
             fire_widths: Arc::new(BTreeMap::new()),
             climate: crate::blast_climate::Climate::default(),
         }

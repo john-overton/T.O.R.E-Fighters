@@ -1,6 +1,8 @@
 struct Band { info:vec4<f32>, ramp:vec4<f32> }
 // scene.view.z is the shared CPU night factor (night_glow::night_factor).
-struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32>, ocean:vec4<f32>, cloud_reflection:vec4<f32>, view:vec4<f32>, quality:vec4<f32>, viewport:vec4<f32>, origin:vec4<f32>, local_eye:vec4<f32> }
+struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32>, ocean:vec4<f32>, cloud_reflection:vec4<f32>, view:vec4<f32>, quality:vec4<f32>, viewport:vec4<f32>, origin:vec4<f32>, local_eye:vec4<f32>, veg:vec4<f32> }
+// veg: ground-detail mode (0 off, 1 on, 2 fine), detail distance in feet,
+// unused, climate (0 temperate, 1 desert, 2 arctic, 3 tropical).
 // quality: spotting aid strength (0 off), terrain filtering (0/1), thermal
 // sensor picture (0/1, see "Thermal sensor picture" at the end), the thermal
 // picture's reference brightness (sim_renderer.rs `thermal_reference`). viewport: world image width and height in pixels, MSAA
@@ -466,7 +468,8 @@ fn fill_shadow(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,size:vec4<f32>,
  let normal=select(receiver,normalize(in.terrain_normal),dot(in.terrain_normal,in.terrain_normal)>0.1 && smooth_weather());
  if in.layer<0.0 {
   if thermal_on() {return scenery(thermal_grey(thermal_ground(in.albedo,normal,in.direction,in.distance)));}
-  return scenery(aerial_perspective(surface_color(in.color,in.direction,normal,false,receiver,in.albedo),in.direction,in.altitude));
+  let bare=ground_detail(in.color,in.direction,in.distance);
+  return scenery(aerial_perspective(surface_color(bare,in.direction,normal,false,receiver,bare),in.direction,in.altitude));
  }
  var remaps=vec2<f32>(-1.0);
  if in.fog_enabled!=0u {remaps=ray_rows(in.distance,in.altitude);}
@@ -477,9 +480,57 @@ fn fill_shadow(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,size:vec4<f32>,
   let bare=sample_tile(in.uv,i32(in.layer),base_row(),-1,-1,vec2<f32>(-1.0)).rgb;
   return scenery(thermal_grey(thermal_ground(bare,normal,in.direction,in.distance)));
  }
- var albedo=tex.rgb;
+ var albedo=ground_detail(tex.rgb,in.direction,in.distance);
  if flares_burning() {albedo=sample_tile(in.uv,i32(in.layer),base_row(),-1,in.light_row,vec2<f32>(-1.0)).rgb;}
- return scenery(aerial_perspective(surface_color(tex.rgb,in.direction,normal,false,receiver,albedo),in.direction,in.altitude));
+ return scenery(aerial_perspective(surface_color(albedo,in.direction,normal,false,receiver,albedo),in.direction,in.altitude));
+}
+// Close-range ground detail (exploratory vegetation, 2026-10-16). The
+// pattern is world-anchored so it streams under a low pass, and it fades
+// with distance and with eye altitude so the retail tile is unchanged
+// from cruise height. Colours stay the tile's own.
+fn veg_hash(p:vec2<f32>)->f32 {
+ var q=fract(vec3<f32>(p.xyx)*0.1031);
+ q+=dot(q,q.yzx+vec3<f32>(33.33));
+ return fract((q.x+q.y)*q.z);
+}
+fn ground_detail(color:vec3<f32>,direction:vec3<f32>,dist:f32)->vec3<f32> {
+ let mode=scene.veg.x;
+ if mode<0.5 {return color;}
+ let reach=scene.veg.y;
+ if reach<1.0 {return color;}
+ let dist_w=1.0-smoothstep(reach*0.4,reach,dist);
+ let alt_w=1.0-smoothstep(1800.0,7000.0,scene.eye.y);
+ let w=dist_w*alt_w;
+ if w<0.02 {return color;}
+ let fine=select(1.0,1.85,mode>1.5);
+ let world=scene.origin.xz+scene.local_eye.xz+direction.xz;
+ let r=color.r;let g=color.g;let b=color.b;
+ let mx=max(r,max(g,b));let mn=min(r,min(g,b));
+ let sat=mx-mn;
+ let luma=dot(color,vec3<f32>(0.299,0.587,0.114));
+ var pattern=0.0;var amp=0.12;
+ if g>r*1.35 && g>b && luma<0.16 {
+  pattern=veg_hash(floor(world/7.0))-0.5+(veg_hash(floor(world/26.0))-0.5)*0.6;
+  amp=0.40;
+ } else if g>r*1.05 && g>=b {
+  let blades=sin(dot(world,vec2<f32>(0.22,0.09))*fine);
+  pattern=blades*0.55+(veg_hash(floor(world*fine/4.5))-0.5);
+  amp=0.48;
+ } else if r>b*1.25 && g>b && sat>0.015 {
+  let rip=sin(dot(world,vec2<f32>(0.05,0.012))*fine);
+  pattern=rip*0.65+(veg_hash(floor(world*fine/3.0))-0.5);
+  amp=select(0.40,0.52,scene.veg.w>0.5 && scene.veg.w<1.5);
+ } else if sat<0.08 && luma>0.08 && luma<0.55 {
+  pattern=veg_hash(floor(world/12.0))-0.5;
+  amp=0.46;
+ } else if r>0.04 && g>0.03 {
+  let furrow=sin(dot(world,vec2<f32>(0.03,0.18))*fine);
+  pattern=furrow*0.8+(veg_hash(floor(world/36.0))-0.5)*0.4;
+  amp=0.36;
+ }
+ if luma>0.55 && sat<0.08 {amp=0.05;}
+ if sat<0.04 && luma>0.28 {amp*=0.3;}
+ return color*(1.0+pattern*amp*w);
 }
 // User-requested material. Pink is a mask; metal pixels retain their source RGB.
 fn engine_texel(at:vec2<i32>,heat:f32)->vec3<f32> {
@@ -612,6 +663,31 @@ fn tracer_night()->f32 {
 // flare light or panel sheen, so a distant box costs little per pixel. A box
 // fading in, or fading out over its full detail building, keeps only its
 // coverage's samples.
+// Vegetation: a mesh in the instance's colour. `turn.w` is the fade,
+// `place.w` the hash, `look.y` whether the lower part is a trunk.
+@vertex fn veg_vertex(@location(0) position:vec3<f32>,@location(1) normal:vec3<f32>,@location(5) place:vec4<f32>,@location(6) turn:vec4<f32>,@location(7) look:vec4<f32>,@location(8) color:vec4<f32>)->VertexOut {
+ let local=vec3<f32>(position.x*look.x,position.y*turn.z,position.z*look.x);
+ let p=place.xyz+vec3<f32>(local.x*turn.x+local.z*turn.y,local.y,local.z*turn.x-local.x*turn.y);
+ var out=placed_vertex(p+scene.origin.xyz,p-scene.local_eye.xyz,vec2<f32>(turn.w,place.w),-1.0,color.xyz,-1.0);
+ out.color=color.xyz;
+ out.albedo=color.xyz;
+ out.uv=vec2<f32>(turn.w,place.w);
+ out.terrain_normal=vec3<f32>(normal.y,look.y,position.y);
+ return out;
+}
+@fragment fn veg_fragment(in:VertexOut)->FillOut {
+ let mask=fill_coverage(in.clip.xy,in.uv.x,in.uv.y);
+ if mask==0u {discard;}
+ var color=in.color;
+ let trunk=smoothstep(0.28,0.08,in.terrain_normal.z)*in.terrain_normal.y;
+ color=mix(color,color*vec3<f32>(0.42,0.28,0.16),trunk);
+ let top=clamp(in.terrain_normal.x*0.25+0.9,0.62,1.15);
+ color*=top;
+ var shaded=in;
+ shaded.color=color;
+ shaded.albedo=color;
+ return FillOut(fill_far_color(shaded),mask);
+}
 @fragment fn fill_far_fragment(in:VertexOut)->FillOut{
  let mask=fill_coverage(in.clip.xy,in.uv.x,in.uv.y);
  if mask==0u {discard;}

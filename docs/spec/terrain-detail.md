@@ -122,4 +122,9 @@ The following are **fitted agent choices**, not recovered original rules:
 Optional surface shaders and expanded landscape geometry/vegetation are
 [deferred roadmap items](../ROADMAP.md#future-terrain-enhancements), as John
 requested on 2026-09-23. No new shader material noise, snowline, terrain
-movement or invented scenery is included in this implementation.
+movement or invented scenery is included in this implementation. The
+`exp/vegetation` branch is an exploratory exception (John, 2026-10-16):
+close-range ground detail and non-collidable vegetation, set from the
+Graphics screen
+([vegetation](graphics-options.md#vegetation-texture-and-vegetation-objects)).
+It is not part of the terrain-detail behaviour above.

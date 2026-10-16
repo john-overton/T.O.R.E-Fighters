@@ -34,6 +34,11 @@ shown below the options.
 | Terrain filtering | Off, On | On |
 | Building distance (city fill) | 10 nm, 20 nm, 30 nm | 30 nm |
 | Building detail (city fill) | 1 nm, 2 nm, 5 nm, 10 nm, 20 nm | 5 nm |
+| Vegetation texture | Off, On, Fine | On |
+| Vegetation texture distance | 1 nm, 2 nm, 4 nm | 2 nm |
+| Vegetation distance | 2 nm, 4 nm, 6 nm, 8 nm | 4 nm |
+| Vegetation detail | 1 nm, 2 nm, 3 nm, 4 nm | 2 nm |
+| Vegetation density | Low, Med, High, Ultra | High |
 
 Choices are saved in `graphics-v1.conf` in the application data directory,
 beside `preferences-v1.conf`. A missing file uses the defaults quietly; an unreadable or malformed one uses them and logs a warning saying why.
@@ -154,12 +159,51 @@ only when they differ from the defaults. Measured costs are in the city
 fill notes; at 4K the 5 nm default adds about 2 to 5 ms over Kiev, 1 nm
 about 1 ms. The fades cost about 0.1 to 0.4 ms more at 4K (2026-10-12).
 
+## Vegetation texture and vegetation objects
+
+Shown when the exploratory vegetation is on, which it is on this branch
+(hidden only under the developer switch `TORE_VEGETATION=0`). John asked
+on 2026-10-16 for the same kind of control the city buildings have. The
+steps and the defaults are an agent choice the same day, aimed at an
+RTX 4070 at 4K. Vegetation is presentation only: it is not collidable,
+and it is not part of the simulation, the network session, replays or
+checkpoints. What was drawn is seeded from the theater and the tile, so
+every machine that uses the same settings shows the same scene.
+
+**Vegetation texture** is the close-range ground detail: furrows on
+fields, grass, a mottled forest floor, sand grain and ripples, and
+scree on rock. Off leaves the retail tile. On is the ordinary grain.
+Fine is a tighter grain. **Vegetation texture distance** is how far
+that grain reaches. It also fades with height, full below about
+1,800 ft and gone by about 7,000 ft, so a cruise view stays the retail
+tile.
+
+**Vegetation distance** is how far trees, bushes and ground clutter are
+drawn, the same idea as building distance. **Vegetation detail** is the
+distance inside which they are full meshes; beyond it, trees, bushes,
+rocks and dead wood are flat crossed cards, while grass, hedges and
+dunes keep their mesh. **Vegetation density** is Low, Med, High or
+Ultra (about 0.4, 0.7, 1.0 and 1.65 times the High placement). Objects
+also fade out with height, full below about 4,500 ft and gone by about
+10,500 ft, and nothing is placed above 11,000 ft.
+
+The five values are saved in `graphics-v1.conf` only when they differ
+from the defaults (`vegetation-texture`, `vegetation-texture-distance`,
+`vegetation-distance`, `vegetation-detail`, `vegetation-density`). An
+older file that has none of them reads as the defaults. Apply puts them
+into effect at once, the same way as the building settings. Original
+graphics turns the texture off and leaves the object distances at the
+defaults, as it does for buildings.
+
 ## Command line
 
 For one run, without saving: `--anti-aliasing off|2x|4x|8x`,
 `--render-scale 75|100|125|150|200`, `--spotting-aid off|subtle|strong`,
 `--terrain-filtering on|off`, `--building-distance 10|20|30`,
-`--building-detail 1|2|5|10|20`, and `--original-graphics` for everything off
+`--building-detail 1|2|5|10|20`, `--vegetation-texture off|on|fine`,
+`--vegetation-texture-distance 1|2|4`, `--vegetation-distance 2|4|6|8`,
+`--vegetation-detail 1|2|3|4`, `--vegetation-density low|medium|high|ultra`,
+and `--original-graphics` for everything off
 at 100%. Flags apply in order, so `--original-graphics --spotting-aid strong`
 turns on only the outline. Pressing Apply on the Graphics screen saves whatever
 the screen shows, including a flag's value.

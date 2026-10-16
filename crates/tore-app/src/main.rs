@@ -156,6 +156,9 @@ mod ui_text_renderer;
 mod v22_animation;
 mod variety_animation;
 mod variety_rotors;
+mod vegetation;
+mod vegetation_preview;
+mod vegetation_renderer;
 mod version;
 mod view_compass;
 mod weapon_hud;
@@ -10667,6 +10670,14 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
         gun_flash_preview::run()?;
         return Ok(Outcome::Done);
     }
+    if std::env::args().nth(1).as_deref() == Some("--vegetation-survey") {
+        vegetation::survey()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--vegetation-preview") {
+        vegetation_preview::run()?;
+        return Ok(Outcome::Done);
+    }
     if std::env::args().nth(1).as_deref() == Some("--city-fill-survey") {
         city_fill_dump::survey()?;
         return Ok(Outcome::Done);
@@ -11865,7 +11876,9 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             "--smoke-test" => smoke_test = true,
             "--windowed" => windowed_flag = true,
             flag @ ("--anti-aliasing" | "--render-scale" | "--spotting-aid"
-            | "--terrain-filtering" | "--building-distance" | "--building-detail") => {
+            | "--terrain-filtering" | "--building-distance" | "--building-detail"
+            | "--vegetation-texture" | "--vegetation-texture-distance"
+            | "--vegetation-distance" | "--vegetation-detail" | "--vegetation-density") => {
                 let value = args.next().ok_or(format!("{flag} needs a value"))?;
                 graphics_flags.push((flag.to_owned(), value));
             }

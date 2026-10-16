@@ -10,7 +10,8 @@ use crate::controls_editor::{
     ResultAction, TITLE, WHITE, fit, inside, text_width,
 };
 use crate::graphics::{
-    AntiAliasing, BUILDING_DETAILS, BUILDING_DISTANCES, Options, RENDER_SCALES, SpottingAid,
+    AntiAliasing, BUILDING_DETAILS, BUILDING_DISTANCES, GROUND_TEXTURE_DISTANCES, GroundTexture,
+    Options, RENDER_SCALES, SpottingAid, VEGETATION_DETAILS, VEGETATION_DISTANCES, VegDensity,
 };
 use crate::menu::Canvas;
 use std::path::Path;
@@ -24,6 +25,11 @@ enum Row {
     TerrainFiltering,
     BuildingDistance,
     BuildingDetail,
+    GroundTexture,
+    GroundTextureDistance,
+    VegetationDistance,
+    VegetationDetail,
+    VegetationDensity,
 }
 const BASE_ROWS: [Row; 4] = [
     Row::AntiAliasing,
@@ -31,7 +37,33 @@ const BASE_ROWS: [Row; 4] = [
     Row::SpottingAid,
     Row::TerrainFiltering,
 ];
-const CITY_ROWS: [Row; 6] = [
+/// The rows shown. The city building rows hide when `TORE_CITY_FILL=0`, and
+/// the vegetation rows hide when `TORE_VEGETATION=0`. Both are developer
+/// escape hatches; both are on when the variable is unset.
+fn rows() -> &'static [Row] {
+    let city = crate::scenery::city_fill().unwrap_or(true);
+    let veg = crate::vegetation::enabled().unwrap_or(true);
+    match (city, veg) {
+        (true, true) => &ALL_ROWS,
+        (true, false) => &CITY_ONLY,
+        (false, true) => &VEG_ONLY,
+        (false, false) => &BASE_ROWS,
+    }
+}
+const ALL_ROWS: [Row; 11] = [
+    Row::AntiAliasing,
+    Row::RenderScale,
+    Row::SpottingAid,
+    Row::TerrainFiltering,
+    Row::BuildingDistance,
+    Row::BuildingDetail,
+    Row::GroundTexture,
+    Row::GroundTextureDistance,
+    Row::VegetationDistance,
+    Row::VegetationDetail,
+    Row::VegetationDensity,
+];
+const CITY_ONLY: [Row; 6] = [
     Row::AntiAliasing,
     Row::RenderScale,
     Row::SpottingAid,
@@ -39,15 +71,17 @@ const CITY_ROWS: [Row; 6] = [
     Row::BuildingDistance,
     Row::BuildingDetail,
 ];
-/// The rows shown: the two city building rows unless the city fill is
-/// switched off (`TORE_CITY_FILL=0`, a developer escape hatch).
-fn rows() -> &'static [Row] {
-    if crate::scenery::city_fill().unwrap_or(true) {
-        &CITY_ROWS
-    } else {
-        &BASE_ROWS
-    }
-}
+const VEG_ONLY: [Row; 9] = [
+    Row::AntiAliasing,
+    Row::RenderScale,
+    Row::SpottingAid,
+    Row::TerrainFiltering,
+    Row::GroundTexture,
+    Row::GroundTextureDistance,
+    Row::VegetationDistance,
+    Row::VegetationDetail,
+    Row::VegetationDensity,
+];
 impl Row {
     fn label(self) -> &'static str {
         match self {
@@ -57,6 +91,11 @@ impl Row {
             Row::TerrainFiltering => "Terrain filtering",
             Row::BuildingDistance => "Building distance",
             Row::BuildingDetail => "Building detail",
+            Row::GroundTexture => "Vegetation texture",
+            Row::GroundTextureDistance => "Vegetation texture distance",
+            Row::VegetationDistance => "Vegetation distance",
+            Row::VegetationDetail => "Vegetation detail",
+            Row::VegetationDensity => "Vegetation density",
         }
     }
     fn description(self) -> &'static str {
@@ -75,6 +114,19 @@ impl Row {
             Row::BuildingDetail => {
                 "City buildings inside this distance are drawn with full texture and detail, farther ones as plain blocks."
             }
+            Row::GroundTexture => {
+                "Close-range field, grass, sand and rock detail on the ground. Fine is a tighter grain."
+            }
+            Row::GroundTextureDistance => {
+                "How far that ground detail reaches. It also fades out as you climb, so high altitude keeps the retail look."
+            }
+            Row::VegetationDistance => "How far away trees, bushes and ground clutter are drawn.",
+            Row::VegetationDetail => {
+                "Vegetation inside this distance is a full mesh. Farther pieces are flat crosses."
+            }
+            Row::VegetationDensity => {
+                "How thick the vegetation is. High is the tuned look. Ultra is denser."
+            }
         }
     }
     fn choices(self) -> Vec<String> {
@@ -85,6 +137,13 @@ impl Row {
             Row::TerrainFiltering => vec!["Off".into(), "On".into()],
             Row::BuildingDistance => BUILDING_DISTANCES.map(|n| format!("{n} nm")).to_vec(),
             Row::BuildingDetail => BUILDING_DETAILS.map(|n| format!("{n} nm")).to_vec(),
+            Row::GroundTexture => GroundTexture::ALL.map(|a| a.label().to_owned()).to_vec(),
+            Row::GroundTextureDistance => {
+                GROUND_TEXTURE_DISTANCES.map(|n| format!("{n} nm")).to_vec()
+            }
+            Row::VegetationDistance => VEGETATION_DISTANCES.map(|n| format!("{n} nm")).to_vec(),
+            Row::VegetationDetail => VEGETATION_DETAILS.map(|n| format!("{n} nm")).to_vec(),
+            Row::VegetationDensity => VegDensity::ALL.map(|a| a.label().to_owned()).to_vec(),
         }
     }
 }
@@ -104,14 +163,30 @@ enum Hit {
 }
 
 const FOOTER: [&str; 3] = ["Apply", "Defaults", "Cancel"];
-const PANEL_RECT: Rect = (6, 24, 628, 184);
-const ROW_TOP: i32 = 48;
-const ROW_STEP: i32 = 30;
-const CHOICE_X: i32 = 250;
-const CHOICE_W: i32 = 70;
-const CHOICE_GAP: i32 = 6;
-const ABOUT_RECT: Rect = (6, 214, 628, 96);
+const CHOICE_X: i32 = 248;
+const CHOICE_W: i32 = 62;
+const CHOICE_GAP: i32 = 4;
 const OUTLINE: [u8; 4] = [110, 130, 156, 255];
+
+/// Row step, settings panel and about panel. Eleven rows (city fill and
+/// vegetation both on) use a tighter step so the about panel still sits
+/// above the status bar.
+fn layout() -> (i32, Rect, Rect) {
+    let n = rows().len() as i32;
+    let step = if n > 8 {
+        17
+    } else if n > 4 {
+        22
+    } else {
+        30
+    };
+    let row_top = 40;
+    let panel_h = row_top - 24 + n * step + 6;
+    let panel = (6, 24, 628, panel_h);
+    let about_y = 28 + panel_h;
+    let about_h = (428 - about_y).clamp(56, 96);
+    (step, panel, (6, about_y, 628, about_h))
+}
 
 pub struct Editor {
     /// The values shown and edited; they take effect only on Apply.
@@ -177,6 +252,26 @@ impl Editor {
                 .iter()
                 .position(|n| *n == d.building_detail_nm)
                 .unwrap_or(2),
+            Row::GroundTexture => GroundTexture::ALL
+                .iter()
+                .position(|a| *a == d.ground_texture)
+                .unwrap_or(1),
+            Row::GroundTextureDistance => GROUND_TEXTURE_DISTANCES
+                .iter()
+                .position(|n| *n == d.ground_texture_distance_nm)
+                .unwrap_or(1),
+            Row::VegetationDistance => VEGETATION_DISTANCES
+                .iter()
+                .position(|n| *n == d.vegetation_distance_nm)
+                .unwrap_or(1),
+            Row::VegetationDetail => VEGETATION_DETAILS
+                .iter()
+                .position(|n| *n == d.vegetation_detail_nm)
+                .unwrap_or(1),
+            Row::VegetationDensity => VegDensity::ALL
+                .iter()
+                .position(|a| *a == d.vegetation_density)
+                .unwrap_or(2),
         }
     }
     fn set_choice(&mut self, row: usize, i: usize) {
@@ -188,6 +283,13 @@ impl Editor {
             Row::TerrainFiltering => d.terrain_filtering = i == 1,
             Row::BuildingDistance => d.building_distance_nm = BUILDING_DISTANCES[i],
             Row::BuildingDetail => d.building_detail_nm = BUILDING_DETAILS[i],
+            Row::GroundTexture => d.ground_texture = GroundTexture::ALL[i],
+            Row::GroundTextureDistance => {
+                d.ground_texture_distance_nm = GROUND_TEXTURE_DISTANCES[i]
+            }
+            Row::VegetationDistance => d.vegetation_distance_nm = VEGETATION_DISTANCES[i],
+            Row::VegetationDetail => d.vegetation_detail_nm = VEGETATION_DETAILS[i],
+            Row::VegetationDensity => d.vegetation_density = VegDensity::ALL[i],
         }
     }
     fn available(&self, row: usize, i: usize) -> bool {
@@ -360,22 +462,16 @@ impl Editor {
     // ---- pointer --------------------------------------------------------
 
     fn row_rect(row: usize) -> Rect {
-        // Six rows fit the panel at a tighter step.
-        let step = if rows().len() > 4 { 24 } else { ROW_STEP };
-        (
-            PANEL_RECT.0 + 4,
-            ROW_TOP + row as i32 * step,
-            PANEL_RECT.2 - 8,
-            step - 4,
-        )
+        let (step, panel, _) = layout();
+        (panel.0 + 4, 40 + row as i32 * step, panel.2 - 8, step - 2)
     }
     fn choice_rect(row: usize, i: usize) -> Rect {
         let r = Self::row_rect(row);
         (
             CHOICE_X + i as i32 * (CHOICE_W + CHOICE_GAP),
-            r.1 + 4,
+            r.1 + 1,
             CHOICE_W,
-            r.3 - 8,
+            (r.3 - 2).max(8),
         )
     }
     /// The same footer positions as the input configuration screen.
@@ -434,7 +530,7 @@ impl Editor {
         }
     }
     fn draw_rows(&self, pixels: &mut [u8], font: &Font) {
-        let panel = PANEL_RECT;
+        let (_, panel, _) = layout();
         Canvas(pixels).rect(panel, PANEL);
         Chrome::text(
             pixels,
@@ -488,7 +584,7 @@ impl Editor {
         }
     }
     fn draw_about(&self, pixels: &mut [u8], font: &Font) {
-        let panel = ABOUT_RECT;
+        let (_, _, panel) = layout();
         Canvas(pixels).rect(panel, PANEL);
         let (title, description, note) = match self.focus {
             Focus::Footer(i) => (
@@ -585,7 +681,7 @@ mod tests {
         assert_eq!(e.focus, Focus::Row(0));
         press(&mut e, "ArrowUp");
         assert_eq!(e.focus, Focus::Row(0), "the top row stops the focus");
-        // Six rows with the city fill's two (the default), four without.
+        // Eleven rows with city fill and vegetation (both default on).
         let last = rows().len() - 1;
         for _ in 0..last {
             press(&mut e, "ArrowDown");

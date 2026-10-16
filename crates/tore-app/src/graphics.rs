@@ -1,8 +1,10 @@
 //! Player graphics choices for the 3D view: anti-aliasing, render scale, the
-//! spotting aid and terrain distance filtering. These are
-//! opinionated host additions requested by John on 2026-09-22; the original
-//! game had none of them. The values and defaults are agent choices. They are
-//! saved in their own small file, `graphics-v1.conf`, beside the preferences.
+//! spotting aid, terrain distance filtering, city fill distances and the
+//! exploratory vegetation distances. These are opinionated host additions
+//! requested by John on 2026-09-22; the original game had none of them. The
+//! vegetation rows were added on 2026-10-16. The values and defaults are
+//! agent choices. They are saved in their own small file, `graphics-v1.conf`,
+//! beside the preferences.
 use std::path::Path;
 
 /// Multisample anti-aliasing. 4x is the only count every GPU must support;
@@ -95,6 +97,98 @@ pub const BUILDING_DETAILS: [u32; 5] = [1, 2, 5, 10, 20];
 pub const DEFAULT_BUILDING_DISTANCE: u32 = 30;
 pub const DEFAULT_BUILDING_DETAIL: u32 = 5;
 
+/// Close-range ground detail (fields, grass, sand, rock) on the terrain.
+/// Opinionated, 2026-10-16. Off draws the retail tile alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GroundTexture {
+    Off,
+    On,
+    /// A finer grain, for a low pass.
+    Fine,
+}
+impl GroundTexture {
+    pub const ALL: [Self; 3] = [Self::Off, Self::On, Self::Fine];
+    /// Shader mode: 0 off, 1 on, 2 fine.
+    pub fn mode(self) -> f32 {
+        match self {
+            Self::Off => 0.,
+            Self::On => 1.,
+            Self::Fine => 2.,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::On => "On",
+            Self::Fine => "Fine",
+        }
+    }
+    fn key(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::On => "on",
+            Self::Fine => "fine",
+        }
+    }
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|a| a.key() == text)
+    }
+}
+
+/// How thick the vegetation objects are, relative to the high setting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VegDensity {
+    Low,
+    Medium,
+    High,
+    Ultra,
+}
+impl VegDensity {
+    pub const ALL: [Self; 4] = [Self::Low, Self::Medium, Self::High, Self::Ultra];
+    /// Placement multiplier. High is the tuned density.
+    pub fn scale(self) -> f32 {
+        match self {
+            Self::Low => 0.4,
+            Self::Medium => 0.7,
+            Self::High => 1.,
+            Self::Ultra => 1.65,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Low => "Low",
+            Self::Medium => "Med",
+            Self::High => "High",
+            Self::Ultra => "Ultra",
+        }
+    }
+    fn key(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Ultra => "ultra",
+        }
+    }
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|a| a.key() == text)
+    }
+}
+
+/// How far the close-range ground detail reaches, nautical miles.
+pub const GROUND_TEXTURE_DISTANCES: [u32; 3] = [1, 2, 4];
+/// How far vegetation objects are drawn, nautical miles.
+pub const VEGETATION_DISTANCES: [u32; 4] = [2, 4, 6, 8];
+/// Full vegetation meshes inside this, cheaper crosses beyond, nautical miles.
+pub const VEGETATION_DETAILS: [u32; 4] = [1, 2, 3, 4];
+/// Tuned for an RTX 4070 at 4K: detail close in, objects out to 4 nm, full
+/// meshes inside 2 nm, high density (2026-10-16).
+pub const DEFAULT_GROUND_TEXTURE: GroundTexture = GroundTexture::On;
+pub const DEFAULT_GROUND_TEXTURE_DISTANCE: u32 = 2;
+pub const DEFAULT_VEGETATION_DISTANCE: u32 = 4;
+pub const DEFAULT_VEGETATION_DETAIL: u32 = 2;
+pub const DEFAULT_VEGETATION_DENSITY: VegDensity = VegDensity::High;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Options {
     pub anti_aliasing: AntiAliasing,
@@ -108,6 +202,19 @@ pub struct Options {
     /// City fill buildings draw with full texture and detail inside this,
     /// nautical miles; one of `BUILDING_DETAILS`.
     pub building_detail_nm: u32,
+    /// Close-range ground detail. One of `GroundTexture::ALL`.
+    pub ground_texture: GroundTexture,
+    /// How far that detail reaches, nautical miles; one of
+    /// `GROUND_TEXTURE_DISTANCES`.
+    pub ground_texture_distance_nm: u32,
+    /// Vegetation objects draw out to this, nautical miles; one of
+    /// `VEGETATION_DISTANCES`.
+    pub vegetation_distance_nm: u32,
+    /// Full vegetation meshes inside this, nautical miles; one of
+    /// `VEGETATION_DETAILS`.
+    pub vegetation_detail_nm: u32,
+    /// How thick the vegetation is. One of `VegDensity::ALL`.
+    pub vegetation_density: VegDensity,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -118,11 +225,18 @@ impl Default for Options {
             terrain_filtering: true,
             building_distance_nm: DEFAULT_BUILDING_DISTANCE,
             building_detail_nm: DEFAULT_BUILDING_DETAIL,
+            ground_texture: DEFAULT_GROUND_TEXTURE,
+            ground_texture_distance_nm: DEFAULT_GROUND_TEXTURE_DISTANCE,
+            vegetation_distance_nm: DEFAULT_VEGETATION_DISTANCE,
+            vegetation_detail_nm: DEFAULT_VEGETATION_DETAIL,
+            vegetation_density: DEFAULT_VEGETATION_DENSITY,
         }
     }
 }
 impl Options {
     /// Every addition off: the unmodified presentation, for pixel tests.
+    /// Vegetation objects keep their distances, as the city buildings do;
+    /// the ground detail texture turns off with the other image filters.
     pub fn original() -> Self {
         Self {
             anti_aliasing: AntiAliasing::Off,
@@ -131,6 +245,11 @@ impl Options {
             terrain_filtering: false,
             building_distance_nm: DEFAULT_BUILDING_DISTANCE,
             building_detail_nm: DEFAULT_BUILDING_DETAIL,
+            ground_texture: GroundTexture::Off,
+            ground_texture_distance_nm: DEFAULT_GROUND_TEXTURE_DISTANCE,
+            vegetation_distance_nm: DEFAULT_VEGETATION_DISTANCE,
+            vegetation_detail_nm: DEFAULT_VEGETATION_DETAIL,
+            vegetation_density: DEFAULT_VEGETATION_DENSITY,
         }
     }
     pub fn scale(&self) -> f32 {
@@ -152,6 +271,24 @@ impl Options {
         if self.building_detail_nm != DEFAULT_BUILDING_DETAIL {
             text += &format!("building-detail {}\n", self.building_detail_nm);
         }
+        if self.ground_texture != DEFAULT_GROUND_TEXTURE {
+            text += &format!("vegetation-texture {}\n", self.ground_texture.key());
+        }
+        if self.ground_texture_distance_nm != DEFAULT_GROUND_TEXTURE_DISTANCE {
+            text += &format!(
+                "vegetation-texture-distance {}\n",
+                self.ground_texture_distance_nm
+            );
+        }
+        if self.vegetation_distance_nm != DEFAULT_VEGETATION_DISTANCE {
+            text += &format!("vegetation-distance {}\n", self.vegetation_distance_nm);
+        }
+        if self.vegetation_detail_nm != DEFAULT_VEGETATION_DETAIL {
+            text += &format!("vegetation-detail {}\n", self.vegetation_detail_nm);
+        }
+        if self.vegetation_density != DEFAULT_VEGETATION_DENSITY {
+            text += &format!("vegetation-density {}\n", self.vegetation_density.key());
+        }
         text
     }
     pub fn parse(text: &str) -> Result<Self, String> {
@@ -169,10 +306,18 @@ impl Options {
                 return Err("invalid or duplicate graphics setting".into());
             }
         }
-        let optional = ["building-distance", "building-detail"]
-            .iter()
-            .filter(|k| values.contains_key(*k))
-            .count();
+        let optional = [
+            "building-distance",
+            "building-detail",
+            "vegetation-texture",
+            "vegetation-texture-distance",
+            "vegetation-distance",
+            "vegetation-detail",
+            "vegetation-density",
+        ]
+        .iter()
+        .filter(|k| values.contains_key(*k))
+        .count();
         if values.len() != 4 + optional {
             return Err("unknown or missing graphics setting".into());
         }
@@ -207,6 +352,29 @@ impl Options {
                 &BUILDING_DETAILS,
                 DEFAULT_BUILDING_DETAIL,
             )?,
+            ground_texture: match values.get("vegetation-texture") {
+                None => DEFAULT_GROUND_TEXTURE,
+                Some(v) => GroundTexture::parse(v).ok_or("invalid vegetation-texture")?,
+            },
+            ground_texture_distance_nm: step(
+                "vegetation-texture-distance",
+                &GROUND_TEXTURE_DISTANCES,
+                DEFAULT_GROUND_TEXTURE_DISTANCE,
+            )?,
+            vegetation_distance_nm: step(
+                "vegetation-distance",
+                &VEGETATION_DISTANCES,
+                DEFAULT_VEGETATION_DISTANCE,
+            )?,
+            vegetation_detail_nm: step(
+                "vegetation-detail",
+                &VEGETATION_DETAILS,
+                DEFAULT_VEGETATION_DETAIL,
+            )?,
+            vegetation_density: match values.get("vegetation-density") {
+                None => DEFAULT_VEGETATION_DENSITY,
+                Some(v) => VegDensity::parse(v).ok_or("invalid vegetation-density")?,
+            },
         })
     }
     /// Command-line overrides for one run; they are not saved by themselves.
@@ -248,6 +416,35 @@ impl Options {
                         .ok()
                         .filter(|n| BUILDING_DETAILS.contains(n))
                         .ok_or("--building-detail needs 1, 2, 5, 10 or 20")?
+                }
+                "--vegetation-texture" => {
+                    self.ground_texture = GroundTexture::parse(value)
+                        .ok_or("--vegetation-texture needs off, on or fine")?
+                }
+                "--vegetation-texture-distance" => {
+                    self.ground_texture_distance_nm = value
+                        .parse()
+                        .ok()
+                        .filter(|n| GROUND_TEXTURE_DISTANCES.contains(n))
+                        .ok_or("--vegetation-texture-distance needs 1, 2 or 4")?
+                }
+                "--vegetation-distance" => {
+                    self.vegetation_distance_nm = value
+                        .parse()
+                        .ok()
+                        .filter(|n| VEGETATION_DISTANCES.contains(n))
+                        .ok_or("--vegetation-distance needs 2, 4, 6 or 8")?
+                }
+                "--vegetation-detail" => {
+                    self.vegetation_detail_nm = value
+                        .parse()
+                        .ok()
+                        .filter(|n| VEGETATION_DETAILS.contains(n))
+                        .ok_or("--vegetation-detail needs 1, 2, 3 or 4")?
+                }
+                "--vegetation-density" => {
+                    self.vegetation_density = VegDensity::parse(value)
+                        .ok_or("--vegetation-density needs low, medium, high or ultra")?
                 }
                 _ => return Err(format!("unknown graphics flag {flag}")),
             }
@@ -293,11 +490,19 @@ mod tests {
             terrain_filtering: false,
             building_distance_nm: 20,
             building_detail_nm: 2,
+            ground_texture: GroundTexture::Fine,
+            ground_texture_distance_nm: 4,
+            vegetation_distance_nm: 6,
+            vegetation_detail_nm: 1,
+            vegetation_density: VegDensity::Low,
         };
         assert_eq!(Options::parse(&options.text()).unwrap(), options);
-        // The default building distances are not written, and a file
-        // without them reads as the defaults.
-        assert!(!Options::default().text().contains("building"));
+        // The default building and vegetation distances are not written, and
+        // a file without them reads as the defaults.
+        let defaults = Options::default().text();
+        assert!(!defaults.contains("building"));
+        assert!(!defaults.contains("vegetation"));
+        assert!(!defaults.contains("vegetation-texture"));
         assert!(
             Options::parse(
                 &options
