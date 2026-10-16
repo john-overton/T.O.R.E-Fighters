@@ -1691,6 +1691,14 @@ impl SimRenderer {
             size[0] as f32 / (size[1] as f32 * camera.view_fraction),
             &lights,
         );
+        if night > 0. {
+            // Reserve fires through the final scene budget, not just the effect budget.
+            lights = crate::night_glow::night_lights(
+                &lights,
+                camera.position,
+                crate::countermeasure_renderer::MAX_FLARE_LIGHTS,
+            );
+        }
         let mut entries = Vec::with_capacity(12 * 1024);
         for row in std::iter::once(&weather.palette).chain(weather.fog_palette.iter()) {
             for rgb in row {

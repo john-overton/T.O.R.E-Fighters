@@ -693,6 +693,13 @@ target cycling with several targets in view are exercised only by the probe-atta
 
 ## Render captures
 
+`render-night-light-slots` is a CPU-only exception: it runs
+`--night-light-slots` without a window or GPU. The synthetic regression checks
+240 frames with eight sustained fires and up to 64 remote muzzle/impact
+flashes, through both light budgets and the camera-relative upload. Run it
+with `--scenario render-night-light-slots --no-unit-tests --with-windows no`.
+The emission and point-light rules are in [night glow](../spec/explosions.md#night-glow).
+
 `python3 tools/battery.py --scenario 'render-*' --windows 1` runs windowed captures
 (through the wrapper, one window at a time) that reproduce drawing faults.
 The two `render-capture-*-deterministic` cases repeat a bare flight or terrain

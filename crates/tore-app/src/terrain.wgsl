@@ -1031,7 +1031,6 @@ fn cloud_lighting(color:vec3<f32>,direction:vec3<f32>,altitude:f32)->vec3<f32> {
  if flares_burning() {
   let bare=weather_tile(in.uv,i32(in.layer),base_row(),-1,-1,vec2<f32>(-1.0)).rgb;
   flares=bare*flare_light(in.direction,vec3<f32>(0.0));
-  if device_night()>0.0 {flares+=fire_lit(bare,fire_glow(in.direction,vec3<f32>(0.0)));}
  }
  return scenery(cloud_lighting(tex.rgb+flares,in.direction,in.altitude));
 }
@@ -1106,8 +1105,6 @@ struct EffectOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>,
  out.uv=uv;out.opacity=opacity;out.distance=length(p);out.direction=p;out.altitude=p.y+scene.eye.y;out.layer=i32(layer);out.emissive=emissive;out.tint=tint;return out;
 }
 const GLOW_HAZE_SHARE:f32=0.1;
-// Night brightening of fire and explosion art, night_glow::EFFECT_NIGHT_BOOST.
-const EFFECT_NIGHT_BOOST:f32=0.6;
 // How much of a glow reaches the eye through cloud, haze and air: a light
 // at night is seen through the haze about ten times as far as the ground
 // (fitted, nr-fx3), so the haze counts at a tenth of the distance, and only
@@ -1130,12 +1127,9 @@ fn glow_clear(p:vec3<f32>,altitude:f32)->vec3<f32> {
   }
   // Preserve day exactly. At night the entire art emits through the same
   // atmosphere as its additive halo, rather than retaining only a point.
-  // The art also burns brighter than its daylight palette (nr-nightfx
-  // visibility pass, agent fitted): hot texels push toward yellow-white.
   let visibility=mix(vec3<f32>(clear),glow_clear(in.direction,in.altitude),device_night());
   let alpha=color.a*in.opacity;
-  let hot=color.rgb*(1.0+EFFECT_NIGHT_BOOST*device_night());
-  return vec4<f32>(hot*alpha*visibility,alpha*max(visibility.r,max(visibility.g,visibility.b)));
+  return vec4<f32>(color.rgb*alpha*visibility,alpha*max(visibility.r,max(visibility.g,visibility.b)));
  }
  let color=sample_tile(in.uv,in.layer,0,-1,-1,ray_rows(in.distance,in.altitude));
  let alpha=color.a*in.opacity*clear;

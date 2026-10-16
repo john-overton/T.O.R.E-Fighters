@@ -10292,6 +10292,11 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
         flight_map_preview::run()?;
         return Ok(Outcome::Done);
     }
+    if std::env::args().nth(1).as_deref() == Some("--night-light-slots") {
+        night_glow::stability_probe()?;
+        println!("Night light slots: 240 frames, 8 fires stable through both budgets and upload");
+        return Ok(Outcome::Done);
+    }
     if std::env::args().nth(1).as_deref() == Some("--surface-fx-preview") {
         surface_fx_preview::run()?;
         return Ok(Outcome::Done);

@@ -42,6 +42,10 @@ from typing import Iterable, Optional, Sequence
 # --------------------------------------------------------------------------
 
 FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "render-night-light-slots": (
+        "headless persistent fire reservation through effect and scene light budgets",
+        ("render-night-light-slots",),
+    ),
     "terrain-colors": ("retail ground palette families in every theater", ("render-terrain-colors",)),
     "render-night-effect-lights": (
         "fire and flare comparisons and sustained explosion lighting at night",
@@ -719,6 +723,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/surface_parked.rs", ("surface",), "the parked aircraft drive"),
     _r("crates/tore-app/src/city_fires.rs", ("surface", "replay-recording"), "the burning city fill buildings' fires and smoke (--city-fires); a replay's knocked-down buildings (nr-fx3)"),
     _r("crates/tore-app/src/terrain_colors.rs", ("terrain-colors",), "headless theater palette regression"),
+    _r("crates/tore-app/src/night_glow.rs", ("render-night-light-slots",), "headless light-slot stability"),
     _r("crates/tore-app/src/night_glow*", ("surface", "replay-recording", "render-night-effect-lights"), "the night glow of explosions and fires and their surface light", windowed=True),
     _r("crates/tore-app/src/city_fill_dump.rs", ("surface",), "the city fill dump, and --city-fires, which surface-city-fires runs"),
     _r("crates/tore-app/src/effect_renderer.rs", ("render-night-effect-lights",), "effect sprites and sustained light", windowed=True),

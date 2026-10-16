@@ -79,10 +79,10 @@ light to every surface this pass lights, and to water, clouds and
 smoke, with no shadows. Its strength, reach,
 night boost and the daylight colors it shows at night are in
 [countermeasure presentation](countermeasures.md#flare-light).
-Fire, fireball and impact sources use the night-only finite footprint and
-the warm night firelight (`fire_glow`, added in shading so it reads orange on
-any ground colour) described in [night effect light](explosions.md#night-glow);
-other sources remain points.
+Fire, fireball and impact sources use the same flare point law. The rejected
+nr-nightfx finite footprint and additional warm surface term are removed
+(John, 2026-10-15). Whole flame sprites remain emissive; persistent fires have
+reserved night slots as described in [night effect light](explosions.md#night-glow).
 
 ## Geometry shadows
 

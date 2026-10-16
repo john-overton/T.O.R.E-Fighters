@@ -55,6 +55,13 @@ def scenarios() -> list[Scenario]:
         ))
     return stable + [
         Scenario(
+            name="render-night-light-slots",
+            lane="flight",
+            args=["--night-light-slots"],
+            expect=["Night light slots: 240 frames, 8 fires stable through both budgets and upload"],
+            notes="Headless synthetic fires plus 0 to 64 remote AC-130-style flashes per frame; checks effect selection, scene selection and relative-position upload.",
+        ),
+        Scenario(
             name="render-terrain-colors",
             lane="flight",
             args=["--terrain-colors"],
