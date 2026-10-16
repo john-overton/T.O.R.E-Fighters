@@ -215,7 +215,9 @@ pub fn path_words(path: Path) -> &'static str {
 /// sights read it, so an older game must not join.
 /// 39 since the small guided bombs (slice nr-bombs2): GBU-12, GBU-16 and
 /// GBU-38 join the store catalog, so an older game must not join.
-pub const PROTOCOL_VERSION: u16 = 39;
+/// 40 since the AC-130 damage pass (slice nr-nightfx): the 40 mm and 105 mm
+/// shells do twice the damage, so an older game must not join.
+pub const PROTOCOL_VERSION: u16 = 40;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

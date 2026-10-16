@@ -3099,7 +3099,9 @@ again with an observer; the capture format did not change for it.
   body (mass, drag, retarder, steering) and fly one shared fitted model, and
   sights read it, so an older game must not join;
   39 since the small guided bombs (slice nr-bombs2): GBU-12, GBU-16 and
-  GBU-38 join the store catalog, so an older game must not join.
+  GBU-38 join the store catalog, so an older game must not join;
+  40 since the AC-130 damage pass (slice nr-nightfx): the 40 mm and
+  105 mm shells do twice the damage, so an older game must not join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
