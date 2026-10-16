@@ -95,6 +95,16 @@ refused without Cheat loading). For each new row it loads
 the full set, checks capacity, tank and weapon exclusion, fuel feed, Shift+K
 and selected-store jettison, saves, and an old saved load with the row empty.
 
+The [Phantoms' gun pod of 2026-10-16](../spec/stores-on-pylons.md#the-phantoms-gun-pod-2026-10-16)
+lets the F-4B's centreline row take the SUU-16 in place of its stores. The audit
+now pins 3,402 weapon placements (+1: the pod on `F4B.PT` row 3, one a station,
+the row's own capacity of four capped at one); every other count is unchanged,
+the Cheat catalog still lists the pod only for an aircraft that has one (the
+F-4B and F-4J), and the pod is refused on every other station. A dedicated step
+("gun pod F4B.PT: ...") loads it through the selector, checks its 1,702 lb and
+600 logical units, taking it off, Guns only, the saved mission and the lobby rule,
+the Tab gun, a held trigger firing from the pod's nose and the jettison.
+
 The F-14 probe separately covers zero, one and two F250 tanks, external fuel,
 shell mass, total mass, consumption order and accepted-load restoration. It is
 the reviewed F-14 contract only: `--validate-tanks` refuses any other

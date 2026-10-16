@@ -1116,7 +1116,9 @@ straight on. All eleven records of classes 4, 5 and 12 are in the catalog; the
 AT-2 already was. Only the player's releases are guided: AI aircraft still drop
 nothing on the ground.
 
-Also: the F-4J's SUU-16 gun pod and the AC-130's 105 mm already work. Novelty
+Also: the F-4J's SUU-16 gun pod and the AC-130's 105 mm already work; the F-4B can
+carry the SUU-16 on its centreline too (John, 2026-10-16, [the Phantoms' gun
+pod](stores-on-pylons.md#the-phantoms-gun-pod-2026-10-16)). Novelty
 Boulder and Moose are Cheat catalog only (John, 2026-10-10, decision 16; see
 [ordnance presentation](ordnance-presentation.md#novelty-bombs-are-cheat-only)).
 The Pave Spike is a loadable pod (decision 7; the Pave Knife was dropped on 2026-10-16). Carrier counts are the
@@ -1341,12 +1343,12 @@ Retail data (PT defaults, hardpoint in brackets).
 | A-10 | AGM-65G x4, x4, x2, x2 [5 to 8] |
 | A-7 | MK-82 x2 [5], AGM-65G x4 [6] |
 | A-4E | MK-82 x4 [4], LAU-61 x2 [6] |
-| F-4B | MK-82 x4 [4], x4 [5] |
+| F-4B | MK-82 x4 [4], x4 [5]; optional SUU-16 gun pod x1 on the centreline row [3] |
 | Su-25 | B-13 x2 [6], AS-7 x4 [7] |
 | MiG-23 | B-8 x2 [6], AS-7 x2 [7], x2 [8] |
 | AH-64 | LAU-61 x2 [5] |
 | Mi-24 | AT-2 x4 [2] (fixed) |
-| F-4J | SUU-16 gun pod only |
+| F-4J | SUU-16 gun pod only (its own fixed row; drawn since 2026-10-16) |
 | none by default | F-14, MiG-29, Su-27, MiG-21, Su-35, F-15, F-104, MiG-17F |
 
 ### Weapon records

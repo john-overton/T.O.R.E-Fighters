@@ -273,7 +273,9 @@ then test each profile. Identical G envelopes do not justify replacing mass,
 fuel, rudder, departure, radar or weapon data with the newest variant's values.
 
 Treat installed hardware and ammunition separately. The F-4J's source SUU16
-is a gun pod, not an internal gun or a single expendable bullet. The same
+is a gun pod, not an internal gun or a single expendable bullet; the F-4B's
+centreline row can take the same record as an option
+([the Phantoms' gun pod](spec/stores-on-pylons.md#the-phantoms-gun-pod-2026-10-16)). The same
 distinction governs [external tanks](spec/external-fuel-tanks.md): selected
 count, empty equipment mass and fuel/ammunition are different quantities.
 Accepted empty selections must survive mission creation, restart and network
