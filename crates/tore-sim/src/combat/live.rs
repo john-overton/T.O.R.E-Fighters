@@ -5774,6 +5774,7 @@ impl State {
                             is_aircraft_gun(w),
                             p.owner,
                             w.flags,
+                            true,
                         ));
                         impacts.push((
                             position,
@@ -6092,7 +6093,7 @@ impl State {
         if self.cheats.invulnerable() {
             ownship_hits.clear();
         }
-        for (n, amount, section, direct_gun, owner, weapon_flags) in ownship_hits {
+        for (n, amount, section, direct_gun, owner, weapon_flags, recorded) in ownship_hits {
             let own = &mut ships[rows[n].index];
             own.localized_damage
                 .record(section, amount, own.config.damage_capacity);
@@ -6127,7 +6128,11 @@ impl State {
                         category: own.config.target_category,
                         aircraft: true,
                     };
-                    self.ledger.damaged(credit);
+                    if recorded {
+                        self.ledger.damaged(credit);
+                    } else {
+                        self.ledger.blasted(credit);
+                    }
                     if own.hp == 0 {
                         self.ledger.kill(credit);
                     }

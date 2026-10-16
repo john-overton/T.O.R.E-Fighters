@@ -1387,7 +1387,7 @@ impl Recorder {
                     .find(|o| o.key.aim == Some(victim))
                     .or_else(|| hits.clone().next())
             } else {
-                let owner = ledger.credit(victim).map(|kill| kill.owner);
+                let owner = ledger.attacker(victim).map(|kill| kill.owner);
                 hits.clone()
                     .find(|o| Some(o.key.owner) == owner && o.key.aim == Some(victim))
                     .or_else(|| hits.clone().find(|o| Some(o.key.owner) == owner))
@@ -1420,7 +1420,7 @@ impl Recorder {
                     hit.map(|o| o.key.owner)
                 } else {
                     ledger
-                        .credit(id)
+                        .attacker(id)
                         .map(|kill| kill.owner)
                         .or(hit.map(|o| o.key.owner))
                 };

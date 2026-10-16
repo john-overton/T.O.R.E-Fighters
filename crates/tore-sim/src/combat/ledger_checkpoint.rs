@@ -1,6 +1,6 @@
 //! The coders of the mission ledger: launches in flight, aims waiting for
 //! their round, tallies, credited kills and the last shooter to hurt each
-//! target (docs/formats/checkpoint.md).
+//! target (and the last bystander blast) (docs/formats/checkpoint.md).
 //!
 //! Everything the debrief and the score read is coded. The one field skipped
 //! is `outcomes`, a why-record: the host drains it into the tick output at
@@ -42,6 +42,7 @@ crate::checkpoint_struct!(Ledger {
     tallies,
     kills,
     last_hit,
+    blasted,
     uncredited,
 } skip {
     // Why-record: drained into the tick output every step, never read back.
@@ -82,6 +83,12 @@ mod tests {
             aircraft: false,
         });
         ledger.lose_without_credit(12);
+        ledger.blasted(Kill {
+            owner: 6,
+            victim: 14,
+            category: 0x80,
+            aircraft: true,
+        });
         ledger
     }
 
@@ -97,6 +104,9 @@ mod tests {
         assert_eq!(copy.kills(), ledger.kills());
         assert_eq!(copy.credit(9), ledger.credit(9));
         assert_eq!(copy.credit(12), None);
+        assert_eq!(copy.credit(14), None);
+        assert_eq!(copy.attacker(14), ledger.attacker(14));
+        assert_eq!(copy.attacker(14).map(|k| k.owner), Some(6));
         assert_eq!(
             copy.total(|k| k.kind == ShotKind::AirToAir),
             ledger.total(|k| k.kind == ShotKind::AirToAir)

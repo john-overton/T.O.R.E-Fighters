@@ -789,6 +789,11 @@ What a player sees:
 - A splash kill is credited to the shooter in the debrief, the replay and the
   multiplayer score, exactly as a direct kill is, and an ownship's splash
   kills count on its kill tally. Strikes, radio hit calls and jolts follow.
+- Splash that only damages a bystander aircraft does not make the shooter its
+  last attacker, because the tally holds one hit for the shot and that hit is
+  the aircraft it struck; if the bystander is lost later, by colliding with its
+  wingman for instance, nobody is credited
+  ([one record](debrief.md#kills)). Agent decision, 2026-10-16.
 - A surface unit's splash reaches aircraft and the other side's ground
   objects and ships, never its own side's or neutral scenery, whatever the
   friendly fire setting ([surface against
