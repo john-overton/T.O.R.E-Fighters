@@ -469,6 +469,9 @@ impl Host {
     /// the AI can fly it. A player still connected and away keeps its
     /// reservation, now a dropped player's.
     fn reserve(&mut self, gone: Gone) {
+        if !self.settings.ai() {
+            return;
+        }
         let Gone {
             order,
             stage,

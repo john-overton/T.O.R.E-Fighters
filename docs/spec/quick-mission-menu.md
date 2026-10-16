@@ -730,3 +730,33 @@ lists and redirect a second-half selection to the base. New loadout fingerprints
 load exists, lookup reconstructs equivalent old airport-list positions by
 source ID, including either former half and shifted STOL entries. If both
 old halves have saved loads, the most recently flown compatible load wins.
+
+## Multiplayer Player Choice
+
+Opinionated requirements from John, 2026-10-16:
+
+- The host can disable AI aircraft. Every open human slot must be ready before
+  flight starts. SAMs, AAA and ground targets remain active. An idle human keeps
+  neutral-control keepalive. Departure removes its live plane without a loss
+  or kill, and a late join uses revive placement.
+- Each wing can be Player Choice with an AI-flyable default. Human choices may
+  use any flyable aircraft shared by the session, including helicopters,
+  powered-lift aircraft and heavies. Existing content checks apply.
+- Taking a Choice slot opens the existing aircraft selector, then Load Ordnance.
+  Loadout reopens this flow. All peers build the accepted per-plane types.
+- Every player waiting to revive gets Load Ordnance over the running flight,
+  with timer and revive prompt visible. Choice slots also offer the aircraft
+  selector. The host applies revive-weapons and loadouts own/any. Escape cancels
+  edits and input returns to flight after revival.
+- Taking a Choice slot from its AI default removes that aircraft and spawns the
+  chosen one at the existing revival distance, side bearing, altitude and speed.
+
+Agent decisions: AI defaults stay mandatory with AI off; co-op without enemy
+humans is allowed, with no enemy aircraft; there is no force-start bypass.
+Cancelling the lobby aircraft selector retains the previously displayed type
+and proceeds to its ordnance page; cancelling ordnance sends nothing.
+
+Current implementation uses a Fixed/Player choice control beside each wing's
+existing aircraft field, which serves as its AI default, and an AI aircraft
+control above the wing rows when hosting. The in-flight overlay and changed-type
+late-join/revival path are not implemented yet. Visual layout is unverified.

@@ -960,7 +960,7 @@ impl Host {
             settings,
             config,
         };
-        if host.config.start == StartMode::Now {
+        if host.config.start == StartMode::Now && host.settings.ai() {
             host.start_flying().map_err(HostError::Mission)?;
         }
         Ok(host)
@@ -1741,7 +1741,8 @@ impl Host {
                 self.answer(connection, kind::SLOT, "a slot", result);
             }
             Message::Loadout(load) => {
-                let result = self.loadout(connection, load.plane, load.loadout);
+                let result =
+                    self.choose_loadout(connection, load.plane, load.aircraft, load.loadout);
                 self.answer(connection, kind::LOADOUT, "a loadout", result);
             }
             Message::SetReady(ready) => {
@@ -2069,6 +2070,9 @@ impl Host {
         {
             return Some(why);
         }
+        if !self.settings.ai() && self.world.head_lost(plane) {
+            return None;
+        }
         self.world
             .can_take(seat, plane)
             .err()
@@ -2168,6 +2172,11 @@ impl Host {
         if wanted == held {
             return Ok(());
         }
+        if matches!(self.life, Life::Lobby)
+            && let Some(old) = held
+        {
+            self.spec.plane_aircraft.remove(&old.0);
+        }
         let peer = self.peers.get_mut(&connection).ok_or("")?;
         peer.lobby.release();
         peer.lobby.slot = wanted;
@@ -2179,6 +2188,40 @@ impl Host {
 
     /// The loadout for the player's slot: checked by the Load Ordnance
     /// page's rules for that plane's aircraft, kept for the next start.
+    fn choose_loadout(
+        &mut self,
+        connection: ConnectionId,
+        plane: u32,
+        aircraft: Option<tore_formats::aircraft::AircraftId>,
+        loadout: Option<tore_world::mission::LoadoutSpec>,
+    ) -> Result<(), String> {
+        let old = self.spec.plane_aircraft.clone();
+        if let Some(aircraft) = aircraft {
+            let slot = self
+                .spec
+                .open_planes()
+                .into_iter()
+                .find(|p| p.id == plane)
+                .ok_or("No such slot.")?;
+            if !self.spec.player_choice[MissionSpec::wing_index(slot.wing)] {
+                return Err("This slot has a fixed aircraft.".into());
+            }
+            let mut candidate = self.spec.clone();
+            candidate.plane_aircraft.insert(plane, aircraft);
+            if let Some(why) = self.mission_gap_refusal(&candidate) {
+                return Err(why);
+            }
+            candidate.validate().map_err(|e| e.to_string())?;
+            self.spec.plane_aircraft = candidate.plane_aircraft;
+        }
+        if let Err(error) = self.loadout(connection, plane, loadout) {
+            self.spec.plane_aircraft = old;
+            return Err(error);
+        }
+        self.lobby_dirty = true;
+        Ok(())
+    }
+
     fn loadout(
         &mut self,
         connection: ConnectionId,
@@ -2200,13 +2243,8 @@ impl Host {
                 .find(|p| p.id == plane)
                 .ok_or("There is no such plane.")?
                 .aircraft;
-            let kind = self
-                .world
-                .combat
-                .dummy_types()
-                .iter()
-                .find(|kind| kind.profile.id == aircraft)
-                .ok_or("The mission holds no such aircraft.")?;
+            let kind = tore_world::aircraft_type::AircraftType::load(&*self.resources, aircraft)
+                .map_err(|error| error.to_string())?;
             // Under the King's loadout rule, which the mission carries.
             load.check_in(&kind.profile, &*self.resources, &self.spec)
                 .map_err(|error| error.to_string())?;
@@ -2350,6 +2388,19 @@ impl Host {
             return;
         };
         let wanted = wanted.or(held.map(|p| p.0));
+        if !self.settings.ai()
+            && let Some(plane) = wanted.map(PlaneId)
+        {
+            let head = self.world.lineage_head(self.root_of(plane));
+            if self.world.head_lost(head) {
+                if let Some(why) = self.refusal(seat, head, connection) {
+                    self.refuse_seat(connection, why);
+                } else {
+                    self.join_empty(connection, seat, head);
+                }
+                return;
+            }
+        }
         let chosen = match wanted {
             // The lobby pass's follow-up F1: a lost plane's lineage, its
             // newest plane or a wait for its respawn.
@@ -2666,6 +2717,11 @@ impl Host {
             }
             Stage::Leaving | Stage::Closing { .. } => {}
         }
+        if !self.settings.ai()
+            && let Some(peer) = self.peers.get_mut(&connection)
+        {
+            peer.lobby.release();
+        }
         self.lobby_dirty = true;
     }
 
@@ -2810,6 +2866,8 @@ impl Host {
                 .slots()
                 .into_iter()
                 .map(|slot| LobbySlot {
+                    choice: self.spec.player_choice[MissionSpec::wing_index(slot.wing)]
+                        .then_some(self.spec.wings[MissionSpec::wing_index(slot.wing)].aircraft),
                     plane: slot.id,
                     wing: slot.wing,
                     member: slot.member,
@@ -2886,7 +2944,40 @@ impl Host {
     /// The mission starts flying: built again with the loadouts of the held
     /// slots, which every player is sent to build its copy again with, and
     /// every ready player holding a slot takes its plane at the first tick.
+    /// AI-off games cannot bypass the ready requirement, even from the console.
+    pub fn ai_wait_reason(&self) -> Option<String> {
+        if self.settings.ai() {
+            return None;
+        }
+        let missing = self
+            .slots()
+            .iter()
+            .filter(|slot| {
+                !self.closed_slot(slot.id)
+                    && !self.peers.values().any(|peer| {
+                        peer.lobby.slot == Some(PlaneId(slot.id))
+                            && peer.lobby.ready
+                            && peer.lobby.unable.is_none()
+                            && !matches!(peer.stage, Stage::Closing { .. })
+                    })
+            })
+            .count();
+        (missing > 0).then(|| format!("Waiting for {missing} more ready players: AI is off."))
+    }
+
     fn start_flying(&mut self) -> Result<(), String> {
+        if !self.spec.plane_aircraft.is_empty()
+            && let Some(why) = self.mission_gap_refusal(&self.spec)
+        {
+            return Err(why);
+        }
+        if let Some(why) = self.ai_wait_reason() {
+            self.log(HostLog::Fault {
+                tick: self.world.tick(),
+                text: why.clone(),
+            });
+            return Err(why);
+        }
         let lobby_manifest = self.manifest.clone();
         let mut spec = self.spec.clone();
         for peer in self.peers.values() {
@@ -2919,7 +3010,11 @@ impl Host {
                 spec.plane_loadouts.insert(plane.id, load);
             }
         }
-        if !spec.plane_loadouts.is_empty() || self.world.tick() != 0 || self.ticks_run != 0 {
+        if !spec.plane_aircraft.is_empty()
+            || !spec.plane_loadouts.is_empty()
+            || self.world.tick() != 0
+            || self.ticks_run != 0
+        {
             match self.build(&spec) {
                 Ok((world, manifest)) => {
                     self.world = world;
@@ -2973,6 +3068,7 @@ impl Host {
                 .collect(),
         };
         let loadouts = Message::FlightLoadouts(crate::wire::messages::FlightLoadouts {
+            aircraft: spec.plane_aircraft.iter().map(|(p, a)| (*p, *a)).collect(),
             loadouts: spec
                 .plane_loadouts
                 .iter()
@@ -3041,6 +3137,16 @@ impl Host {
         let started = Instant::now();
         let tick = self.world.tick();
         let mut commands = Vec::new();
+        if !self.settings.ai() && tick == 0 {
+            for plane in self.world.roster.planes() {
+                let held = self.peers.values().any(
+                    |peer| matches!(peer.stage, Stage::Taking { plane: p, .. } if p == plane.id),
+                );
+                if !held {
+                    commands.push(MissionCommand::Despawn { plane: plane.id });
+                }
+            }
+        }
 
         // Planes going back to the AI; a plane that cannot (destroyed, or its
         // pilot gone) is held for its player while it stays connected, and
@@ -3057,7 +3163,12 @@ impl Host {
                 given.push(seat);
                 continue;
             }
-            if self.world.can_give_back(seat).is_ok() {
+            if !self.settings.ai() && self.world.can_give_back(seat).is_ok() {
+                if let Some(plane) = self.world.roster.seat(seat).and_then(|s| s.plane) {
+                    commands.push(MissionCommand::Despawn { plane });
+                }
+                given.push(seat);
+            } else if self.world.can_give_back(seat).is_ok() {
                 commands.push(MissionCommand::GiveBack { seat });
                 given.push(seat);
             } else {
@@ -3754,18 +3865,7 @@ fn about(event: &live::Event, plane: u32) -> bool {
 
 /// The aircraft that flies as `plane`.
 fn aircraft_of(world: &World, plane: PlaneId) -> Option<tore_formats::aircraft::AircraftId> {
-    world
-        .ai_wings
-        .as_ref()
-        .and_then(|wings| wings.slot(plane.0))
-        .map(|slot| slot.aircraft)
-        .or_else(|| {
-            world
-                .combat
-                .state
-                .ownship(plane.0)
-                .map(|own| own.configuration().aircraft)
-        })
+    world.aircraft_of(plane)
 }
 
 /// What a seated plane carries now, as a loadout names it: each station's

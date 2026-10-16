@@ -191,6 +191,7 @@ or a delayed observer. Each value is one of the setting's words or a number:
 | `kill-limit` | `none`, `5` | PvP only: `none`, 1, 2, 3, 5, 7 or 10 |
 | `kill-owner` | `side` | PvP only: `total`, `side` or `player` |
 | `observer-delay` | `0` | PvP only, seconds: 0 (`none`), 10, 30 or 60 |
+| `ai` | `on` | `on` or `off`. Off waits until every open human slot is ready, disables AI aircraft, AI respawn and idle handoff. Closed slots and the enemy side in co-op are empty. Ground defenses remain. No force-start bypass. |
 | `ai-respawn` | `on` | `off` or `on`: whether a lost AI aircraft comes back under the revival rules (`lives`, counted per original aircraft, and `revive-delay`), at its flight's original spawn point, as a wingman of its flight. No effect while `respawn` is `none` (John, 2026-10-09). The log has a line for each AI loss and respawn |
 | `idle-ai` | `5` | Minutes a player's game is away before the AI flies its aircraft: `never`, 1, 2, 5 or 10 (written in minutes, as `time-limit` is; John, 2026-10-06, slice F2-O4) |
 
@@ -236,6 +237,7 @@ preset free
 guns-only no
 wing friendly 1 F18.PT 4 experienced
 wing friendly 2 F14.PT 2 average
+wing-choice friendly 2
 wing enemy 1 MIG29.PT 4 experienced
 wing enemy 2 SU27.PT 2 ace
 survive friendly 2 yes
@@ -266,7 +268,9 @@ twice.
 | `separation-nm N` | 1, 2, 5 (the default), 10, 20, 50, 75, 100, 150, 200 or 300, the creator's choices |
 | `preset NAME` | The AI's standing orders: `free` (the default), `cap`, `intercept`, `escort`, `self-defense` or `hold` |
 | `guns-only yes/no` | The creator's air combat setting; `no` by default. With the standard load it leaves the guns loaded and unloads the missiles |
-| `wing SIDE N AIRCRAFT COUNT SKILL` | Up to three wings a side; `wing friendly 1` is required. The aircraft is its exact identity, one of `F18.PT` (the F/A-18D), `RAFALE.PT` (the Rafale C), `F14.PT`, `A4E.PT`, `F31.PT` (the X-31), `MIG29.PT`, `SU27.PT`, `MIG21.PT`, `SU25.PT`, `MIG23.PT`, `SU35.PT`, `F22.PT`, `F22N.PT` (the F-22N) or `faxx` (the F/A-XX); skills are `novice`, `average`, `experienced`, `ace` or `dummy`. Friendly wing 1 holds 1 to 5 aircraft, the others 0 to 5. A wing with no line has no aircraft. The other wings are flown by the AI, which cannot fly the helicopters, the V-22, the AV-8 or the Yak-141 yet, so a mission that puts one of them in a wing other than friendly wing 1 is refused ([AI wingmen](spec/variety-flight.md#ai-wingmen)) |
+| `wing SIDE N AIRCRAFT COUNT SKILL` | Up to three wings a side; `wing friendly 1` is required. The aircraft is its exact identity, one of `F18.PT` (the F/A-18D), `RAFALE.PT` (the Rafale C), `F14.PT`, `A4E.PT`, `F31.PT` (the X-31), `MIG29.PT`, `SU27.PT`, `MIG21.PT`, `SU25.PT`, `MIG23.PT`, `SU35.PT`, `F22.PT`, `F22N.PT` (the F-22N) or `faxx` (the F/A-XX); skills are `novice`, `average`, `experienced`, `ace` or `dummy`. Friendly wing 1 holds 1 to 5 aircraft, the others 0 to 5. A wing with no line has no aircraft. Fixed wings and Player Choice AI defaults must use a type accepted by the AI-flyable catalog. Human Choice overrides may use any flyable type shared by the session |
+| `wing-choice SIDE N` | Makes that wing Player Choice. Its existing `wing` aircraft is the mandatory AI default, including with AI off. Human picks are separate. |
+| `plane-aircraft PLANE AIRCRAFT` | A human aircraft override for an existing Player Choice slot, numbered from zero. Duplicate, missing and fixed-aircraft slots are refused. |
 | `objective SIDE N NAME [SIDE N]` | A wing's objective: `inherit` (the default, the preset), `free`, `cap`, `intercept` or `escort` another wing (an enemy wing for `intercept`, another wing of its own side for `escort`), `self-defense`, `hold` |
 | `survive SIDE N yes/no` | The wing must survive; `no` by default |
 | `cheats LIST` | `none` (the default), or a list of the game's cheats: `unlimited-ammo`, `unlimited-fuel`, `no-spins`, `no-turbulence`, `extra-g`, `ignore-weapon-weights`, `no-sun-whiteout`, `no-g-effects`, `no-screen-shake`, `no-crashes`, `easy-aiming`, `ignore-midair-collisions`, `easy-targeting`, `guns-only`, `easy-physics`, `damage=invulnerable`, `damage=realistic` and `enemy-ai=LEVEL` (`novice`, `average`, `experienced` or `ace`); they apply to every player |
@@ -961,3 +965,20 @@ One mission at a time, Quick Missions only. The lobby, slots and loadout
 choice before flight are built (EF4); the King's settings, chat, respawns,
 PvP scoring, observers, the server browser and NAT traversal are stages F, I
 and J; holding a dropped player's plane for a rejoin is stage K.
+
+## AI-off and Player Choice status
+
+Opinionated, requested by John on 2026-10-16. `ai off` applies only to
+multiplayer aircraft. Idle players retain neutral-control keepalive; their
+planes are not handed to AI. A live departure removes the aircraft without a
+kill or loss and opens its slot. A new player enters at revive placement without
+spending a revival. Agent decisions: co-op is allowed without enemy aircraft;
+AI defaults remain mandatory so enabling AI never invalidates the mission;
+neither King nor console bypasses the full-ready requirement. `start now` with
+AI off waits like `first-player`.
+
+Player Choice mission text, lobby selections and flight-start distribution are
+implemented in this slice. Changing aircraft on a late join or revival and the
+in-flight Load Ordnance overlay are still unfinished. Do not treat this as the
+complete Player Choice feature. The requested behavior is specified in the
+[creator specification](spec/quick-mission-menu.md#multiplayer-player-choice).

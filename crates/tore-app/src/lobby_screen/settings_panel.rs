@@ -204,6 +204,7 @@ pub fn page_rows(page: Page) -> Vec<Kind> {
             Kind::Host,
         ],
         Page::Revival => vec![
+            Kind::Setting(number::AI),
             Kind::Setting(number::RESPAWN),
             Kind::Setting(number::LIVES),
             Kind::Setting(number::REVIVE_DELAY),
@@ -258,6 +259,7 @@ pub fn row_label(kind: Kind) -> &'static str {
             number::IDLE_AI => "AI flies idle aircraft after",
             number::SNAPSHOT_RATE => "Snapshot rate",
             number::AI_RESPAWN => "AI respawn",
+            number::AI => "AI aircraft",
             _ => "",
         },
     }
@@ -395,6 +397,11 @@ pub fn row_state(kind: Kind, ctx: &Context) -> Result<(), String> {
     }
     if kind == Kind::Setting(number::SNAPSHOT_RATE) && !ctx.hosted_by_a_player() {
         return Err(RATE_IS_THE_SERVERS.into());
+    }
+    if matches!(kind, Kind::Setting(number::AI_RESPAWN | number::IDLE_AI))
+        && ctx.value(number::AI) == Some(0)
+    {
+        return Err("AI is off: AI respawn and idle handoff have no effect.".into());
     }
     // AI respawn follows the revival rule: greyed while nothing revives
     // (John, 2026-10-09).

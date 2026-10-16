@@ -106,6 +106,8 @@ pub(super) struct Player {
 pub(super) enum Pending {
     /// A new plane at the revival point.
     Revive { seat: SeatId },
+    /// A newly joining human replaces an empty AI-off slot, without using a life.
+    Join { seat: SeatId, plane: PlaneId },
     /// A free AI aircraft.
     AiSlot { seat: SeatId, plane: PlaneId },
 }
@@ -119,6 +121,7 @@ struct Made {
     new: Option<NewPlane>,
     /// The AI aircraft taken (the `ai-slot` rule).
     taken: Option<PlaneId>,
+    uses_life: bool,
 }
 
 /// The host's revival state for the flying mission: the session's, which
@@ -173,7 +176,9 @@ fn clock(seconds: u64) -> String {
 impl Pending {
     fn seat(self) -> SeatId {
         match self {
-            Pending::Revive { seat } | Pending::AiSlot { seat, .. } => seat,
+            Pending::Revive { seat }
+            | Pending::Join { seat, .. }
+            | Pending::AiSlot { seat, .. } => seat,
         }
     }
 }
@@ -304,6 +309,12 @@ impl Host {
 
     /// Join (Take plane) from the lobby by a player whose plane is lost
     /// counts as flying again: `Some` with the outcome when it is one.
+    pub(super) fn join_empty(&mut self, connection: ConnectionId, seat: SeatId, plane: PlaneId) {
+        self.revival
+            .pending
+            .insert(connection, Pending::Join { seat, plane });
+    }
+
     pub(super) fn revive_join(&mut self, connection: ConnectionId) -> Option<Result<(), String>> {
         if let Some(seat) = self.revival.held.get(&connection).copied() {
             return Some(self.revive_now(connection, seat));
@@ -515,13 +526,34 @@ impl Host {
                 continue;
             };
             let flying_lost = peer.stage == Stage::Seated;
-            if !(flying_lost
+            if !(matches!(wanted, Pending::Join { .. })
+                || flying_lost
                 || self.revival.held.contains_key(&connection)
                 || self.seatless_lost(connection))
             {
                 continue;
             }
             match wanted {
+                Pending::Join { seat, plane } => {
+                    if let Some(why) = self.refusal(seat, plane, connection) {
+                        self.refuse_revival(connection, why);
+                        continue;
+                    }
+                    let Some(order) = self.order_of(connection) else {
+                        continue;
+                    };
+                    self.revival_note_lost(order, plane, tick);
+                    let before = self.revival.making.len();
+                    self.make_revival(connection, seat, commands);
+                    if let Some(made) = self.revival.making.get_mut(before) {
+                        made.uses_life = false;
+                    } else {
+                        self.revival
+                            .pending
+                            .insert(connection, Pending::Join { seat, plane });
+                    }
+                    self.revival.players.entry(order).or_default().lost = None;
+                }
                 Pending::Revive { seat } => self.make_revival(connection, seat, commands),
                 Pending::AiSlot { seat, plane } => {
                     if self
@@ -549,6 +581,7 @@ impl Host {
                         seat,
                         new: None,
                         taken: Some(plane),
+                        uses_life: true,
                     });
                 }
             }
@@ -620,6 +653,7 @@ impl Host {
                     seat,
                     new: Some(new),
                     taken: None,
+                    uses_life: true,
                 });
             }
             Err(error) => self.refuse_revival(connection, error.to_string()),
@@ -754,7 +788,7 @@ impl Host {
             self.revival.held.remove(&made.connection);
             if let Some(order) = self.order_of(made.connection) {
                 let player = self.revival.players.entry(order).or_default();
-                player.used += 1;
+                player.used += u32::from(made.uses_life);
                 player.lost = None;
             }
             self.roster_dirty = true;

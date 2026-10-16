@@ -312,6 +312,12 @@ pub(super) fn open_handoffs() -> Scenario {
                     flying.push(seat)
                 }
                 MissionCommand::GiveBack { seat } => flying.retain(|s| *s != seat),
+                MissionCommand::Despawn { plane } => flying.retain(|s| {
+                    world
+                        .roster
+                        .seat(*s)
+                        .is_none_or(|entry| entry.plane != Some(plane))
+                }),
                 MissionCommand::Settings(_)
                 | MissionCommand::Abandon { .. }
                 | MissionCommand::Revive { .. }
@@ -394,6 +400,12 @@ fn flying_after(world: &World, commands: &[MissionCommand]) -> Vec<SeatId> {
                 flying.push(seat)
             }
             MissionCommand::GiveBack { seat } => flying.retain(|s| *s != seat),
+            MissionCommand::Despawn { plane } => flying.retain(|s| {
+                world
+                    .roster
+                    .seat(*s)
+                    .is_none_or(|entry| entry.plane != Some(plane))
+            }),
             MissionCommand::Settings(_)
             | MissionCommand::Abandon { .. }
             | MissionCommand::Revive { .. }

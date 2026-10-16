@@ -22,6 +22,11 @@ tore_sim::checkpoint_struct!(Lineage { used, lost, told });
 
 fn save_pending(s: &mut Saver, pending: Pending) -> Result<()> {
     match pending {
+        Pending::Join { seat, plane } => {
+            s.writer().write_varint(2);
+            seat.save(s, None)?;
+            plane.save(s, None)
+        }
         Pending::Revive { seat } => {
             s.writer().write_varint(0);
             seat.save(s, None)
@@ -40,6 +45,10 @@ fn load_pending(l: &mut Loader<'_>) -> Result<Pending> {
             seat: Checkpoint::load(l, None)?,
         },
         1 => Pending::AiSlot {
+            seat: Checkpoint::load(l, None)?,
+            plane: Checkpoint::load(l, None)?,
+        },
+        2 => Pending::Join {
             seat: Checkpoint::load(l, None)?,
             plane: Checkpoint::load(l, None)?,
         },

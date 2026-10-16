@@ -1865,6 +1865,7 @@ value's coding. The names are the configuration file's and the logs'.
 | 21 | `host` | 0 calculated, or 1 plus the lobby id of the player the King pinned (stage K, [designed](#host-migration-and-rejoin-stage-k)) |
 | 22 | `snapshot-rate` | snapshots a second: 60, 30 or 20 from the King of a game a player hosts (default 60); a dedicated server's file may give 10, 12, 15, 20, 24, 30, 40 or 60, which the lobby state carries as given and the King may not change (slice R1, protocol 17: [what the rate sets](#connecting)) |
 | 23 | `ai-respawn` | 0 off, 1 on (default on in both modes): a lost AI aircraft respawns under the revival rules; no effect while `respawn` is none (protocol 20; John, 2026-10-09; the respawn itself is the lobby pass's slice R1) |
+| 24 | `ai` | 0 off, 1 on; default on. Lobby-only. Off suppresses AI aircraft, AI respawn and idle handoff and requires every open slot ready. |
 
 A number the host does not know, or a value outside its list, is refused with
 the setting's name and its values. A setting marked PvP only is refused in
@@ -3192,3 +3193,15 @@ prefixed `JETTISON-` are inert; `TORE-BODY:length:diameter` shape identifiers
 request fitted bodies with length and diameter in feet, each finite, positive
 and at most 100. The combat checkpoint layout also changes.
 See [jettison](../spec/jettison.md). Protocol numbering belongs to the lead.
+
+### Player Choice wire changes awaiting integration
+
+The nr-mpchoice slice leaves the protocol constant at 44 for the lead to bump.
+Loadout (13) adds an optional aircraft after the plane number: one presence bit,
+then the existing six-bit aircraft code when present, before the optional loadout.
+FlightLoadouts (22) adds a counted list of `(plane varint, aircraft six bits)`
+before its loadout list, limited to 64 entries. LobbySlot adds an optional
+six-bit AI-default aircraft immediately after its wing, before its member byte.
+Presence denotes Player Choice. The aircraft field remains the current selection.
+Mission text adds `wing-choice SIDE N` and `plane-aircraft PLANE AIRCRAFT`.
+No changed revive-request message has been implemented yet.

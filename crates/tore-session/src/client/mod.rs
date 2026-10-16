@@ -1369,6 +1369,15 @@ impl Client {
     /// standard load). The host checks it with the Load Ordnance page's rules
     /// and refuses one they do not allow, with the reason.
     pub fn send_loadout(&mut self, loadout: Option<LoadoutSpec>) {
+        self.send_aircraft_loadout(None, loadout);
+    }
+
+    /// Select a human aircraft and its stores together.
+    pub fn send_aircraft_loadout(
+        &mut self,
+        aircraft: Option<tore_formats::aircraft::AircraftId>,
+        loadout: Option<LoadoutSpec>,
+    ) {
         let Some(plane) = self
             .lobby
             .as_ref()
@@ -1385,6 +1394,7 @@ impl Client {
         self.request(
             now,
             Message::Loadout(Box::new(crate::wire::messages::Loadout {
+                aircraft,
                 mission: self.number.unwrap_or(0),
                 plane,
                 loadout,
@@ -2294,6 +2304,7 @@ impl Client {
             return;
         }
         spec.plane_loadouts = flight.loadouts.into_iter().collect();
+        spec.plane_aircraft = flight.aircraft.into_iter().collect();
         self.build_mission(spec, number, Check::Added(&flight.manifest));
     }
 

@@ -544,6 +544,9 @@ pub fn mission_items(spec: &MissionSpec) -> Vec<ItemKey> {
     for wing in spec.wings.iter().filter(|wing| wing.count > 0) {
         items.insert((ItemKind::Aircraft, wing.aircraft.selection_key().to_owned()));
     }
+    for aircraft in spec.plane_aircraft.values() {
+        items.insert((ItemKind::Aircraft, aircraft.selection_key().to_owned()));
+    }
     items.insert((ItemKind::Theater, spec.theater.clone()));
     for load in spec.loadout.iter().chain(spec.plane_loadouts.values()) {
         for station in &load.stations {

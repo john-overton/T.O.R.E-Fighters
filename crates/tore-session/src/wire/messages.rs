@@ -246,6 +246,8 @@ pub struct Slot {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Loadout {
     pub mission: u32,
+    /// Human aircraft selection for a Player Choice slot.
+    pub aircraft: Option<AircraftId>,
     /// The slot's plane, which must be the one the player holds.
     pub plane: u32,
     pub loadout: Option<LoadoutSpec>,
@@ -362,6 +364,8 @@ impl StandbyMark {
 /// open planes are) and who holds it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LobbySlot {
+    /// AI default when this is a Player Choice slot.
+    pub choice: Option<AircraftId>,
     pub plane: u32,
     pub wing: WingId,
     pub member: u8,
@@ -1080,6 +1084,8 @@ pub enum Message {
 /// A flight's loadouts and what they add to the content check.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FlightLoadouts {
+    /// Accepted per-plane aircraft before the deterministic flight build.
+    pub aircraft: Vec<(u32, AircraftId)>,
     /// Each loaded plane and its loadout.
     pub loadouts: Vec<(u32, LoadoutSpec)>,
     /// The resources the flight's build read that the lobby's mission did
@@ -1333,6 +1339,7 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
     write_count(w, slots.len());
     for slot in slots {
         let LobbySlot {
+            choice,
             plane,
             wing,
             member,
@@ -1343,6 +1350,9 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
         } = slot;
         w.write_varint(u64::from(*plane));
         write_wing(w, *wing);
+        bits::write_option(w, *choice, |w, a| {
+            let _ = w.write_bits(aircraft_code(a), 6);
+        });
         let _ = w.write_bits(u64::from(*member), 8);
         let _ = w.write_bits(aircraft_code(*aircraft), 6);
         bits::write_option(w, *holder, |w, id| {
@@ -1423,6 +1433,7 @@ fn read_lobby(r: &mut BitReader<'_>) -> WireResult<LobbyState> {
         slots.push(LobbySlot {
             plane: read_u32(r)?,
             wing: read_wing(r)?,
+            choice: bits::read_option(r, read_aircraft)?,
             member: r.read_bits(8)? as u8,
             aircraft: read_aircraft(r)?,
             holder: bits::read_option(r, read_id)?,
@@ -2557,6 +2568,10 @@ impl Message {
             Self::Loadout(load) => {
                 w.write_varint(u64::from(load.mission));
                 w.write_varint(u64::from(load.plane));
+                w.write_bool(load.aircraft.is_some());
+                if let Some(aircraft) = load.aircraft {
+                    let _ = w.write_bits(aircraft_code(aircraft), 6);
+                }
                 w.write_bool(load.loadout.is_some());
                 if let Some(loadout) = &load.loadout {
                     write_loadout(&mut w, loadout)?;
@@ -2592,6 +2607,17 @@ impl Message {
                         what: "loadouts",
                         limit: LOADOUTS_LIMIT,
                     });
+                }
+                if flight.aircraft.len() > LOADOUTS_LIMIT {
+                    return Err(WireError::TooMany {
+                        what: "plane aircraft",
+                        limit: LOADOUTS_LIMIT,
+                    });
+                }
+                write_count(&mut w, flight.aircraft.len());
+                for (plane, aircraft) in &flight.aircraft {
+                    w.write_varint(u64::from(*plane));
+                    let _ = w.write_bits(aircraft_code(*aircraft), 6);
                 }
                 write_count(&mut w, flight.loadouts.len());
                 for (plane, loadout) in &flight.loadouts {
@@ -2778,6 +2804,7 @@ impl Message {
             kind::LOADOUT => Self::Loadout(Box::new(Loadout {
                 mission: read_u32(r)?,
                 plane: read_u32(r)?,
+                aircraft: bits::read_option(r, read_aircraft)?,
                 loadout: bits::read_option(r, read_loadout)?,
             })),
             kind::SET_READY => Self::SetReady(SetReady {
@@ -2799,12 +2826,18 @@ impl Message {
                 reason: read_str(r)?,
             },
             kind::FLIGHT_LOADOUTS => {
+                let count = read_count(r, LOADOUTS_LIMIT, "plane aircraft")?;
+                let mut aircraft = Vec::with_capacity(count);
+                for _ in 0..count {
+                    aircraft.push((read_u32(r)?, read_aircraft(r)?));
+                }
                 let count = read_count(r, LOADOUTS_LIMIT, "loadouts")?;
                 let mut loadouts = Vec::with_capacity(count);
                 for _ in 0..count {
                     loadouts.push((read_u32(r)?, read_loadout(r)?));
                 }
                 Self::FlightLoadouts(FlightLoadouts {
+                    aircraft,
                     loadouts,
                     manifest: read_manifest(r)?,
                 })

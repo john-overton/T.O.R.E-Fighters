@@ -55,6 +55,10 @@ impl Checkpoint for MissionCommand {
                 seat.save(s, None)?;
                 plane.save(s, None)
             }
+            MissionCommand::Despawn { plane } => {
+                s.writer().write_varint(10);
+                plane.save(s, None)
+            }
             MissionCommand::GiveBack { seat } => {
                 s.writer().write_varint(2);
                 seat.save(s, None)
@@ -131,6 +135,9 @@ impl Checkpoint for MissionCommand {
                 seat: Checkpoint::load(l, None)?,
                 callsign: Checkpoint::load(l, None)?,
             },
+            10 => MissionCommand::Despawn {
+                plane: Checkpoint::load(l, None)?,
+            },
             other => return invalid(format!("a mission command has no variant {other}")),
         })
     }
@@ -192,6 +199,7 @@ mod tests {
                 plane: PlaneId(1_000),
             },
             MissionCommand::GiveBack { seat: SeatId(0) },
+            MissionCommand::Despawn { plane: PlaneId(3) },
             MissionCommand::Abandon { seat: SeatId(254) },
             MissionCommand::Revive {
                 seat: SeatId(7),

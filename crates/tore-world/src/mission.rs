@@ -609,6 +609,10 @@ pub struct MissionSpec {
     pub guns_only: bool,
     /// Friendly wings 1 to 3, then enemy wings 1 to 3.
     pub wings: [WingSpec; WINGS],
+    /// Human-selectable wings; `wings` retains each AI default.
+    pub player_choice: [bool; WINGS],
+    /// Accepted human aircraft, keyed by stable mission plane number.
+    pub plane_aircraft: BTreeMap<u32, AircraftId>,
     pub objectives: [GroupObjective; WINGS],
     /// Each wing must survive for the mission to succeed.
     pub must_survive: [bool; WINGS],
@@ -698,6 +702,8 @@ impl MissionSpec {
                 wing(0, Skill::Novice),
                 wing(0, Skill::Novice),
             ],
+            player_choice: [false; WINGS],
+            plane_aircraft: BTreeMap::new(),
             objectives: [GroupObjective::Inherit; WINGS],
             must_survive: [false; WINGS],
             cheats: Cheats::default(),
@@ -812,7 +818,26 @@ impl MissionSpec {
     /// plane: friendly wing 1 keeps its full count, its lead (plane 0)
     /// included.
     pub fn open_wing_launches(&self) -> Result<Vec<WingLaunch>, AiError> {
-        resolve_wings(&self.selections(false), self.enemy_skill)
+        let wings = resolve_wings(&self.selections(false), self.enemy_skill)?;
+        if self.plane_aircraft.is_empty() {
+            return Ok(wings);
+        }
+        let mut plane = 0;
+        let mut result = Vec::new();
+        for wing in wings {
+            for member in &wing.members {
+                let mut launch = wing.clone();
+                launch.members = vec![*member];
+                launch.aircraft = self
+                    .plane_aircraft
+                    .get(&plane)
+                    .copied()
+                    .unwrap_or(wing.aircraft);
+                result.push(launch);
+                plane += 1;
+            }
+        }
+        Ok(result)
     }
 
     /// The aircraft and count pairs the straight-flight fixtures take (no
@@ -838,7 +863,11 @@ impl MissionSpec {
                     id: planes.len() as u32,
                     wing: Self::wing_id(index),
                     member: member as u8,
-                    aircraft: wing.aircraft,
+                    aircraft: self
+                        .plane_aircraft
+                        .get(&(planes.len() as u32))
+                        .copied()
+                        .unwrap_or(wing.aircraft),
                 });
             }
         }
@@ -1061,6 +1090,23 @@ impl MissionSpec {
                 return refuse(format!("`{}` is not a weapon resource name", bad.weapon));
             }
         }
+        let planes = self.open_planes();
+        for plane in self.plane_aircraft.keys() {
+            let Some(slot) = planes.iter().find(|p| p.id == *plane) else {
+                return refuse(format!("plane {plane} is not in the mission"));
+            };
+            if !self.player_choice[Self::wing_index(slot.wing)] {
+                return refuse(format!("plane {plane} is not a Player Choice slot"));
+            }
+        }
+        for (index, choice) in self.player_choice.iter().enumerate() {
+            if *choice && !self.wings[index].aircraft.ai_flyable() {
+                return refuse(format!(
+                    "{} needs an AI-flyable default",
+                    wing_name(Self::wing_id(index))
+                ));
+            }
+        }
         if let Some(plane) = self.plane_loadouts.keys().find(|p| **p >= MAX_PLANES) {
             return refuse(format!(
                 "plane {plane} is beyond the mission's planes 0 to {}",
@@ -1139,6 +1185,17 @@ impl MissionSpec {
                     wing.skill.name()
                 ));
             }
+        }
+        for (index, choice) in self.player_choice.iter().enumerate() {
+            if *choice {
+                line(format!("wing-choice {}", wing_words(Self::wing_id(index))));
+            }
+        }
+        for (plane, aircraft) in &self.plane_aircraft {
+            line(format!(
+                "plane-aircraft {plane} {}",
+                aircraft.selection_key()
+            ));
         }
         for (index, objective) in self.objectives.iter().enumerate() {
             if *objective != GroupObjective::Inherit {
@@ -1502,6 +1559,8 @@ struct Parser {
     preset: Option<Preset>,
     guns_only: Option<bool>,
     wings: [Option<WingSpec>; WINGS],
+    player_choice: [Option<bool>; WINGS],
+    plane_aircraft: BTreeMap<u32, AircraftId>,
     objectives: [Option<GroupObjective>; WINGS],
     survive: [Option<bool>; WINGS],
     cheats: Option<Cheats>,
@@ -1783,6 +1842,25 @@ impl Parser {
                 once(&mut self.guns_only, "`guns-only`", yes_no_word(value, key)?)
             }
             "wing" => self.wing(words),
+            "wing-choice" => {
+                let [side, number] = arguments(words, 2, "wing-choice SIDE N")? else {
+                    unreachable!()
+                };
+                let index = parse_wing(side, number)?;
+                once(&mut self.player_choice[index], "wing-choice", true)
+            }
+            "plane-aircraft" => {
+                let [plane, aircraft] = arguments(words, 2, "plane-aircraft PLANE AIRCRAFT")?
+                else {
+                    unreachable!()
+                };
+                let plane = whole(plane, "the plane number")?;
+                let aircraft = parse_aircraft(aircraft)?;
+                if self.plane_aircraft.insert(plane, aircraft).is_some() {
+                    return refuse(format!("plane {plane}'s aircraft appears twice"));
+                }
+                Ok(())
+            }
             "objective" => self.objective(words),
             "survive" => {
                 let [side, number, value] = arguments(words, 3, "survive SIDE N yes/no")? else {
@@ -2230,6 +2308,8 @@ impl Parser {
             spec.preset = preset;
         }
         spec.guns_only = self.guns_only.unwrap_or(false);
+        spec.player_choice = self.player_choice.map(|v| v.unwrap_or(false));
+        spec.plane_aircraft = self.plane_aircraft;
         for index in 0..WINGS {
             spec.objectives[index] = self.objectives[index].unwrap_or(GroupObjective::Inherit);
             spec.must_survive[index] = self.survive[index].unwrap_or(false);
@@ -2266,6 +2346,24 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn player_choice_text_and_member_launches_round_trip() {
+        let text = "tore-mission 1\ntheater UKR\nwing friendly 1 F18.PT 2 average\nwing-choice friendly 1\nplane-aircraft 1 MIG29.PT\n";
+        let spec = MissionSpec::from_text(text).unwrap();
+        assert!(spec.player_choice[0]);
+        assert_eq!(spec.open_planes()[0].aircraft, AircraftId::F18);
+        assert_eq!(spec.open_planes()[1].aircraft.selection_key(), "MIG29.PT");
+        let launches = spec.open_wing_launches().unwrap();
+        assert_eq!(launches[1].aircraft, spec.open_planes()[1].aircraft);
+        assert_eq!(launches[1].members[0].member, 1);
+        assert_eq!(MissionSpec::from_text(&spec.to_text()).unwrap(), spec);
+        assert!(MissionSpec::from_text(&text.replace("wing-choice friendly 1\n", "")).is_err());
+        assert!(
+            MissionSpec::from_text(&text.replace("plane-aircraft 1", "plane-aircraft 9")).is_err()
+        );
+        assert!(MissionSpec::from_text(&format!("{text}plane-aircraft 1 F18.PT\n")).is_err());
+    }
 
     /// The first fenced `text` block under "The mission file" in the guide.
     fn guide_example() -> String {

@@ -32,6 +32,8 @@ pub enum MissionCommand {
     /// kicked ([`World::give_back_plane`]). The seat sends no input for this
     /// tick.
     GiveBack { seat: SeatId },
+    /// Removes an aircraft without damage, debris or score credit.
+    Despawn { plane: PlaneId },
     /// Stage F phase 2: frees `seat` from its lost plane, whose pilot
     /// becomes [`crate::seats::Pilot::Lost`] (docs/ARCHITECTURE.md, "Death,
     /// revival and lives"; [`World::abandon_plane`]). The seat sends no input
@@ -158,6 +160,9 @@ impl World {
                 self.take_plane(*seat, *plane)?;
                 // A player back from away retakes the lead it owns (R2).
                 self.lead_taken(*seat, *plane);
+            }
+            MissionCommand::Despawn { plane } => {
+                self.despawn_plane(*plane)?;
             }
             MissionCommand::GiveBack { seat } => {
                 let plane = self.roster.seat(*seat).and_then(|s| s.plane);

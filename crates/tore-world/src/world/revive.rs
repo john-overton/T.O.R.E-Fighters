@@ -188,6 +188,8 @@ pub struct LostPlane {
 /// checkpoint section (`revive_checkpoint.rs`).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Book {
+    /// Cleanly removed aircraft, retained as empty slots for late joins.
+    despawned: BTreeMap<PlaneId, AircraftId>,
     lost: Vec<LostPlane>,
     retired: Vec<Plane>,
     /// Every plane [`World::add_plane`] added, in order.
@@ -509,7 +511,7 @@ impl World {
     }
 
     /// The aircraft `plane` is.
-    fn aircraft_of(&self, plane: PlaneId) -> Option<AircraftId> {
+    pub fn aircraft_of(&self, plane: PlaneId) -> Option<AircraftId> {
         self.combat
             .state
             .ownship(plane.0)
@@ -520,6 +522,7 @@ impl World {
                     .and_then(|wings| wings.slot(plane.0))
                     .map(|slot| slot.aircraft)
             })
+            .or_else(|| self.revival.despawned.get(&plane).copied())
     }
 
     /// The configuration an aircraft's standard load is built from.
@@ -787,6 +790,14 @@ impl World {
     /// The oldest abandoned wreck that has rested on the ground for
     /// [`RETIRE_AFTER_TICKS`], which a revival may retire.
     pub fn retirable(&self) -> Option<PlaneId> {
+        if let Some(plane) = self
+            .revival
+            .despawned
+            .keys()
+            .find(|p| self.roster.plane(**p).is_some())
+        {
+            return Some(*plane);
+        }
         let now = self.tick();
         self.revival
             .lost
@@ -1362,8 +1373,34 @@ impl World {
     /// An AI wreck whose lineage respawned (slice R1) retires the same way:
     /// its AI actor goes too, and the retired entry names nobody as its
     /// pilot ([`Pilot::Lost`]).
+    /// Clean removal retains a slot identity for a later human revival.
+    /// It emits no damage, loss, debris or kill event.
+    pub fn despawn_plane(&mut self, plane: PlaneId) -> WorldResult<()> {
+        if self.roster.plane(plane).is_none() {
+            return Err(format!("plane {} is not in the mission", plane.0).into());
+        }
+        if let Some(aircraft) = self.aircraft_of(plane) {
+            self.revival.despawned.insert(plane, aircraft);
+        }
+        if let Some(seat) = self.roster.seat_of(plane) {
+            self.roster.release_plane(seat);
+        }
+        if let Some(wings) = &mut self.ai_wings {
+            wings.retire_actor(plane.0);
+        }
+        self.cockpits.retain(|cockpit| cockpit.plane != plane);
+        self.combat.remove_ownship(plane.0);
+        self.combat
+            .state
+            .targets
+            .retain(|target| target.id != plane.0);
+        self.refresh_friendlies();
+        Ok(())
+    }
+
     pub fn retire_plane(&mut self, plane: PlaneId) -> WorldResult<()> {
-        let ai_wreck = self.revival.lost.iter().any(|lost| lost.plane == plane)
+        let ai_wreck = (self.revival.despawned.contains_key(&plane)
+            || self.revival.lost.iter().any(|lost| lost.plane == plane))
             && self.roster.plane(plane).map(|p| p.pilot) == Some(Pilot::Ai);
         if self.roster.plane(plane).map(|p| p.pilot) != Some(Pilot::Lost) && !ai_wreck {
             return Err(format!("plane {} is not an abandoned wreck", plane.0).into());

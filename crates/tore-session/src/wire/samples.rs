@@ -888,6 +888,7 @@ pub fn messages(exact: Vec<u8>) -> Vec<Message> {
             request: SlotRequest::Side(Side::Enemy),
         }),
         Message::Loadout(Box::new(Loadout {
+            aircraft: None,
             mission: 7,
             plane: 2,
             loadout: Some(LoadoutSpec {
@@ -906,6 +907,7 @@ pub fn messages(exact: Vec<u8>) -> Vec<Message> {
             }),
         })),
         Message::Loadout(Box::new(Loadout {
+            aircraft: None,
             mission: 7,
             plane: 2,
             loadout: None,
@@ -929,6 +931,7 @@ pub fn messages(exact: Vec<u8>) -> Vec<Message> {
         Message::Goodbye(Goodbye::Kicked("AFK".into())),
         Message::Goodbye(Goodbye::HostLeft),
         Message::FlightLoadouts(super::messages::FlightLoadouts {
+            aircraft: Vec::new(),
             loadouts: vec![(
                 2,
                 LoadoutSpec {
@@ -1270,6 +1273,7 @@ pub fn lobby() -> LobbyState {
         ],
         slots: vec![
             LobbySlot {
+                choice: None,
                 plane: 0,
                 wing: WingId::new(Side::Friendly, 0).unwrap(),
                 member: 0,
@@ -1279,6 +1283,7 @@ pub fn lobby() -> LobbyState {
                 reserved: None,
             },
             LobbySlot {
+                choice: None,
                 plane: 1,
                 wing: WingId::new(Side::Friendly, 0).unwrap(),
                 member: 1,
@@ -1288,6 +1293,7 @@ pub fn lobby() -> LobbyState {
                 reserved: Some("Cobra".into()),
             },
             LobbySlot {
+                choice: None,
                 plane: 4,
                 wing: WingId::new(Side::Friendly, 1).unwrap(),
                 member: 0,

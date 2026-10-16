@@ -660,6 +660,13 @@ impl World {
                 {
                     flying.push(seat)
                 }
+                MissionCommand::Despawn { plane } => {
+                    flying.retain(|seat| {
+                        self.roster
+                            .seat(*seat)
+                            .is_none_or(|s| s.plane != Some(plane))
+                    });
+                }
                 MissionCommand::GiveBack { seat } | MissionCommand::Abandon { seat } => {
                     flying.retain(|s| *s != seat)
                 }

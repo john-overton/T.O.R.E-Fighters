@@ -1842,3 +1842,22 @@ loads; explicit mission-file AI loads stay intact. With multiple humans in one
 wing, the lowest member slot supplies its AI load. Revival retains the chosen
 stores under the existing full-fuel and revival-weapons rules. See the
 [loadout contract](spec/multiplayer.md#human-flight-loadouts).
+
+## AI aircraft and Player Choice
+
+John requested these options on 2026-10-16. The Revival settings page includes
+**AI aircraft**, also available in the hosting creator. Off disables AI aircraft,
+AI respawn and idle handoff. The lobby reports how many open slots still need a
+ready human. The King cannot force an early start. Co-op is allowed with an empty
+enemy air force; ground defenses still operate. Live departures remove the plane
+without kill or loss credit; late joins use revive placement.
+
+The creator offers Fixed/Player choice per wing beside its aircraft selector.
+For Choice wings that selector is the mandatory AI default. Taking a Choice slot
+opens the existing aircraft dialog then Load Ordnance. Loadout reopens the flow.
+Slots name the selected aircraft or AI default. Accepted choices pass the shared
+content check and travel with the flight build.
+
+This slice is incomplete: changing type on a late join or revival and the
+in-flight ordnance overlay remain outstanding. See the
+[requirements and agent decisions](spec/quick-mission-menu.md#multiplayer-player-choice).

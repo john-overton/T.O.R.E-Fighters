@@ -562,3 +562,17 @@ The [optional Rafale centreline](../spec/stores-on-pylons.md#optional-carriers-2
 also uses row 9; F-22 and MiG-29 additions use row and bank 8.
 Configuration validation rejects duplicate fuel-bank allocation. Tank records
 and store poses still carry source row 9, not the fuel-bank number.
+
+## Player Choice and AI-off additions awaiting integration
+
+The nr-mpchoice slice adds mission command tag 10, `Despawn`, followed by
+`PlaneId`. The command removes live state without damage events and frees its
+seat. The revival section begins with a map from cleanly removed `PlaneId` to
+`AircraftId`, before the existing lost-plane list, preserving types for late joins.
+These empty aircraft can retire immediately when room is needed.
+
+Session revival pending tag 2 is `Join`, followed by seat and plane. It uses
+revival placement without charging a life. The per-tick `Made.uses_life` flag is
+scratch and is not checkpointed. The settings registry gains number 24. Mission
+strings preserve the Choice markers and per-plane aircraft map. Protocol and
+checkpoint compatibility require lead integration; no version is bumped here.

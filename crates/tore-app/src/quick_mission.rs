@@ -68,7 +68,9 @@ const SURVIVAL_BASE: usize = OBJECTIVE_BASE + OBJECTIVE_COUNT;
 /// player's Start and Airport), 35 and 36 the enemy's Start and Airport
 /// (slice CL-R, John 2026-10-11: Redfor ground starts that match the
 /// creator's styles).
-const FIELDS: usize = 37;
+const FIELDS: usize = 44;
+pub const AI_AIRCRAFT: usize = 43;
+const CHOICE_BASE: usize = 37;
 /// The enemy's Start field (Airborne or Ground), the Redfor mirror of 33.
 const ENEMY_START: usize = 35;
 /// The enemy's Airport field, the Redfor mirror of 34.
@@ -182,6 +184,7 @@ impl Default for Draft {
             (19, 1),
             (21, 2),
             (22, 2),
+            (AI_AIRCRAFT, 1),
         ] {
             values[id] = value;
         }
@@ -754,6 +757,12 @@ impl QuickMission {
             .unwrap_or(0)
     }
     fn values(&self, id: usize) -> Cow<'_, [String]> {
+        if id == AI_AIRCRAFT {
+            return Cow::Owned(vec!["Off".into(), "On".into()]);
+        }
+        if (CHOICE_BASE..CHOICE_BASE + 6).contains(&id) {
+            return Cow::Owned(vec!["Fixed".into(), "Player choice".into()]);
+        }
         Cow::Borrowed(if id == 6 {
             &self.aircraft_names
         } else if AI_AIRCRAFT_FIELDS.contains(&id) {
@@ -1012,6 +1021,7 @@ impl QuickMission {
                 skill: Skill::from_level(v[field + 1] as i32).ok_or("Choose a pilot skill.")?,
             };
         }
+        spec.player_choice = std::array::from_fn(|i| self.lobby && v[CHOICE_BASE + i] != 0);
         spec.enemy_start = self.enemy_start();
         // A strike needs a ground target to strike; without one the wing
         // flies the mission's own orders.
@@ -1407,6 +1417,7 @@ impl QuickMission {
             .ok_or_else(|| format!("This creator has no {} mile distance.", spec.separation_nm))?;
         v[19] = usize::from(!spec.guns_only);
         for (index, field) in [4, 7, 10, 21, 24, 27].into_iter().enumerate() {
+            v[CHOICE_BASE + index] = usize::from(spec.player_choice[index]);
             let wing = spec.wings[index];
             if wing.count < self.options.fields[field].len() {
                 v[field] = wing.count;
@@ -1556,6 +1567,14 @@ impl QuickMission {
         over.preset = spec.preset;
         over.guns_only = spec.guns_only;
         over.wings = spec.wings;
+        over.player_choice = spec.player_choice;
+        let planes = over.open_planes();
+        let choices = over.player_choice;
+        over.plane_aircraft.retain(|plane, _| {
+            planes
+                .iter()
+                .any(|p| p.id == *plane && choices[MissionSpec::wing_index(p.wing)])
+        });
         over.objectives = spec.objectives;
         over.must_survive = spec.must_survive;
         // The ground target and its defenses are the creator's; the seed is
@@ -1760,6 +1779,26 @@ impl QuickMission {
     fn hidden_airport(&self, id: usize) -> bool {
         (id == 34 && !self.ground_start()) || (id == ENEMY_AIRPORT && !self.enemy_ground_start())
     }
+    /// Reuse the creator's aircraft dialog for a multiplayer slot.
+    pub fn open_slot_aircraft(&mut self, aircraft: AircraftId) {
+        if let Some(index) = self
+            .aircraft_files
+            .iter()
+            .position(|name| AircraftId::parse(name).ok() == Some(aircraft))
+        {
+            self.draft.values[6] = index;
+        }
+        self.open(6);
+    }
+
+    pub fn slot_aircraft_result(&self) -> Option<AircraftId> {
+        if self.selector.is_some() {
+            None
+        } else {
+            self.wing_aircraft(6)
+        }
+    }
+
     fn open(&mut self, id: usize) {
         self.selector = Some(id);
         self.cursor = if let Some(group) = id
@@ -1880,6 +1919,12 @@ impl QuickMission {
             // The creator opened from a multiplayer lobby (EF8), and after the
             // host refused an Accept.
             "lobby-creator" => self.enter_lobby(),
+            "lobby-creator-choice" => {
+                self.enter_lobby();
+                self.draft.values[CHOICE_BASE] = 1;
+                self.draft.values[CHOICE_BASE + 3] = 1;
+                self.draft.values[AI_AIRCRAFT] = 0;
+            }
             "lobby-creator-refused" => {
                 self.enter_lobby();
                 self.notice = Some(
@@ -2225,7 +2270,7 @@ impl QuickMission {
                 self.map_build = None;
                 return Action::Back;
             }
-            3..=36 | 60 | OBJECTIVE_BASE..=91 => {
+            3..=43 | 60 | OBJECTIVE_BASE..=91 => {
                 self.focus = id;
                 self.notice = Some(kind.refusal().into());
             }
@@ -2304,7 +2349,7 @@ impl QuickMission {
                 self.map_build = None;
                 return Action::Back;
             }
-            3..=36 => {
+            3..=43 => {
                 if self.hidden_airport(id) {
                     return Action::None;
                 }
@@ -2398,7 +2443,7 @@ impl QuickMission {
             "Tab" | "ArrowDown" | "ArrowUp" => {
                 let backwards = shift || key == "ArrowUp";
                 let focus_order: Vec<_> = (1..FIELDS)
-                    .filter(|id| !self.hidden_airport(*id))
+                    .filter(|id| !self.hidden_airport(*id) && (self.lobby || *id < CHOICE_BASE))
                     .chain(OBJECTIVE_BASE..SURVIVAL_BASE + OBJECTIVE_COUNT)
                     .collect();
                 self.focus = if let Some(position) =
@@ -2459,6 +2504,15 @@ impl QuickMission {
         }
         self.controls.push((0, (84, 35, 18, 24)));
         self.controls.extend(entries);
+        if self.lobby {
+            self.line(
+                &mut c,
+                font,
+                35,
+                120,
+                &[("AI aircraft: ", None), ("", Some(AI_AIRCRAFT))],
+            );
+        }
         c.text(font, "FRIENDLY SITUATION", 116, 104, None);
         c.text(font, "ENEMY SITUATION", 429, 104, None);
         self.line(
@@ -2479,20 +2533,28 @@ impl QuickMission {
             for wing in 0..3 {
                 let id = start + wing * 3;
                 let y = 153 + wing as i32 * 14;
-                self.line(
-                    &mut c,
-                    font,
-                    x,
-                    y,
-                    &[
-                        (&format!("Wing {}: ", wing + 1), None),
-                        ("", Some(id)),
-                        (" ", None),
-                        ("", Some(id + 1)),
-                        (" ", None),
-                        ("", Some(id + 2)),
-                    ],
-                );
+                let heading = format!("Wing {}: ", wing + 1);
+                let group = wing + usize::from(start == 21) * 3;
+                let mut parts = vec![
+                    (heading.as_str(), None),
+                    ("", Some(id)),
+                    (" ", None),
+                    ("", Some(id + 1)),
+                    (" ", None),
+                ];
+                if self.lobby {
+                    parts.push(("", Some(CHOICE_BASE + group)));
+                    parts.push((
+                        if self.draft.values[CHOICE_BASE + group] != 0 {
+                            " AI: "
+                        } else {
+                            " "
+                        },
+                        None,
+                    ));
+                }
+                parts.push(("", Some(id + 2)));
+                self.line(&mut c, font, x, y, &parts);
             }
             for wing in 0..3 {
                 let group = wing + usize::from(start == 21) * 3;
