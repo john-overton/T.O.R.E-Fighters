@@ -10,6 +10,18 @@ use crate::combat::{
 pub(super) const CRATER_SCALE: u8 = 25;
 
 impl State {
+    /// AI inventory bridge. Uses the player separation path, preserving the
+    /// cockpit selection. Empty stations and already removed tanks are no-ops.
+    pub fn jettison_ai(&mut self, own: &mut Ownship, launcher: Launcher, stations: &[usize]) {
+        let selected = own.selected;
+        self.jettison(own, launcher, true);
+        for &station in stations {
+            own.selected = station;
+            self.jettison(own, launcher, false);
+        }
+        own.selected = selected;
+    }
+
     pub(super) fn jettison(&mut self, own: &mut Ownship, launcher: Launcher, tanks: bool) {
         if !launcher.alive || own.hp <= 0 || !own.external {
             return;
@@ -60,6 +72,30 @@ impl State {
             own.config
                 .refresh_tanks()
                 .expect("removing validated tanks");
+        } else if let Some(index) = own
+            .config
+            .designator_pods
+            .iter()
+            .position(|p| p.station == own.selected)
+        {
+            let pod = own.config.designator_pods.remove(index);
+            let mut weapon = inert_record();
+            weapon.source = format!("JETTISON-{}", pod.store.source);
+            weapon.name = pod.store.name;
+            weapon.shape = Some(body_shape(store_sizes::PLAIN));
+            stores.push((
+                weapon,
+                own.selected,
+                own.config.stations[own.selected].mount,
+            ));
+            own.config
+                .refresh_tanks()
+                .expect("removing validated designator");
+            own.cockpit.sight = own
+                .config
+                .sight_sensor()
+                .map(super::super::sight::Sight::new);
+            own.cockpit.laser = Default::default();
         } else if let Some(station) = own
             .config
             .stations
@@ -358,6 +394,44 @@ mod tests {
         assert_eq!(s.projectiles.len(), 3);
         assert!(s.take_sound_events().is_empty());
     }
+    #[test]
+    fn selected_designator_falls_once_and_removes_its_mass_and_laser() {
+        use crate::combat::sight::{DesignatorPod, DesignatorStore, Gimbal, SightSensor};
+        let mut s = loaded();
+        let own = s.own_mut();
+        own.ammo[0] = 0;
+        own.config.designator_pods.push(DesignatorPod {
+            station: 0,
+            store: DesignatorStore {
+                source: "TEST.SEE".into(),
+                name: "Designator".into(),
+                weight_lbs: 400,
+                flags: 2,
+                sensor: SightSensor {
+                    laser: true,
+                    range_ft: 60_000.,
+                    gimbal: Gimbal::Hemisphere,
+                    eye: [0.; 3],
+                    default_look: [0.; 2],
+                },
+            },
+        });
+        own.config.refresh_tanks().unwrap();
+        let mass = own.payload_lbs();
+        s.command(0, Command::Jettison, launcher());
+        assert_eq!(s.own().payload_lbs(), mass - 400.);
+        assert!(s.own().configuration().designator_pods.is_empty());
+        assert_eq!(s.projectiles.len(), 1);
+        assert_eq!(
+            s.projectiles[0].weapon.as_ref().unwrap().source,
+            "JETTISON-TEST.SEE"
+        );
+        s.take_sound_events();
+        s.command(0, Command::Jettison, launcher());
+        assert_eq!(s.projectiles.len(), 1);
+        assert!(s.take_sound_events().is_empty());
+    }
+
     #[test]
     fn selected_stores_fall_without_detonation_or_damage_and_leave_small_craters() {
         let mut s = loaded();

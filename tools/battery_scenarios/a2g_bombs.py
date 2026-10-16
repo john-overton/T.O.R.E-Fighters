@@ -210,9 +210,42 @@ def jettison_recording_problems(work: Path, output: str) -> list[str]:
     return problems
 
 
+def ai_jettison_recording_problems(work: Path, output: str) -> list[str]:
+    if not (work / "log/log.jsonl").is_file():
+        return ["AI jettison recording log was not produced"]
+    rows = [json.loads(line) for line in (work / "log/log.jsonl").read_text().splitlines()]
+    drops = re.findall(r"ai-jettison: drop tick=\d+ id=(\d+) store=JETTISON-", output)
+    inert = [row for row in rows if row.get("kind") == "weapon.launch"
+             and row.get("fields", {}).get("class") == "other"
+             and str(row.get("fields", {}).get("projectile")) in drops]
+    sounds = [row.get("fields", {}).get("sound") for row in rows
+              if row.get("kind") == "audio.effect"]
+    problems = []
+    if not drops or len(inert) != len(drops):
+        problems.append(f"recording has {len(inert)} inert launches for {len(drops)} drops")
+    if "blast39" not in sounds:
+        problems.append("missing recorded jettison release sound")
+    if not re.search(r"verify-render: PASS ticks=\d+ missing=0 differing=0", output):
+        problems.append("AI jettison replay scene verification did not pass")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     run = ["--a2g-run", "UKR", "QUCOL", "--attack", "release", "--from", "1"]
     return [
+        Scenario(
+            name="ai-jettison", lane="ai",
+            args=["--a2g-run", "UKR", "QUCOL", "--attack", "ai-jettison",
+                  "--aircraft", "f16c", "--load", "MK82", "--altitude", "5000",
+                  "--speed", "300", "--seconds", "40", "--defenses", "0", "0",
+                  "--record", "{work}/ai-jettison.tore-replay", "--verify-render"],
+            timeout=300,
+            expect=[r"ai-jettison: PASS drops=[1-9]\d* .* inert-landed"],
+            then=[Step(["--recording-info", "{work}/ai-jettison.tore-replay"]),
+                  Step(["--recording-log", "{work}/ai-jettison.tore-replay", "--out", "{work}/log", "--rate", "5"])],
+            check_work=ai_jettison_recording_problems,
+            notes="An F-16 strike pilot sheds tanks and bombs after a perceived close air attack; records inert falls.",
+        ),
         Scenario(
             name="a2g-jettison", lane="flight",
             args=["--a2g-run", "UKR", "QUCOL", "--attack", "jettison",

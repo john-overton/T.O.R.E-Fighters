@@ -175,7 +175,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "ai-strike": (
         "the AI strike driver (--a2g-run --pilot ai) and the AI's air-to-ground behaviour (slice ST-D onward)",
-        ("ai-strike-*", "ai-sead-*", "ai-wing-*", "qmc-strike-*"),
+        ("ai-strike-*", "ai-sead-*", "ai-wing-*", "qmc-strike-*", "ai-jettison"),
     ),
     "windowed-menus": ("captured windows: launches, terrain, previews, sizes", ("menus-window-*",)),
     "flight-views": ("camera views and their rendering", ("replay-view-*", "render-*", "flight-target-camera-*")),

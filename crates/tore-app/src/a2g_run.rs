@@ -70,6 +70,7 @@ use tore_world::{
 };
 
 mod ai;
+mod ai_jettison;
 pub(crate) mod ai_render;
 mod ccip;
 mod cluster;
@@ -331,6 +332,7 @@ pub fn run() -> AppResult<()> {
     match o.attack.as_str() {
         "release" => release::run(&mut scene, &o)?,
         "jettison" => jettison::run(&mut scene, &o)?,
+        "ai-jettison" => ai_jettison::run(&mut scene, &o, &resources)?,
         "cluster" => cluster::run(&mut scene, &o)?,
         kind @ ("maverick" | "harm" | "antiship" | "sarh" | "sarh-uncued") => {
             missile::run(&mut scene, &o, kind, &resources)?
@@ -383,6 +385,13 @@ impl Scene {
     ) -> AppResult<Self> {
         let mut spec = MissionSpec::new(&o.theater, o.aircraft);
         spec.ground_target = Some(o.stem.clone());
+        if o.attack == "ai-jettison" {
+            spec.wings[0].count = 2;
+            spec.wings[3].aircraft = tore_formats::aircraft::AircraftId::Mig29;
+            spec.wings[3].count = 1;
+            spec.separation_nm = 50;
+        }
+
         spec.aaa = Defense::from_level(o.defenses.0).ok_or("defense levels are 0 to 3")?;
         spec.sam = Defense::from_level(o.defenses.1).ok_or("defense levels are 0 to 3")?;
         spec.surface_seed = o.seed;
@@ -448,7 +457,9 @@ impl Scene {
 
     /// Starts the recording `--record` asks for, with the scene as it is.
     fn recording(mut self, o: &Options) -> AppResult<Self> {
-        if let Some(path) = &o.record {
+        if o.attack != "ai-jettison"
+            && let Some(path) = &o.record
+        {
             let plane = o.aircraft.label().to_owned();
             self.record = Some(crate::surface_objective::Record::start(
                 &self.world,

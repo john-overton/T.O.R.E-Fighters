@@ -344,3 +344,5 @@ mod tests {
         assert!((0..1000).all(|_| r.chance(100)));
     }
 }
+
+pub mod jettison;

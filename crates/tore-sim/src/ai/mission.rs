@@ -185,6 +185,7 @@ pub struct DeviceEvent {
 /// What one tick of the mission produced.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MissionOutput {
+    pub jettison: Vec<(u32, super::jettison::Drop)>,
     pub launches: Vec<LaunchEvent>,
     pub devices: Vec<DeviceEvent>,
     /// Player-readable activity per actor, for a radio or status display.
@@ -3748,6 +3749,45 @@ impl AiMission {
             }
             actor.activity = activity;
             output.activities.push((actor_id, activity));
+        }
+
+        // Opinionated load shedding, from this tick's perceived contacts only.
+        let range = |id| {
+            actor
+                .trace
+                .targets
+                .iter()
+                .find(|t| t.id == id && t.valid && t.is_aircraft && t.side != identity.side)
+                .map(|t| distance(own.position, t.position))
+        };
+        let attacker_ft = reports
+            .iter()
+            .filter(|r| r.defended_id == actor_id)
+            .filter_map(|r| r.attacker_id.and_then(range))
+            .min_by(f64::total_cmp);
+        let engagement_ft = actor.controller.target().and_then(range);
+        if let Some(drop) = super::jettison::decide(super::jettison::Situation {
+            skill: actor.experience().level,
+            strike: actor.strikes(),
+            missile_defense: actor
+                .last_defense
+                .is_some_and(|d| d.motion.is_some() || d.burst.is_some()),
+            defensive_break: actor.fire_defending
+                || matches!(
+                    actor.activity,
+                    Activity::Defending | Activity::Evading | Activity::Breaking
+                ),
+            engagement_ft: if matches!(
+                actor.activity,
+                Activity::Pursuing | Activity::Attacking | Activity::Acquiring
+            ) {
+                engagement_ft
+            } else {
+                None
+            },
+            attacker_ft,
+        }) {
+            output.jettison.push((actor_id, drop));
         }
 
         // 4. Weapons: debit this actor's own store, then emit the event.

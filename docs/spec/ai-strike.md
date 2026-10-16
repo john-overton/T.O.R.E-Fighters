@@ -1221,3 +1221,9 @@ and is open to change.
   and roles, ST-K takeover, ST-F helicopters and AC-130, ST-N multiplayer,
   ST-RA replay, ST-B baseline, ST-A acceptance. The evidence will be a baseline
   at `docs/baselines/ai-strike.md` when the round is accepted.
+
+## Defensive store jettison
+
+John requested AI defensive jettison on 2026-10-15. The shared
+[jettison contract](jettison.md#replay-network-and-ai) defines tank shedding,
+merge range, skill-dependent strike-load retention and inert recording behavior.

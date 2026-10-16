@@ -70,6 +70,32 @@ Peers must agree on the [network conventions](../formats/net-protocol.md#inert-j
 and [checkpoint layout](../formats/checkpoint.md#inert-stores). The lead assigns
 the protocol bump.
 
-No autonomous jettison decision is added. Existing AI decision code has no
-jettison command call. Human-owned aircraft use the same combat path regardless
-of seat, including an aircraft taken over from AI.
+AI jettison is opinionated behavior requested by John on 2026-10-15. The
+thresholds below are agent decisions, not recovered retail numbers. AI wingmen
+of humans and autonomous wings use the same rules on the authoritative host.
+
+- Perceived missile defense or a defensive break drops all external tanks,
+  including empty tanks. A missile defense means a maneuver or countermeasure
+  response, not tracking a threat while waiting. A strike pilot in missile
+  defense or an actual defensive break also drops the external air-to-ground load.
+- A non-strike pilot pursuing, acquiring or attacking an aircraft within
+  3 nautical miles drops tanks and external air-to-ground stores.
+- A perceived attack on the aircraft itself drops that load when the observed
+  attacker is within 3 nautical miles. Strike pilots instead use 4, 3, 2 and
+  1 nautical miles for Novice, Average, Experienced and Ace. A nearby contact
+  alone never makes a strike pilot abandon the load.
+- Bombs, rocket pods, selectable designator pods and air-to-ground missiles are discarded. Guns and
+  air-to-air missiles remain, as do internal weapons. No cruise, ground,
+  ordinary strike or bingo-return trigger is added.
+
+One nautical mile is 6076.11549 feet. Distances use perceived aircraft contacts,
+not hidden enemy positions. No random draw is added. The decision uses the
+current mission tick; the bridge applies it after that tick's ordinary weapon
+releases, before the next flight step. An already released weapon stays armed.
+Removing stores empties their AI inventory and configuration, so a sustained
+trigger cannot repeat a drop or sound. No new checkpoint latch is needed.
+Tank fuel and the mass/drag load update through the existing fuel and flight
+payload interfaces. A dropped load can improve maneuvering and shorten fuel
+endurance. The existing inert projectile path supplies recordings and clients.
+Human-owned aircraft use the same combat path regardless of seat, including
+an aircraft taken over from AI.
