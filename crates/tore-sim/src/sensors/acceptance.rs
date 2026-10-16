@@ -769,6 +769,39 @@ fn a_grounded_aircraft_is_hidden_from_radar_but_not_from_eyes_or_infrared() {
 }
 
 #[test]
+fn a_stealthy_aircraft_with_external_tanks_shows_up_much_further_out() {
+    // John, 2026-10-16: ordnance should raise detectability. A signature-10
+    // aircraft clean is found at 28.5 nmi by the 90-nmi radar; with two 600
+    // gallon tanks at 52.1 nmi (docs/radar.md, "External stores").
+    let air = clear_air();
+    let o = observer();
+    let raptor = |distance_nmi: f64, stores: crate::sensors::Stores| Observable {
+        configuration: Configuration::carrying(stores),
+        signature: SignatureProfile {
+            radar: 10.,
+            ..SignatureProfile::default()
+        },
+        ..ahead(1, distance_nmi)
+    };
+    let tanks = crate::sensors::Stores {
+        count: 2.,
+        lbs: 8770.,
+    };
+    let seen = |distance_nmi: f64, stores| {
+        let mut s = hornet();
+        s.step(&o, &[raptor(distance_nmi, stores)], &air);
+        s.contact(1).is_some()
+    };
+    assert!(seen(28., crate::sensors::Stores::NONE));
+    assert!(!seen(29., crate::sensors::Stores::NONE));
+    assert!(seen(40., tanks));
+    assert!(seen(52., tanks));
+    assert!(!seen(53., tanks));
+    // Jettisoned, it is as hard to find as before.
+    assert!(!seen(40., crate::sensors::Stores::NONE));
+}
+
+#[test]
 fn a_jamming_target_denies_its_own_return_until_ownship_closes() {
     let air = clear_air();
     let o = observer();
