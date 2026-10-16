@@ -1582,7 +1582,12 @@ host left the game (4); the King's End mission is reason 3.
   server whose file says `king-mission locked` sets it; a game a player
   hosts never does. The lobby screen then opens the King's Mission... read
   only, with "This server's mission is fixed.". The host's refusals of the
-  King's mission and settings changes are unchanged.
+  King's mission and settings changes are unchanged. After the locked bit,
+  one more optional field (nr-lobbyui; the lead numbers the protocol, which
+  stays 50 until then): a presence bit and, when set, 4 bits of seconds left
+  on the King's force start, 1 to 10. Absent (one 0 bit) when no countdown
+  runs. The host owns the number. **Force start** (kind 55) is empty, from
+  the King: it starts that countdown or cancels the one running.
 - **Refused** is the request's kind (8 bits) and the reason (a string).
   **Goodbye** is 2 bits (kicked 0, then the reason as a string; the host
   left 1). **Flight loadouts** is a count, then each plane (varint) and its
@@ -2245,6 +2250,7 @@ words.
 | 52 | Taken over | new host to old host | Sent by the new host's own client on its old connection: the new host's lobby id (8) and tick T (32) |
 | 53 | Release | the King to host | The plane (varint): its reservation ends |
 | 54 | Rejoin | player to host | The token (128): sent after Accepted by a game that joined without sending its token and holds one for this session |
+| 55 | Force start | the King to host | Empty. Starts a 10 second force start, or cancels one that is running (nr-lobbyui). The seconds left travel on Lobby, after the mission-locked bit |
 
 **Changed messages.**
 

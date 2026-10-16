@@ -546,7 +546,7 @@ minimum's).
 | `first-player` | N, 2 or more | When the Nth such player is ready |
 | `now` | 0 | At once, with nobody in it |
 | `now` | N, 1 or more | Like `first-player` with that minimum: it waits in the lobby, and a restart or the next rotation entry waits again |
-| `king first-player` | any | When the King presses Fly and the minimum is met; the King's Fly is refused with the wait line until then |
+| `king first-player` | any | When the King presses Fly and the minimum is met; the King's Fly is refused with the wait line until then. Force Start (a 10 second countdown when someone holding a slot is not ready) is available to that King on the same terms as a player who hosts, and it does not start the mission while the minimum is unmet |
 
 Rules and decisions (agent decisions unless noted):
 
