@@ -721,6 +721,9 @@ fn per_store_bomb_flight_measurements() {
         ("FAB500.JT", 0x22012, 1093, 100, 1),
         ("GBU10.JT", 0x2a543, 2000, 90, 1),
         ("GBU10A.JT", 0x2a543, 2000, 90, 1),
+        ("GBU12.JT", 0x2a543, 500, 90, 1),
+        ("GBU16.JT", 0x2a543, 1000, 90, 1),
+        ("GBU38.JT", 0x2a043, 500, 90, 1),
         ("GBU28.JT", 0x2a543, 4500, 90, 1),
         ("GBU29.JT", 0x2a043, 2000, 90, 1),
         ("GBU29P.JT", 0x2a043, 2000, 90, 1),
@@ -751,7 +754,7 @@ fn per_store_bomb_flight_measurements() {
         w.weight = weight;
         w.movement.launch_retard = retard;
         w.burst.game_rounds_in_burst = count;
-        if name.starts_with("GBU29") || name == "GBU30.JT" {
+        if name.starts_with("GBU29") || matches!(name, "GBU30.JT" | "GBU38.JT") {
             w.seeker.signature = 0;
         }
         let body = Body::of(&w);

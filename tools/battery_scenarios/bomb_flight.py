@@ -23,6 +23,8 @@ def guided_problems(output):
 
 def scenarios():
     cases = [
+        ("gbu12-level", "laser", "f16c", "GBU12", "20000", "0", ["--release", "bar", "--station", "2"]),
+        ("gbu38-level", "jdam", "f16c", "GBU38", "12000", "0", ["--release", "bar", "--station", "2"]),
         ("gbu10-level", "laser", "f16c", "GBU10", "20000", "0", ["--release", "bar", "--station", "2"]),
         ("jdam-max", "jdam", "f16c", "GBU30", "12000", "0", ["--release", "max", "--station", "2"]),
         ("mk82-dive", "ccip", "a4e", "MK82", "5000", "30", []),
@@ -39,6 +41,7 @@ def scenarios():
         outputs=["flight.tore-replay"], timeout=300,
         check=guided_problems if attack in ("laser", "jdam") else None,
         forbid=[r"a2g-run: impact .*unseen"],
-        expect=[r"a2g-run: impact", r"a2g-run: done"],
+        expect=[r"a2g-run: impact", r"a2g-run: done",
+                *([r"a2g-run: impact .*target-hp 0"] if name in ("gbu12-level", "gbu38-level") else [])],
         notes="Headless recording and CPU replay-transform verification. Flight-model numerical assertions are in tore-sim.",
     ) for name, attack, aircraft, store, altitude, dive, extra in cases]

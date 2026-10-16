@@ -72,9 +72,9 @@ pub enum Form {
 /// The weapon records that go for the ground and are neither bombs, rocket
 /// pods nor laser weapons (the data carries no class; fitted from the plan's
 /// path table until the weapon slices name one).
-const GROUND_RECORDS: [&str; 14] = [
+const GROUND_RECORDS: [&str; 15] = [
     "AGM65G", "AGM65A", "AGM84E", "AGM88", "AGM45", "AGM84A", "AM39", "AS16", "AS7", "AS15", "AT2",
-    "GBU29", "GBU29P", "GBU30",
+    "GBU29", "GBU29P", "GBU30", "GBU38",
 ];
 
 /// The selected weapon is for the ground: a bomb, a rocket pod, a laser

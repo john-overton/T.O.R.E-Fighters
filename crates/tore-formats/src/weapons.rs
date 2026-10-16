@@ -573,6 +573,112 @@ mod tests {
     }
 
     #[test]
+    fn virtual_bomb_shapes_alias_only_the_donor_model() {
+        // Construct by field name instead of assuming an object offset.
+        let mut fields = String::from("[brent's_relocatable_format]\n");
+        for (layout, schema) in [
+            ("object", crate::aircraft::schema::OBJECT),
+            ("projectile", crate::aircraft::schema::PROJECTILE),
+        ] {
+            for &(kind, field) in schema {
+                let value = match (layout, field) {
+                    ("object", "structType") => "7",
+                    ("object", "typeSize") => "315",
+                    ("projectile", "structType") => "10",
+                    (_, "utilProc") => "_PROJProc",
+                    (_, "si_names" | "ot_names") => "si_names",
+                    (_, "shape") => "model",
+                    _ => "0",
+                };
+                let kind = if kind == "ptr" && value == "0" {
+                    "dword"
+                } else {
+                    kind
+                };
+                fields.push_str(&format!("{kind} {value}\n"));
+            }
+        }
+        fields.push_str(
+            r#":si_names
+string "Test"
+string "Test bomb"
+string "TEST.JT"
+:model
+string "TEST.SH"
+end
+"#,
+        );
+        let mut data = BTreeMap::from([
+            ("PAVEWAY.JT".into(), fields.clone().into_bytes()),
+            ("GBU29.JT".into(), fields.into_bytes()),
+            ("TEST.SH".into(), vec![1, 2, 3]),
+        ]);
+        corrections::extend_resources(&mut data);
+        assert_eq!(data.len(), 9);
+        for (name, donor, _, _, shape) in corrections::SMALL_BOMBS {
+            assert_eq!(
+                corrections::resource_donor(name, &data).as_deref(),
+                Some(donor)
+            );
+            assert_eq!(
+                corrections::resource_donor(shape, &data).as_deref(),
+                Some("TEST.SH")
+            );
+            assert_eq!(data[shape], data["TEST.SH"]);
+        }
+        data.insert("GB12.SH".into(), vec![9]);
+        corrections::extend_resources(&mut data);
+        assert_eq!(data["GB12.SH"], vec![9], "explicit shapes win");
+    }
+
+    #[test]
+    fn smaller_bombs_preserve_donor_contract_and_scale_damage() {
+        let bytes = fixture();
+        let mut donor = Weapon::parse("PAVEWAY.JT", bytes.as_bytes()).unwrap();
+        donor.weight = 2000;
+        donor.damage.by_class = [401, 800, 1200, 1600, 2000];
+        donor.damage.collateral_radius = 100;
+        for (name, _, weight, divisor, shape) in corrections::SMALL_BOMBS {
+            let mut variant = donor.clone();
+            variant.source = name.into();
+            corrections::apply(&mut variant);
+            assert_eq!(variant.weight, weight);
+            assert_eq!(
+                variant.damage.by_class,
+                donor.damage.by_class.map(|v| v / divisor)
+            );
+            assert_eq!(
+                variant.damage.collateral_radius,
+                if divisor == 4 { 63 } else { 79 }
+            );
+            assert_eq!(
+                variant.damage.collateral_percent,
+                donor.damage.collateral_percent
+            );
+            assert_eq!(variant.damage.fuze_radius, donor.damage.fuze_radius);
+            assert_eq!(variant.damage.fuze_arm_t, donor.damage.fuze_arm_t);
+            assert_eq!(variant.movement, donor.movement);
+            assert_eq!(variant.seeker, donor.seeker);
+            assert_eq!(variant.flags, donor.flags);
+            assert_eq!(variant.effects, donor.effects);
+            assert_eq!(variant.shape.as_deref(), Some(shape));
+            assert_eq!(
+                Weapon::parse(name, bytes.as_bytes()).unwrap().weight,
+                weight
+            );
+        }
+        let mut resources = BTreeMap::from([
+            ("PAVEWAY.JT".into(), bytes.clone().into_bytes()),
+            ("GBU29.JT".into(), bytes.into_bytes()),
+        ]);
+        corrections::extend_resources(&mut resources);
+        let once = resources.clone();
+        corrections::extend_resources(&mut resources);
+        assert_eq!(resources, once);
+        assert_eq!(resources.len(), 5);
+    }
+
+    #[test]
     fn derived_r27_records_change_guidance_motor_and_names_at_parse() {
         let bytes = fixture();
         let mut donor = Weapon::parse("AA10.JT", bytes.as_bytes()).unwrap();

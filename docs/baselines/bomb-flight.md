@@ -11,6 +11,9 @@
 Implementation validation on Linux, 2026-10-15, branch nr-bombphys based on
 3653df60. The flight constants are fitted agent choices in
 [bomb motion](../spec/air-to-ground.md#bomb-motion), not measured retail parity.
+The GBU-12/16/38 rows were measured on nr-bombs2, based on f805054a, using
+`cargo test --locked -p tore-sim per_store_bomb_flight_measurements -- --nocapture`.
+Their fitted definitions are in [smaller guided stores](../spec/missiles.md#smaller-guided-bomb-stores).
 No GPU run or retail executable comparison was performed.
 
 ## Numerical store probe
@@ -30,6 +33,9 @@ the ground. Pack rows describe one body, with record weight divided by count.
 | FAB500.JT | 450 | 724.637 | 36.35833 | 25752.278 |
 | GBU10.JT | 450 | 710.658 | 33.82500 | 24002.733 |
 | GBU10A.JT | 450 | 710.658 | 33.82500 | 24002.733 |
+| GBU12.JT | 450 | 671.688 | 34.46667 | 24000.243 |
+| GBU16.JT | 450 | 693.894 | 34.05833 | 24000.753 |
+| GBU38.JT | 450 | 676.414 | 35.18333 | 24003.600 |
 | GBU28.JT | 450 | 738.400 | 33.84167 | 24005.446 |
 | GBU29.JT | 450 | 720.079 | 34.20000 | 24002.474 |
 | GBU29P.JT | 450 | 720.079 | 34.20000 | 24002.474 |
@@ -96,3 +102,21 @@ Unit tests live with combat ballistics, guided flight and live bomb tests.
 transforms. Logs, recordings, the full run report and the GPU frame plan are
 local-only under `.local/tmp-nr-bombphys/` and
 `.local/next-round/reports/nr-bombphys.md`.
+
+## Smaller-store recorded releases
+
+On nr-bombs2 based on f805054a, the headless `a2g-bomb-flight-gbu12-level`
+and `a2g-bomb-flight-gbu38-level` cases use an F-16C at 450 kt, a level
+release at the shared T bar, and a truck-park target. Both destroy the target
+and verify their recorded render transforms on the CPU with zero missing or
+differing frames. These are game-model measurements, not retail comparisons.
+
+| Store | Release altitude ft | Flight s | Arrival kt | Aim-point miss ft | Prediction error ticks |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| GBU-12 | 20000 | 32.116667 | 676.736 | 8.2 | -0.519 |
+| GBU-38 | 12000 | 29.533333 | 579.615 | 14.9 | -1.360 |
+
+The battery also retains the four existing shared-flight cases and
+`replay-a2g` for older-recording compatibility. The actual imported-store
+carrier, catalog and persistence audit is documented in
+[ordnance availability](ordnance-availability.md).

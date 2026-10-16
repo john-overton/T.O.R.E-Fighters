@@ -154,13 +154,15 @@ pub const SURFACE_ROLE: [&str; 10] = [
 /// added the AT-2 the same day and the laser bombs on 2026-10-13 ("nosecone
 /// (GBU's, Mavericks, AT-12's etc) views"); the data has no such flag, and no
 /// TV or IR guided bomb (GBU-15, Walleye) exists in it.
-pub const SEEKER_VIEW: [&str; 12] = [
+pub const SEEKER_VIEW: [&str; 14] = [
     "AGM65G.JT",
     "AGM65A.JT",
     "AGM84E.JT",
     "GBU10.JT",
     "GBU10A.JT",
     "PAVEWAY.JT",
+    "GBU12.JT",
+    "GBU16.JT",
     "PAVEWA3.JT",
     "GBU28.JT",
     "AS14.JT",
@@ -180,10 +182,12 @@ pub fn surface_launched(source: &str) -> bool {
 /// The seeker-view weapons that home on a laser spot rather than on an
 /// object: the laser bombs and the laser missiles (class 4 and 12). Their
 /// picture marks the spot (the laser, docs/spec/air-to-ground.md).
-pub const SPOT_HOMING: [&str; 8] = [
+pub const SPOT_HOMING: [&str; 10] = [
     "GBU10.JT",
     "GBU10A.JT",
     "PAVEWAY.JT",
+    "GBU12.JT",
+    "GBU16.JT",
     "PAVEWA3.JT",
     "GBU28.JT",
     "AS14.JT",
@@ -1092,7 +1096,7 @@ mod tests {
         for laser in SPOT_HOMING {
             assert!(has_seeker_view(laser) && homes_on_spot(laser), "{laser}");
         }
-        for jdam in ["GBU29.JT", "GBU29P.JT", "GBU30.JT"] {
+        for jdam in ["GBU29.JT", "GBU29P.JT", "GBU30.JT", "GBU38.JT"] {
             assert!(!has_seeker_view(jdam) && !homes_on_spot(jdam), "{jdam}");
         }
         assert!(has_seeker_view("AGM65G.JT") && !homes_on_spot("AGM65G.JT"));

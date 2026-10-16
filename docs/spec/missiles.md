@@ -125,6 +125,52 @@ Real-world family grounding: [Rosoboronexport R-27ER1](https://roe.ru/pdfs/pdf_4
 and [R-27ET1](https://roe.ru/pdfs/pdf_4714.pdf) identify the extended radar
 and IR family. These references do not calibrate this game's motor timers.
 
+## Smaller guided bomb stores
+
+**Opinionated, requested by John on 2026-10-15.** GBU-12, GBU-16 and GBU-38
+are derived game stores. Their guidance, seeker, steering class, release and
+impact sounds, fuze rules, lifetime and loadout art stay those of the donor.
+They are not recovered retail variants. The numerical scaling and model
+sizes below are fitted agent decisions for the requested weight classes.
+
+| Resource / HUD | Donor | Weight lb | Damage multiplier | Shape alias | Length / diameter / fin span ft |
+| --- | --- | ---: | ---: | --- | --- |
+| GBU12.JT / GBU-12 | PAVEWAY.JT, Paveway II | 500 | 0.25 | GB12.SH | 10.8 / 0.90 / 4.4 |
+| GBU16.JT / GBU-16 | PAVEWAY.JT, Paveway II | 1000 | 0.50 | GB16.SH | 12.1 / 1.17 / 5.0 |
+| GBU38.JT / GBU-38 | GBU29.JT, JDAM | 500 | 0.25 | GB38.SH | 7.7 / 0.90 / 1.67 |
+
+All five `damage.by_class` values divide by four or two, with integer
+truncation toward zero. `damage.collateral_radius` divides by the cube root
+of that divisor and rounds to the nearest integer. `collateral_percent`,
+fuze radius, arm time and side-hit failure remain the donor's. Thus splash
+strength inherits the smaller class damage and splash reach shrinks by
+volume scaling. Explosion types and the record's crater-presence field stay
+unchanged. Existing [explosion sizing](explosions.md#size-by-weapon) uses
+`round(100 * (weight / 500)^(1/3))`: 100 percent for GBU-12/38 and 126 percent
+for GBU-16, versus 159 percent for a 2000 lb donor. Craters use that same
+scale on the existing 500 lb crater template when the donor leaves a crater.
+
+The [shared bomb body](air-to-ground.md#bomb-motion) derives mass and drag
+area from the smaller record weight. GBU-12/16 retain Paveway II bang-bang
+steering; GBU-38 retains JDAM proportional steering. Existing AI store
+classification and strike logic consume those same definitions.
+
+Loading a pack supplies donor-identical virtual record bytes and private
+shape aliases in memory. Parsing applies these rules. Each shape is refitted
+to the table's length, body diameter and fin span for both carriage and flight;
+the donor shape remains unchanged. No retail model or image is distributed.
+The import fingerprint excludes only aliases whose bytes still match their
+donor, including shape aliases, preserving old tapes' import identity.
+Explicit different resources continue to participate in the fingerprint.
+
+Every station that accepts a donor accepts its smaller variants. An exact
+donor-default station recognizes the variant as belonging to that default
+family. Other station compatibility masks remain in force. Existing count
+limits and total weight-class limits determine carriage: a four-place,
+2000 lb rack takes four 500 lb bombs or two 1000 lb bombs. Aircraft defaults
+are unchanged. Cheat loading includes all three through its existing rules.
+Validation is in the [bomb-flight baseline](../baselines/bomb-flight.md).
+
 ## Infrared aspect and acquisition
 
 **Opinionated, requested by John on 2026-10-15; numeric model fitted by the

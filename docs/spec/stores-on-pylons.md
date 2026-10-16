@@ -597,3 +597,11 @@ review request. The twin bar remains the game's simplified launcher;
 the [US Army Mi-24 reference](https://odin.t2com.army.mil/WEG/Asset/Mi-24_%28Hind%29_Russian_Attack_Helicopter)
 places the four AT-2s on two underwing rails. No rotor, flight controller,
 weapon capacity or guidance behaviour changes.
+
+### Derived smaller guided bomb models
+
+The private GB12.SH, GB16.SH and GB38.SH aliases reuse donor geometry with
+separate length, body diameter and fin-span refits. Pylon placement and
+released-store rendering use the same size table. See the canonical
+[smaller guided bomb specification](missiles.md#smaller-guided-bomb-stores)
+for dimensions and provenance.

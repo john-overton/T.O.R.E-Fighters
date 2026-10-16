@@ -82,6 +82,10 @@ pub const SIZES: &[(&str, Real)] = &[
     ("MK20.SH", real(7.7, 1.1, 1.45)),
     ("CB87.SH", real(7.7, 1.3, 1.9)),
     ("CB89.SH", real(7.7, 1.3, 1.9)),
+    // Fitted smaller kit envelopes; private aliases retain donor geometry.
+    ("GB12.SH", real(10.8, 0.9, 4.4)),
+    ("GB16.SH", real(12.1, 1.17, 5.0)),
+    ("GB38.SH", real(7.7, 0.9, 1.67)),
     ("PAVE.SH", real(14.2, 1.5, 5.4)),
     ("GB27.SH", real(13.9, 1.2, 5.4)),
     ("GB28.SH", real(19.2, 1.21, 2.2)),

@@ -20,7 +20,7 @@ use tore_world::mission::{LoadoutSpec, MissionSpec};
 const AIRCRAFT: usize = 36;
 const RECOVERED_STATIONS: usize = 9;
 const TANK_RECORDS: usize = 4;
-const WEAPON_PLACEMENTS: usize = 3118;
+const WEAPON_PLACEMENTS: usize = 3319;
 const TANK_PLACEMENTS: usize = 146;
 /// Station and novelty-record pairs the Cheat loading accepts and the normal
 /// loading refuses (A2G decision 16).
@@ -67,6 +67,20 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
         .filter(|(name, _)| SUPPORTED_WEAPONS.contains(&name.as_str()))
         .map(|(name, bytes)| Weapon::parse(name, bytes))
         .collect::<std::io::Result<Vec<_>>>()?;
+    for (name, donor, _, _, _) in tore_formats::weapons::corrections::SMALL_BOMBS {
+        let weapon = weapons
+            .iter()
+            .find(|w| w.source == name)
+            .ok_or("missing small bomb")?;
+        println!(
+            "bomb variant: {name} donor={donor} weight={} damage={:?} collateral-radius={} collateral-percent={} shape={:?}",
+            weapon.weight,
+            weapon.damage.by_class,
+            weapon.damage.collateral_radius,
+            weapon.damage.collateral_percent,
+            weapon.shape
+        );
+    }
     let novelty = NOVELTY_WEAPONS
         .iter()
         .map(|name| {
@@ -182,6 +196,42 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
             }
             assert_roundtrip(&draft, &standard, &aircraft, data)?;
         }
+        for (name, donor, weight, _, shape) in tore_formats::weapons::corrections::SMALL_BOMBS {
+            let variant = weapons
+                .iter()
+                .find(|w| w.source == name)
+                .ok_or("missing small bomb")?;
+            let donor = weapons
+                .iter()
+                .find(|w| w.source == donor)
+                .ok_or("missing donor bomb")?;
+            if variant.weight != weight
+                || variant.seeker_kind() != donor.seeker_kind()
+                || tore_sim::combat::guided::kind(variant) != tore_sim::combat::guided::kind(donor)
+                || tore_sim::combat::bomb_flight::Body::of(variant).steering
+                    != tore_sim::combat::bomb_flight::Body::of(donor).steering
+                || tore_sim::combat::release_sound(variant)
+                    != tore_sim::combat::release_sound(donor)
+                || variant.shape.as_deref() != Some(shape)
+                || !data.contains_key(shape)
+            {
+                return Err(format!("invalid derived bomb {name}").into());
+            }
+            let counts: Vec<_> = (0..standard.configuration.stations.len())
+                .map(|slot| standard.capacity(slot, variant))
+                .collect();
+            if counts.iter().any(|count| *count > 0) {
+                println!("bomb carriage: {} {name} capacities={counts:?}", id.pt());
+            }
+            for slot in 0..standard.configuration.stations.len() {
+                let capacity = standard.capacity(slot, donor);
+                if capacity > 0 && standard.capacity(slot, variant) < capacity {
+                    return Err(
+                        format!("{} station {slot} loses {name} donor capacity", id.pt()).into(),
+                    );
+                }
+            }
+        }
         recovered += standard.configuration.stations.len() - default_count;
         // The previous schema wrote only the default weapon prefix.
         let mut old = LoadoutSpec::of(&standard);
@@ -214,7 +264,10 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                 }
                 let expected = rule.allowed_count(
                     loading::Store::weapon(weapon),
-                    source.store.as_deref() == Some(weapon.source.as_str()),
+                    source.store.as_deref() == Some(weapon.source.as_str())
+                        || tore_formats::weapons::corrections::donor(&weapon.source)
+                            .filter(|_| weapon.source.starts_with("GBU"))
+                            .is_some_and(|donor| source.store.as_deref() == Some(donor)),
                 );
                 let r27 = matches!(
                     weapon.source.as_str(),
@@ -596,6 +649,6 @@ mod tests {
     #[test]
     fn the_pinned_counts_match_the_reviewed_roster() {
         assert_eq!(AircraftId::ALL.len(), AIRCRAFT);
-        assert_eq!(SUPPORTED_WEAPONS.len(), 75);
+        assert_eq!(SUPPORTED_WEAPONS.len(), 78);
     }
 }

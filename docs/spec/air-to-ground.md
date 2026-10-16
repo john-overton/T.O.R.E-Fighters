@@ -1212,7 +1212,7 @@ speed. Cluster and novelty stores use the same gravity and drag model.
 Guidance supplies acceleration normal to velocity, limited to four g and
 `dynamic pressure * effective area * 15 / mass`. The command is velocity
 pursuit with gain 4 and gravity compensation, with a minimum 0.25 second
-time to target. GBU10, GBU10A and PAVEWAY use full available steering above a
+time to target. GBU10, GBU10A, PAVEWAY and the derived GBU12/16 use full available steering above a
 2 ft/s squared threshold, with proportional steering below it; PAVEWA3, GBU28 and coordinate bombs use proportional
 steering. Steering drag is acceleration squared divided by
 `max(dynamic pressure / mass * 12, 1)`, multiplied by 0.15 for bang-bang
