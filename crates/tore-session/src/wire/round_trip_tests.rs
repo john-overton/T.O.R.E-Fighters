@@ -1074,3 +1074,36 @@ fn a_stores_event_is_small_and_checked() {
         }
     );
 }
+
+/// The largest station a Stores event names: a live configuration has at
+/// most 32 weapon stations (0 to 31), and a tank row is 55 plus a hardpoint
+/// with a fuel bank, at most hardpoint 9 (code 64). Both, and the 7-bit
+/// field's own top (127), round-trip.
+#[test]
+fn a_stores_event_carries_the_largest_station_code() {
+    let last_tank = (0..=usize::from(u8::MAX))
+        .filter(|&hardpoint| tore_formats::aircraft::stations::fuel_bank(hardpoint).is_some())
+        .max()
+        .unwrap();
+    let largest = 55 + u8::try_from(last_tank).unwrap();
+    assert_eq!(largest, 64);
+    let loads: Vec<_> = [31, largest, 127]
+        .into_iter()
+        .map(|station| StationStores { station, items: 1 })
+        .collect();
+    let section = EventsSection {
+        events: vec![SectionEvent {
+            number: 1,
+            ticks_back: 0,
+            event: WireEvent::Stores {
+                aircraft: 3,
+                loads: loads.clone(),
+            },
+        }],
+    };
+    let decoded = EventsSection::decode(&section.encode().unwrap()).unwrap();
+    assert_eq!(
+        decoded.events[0].event,
+        WireEvent::Stores { aircraft: 3, loads }
+    );
+}

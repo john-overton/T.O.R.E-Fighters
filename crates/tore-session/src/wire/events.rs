@@ -1039,9 +1039,10 @@ fn read_stores(r: &mut BitReader<'_>) -> WireResult<Vec<StationStores>> {
 }
 
 /// Bits of a station index in a Stores event. Six bits reached 0 to 63:
-/// weapon stations, and tank hardpoints 0 to 8 at codes 55 to 63. Hardpoint
-/// 9 (the F-16C inner wet pair and the Rafale centreline tank) is code 64,
-/// so the field is 7 bits (protocol 51). A loadout still lists at most 64
+/// weapon stations (0 to 31), and tank hardpoints 0 to 8 at codes 55 to 63.
+/// Hardpoint 9 (the F-16C inner wet pair and the Rafale centreline tank) is
+/// code 64, the largest a configuration allows, so the field is 7 bits
+/// (protocol 51). A loadout still lists at most 64
 /// stations; the index may be higher than the count.
 const STATION_BITS: u32 = 7;
 
