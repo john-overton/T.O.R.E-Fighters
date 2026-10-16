@@ -128,6 +128,7 @@ builds a mission as usual, then opens its slots to humans.
 | Respawn rules | None, into an open AI slot, or back at a base |
 | Revival | Retail's settings apply to every respawn: lives (0 to 10, or unlimited), delay (0 to 5 minutes), distance from the battle (1 to 40 miles as retail, up to 150 since the lobby pass) and weapons (with missiles, without missiles, guns only, half guns) |
 | AI respawn | On or off: whether a lost AI aircraft comes back under the revival rules; greyed while the respawn rule is None ([AI respawn](#ai-respawn)) |
+| Players, at least | A dedicated server's minimum players to start (John, 2026-10-16; 0 for none). Shown on the Revival page, always greyed: the server operator sets it in `server.conf` or per rotation entry, and until enough players holding slots are ready the lobby says "Waiting for 2 more ready players (minimum 4)." ([guide](DEDICATED-SERVER.md#minimum-players)) |
 | Scoring | PvP: retail's fight type (sides or free for all), kill tally (total kills, total damage or kill ratio), time limit (1 to 30 minutes), kill limit (1 to 10) and kill owner (total, one side or one player) |
 | Difficulty and realism | Inherits the Quick Mission settings, locked for all humans |
 
