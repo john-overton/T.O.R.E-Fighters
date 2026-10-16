@@ -80,8 +80,8 @@ pub struct Ordnance {
     catalog: Vec<Weapon>,
     tanks: Vec<tore_sim::combat::live::TankStore>,
     tank_catalog: Vec<tore_sim::combat::live::TankStore>,
-    /// The laser designator pods (Pave Spike, Pave Knife) the import has, and
-    /// the ones the catalog lists.
+    /// The laser designator pod (Pave Spike) the import has, and the ones
+    /// the catalog lists.
     designators: Vec<DesignatorStore>,
     designator_catalog: Vec<DesignatorStore>,
     sprites: BTreeMap<String, Sprite>,
@@ -114,6 +114,11 @@ pub struct Ordnance {
     /// (`AIM9X.JT`), each with the host's words for why it cannot be
     /// loaded. Used on a lobby page only; empty otherwise.
     gaps: BTreeMap<String, String>,
+    /// The page's frame clock for the pod station's blink: when it opened.
+    opened: Instant,
+    /// A fixed clock in milliseconds, for previews and tests: the blink
+    /// then holds one phase and the page asks for no redraws.
+    frozen_ms: Option<u64>,
 }
 impl Ordnance {
     pub fn new(mut loadout: Loadout, data: &BTreeMap<String, Vec<u8>>) -> AppResult<Self> {
@@ -221,7 +226,10 @@ impl Ordnance {
             lobby: false,
             lobby_cheat: false,
             gaps: BTreeMap::new(),
+            opened: Instant::now(),
+            frozen_ms: None,
         };
+        ordnance.station = ordnance.display_order().first().copied().unwrap_or(0);
         ordnance.remember_occupants();
         ordnance.rebuild_catalog();
         Ok(ordnance)
@@ -398,8 +406,26 @@ impl Ordnance {
                 .is_some_and(|tank| tank.quantity > 0)
         })
     }
+    /// The stations in the order the page lists them (gun, centreline, then
+    /// inboard to outboard); each entry is the station's source-order index,
+    /// which is what clicks, the wire and saved loads keep using.
+    fn display_order(&self) -> Vec<usize> {
+        self.loadout.station_display_order()
+    }
+    /// The page that lists station `index`.
+    fn page_of(&self, index: usize) -> usize {
+        self.display_order()
+            .iter()
+            .position(|&station| station == index)
+            .map_or(0, |at| at / STATIONS_PER_PAGE)
+    }
     fn reveal_station(&mut self) {
-        self.station_page = self.station / STATIONS_PER_PAGE;
+        self.station_page = self.page_of(self.station);
+    }
+    /// Milliseconds on the page's frame clock.
+    fn clock_ms(&self) -> u64 {
+        self.frozen_ms
+            .unwrap_or_else(|| self.opened.elapsed().as_millis() as u64)
     }
     fn cannot_load(&mut self) -> Action {
         self.message = Some("This store cannot be loaded at this station.".into());
@@ -915,7 +941,11 @@ impl Ordnance {
                 } else {
                     (self.station_page + 1).min(pages - 1)
                 };
-                self.station = self.station_page * STATIONS_PER_PAGE;
+                self.station = self
+                    .display_order()
+                    .get(self.station_page * STATIONS_PER_PAGE)
+                    .copied()
+                    .unwrap_or(0);
                 self.selected = None;
             }
             11 => self.menu = !self.menu,
@@ -1008,9 +1038,12 @@ impl Ordnance {
             "a" | "A" => self.activate(3),
             "s" | "S" => self.activate(4),
             "Tab" => {
-                let count = self.loadout.editable_stations().len();
-                if count > 0 {
-                    self.station = (self.station + 1) % count;
+                let order = self.display_order();
+                if let Some(at) = order.iter().position(|&index| index == self.station) {
+                    self.station = order[(at + 1) % order.len()];
+                    self.reveal_station();
+                } else if let Some(&first) = order.first() {
+                    self.station = first;
                     self.reveal_station();
                 }
                 self.selected = None;
@@ -1049,6 +1082,47 @@ impl Ordnance {
                 {
                     for slot in 0..self.loadout.quantities.len() {
                         if self.loadout.select(slot, weapon.clone()).is_ok() {
+                            break;
+                        }
+                    }
+                }
+            }
+            "ordnance-pod" | "ordnance-pod-yellow" => {
+                // The laser pod on the first station that takes it, with the
+                // blink held on its red or its yellow phase (a fixed clock).
+                self.category = 1;
+                if let Some(pod) = self.designator_catalog.first().cloned() {
+                    for slot in 0..self.loadout.quantities.len() {
+                        if self.loadout.load_designator(slot, pod.clone()).is_ok() {
+                            break;
+                        }
+                    }
+                }
+                self.frozen_ms = Some(if state == "ordnance-pod" {
+                    0
+                } else {
+                    POD_BLINK_MS
+                });
+            }
+            "ordnance-authored-tank" => {
+                // The first authored tank (an F-16C's 370 gallon one, say) on
+                // the first tank station that takes it, on the air-to-surface
+                // page, where the catalog lists tanks first.
+                self.category = 1;
+                if let Some(tank) = self
+                    .tank_catalog
+                    .iter()
+                    .find(|tank| {
+                        tore_formats::aircraft::stations::TANKS
+                            .iter()
+                            .any(|(name, ..)| *name == tank.source)
+                    })
+                    .cloned()
+                {
+                    for slot in 0..self.loadout.configuration.tanks.len() {
+                        if self.loadout.select_tank(slot, tank.clone()).is_ok()
+                            && self.loadout.configuration.tanks[slot].quantity > 0
+                        {
                             break;
                         }
                     }
@@ -1128,9 +1202,13 @@ impl Ordnance {
                         &mut c,
                         &self.sprites,
                         &self.designator_catalog[index],
-                        x,
-                        y,
+                        (x, y),
                         self.selected == Some(CatalogEntry::Designator(index)),
+                        if self.selected == Some(CatalogEntry::Designator(index)) {
+                            OUTLINE_YELLOW
+                        } else {
+                            OUTLINE_RED
+                        },
                         true,
                     );
                     // What not every player has is dimmed on the lobby's page.
@@ -1179,9 +1257,11 @@ impl Ordnance {
                 self.controls.push((id, hit));
             }
         }
-        for (visible, (index, row)) in stations
+        let order = self.display_order();
+        let blink_yellow = pod_blink_yellow(self.clock_ms());
+        for (visible, (index, row)) in order
             .iter()
-            .enumerate()
+            .map(|&index| (index, &stations[index]))
             .skip(self.station_page * STATIONS_PER_PAGE)
             .take(STATIONS_PER_PAGE)
             .enumerate()
@@ -1200,13 +1280,7 @@ impl Ordnance {
             .get(usize::from(row.location))
             .copied()
             .unwrap_or("Station");
-            c.text(
-                font,
-                &fit(font, &format!("{} {location}", row.hardpoint + 1), 111),
-                x + 1,
-                y,
-                None,
-            );
+            c.text(font, &fit(font, location, 111), x + 1, y, None);
             if let Some(slot) = self.loaded_tank(row) {
                 let tank = &self.loadout.configuration.tanks[slot];
                 if let Some(store) = &tank.store {
@@ -1239,9 +1313,14 @@ impl Ordnance {
                     &mut c,
                     &self.sprites,
                     pod,
-                    x + 3,
-                    y + 14,
+                    (x + 3, y + 14),
                     self.station == index,
+                    // A pod on a station blinks its box between red and yellow.
+                    if blink_yellow {
+                        OUTLINE_YELLOW
+                    } else {
+                        OUTLINE_RED
+                    },
                     false,
                 );
                 c.text(font, "1 loaded (max 1)", x + 3, y + 52, None);
@@ -1380,9 +1459,10 @@ impl Ordnance {
             ];
         }
         // The page's words, one band by priority: what the player just did
-        // (the message), then the laser warning. The sensor helper line sits
-        // in the strip under the title bar; the lobby's one band is that
-        // strip, so there it gives way to the other two (slice BQ, B24).
+        // (the message), then the laser warning. The sensor helper line has
+        // its own place below the Select Plane and Fly buttons, so it shows
+        // with either (John, 2026-10-16; it used to share the lobby's strip
+        // under the title bar and gave way there).
         let warning = laser_warning(&self.loadout);
         let identity = match self.selected {
             Some(CatalogEntry::Weapon(index)) => {
@@ -1398,10 +1478,8 @@ impl Ordnance {
         } else if let Some(name) = identity {
             notice(&mut c, font, name, self.lobby);
         }
-        if !(self.lobby && (self.message.is_some() || warning.is_some() || identity.is_some()))
-            && let Some(words) = sensor_helper(&self.loadout, !self.designator_catalog.is_empty())
-        {
-            band(&mut c, font, &words, true, HELPER_INK);
+        if let Some(words) = sensor_helper(&self.loadout, !self.designator_catalog.is_empty()) {
+            helper_band(&mut c, font, &words);
         }
         if let Some(drag) = self.drag.as_ref().filter(|drag| drag.moved)
             && let Some((x, y)) = self.pointer
@@ -1418,7 +1496,10 @@ impl Ordnance {
                 1.,
             );
         }
+        // A pod on a station blinks on the live clock, so the page asks for
+        // frames while one hangs; a fixed clock (previews, tests) does not.
         animating
+            || (self.frozen_ms.is_none() && !self.loadout.configuration.designator_pods.is_empty())
     }
 }
 /// Where the page's notice sits: single player's low on the left, over the
@@ -1435,8 +1516,38 @@ fn notice(c: &mut Canvas, font: &Sprite, message: &str, lobby: bool) {
 /// (opinionated, John 2026-10-12 asked for a subtle warning; the colour is
 /// the lead's default).
 const WARNING_INK: [u8; 3] = [196, 138, 52];
-/// The sensor helper line's ink: a quiet blue-grey (agent decision).
-const HELPER_INK: [u8; 3] = [150, 170, 180];
+/// The sensor helper line's ink: a light blue-grey, brighter than the first
+/// quiet [150, 170, 180] so it stands out (John, 2026-10-16: "a little
+/// brighter"; the value is an agent decision).
+const HELPER_INK: [u8; 3] = [208, 228, 238];
+/// The sensor helper line sits below the right panel's Select Plane and Fly
+/// buttons, on the backdrop under the panel's frame (John, 2026-10-16): its
+/// top edge, the centre it is drawn about (the panel's) and the widest it
+/// may be, which stays clear of the left panel and the screen edge.
+const HELPER_Y: i32 = 458;
+const HELPER_CENTER_X: i32 = 466;
+const HELPER_MAX_WIDTH: i32 = 308;
+/// The leftmost the strip may start (right of the left panel's frame) and the
+/// right edge it keeps clear of.
+const HELPER_LEFT: i32 = 322;
+const HELPER_RIGHT: i32 = 632;
+/// One line of the sensor helper on its dark strip, centred under the right
+/// panel.
+fn helper_band(c: &mut Canvas, font: &Sprite, message: &str) {
+    let line = message.split_whitespace().collect::<Vec<_>>().join(" ");
+    let line = fit(font, &line, HELPER_MAX_WIDTH - 8);
+    if line.is_empty() {
+        return;
+    }
+    let width = text_width(font, &line) + 8;
+    let x =
+        (HELPER_CENTER_X - width / 2).clamp(HELPER_LEFT, (HELPER_RIGHT - width).max(HELPER_LEFT));
+    c.rect(
+        (x, HELPER_Y, width, font.height as i32 + 4),
+        [35, 44, 46, 255],
+    );
+    c.text(font, &line, x + 4, HELPER_Y + 2, Some(HELPER_INK));
+}
 /// One line of the page's words on its dark strip, in `ink`: low on the
 /// left in single player, or in the lobby's strip under the title bar
 /// (`high`).
@@ -1482,9 +1593,7 @@ pub fn laser_warning(loadout: &Loadout) -> Option<&'static str> {
 pub fn sensor_helper(loadout: &Loadout, pods: bool) -> Option<String> {
     use tore_sim::combat::sight::Gimbal;
     let Some(sensor) = loadout.configuration.sight else {
-        return pods.then(|| {
-            "No built-in designator: hang a Pave Spike or Pave Knife pod to lase.".to_string()
-        });
+        return pods.then(|| "No built-in designator: hang a Pave Spike pod to lase.".to_string());
     };
     let (what, needs) = if sensor.laser {
         ("laser designator", "laser ordnance")
@@ -1492,9 +1601,11 @@ pub fn sensor_helper(loadout: &Loadout, pods: bool) -> Option<String> {
         ("FLIR", "IR weapons")
     };
     Some(if sensor.gimbal == Gimbal::Hemisphere {
-        let mut what = what.to_string();
-        what[..1].make_ascii_uppercase();
-        format!("{what} pod fitted: no extra pod needed for {needs}.")
+        // Shortened on John's request, 2026-10-16.
+        format!(
+            "Aircraft {} pod equipped",
+            if sensor.laser { "laser" } else { "FLIR" }
+        )
     } else {
         format!("Built-in {what}: no pod needed for {needs}.")
     })
@@ -1598,12 +1709,12 @@ fn designator_card(
     c: &mut Canvas,
     sprites: &BTreeMap<String, Sprite>,
     pod: &DesignatorStore,
-    x: i32,
-    y: i32,
+    (x, y): (i32, i32),
     selected: bool,
+    edge: [u8; 4],
     catalog: bool,
 ) {
-    card_outline(c, x, y, selected);
+    outline(c, x, y, edge);
     if let Some(icon) = designator_thumbnail(sprites, pod) {
         c.blit(
             icon,
@@ -1682,19 +1793,72 @@ fn tank_thumbnail<'a>(
     sprites: &'a BTreeMap<String, Sprite>,
     tank: &tore_sim::combat::live::TankStore,
 ) -> Option<&'a Sprite> {
-    sprites.get(&format!("${}.PIC", tank.source.trim_end_matches(".GAS")))
+    let stem = tank.source.trim_end_matches(".GAS");
+    sprites
+        .get(&format!("${stem}.PIC"))
+        .or_else(|| nearest_tank_picture(sprites, stem))
+}
+/// The picture of the retail tank closest in size, for a tank with no
+/// picture of its own: the authored tanks (`F370`, `F610`, `F600`, `M396`,
+/// `R528`; `aircraft_stations`) have no retail art, and the page draws them
+/// with the retail tank graphic like the other fuel tanks (John, 2026-10-16;
+/// the nearest-size rule is an agent decision). The stem is the record name
+/// without `.GAS`, whose digits are its gallons; ties go to the larger tank.
+fn nearest_tank_picture<'a>(
+    sprites: &'a BTreeMap<String, Sprite>,
+    stem: &str,
+) -> Option<&'a Sprite> {
+    let gallons = |stem: &str| -> Option<i32> {
+        let digits = stem.trim_start_matches(|c: char| c.is_ascii_alphabetic());
+        (!digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()))
+            .then(|| digits.parse().ok())
+            .flatten()
+    };
+    let wanted = gallons(stem)?;
+    sprites
+        .iter()
+        .filter_map(|(name, sprite)| {
+            // A retail tank picture is `$F` and its gallons, `$F350.PIC`:
+            // not the `$FAB500.PIC` bomb or another store's.
+            let size = name
+                .strip_prefix("$F")?
+                .strip_suffix(".PIC")
+                .filter(|size| size.chars().all(|c| c.is_ascii_digit()))?
+                .parse::<i32>()
+                .ok()?;
+            Some((size, sprite))
+        })
+        .min_by_key(|(size, _)| ((size - wanted).abs(), -size))
+        .map(|(_, sprite)| sprite)
 }
 fn thumbnail<'a>(sprites: &'a BTreeMap<String, Sprite>, weapon: &Weapon) -> Option<&'a Sprite> {
     let source =
         tore_formats::weapons::corrections::donor(&weapon.source).unwrap_or(&weapon.source);
     sprites.get(&format!("${}.PIC", source.trim_end_matches(".JT")))
 }
+const OUTLINE_YELLOW: [u8; 4] = [201, 179, 49, 255];
+const OUTLINE_RED: [u8; 4] = [94, 30, 20, 255];
+/// How long each colour of a pod station's blink shows: two full red and
+/// yellow cycles a second (opinionated, John 2026-10-16).
+pub const POD_BLINK_MS: u64 = 250;
+/// Whether the pod station's outline is yellow (else red) `ms` milliseconds
+/// into the page's frame clock: red first, each colour [`POD_BLINK_MS`].
+pub fn pod_blink_yellow(ms: u64) -> bool {
+    (ms / POD_BLINK_MS) % 2 == 1
+}
 fn card_outline(c: &mut Canvas, x: i32, y: i32, selected: bool) {
-    let edge = if selected {
-        [201, 179, 49, 255]
-    } else {
-        [94, 30, 20, 255]
-    };
+    outline(
+        c,
+        x,
+        y,
+        if selected {
+            OUTLINE_YELLOW
+        } else {
+            OUTLINE_RED
+        },
+    );
+}
+fn outline(c: &mut Canvas, x: i32, y: i32, edge: [u8; 4]) {
     c.rect((x, y - 1, CARD_WIDTH, 1), edge);
     c.rect((x, y + CARD_HEIGHT - 2, CARD_WIDTH, 1), edge);
     c.rect((x, y - 1, 1, CARD_HEIGHT), edge);
@@ -2583,6 +2747,8 @@ mod tests {
             lobby: false,
             lobby_cheat: false,
             gaps: BTreeMap::new(),
+            opened: Instant::now(),
+            frozen_ms: Some(0),
         };
         ui.render(&mut vec![0; WIDTH * HEIGHT * 4]);
         ui
@@ -2872,7 +3038,7 @@ mod tests {
         // Actual mouse dragging works from a tank shown in a weapon catalog.
         ui.render(&mut vec![0; WIDTH * HEIGHT * 4]);
         assert_eq!(
-            drag(&mut ui, (500., 145.), (75., 360.)),
+            drag(&mut ui, (400., 215.), (75., 360.)),
             Action::OrdnanceFuel
         );
         assert_eq!(ui.loadout.configuration.tanks[1].quantity, 0);
@@ -2922,6 +3088,142 @@ mod tests {
         ui.activate(16);
         assert_eq!(ui.station, 0);
     }
+    /// Nine stations in source order whose lateral offsets run the other
+    /// way: hardpoint 4 is the centreline and 7 the internal gun.
+    fn crowded() -> Ordnance {
+        let mut ui = fixture();
+        let station = ui.loadout.configuration.stations[0].clone();
+        let mut gun = station.clone();
+        gun.internal = true;
+        let mut stations = vec![station.clone(); 9];
+        stations[7] = gun;
+        let mut hardpoints = vec![ui.loadout.hardpoints[0].clone(); 9];
+        for (index, hardpoint) in hardpoints.iter_mut().enumerate() {
+            hardpoint.position = [
+                (90 - 10 * index as i32) * if index % 2 == 0 { 1 } else { -1 },
+                0,
+                0,
+            ];
+        }
+        hardpoints[4].location = 0;
+        hardpoints[4].position = [0; 3];
+        hardpoints[7].location = 2;
+        ui.loadout.configuration.stations = stations;
+        ui.loadout.configuration.hardpoint_slots = (0..9).map(Some).collect();
+        ui.loadout.hardpoints = hardpoints;
+        ui.loadout.quantities = vec![0; 9];
+        ui.station = ui.display_order()[0];
+        ui.render(&mut vec![0; WIDTH * HEIGHT * 4]);
+        ui
+    }
+    #[test]
+    fn stations_list_gun_then_centerline_then_inboard_to_outboard() {
+        let mut ui = crowded();
+        // The gun, the centreline, then the rest by |x|: 90 - 10 i, so the
+        // highest source row is the most inboard, mirrored sides alike.
+        assert_eq!(ui.display_order(), [7, 4, 8, 6, 5, 3, 2, 1, 0]);
+        // Station numbers are the source order's: the boxes' ids follow it,
+        // wherever they are drawn.
+        let ids = |ui: &Ordnance| {
+            ui.controls
+                .iter()
+                .filter(|(id, _)| (200..232).contains(id))
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&ui), [207, 204, 208, 206, 205, 203]);
+        assert_eq!(ui.station, 7);
+        // Tab walks the page's order and turns the page with it.
+        for expected in [4, 8, 6, 5, 3] {
+            ui.key("Tab");
+            assert_eq!(ui.station, expected);
+            assert_eq!(ui.station_page, 0);
+        }
+        ui.key("Tab");
+        assert_eq!((ui.station, ui.station_page), (2, 1));
+        ui.render(&mut vec![0; WIDTH * HEIGHT * 4]);
+        assert_eq!(ids(&ui), [202, 201, 200]);
+        for _ in 0..3 {
+            ui.key("Tab");
+        }
+        assert_eq!((ui.station, ui.station_page), (7, 0));
+        // Prev and Next pages start on their first listed station.
+        ui.activate(18);
+        assert_eq!((ui.station, ui.station_page), (2, 1));
+        ui.activate(17);
+        assert_eq!((ui.station, ui.station_page), (7, 0));
+    }
+    #[test]
+    fn a_click_edits_the_station_the_box_shows_not_its_place_on_the_page() {
+        let mut ui = crowded();
+        ui.loadout.quantities[4] = 1;
+        ui.render(&mut vec![0; WIDTH * HEIGHT * 4]);
+        // The second box on the page is source station 4 (the centreline): a
+        // click adds one to it and to nothing else.
+        drag(&mut ui, (500., 145.), (501., 145.));
+        assert_eq!(ui.station, 4);
+        assert_eq!(ui.loadout.quantities, [0, 0, 0, 0, 2, 0, 0, 0, 0]);
+        // A right click takes one off the same station and no other.
+        ui.pointer(Some((500., 145.)));
+        ui.right(true);
+        ui.right(false);
+        assert_eq!(ui.station, 4);
+        assert_eq!(ui.loadout.quantities, [0, 0, 0, 0, 1, 0, 0, 0, 0]);
+    }
+    #[test]
+    fn authored_tanks_without_art_use_the_nearest_retail_tank_graphic() {
+        use tore_sim::combat::live::TankStore;
+        // One picture per retail tank, told apart by width; the bomb picture
+        // `$FAB500` is not a tank.
+        let sprites: BTreeMap<String, Sprite> = [
+            ("$F150.PIC", 15),
+            ("$F250.PIC", 25),
+            ("$F350.PIC", 35),
+            ("$F500.PIC", 50),
+            ("$FAB500.PIC", 99),
+        ]
+        .into_iter()
+        .map(|(name, width)| {
+            (
+                name.to_owned(),
+                Sprite {
+                    width,
+                    height: 1,
+                    rgba: vec![0; width * 4],
+                    glyphs: vec![],
+                },
+            )
+        })
+        .collect();
+        let tank = |source: &str| TankStore {
+            source: source.into(),
+            name: source.into(),
+            tank: tore_formats::weapons::Tank {
+                empty_weight: 1,
+                fuel_weight: 1,
+                flags: 1,
+            },
+        };
+        let width = |source: &str| tank_thumbnail(&sprites, &tank(source)).map(|s| s.width);
+        // A retail tank keeps its own picture.
+        assert_eq!(width("F250.GAS"), Some(25));
+        // Every authored tank gets the graphic of the nearest size.
+        for (source, expected) in [
+            ("F370.GAS", 35),
+            ("F610.GAS", 50),
+            ("F600.GAS", 50),
+            ("M396.GAS", 35),
+            ("R528.GAS", 50),
+        ] {
+            assert_eq!(width(source), Some(expected), "{source}");
+        }
+        // Each authored record the game generates has one.
+        for (name, ..) in tore_formats::aircraft::stations::TANKS {
+            assert!(width(name).is_some(), "{name}");
+        }
+        // A name with no size has none to borrow.
+        assert_eq!(width("SYNTHETIC.GAS"), None);
+    }
     #[test]
     fn catalog_drag_draws_only_transparent_thumbnail_and_loads_station() {
         let mut ui = fixture();
@@ -2944,7 +3246,7 @@ mod tests {
             &after[changed[0] * 4..changed[0] * 4 + 4],
             &[0, 255, 0, 255]
         );
-        ui.pointer(Some((500., 145.)));
+        ui.pointer(Some((400., 215.)));
         ui.up();
         assert_eq!(ui.loadout.quantities, [2, 4, 500]);
         assert!(ui.drag.is_none());
@@ -2952,13 +3254,13 @@ mod tests {
     #[test]
     fn station_transfer_and_catalog_unload_preserve_other_stations() {
         let mut ui = fixture();
-        drag(&mut ui, (400., 145.), (500., 145.));
+        drag(&mut ui, (500., 145.), (400., 215.));
         assert_eq!(ui.loadout.quantities, [1, 1, 500]);
         // Unused space in the catalog is a valid unload destination.
-        drag(&mut ui, (500., 145.), (280., 360.));
+        drag(&mut ui, (400., 215.), (280., 360.));
         assert_eq!(ui.loadout.quantities, [1, 0, 500]);
         // An occupied catalog card unloads too, without selecting that card.
-        drag(&mut ui, (400., 145.), (100., 120.));
+        drag(&mut ui, (500., 145.), (100., 120.));
         assert_eq!(ui.loadout.quantities, [0, 0, 500]);
         assert!(ui.selected.is_none());
     }
@@ -2969,7 +3271,7 @@ mod tests {
         let mut sp = fixture();
         sp.set_gaps(|source| (source == "AIM9M.JT").then(|| AIM9M_WORDS.to_owned()));
         assert_eq!(sp.gap_words("AIM9M.JT"), None);
-        drag(&mut sp, (100., 120.), (500., 145.));
+        drag(&mut sp, (100., 120.), (400., 215.));
         assert_eq!(sp.loadout.quantities, [2, 4, 500]);
         assert!(sp.message.is_none());
 
@@ -2985,7 +3287,7 @@ mod tests {
         assert_eq!(ui.gap_words("AIM9M.JT"), Some(AIM9M_WORDS));
         // Dragging it onto a station is refused, with the host's words, and
         // the loadout stays as it was.
-        drag(&mut ui, (100., 120.), (500., 145.));
+        drag(&mut ui, (100., 120.), (400., 215.));
         assert_eq!(ui.loadout.quantities, [2, 0, 500]);
         assert_eq!(ui.message.as_deref(), Some(AIM9M_WORDS));
         // So is picking it and clicking a station, and picking it says so.
@@ -3222,15 +3524,15 @@ mod tests {
     #[test]
     fn invalid_same_station_outside_and_cancelled_drops_do_not_mutate_loads() {
         let mut ui = fixture();
-        drag(&mut ui, (400., 145.), (400., 215.));
+        drag(&mut ui, (500., 145.), (400., 145.));
         assert!(ui.message.is_some());
         assert_eq!(ui.loadout.quantities, [2, 0, 500]);
-        for destination in [(410., 145.), (600., 300.), (520., 430.)] {
-            drag(&mut ui, (400., 145.), destination);
+        for destination in [(510., 145.), (600., 300.), (520., 430.)] {
+            drag(&mut ui, (500., 145.), destination);
             assert_eq!(ui.loadout.quantities, [2, 0, 500]);
         }
         for cancel in 0..3 {
-            ui.pointer(Some((400., 145.)));
+            ui.pointer(Some((500., 145.)));
             ui.down();
             ui.pointer(Some((100., 120.)));
             match cancel {
@@ -3273,7 +3575,7 @@ mod tests {
         let mut ui = fixture();
         drag(&mut ui, (100., 120.), (101., 120.));
         assert_eq!(ui.selected, Some(CatalogEntry::Weapon(0)));
-        drag(&mut ui, (500., 145.), (500., 145.));
+        drag(&mut ui, (400., 215.), (400., 215.));
         assert_eq!(ui.loadout.quantities, [2, 4, 500]);
         ui.right(true);
         ui.right(false);
@@ -3322,64 +3624,64 @@ mod tests {
         other.source = "AIM120.JT".into();
         ui.catalog.push(other);
         ui.selected = Some(CatalogEntry::Weapon(1));
-        drag(&mut ui, (400., 145.), (401., 145.));
+        drag(&mut ui, (500., 145.), (501., 145.));
         assert_eq!(ui.loadout.quantities, [3, 0, 500]);
         assert_eq!(
             ui.loadout.configuration.stations[0].weapon.source,
             "AIM9M.JT"
         );
-        drag(&mut ui, (400., 145.), (400., 145.));
-        drag(&mut ui, (400., 145.), (400., 145.));
+        drag(&mut ui, (500., 145.), (500., 145.));
+        drag(&mut ui, (500., 145.), (500., 145.));
         assert_eq!(ui.loadout.quantities, [4, 0, 500]);
         // Click adds one even where keyboard/right-click steps are 100 rounds.
         ui.loadout.quantities[2] = 498;
-        drag(&mut ui, (400., 215.), (400., 215.));
+        drag(&mut ui, (400., 145.), (400., 145.));
         assert_eq!(ui.loadout.quantities, [4, 0, 499]);
     }
     #[test]
     fn ordnance_sounds_follow_successful_edits_and_not_failed_or_empty_actions() {
         let mut ui = fixture();
         assert_eq!(
-            drag(&mut ui, (400., 145.), (400., 145.)),
+            drag(&mut ui, (500., 145.), (500., 145.)),
             Action::OrdnanceWeapon
         );
         ui.right(true);
         assert_eq!(ui.right(false), Action::OrdnanceWeapon);
         assert_eq!(ui.key("+"), Action::OrdnanceWeapon);
         assert_eq!(
-            drag(&mut ui, (100., 120.), (500., 145.)),
+            drag(&mut ui, (100., 120.), (400., 215.)),
             Action::OrdnanceWeapon
         );
-        assert_eq!(drag(&mut ui, (400., 145.), (500., 145.)), Action::None);
+        assert_eq!(drag(&mut ui, (500., 145.), (400., 215.)), Action::None);
         ui.loadout.quantities[1] = 0;
         assert_eq!(
-            drag(&mut ui, (400., 145.), (500., 145.)),
+            drag(&mut ui, (500., 145.), (400., 215.)),
             Action::OrdnanceWeapon
         );
-        assert_eq!(
-            drag(&mut ui, (500., 145.), (100., 120.)),
-            Action::OrdnanceWeapon
-        );
-        assert_eq!(drag(&mut ui, (400., 145.), (400., 215.)), Action::None);
-        assert!(ui.message.is_some());
-        assert_eq!(drag(&mut ui, (400., 145.), (410., 145.)), Action::None);
-        ui.loadout.quantities[2] = 499;
-        assert_eq!(
-            drag(&mut ui, (400., 215.), (400., 215.)),
-            Action::OrdnanceAmmunition
-        );
-        assert_eq!(drag(&mut ui, (400., 215.), (400., 215.)), Action::None);
         assert_eq!(
             drag(&mut ui, (400., 215.), (100., 120.)),
+            Action::OrdnanceWeapon
+        );
+        assert_eq!(drag(&mut ui, (500., 145.), (400., 145.)), Action::None);
+        assert!(ui.message.is_some());
+        assert_eq!(drag(&mut ui, (500., 145.), (510., 145.)), Action::None);
+        ui.loadout.quantities[2] = 499;
+        assert_eq!(
+            drag(&mut ui, (400., 145.), (400., 145.)),
             Action::OrdnanceAmmunition
         );
-        ui.pointer(Some((400., 215.)));
+        assert_eq!(drag(&mut ui, (400., 145.), (400., 145.)), Action::None);
+        assert_eq!(
+            drag(&mut ui, (400., 145.), (100., 120.)),
+            Action::OrdnanceAmmunition
+        );
+        ui.pointer(Some((400., 145.)));
         ui.right(true);
         assert_eq!(ui.right(false), Action::None);
         // The imported flag chooses the sound, including ammunition in a pod.
         ui.loadout.configuration.stations[0].weapon.flags |= 0x80;
         assert_eq!(
-            drag(&mut ui, (400., 145.), (400., 145.)),
+            drag(&mut ui, (500., 145.), (500., 145.)),
             Action::OrdnanceAmmunition
         );
     }
@@ -3717,7 +4019,7 @@ mod tests {
         assert_eq!(sensor_helper(&ui.loadout, false), None);
         assert_eq!(
             sensor_helper(&ui.loadout, true).as_deref(),
-            Some("No built-in designator: hang a Pave Spike or Pave Knife pod to lase.")
+            Some("No built-in designator: hang a Pave Spike pod to lase.")
         );
         for (laser, gimbal, words) in [
             (
@@ -3726,16 +4028,8 @@ mod tests {
                 "Built-in laser designator: no pod needed for laser ordnance.",
             ),
             (false, CONE, "Built-in FLIR: no pod needed for IR weapons."),
-            (
-                true,
-                Gimbal::Hemisphere,
-                "Laser designator pod fitted: no extra pod needed for laser ordnance.",
-            ),
-            (
-                false,
-                Gimbal::Hemisphere,
-                "FLIR pod fitted: no extra pod needed for IR weapons.",
-            ),
+            (true, Gimbal::Hemisphere, "Aircraft laser pod equipped"),
+            (false, Gimbal::Hemisphere, "Aircraft FLIR pod equipped"),
         ] {
             ui.loadout.configuration.sight = Some(sensor(laser, gimbal));
             // Pods on offer or not, a sensor the aircraft has is what is said.
@@ -3791,23 +4085,26 @@ mod tests {
         assert_eq!(ui.loadout.validate().is_ok(), valid);
     }
     #[test]
-    fn the_helper_sits_under_the_title_bar_and_the_lobbys_one_band_gives_way() {
+    fn the_helper_sits_below_the_buttons_in_both_pages_and_beside_any_message() {
         use tore_sim::combat::sight::Gimbal;
         let mut ui = fixture();
         ui.loadout.configuration.sight = Some(sensor(false, CONE));
         let (top, bottom) = ink_rows(&drawn(&mut ui), HELPER_INK).expect("the helper draws");
+        // Under the Select Plane and Fly buttons (they end at row 438) and on
+        // the screen, not in the strip under the title bar.
         assert!(
-            top >= LOBBY_NOTICE_Y as usize && bottom < 86,
+            top >= HELPER_Y as usize + 2 && bottom < HEIGHT && top > 438,
             "{top} {bottom}"
         );
-        // Single player: the warning low, the helper high, both at once.
+        // Single player: the warning low on the left, the helper below the
+        // panel, both at once.
         let mut both = laser_fixture();
         both.loadout.configuration.sight = Some(sensor(false, Gimbal::Hemisphere));
         let pixels = drawn(&mut both);
         assert!(ink_rows(&pixels, WARNING_INK).is_some());
         assert!(ink_rows(&pixels, HELPER_INK).is_some());
-        // The lobby has the one band: the warning is in it, the helper gives
-        // way, and with nothing to warn of the helper has it.
+        // The lobby's warning keeps the strip under the title bar and the
+        // helper no longer gives way to it.
         both.lobby = true;
         let pixels = drawn(&mut both);
         let (top, bottom) = ink_rows(&pixels, WARNING_INK).expect("the lobby's warning draws");
@@ -3815,10 +4112,106 @@ mod tests {
             top >= LOBBY_NOTICE_Y as usize && bottom < 86,
             "{top} {bottom}"
         );
-        assert_eq!(ink_rows(&pixels, HELPER_INK), None);
+        let (top, _) = ink_rows(&pixels, HELPER_INK).expect("the helper stays");
+        assert!(top > 438);
         both.loadout.quantities[0] = 0;
         let pixels = drawn(&mut both);
         assert_eq!(ink_rows(&pixels, WARNING_INK), None);
         assert!(ink_rows(&pixels, HELPER_INK).is_some());
+    }
+    /// The widest helper line never leaves the strip's bounds or the screen.
+    #[test]
+    fn the_longest_helper_line_stays_between_the_panels_and_the_screen_edge() {
+        let ui = fixture();
+        let font = &ui.sprites["QUICKFONT"];
+        let mut pixels = vec![0u8; WIDTH * HEIGHT * 4];
+        let mut canvas = Canvas(&mut pixels);
+        helper_band(
+            &mut canvas,
+            font,
+            "No built-in designator: hang a Pave Spike pod to lase.",
+        );
+        let strip: Vec<usize> = (0..WIDTH)
+            .filter(|x| {
+                (HELPER_Y as usize..HELPER_Y as usize + 15)
+                    .any(|y| pixels[(y * WIDTH + x) * 4 + 3] != 0)
+            })
+            .collect();
+        assert!(*strip.first().unwrap() >= HELPER_LEFT as usize);
+        assert!(*strip.last().unwrap() < HELPER_RIGHT as usize);
+    }
+    #[test]
+    fn a_pod_station_blinks_red_then_yellow_twice_a_second() {
+        // Each colour 250 ms, red first: one full cycle every 500 ms.
+        for (ms, yellow) in [
+            (0, false),
+            (249, false),
+            (250, true),
+            (499, true),
+            (500, false),
+            (749, false),
+            (750, true),
+            (1_000, false),
+        ] {
+            assert_eq!(pod_blink_yellow(ms), yellow, "{ms} ms");
+        }
+        // The station box's outline takes the phase; a frozen clock holds it
+        // and asks for no redraws.
+        let mut ui = with_pod_station();
+        ui.activate(4);
+        ui.activate(100);
+        ui.activate(201);
+        assert!(ui.loadout.designator(1).is_some());
+        let order = ui.display_order();
+        let slot = order.iter().position(|&index| index == 1).unwrap();
+        let (x, y) = (
+            350 + (slot as i32 % 2) * 119 + 3,
+            121 + (slot as i32 / 2) * 71 + 14,
+        );
+        let edge = |ui: &mut Ordnance, ms: u64| {
+            ui.frozen_ms = Some(ms);
+            let mut pixels = vec![0u8; WIDTH * HEIGHT * 4];
+            let animating = ui.render(&mut pixels);
+            assert!(!animating, "a frozen clock needs no redraws");
+            let at = ((y - 1) as usize * WIDTH + (x + 10) as usize) * 4;
+            [pixels[at], pixels[at + 1], pixels[at + 2]]
+        };
+        assert_eq!(edge(&mut ui, 0), [94, 30, 20]);
+        assert_eq!(edge(&mut ui, 250), [201, 179, 49]);
+        assert_eq!(edge(&mut ui, 500), [94, 30, 20]);
+        // On the live clock a hung pod keeps the page redrawing.
+        ui.frozen_ms = None;
+        assert!(ui.render(&mut vec![0u8; WIDTH * HEIGHT * 4]));
+        // Without a pod the clock is idle.
+        ui.loadout.configuration.designator_pods.clear();
+        assert!(!ui.render(&mut vec![0u8; WIDTH * HEIGHT * 4]));
+    }
+    #[test]
+    fn the_retired_pave_knife_loads_as_the_pave_spike_and_is_not_offered() {
+        use tore_world::mission::LoadoutSpec;
+        assert_eq!(
+            tore_sim::combat::sight::pod_record("PAVEKNF.SEE"),
+            "PAVESPK.SEE"
+        );
+        assert_eq!(
+            tore_sim::combat::sight::pod_record("PAVESPK.SEE"),
+            "PAVESPK.SEE"
+        );
+        assert_eq!(tore_sim::combat::sight::DESIGNATOR_PODS, ["PAVESPK.SEE"]);
+        let ui = with_pod_station();
+        let mut spec = LoadoutSpec::of(&ui.loadout);
+        // The synthetic record's flags were not made for pods: Cheat loading.
+        spec.cheat = true;
+        spec.stations[1].weapon = "PAVEKNF.SEE".into();
+        spec.stations[1].quantity = 0;
+        let mut resources = std::collections::BTreeMap::new();
+        resources.insert(
+            "PAVESPK.SEE".to_owned(),
+            tore_world::test_support::resources::laser_pod("PAVESPK.SEE"),
+        );
+        let applied = spec
+            .apply(ui.loadout.clone(), &resources, None)
+            .expect("an old Pave Knife row still loads");
+        assert_eq!(applied.designator(1).unwrap().source, "PAVESPK.SEE");
     }
 }

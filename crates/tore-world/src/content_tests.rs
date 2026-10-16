@@ -135,18 +135,22 @@ fn the_synthetic_import_has_its_aircraft_theater_weapons_and_shared_item() {
 #[test]
 fn the_designator_pods_and_the_novelty_stores_are_weapon_items() {
     let mut map = resources();
+    map.insert("PAVESPK.SEE".into(), laser_pod("PAVESPK.SEE"));
+    // The Pave Knife is no longer offered (John, 2026-10-16): no item.
     map.insert("PAVEKNF.SEE".into(), laser_pod("PAVEKNF.SEE"));
     map.insert("~BLDR.JT".into(), loadable_missile("~BLDR.JT"));
     map.insert("~SPARE.JT".into(), loadable_missile("~SPARE.JT"));
+    let content = Content::of(&map);
+    let pod = content.get(Kind::Weapon, "PAVESPK.SEE").expect("the pod");
+    assert_eq!(pod.names().collect::<Vec<_>>(), ["PAVESPK.SEE"]);
+    assert!(content.get(Kind::Weapon, "PAVEKNF.SEE").is_none());
+    assert!(content.get(Kind::Weapon, "~BLDR.JT").is_some());
+    assert!(content.get(Kind::Weapon, "~SPARE.JT").is_none());
+    assert_eq!(content.of_kind(Kind::Weapon).count(), 4);
     // A sensor that is not a designator pod is no item.
     map.insert("PAVESPK.SEE".into(), map["F18R.SEE"].clone());
     let content = Content::of(&map);
-    let pod = content.get(Kind::Weapon, "PAVEKNF.SEE").expect("the pod");
-    assert_eq!(pod.names().collect::<Vec<_>>(), ["PAVEKNF.SEE"]);
-    assert!(content.get(Kind::Weapon, "~BLDR.JT").is_some());
-    assert!(content.get(Kind::Weapon, "~SPARE.JT").is_none());
     assert!(content.get(Kind::Weapon, "PAVESPK.SEE").is_none());
-    assert_eq!(content.of_kind(Kind::Weapon).count(), 4);
 }
 
 #[test]

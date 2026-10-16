@@ -83,13 +83,29 @@ the list in the slices that make them work.
 
 ### Laser designator pods
 
-The Pave Spike (`PAVESPK`) and Pave Knife (`PAVEKNF`) laser pods load on any
-pod station, the retail equipment rule T1 implemented (decision 7;
-[air-to-ground](air-to-ground.md)). The page lists them in the air-to-surface
-catalog after the tanks and before the weapons, each as a card with the
-original `$PAVESPK` or `$PAVEKNF` thumbnail, the pod's name, its weight and
-"laser" in the seeker corner. Normal loading lists a pod when some station of the
-aircraft can hang it; Cheat loading lists both.
+The Pave Spike (`PAVESPK`) laser pod loads on any pod station, the retail
+equipment rule T1 implemented (decision 7; [air-to-ground](air-to-ground.md)).
+The page lists it in the air-to-surface catalog after the tanks and before the
+weapons, as a card with the original `$PAVESPK` thumbnail, the pod's name, its
+weight and "laser" in the seeker corner. Normal loading lists it when some
+station of the aircraft can hang it; Cheat loading lists it whatever the
+aircraft.
+
+**The Pave Knife is no longer offered** (John, 2026-10-16: its data equals the
+Pave Spike's, 425 lb, 10 nm laser, pod hemisphere, so it "really adds nothing").
+It is gone from both catalogs, single player and the lobby's page. Old data
+still loads (agent decision): a saved quick loadout, a `loadout` or
+`plane-loadout` mission line or a lobby request that names `PAVEKNF.SEE` loads
+the Pave Spike on the same station instead of failing
+(`tore_sim::combat::sight::pod_record`). Replays and checkpoints that recorded a
+Pave Knife are not touched and play as before.
+
+**A station holding a pod blinks.** Its box outline alternates between the
+normal red and yellow, two full cycles a second: red for 250 ms, then yellow for
+250 ms (opinionated, John 2026-10-16). It runs on the page's frame clock, the
+time since the page opened, and the page asks for frames while a pod hangs. A
+preview or test fixes the clock, so the blink holds one phase and renders
+repeat (`ordnance-pod` is the red phase, `ordnance-pod-yellow` the yellow).
 
 A pod takes the station's place: loading one leaves the station's weapon
 unloaded (and a tank on the same mount off), and a weapon or tank taking the
@@ -198,8 +214,13 @@ source evidence and missing-mount inventory live in the
 [ordnance source matrix](../formats/aircraft-ordnance.md).
 
 Agent-selected presentation rules: display one row per editable source
-hardpoint, ordered by its original number. The visible number is the source
-index plus one, followed by its source location label. A source row may carry
+hardpoint. A row's heading is its source location label alone (John removed the
+station numbers on 2026-10-16: "Internal Gun", "Wing", "Centerline"). The rows
+are listed in a display order, not their source order: the internal gun first,
+then the centreline, then the other stations from the fuselage outward by
+lateral offset (see [display order](#display-order), John 2026-10-16). Station
+numbers stay the source's everywhere else (mission text, the wire, saved loads,
+checkpoints, replays). A source row may carry
 multiple stores; its quantity is not evidence of multiple physical pylons.
 Weapon and tank capabilities on the same hardpoint share one row. Always show
 its actual loaded occupant, regardless of the selected catalog. Switching between
@@ -219,9 +240,10 @@ order; any new optional rows append after those stations, and older saved loads
 leave those new rows empty.
 
 Use six station cards per page in the existing three-row area. When more than
-six rows exist, source-station Previous/Next controls and a page count occupy the
-top strip, independent of catalog paging. Tab cycles all source rows and reveals
-the focused page. This is an agent-selected layout safeguard, not a claim about
+six rows exist, station Previous/Next controls and a page count occupy the
+top strip, independent of catalog paging. Tab cycles all rows in display order
+and reveals the focused page; Previous and Next select the first row of their
+page. This is an agent-selected layout safeguard, not a claim about
 retail pagination. All currently reviewed aircraft fit in six rows.
 
 A loaded row responds to left-click, right-click and quantity keys according to
@@ -242,6 +264,31 @@ contract.
 Physical source compatibility does not supply missing radar or designator
 capabilities. Guided release still follows the [missile contract](missiles.md)
 and the aircraft's actual sensor and target state.
+
+### Display order
+
+John asked on 2026-10-16 for the station boxes to run gun first, then the
+centreline, then the wing stations working outward, "so it is easier to keep
+track of" (opinionated; the tie-breaks are agent decisions). It is a display
+order only: no station is renumbered in the data, the mission text, the wire,
+checkpoints or replays, so multiplayer and saved loadouts are unaffected.
+Clicking, dragging, right-click, keys and Tab all act on the station a box
+shows, whatever place the box has.
+
+1. **Internal gun first**: a row whose store is internal (source flag 8, the
+   gun rows, including the F-15C's gun listed under Fuselage) or whose location
+   is Internal Gun.
+2. **Centreline** rows (location 0).
+3. **Every other row**, inboard to outboard by the absolute lateral offset of
+   its source position (x; the source records one side and the pair mirrors
+   it, [hardpoint positions](../formats/aircraft-ordnance.md#hardpoint-positions)).
+
+Within a group, rows with the same offset keep their source order. A row with no
+source position sorts after the positioned rows of its group, in source order. A
+row that holds a weapon uses the weapon row's position, a tank-only row the tank
+row's. The F-15C therefore lists gun, centreline, fuselage AIM-120s, wing AIM-9s,
+wing tanks; the F-16C gun, centreline, its inner wet pair, then the weapon wing
+rows and the wingtips.
 
 ## Presentation
 
@@ -327,20 +374,40 @@ lasing](air-to-ground.md#buddy-lasing)).
   loading) takes the band while it is up; the warning is back when the message
   clears. Single player's band is the message strip at (30, 335); the lobby's is
   the strip under the title bar, the same place its messages use.
-- **Helper.** One line in the strip under the title bar, at (30, 64) in a quiet
-  blue-grey (150, 170, 180), from the aircraft's sight sensor
+- **Helper.** One line **below the Select Plane and Fly buttons**, on the
+  backdrop under the right panel's frame, in the band John circled on
+  2026-10-16: a dark strip 15 px tall at y=458, centred on the panel (x=466),
+  4 px padding each side, in a light blue-grey (208, 228, 238), brighter than
+  the first (150, 170, 180) because John asked for it to stand out. It clears
+  the buttons (they end at y=438), the panel frame and the left panel: the strip
+  starts no left of x=322 and ends before x=632 and a line too long for that
+  ends with `..`. The words come from the aircraft's sight sensor
   ([who has a sight](air-to-ground.md#who-has-a-sight)): "Built-in laser
   designator: no pod needed for laser ordnance." or "Built-in FLIR: no pod needed
-  for IR weapons." for a built-in sensor (a cone gimbal); "Laser designator pod
-  fitted: no extra pod needed for laser ordnance." or "FLIR pod fitted: no extra
-  pod needed for IR weapons." for a fixed pod (a hemisphere gimbal: the Pave
-  Spike row, the AAS-38); and, for an aircraft with no sensor but a station that
-  takes a pod, "No built-in designator: hang a Pave Spike or Pave Knife pod to
-  lase." An aircraft with none of these shows no line. The lobby's page has one
-  band: a message, then the warning, then the helper, whichever comes first.
+  for IR weapons." for a built-in sensor (a cone gimbal); **"Aircraft laser pod
+  equipped"** (or "Aircraft FLIR pod equipped") for a fixed pod (a hemisphere
+  gimbal: the Pave Spike row, the AAS-38), shortened on John's request on
+  2026-10-16; and, for an aircraft with no sensor but a station that takes a
+  pod, "No built-in designator: hang a Pave Spike pod to lase." An aircraft with
+  none of these shows no line. The helper has its own place, so it shows
+  together with a message or the warning, in the lobby too (it used to share the
+  lobby's strip under the title bar and give way there). The message and
+  warning keep their places.
 - **Preview.** `--quick-mission --snapshot-state ordnance-laser` and
   `lobby-ordnance-laser` load a laser bomb on the first station that takes one
   and show the air-to-surface page.
+
+### Tank graphics
+
+Every tank card, in the catalog and in a station box, draws the retail tank
+picture (`$F150`, `$F250`, `$F350`, `$F500`). The authored tanks
+([stores on pylons](stores-on-pylons.md#derived-f-15c-and-f-16c-stations):
+`F370`, `F610`, `F600`, `M396`, `R528`) have no retail picture of their own, so
+the card draws the picture of the retail tank nearest in gallons (larger on a
+tie): the 370 gallon tank takes the 350's, the 396 the 350's, the 528, 600 and
+610 the 500's. John saw the 370 gallon card without a picture on 2026-10-16
+(requested; the nearest-size rule is an agent decision). `ordnance-authored-tank`
+previews it.
 
 ### Opening on a saved load
 

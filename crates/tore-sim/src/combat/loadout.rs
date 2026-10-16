@@ -57,6 +57,37 @@ impl Loadout {
         }
         rows.into_values().collect()
     }
+    /// The order the Load Ordnance page lists its stations in: the internal
+    /// gun first, then the centreline, then the other stations from the
+    /// fuselage outward by their lateral offset (the source position's x,
+    /// mirrored for the pair), ties by source row. Each entry indexes
+    /// [`Self::editable_stations`]; station numbers, mission text and the wire
+    /// keep the source order (display only, John 2026-10-16).
+    pub fn station_display_order(&self) -> Vec<usize> {
+        let rows = self.editable_stations();
+        let mut order: Vec<usize> = (0..rows.len()).collect();
+        let key = |row: &EditableStation| {
+            let internal = row
+                .weapon
+                .and_then(|slot| self.configuration.stations.get(slot))
+                .is_some_and(|station| station.internal);
+            let group = if internal || row.location == 2 {
+                0
+            } else if row.location == 0 {
+                1
+            } else {
+                2
+            };
+            let hardpoint = row
+                .weapon
+                .and_then(|slot| self.hardpoints.get(slot))
+                .or_else(|| row.tank.and_then(|slot| self.tank_hardpoints.get(slot)));
+            let lateral = hardpoint.map_or(i32::MAX, |h| h.position[0].abs());
+            (group, lateral, row.hardpoint)
+        };
+        order.sort_by_key(|&index| key(&rows[index]));
+        order
+    }
     pub fn unload_tank(&mut self, slot: usize) -> Result<()> {
         let mut draft = self.clone();
         let tank = draft
