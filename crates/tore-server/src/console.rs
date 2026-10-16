@@ -18,6 +18,10 @@ pub enum Command {
     KickPlayer(u8, String),
     End,
     Restart,
+    Rotation,
+    Next,
+    Goto(usize),
+    Reload,
     /// `broadcast on` or `broadcast off`: list the server on the Internet
     /// Lobby, or take it off.
     Broadcast(bool),
@@ -28,7 +32,7 @@ pub enum Command {
 }
 
 /// The help text for `help`.
-pub const HELP: &str = "Commands: status, players, kick SEAT, kick-player ID [REASON], end, restart, broadcast on|off, quit";
+pub const HELP: &str = "Commands: status, players, kick SEAT, kick-player ID [REASON], end, restart, rotation, next, goto N, reload, broadcast on|off, quit";
 
 /// Reads one line. Blank lines are nothing.
 pub fn parse(line: &str) -> Option<Command> {
@@ -47,6 +51,16 @@ pub fn parse(line: &str) -> Option<Command> {
         "players" => no_arguments(Command::Players),
         "end" => no_arguments(Command::End),
         "restart" => no_arguments(Command::Restart),
+        "rotation" => no_arguments(Command::Rotation),
+        "next" => no_arguments(Command::Next),
+        "reload" => no_arguments(Command::Reload),
+        "goto" => match rest.as_slice() {
+            [n] => match n.parse::<usize>() {
+                Ok(n) if n > 0 => Command::Goto(n),
+                _ => Command::Invalid("goto needs a positive entry number".into()),
+            },
+            _ => Command::Invalid("usage: goto N".into()),
+        },
         "quit" => no_arguments(Command::Quit),
         "help" | "?" => Command::Help,
         "kick" => match rest.as_slice() {
@@ -153,5 +167,25 @@ mod tests {
         read_commands("status\n\nkick 2\nquit\n".as_bytes(), &sender);
         let all: Vec<_> = receiver.try_iter().collect();
         assert_eq!(all, vec![Command::Status, Command::Kick(2), Command::Quit]);
+    }
+}
+
+#[test]
+fn rotation_commands_are_strict() {
+    assert_eq!(parse("rotation"), Some(Command::Rotation));
+    assert_eq!(parse("next"), Some(Command::Next));
+    assert_eq!(parse("reload"), Some(Command::Reload));
+    assert_eq!(parse("goto 2"), Some(Command::Goto(2)));
+    for line in [
+        "rotation a",
+        "next a",
+        "reload a",
+        "goto",
+        "goto 0",
+        "goto -1",
+        "goto 2 3",
+        "goto a",
+    ] {
+        assert!(matches!(parse(line), Some(Command::Invalid(_))), "{line}");
     }
 }

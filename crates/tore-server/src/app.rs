@@ -92,7 +92,12 @@ pub fn run(args: impl IntoIterator<Item = String>) -> Result<(), Failure> {
 
     let prepared = prepare::prepare(&options, &data_dir)?;
     if options.check {
-        for line in check::report(&prepared) {
+        for line in prepared
+            .rotation_report
+            .iter()
+            .cloned()
+            .chain(check::report(&prepared))
+        {
             say(&line);
         }
         return Ok(());
@@ -124,6 +129,7 @@ pub fn serve_with(
     mut log: Logger,
 ) -> Result<(), String> {
     let Prepared {
+        rotation,
         config,
         data_dir,
         spec,
@@ -161,7 +167,12 @@ pub fn serve_with(
     let (status_interval, start_mode) = (config.status_interval_seconds, config.start);
     let install_id = install_id(&data_dir, config.telemetry);
 
+    if let Some(rotation) = &rotation {
+        log.log(timer.unix_seconds(), &rotation.heading());
+        log.log(timer.unix_seconds(), &rotation.current_line());
+    }
     let mut host = start_host(HostSetup {
+        rotation,
         config,
         spec,
         resources,
