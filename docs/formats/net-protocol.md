@@ -3107,7 +3107,10 @@ again with an observer; the capture format did not change for it.
   must not join;
   42 since the cleanup round (slices nr-ac105, nr-aijett, nr-fx2,
   nr-sndfix): the 105 mm splash and AI jettison change the shared
-  simulation, so an older game must not join.
+  simulation, so an older game must not join;
+  43 since the extra stations (slice nr-stations): F-15C centreline and
+  wing tank rows, the F-16C inner wet pair and two tank records, so an
+  older game must not join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

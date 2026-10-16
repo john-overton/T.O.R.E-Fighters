@@ -223,7 +223,10 @@ pub fn path_words(path: Path) -> &'static str {
 /// 42 since the cleanup round (slices nr-ac105, nr-aijett, nr-fx2,
 /// nr-sndfix): the 105 mm splash and AI jettison change the shared
 /// simulation, so an older game must not join.
-pub const PROTOCOL_VERSION: u16 = 42;
+/// 43 since the extra stations (slice nr-stations): F-15C centreline and
+/// wing tank rows, the F-16C inner wet pair and two tank records, so an
+/// older game must not join.
+pub const PROTOCOL_VERSION: u16 = 43;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
