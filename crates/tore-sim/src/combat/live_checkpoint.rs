@@ -274,11 +274,17 @@ crate::checkpoint_struct!(ActorSupport {
     radar_emitting,
 });
 
-// The deployed fractions of gear, flaps and bay. A target row holds them
-// between ticks, so they are state (`signature_checkpoint.rs` notes that the
-// profile itself never does).
+// The deployed fractions of gear, flaps and bay and the external stores. A
+// target row holds them between ticks, so they are state.
 type Deployed = sensors::Configuration;
-crate::checkpoint_struct!(Deployed { gear, flaps, bay });
+crate::checkpoint_struct!(Deployed {
+    gear,
+    flaps,
+    bay,
+    stores,
+});
+type Carried = sensors::signature::Stores;
+crate::checkpoint_struct!(Carried { count, lbs });
 
 crate::checkpoint_struct!(OrientedBox {
     center,

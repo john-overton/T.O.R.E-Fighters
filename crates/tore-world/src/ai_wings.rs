@@ -346,14 +346,29 @@ pub struct HumanAircraft<'a> {
     /// configuration).
     pub signature: sensors::SignatureProfile,
     pub jammer: Option<sensors::JammerProfile>,
+    /// The external stores it carries now, which raise its radar signature.
+    pub stores: sensors::Stores,
 }
 
 impl<'a> HumanAircraft<'a> {
-    pub fn new(
+    /// The aircraft as its combat ownship `own` holds it: hit points,
+    /// signature, jammer and live external stores.
+    pub fn new(slot: HumanSlot, flight: &'a flight::State, own: &live::Ownship) -> Self {
+        Self::from_parts(
+            slot,
+            flight,
+            own.hp,
+            own.configuration(),
+            own.external_stores(),
+        )
+    }
+
+    pub(crate) fn from_parts(
         slot: HumanSlot,
         flight: &'a flight::State,
         hit_points: i32,
         config: &live::Configuration,
+        stores: sensors::Stores,
     ) -> Self {
         Self {
             slot,
@@ -361,6 +376,7 @@ impl<'a> HumanAircraft<'a> {
             hit_points,
             signature: config.sensors.signature,
             jammer: config.sensors.jammer.clone(),
+            stores,
         }
     }
 
@@ -2683,7 +2699,7 @@ impl AiWings {
                     position: player.position,
                     velocity: player.velocity,
                     basis: Basis::new(player.yaw, player.pitch, player.bank),
-                    configuration: sensors::Configuration::CLEAN,
+                    configuration: sensors::Configuration::carrying(human.stores),
                     signature: human.signature,
                     jammer: human.jammer.clone(),
                     jammer_active: player.jammer && player.engine,
@@ -2957,7 +2973,35 @@ impl AiWings {
             target.radar_emitting = f.radar;
             target.on_ground = f.research.as_ref().is_some_and(|r| r.on_ground);
             target.wreck_power = f.wreck_power(target.wreck_power.engine_count.max(1));
+            target.configuration = sensors::Configuration::carrying(self.external_stores(slot.id));
         }
+    }
+
+    /// What AI aircraft `id` carries outside right now, from its combat
+    /// configuration and its live station rounds: the count every radar,
+    /// jammer comparison and missile seeker reads (docs/radar.md, "External
+    /// stores").
+    pub fn external_stores(&self, id: u32) -> sensors::Stores {
+        let (Some(actor), Some(config)) = (self.mission.actor(id), self.configs.get(&id)) else {
+            return sensors::Stores::NONE;
+        };
+        config.external_stores(
+            |index| {
+                actor
+                    .stations()
+                    .iter()
+                    .find(|s| usize::from(s.station.0) == index)
+                    .map_or(0, |s| match s.rounds() {
+                        tore_sim::ai::weapon_service::Rounds::Finite(n) => n,
+                        tore_sim::ai::weapon_service::Rounds::Unlimited => {
+                            let station = &config.stations[index];
+                            u32::from(station.count) * live::pod_rounds(&station.weapon)
+                        }
+                    })
+            },
+            // An AI aircraft never drops a gun pod.
+            |_| true,
+        )
     }
 
     /// Turn one AI launch into a real projectile flown by the existing combat
@@ -4145,11 +4189,12 @@ mod tests {
     /// The single-player entry for a flight state, for tests.
     pub(crate) fn human(flight: &flight::State) -> HumanAircraft<'_> {
         static CONFIG: std::sync::OnceLock<live::Configuration> = std::sync::OnceLock::new();
-        HumanAircraft::new(
+        HumanAircraft::from_parts(
             HumanSlot::SINGLE_PLAYER,
             flight,
             1000,
             CONFIG.get_or_init(|| combat_fixture(false).own().configuration().clone()),
+            sensors::Stores::NONE,
         )
     }
 
@@ -4159,6 +4204,23 @@ mod tests {
             slot,
             ..human(flight)
         }
+    }
+
+    #[test]
+    fn a_human_seat_shows_the_ai_radars_its_external_stores() {
+        let player = flight::State::new(&aircraft(), [0., 20000., 0.]).unwrap();
+        let clean = AiWings::human_object(&human(&player));
+        let stores = sensors::Stores {
+            count: 2.,
+            lbs: 8770.,
+        };
+        let loaded = AiWings::human_object(&HumanAircraft {
+            stores,
+            ..human(&player)
+        });
+        let seen = |o: &WorldObject| o.observable.as_ref().unwrap().configuration;
+        assert_eq!(seen(&clean), sensors::Configuration::CLEAN);
+        assert_eq!(seen(&loaded), sensors::Configuration::carrying(stores));
     }
 
     #[test]

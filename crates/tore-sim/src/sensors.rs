@@ -16,7 +16,7 @@ pub use profile::{
     DEFAULT_RANGE_INDEX, FEET_PER_NAUTICAL_MILE, Generation, InfraredProfile, JammerProfile,
     Preset, RANGE_LADDER_NMI, RadarProfile, SensorProfiles, Volume,
 };
-pub use signature::{Configuration, SignatureProfile};
+pub use signature::{Configuration, SignatureProfile, Stores};
 pub use track::{
     Channel, Contact, Controls, Environment, Event, GroundContact, GroundObject, GroundSymbol,
     Mode, Observable, Observer, Picks, Plot, Sample, Sensors, Strobe, Support, Weather,
