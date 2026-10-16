@@ -3119,7 +3119,9 @@ again with an observer; the capture format did not change for it.
   older game must not join;
   46 since the store signature (slice nr-rcs): external stores raise the
   radar signature every radar and seeker reads, so an older game must not
-  join.
+  join;
+  47 since the F-16C wingtip AIM-120 (slice nr-f16tip): an older game
+  refuses the load, so an older game must not join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

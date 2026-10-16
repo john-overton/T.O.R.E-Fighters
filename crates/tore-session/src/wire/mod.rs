@@ -235,7 +235,9 @@ pub fn path_words(path: Path) -> &'static str {
 /// 46 since the store signature (slice nr-rcs): external stores raise the
 /// radar signature every radar and seeker reads, so an older game must not
 /// join.
-pub const PROTOCOL_VERSION: u16 = 46;
+/// 47 since the F-16C wingtip AIM-120 (slice nr-f16tip): an older game
+/// refuses the load, so an older game must not join.
+pub const PROTOCOL_VERSION: u16 = 47;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
