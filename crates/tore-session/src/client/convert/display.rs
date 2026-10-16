@@ -77,19 +77,20 @@ impl Seen {
             .unwrap_or_default()
     }
 
-    /// The events whose tick is `tick`, with an empty weapon name filled
-    /// from `store` (the mission loadout). Mount stays as sampled.
-    pub fn events_at(
-        &self,
+    /// Takes the events whose tick is `tick`, with an empty weapon name
+    /// filled from `store` (the mission loadout). Mount stays as sampled.
+    /// A recorder takes each tick once, so the change list stays short.
+    pub fn take_events(
+        &mut self,
         tick: u64,
         mut store: impl FnMut(u32, u8) -> Option<(String, [f64; 3])>,
     ) -> Vec<Event> {
         let mut events = Vec::new();
-        let Some(list) = self.changes.get(&tick) else {
+        let Some(list) = self.changes.remove(&tick) else {
             return events;
         };
         for change in list {
-            if let Some(mut hud) = change.hud.clone() {
+            if let Some(mut hud) = change.hud {
                 if hud.weapon.is_empty()
                     && let Some((source, mount)) = store(change.aircraft, hud.station)
                 {
@@ -100,7 +101,7 @@ impl Seen {
                 }
                 events.push(hud.event(change.aircraft));
             }
-            if let Some(sight) = &change.sight {
+            if let Some(sight) = change.sight {
                 events.push(sight.event(change.aircraft));
             }
         }

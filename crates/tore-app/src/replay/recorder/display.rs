@@ -58,7 +58,7 @@ impl Recorder {
             self.sample_seat(tick, number, id, launcher_of(pose), &mut sampled);
         }
         self.sample_ai(tick, number, &sampled);
-        self.display.events_at(number, |_, _| None)
+        self.display.take_events(number, |_, _| None)
     }
 
     fn sample_seat(

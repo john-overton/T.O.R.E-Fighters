@@ -166,6 +166,8 @@ impl Viewer {
     }
 
     /// The aircraft's configuration with the recorded weapon on its station.
+    /// `None` when the recorded weapon cannot be loaded, so the HUD camera
+    /// keeps the derived picture rather than naming another store.
     fn hud_config(
         &self,
         id: u32,
@@ -179,19 +181,30 @@ impl Viewer {
             .1
             .clone();
         let index = usize::from(sample.station);
-        if config.stations.len() <= index
-            && let Some(first) = config.stations.first().cloned()
-        {
-            while config.stations.len() <= index {
-                config.stations.push(first.clone());
+        let weapon = match self.hud_weapons.get(&sample.weapon) {
+            Some(weapon) => Some(weapon),
+            None if sample.weapon.is_empty() => None,
+            None => {
+                let carried = config.stations.get(index)?;
+                if !carried.weapon.source.eq_ignore_ascii_case(&sample.weapon) {
+                    return None;
+                }
+                None
             }
-        }
-        if let Some(weapon) = self.hud_weapons.get(&sample.weapon)
-            && let Some(station) = config.stations.get_mut(index)
-        {
-            station.weapon = weapon.clone();
-            if sample.mount != [0.; 3] {
-                station.mount = sample.mount;
+        };
+        if let Some(weapon) = weapon {
+            if config.stations.len() <= index
+                && let Some(first) = config.stations.first().cloned()
+            {
+                while config.stations.len() <= index {
+                    config.stations.push(first.clone());
+                }
+            }
+            if let Some(station) = config.stations.get_mut(index) {
+                station.weapon = weapon.clone();
+                if sample.mount != [0.; 3] {
+                    station.mount = sample.mount;
+                }
             }
         }
         config.stations.get(index).is_some().then_some(config)
