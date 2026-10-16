@@ -128,3 +128,92 @@ close-range ground detail and non-collidable vegetation, set from the
 Graphics screen
 ([vegetation](graphics-options.md#vegetation-texture-and-vegetation-objects)).
 It is not part of the terrain-detail behaviour above.
+
+## Exploratory vegetation and ground detail
+
+`exp/vegetation` only. Everything in this section is **opinionated**:
+John asked for vegetation on 2026-10-16 and for the second pass the
+same day (retail trees, placement from the tile art, denser grass, a
+better desert); the rules and numbers are agent choices, fitted by eye
+on offscreen renders. The original game has none of it. Nothing is
+collidable or part of the simulation, the network session, replays or
+checkpoints.
+
+### Shapes
+
+Trees, bushes, tree clumps and palms are the retail shapes and
+textures from `FA_2.LIB`, which no mission or layout places: `TREEA`
+(broadleaf), `TREEB` (autumn), `TREEC` (dead), `TREED` (conifer),
+`BUSH1` to `BUSH3` (dry bushes), `BUSH4` (green bush), `GROVA` to
+`GROVD` and `GROVPA` to `GROVPC` (broadleaf and pine clumps), and
+`PLMGA` to `PLMGC` (palm groves; single palms are cut out of them). The
+import keeps them as `VEGETATION_ART`, apart from the theater
+resources. Rocks are the retail `ROCK` and `ROCKA` to `ROCKE` shapes,
+sunk a little into the ground and tinted toward the tile under them.
+Acacias and loose boulders have no retail shape and are drawn
+fallbacks, as is anything an older import lacks.
+
+### Where things grow
+
+Placement reads the tile art under each spot through the theater's
+reference palette, with the ground's slope and height. A theater's
+own greens are split by tone, so the split follows that theater's
+palette rather than fixed colours:
+
+- **Woodland** (its darker greens): dense trees, broadleaf or conifer
+  by climate, with tree clumps standing in at distance.
+- **Meadow** (the middle greens): grass with copses where a slow noise
+  field says so.
+- **Fields** (the lighter yellow-greens): clear, with hedgerows and
+  the odd tree along the edges of 1,024 ft plots.
+- **Hills**: more trees with slope (from about 3 to 13 degrees) and
+  with height above the theater's median, up to a climate tree line.
+- **Water**: river banks and shores are denser. A 512 ft block counts
+  as water only when at least half its texels are water, so a blue
+  roof is not a river.
+- **Clear ground**: cities, streets, runways (plus about 220 ft) and
+  water.
+- **Deserts**: sand stays bare. Palm groves and green belts follow
+  rivers and oases; dry bushes and a few trees line wadi banks;
+  outcrops ringed by boulders stand on slopes and stony ground.
+
+`--vegetation-preview OUT overlay` writes top-down classification
+pictures for Ukraine and Egypt.
+
+### Grass
+
+A carpet of grass tufts, each five tapered blades, on meadow, field
+edges, woodland floor and desert gravel (dry straw there). Its radius
+and density follow the
+[density setting](graphics-options.md#vegetation-texture-and-vegetation-objects).
+
+### Desert ground
+
+The desert texture is meant to read as sand at every height, not as
+one repeating ripple:
+
+- **Colour fields**, miles across: ochre, red and pale sands, grey
+  gravel plains (serir), dark varnish on stony ground, pale silt in
+  meandering wadi beds about 150 ft wide with darker banks.
+- **Dunes**: in sand seas a few miles across, transverse ridges about
+  1,150 and 1,750 ft apart and up to about 80 ft high, with a long lit
+  windward slope, a sharp crest and a shaded slip face. Barchan
+  crescents, a few hundred feet across, sit on the sea's edges. They
+  are shading on the lighting, not geometry.
+- **Close range**: wind streaks along the wind, ripples 24 to 40 ft
+  apart in three directions that come and go in patches, soft grit,
+  and pebbles about a foot across on gravel.
+
+Each pattern fades out before it is smaller than a pixel. The fine
+grain is full below about 2,200 ft and gone by about 7,500 ft; the
+colour fields and dunes reach two to six times the texture distance
+and fade out between about 9,000 and 26,000 ft.
+
+### Lights
+
+Flares, afterburners, fires and gun flashes add light to the ground
+detail and never remove it. Measured on the Ukraine chase view (the
+mean difference of each pixel from its 3 by 3 neighbourhood, lower half
+of the picture), the ground detail is 1.001 times as strong with an
+afterburner's light at 300 ft and 1.049 times at 40 ft, where the light
+reaches the ground.

@@ -159,6 +159,7 @@ mod variety_rotors;
 mod vegetation;
 mod vegetation_preview;
 mod vegetation_renderer;
+mod vegetation_shapes;
 mod version;
 mod view_compass;
 mod weapon_hud;
@@ -10672,6 +10673,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     }
     if std::env::args().nth(1).as_deref() == Some("--vegetation-survey") {
         vegetation::survey()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--vegetation-art") {
+        vegetation_preview::art()?;
         return Ok(Outcome::Done);
     }
     if std::env::args().nth(1).as_deref() == Some("--vegetation-preview") {

@@ -90,6 +90,8 @@ pub struct Scenery {
     pub fill: Option<Arc<crate::fill_renderer::FillArt>>,
     /// Exploratory vegetation tiles. `None` when `TORE_VEGETATION=0`.
     pub vegetation: Option<Arc<crate::vegetation::Atlas>>,
+    /// The vegetation meshes, their retail textures in the static art pages.
+    pub vegetation_meshes: Option<Arc<crate::vegetation_shapes::Library>>,
 }
 
 /// The launch overrides the environment asks for: `TORE_WEATHER_TIME` as
@@ -443,6 +445,7 @@ impl Scenery {
             origin: [0.; 3],
             fill: None,
             vegetation: None,
+            vegetation_meshes: None,
             climate: crate::blast_climate::Climate {
                 humidity: terrain.humidity(),
             },
@@ -460,6 +463,16 @@ impl Scenery {
         );
         out.build_static_geometry(resources, terrain, code)?;
         out.vegetation = crate::vegetation::Atlas::build(resources, terrain)?.map(Arc::new);
+        if out.vegetation.is_some() {
+            let terrain_bytes = out.texture_indices.len();
+            out.vegetation_meshes = Some(Arc::new(crate::vegetation_shapes::Library::build(
+                &crate::vegetation::art(),
+                resources,
+                &out.palette,
+                &mut out.sky_indices,
+                |pages| (terrain_bytes + pages.len()) / 65536,
+            )));
+        }
         if let Some(fill) = &terrain.city_fill {
             let terrain_bytes = out.texture_indices.len();
             out.fill = Some(Arc::new(crate::fill_renderer::FillArt::build(
@@ -1076,6 +1089,7 @@ pub(crate) mod tests {
             origin: [0.; 3],
             fill: None,
             vegetation: None,
+            vegetation_meshes: None,
             fire_widths: Arc::new(BTreeMap::new()),
             climate: crate::blast_climate::Climate::default(),
         }

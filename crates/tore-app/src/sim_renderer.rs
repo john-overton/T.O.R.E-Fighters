@@ -720,19 +720,24 @@ impl SimRenderer {
         if let Some(fill) = &mut fill {
             fill.set_options(&options);
         }
-        let vegetation = scenery.vegetation.as_ref().map(|atlas| {
-            let mut vegetation = crate::vegetation_renderer::Renderer::new(
-                device,
-                &shader,
-                format,
-                samples,
-                &material_layout,
-                &lighting.layout,
-                Arc::clone(atlas),
-            );
-            vegetation.set_options(&options);
-            vegetation
-        });
+        let vegetation = scenery
+            .vegetation
+            .as_ref()
+            .zip(scenery.vegetation_meshes.as_ref())
+            .map(|(atlas, library)| {
+                let mut vegetation = crate::vegetation_renderer::Renderer::new(
+                    device,
+                    &shader,
+                    format,
+                    samples,
+                    &material_layout,
+                    &lighting,
+                    Arc::clone(atlas),
+                    Arc::clone(library),
+                );
+                vegetation.set_options(device, &options);
+                vegetation
+            });
         let celestial_vertices = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Celestial vertices"),
             size: 256 * 1024,
@@ -1337,7 +1342,7 @@ impl SimRenderer {
             fill.set_options(&options);
         }
         if let Some(vegetation) = &mut self.vegetation {
-            vegetation.set_options(&options);
+            vegetation.set_options(device, &options);
         }
         if samples == self.samples {
             return;
@@ -1358,7 +1363,7 @@ impl SimRenderer {
                 self.format,
                 samples,
                 &self.material_layout,
-                &self.lighting.layout,
+                &self.lighting,
             );
         }
         if let Some(fill) = &mut self.fill {
@@ -1830,6 +1835,9 @@ impl SimRenderer {
                 .draw(encoder, (&self.bind, &self.vertices, self.count), &objects);
             if let Some(fill) = &self.fill {
                 fill.draw_shadows(&self.lighting, encoder, &self.bind);
+            }
+            if let Some(vegetation) = &self.vegetation {
+                vegetation.draw_shadows(&self.lighting, encoder, &self.bind);
             }
         }
         // The spotting aid covers other aircraft in the main view and the

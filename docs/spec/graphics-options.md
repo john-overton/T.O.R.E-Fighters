@@ -171,21 +171,49 @@ checkpoints. What was drawn is seeded from the theater and the tile, so
 every machine that uses the same settings shows the same scene.
 
 **Vegetation texture** is the close-range ground detail: furrows on
-fields, grass, a mottled forest floor, sand grain and ripples, and
-scree on rock. Off leaves the retail tile. On is the ordinary grain.
-Fine is a tighter grain. **Vegetation texture distance** is how far
-that grain reaches. It also fades with height, full below about
-1,800 ft and gone by about 7,000 ft, so a cruise view stays the retail
-tile.
+fields, grass, a mottled forest floor, sand grain, ripples and dunes,
+pebbles on gravel, and scree on rock. It is described in
+[terrain detail](terrain-detail.md#exploratory-vegetation-and-ground-detail).
+Off leaves the retail tile. On is the ordinary grain. Fine is a
+tighter grain. **Vegetation texture distance** is how far that grain
+reaches. It also fades with height, full below about 2,200 ft and gone
+by about 7,500 ft, so a cruise view stays the retail tile; the desert's
+broad colour fields and dune shading reach farther and fade out by
+about 26,000 ft. A flare,
+afterburner, fire or gun flash only adds light to it: the grain is the
+same with and without one.
 
-**Vegetation distance** is how far trees, bushes and ground clutter are
-drawn, the same idea as building distance. **Vegetation detail** is the
-distance inside which they are full meshes; beyond it, trees, bushes,
-rocks and dead wood are flat crossed cards, while grass, hedges and
-dunes keep their mesh. **Vegetation density** is Low, Med, High or
-Ultra (about 0.4, 0.7, 1.0 and 1.65 times the High placement). Objects
-also fade out with height, full below about 4,500 ft and gone by about
-10,500 ft, and nothing is placed above 11,000 ft.
+**Vegetation distance** is how far trees, bushes, palms and rocks are
+drawn, the same idea as building distance. **Vegetation detail** sets
+how far they stay at full density: trees are at full density out to
+0.4 times the detail distance (about 4,900 ft at the default 2 nm) and
+thin beyond it, smaller things sooner (bushes and boulders at about a
+third of that, single stones at about an eighth), and the grass carpet
+reaches half the detail distance at most. Tree clumps (retail grove
+shapes) stand in for single trees from about a third of the full
+density distance outwards. The trees, bushes, palms and rocks are the
+retail shapes, which are already crossed cards, so there is no
+separate card level. **Vegetation density** is Low, Med, High or Ultra
+(about 0.4, 0.7, 1.0 and 1.65 times the High placement), and also sets
+the grass carpet:
+
+| Density | Grass radius | Tufts per 32 ft patch near the camera | Objects kept at most |
+| --- | --- | --- | --- |
+| Low | 700 ft | 48 | 65,536 |
+| Med | 1,100 ft | 96 | 131,072 |
+| High | 1,500 ft | 160 | 262,144 |
+| Ultra | 2,200 ft | 256 | 524,288 |
+
+Each tuft has five blades. Grass thins in four rings: full within 14%
+of its radius, then half, a quarter and an eighth. Where a view would
+hold more objects than the density keeps (a deep forest at High would
+hold several times as many), full density reaches less far, for every kind
+of object alike, so the view thins sooner instead of stopping short of
+the vegetation distance. With the larger budget Ultra keeps about the
+same thinning distance as High in such places, so it is denser at
+every distance and reaches farther. Objects also fade out with height,
+full below about 7,000 ft and gone by about 15,000 ft, and nothing is
+placed above 16,000 ft.
 
 The five values are saved in `graphics-v1.conf` only when they differ
 from the defaults (`vegetation-texture`, `vegetation-texture-distance`,

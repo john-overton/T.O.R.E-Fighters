@@ -186,6 +186,51 @@ pub const MULTIPLAYER_DATA: &[&str] = &[
     // delay, Revive distance) is what opens the `MC_*` dialogs above.
     "MC_MENU.MNU",
 ];
+/// The retail tree, bush, grove and palm grove shapes and their textures,
+/// kept from `FA_2.LIB` for the exploratory vegetation. No OT, mission or
+/// layout names them (`TREE1.OT` and `TREE2.OT` name a `TREE1.SH` and a
+/// `TREE2.SH` the media does not hold), so the surface data never keeps
+/// them. The game keeps them apart from the theater resources, so the combat
+/// tapes' fingerprint does not move when an import gains them; an import
+/// without them draws generated shapes instead.
+pub const VEGETATION_ART: &[&str] = &[
+    "TREEA.SH",
+    "TREEB.SH",
+    "TREEC.SH",
+    "TREED.SH",
+    "BUSH1.SH",
+    "BUSH2.SH",
+    "BUSH3.SH",
+    "BUSH4.SH",
+    "GROVA.SH",
+    "GROVB.SH",
+    "GROVC.SH",
+    "GROVD.SH",
+    "GROVPA.SH",
+    "GROVPB.SH",
+    "GROVPC.SH",
+    "PLMGA.SH",
+    "PLMGB.SH",
+    "PLMGC.SH",
+    "_TREEA.PIC",
+    "_TREEB.PIC",
+    "_TREEC.PIC",
+    "_TREED.PIC",
+    "_BUSH1.PIC",
+    "_BUSH2.PIC",
+    "_BUSH3.PIC",
+    "_BUSH4.PIC",
+    "_GROVA.PIC",
+    "_GROVB.PIC",
+    "_GROVC.PIC",
+    "_GROVD.PIC",
+    "_GROVPA.PIC",
+    "_GROVPB.PIC",
+    "_GROVPC.PIC",
+    "_PLMGA.PIC",
+    "_PLMGB.PIC",
+    "_PLMGC.PIC",
+];
 /// The pack's name for the retail `CHAT.TXT` (a loose file, in no archive): its
 /// bytes as read, parsed by `tore_formats::chat`. Absent when the media has no
 /// readable copy, in which case chat has no quick messages.
@@ -208,6 +253,7 @@ mod tests {
             MULTIPLAYER_ART,
             MULTIPLAYER_DATA,
             SLIDER_ART,
+            VEGETATION_ART,
         ];
         for list in lists {
             let unique: BTreeSet<_> = list.iter().collect();
