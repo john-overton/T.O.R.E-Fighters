@@ -2605,7 +2605,7 @@ What travels:
   added. Their ends are the Hit, Ground and Effect events every weapon
   already had.
 - **Loadouts.** A loadout row's weapon may name a laser designator pod's SEE
-  record (`PAVESPK.SEE`, `PAVEKNF.SEE`; X1 writes the pod there), with its
+  record (`PAVESPK.SEE`, or the retired `PAVEKNF.SEE`, which a host builds as the Pave Spike; X1 writes the pod there), with its
   count and a quantity of 0; the Loadout and Flight loadouts messages carry
   it as any name. The content check counts the pods, and Cheat loading's
   novelty stores (`~BLDR.JT`, `~MOOSE.JT`), as weapon items, so a loadout

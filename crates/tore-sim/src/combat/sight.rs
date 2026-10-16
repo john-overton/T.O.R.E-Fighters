@@ -258,10 +258,27 @@ impl SightSensor {
     }
 }
 
-/// The retail laser pods the Load Ordnance page offers on a pod station
-/// (decision 7: Pave Spike and Pave Knife load on any pod station from the
-/// Air-to-Surface group, as the retail manual instructs).
-pub const DESIGNATOR_PODS: [&str; 2] = ["PAVESPK.SEE", "PAVEKNF.SEE"];
+/// The laser pod the Load Ordnance page offers on a pod station (decision 7:
+/// the pod loads on any pod station from the Air-to-Surface group, as the
+/// retail manual instructs). The Pave Knife is no longer offered: its data
+/// equals the Pave Spike's (same weight, range and hemisphere), so it added
+/// nothing (John, 2026-10-16); see [`pod_record`].
+pub const DESIGNATOR_PODS: [&str; 1] = ["PAVESPK.SEE"];
+
+/// Pod records the page no longer offers, with the record each now loads as
+/// (agent decision, 2026-10-16: an old saved loadout, mission line or lobby
+/// request naming the Pave Knife loads the Pave Spike on the same station
+/// instead of failing).
+pub const RETIRED_PODS: [(&str, &str); 1] = [("PAVEKNF.SEE", "PAVESPK.SEE")];
+
+/// The record a pod named in a loadout loads as: the name itself, or the
+/// pod that replaced it.
+pub fn pod_record(name: &str) -> &str {
+    RETIRED_PODS
+        .iter()
+        .find(|(old, _)| old.eq_ignore_ascii_case(name))
+        .map_or(name, |(_, now)| now)
+}
 
 /// A laser designator pod as a loadable store: its record, its sight and
 /// its weight.

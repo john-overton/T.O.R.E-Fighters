@@ -439,7 +439,7 @@ fn a_loadout_with_a_weapon_a_player_lacks_or_has_differently_is_refused() {
 }
 
 /// A laser designator pod the page offers (protocol 23, slice NA).
-const POD: &str = "PAVEKNF.SEE";
+const POD: &str = "PAVESPK.SEE";
 
 /// The F/A-18D's standard load with the pod on its missile station, a
 /// Cheat loading (the synthetic station's flags were not made for pods).

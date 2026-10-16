@@ -26,7 +26,7 @@ const TANK_PLACEMENTS: usize = 175;
 /// loading refuses (A2G decision 16).
 const NOVELTY_PLACEMENTS: usize = 166;
 /// Station and designator-pod pairs the normal rules accept (A2G decision 7).
-const POD_PLACEMENTS: usize = 130;
+const POD_PLACEMENTS: usize = 65;
 
 pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     if AircraftId::ALL.len() != AIRCRAFT {

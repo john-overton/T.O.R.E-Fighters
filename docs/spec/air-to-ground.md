@@ -283,20 +283,24 @@ search and 45 degree track for built-ins and 360 for pods).
 | Sensor | Aircraft | Laser | Gimbal |
 | --- | --- | --- | --- |
 | PAVESPK Pave Spike (fixed row) | F-16C, A-10 | yes, 10 nmi | pod: the hemisphere below the aircraft, as the AC-130 dome (fitted) |
-| PAVESPK, PAVEKNF as loaded pods | any aircraft with a pod station (flag 0x400) | yes, 10 nmi | pod hemisphere |
+| PAVESPK as a loaded pod (PAVEKNF no longer offered) | any aircraft with a pod station (flag 0x400) | yes, 10 nmi | pod hemisphere |
 | SU24L, KA50L (built in) | Su-25, V-22 | yes, 10 nmi | 60 degree search, 45 degree track cone about the nose (record fields) |
 | AAS38 pod, AV8IR, MIG29I, SU27I, AC130I (FLIR) | Rafale (pod), X-31, F-22, F-22N, AV-8B, AH-64, MiG-29, Su-27, Su-35, AC-130 | no | FLIR pods: hemisphere; internal FLIR: 60 degree cone (fitted) |
 
 Other aircraft have no sight. They designate by radar, FLIR channel or visually
 and cannot laze, but they can still drop laser bombs on a buddy's spot (see
-[buddy lasing](#buddy-lasing)). Pave Knife is on no imported aircraft by
-default; Pave Spike and Pave Knife load on any pod station from the
+[buddy lasing](#buddy-lasing)). Pave Spike loads on any pod station from the
 Air-to-Surface group, as the manual instructs (retail manual p. 120, decision 7).
+The Pave Knife has the same data (425 lb, 10 nmi laser, pod hemisphere), is on no
+imported aircraft by default and was dropped from the page on 2026-10-16 (John:
+it adds nothing); a saved loadout, mission line or lobby request that names it
+loads the Pave Spike on the same station
+([laser designator pods](ordnance-presentation.md#laser-designator-pods)).
 In retail a laser weapon needs only that its own launcher carries a working
 signature-1 sensor with a nonzero count, so a loaded pod counts.
 
 Built (T1). Which gimbal a record gets is one rule over the SEE fields (fitted):
-a record with weight (an external store: PAVESPK and PAVEKNF 425 lb, AAS38
+a record with weight (an external store: PAVESPK and the retired PAVEKNF 425 lb, AAS38
 350 lb) or an all-round zone is a pod with the hemisphere below the aircraft;
 any other is built in, with a cone of its zone 0 heading (search, 60 degrees on
 every retail record) and zone 1 heading (track, 45 degrees). The cone is
@@ -1115,7 +1119,7 @@ nothing on the ground.
 Also: the F-4J's SUU-16 gun pod and the AC-130's 105 mm already work. Novelty
 Boulder and Moose are Cheat catalog only (John, 2026-10-10, decision 16; see
 [ordnance presentation](ordnance-presentation.md#novelty-bombs-are-cheat-only)).
-Pave Spike and Pave Knife are loadable pods (decision 7). Carrier counts are the
+The Pave Spike is a loadable pod (decision 7; the Pave Knife was dropped on 2026-10-16). Carrier counts are the
 Load Ordnance audit's (`--validate-ordnance`, static PT stations with the real
 loading rules), re-checked at acceptance.
 
