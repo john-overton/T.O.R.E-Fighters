@@ -2151,7 +2151,7 @@ def heavy_gcurve_scenarios() -> list[Scenario]:
 # The AC-130 gunsight probes (`--gunsight-probe`, crates/tore-app/src/gunsight_probe.rs):
 # scripted runs on flat ground through the live combat state with the imported guns.
 # name -> the PASS lines a healthy run prints at least.
-GUNSIGHT_PROBES = {"pin-orbit": 9, "fire-no-target": 9, "track-out-of-arc": 11}
+GUNSIGHT_PROBES = {"pin-orbit": 9, "fire-no-target": 9, "track-out-of-arc": 11, "splash-105": 7}
 
 
 def check_gunsight(name: str, minimum: int):

@@ -679,7 +679,7 @@ end
     }
 
     #[test]
-    fn gunship_damage_correction_preserves_all_other_record_fields() {
+    fn gunship_damage_correction_preserves_direct_damage_and_effects() {
         let bytes = fixture_damage("150");
         let original = Weapon::parse("C_25.JT", bytes.as_bytes()).unwrap();
         assert_eq!(original.damage.by_class, [150; 5]);
@@ -689,6 +689,20 @@ end
                 corrected.damage.by_class,
                 original.damage.by_class.map(|v| v.saturating_mul(2))
             );
+            if source == "C_105.JT" {
+                assert_eq!(corrected.damage.collateral_radius, 100);
+                assert_eq!(corrected.damage.collateral_percent, 35);
+                assert_eq!(
+                    corrections::collateral_damage(&corrected),
+                    [300, 0, 300, 0, 300]
+                );
+            } else {
+                assert_eq!(corrected.damage.collateral_radius, 0);
+                assert_eq!(corrected.damage.collateral_percent, 0);
+                assert_eq!(corrections::collateral_damage(&corrected), [300; 5]);
+            }
+            corrected.damage.collateral_radius = original.damage.collateral_radius;
+            corrected.damage.collateral_percent = original.damage.collateral_percent;
             corrected.damage.by_class = original.damage.by_class;
             corrected.source = original.source.clone();
             assert_eq!(corrected, original);

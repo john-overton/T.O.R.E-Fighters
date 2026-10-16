@@ -709,6 +709,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/formation_trace.rs", ("ai-fights", "ai-orders"), "formation trace"),
     _r("crates/tore-app/src/combat_smoke.rs", ("flight-combat",), "combat smoke"),
     _r("crates/tore-app/src/gunsight_probe.rs", ("flight-combat",), "AC-130 gunsight probe"),
+    _r("crates/tore-app/src/gunsight_splash.rs", ("flight-combat",), "AC-130 mixed-group splash probe"),
     _r("crates/tore-app/src/missile_sag.rs", ("flight-combat",), "missile sag regression"),
     _r("crates/tore-app/src/missile_acceptance.rs", ("flight-combat",), "missile acceptance"),
     _r("crates/tore-app/src/tape_file.rs", ("combat-tapes", "flight-combat", "replay-cli"), "tape files"),

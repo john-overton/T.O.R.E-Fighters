@@ -120,16 +120,66 @@ weapon, `C_105.JT` (`ProjectilePose::weapon`).
 **Damage.** Opinionated, John, 2026-10-15: load-time corrections double
 all five damage-class fields of `C_40.JT` (50 to 100) and `C_105.JT`
 (150 to 300). `C_25.JT` is unchanged. This applies to every use of those
-records, including the base gun. Rates, velocities, collateral percentage,
-blast radius, crater and explosion art are unchanged. Direct and collateral
-damage consume the corrected fields. The imported three gun records have zero
-collateral radius and percent, so their blast damage remains zero. No new
-splash damage is introduced. Integer division is preserved: after the
+records, including the base gun. Rates, velocities, crater and explosion art
+are unchanged. The 105 mm splash correction below is separate from direct
+damage. Integer division is preserved: after the
 aircraft-gun divisor of three and two physical rounds per game round, the
 40 mm changes from 8/8 to 17/16 alternating points per hit; the 105 mm changes
 from 25/25 to 50/50. Truck, tank and SAM classes use the same figures in
 these records, before location, protection, falloff and remaining-health caps.
 This is a balance choice, not recovered original behaviour.
+
+### 105 mm fragmentation splash
+
+Opinionated, requested by John on 2026-10-15: the 105 mm damages nearby soft
+targets, with roughly 30 m reach, while armor resists fragmentation. This is
+an authored addition, not a claim about retail behavior. The 25 and 40 mm
+retain their zero splash radius and percentage.
+
+Agent balance choices: `C_105.JT` loads with a **100 ft (30.48 m) radius** and
+**35 percent** collateral damage. A splash-only class multiplier is
+`[100, 0, 100, 0, 100]` percent. Classes 1 (ships) and 3 (tanks, including
+APCs such as M113) take no fragmentation damage. Classes 0 (aircraft and
+fallback), 2 (structures), and 4 (vehicles, infantry, AAA and SAM sites) use
+the corrected per-class damage unchanged. This small table in
+`weapon_corrections::collateral_damage` is separate from direct-hit fields:
+the latter remain `[300; 5]` for the 105. No per-vehicle name exceptions or
+new armor attribute are needed. A vehicle assigned to the soft class remains
+soft, even if its visual model looks armored.
+
+The existing [splash contract](missiles.md#splash-damage) supplies linear
+falloff to the near surface of the target, integer rounding, the 50 percent
+ground share, friendly-fire policy, credit and exclusion of a direct-hit
+victim. For one physical ground-impact shell, before the remaining-health
+cap, damage is:
+
+| Distance from blast to target surface (ft) | 0 | 25 | 50 | 75 | 99 | 100 | 110 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Classes 0, 2, 4 | 51 | 39 | 27 | 12 | 0 | 0 | 0 |
+| Classes 1, 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+Previously all these splash values were zero. For an air impact the ground
+share does not apply: soft classes take 105, 81, 54, 27, 3, 0, 0 at those
+same distances. Each physical projectile gets its own splash; direct hits
+still use the existing aircraft-gun divisor and physical-round split (50
+points per 105 mm hit). Splash is not divided by those direct-hit factors.
+City-fill scenery stays standing: the ground burst's 17 percent is below
+the existing 30 percent flattening threshold. Targetable buildings take
+normal class-2 splash damage.
+
+Player and AI rounds use the same corrected record and burst path. AI gunship
+decisions are unchanged. Explosion scale remains `blast_scale::HOWITZER`
+(100), crater scale remains the existing howitzer rule, and explosion types
+and sound selection are unchanged. Peers must agree on the correction and
+class multiplier to simulate the same damage; there are no new wire fields.
+
+The headless `--gunsight-probe splash-105 --aircraft ac130 --no-audio`
+probe fires one physical shell through the player gun path, measures its
+terrain impact, and places imported TRUCK, M113 and M1 shapes beside that
+point using `tore_world::grounding`. It compares zero-radius and corrected
+runs. The battery names it `flight-ac130-splash-105`. Synthetic simulation
+tests cover all five classes, ground/air bursts, distances and both player
+and AI projectile ownership.
 
 **Readout.** The gun status line has no cycling state. `Ownship::gun_ready_in`
 gives the ticks until a gun's next round may leave, 0 when ready, as the hook

@@ -12178,7 +12178,12 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 .cloned()
                 .ok_or_else(|| std::io::Error::other("missing probe resource"))
         })?;
-        gunsight_probe::run(&config, name, gunsight_dump.as_deref())?;
+        gunsight_probe::run(
+            &config,
+            name,
+            gunsight_dump.as_deref(),
+            &assets.theater_resources,
+        )?;
         return Ok(Outcome::Done);
     }
     if live_fire && record_input.is_some() {

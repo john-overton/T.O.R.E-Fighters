@@ -117,7 +117,7 @@ impl Burst {
             shooter,
             station: p.station,
             position,
-            damage: w.damage.by_class,
+            damage: tore_formats::weapons::corrections::collateral_damage(w),
             radius: f64::from(w.damage.collateral_radius.max(0)),
             percent: i32::from(w.damage.collateral_percent.max(0)),
             detonation,

@@ -20,8 +20,15 @@ use tore_sim::{
 
 type Vector = [f64; 3];
 
+#[path = "gunsight_splash.rs"]
+mod splash;
 /// The probes by name, as the battery spells them.
-pub const NAMES: [&str; 3] = ["pin-orbit", "fire-no-target", "track-out-of-arc"];
+pub const NAMES: [&str; 4] = [
+    "pin-orbit",
+    "fire-no-target",
+    "track-out-of-arc",
+    "splash-105",
+];
 
 const GRAVITY: f64 = 32.174;
 const HZ: f64 = 120.;
@@ -217,8 +224,14 @@ impl Impacts {
 }
 
 /// Runs one probe by name. `dump` is a CSV path for the orbit's gun train.
-pub fn run(config: &Configuration, name: &str, dump: Option<&std::path::Path>) -> AppResult<()> {
+pub fn run(
+    config: &Configuration,
+    name: &str,
+    dump: Option<&std::path::Path>,
+    resources: &dyn tore_world::resources::ResourceSource,
+) -> AppResult<()> {
     match name {
+        "splash-105" => splash::run(config, resources),
         "pin-orbit" => pin_orbit(config, dump),
         "fire-no-target" => fire_no_target(config),
         "track-out-of-arc" => track_out_of_arc(config),
