@@ -436,3 +436,8 @@ The guarded F-15C and F-16C [derived stations](spec/stores-on-pylons.md#derived-
 are appended in memory after parsing. Their tank records are authored at pack
 load. They need no reimport, keep source indices and default loads, and do not
 modify user media. Edited station records suppress the additions.
+
+The [optional carriers added on 2026-10-16](spec/stores-on-pylons.md#optional-carriers-2026-10-16)
+extend the same mechanism to F22.PT, MIG29.PT and RAFALE.PT, and enable the
+F-15C centreline bomb rack. F22N.PT and A10.PT remain unchanged. New authored
+tanks are supplied only with their carrier; no reimport is needed.

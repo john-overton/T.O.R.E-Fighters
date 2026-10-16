@@ -841,6 +841,9 @@ pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
         (AircraftId::F15, 5) => at(Location::Wing, 50. / 3., -5.5, Hang::AsRecorded),
         (AircraftId::F15, 6) => at(Location::Centerline, 0., -3., Hang::FromBelow { up: -8. }),
         (AircraftId::F15, 7) => at(Location::Wing, 50. / 3., -4.3, Hang::AsRecorded),
+        (AircraftId::F22, 8) => at(Location::Wing, 12., -6., Hang::FromBelow { up: -6. }),
+        (AircraftId::Mig29, 8) => at(Location::Centerline, 0., -2., Hang::FromBelow { up: -8. }),
+        (AircraftId::Rafale, 9) => at(Location::Centerline, 0., -4., Hang::FromBelow { up: -8. }),
         (AircraftId::F16C, 9) => at(Location::Wing, 7., -1., Hang::FromBelow { up: -6. }),
         // Mi-24's source row is ahead of the stub wing, so it sees the
         // rotor disk. Put the twin rails near the outer stub-wing ends,
@@ -1732,6 +1735,76 @@ mod tests {
             store: Some(store.into()),
             count,
             weight_class: 0,
+        }
+    }
+
+    #[test]
+    fn optional_carriers_place_bombs_rails_and_tanks_at_the_release_origin() {
+        let model = Underside::of(
+            &Shape {
+                faces: vec![tore_formats::shape::Face {
+                    positions: vec![
+                        [-90., -90., 0.],
+                        [90., -90., 0.],
+                        [90., 90., 0.],
+                        [-90., 90., 0.],
+                    ],
+                    colors: vec![1; 4],
+                    fog: Default::default(),
+                    uv: Vec::new(),
+                    texture: String::new(),
+                    subtype: 0x20,
+                    normal: None,
+                    address: 0,
+                }],
+                lines: Vec::new(),
+                billboards: Vec::new(),
+                state_words: Default::default(),
+            },
+            1. / 3.,
+        );
+        for (id, row, location, flags, count, right, forward) in [
+            (AircraftId::F15, 6, 0, 0x3c1, 3, 0., -3.),
+            (AircraftId::F22, 8, 4, 0x2a5, 4, 12., -6.),
+            (AircraftId::Mig29, 8, 0, 0x201, 1, 0., -2.),
+            (AircraftId::Rafale, 9, 0, 0x201, 1, 0., -4.),
+        ] {
+            let h = Hardpoint {
+                location,
+                flags,
+                position: [0, -24, 0],
+                store: None,
+                count,
+                weight_class: 90,
+            };
+            let (mount, rack) = placed_on(id, row, &h, Some(&model));
+            assert_eq!([mount[0], mount[2]], [right, forward]);
+            let size = StoreSize::of_shape(Some(if id == AircraftId::F22 {
+                "AMRAM.SH"
+            } else {
+                "MK82.SH"
+            }));
+            let counts = rack.sides(mount, count as u16);
+            assert_eq!(
+                counts,
+                if id == AircraftId::F22 {
+                    [2, 2]
+                } else {
+                    [count as u16, 0]
+                }
+            );
+            for (side, on) in counts.into_iter().enumerate() {
+                for slot in 0..on {
+                    let point = rack.store_point(mount, count as u16, side, slot, size);
+                    assert_eq!(point[2], forward);
+                    assert!(point[1] + size.top < 0.);
+                }
+            }
+            if id == AircraftId::F22 {
+                assert_eq!(rack.pylons(2), 1);
+                let pair = [0, 1].map(|slot| rack.store_point(mount, 4, 0, slot, size));
+                assert!(pair[0][0] < right && pair[1][0] > right);
+            }
         }
     }
 

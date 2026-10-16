@@ -23,13 +23,18 @@ pub(crate) fn run() -> AppResult<()> {
         AircraftId::F14,
         AircraftId::F15,
         AircraftId::F16C,
+        AircraftId::F22,
+        AircraftId::Mig29,
+        AircraftId::Rafale,
         AircraftId::Mi24,
         AircraftId::A4E,
         AircraftId::Su25,
         AircraftId::F4B,
     ] {
-        check_load(id, resources)?;
+        check_load(id, resources, None)?;
     }
+    check_load(AircraftId::F15, resources, Some((6, "MK82.JT")))?;
+    check_load(AircraftId::F22, resources, Some((8, "AIM120.JT")))?;
     if let Some(file) = recording {
         check_recording(Path::new(file), resources, renders)?;
     }
@@ -48,7 +53,11 @@ fn check_shapes(stores: &[StorePose], art: &CombatArt) -> AppResult<()> {
     Ok(())
 }
 
-fn check_load(id: AircraftId, resources: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
+fn check_load(
+    id: AircraftId,
+    resources: &BTreeMap<String, Vec<u8>>,
+    weapon: Option<(usize, &str)>,
+) -> AppResult<()> {
     let profile = Aircraft::parse(resources.get(id.pt()).ok_or("missing aircraft")?)?;
     let mut load = tore_sim::combat::loadout::Loadout::new(&profile, |name| {
         resources
@@ -59,13 +68,17 @@ fn check_load(id: AircraftId, resources: &BTreeMap<String, Vec<u8>>) -> AppResul
     let added: &[usize] = match id {
         AircraftId::F15 => &[6, 7],
         AircraftId::F16C => &[9],
+        AircraftId::F22 | AircraftId::Mig29 => &[8],
+        AircraftId::Rafale => &[9],
         _ => &[],
     };
     for &row in added {
-        let name = if id == AircraftId::F15 {
-            "F610.GAS"
-        } else {
-            "F370.GAS"
+        let name = match id {
+            AircraftId::F15 => "F610.GAS",
+            AircraftId::F22 => "F600.GAS",
+            AircraftId::Mig29 => "M396.GAS",
+            AircraftId::Rafale => "R528.GAS",
+            _ => "F370.GAS",
         };
         let slot = load
             .configuration
@@ -74,6 +87,13 @@ fn check_load(id: AircraftId, resources: &BTreeMap<String, Vec<u8>>) -> AppResul
             .position(|t| t.hardpoint == row)
             .ok_or("missing added tank row")?;
         load.select_tank(slot, live::TankStore::parse(name, &resources[name])?)?;
+    }
+    if let Some((row, name)) = weapon {
+        let slot = load.configuration.hardpoint_slots[row].ok_or("missing added weapon row")?;
+        load.select(
+            slot,
+            tore_formats::weapons::Weapon::parse(name, &resources[name])?,
+        )?;
     }
     let config = load.configuration;
     let loaded = |i: usize| config.stations[i].count > 0;

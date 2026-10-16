@@ -36,6 +36,11 @@ def scenarios() -> list[Scenario]:
         args=["--replay-stores-check"],
         expect=[
             "Replay stores: PASS",
+            r"Replay stores: F22.PT unfired shapes, live vertices, release origins and \d+ count states agree",
+            r"Replay stores: MIG29.PT unfired shapes, live vertices, release origins and \d+ count states agree",
+            r"Replay stores: RAFALE.PT unfired shapes, live vertices, release origins and \d+ count states agree",
+            r"Replay stores: F15.PT hardpoint=6 shape=Some",
+            r"Replay stores: F22.PT hardpoint=8 shape=Some",
             "Replay stores: F15.PT unfired shapes, live vertices, release origins and 10 count states agree",
             "Replay stores: F16C.PT unfired shapes, live vertices, release origins and 10 count states agree",
             "Replay stores: MI24.PT unfired shapes, live vertices, release origins and 5 count states agree",

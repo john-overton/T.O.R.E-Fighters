@@ -18,13 +18,13 @@ use tore_world::mission::{LoadoutSpec, MissionSpec};
 /// record why in `docs/baselines/ordnance-availability.md`, when the supported
 /// weapon list, the tank records or the aircraft change.
 const AIRCRAFT: usize = 36;
-const RECOVERED_STATIONS: usize = 10;
-const TANK_RECORDS: usize = 6;
-const WEAPON_PLACEMENTS: usize = 3372;
-const TANK_PLACEMENTS: usize = 161;
+const RECOVERED_STATIONS: usize = 12;
+const TANK_RECORDS: usize = 9;
+const WEAPON_PLACEMENTS: usize = 3401;
+const TANK_PLACEMENTS: usize = 175;
 /// Station and novelty-record pairs the Cheat loading accepts and the normal
 /// loading refuses (A2G decision 16).
-const NOVELTY_PLACEMENTS: usize = 162;
+const NOVELTY_PLACEMENTS: usize = 166;
 /// Station and designator-pod pairs the normal rules accept (A2G decision 7).
 const POD_PLACEMENTS: usize = 130;
 
@@ -274,7 +274,9 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                     weapon.source.as_str(),
                     "AA10.JT" | "R27ER.JT" | "R27T.JT" | "R27ET.JT"
                 );
-                let expected = if r27 {
+                let expected = if r27
+                    || matches!((id, hardpoint), (AircraftId::F15, 6) | (AircraftId::F22, 8))
+                {
                     rows.iter()
                         .find(|r| r.hardpoint == hardpoint)
                         .and_then(|r| r.weapon)
@@ -595,6 +597,9 @@ fn extra_stations(
     let (rows, name, count, fuel, shell): (&[usize], _, _, _, _) = match aircraft.id {
         AircraftId::F15 => (&[6, 7], "F610.GAS", 3, 12078., 1296.),
         AircraftId::F16C => (&[9], "F370.GAS", 2, 4884., 524.),
+        AircraftId::F22 => (&[8], "F600.GAS", 2, 7920., 850.),
+        AircraftId::Mig29 => (&[8], "M396.GAS", 1, 2614., 281.),
+        AircraftId::Rafale => (&[9], "R528.GAS", 1, 3485., 374.),
         _ => return Ok(()),
     };
     let mut full = standard.clone();
@@ -612,7 +617,13 @@ fn extra_stations(
             return Err("derived row starts loaded".into());
         }
         let tank = TankStore::parse(name, data.get(name).ok_or("derived tank missing")?)?;
-        let expected = if row == 6 { 1 } else { 2 };
+        let expected = if aircraft.id == AircraftId::F15 && row == 6
+            || matches!(aircraft.id, AircraftId::Mig29 | AircraftId::Rafale)
+        {
+            1
+        } else {
+            2
+        };
         if full.tank_capacity(slot, &tank) != expected {
             return Err("derived tank capacity".into());
         }
@@ -637,7 +648,10 @@ fn extra_stations(
     }
     // A pre-addition save ends before the appended optional weapon slot.
     let mut old = LoadoutSpec::of(standard);
-    if aircraft.id == AircraftId::F16C {
+    if matches!(
+        aircraft.id,
+        AircraftId::F15 | AircraftId::F16C | AircraftId::F22
+    ) {
         old.stations.pop();
     }
     let restored = old.apply(standard.clone(), data, None)?;
@@ -674,22 +688,75 @@ fn extra_stations(
     {
         return Err("extra tank jettison lost weapons or retained tank mass".into());
     }
-    if aircraft.id == AircraftId::F16C {
-        let slot = standard.configuration.hardpoint_slots[9].ok_or("wet weapon slot missing")?;
-        for weapon in ["MK82.JT", "AGM65G.JT"] {
-            let mut armed = standard.clone();
-            armed.select(slot, Weapon::parse(weapon, &data[weapon])?)?;
-            if armed.quantities[slot] != 2 {
-                return Err("wet weapon capacity".into());
-            }
-            assert_roundtrip(&armed, standard, aircraft, data)?;
-            let mut state = live::State::new(armed.configuration.clone(), true)?;
-            state.own_mut().selected = slot;
-            state.command(0, live::Command::Jettison, launcher);
-            if state.own().rounds(slot) != 0 {
-                return Err("wet selected store did not jettison".into());
+    let weapons: &[(usize, &str, u16)] = match aircraft.id {
+        AircraftId::F15 => &[(6, "MK82.JT", 3), (6, "GBU12.JT", 3), (6, "MK84.JT", 2)],
+        AircraftId::F16C => &[(9, "MK82.JT", 2), (9, "AGM65G.JT", 2)],
+        AircraftId::F22 => &[(8, "AIM120.JT", 4), (8, "AIM9M.JT", 4), (8, "AIM9X.JT", 4)],
+        _ => &[],
+    };
+    for &(row, weapon, quantity) in weapons {
+        let slot = standard.configuration.hardpoint_slots[row].ok_or("wet weapon slot missing")?;
+        let mut armed = full.clone();
+        armed
+            .select(slot, Weapon::parse(weapon, &data[weapon])?)
+            .map_err(|error| format!("{} row {row} {weapon}: {error}", aircraft.id.pt()))?;
+        if armed.quantities[slot] != quantity
+            || armed
+                .configuration
+                .tanks
+                .iter()
+                .any(|t| t.hardpoint == row && t.quantity > 0)
+        {
+            return Err(format!(
+                "{} row {row} {weapon}: capacity or tank exclusion",
+                aircraft.id.pt()
+            )
+            .into());
+        }
+        assert_roundtrip(&armed, standard, aircraft, data)?;
+        let mut state = live::State::new(armed.configuration.clone(), true)?;
+        state.own_mut().selected = slot;
+        state.command(0, live::Command::Jettison, launcher);
+        if state.own().rounds(slot) != 0 {
+            return Err("wet selected store did not jettison".into());
+        }
+        let tank_slot = armed
+            .configuration
+            .tanks
+            .iter()
+            .position(|t| t.hardpoint == row)
+            .unwrap();
+        armed.select_tank(tank_slot, TankStore::parse(name, &data[name])?)?;
+        if armed.quantities[slot] != 0 {
+            return Err("tank selection retained weapons".into());
+        }
+    }
+    if matches!(aircraft.id, AircraftId::F15 | AircraftId::F22) {
+        let row = if aircraft.id == AircraftId::F15 { 6 } else { 8 };
+        let slot = standard.configuration.hardpoint_slots[row].unwrap();
+        let rejected: &[&str] = if aircraft.id == AircraftId::F15 {
+            &["AIM120.JT", "AGM65G.JT", "LAU61.JT"]
+        } else {
+            &["MK82.JT", "AGM65G.JT", "AA11.JT"]
+        };
+        for name in rejected {
+            if standard.capacity(slot, &Weapon::parse(name, &data[*name])?) != 0 {
+                return Err(format!("unexpected derived weapon permission {name}").into());
             }
         }
+        let accepted: Vec<_> = SUPPORTED_WEAPONS
+            .iter()
+            .filter_map(|name| {
+                let w = Weapon::parse(name, &data[*name]).ok()?;
+                let capacity = standard.capacity(slot, &w);
+                (capacity > 0).then(|| format!("{name}:{capacity}"))
+            })
+            .collect();
+        println!(
+            "derived weapons {} row {row}: {}",
+            aircraft.id.pt(),
+            accepted.join(", ")
+        );
     }
     println!(
         "derived stations {}: {count} extra tanks, {fuel} lb fuel, {shell} lb shells; feed, jettison, save and old load passed",
