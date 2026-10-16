@@ -357,30 +357,38 @@ fn placed_vertex(position:vec3<f32>,p:vec3<f32>,uv:vec2<f32>,layer:f32,color:vec
  out.heat=1.0;
  if gun_ribbon {
   // Gun ribbon payload, shared by live, network and replay snapshots.
-  let end_on=index < -12.0;
-  let brightness=-index-2.0-select(0.0,10.0,end_on);
+  let green=index < -22.0;
+  let tag=index+select(0.0,20.0,green);
+  let end_on=tag < -12.0;
+  let brightness=-tag-2.0-select(0.0,10.0,end_on);
   let width=length(color);
   let night=tracer_night();
   let p=position-scene.local_eye.xyz;
   let z=dot(p,scene.forward.xyz);
   let f=1.7320508*scene.up.w;
   let pixel=2.0*max(z,1.0)/(max(scene.viewport.y,1.0)*f);
-  // A bounded 2 px halo; unresolved cores broaden inside it below.
-  let half_width=mix(1.2*width,max(1.2*width,pixel),night);
+  // Keep the narrow hot ribbon, surround it with a bounded soft halo.
+  let core_width=mix(1.2*width,max(1.2*width,pixel),night);
+  let half_width=mix(core_width,max(core_width,8.0*pixel),night);
   var offset=normalize(color)*uv.y*(half_width-1.2*width);
   let along=select(0.0,1.0,uv.x>0.0);
   out.uv.x=along;
   let projected_length=2.0*abs(uv.x);
   var longitudinal=scene.up.xyz;
   if !end_on {longitudinal=normalize(cross(color,p));}
-  offset+=longitudinal*(along-0.5)*night*max(2.0*pixel-projected_length,0.0);
+  // Side-on unresolved rounds remain short streaks, not square dots.
+  let core_length=projected_length+night*max(select(6.0,2.0,end_on)*pixel-projected_length,0.0);
+  let glow_length=mix(core_length,max(core_length,16.0*pixel),night);
+  offset+=longitudinal*(along-0.5)*(glow_length-projected_length);
   let q=p+offset;
   if night>0.0 {
    out.clip=vec4<f32>(dot(q,scene.right.xyz)*f/scene.eye.w,dot(q,scene.up.xyz)*f,world_depth_clip(dot(q,scene.forward.xyz)),dot(q,scene.forward.xyz));
   }
-  out.color=vec3<f32>(brightness);
+  out.color=vec3<f32>(select(0.0,1.0,green),brightness,0.0);
   out.heat=2.0;
   out.terrain_normal.x=night*clamp(1.0-1.2*width/pixel,0.0,1.0);
+  out.terrain_normal.y=half_width/core_width;
+  out.terrain_normal.z=glow_length/max(core_length,0.0001);
  }
  return out;
 }
@@ -535,19 +543,47 @@ fn tracer_night()->f32 {
 }
 @fragment fn tracer_fragment(in:VertexOut)->@location(0) vec4<f32>{
  if in.layer != -8.0 {discard;}
- let edge=1.0-smoothstep(0.8,1.0,abs(in.uv.y));
- let ends=smoothstep(0.0,0.12,in.uv.x)*(1.0-smoothstep(0.88,1.0,in.uv.x));
- let unresolved=select(0.0,in.terrain_normal.x,in.heat==2.0);
- let core=3.0*exp(-mix(120.0,6.0,unresolved)*in.uv.y*in.uv.y);
- let halo=0.65*exp(-5.0*in.uv.y*in.uv.y);
+ let gun=in.heat==2.0;
+ let night=select(0.0,tracer_night(),gun);
+ var uv=in.uv;
+ if night>0.0 {
+  uv=vec2<f32>((uv.x-0.5)*in.terrain_normal.z+0.5,uv.y*in.terrain_normal.y);
+ }
+ let edge=1.0-smoothstep(0.8,1.0,abs(uv.y));
+ let ends=smoothstep(0.0,0.12,uv.x)*(1.0-smoothstep(0.88,1.0,uv.x));
+ let unresolved=select(0.0,in.terrain_normal.x,gun);
+ let core=3.0*exp(-mix(120.0,6.0,unresolved)*uv.y*uv.y);
+ let halo=0.65*exp(-5.0*uv.y*uv.y);
  let cloud=clamp(cloud_occlusion(vec3<f32>(1.0),in.direction,in.altitude)
      -cloud_occlusion(vec3<f32>(0.0),in.direction,in.altitude),vec3<f32>(0.0),vec3<f32>(1.0));
- let night=select(0.0,tracer_night(),in.heat==2.0);
- let distance=in.distance/(1.0+2.0*night);
+ let distance=in.distance/(1.0+5.0*night);
  let visibility=(1.0-clamp(haze(distance),0.0,1.0))*(1.0-air_opacity(distance,in.altitude));
- // The vertex color carries the gun's tracer brightness (1 for most guns,
- // 1.5 for the AC-130's 105 mm), already decoded to linear.
- let radiance=(core*vec3<f32>(1.0,0.92,0.68)+halo*vec3<f32>(1.0,0.25,0.025))*edge*ends*visibility*cloud*in.color.g*(1.0+night);
+ var core_color=vec3<f32>(1.0,0.92,0.68);
+ var body_color=vec3<f32>(1.0,0.25,0.025);
+ var glow_color=vec3<f32>(1.0,0.06,0.025);
+ if night>0.0 {
+  core_color=mix(core_color,vec3<f32>(1.0,0.72,0.38),night);
+  body_color=mix(body_color,vec3<f32>(1.0,0.09,0.025),night);
+ }
+ if gun && in.color.r>0.5 && !thermal_on() {
+  core_color=mix(vec3<f32>(0.78,1.0,0.68),vec3<f32>(0.72,1.0,0.38),night);
+  body_color=vec3<f32>(0.09,1.0,0.025);
+  glow_color=vec3<f32>(0.06,1.0,0.025);
+ }
+ // Red daytime arithmetic is unchanged. Keep the 105's 1.5 radiance factor.
+ var radiance=(core*core_color+halo*body_color)*edge*ends*visibility*cloud*in.color.g*(1.0+night);
+ if night>0.0 {
+  let local=vec2<f32>(2.0*in.uv.x-1.0,in.uv.y);
+  let r=length(local);
+  // Flare glare's two soft lobes, without its canopy cross-streaks.
+  let soft=1.1*exp(-r*r*10.0)+0.4*exp(-r*3.2);
+  let window=1.0-smoothstep(0.85,1.0,max(abs(local.x),abs(local.y)));
+  // 75% of the flare halo profile peak, before distance attenuation.
+  // Use the tracer visibility envelope only: close-range glare falloff
+  // erased the halo at 4 nm even though the streak remained visible.
+  let strength=0.75*night;
+  radiance+=glow_color*soft*window*strength*visibility*cloud*in.color.g;
+ }
  return thermal_light(vec4<f32>(radiance,0.0),1.0);
 }
 // Static world textures use index255/mask cutouts without opaque backing color.

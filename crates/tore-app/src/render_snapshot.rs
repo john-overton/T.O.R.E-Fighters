@@ -429,8 +429,7 @@ pub fn combat_geometry(
                 local(p.previous),
                 local(p.position),
                 &eye,
-                tracer_brightness(&p.weapon),
-                tracer_width(&p.weapon),
+                &p.weapon,
             );
         } else if !p.gun && p.powered {
             // The motor's flame: a thin bright strip over the swept segment
@@ -632,6 +631,36 @@ fn tracer_width(weapon: &str) -> f64 {
         1.
     }
 }
+/// Opinionated ammunition colour families, John 2026-10-16. Exact record
+/// keys, never aircraft nationality. Reviewed assignments and exceptions:
+/// docs/spec/damage-smoke.md#tracer-colour-families.
+const GREEN_TRACERS: &[&str] = &[
+    "GSH23.JT",
+    "GSH30.JT",
+    "GSH301.JT",
+    "GSH6_23.JT",
+    "GSH6_30.JT",
+    "T12_4.JT",
+    "T30_1.JT",
+    "ZSU23.JT",
+    "2S6.JT",
+    "ZSU57.JT",
+    "AAA30.JT",
+    "AAA30BAD.JT",
+    "M1939.JT",
+    "A_M1939.JT",
+    "BMP2.JT",
+    "BTR80.JT",
+    "KS12.JT",
+    "KS19.JT",
+    "T72.JT",
+];
+fn green_tracer(weapon: &str) -> bool {
+    GREEN_TRACERS
+        .iter()
+        .any(|record| record.eq_ignore_ascii_case(weapon))
+}
+
 /// The vertex color that the shader's sRGB decode turns into `linear`, so a
 /// tracer's brightness survives the decode the world vertices go through.
 fn encoded(linear: f64) -> f32 {
@@ -642,17 +671,30 @@ fn encoded(linear: f64) -> f32 {
     }
 }
 /// Camera-facing luminous ribbon over the actual swept gun segment, at
-/// `brightness` times the ordinary tracer's radiance and `width` times its
-/// width.
+/// the weapon's colour family, relative radiance and relative width.
 fn gun_tracer(
     out: &mut Vec<f32>,
     previous: Vector,
     position: Vector,
     camera: &Camera,
-    brightness: f64,
-    width: f64,
+    weapon: &str,
 ) {
-    ribbon(out, previous, position, camera, brightness, width, true);
+    let first = out.len();
+    ribbon(
+        out,
+        previous,
+        position,
+        camera,
+        tracer_brightness(weapon),
+        tracer_width(weapon),
+        true,
+    );
+    // Extend the existing tag, leaving red vertex bytes exactly unchanged.
+    if green_tracer(weapon) {
+        for vertex in out[first..].chunks_exact_mut(10) {
+            vertex[9] -= 20.;
+        }
+    }
 }
 
 fn tracer(
@@ -667,7 +709,7 @@ fn tracer(
 }
 
 // Gun vertices reuse the ribbon payload: RGB is side * width, index is
-// -(2 + radiance + 10 if end-on); UV.x is signed projected half-length.
+// -(2 + radiance + 10 if end-on + 20 if green); UV.x is signed projected half-length.
 // Sparks retain the ordinary color payload.
 // The shared object shader expands this in the actual view's pixel units.
 #[allow(clippy::too_many_arguments)]
@@ -777,7 +819,7 @@ mod tests {
         } else {
             1. - t * t * (3. - 2. * t)
         };
-        (night, 1. + night, 1. + 2. * night)
+        (night, 1. + night, 1. + 5. * night)
     }
 
     fn pixel_width(distance: f64, night: f64, width: f64) -> f64 {
@@ -785,76 +827,262 @@ mod tests {
         2. * (1.2 * width + night * (pixel - 1.2 * width).max(0.)) / pixel
     }
 
+    // Halo-only peak, excluding the flare's core and canopy cross-streaks.
+    fn glow_peak(night: f64) -> f64 {
+        1.5 * 0.75 * night
+    }
+
+    fn colours(night: f32, green: bool) -> ([f32; 3], [f32; 3]) {
+        let mix = |a: f32, b: f32| a * (1. - night) + b * night;
+        if green {
+            ([mix(0.78, 0.72), 1., mix(0.68, 0.38)], [0.09, 1., 0.025])
+        } else if night > 0. {
+            (
+                [1., mix(0.92, 0.72), mix(0.68, 0.38)],
+                [1., mix(0.25, 0.09), 0.025],
+            )
+        } else {
+            ([1., 0.92, 0.68], [1., 0.25, 0.025])
+        }
+    }
+
     #[test]
     fn tracer_night_factors_and_pixel_floor() {
         assert_eq!(night_rule(1., false), (0., 1., 1.));
-        assert_eq!(night_rule(-1., false), (1., 2., 3.));
+        assert_eq!(night_rule(-1., false), (1., 2., 6.));
         assert_eq!(night_rule(-1., true), (0., 1., 1.));
         let middle = (-0.104528 + 0.0348995) / 2.;
-        assert_eq!(night_rule(middle, false), (0.5, 1.5, 2.));
-        for edge in [-0.104528, 0.0348995] {
+        assert_eq!(night_rule(middle, false), (0.5, 1.5, 3.5));
+        for edge in [-0.104528, middle, 0.0348995] {
+            let left = night_rule(edge - 1e-7, false);
+            let right = night_rule(edge + 1e-7, false);
+            assert!((left.0 - right.0).abs() < 3e-6);
+            assert!((left.2 - right.2).abs() < 2e-5);
+            assert!((glow_peak(left.0) - glow_peak(right.0)).abs() < 3e-6);
+            let (lc, lb) = colours(left.0 as f32, false);
+            let (rc, rb) = colours(right.0 as f32, false);
             assert!(
-                (night_rule(edge - 1e-7, false).0 - night_rule(edge + 1e-7, false).0).abs() < 1e-9
+                lc.into_iter()
+                    .zip(rc)
+                    .chain(lb.into_iter().zip(rb))
+                    .all(|(a, b)| (a - b).abs() < 3e-6)
             );
         }
-        for nm in [1., 3., 4., 5., 12.] {
-            let distance = nm * 6076.12;
-            let before = pixel_width(distance, 0., 1.);
-            let after = pixel_width(distance, 1., 1.);
-            assert!((after - 2.).abs() < 1e-12);
-            println!(
-                "tracer {nm} nm: halo {before:.4} -> {after:.4} px; linear gain 1 -> 2; haze distance {distance:.1} -> {:.1} ft; additive alpha 0 -> 0",
-                distance / 3.
-            );
+        let visibility = |d: f64| 1. - ((d - 6000.) / 6000.).clamp(0., 1.);
+        // Exact envelope scaling also holds for exponential aerial opacity
+        // at fixed eye/source altitudes; dense clouds deliberately stay unscaled.
+        for d in [0., 6000., 9000., 12000., 18000., 40000.] {
+            assert_eq!(visibility(d / 3.), visibility(2. * d / 6.));
+            assert_eq!((-d / 3. / 50000.).exp(), (-2. * d / 6. / 50000.).exp());
         }
-        // Synthetic haze ramp, 6,000 to 12,000 ft. The same visibility
-        // moves to exactly triple the distance, without changing alpha.
-        let visibility = |distance: f64| 1. - ((distance - 6000.) / 6000.).clamp(0., 1.);
-        for distance in [0., 6000., 9000., 12000., 18000.] {
-            assert_eq!(
-                visibility(distance),
-                visibility(distance * 3. / night_rule(-1., false).2)
-            );
-        }
-        for nm in [3., 4., 5.] {
+        for nm in [3., 4., 5., 6., 8., 10.] {
             let d = nm * 6076.12;
+            assert!((pixel_width(d, 1., 1.) - 2.).abs() < 1e-12);
+            let flare_peak = 1.5;
+            assert!((glow_peak(1.) / flare_peak - 0.75).abs() < 1e-12);
             println!(
-                "synthetic haze {nm} nm: visibility {:.4} -> {:.4}; peak red radiance {:.4} -> {:.4}",
-                visibility(d),
+                "{nm} nm: visibility {:.6} -> {:.6}; ribbon peak red {:.6} -> {:.6}; new glow peak {:.6}",
                 visibility(d / 3.),
-                3.65 * visibility(d),
-                7.3 * visibility(d / 3.)
+                visibility(d / 6.),
+                7.3 * visibility(d / 3.),
+                7.3 * visibility(d / 6.),
+                glow_peak(1.) * visibility(d / 6.)
             );
         }
         let shader = include_str!("terrain.wgsl");
-        assert!(shader.contains("in.distance/(1.0+2.0*night)"));
-        assert!(shader.contains("in.color.g*(1.0+night)"));
-        assert!(shader.contains("max(1.2*width,pixel)"));
-        assert!(shader.contains("max(2.0*pixel-projected_length,0.0)"));
+        for rule in [
+            "in.distance/(1.0+5.0*night)",
+            "in.color.g*(1.0+night)",
+            "max(core_width,8.0*pixel)",
+            "max(core_length,16.0*pixel)",
+            "select(6.0,2.0,end_on)",
+            "let strength=0.75*night;",
+            "1.1*exp(-r*r*10.0)+0.4*exp(-r*3.2)",
+            "vec3<f32>(1.0,0.72,0.38)",
+            "vec3<f32>(1.0,0.09,0.025)",
+            "vec3<f32>(1.0,0.06,0.025)",
+            "cloud_occlusion(vec3<f32>(1.0),in.direction,in.altitude)",
+        ] {
+            assert!(shader.contains(rule), "missing shader contract: {rule}");
+        }
+        assert!(
+            include_str!("countermeasures.wgsl").contains("1.1*exp(-r*r*10.0)+0.4*exp(-r*3.2)")
+        );
+        assert_eq!(colours(1., false), ([1., 0.72, 0.38], [1., 0.09, 0.025]));
+        assert_eq!(colours(1., true), ([0.72, 1., 0.38], [0.09, 1., 0.025]));
+    }
+
+    #[test]
+    fn tracer_halo_survives_with_the_streak_at_range() {
+        let visibility = |d: f64| 1. - ((d / 6. - 6000.) / 6000.).clamp(0., 1.);
+        for nm in [1., 2., 4., 6., 8.] {
+            let d = nm * 6076.12;
+            let new = glow_peak(1.) * visibility(d);
+            let old = new / (1. + (d / 3000.).powi(2));
+            let pixel = 2. * d / (1080. * 1.7320508);
+            let width = 2. * (1.2_f64.max(pixel)).max(8. * pixel) / pixel;
+            assert!((width - 16.).abs() < 1e-12);
+            assert!((new / visibility(d) - 1.125).abs() < 1e-12);
+            assert!(new > 0.73, "halo must survive at {nm} nm");
+            println!(
+                "halo {nm} nm: peak {old:.6} -> {new:.6}; full width {width:.2} -> {width:.2} px"
+            );
+        }
+        // At 4 pixels off the centre (half of the 8 px halo radius),
+        // outside the narrow ribbon, the halo must still have real radiance.
+        let r = 0.5_f64;
+        let shoulder = 0.75 * (1.1 * (-r * r * 10.).exp() + 0.4 * (-r * 3.2).exp());
+        assert!((shoulder - 0.128289079).abs() < 1e-8);
+        assert_eq!(glow_peak(1.) * visibility(72000.), 0.);
+        assert_eq!(glow_peak(0.), 0.);
+        assert!(!include_str!("terrain.wgsl").contains("pow(in.distance/3000.0,2.0)"));
+    }
+
+    #[test]
+    fn tracer_glow_bounds_and_streak_shape() {
+        let dimensions = |physical_half: f64, length: f64, pixel: f64, night: f64, end_on: bool| {
+            let core = physical_half + night * (pixel - physical_half).max(0.);
+            let wide = core + night * (8. * pixel - core).max(0.);
+            let streak = length + night * ((if end_on { 2. } else { 6. }) * pixel - length).max(0.);
+            let long = streak + night * (16. * pixel - streak).max(0.);
+            [core, wide, streak, long]
+        };
+        for width in [1., HOWITZER_TRACER_WIDTH] {
+            for length in [0.5 * width, 20., 500.] {
+                for pixel in [0.1, 1., 20., 100.] {
+                    assert_eq!(
+                        dimensions(1.2 * width, length, pixel, 0., false),
+                        [1.2 * width, 1.2 * width, length, length]
+                    );
+                    for end_on in [false, true] {
+                        let [core, wide, streak, long] =
+                            dimensions(1.2 * width, length, pixel, 1., end_on);
+                        assert!(wide >= core && wide - core <= 8. * pixel);
+                        assert!(long >= streak && long - streak <= 16. * pixel);
+                        assert!(streak >= if end_on { 2. * pixel } else { 6. * pixel });
+                        for night in [0., 0.5, 1.] {
+                            let a = dimensions(
+                                1.2 * width,
+                                length,
+                                pixel,
+                                (night - 1e-8_f64).max(0.),
+                                end_on,
+                            );
+                            let b = dimensions(
+                                1.2 * width,
+                                length,
+                                pixel,
+                                (night + 1e-8_f64).min(1.),
+                                end_on,
+                            );
+                            assert!(a.into_iter().zip(b).all(|(a, b)| (a - b).abs() < 0.0001));
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            dimensions(1.2, 20., 100., 1., false),
+            [100., 800., 600., 1600.]
+        );
+        assert_eq!(
+            dimensions(1.2, 0.5, 100., 1., true),
+            [100., 800., 200., 1600.]
+        );
+    }
+
+    #[test]
+    fn tracer_families_and_red_day_bytes() {
+        for weapon in GREEN_TRACERS {
+            assert!(green_tracer(weapon));
+            assert!(green_tracer(&weapon.to_lowercase()));
+        }
+        for weapon in [
+            "M61.JT",
+            "C_25.JT",
+            "C_40.JT",
+            "C_105.JT",
+            "PHALANX.JT",
+            "M2.JT",
+            "M113.JT",
+            "SMLARMS.JT",
+            "UNKNOWN.JT",
+            "GSH301.GN",
+        ] {
+            assert!(!green_tracer(weapon));
+            for end in [[20., 0., 24000.], [0., 0., 24020.]] {
+                let mut old = Vec::new();
+                let mut new = Vec::new();
+                let camera = Camera::new();
+                ribbon(
+                    &mut old,
+                    [0., 0., 24000.],
+                    end,
+                    &camera,
+                    tracer_brightness(weapon),
+                    tracer_width(weapon),
+                    true,
+                );
+                gun_tracer(&mut new, [0., 0., 24000.], end, &camera, weapon);
+                assert_eq!(
+                    old.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+                    new.iter().map(|x| x.to_bits()).collect::<Vec<_>>()
+                );
+            }
+        }
+        // No new green assignment enables an unflagged flak/tank round.
+        for record in ["KS12.JT", "KS19.JT", "T72.JT"] {
+            assert!(green_tracer(record));
+            assert!(
+                !tore_sim::combat::surface_guns::tuning("", record)
+                    .unwrap()
+                    .tracer
+            );
+        }
+        let (core, body) = colours(0., false);
+        assert_eq!(
+            core.map(f32::to_bits),
+            [1_f32, 0.92, 0.68].map(f32::to_bits)
+        );
+        assert_eq!(
+            body.map(f32::to_bits),
+            [1_f32, 0.25, 0.025].map(f32::to_bits)
+        );
+        assert_eq!(glow_peak(0.).to_bits(), 0_f64.to_bits());
     }
 
     #[test]
     fn every_gun_family_uses_the_same_payload_and_sparks_do_not() {
         let camera = Camera::new();
         for weapon in [
-            "ZSU23", "ZSU57", "M163", "SHIP", "SMLARMS", "M61A1.GN", "GSH23.GN", "HELI", "C_25.JT",
-            "C_40.JT", "C_105.JT",
+            "ZSU23",
+            "ZSU57",
+            "M163",
+            "SHIP",
+            "SMLARMS",
+            "M61A1.GN",
+            "GSH23.GN",
+            "HELI",
+            "C_25.JT",
+            "C_40.JT",
+            "C_105.JT",
+            "GSH301.JT",
+            "GSH23.JT",
+            "T12_4.JT",
+            "T30_1.JT",
+            "ZSU23.JT",
+            "ZSU57.JT",
         ] {
             for end in [[20., 0., 0.], camera.position] {
                 let mut vertices = Vec::new();
-                gun_tracer(
-                    &mut vertices,
-                    [0.; 3],
-                    end,
-                    &camera,
-                    tracer_brightness(weapon),
-                    tracer_width(weapon),
-                );
+                gun_tracer(&mut vertices, [0.; 3], end, &camera, weapon);
                 assert_eq!(vertices.len(), 60);
                 for v in vertices.chunks_exact(10) {
                     assert_eq!(v[5], -8.);
                     assert!(v[9] < -2.);
-                    let brightness = -v[9] - 2. - if v[9] < -12. { 10. } else { 0. };
+                    let tag = v[9] + if green_tracer(weapon) { 20. } else { 0. };
+                    assert_eq!(v[9] < -22., green_tracer(weapon));
+                    let brightness = -tag - 2. - if tag < -12. { 10. } else { 0. };
                     assert_eq!(brightness, tracer_brightness(weapon) as f32);
                     assert!(
                         (v[6..9].iter().map(|x| x * x).sum::<f32>().sqrt()
@@ -879,8 +1107,23 @@ mod tests {
         let models = crate::combat_view::render_hash_tests::models();
         let art = CombatArt::synthetic(Default::default());
         for weapon in [
-            "M61A1.GN", "GSH23.GN", "ZSU23", "ZSU57", "M163", "SHIP", "SMLARMS", "HELI", "C_25.JT",
-            "C_40.JT", "C_105.JT",
+            "M61A1.GN",
+            "GSH23.GN",
+            "ZSU23",
+            "ZSU57",
+            "M163",
+            "SHIP",
+            "SMLARMS",
+            "HELI",
+            "C_25.JT",
+            "C_40.JT",
+            "C_105.JT",
+            "GSH301.JT",
+            "GSH23.JT",
+            "T12_4.JT",
+            "T30_1.JT",
+            "ZSU23.JT",
+            "ZSU57.JT",
         ] {
             let info = tore_replay::WeaponInfo {
                 id: 1,
@@ -972,15 +1215,25 @@ mod tests {
                 vertices.clear();
                 for round in 0..5000 {
                     let z = 6076.12 * (3. + (round % 300) as f64 / 100.);
-                    ribbon(
-                        &mut vertices,
-                        [0., 0., z],
-                        [20., 0., z],
-                        &camera,
-                        1.,
-                        1.,
-                        gun,
-                    );
+                    if gun {
+                        gun_tracer(
+                            &mut vertices,
+                            [0., 0., z],
+                            [20., 0., z],
+                            &camera,
+                            if round % 2 == 0 { "M61.JT" } else { "ZSU23.JT" },
+                        );
+                    } else {
+                        ribbon(
+                            &mut vertices,
+                            [0., 0., z],
+                            [20., 0., z],
+                            &camera,
+                            1.,
+                            1.,
+                            false,
+                        );
+                    }
                 }
                 std::hint::black_box(&vertices);
             }
