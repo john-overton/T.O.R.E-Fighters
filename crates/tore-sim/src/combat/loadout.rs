@@ -344,6 +344,24 @@ impl Loadout {
                 return 0;
             }
         }
+        // Guarded extra permissions on an existing source row (the F-16C's
+        // wingtip AIM-120, one a tip): the row's own count, no weight cap.
+        if !self.cheat
+            && row.is_some_and(|row| {
+                tore_formats::aircraft::stations::extra_weapon(
+                    self.aircraft,
+                    self.configuration.hardpoint_slots.len(),
+                    row,
+                    &w.source,
+                )
+            })
+        {
+            return self
+                .hardpoints
+                .get(slot)
+                .map_or(0, |h| h.count)
+                .clamp(0, 32766);
+        }
         // R-27 carriage is an explicit family policy, not generic IR rail
         // compatibility. Cheat keeps its existing unrestricted behavior.
         if !self.cheat

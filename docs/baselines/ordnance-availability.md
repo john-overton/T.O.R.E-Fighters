@@ -95,6 +95,13 @@ refused without Cheat loading). For each new row it loads
 the full set, checks capacity, tank and weapon exclusion, fuel feed, Shift+K
 and selected-store jettison, saves, and an old saved load with the row empty.
 
+The [F-16C wingtip AIM-120](../spec/stores-on-pylons.md#the-f-16c-wingtip-aim-120)
+(John, 2026-10-16) adds one weapon placement, so the audit now pins 3,402
+(the AIM-120 on the F-16C tip row, two a load; nothing else moves: tanks, records and
+Cheat-only placements are unchanged). The audit also checks that every other
+supported weapon keeps the tip row's source rule, loads two AIM-120s, saves and
+restores them, and fires one from each tip's edge with guidance.
+
 The F-14 probe separately covers zero, one and two F250 tanks, external fuel,
 shell mass, total mass, consumption order and accepted-load restoration. It is
 the reviewed F-14 contract only: `--validate-tanks` refuses any other

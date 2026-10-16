@@ -6,6 +6,7 @@ use super::{AircraftId, Hardpoint};
 pub const F15_CENTER: usize = 6;
 pub const F15_WING_TANKS: usize = 7;
 pub const F16_WET: usize = 9;
+pub const F16_TIP: usize = 8;
 pub const F22_WET: usize = 8;
 pub const MIG29_CENTER: usize = 8;
 pub const RAFALE_CENTER: usize = 9;
@@ -66,6 +67,18 @@ pub fn tank_allowed(id: AircraftId, row: usize, name: &str) -> bool {
         "R528.GAS" => id == AircraftId::Rafale && row == RAFALE_CENTER,
         _ => true,
     }
+}
+
+/// Weapons an existing source row takes in normal loading beyond its own mask,
+/// on aircraft whose guarded rows were appended (so the reviewed source
+/// signature matched). The F-16C's wingtip launchers (stations 1 and 9,
+/// LAU-129) carry the AIM-120 as well as the AIM-9 (John, 2026-10-16). The
+/// source row stays as imported: its mask (0x85, infrared only) and weight
+/// class (4, sized for two AIM-9s) cannot admit a 345 lb radar missile, and
+/// raising either would also change the Archer and other infrared counts.
+/// The count is the row's own, one a tip. Cheat loading already allows it.
+pub fn extra_weapon(id: AircraftId, rows: usize, row: usize, source: &str) -> bool {
+    id == AircraftId::F16C && rows > F16_WET && row == F16_TIP && source == "AIM120.JT"
 }
 
 type Signature = (u8, i32, [i32; 3], &'static str, i32, i32);
@@ -214,6 +227,21 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn only_the_appended_f16c_tip_row_takes_the_amraam() {
+        assert!(extra_weapon(AircraftId::F16C, 10, F16_TIP, "AIM120.JT"));
+        assert!(!extra_weapon(AircraftId::F16C, 9, F16_TIP, "AIM120.JT"));
+        assert!(!extra_weapon(AircraftId::F16C, 10, 7, "AIM120.JT"));
+        assert!(!extra_weapon(AircraftId::F16C, 10, F16_TIP, "AIM7.JT"));
+        assert!(!extra_weapon(AircraftId::F18, 10, F16_TIP, "AIM120.JT"));
+        // The row is the reviewed source tip, which the signature guards.
+        let tip = signature(AircraftId::F16C)[F16_TIP];
+        assert_eq!(
+            (tip.0, tip.1, tip.3, tip.4, tip.5),
+            (5, 0x85, "AIM9M.JT", 2, 4)
+        );
+    }
+
     #[test]
     fn each_tank_requires_its_own_carrier() {
         for (index, carrier) in ["F15.PT", "F16C.PT", "F22.PT", "MIG29.PT", "RAFALE.PT"]
