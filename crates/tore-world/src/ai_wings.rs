@@ -545,7 +545,7 @@ pub(crate) fn station_specs_loaded(
     let mut stores = Vec::new();
     for (index, station) in config.stations.iter().enumerate() {
         let w = &station.weapon;
-        let gun = config.aircraft.guns().contains(&w.source.as_str());
+        let gun = config.aircraft.mounts_gun(&w.source);
         let units = u32::from(quantities.get(index).copied().unwrap_or(station.count));
         // Source bookkeeping must use the same ammo units for a human taking
         // this depot's aircraft. This changes no targeting or steering rules.
@@ -590,7 +590,11 @@ pub(crate) fn station_specs_loaded(
         spec.tracking_delay =
             tore_sim::ai::weapon_service::Delay::quarters(u32::from(w.guidance.track_t));
         spec.damage_vs_category = f64::from(w.damage.by_class[0]);
-        spec.mount = station.mount;
+        spec.mount = if gun {
+            station.gun_mount()
+        } else {
+            station.mount
+        };
         spec.infrared_envelope = (w.flags & 0x10000 != 0
             && w.seeker_kind() == tore_formats::weapons::SeekerKind::Infrared)
             .then_some((
@@ -1413,13 +1417,13 @@ impl AiWings {
         // action, not what the mission's Air combat guns only setting holds
         // back; that setting is the AI's, and the human's selection ring
         // has its own.
-        let guns = slot.aircraft.guns();
+        let aircraft = slot.aircraft;
         for spec in &mut parts.stations {
             let by_setting = self.guns_only
                 && self
                     .weapons
                     .get(&(id, spec.station.0))
-                    .is_some_and(|w| !guns.contains(&w.source.as_str()))
+                    .is_some_and(|w| !aircraft.mounts_gun(&w.source))
                 && !self.damaged_stations.contains(&(id, spec.station.0));
             if by_setting {
                 spec.store.inhibited = false;
@@ -1551,7 +1555,7 @@ impl AiWings {
             let gun = |station: u8| {
                 self.weapons
                     .get(&(insert.id, station))
-                    .is_some_and(|w| insert.aircraft.guns().contains(&w.source.as_str()))
+                    .is_some_and(|w| insert.aircraft.mounts_gun(&w.source))
             };
             for spec in actor.stations_mut() {
                 if !gun(spec.station.0) {
@@ -2016,7 +2020,7 @@ impl AiWings {
                 let gun = self
                     .weapons
                     .get(&(slot.id, spec.station.0))
-                    .is_some_and(|w| slot.aircraft.guns().contains(&w.source.as_str()));
+                    .is_some_and(|w| slot.aircraft.mounts_gun(&w.source));
                 if !gun {
                     spec.store.inhibited =
                         on || self.damaged_stations.contains(&(slot.id, spec.station.0));

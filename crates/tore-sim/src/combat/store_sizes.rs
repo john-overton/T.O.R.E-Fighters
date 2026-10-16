@@ -104,6 +104,10 @@ pub fn real_size(name: &str) -> Option<Real> {
         .map(|(_, real)| *real)
 }
 
+/// The SUU-16 gun pod's length, feet: its muzzle is half this ahead of the
+/// pod's middle ([`StoreSize::of_weapon`]'s origin).
+pub const SUU16_LENGTH: f64 = 15.7;
+
 /// A fitted rocket pod's length and diameter, feet: LAU-61 size (retail
 /// has no pod shape).
 pub const POD_BODY: [f64; 2] = [8.5, 1.4];
@@ -117,6 +121,9 @@ pub fn pod_body(source: &str) -> [f64; 2] {
         "LAU10.JT" => [8.3, 1.25],
         "B8.JT" => [8.9, 1.71],
         "B13.JT" => [11.7, 1.35],
+        // The SUU-16/A: about 16 ft by 22 in, public data (2026-10-16); the
+        // game's record has no shape.
+        "SUU16.JT" => [SUU16_LENGTH, 1.8],
         _ => POD_BODY,
     }
 }
@@ -166,7 +173,7 @@ impl StoreSize {
     }
     /// A weapon station's store: a rocket pod's body, or the weapon's shape.
     pub fn of_weapon(weapon: &tore_formats::weapons::Weapon) -> Self {
-        if super::ballistics::is_pod(weapon) {
+        if super::ballistics::is_pod(weapon) || super::live::is_gun_pod(weapon) {
             Self::body(pod_body(&weapon.source))
         } else {
             Self::of_shape(weapon.shape.as_deref())

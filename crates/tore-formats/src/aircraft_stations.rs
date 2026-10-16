@@ -10,6 +10,21 @@ pub const F22_WET: usize = 8;
 pub const MIG29_CENTER: usize = 8;
 pub const RAFALE_CENTER: usize = 9;
 
+/// The source row of the F-4B's centreline station (`F4B.PT` row 3: four
+/// AIM-9Bs, Mk 82s and the other stores on the centreline) that also takes
+/// the SUU-16 gun pod, one in place of whatever else it carries (John,
+/// 2026-10-16: "a gun pod is missing from the Phantom B"). A real Phantom's
+/// centreline is one station, a tank, bombs or a gun pod: the pod replaces
+/// the row's stores and does not add a station.
+pub const F4B_POD_ROW: usize = 3;
+
+/// The source row of aircraft `id` that takes a gun pod in place of its
+/// stores, if any. Only the F-4B's: the F-4J's pod is its own fixed row, and
+/// the F-4E and F-4G are built with a gun (an open question for John).
+pub fn gun_pod_row(id: AircraftId) -> Option<usize> {
+    (id == AircraftId::F4B).then_some(F4B_POD_ROW)
+}
+
 /// These names have authored GAS records, generated in memory at pack load.
 /// Fuel uses the game's 6.6 lb/US gal convention; shell weights are fitted by
 /// scaling the 350 gallon class (248 lb), rounded to whole pounds.
@@ -214,6 +229,24 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn only_the_f4b_swaps_a_gun_pod_into_its_centreline_row() {
+        assert_eq!(gun_pod_row(AircraftId::F4B), Some(3));
+        for id in [
+            AircraftId::F4J,
+            AircraftId::F4E,
+            AircraftId::F4G,
+            AircraftId::F15,
+        ] {
+            assert_eq!(gun_pod_row(id), None);
+        }
+        assert_eq!(AircraftId::F4B.gun_pods(), &["SUU16.JT"]);
+        // The pod is a gun pod of that aircraft only where the table has a row.
+        for id in AircraftId::ALL {
+            assert_eq!(!id.gun_pods().is_empty(), gun_pod_row(id).is_some());
+        }
+    }
+
     #[test]
     fn each_tank_requires_its_own_carrier() {
         for (index, carrier) in ["F15.PT", "F16C.PT", "F22.PT", "MIG29.PT", "RAFALE.PT"]

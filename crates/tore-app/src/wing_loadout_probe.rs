@@ -34,11 +34,7 @@ pub fn run(assets: &Assets, out: &Path) -> AppResult<()> {
     let standard = load.clone();
     load.clear_tanks()?;
     for (station, quantity) in load.configuration.stations.iter().zip(&mut load.quantities) {
-        if !kind
-            .profile
-            .id
-            .guns()
-            .contains(&station.weapon.source.as_str())
+        if !kind.profile.id.mounts_gun(&station.weapon.source)
             && !station.weapon.source.starts_with("AIM9")
         {
             *quantity = 0;
@@ -113,6 +109,64 @@ pub fn run(assets: &Assets, out: &Path) -> AppResult<()> {
     verify(&world, &cheat)?;
     println!("qmc wing loadout: cheat Boulder carriage matches");
     println!("qmc wing loadout: four F16 aircraft match, airborne, ground and restart passed");
+    gun_pod_wing(assets)?;
+    Ok(())
+}
+
+/// The F-4B's centreline SUU-16 gun pod (2026-10-16) in a shared flight
+/// loadout: the lead's pod, the wingmen's pods with their rounds as guns, and
+/// the AI's gun leaving the pod's nose, at the start and after a restart.
+fn gun_pod_wing(assets: &Assets) -> AppResult<()> {
+    let data = &assets.theater_resources;
+    let kind = AircraftType::load(data, AircraftId::F4B)?;
+    let mut quick = QuickMission::new(AircraftId::F4B, assets.creator_options.clone(), data);
+    quick.draft.values[4] = 4;
+    for field in [7, 10, 21, 24, 27] {
+        quick.draft.values[field] = 0;
+    }
+    let mut spec = quick.mission_spec()?;
+    spec.share_flight_loadout = true;
+    spec.theater = "UKR".into();
+    spec.ai_flight_model = tore_world::ai_wings::AiFlightModel::Standard;
+    spec.start = Start::Airborne {
+        altitude_ft: 10_000,
+    };
+    let mut load = Loadout::new(&kind.profile, |name| {
+        data.get(name)
+            .cloned()
+            .ok_or_else(|| std::io::Error::other(name.to_owned()))
+    })?;
+    let row = tore_formats::aircraft::stations::gun_pod_row(AircraftId::F4B).ok_or("no pod row")?;
+    let slot = load.configuration.hardpoint_slots[row].ok_or("pod row has no slot")?;
+    let pod = Weapon::parse("SUU16.JT", data.get("SUU16.JT").ok_or("missing SUU-16")?)?;
+    load.select(slot, pod)?;
+    load.validate()?;
+    spec.loadout = Some(LoadoutSpec::of(&load));
+    let mut world = World::new(&spec, data, Seating::SinglePlayer)?;
+    let mut checked = 0;
+    for restarted in [false, true] {
+        if restarted {
+            world.restart(&kind, data)?;
+        }
+        verify(&world, &load)?;
+        let wings = world.ai_wings.as_ref().ok_or("no wings")?;
+        for id in 1..4 {
+            let actor = wings.mission().actor(id).ok_or("missing wingman")?;
+            let config = wings.configuration(id).ok_or("missing configuration")?;
+            let station = &config.stations[slot];
+            let spec = &actor.stations()[slot];
+            if config.gun_pod(slot).map(|p| p.quantity) != Some(1)
+                || spec.store.rounds != tore_sim::ai::weapon_service::Rounds::Finite(600)
+                || spec.mount != station.muzzle()
+            {
+                return Err(format!("wingman {id}'s gun pod differs from the lead's").into());
+            }
+            checked += 1;
+        }
+    }
+    println!(
+        "qmc wing loadout: F-4B gun pod matches on {checked} wingman starts, rounds and muzzle, airborne and restart passed"
+    );
     Ok(())
 }
 

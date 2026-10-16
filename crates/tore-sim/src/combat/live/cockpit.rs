@@ -846,9 +846,10 @@ impl State {
             return false;
         };
         // A store leaves its own side of a paired station; a gun keeps its
-        // muzzle (B3).
+        // muzzle (B3). A gun pod's muzzle is the nose of the pod as drawn,
+        // under the aircraft (2026-10-16).
         let mount = if super::is_gun(w) {
-            station.mount
+            station.gun_mount()
         } else {
             station.release_point(r.units_after)
         };

@@ -597,7 +597,7 @@ fn draw_gun(
             position: c.position,
             velocity: c.velocity,
         });
-    let solution = gunsight::solve(&station.weapon, &l, station.mount, radar)
+    let solution = gunsight::solve(&station.weapon, &l, station.gun_mount(), radar)
         .ok()
         .flatten();
     let Some(solution) = solution else {

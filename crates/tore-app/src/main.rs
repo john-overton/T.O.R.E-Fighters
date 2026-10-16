@@ -7752,7 +7752,7 @@ fn probe_on_pipper(
             position: contact.position,
             velocity: contact.velocity,
         });
-    let Ok(Some(solution)) = gunsight::solve(&station.weapon, launcher, station.mount, radar)
+    let Ok(Some(solution)) = gunsight::solve(&station.weapon, launcher, station.gun_mount(), radar)
     else {
         return false;
     };
@@ -13219,6 +13219,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     | "lobby-ordnance-laser"
                     | "ordnance-pod"
                     | "ordnance-pod-yellow"
+                    | "ordnance-gun-pod"
                     | "ordnance-authored-tank"
             ) {
                 quick.ordnance = Some(ordnance::Ordnance::new(
