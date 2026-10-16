@@ -226,7 +226,10 @@ pub fn path_words(path: Path) -> &'static str {
 /// 43 since the extra stations (slice nr-stations): F-15C centreline and
 /// wing tank rows, the F-16C inner wet pair and two tank records, so an
 /// older game must not join.
-pub const PROTOCOL_VERSION: u16 = 43;
+/// 44 since the second stations pass (slice nr-stations2): F-15C centreline
+/// bomb rack, F-22 wing stations, MiG-29 and Rafale centreline tanks and
+/// three tank records, so an older game must not join.
+pub const PROTOCOL_VERSION: u16 = 44;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

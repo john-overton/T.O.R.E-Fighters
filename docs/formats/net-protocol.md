@@ -3110,7 +3110,10 @@ again with an observer; the capture format did not change for it.
   simulation, so an older game must not join;
   43 since the extra stations (slice nr-stations): F-15C centreline and
   wing tank rows, the F-16C inner wet pair and two tank records, so an
-  older game must not join.
+  older game must not join;
+  44 since the second stations pass (slice nr-stations2): F-15C centreline
+  bomb rack, F-22 wing stations, MiG-29 and Rafale centreline tanks and
+  three tank records, so an older game must not join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
