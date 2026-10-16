@@ -211,12 +211,11 @@ def bar_problems(output: str) -> list[str]:
     return problems
 
 
-def missile_problems(output: str) -> list[str]:
+def missile_problems(output: str, label: str = "Su-25 AS-14 on its own spot") -> list[str]:
     parts = runs(output)
     if len(parts) != 1:
         return [f"{len(parts)} runs finished, want 1"]
     problems: list[str] = []
-    label = "Su-25 AS-14 on its own spot"
     release, sight, impact, target = _one(parts[0], label, problems)
     if release and (release.group(2), release.group(3), release.group(4)) != ("Laser", "Guiding", "0"):
         problems.append(f"{label}: released {release.group(0)}, want guiding on its own spot")
@@ -308,6 +307,14 @@ def scenarios() -> list[Scenario]:
             timeout=300,
             check=missile_problems,
             notes="Su-25 built-in laser and an AS-14 on its own spot.",
+        ),
+        Scenario(
+            name="a2g-laser-as30l", lane="flight",
+            args=run("UKR", "QUCOL", "laser", "--aircraft", "su25", "--load", "AS30", "--station", "2",
+                     "--count", "2", "--altitude", "3000", "--speed", "400", "--from", "5", "--seconds", "90"),
+            timeout=300,
+            check=lambda out: missile_problems(out, "Su-25 AS-30L on its own spot"),
+            notes="Su-25 built-in laser and an AS-30L on its own spot.",
         ),
         Scenario(
             name="a2g-at2", lane="flight", args=at2, timeout=300,

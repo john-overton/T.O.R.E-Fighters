@@ -273,6 +273,20 @@ def terrain_cruise_problems(output: str) -> list[str]:
     return problems
 
 
+def other_missile_problems(output: str) -> list[str]:
+    parts = runs(output)
+    if len(parts) != 3:
+        return [f"{len(parts)} runs finished, want 3"]
+    problems: list[str] = []
+    _cued_kill(parts[0], "F-15 SLAM", problems)
+    launch = _launch(parts[1], "A-4 Shrike", problems)
+    if launch and launch.group(3) != STRAIGHT_FLUSH:
+        problems.append("Shrike did not select the Straight Flush")
+    _killed(parts[1], STRAIGHT_FLUSH, "A-4 Shrike", problems)
+    _cued_kill(parts[2], "MiG-29 AS-15", problems)
+    return problems
+
+
 def scenarios() -> list[Scenario]:
     run = ["--a2g-run"]
     col = run + ["UKR", "QUCOL", "--speed", "350", "--seconds", "60"]
@@ -282,6 +296,22 @@ def scenarios() -> list[Scenario]:
     fleet = run + ["UKR", "QUSFLT", "--unit", KRIVAK, "--attack", "antiship", "--from", "15", "--altitude", "5000",
                    "--speed", "450", "--seconds", "90"]
     return [
+        Scenario(
+            name="a2g-slam-shrike-as15", lane="flight",
+            args=col + ["--aircraft", "f15", "--load", "AGM84E", "--station", "2", "--count", "2", "--attack", "maverick",
+                        "--from", "6", "--altitude", "3000"],
+            timeout=300,
+            then=[
+                Step(run + ["VLA", "QVRDRI", "--surface-seed", "4", "--defenses", "3", "3",
+                            "--unit", STRAIGHT_FLUSH, "--aircraft", "a4e", "--load", "AGM45",
+                            "--attack", "harm", "--from", "6", "--altitude", "5000",
+                            "--speed", "450", "--seconds", "60"], timeout=300),
+                Step(col + ["--aircraft", "mig29", "--load", "AS15", "--station", "2", "--count", "2", "--attack", "sarh",
+                            "--from", "4", "--altitude", "3000"], timeout=300),
+            ],
+            check=other_missile_problems,
+            notes="SLAM IR, Shrike anti-radiation and AS-15 SARH retain their ground guidance.",
+        ),
         Scenario(
             name="a2g-sarh-uncued", lane="flight",
             args=col + ["--aircraft", "mig23", "--load", "AS7", "--attack", "sarh-uncued",

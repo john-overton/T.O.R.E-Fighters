@@ -471,14 +471,28 @@ other way. (The city fill cuts its kit pieces base-centred, at the lowest
 point of their faces, the same rule.)
 
 **Objective sites on slopes (nr-objg, 2026-10-14).** The complete shape,
-including line endpoints, supplies the footing and contact bounds. The GCI
+including line endpoints, supplies the footing. Solid contact bounds use
+filled faces and sprites only; thin lines do not make their enclosing space
+solid. The GCI
 and KING antenna frames reach one shape unit below their filled faces,
 1.33 ft at their placed scale. Their origin now stands 18.67 ft above flat
 ground rather than 17.33 ft. The dish, mast and base keep their decoded
 relative positions; they are not grounded separately.
 
-`Placements::stance_on_terrain` uses the same rule for rendering and hit
-boxes. It samples terrain under the transformed geometry, then translates
+**Solid contact (nr-mav, 2026-10-15, fitted, agent implementation of the lead request).**
+`grounding::solid_points` supplies face and sprite vertices to the placement's
+contact box. `grounding::points` still supplies the complete drawn geometry
+for footing and slope lift. Weapons, aircraft object collisions and roof
+contact use the resulting solid box. Line primitives have no solid thickness:
+bridge cables, crane rigging and antenna frames do not inflate the box.
+Actual polygon towers still count. A frame can stand on the ground while its
+solid body and contact box begin above it. No line geometry is removed from
+the drawing or grounding calculation. This restores pre-ccba1db2 local
+contact extents while preserving the corrected placement origin and slope
+lift. [Full shape audit and validation](../baselines/maverick-regression.md).
+
+`Placements::stance_on_terrain` applies the same origin translation to drawing
+and the solid hit box. It samples terrain under the transformed geometry, then translates
 the complete assembly vertically until its minimum clearance is zero.
 Authored placement height is preserved above that support. This fixes an
 origin-only height sample burying the uphill side of a site. Runway planes,

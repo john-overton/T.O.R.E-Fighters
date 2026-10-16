@@ -957,6 +957,12 @@ Built (W2), with these rules (opinionated, agent, where not labelled):
   ground object or ship by range and radar signature alone, without the air
   radar's clutter notch (fitted).
 
+Surface impacts use the shared [solid contact box](../formats/objects-and-shapes.md#grounding-every-object-stands-on-the-bottom-of-its-shape):
+filled polygons and sprites bound the body, while thin line primitives do
+not enlarge it. Grounding still includes the lines. This applies equally to
+missiles, bombs and gun rounds, and avoids an invisible wall below a bridge
+cable. Solid towers and other intervening bodies still block a shot.
+
 ### Terrain at lock and launch
 
 **Opinionated, John, 2026-10-11 (surface close-out Q7):** a seeker needs a

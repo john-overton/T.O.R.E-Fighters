@@ -397,7 +397,9 @@ fn grounding_survey(resources: &BTreeMap<String, Vec<u8>>, named: &[String]) -> 
             }
             // The hit box is at least 2 ft tall: a thinner shape's box
             // reaches below its bottom by the difference.
-            if tall >= 2. {
+            if tall >= 2. && hit_box < -GROUNDING_TOLERANCE_FT {
+                // A thin frame may touch ground below the solid body. The
+                // contact box must not sink, but need not touch the frame tip.
                 wrong("hit box bottom", hit_box);
             }
         }
