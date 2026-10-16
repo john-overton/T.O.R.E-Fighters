@@ -220,7 +220,10 @@ pub fn path_words(path: Path) -> &'static str {
 /// 41 since the contact bounds fix (slice nr-mav): thin line geometry no
 /// longer inflates surface objects' solid contact boxes, so an older game
 /// must not join.
-pub const PROTOCOL_VERSION: u16 = 41;
+/// 42 since the cleanup round (slices nr-ac105, nr-aijett, nr-fx2,
+/// nr-sndfix): the 105 mm splash and AI jettison change the shared
+/// simulation, so an older game must not join.
+pub const PROTOCOL_VERSION: u16 = 42;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
