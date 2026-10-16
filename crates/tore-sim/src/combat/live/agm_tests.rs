@@ -274,6 +274,61 @@ fn a_maverick_locks_a_designated_ground_target_and_in_bore_the_strongest_return(
     assert_eq!(s.own_view().readiness(launcher()), Readiness::NoTarget);
 }
 
+/// A lock does not let a missile pass through another solid ground object.
+/// The old Maverick battery approached three bridge sections end-on; extending
+/// their contact bounds to the drawn lines put a nearer section in the path.
+#[test]
+fn locked_surface_missiles_hit_the_first_solid_on_their_path() {
+    for source in ["AGM65A.JT", "AGM65G.JT", "AGM84E.JT"] {
+        for obstructed in [false, true] {
+            let mut s = armed(source, 2);
+            let target = 0x5000_0001;
+            let obstacle = 0x5000_0002;
+            ground(&mut s, target, 0., 20_000., 0x400);
+            if obstructed {
+                s.add_ground_target(
+                    obstacle,
+                    OrientedBox {
+                        center: [0., 1500., 15_000.],
+                        half: [500., 1500., 500.],
+                        heading: 0.,
+                        pitch: 0.,
+                        bank: 0.,
+                    },
+                    100,
+                    0x100,
+                    REDFOR,
+                )
+                .unwrap();
+            }
+            s.command(0, Command::ToggleAirGround, launcher());
+            step(&mut s, launcher(), false);
+            s.command(0, Command::DesignateTarget(target), launcher());
+            assert_eq!(until_ready(&mut s, launcher(), 120), Readiness::Ready);
+            let shot = fire(&mut s, launcher());
+            assert_eq!(shot.target, Some(target), "{source}");
+            for _ in 0..40 * 120 {
+                if s.projectiles.is_empty() {
+                    break;
+                }
+                let flight = s.projectiles[0].guidance.as_ref().unwrap();
+                assert_eq!(flight.seeker.target, Some(target), "{source}");
+                assert_eq!(flight.seeker.status, Status::Locked, "{source}");
+                assert!(!flight.unguided, "{source}");
+                step(&mut s, launcher(), false);
+            }
+            assert!(s.projectiles.is_empty(), "{source}");
+            let hp = |id| s.targets.iter().find(|t| t.id == id).unwrap().hp;
+            if obstructed {
+                assert_eq!(hp(target), 100, "{source}: the farther target is protected");
+                assert!(hp(obstacle) < 100, "{source}: the nearer solid was hit");
+            } else {
+                assert!(hp(target) < 100, "{source}: clear path reaches the lock");
+            }
+        }
+    }
+}
+
 /// The HARM fixture: three ground radars ahead, emitting.
 fn harm_scene() -> State {
     let mut s = armed("AGM88.JT", 4);

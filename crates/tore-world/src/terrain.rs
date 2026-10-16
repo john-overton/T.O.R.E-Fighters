@@ -272,6 +272,7 @@ pub struct Placements {
 /// Where one placed shape stands in the world.
 pub struct Stance {
     pub scale: f64,
+    /// Solid face/sprite bounds in scaled local axes (right, up, forward).
     pub min: [f64; 3],
     pub max: [f64; 3],
     pub half: [f64; 3],
@@ -922,7 +923,9 @@ impl Placements {
         let support_height = ground;
         let mut min = [f64::INFINITY; 3];
         let mut max = [f64::NEG_INFINITY; 3];
-        for point in crate::grounding::points(shape) {
+        // Contact bounds exclude thin lines; the origin below still uses the
+        // complete drawn shape for grounding and compact-object slope lift.
+        for point in crate::grounding::solid_points(shape) {
             let mapped = [
                 f64::from(point[0]),
                 f64::from(point[2]),

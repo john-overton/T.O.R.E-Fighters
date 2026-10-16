@@ -924,8 +924,8 @@ def grounding_problems(output: str) -> list[str]:
         if abs(lift + low) > 0.11:
             problems.append(f"{name}: lifted {lift} ft, its lowest point is {low} ft")
         checks = [("faces", drawn), ("man near", near), ("man far", far)]
-        if high - low >= 2:
-            checks.append(("hit box", box))
+        if high - low >= 2 and box != "-" and float(box) < -0.05:
+            problems.append(f"{name}: solid hit box bottom {box} ft below ground")
         for what, value in checks:
             if value != "-" and abs(float(value)) > 0.05:
                 problems.append(f"{name}: {what} bottom {value} ft above the ground")
@@ -952,7 +952,7 @@ def scenarios() -> list[Scenario]:
             forbid=[r"^grounding: problem "],
             check=grounding_problems,
             notes="B13 and GROUND: every object, unit, man and parked aircraft stands on the bottom of its shape, "
-                  "drawn and hit box alike. Reads the records the import lacks from the retail media.",
+                  "including thin frames below the solid hit box. Reads the records the import lacks from the retail media.",
         ),
         Scenario(
             name="surface-grounding-sites", lane="ai",

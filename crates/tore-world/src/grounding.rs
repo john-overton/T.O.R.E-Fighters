@@ -78,8 +78,8 @@ pub fn height_range(shape: &Shape) -> Option<[f64; 2]> {
     range.iter().all(|v| v.is_finite()).then_some(range)
 }
 
-/// Geometry used for footing and contact bounds. Lines are physical geometry
-/// too: radar antenna frames can extend below their filled faces. Components
+/// Complete drawn geometry used for footing. Thin lines can support an
+/// antenna frame, but must not expand a solid collision volume. Components
 /// retain their decoded offsets within the complete shape.
 pub fn points(shape: &Shape) -> impl Iterator<Item = [f32; 3]> + Clone + '_ {
     shape
@@ -87,11 +87,26 @@ pub fn points(shape: &Shape) -> impl Iterator<Item = [f32; 3]> + Clone + '_ {
         .iter()
         .flat_map(|f| f.positions.iter().copied())
         .chain(shape.lines.iter().flat_map(|l| l.positions))
-        .chain(shape.billboards.iter().flat_map(|sprite| {
-            let [w, h] = sprite.size.map(|v| v * 0.5);
-            let [x, y, z] = sprite.center;
-            [[x - w, y - w, z - h], [x + w, y + w, z + h]]
-        }))
+        .chain(sprite_points(shape))
+}
+
+/// Vertices of solid contact geometry. Faces and sprites bound the fitted
+/// body; zero-thickness line primitives (cables, wires, frames) do not make
+/// the empty space around them solid. Grounding still uses all `points`.
+pub fn solid_points(shape: &Shape) -> impl Iterator<Item = [f32; 3]> + Clone + '_ {
+    shape
+        .faces
+        .iter()
+        .flat_map(|f| f.positions.iter().copied())
+        .chain(sprite_points(shape))
+}
+
+fn sprite_points(shape: &Shape) -> impl Iterator<Item = [f32; 3]> + Clone + '_ {
+    shape.billboards.iter().flat_map(|sprite| {
+        let [w, h] = sprite.size.map(|v| v * 0.5);
+        let [x, y, z] = sprite.center;
+        [[x - w, y - w, z - h], [x + w, y + w, z + h]]
+    })
 }
 
 /// Vertical correction for a complete placed shape on uneven terrain. Keep
@@ -526,6 +541,64 @@ mod tests {
         assert_eq!(slope.center[1] - flat.center[1], 5.);
         assert_eq!(slope.support_origin, flat.support_origin);
         assert_eq!(slope.half, flat.half);
+    }
+
+    #[test]
+    fn thin_lines_ground_the_shape_without_filling_the_air_above_its_solid_body() {
+        use crate::terrain::Placements;
+        use std::collections::BTreeMap;
+        let resources: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        let mut sources = Placements::of_types(&resources, std::iter::empty());
+        sources
+            .definitions
+            .insert("TEST.OT".into(), definition("TEST.OT", "_OBJProc", 0));
+        let mut shape = upright(0., 20.);
+        shape.lines.push(tore_formats::shape::Line {
+            positions: [[0., 0., -1.], [0., 0., 1000.]],
+            color: 1,
+            fog: Default::default(),
+        });
+        sources.shapes.insert("TEST.OT".into(), shape);
+        let layout = tore_formats::mission::Layout::parse(
+            "TEST.MM",
+            b"textFormat\nobj\n type TEST.OT\n pos 0 0 0\n.\n",
+        )
+        .unwrap();
+        let placement = &layout.placements[0];
+        let stance = sources.stance(placement, 0.).unwrap();
+        assert_eq!(
+            stance.origin[1], 1.,
+            "the low line still establishes footing"
+        );
+        assert_eq!(stance.min[1], 0.);
+        assert_eq!(stance.max[1], 20., "the high line does not raise contact");
+        let bounds = tore_sim::airport::OrientedBox {
+            center: stance.center,
+            half: stance.half,
+            heading: stance.heading,
+            pitch: stance.pitch,
+            bank: stance.bank,
+        };
+        assert!(
+            bounds
+                .segment_fraction([5., 100., -50.], [5., 100., 50.])
+                .is_none()
+        );
+        assert!(
+            bounds
+                .segment_fraction([5., 10., -50.], [5., 10., 50.])
+                .is_some()
+        );
+        // A downward round meets the solid top at 21 ft, not the cable at 1001.
+        let at = bounds
+            .segment_fraction([5., 100., 0.], [5., 0., 0.])
+            .unwrap();
+        assert!((at - 0.79).abs() < 1e-12);
+        // A tall polygon is solid even when a line at that height is not.
+        sources.shapes.get_mut("TEST.OT").unwrap().faces[0]
+            .positions
+            .push([0., 0., 1000.]);
+        assert_eq!(sources.stance(placement, 0.).unwrap().max[1], 1000.);
     }
 
     #[test]
