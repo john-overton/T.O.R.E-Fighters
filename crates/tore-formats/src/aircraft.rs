@@ -730,6 +730,22 @@ impl AircraftId {
     pub fn gun(self) -> Option<&'static str> {
         self.guns().first().copied()
     }
+    /// Gun pods this aircraft can carry in place of a store, beyond the guns
+    /// it is built with (the F-4B's centreline SUU-16, 2026-10-16): the weapon
+    /// records of [`Self::guns`]'s kind that a loadout may put on the
+    /// [`stations::gun_pod_row`].
+    pub fn gun_pods(self) -> &'static [&'static str] {
+        match self {
+            Self::F4B => &["SUU16.JT"],
+            _ => &[],
+        }
+    }
+    /// Whether `source` is a gun on this aircraft: one it is built with
+    /// ([`Self::guns`], the F-4J's default SUU-16 pod among them) or a pod it
+    /// can carry ([`Self::gun_pods`]). Guns only keeps exactly these.
+    pub fn mounts_gun(self, source: &str) -> bool {
+        self.guns().contains(&source) || self.gun_pods().contains(&source)
+    }
     /// Source gun types. An empty slice means the aircraft is unarmed with guns.
     pub fn guns(self) -> &'static [&'static str] {
         match self {
@@ -1426,6 +1442,13 @@ mod tests {
         assert_eq!(AircraftId::V22.gun(), Some("T30_1.JT"));
         assert_eq!(AircraftId::F4G.gun(), Some("M61.JT"));
         assert_eq!(AircraftId::F4J.gun(), Some("SUU16.JT"));
+        // The B is built with no gun but carries the SUU-16 on its centreline.
+        assert_eq!(AircraftId::F4B.gun(), None);
+        assert!(AircraftId::F4B.mounts_gun("SUU16.JT"));
+        assert!(AircraftId::F4J.mounts_gun("SUU16.JT"));
+        assert!(AircraftId::F4E.mounts_gun("M61.JT"));
+        assert!(!AircraftId::F4E.mounts_gun("SUU16.JT"));
+        assert!(!AircraftId::F4B.mounts_gun("M61.JT"));
         assert_eq!(AircraftId::Ah64.radar(), Some("F18R.SEE"));
         assert_eq!(AircraftId::parse("f4.pt").unwrap(), AircraftId::F4G);
         assert_ne!(AircraftId::F4B.pt(), AircraftId::F4J.pt());

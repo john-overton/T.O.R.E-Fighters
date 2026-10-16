@@ -1104,6 +1104,31 @@ impl Ordnance {
                     POD_BLINK_MS
                 });
             }
+            "ordnance-gun-pod" => {
+                // The SUU-16 gun pod on the first station that takes it (the
+                // F-4B's centreline, in place of its Sidewinders), on the
+                // first page, where the catalog lists a gun.
+                self.category = 0;
+                if let Some(pod) = self
+                    .catalog
+                    .iter()
+                    .find(|w| w.source == "SUU16.JT")
+                    .cloned()
+                {
+                    for slot in 0..self.loadout.quantities.len() {
+                        if self.loadout.select(slot, pod.clone()).is_ok() {
+                            break;
+                        }
+                    }
+                    // The catalog page that lists the pod.
+                    let at = self.page_entries().iter().position(|entry| {
+                        matches!(entry, CatalogEntry::Weapon(i) if self.catalog[*i].source == "SUU16.JT")
+                    });
+                    if let Some(at) = at {
+                        self.pages[0] = at / 8;
+                    }
+                }
+            }
             "ordnance-authored-tank" => {
                 // The first authored tank (an F-16C's 370 gallon one, say) on
                 // the first tank station that takes it, on the air-to-surface
@@ -2162,7 +2187,7 @@ pub fn validate_sources(
                 let pipper = tore_sim::combat::gunsight::solve(
                     &gun_station.weapon,
                     &launcher,
-                    gun_station.mount,
+                    gun_station.gun_mount(),
                     None,
                 )?
                 .ok_or_else(|| format!("{id:?}: imported gun has no 1000-foot sight solution"))?;
@@ -2602,12 +2627,7 @@ fn validate_guns_only(
                 .zip(&load.configuration.stations)
                 .enumerate()
             {
-                let count = if guns_only
-                    && !load
-                        .aircraft
-                        .guns()
-                        .contains(&original.weapon.source.as_str())
-                {
+                let count = if guns_only && !load.aircraft.mounts_gun(&original.weapon.source) {
                     0
                 } else {
                     u32::from(expected_ammo[index])

@@ -178,7 +178,7 @@ pub fn roster_probe(
                 config
                     .stations
                     .iter()
-                    .any(|s| id.guns().contains(&s.weapon.source.as_str())),
+                    .any(|s| id.mounts_gun(&s.weapon.source)),
                 bridge.realised_launches,
                 bridge.dropped_launches
             );

@@ -243,11 +243,14 @@ pub fn path_words(path: Path) -> &'static str {
 /// 49 since the collision credit fix (slice nr-collkill): splash on a
 /// bystander no longer makes its shooter the last attacker, which changes
 /// kill credit and the combat checkpoint, so an older game must not join.
-/// 50 since the stores station index (slice nr-basefix): a Stores event's
-/// station index is 7 bits, so tank hardpoint 9 (code 64, the F-16C inner
-/// wet pair and the Rafale centreline) can be told. A 49 game reads those
-/// events short and must not join.
-pub const PROTOCOL_VERSION: u16 = 50;
+/// 50 since the F-4B gun pod option (slice nr-f4gun): the F-4B's centreline
+/// row takes one SUU-16, which an older game refuses, and the `Stores` event
+/// lists a hung gun pod as one store, so an older game must not join.
+/// 51 since the Stores station index (slice nr-basefix): a Stores event's
+/// station index is 7 bits and can name tank hardpoint 9 (code 64, the
+/// F-16C inner wet pair and the Rafale centreline), so an older game must
+/// not join.
+pub const PROTOCOL_VERSION: u16 = 51;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

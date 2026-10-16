@@ -155,6 +155,13 @@ station live in the [source review](../formats/aircraft-variety.md). The
 source-pod fire and accepted-load restart. This does not claim recovered empty
 shell/ammunition mass or a separately identified pod mesh.
 
+The F-4B (built with no gun) can carry the same pod on its centreline row in
+place of that row's stores, and the pod is drawn under the aircraft and fires from
+its nose, on the F-4J too (John, 2026-10-16; [the Phantoms' gun
+pod](stores-on-pylons.md#the-phantoms-gun-pod-2026-10-16)). The pod record is the
+SUU-16 for both: the data has no Mk 4 or SUU-23 record. The F-4E and F-4G, built
+with an M61, get no pod (an open question for John).
+
 ## VTOL and tiltrotor flight
 
 John's direction, 2026-10-05: extract approximate forces and control behavior

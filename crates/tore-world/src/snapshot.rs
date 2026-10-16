@@ -166,10 +166,18 @@ pub struct StationStores {
     /// Weapon station 0..31, or 55 + hardpoint for a tank row. Hardpoints 0
     /// to 8 are codes 55 to 63. Hardpoint 9 (the F-16C inner wet pair and the
     /// Rafale centreline) is code 64, which the Stores event carries in 7
-    /// bits (protocol 50).
+    /// bits (protocol 51).
     pub station: u8,
     /// Whole stores still on it (pods and single stores).
     pub items: u16,
+}
+
+/// Whether a station's weapon is drawn on its pylon: every store but a gun,
+/// except a gun pod (the SUU-16, 2026-10-16), which is a store hung under the
+/// aircraft.
+fn drawn_store(weapon: &tore_formats::weapons::Weapon) -> bool {
+    use tore_sim::combat::live;
+    !live::is_gun(weapon) || live::is_gun_pod(weapon)
 }
 
 /// The stations `config` draws, in station order, with the whole stores
@@ -188,13 +196,20 @@ pub fn station_stores(
         .iter()
         .enumerate()
         .filter(|(index, station)| {
-            station.rack.location().external() && !live::is_gun(&station.weapon) && loaded(*index)
+            station.rack.location().external() && drawn_store(&station.weapon) && loaded(*index)
         })
         .filter_map(|(index, station)| {
             let per_item = live::pod_rounds(&station.weapon).max(1);
             Some(StationStores {
                 station: u8::try_from(index).ok()?,
-                items: u16::try_from(rounds(index).div_ceil(per_item)).unwrap_or(u16::MAX),
+                // A gun pod hangs as one store until it is removed, whatever
+                // rounds it has left (its hardware stays, a rocket pod's
+                // empties).
+                items: if live::is_gun_pod(&station.weapon) {
+                    1
+                } else {
+                    u16::try_from(rounds(index).div_ceil(per_item)).unwrap_or(u16::MAX)
+                },
             })
         })
         .chain(config.tanks.iter().map(|tank| StationStores {
@@ -253,21 +268,22 @@ pub fn store_poses_of(
         .filter_map(|load| {
             let index = usize::from(load.station);
             let station = config.stations.get(index)?;
-            if !station.rack.location().external() || live::is_gun(&station.weapon) {
+            if !station.rack.location().external() || !drawn_store(&station.weapon) {
                 return None;
             }
+            let pod = live::is_gun_pod(&station.weapon);
             let per_item = live::pod_rounds(&station.weapon).max(1);
             Some(StorePose {
                 hardpoint: u8::try_from(hardpoint(index)?).ok()?,
                 mount: station.mount,
                 rack: station.rack,
                 shape: station.weapon.shape.clone(),
-                look: if per_item > 1 {
+                look: if per_item > 1 || pod {
                     StoreLook::Pod
                 } else {
                     StoreLook::Store
                 },
-                body: if per_item > 1 {
+                body: if per_item > 1 || pod {
                     pod_body(&station.weapon.source)
                 } else {
                     [0.; 2]
@@ -765,6 +781,41 @@ mod tests {
             attitude,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_gun_pod_is_drawn_as_one_pod_whatever_rounds_it_has_left() {
+        use tore_sim::combat::hardpoints::{Location, Rack};
+        let mut config = crate::test_support::combat_fixture(false)
+            .own()
+            .configuration()
+            .clone();
+        let station = &mut config.stations[0];
+        station.weapon.source = "SUU16.JT".into();
+        station.count = 1;
+        station.internal = false;
+        station.rack = Rack {
+            location: Location::Centerline.byte(),
+            ..Rack::default()
+        };
+        config.hardpoint_slots = vec![Some(0)];
+        let loads = station_stores(&config, |_| 0, |index| index == 0);
+        // Out of ammunition, the pod hangs on.
+        assert_eq!(
+            loads,
+            [StationStores {
+                station: 0,
+                items: 1
+            }]
+        );
+        let poses = store_poses_of(&config, &loads);
+        assert_eq!(poses.len(), 1);
+        assert_eq!(poses[0].look, StoreLook::Pod);
+        assert_eq!(poses[0].body, pod_body("SUU16.JT"));
+        assert_eq!(poses[0].items, 1);
+        // A gun that is not a pod is still not drawn.
+        config.stations[0].weapon.source = "M61.JT".into();
+        assert!(station_stores(&config, |_| 9, |_| true).is_empty());
     }
 
     #[test]

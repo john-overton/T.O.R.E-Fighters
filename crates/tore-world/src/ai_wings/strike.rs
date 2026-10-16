@@ -136,7 +136,7 @@ pub(super) fn step(
             } else if sel.kind == StoreKind::Gun {
                 // The gun's ground cue (slice ST-T2); the striker judges its
                 // own bursts.
-                let mount = config.stations[station].mount;
+                let mount = config.stations[station].gun_mount();
                 let cue = tore_sim::combat::gunsight::ground_cue(w, &launcher, mount, ground)
                     .ok()
                     .flatten();

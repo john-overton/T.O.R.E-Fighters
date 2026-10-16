@@ -982,7 +982,7 @@ fn records_code_against_baselines_up_to_127_snapshots_back() {
     }
 }
 
-/// A Stores event (protocol 27, station index widened in protocol 50) costs
+/// A Stores event (protocol 27, station index widened in protocol 51) costs
 /// a few bytes for a release. Stations out of order, or at index 128 or
 /// above, are refused. An F-16C cheat load of air-to-ground stores carries
 /// tank hardpoint 9 as station 64, which six bits could not hold.

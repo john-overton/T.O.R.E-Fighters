@@ -450,6 +450,24 @@ impl Station {
             self.size(),
         )
     }
+    /// Where a gun pod's rounds leave, feet right, up and forward of the
+    /// aircraft: the nose of the pod as it hangs on its station, half its
+    /// length ahead of its middle ([`Self::release_point`]), so a pod fires
+    /// from where it is drawn.
+    pub fn muzzle(&self) -> Vector {
+        let mut at = self.release_point(0);
+        at[2] += self.size().length / 2.;
+        at
+    }
+    /// Where this gun station's rounds, and its sight's solution, start:
+    /// the record's mount, except a gun pod's [`Self::muzzle`].
+    pub fn gun_mount(&self) -> Vector {
+        if is_gun_pod(&self.weapon) {
+            self.muzzle()
+        } else {
+            self.mount
+        }
+    }
     /// How deep the pylon the store [`Self::release_point`] names hangs from
     /// is, feet from the model's underside to the store's lugs
     /// ([`super::hardpoints::Rack::store_depth`]); `None` for a wingtip rail
@@ -534,6 +552,32 @@ pub struct GunPod {
     pub rounds_per_pod: u16,
     pub weight_lbs: i32,
 }
+impl GunPod {
+    /// The pod of `quantity` units of `weapon` (an SUU-16 record) on weapon
+    /// station `station`: the host interpretation of the record's 1200
+    /// projectiles as `projsInPod / actualRoundsPerGame` logical units a pod,
+    /// and the hardware mass of its object record (docs/spec/aircraft-variety.md,
+    /// "F-4 family contract").
+    pub fn of(
+        station: usize,
+        quantity: u16,
+        weapon: &Weapon,
+        equipment: &tore_formats::aircraft::Equipment,
+    ) -> Result<Self> {
+        let real_rounds = i32::from(weapon.burst.projectiles_in_pod);
+        let multiplier = i32::from(weapon.burst.actual_rounds_per_game);
+        if real_rounds <= 0 || multiplier <= 0 || real_rounds % multiplier != 0 {
+            return Err(super::invalid("unreviewed gun pod ammunition contract"));
+        }
+        Ok(Self {
+            station,
+            quantity,
+            rounds_per_pod: u16::try_from(real_rounds / multiplier)
+                .map_err(|_| super::invalid("gun pod round count exceeds word"))?,
+            weight_lbs: equipment.object["weight"].number()?,
+        })
+    }
+}
 #[derive(Clone, Debug)]
 pub struct Configuration {
     pub ecm: tore_formats::weapons::Countermeasures,
@@ -572,6 +616,15 @@ pub struct Configuration {
     pub designator_pods: Vec<super::sight::DesignatorPod>,
 }
 impl Configuration {
+    /// The gun pod on weapon station `station`, when that station's weapon
+    /// is the pod: a row that can take a pod keeps its (empty) entry while it
+    /// carries something else, which is no pod.
+    pub fn gun_pod(&self, station: usize) -> Option<&GunPod> {
+        self.stations
+            .get(station)
+            .filter(|s| is_gun_pod(&s.weapon))
+            .and_then(|_| self.gun_pods.iter().find(|pod| pod.station == station))
+    }
     /// Convert installed quantities to logical rounds: a gun pod's rounds,
     /// and a rocket pod's rockets, `projsInPod` a pod (retail multiplies a
     /// loaded station's count by it at mission start, `HARDPodHack`; two
@@ -812,18 +865,12 @@ impl Configuration {
             super::gunship::apply_tore_record(&mut weapon);
             if name == "SUU16.JT" {
                 let equipment = tore_formats::aircraft::Equipment::parse(name, &read(name)?)?;
-                let real_rounds = i32::from(weapon.burst.projectiles_in_pod);
-                let multiplier = i32::from(weapon.burst.actual_rounds_per_game);
-                if real_rounds <= 0 || multiplier <= 0 || real_rounds % multiplier != 0 {
-                    return Err(super::invalid("unreviewed gun pod ammunition contract"));
-                }
-                gun_pods.push(GunPod {
-                    station: stations.len(),
-                    quantity: h.count as u16,
-                    rounds_per_pod: u16::try_from(real_rounds / multiplier)
-                        .map_err(|_| super::invalid("gun pod round count exceeds word"))?,
-                    weight_lbs: equipment.object["weight"].number()?,
-                });
+                gun_pods.push(GunPod::of(
+                    stations.len(),
+                    h.count as u16,
+                    &weapon,
+                    &equipment,
+                )?);
             }
             // Restrict the live adapter to the actual default stations of the
             // reviewed aircraft. Catalog import never makes another type flyable.
@@ -954,6 +1001,19 @@ impl Configuration {
                     internal: false,
                 });
             }
+        }
+        // A source row that takes a gun pod in place of its stores (the
+        // F-4B's centreline) carries an empty pod entry: the pod is loaded
+        // when that station's weapon is the SUU-16 and not otherwise
+        // (`Loadout::refresh_equipment`).
+        if let Some(slot) = tore_formats::aircraft::stations::gun_pod_row(a.id)
+            .and_then(|row| hardpoint_slots.get(row).copied().flatten())
+            && !gun_pods.iter().any(|pod| pod.station == slot)
+            && let Ok(bytes) = read("SUU16.JT")
+        {
+            let weapon = Weapon::parse("SUU16.JT", &bytes)?;
+            let equipment = tore_formats::aircraft::Equipment::parse("SUU16.JT", &bytes)?;
+            gun_pods.push(GunPod::of(slot, 0, &weapon, &equipment)?);
         }
         let hit_points = a
             .object
@@ -6473,6 +6533,12 @@ pub fn motor_powered(w: &Weapon, p: &Projectile, now: u16) -> bool {
     phase == super::EnginePhase::Powered
 }
 
+/// The SUU-16 gun pod: an external store that fires a gun, hung under the
+/// aircraft and drawn there, its hardware mass kept until it is removed
+/// (the F-4J's default station, the F-4B's centreline option).
+pub fn is_gun_pod(w: &Weapon) -> bool {
+    w.source == "SUU16.JT"
+}
 /// Whether `w` is a gun: an aircraft's gun record or a surface gun of the AAA
 /// tuning table. Gun rounds are hit-tested against the aircraft volume, spread
 /// by the gun dispersion and never home.
@@ -7121,6 +7187,47 @@ mod tests {
         assert_eq!(state.own().payload_lbs(), 1702.);
         state.command(0, Command::Jettison, launcher());
         assert_eq!(state.own().payload_lbs(), 0.);
+    }
+
+    #[test]
+    fn a_gun_pod_row_is_a_pod_only_while_the_pod_is_its_weapon_and_fires_from_the_nose() {
+        let mut config = fixture(false).own().configuration().clone();
+        config.stations[0].weapon.source = "AIM9B.JT".into();
+        config.stations[0].count = 4;
+        config.stations[0].internal = false;
+        config.stations[0].mount = [0., -6.33, 0.];
+        config.stations[0].rack = crate::combat::hardpoints::Rack {
+            location: crate::combat::hardpoints::Location::Centerline.byte(),
+            ..crate::combat::hardpoints::Rack::default()
+        };
+        config.gun_pods = vec![GunPod {
+            station: 0,
+            quantity: 0,
+            rounds_per_pod: 600,
+            weight_lbs: 1702,
+        }];
+        // An empty entry on a row carrying missiles is no pod, and a gun
+        // mount is the record's own.
+        assert!(config.gun_pod(0).is_none());
+        assert_eq!(config.stations[0].gun_mount(), config.stations[0].mount);
+        config.stations[0].weapon.source = "SUU16.JT".into();
+        config.stations[0].count = 1;
+        config.gun_pods[0].quantity = 1;
+        assert_eq!(config.gun_pod(0).map(|pod| pod.quantity), Some(1));
+        // The pod's rounds start at its nose: half the pod's length ahead
+        // of where its middle hangs, the same point the sight solves from.
+        let station = &config.stations[0];
+        let middle = station.release_point(0);
+        let muzzle = station.muzzle();
+        assert_eq!(station.gun_mount(), muzzle);
+        assert!(
+            (muzzle[2] - middle[2] - crate::combat::store_sizes::SUU16_LENGTH / 2.).abs() < 1e-9
+        );
+        assert_eq!((muzzle[0], muzzle[1]), (middle[0], middle[1]));
+        assert_eq!(
+            crate::combat::store_sizes::StoreSize::of_weapon(&station.weapon).length,
+            crate::combat::store_sizes::SUU16_LENGTH
+        );
     }
 
     #[test]
