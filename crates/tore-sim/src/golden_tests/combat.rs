@@ -33,7 +33,7 @@ const OWN: u32 = 0;
 // missiles stop orbiting passed memory points. Measured on Apple Silicon CI.
 const GUNS_AND_DAMAGE: u64 = 0x5a40_7a7e_c359_f7ac;
 const GUIDED_MISSILES: u64 = 0x7104_8d34_d745_e670;
-const PLAYER_COUNTERMEASURES: u64 = 0xca96_18fe_eb3b_f912;
+const PLAYER_COUNTERMEASURES: u64 = 0x11ae_b223_66c8_928f;
 
 #[test]
 fn combat_guns_and_damage_match_recorded_fingerprint() {
