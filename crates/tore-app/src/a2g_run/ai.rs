@@ -1123,6 +1123,16 @@ fn observe(scene: &mut Scene, w: &mut Watch) {
     let at = scene.striker_at(w.plane);
     for (id, position, station, weapon) in fresh {
         w.seen.insert(id);
+        if let Some(store) = weapon
+            .as_ref()
+            .filter(|wp| wp.source.starts_with("JETTISON-"))
+        {
+            println!(
+                "ai-strike: JETTISON t={t:.3} id={id} weapon={} station={station}",
+                store.source
+            );
+            continue;
+        }
         w.releases += 1;
         w.flying.insert(id, (position, w.releases));
         w.last_release = Some(t);

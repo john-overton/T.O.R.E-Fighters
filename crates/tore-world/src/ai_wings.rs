@@ -29,6 +29,7 @@ mod engagement;
 pub use engagement::Preset;
 mod ground;
 mod gunship;
+mod jettison;
 mod orders;
 pub(crate) use orders::{GroundAim, GroundFact, OrderReport, order_label};
 pub mod outcome;
@@ -2231,6 +2232,7 @@ impl AiWings {
         for event in &output.devices {
             self.realise_device(event, state)?;
         }
+        jettison::apply(self, state, &output.jettison)?;
         state.set_actor_supports(self.actor_supports());
         if state.weapon_rules == Rules::Compatibility {
             // Each round's seeker comes from the weapon it carries: its own

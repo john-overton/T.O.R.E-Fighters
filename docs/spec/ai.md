@@ -1699,3 +1699,9 @@ The mission evaluates escape before weapon releases; a successful ejection
 stops aircraft control while the detached pilot continues descending. Combat
 retains ownership of the abandoned wreck. These additions are fitted and
 opinionated where labelled, not recovered retail AI decision predicates.
+
+## Defensive store jettison
+
+John requested AI defensive jettison on 2026-10-15. The shared
+[jettison contract](jettison.md#replay-network-and-ai) defines tank shedding,
+merge range, skill-dependent strike-load retention and inert recording behavior.

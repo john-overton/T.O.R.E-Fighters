@@ -134,7 +134,17 @@ pub fn roster_probe(
                     // replay of its input.
                     let struck = replay.damage_fraction != actor.flight().damage_fraction
                         || replay.systems.counts != actor.flight().systems.counts;
-                    if was_alive && actor.alive() && !struck {
+                    // Jettison is a post-flight inventory/fuel operation, not
+                    // pilot input. Only its actual separation tick is excluded;
+                    // subsequent ticks still replay the now-lighter aircraft.
+                    let shed = combat.projectiles.iter().any(|p| {
+                        p.owner == actor.id()
+                            && p.age == 0
+                            && p.weapon
+                                .as_ref()
+                                .is_some_and(|w| w.source.starts_with("JETTISON-"))
+                    });
+                    if was_alive && actor.alive() && !struck && !shed {
                         replay.damage_fraction = actor.flight().damage_fraction;
                         replay.payload_lbs = actor.flight().payload_lbs;
                         // A researched actor (a rotorcraft since slice H1)
