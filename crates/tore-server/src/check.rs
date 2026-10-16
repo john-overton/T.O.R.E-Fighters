@@ -100,6 +100,13 @@ pub fn report(prepared: &Prepared) -> Vec<String> {
         } else {
             "friendly"
         };
+        if spec.player_choice[MissionSpec::wing_index(plane.slot.wing)] {
+            lines.push(format!(
+                "  Player Choice slot {} (AI default: {})",
+                plane.id.0,
+                wing.aircraft.selection_key()
+            ));
+        }
         lines.push(format!(
             "  {:>2}  {:<9} {side} wing {}, member {}, {}",
             plane.id.0,

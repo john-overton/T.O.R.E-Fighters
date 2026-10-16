@@ -142,6 +142,17 @@ shooter the last attacker.
   attacker). A mid-air collision is the same: if the aircraft was damaged
   earlier, its last attacker is credited. This holds however long ago the hit
   was.
+- **Splash is a hit only for the shot's own outcome.** A missile or bomb is
+  one hit in the tally however many aircraft its blast reaches. The aircraft it
+  strikes, and the ones a burst that is the shot's whole outcome reaches (a
+  flak shell that struck nothing), have a recorded hit behind them. An aircraft
+  that only stood within the blast of a shot that struck, or was resolved,
+  elsewhere does not: the shooter is not its last attacker, so if it is later
+  lost another way (a mid-air collision with its wingman is the usual case) it
+  credits nobody. A splash kill is still credited to the shooter, as below.
+  Agent decision, 2026-10-16: before it, a four-ship hit by one Sparrow's blast
+  let the player collect kills for wingmen that later collided with each other,
+  three kills on one recorded hit.
 - **No credit.** An aircraft lost to the map edge, overspeed or belly scrape
   wear credits nobody, whoever hit it earlier. An aircraft nobody hit credits
   nobody.

@@ -552,7 +552,7 @@ changes are **opinionated**, requested by John; exact origins below are
 | 5 | Centreline 5 | 0 / 0 | Unchanged | One tank, under the fuselage |
 | 6 | Middle underwing 3/7 | 10.67 / -2.33 | 10.67 / -3 | One pylon per wing; paired stores retain the small twin bar |
 | 7 | Outer underwing 2/8 | 14.33 / -3.67 | 14.33 / -7 | One pylon per wing, farther aft under the chord |
-| 8 | Wingtip 1/9 | Source 18 / -4.67, fitted to the tip at 17 ft out | Unchanged | Stores sit on the model's tip launcher |
+| 8 | Wingtip 1/9 | Source 18 / -4.67, fitted to the tip at 17 ft out | Unchanged | Stores sit on the model's tip launcher; AIM-9 or [AIM-120](#the-f-16c-wingtip-aim-120), one a tip |
 
 The inner wet pair, real stations 4/6, has no source row. The
 [derived station addition](#derived-f-15c-and-f-16c-stations) supplies it.
@@ -579,6 +579,58 @@ real aircraft carriage clearance, variable-sweep clearance or certification.
 Long stores and tip launchers can extend ahead of a wing. Uncertain
 real-world station mappings require references and a design decision,
 not a blanket aft shift.
+
+### The F-16C wingtip AIM-120
+
+**Opinionated**, John, 2026-10-16: "On the F-16, the wingtip station
+typically can have AIM-120s. Can we make sure that is enabled for the
+wingtip?" The real F-16C's tip launchers (stations 1 and 9, LAU-129) carry
+the AIM-120 as well as the AIM-9. The rule below is an **agent decision**.
+
+Why it was refused: source row 8 is a wingtip station with mask 0x85
+(infrared missiles only) and weight class 4 (400 lb, sized for two
+190 lb AIM-9s). The AIM-120 is a 345 lb active-radar missile, so the
+station mask turned it away, and a weight class of 4 would have allowed only
+one. Raising the class would have changed the other infrared counts too
+(a 230 lb AA-11 would go from one to two).
+
+What changed: on the F-16C only, normal loading gives the AIM-120 on the
+wingtip row the row's own count, **2**, which is one a tip, exactly what the
+row holds for an AIM-9 today. The rule is
+`aircraft::stations::extra_weapon` (read by `Loadout::capacity`, which every
+caller shares: the Load Ordnance page and its drag and drop, the saved-load
+and mission-text checks, the multiplayer lobby's loadout check and the AI
+wingmen who copy their lead's loadout). It applies only to an F-16C record
+whose guarded station rows were appended (so the reviewed source signature
+matched, the same guard as the [derived stations](#derived-f-15c-and-f-16c-stations)).
+Nothing else moves:
+
+- every other store keeps the source mask and weight rule on that row (AIM-9
+  two, AA-11 one, radar missiles other than the AIM-120 none, bombs none);
+- the other F-16C rows, their order, station numbers and default load, and
+  old saved loads, are unchanged (an old load simply has the AIM-9 there);
+- Cheat loading already gave the row's raw capacity;
+- the F/A-18D's tips stay AIM-9 only, as the real aircraft's.
+
+A tip AIM-120 is placed by the same [wingtip rule](#rules) as the AIM-9: its
+centre line on the tip's edge (17 ft out), no pylon. The 12 ft missile is
+longer than the tip's 9 ft chord, so its nose stands about 3.2 ft ahead of
+the tip's leading edge and its tail ends at the tip's trailing edge (the
+outer-wing AIM-120 already shows about 3.1 ft ahead). The model's tip
+overlaps the drawn missile by 0.9 ft at its worst vertex, against 0.4 ft
+for the AIM-9; the audit's clip report shows both. Left and right alternate
+as for any paired row, the missile leaves from the tip edge, and it flies the
+AIM-120's own guided record.
+
+Checked by `--validate-ordnance` (the F-16C tip block of `ordnance_audit.rs`:
+capacity of every supported weapon, load, save, restore, two shots from the tip
+edges), `--validate-wing-loadout` (wingmen and the lobby check) and a Load
+Ordnance snapshot (`--snapshot-state ordnance-tip-amraam`).
+
+Other aircraft with a wingtip row: the F/A-18D, Rafale C and X-31 tip rows have
+the same infrared-only mask and stay as they are; the Su-27's tip row already
+accepts the AIM-120 under the original mask, and the Su-35's is a fixed
+station. These are listed for John, not changed.
 
 ### Mi-24 lower wing attachment
 
@@ -788,7 +840,7 @@ loaded (max 1)"). A real Phantom's centreline is one station, so the pod
 replaces the row's stores rather than adding a second centreline row: the
 default load (four AIM-9Bs, four Mk 82s on the fuselage pairs, four on the
 wing pair and two 350 gallon tanks) is unchanged, and taking the pod off
-restores the row's stores. Carrying it, the B has 53,416 lb to 52,394 lb
+restores the row's stores. Carrying it, the B weighs 53,416 lb, against 52,394 lb
 without it (the pod's 1,702 lb replaces four 170 lb Sidewinders; the same
 weight accounting as the F-4J's pod). It starts empty-of-pod; saved loadouts
 and mission files from before carry the row's own weapon and load as they did.

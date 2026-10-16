@@ -109,6 +109,8 @@ impl Host {
             && self.king_id().is_some()
         {
             StartMode::King
+        } else if !self.settings.ai() && self.config.start == StartMode::Now {
+            StartMode::FirstPlayer
         } else {
             self.config.start
         }

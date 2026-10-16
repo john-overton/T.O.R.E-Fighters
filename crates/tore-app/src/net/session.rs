@@ -742,6 +742,12 @@ impl Join {
 /// A joined (or joining) session.
 pub struct NetSession {
     pub client: Client,
+    /// The last accepted local respawn draft, scoped to the mission.
+    pub revival_draft: Option<(
+        u32,
+        tore_formats::aircraft::AircraftId,
+        tore_world::mission::LoadoutSpec,
+    )>,
     socket: Transport,
     /// Speaks for the connection while the game's loop is stalled.
     kept: KeptAlive,
@@ -1031,6 +1037,7 @@ impl NetSession {
         let launches = crate::audio::LaunchSounds::of(&resources);
         Ok(Self {
             client,
+            revival_draft: None,
             socket,
             kept: KeptAlive::new(KeepaliveConfig::default()),
             clock,

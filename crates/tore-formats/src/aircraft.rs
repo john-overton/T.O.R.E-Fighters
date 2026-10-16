@@ -587,6 +587,21 @@ impl AircraftId {
             Self::A310 => "~AC130H.PIC",
         }
     }
+    /// Compact identity for lobby columns and server seat logs.
+    pub fn short_label(self) -> &'static str {
+        if self == Self::Rafale {
+            return "Rafale C";
+        }
+        self.reviewed_names()
+            .map(|(short, _)| short)
+            .unwrap_or_else(|| {
+                self.label()
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or(self.label())
+            })
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::F18 => "F/A-18D Hornet",

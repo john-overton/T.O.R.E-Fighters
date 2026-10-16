@@ -47,6 +47,8 @@ pub mod number {
     /// The lobby pass (slice W0): whether a lost AI aircraft respawns
     /// while revival is on (John, 2026-10-09).
     pub const AI_RESPAWN: u8 = 23;
+    /// Whether unheld aircraft may be flown by AI.
+    pub const AI: u8 = 24;
 }
 
 /// Setting 21's value for the calculated host; a pinned player is 1 plus
@@ -246,7 +248,7 @@ const OFF_ON: &[(u32, &str)] = &[(0, "off"), (1, "on")];
 const OFF_ON_VALUES: &[u32] = &[0, 1];
 
 /// Every setting, in number order: the registry.
-pub const REGISTRY: [Setting; 23] = [
+pub const REGISTRY: [Setting; 24] = [
     Setting {
         number: number::MODE,
         name: "mode",
@@ -515,6 +517,17 @@ pub const REGISTRY: [Setting; 23] = [
     Setting {
         number: number::AI_RESPAWN,
         name: "ai-respawn",
+        allowed: Allowed::List(OFF_ON_VALUES),
+        unit: Unit::Count,
+        words: OFF_ON,
+        coop: 1,
+        pvp: 1,
+        change: Change::InLobby,
+        pvp_only: false,
+    },
+    Setting {
+        number: number::AI,
+        name: "ai",
         allowed: Allowed::List(OFF_ON_VALUES),
         unit: Unit::Count,
         words: OFF_ON,
@@ -842,8 +855,12 @@ impl Store {
 
     /// Whether a lost AI aircraft respawns: the `ai-respawn` setting, while
     /// `respawn` is not `none` (slice W0; the respawn itself is slice R1's).
+    pub fn ai(&self) -> bool {
+        self.value(number::AI) != 0
+    }
+
     pub fn ai_respawn(&self) -> bool {
-        self.respawn() != Respawn::None && self.value(number::AI_RESPAWN) != 0
+        self.ai() && self.respawn() != Respawn::None && self.value(number::AI_RESPAWN) != 0
     }
 
     pub fn revive_delay_seconds(&self) -> u32 {
@@ -887,7 +904,7 @@ impl Store {
     /// Seconds away before the AI flies a player's aircraft; `None` for
     /// never.
     pub fn idle_ai_seconds(&self) -> Option<u32> {
-        Some(self.value(number::IDLE_AI)).filter(|&s| s != 0)
+        Some(self.value(number::IDLE_AI)).filter(|&s| self.ai() && s != 0)
     }
 
     /// Snapshots a second the host sends each player: the King's choice in a

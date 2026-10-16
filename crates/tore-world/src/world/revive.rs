@@ -93,7 +93,7 @@ pub struct Spawn {
     pub heading_rad: f64,
     /// The airspeed, feet a second.
     pub speed_fps: f64,
-    /// The stores, already cut by the revival weapons rule, with full fuel.
+    /// The stores, already cut by the revival weapons rule, and accepted fuel.
     pub loadout: LoadoutSpec,
 }
 
@@ -188,6 +188,8 @@ pub struct LostPlane {
 /// checkpoint section (`revive_checkpoint.rs`).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Book {
+    /// Cleanly removed aircraft, retained as empty slots for late joins.
+    despawned: BTreeMap<PlaneId, AircraftId>,
     lost: Vec<LostPlane>,
     retired: Vec<Plane>,
     /// Every plane [`World::add_plane`] added, in order.
@@ -509,7 +511,7 @@ impl World {
     }
 
     /// The aircraft `plane` is.
-    fn aircraft_of(&self, plane: PlaneId) -> Option<AircraftId> {
+    pub fn aircraft_of(&self, plane: PlaneId) -> Option<AircraftId> {
         self.combat
             .state
             .ownship(plane.0)
@@ -520,6 +522,35 @@ impl World {
                     .and_then(|wings| wings.slot(plane.0))
                     .map(|slot| slot.aircraft)
             })
+            .or_else(|| self.revival.despawned.get(&plane).copied())
+    }
+
+    /// Types available to a recording before any runtime choice is made.
+    pub fn available_aircraft(&self) -> Vec<AircraftId> {
+        let mut ids = Vec::new();
+        for kind in self
+            .combat
+            .dummy_types()
+            .iter()
+            .chain(self.choices.types.iter())
+        {
+            if !ids.contains(&kind.profile.id) {
+                ids.push(kind.profile.id);
+            }
+        }
+        ids
+    }
+
+    /// A simulation type available for a validated runtime aircraft choice.
+    pub fn aircraft_type(
+        &self,
+        aircraft: AircraftId,
+    ) -> Option<&std::sync::Arc<crate::aircraft_type::AircraftType>> {
+        self.combat
+            .dummy_types()
+            .iter()
+            .chain(self.choices.types.iter())
+            .find(|kind| kind.profile.id == aircraft)
     }
 
     /// The configuration an aircraft's standard load is built from.
@@ -528,6 +559,13 @@ impl World {
             .dummy_configurations()
             .iter()
             .find(|config| config.aircraft == aircraft)
+            .or_else(|| {
+                self.choices
+                    .loads
+                    .iter()
+                    .find(|load| load.aircraft == aircraft)
+                    .map(|load| &load.configuration)
+            })
             .ok_or_else(|| {
                 format!("the mission holds no configuration for {}", aircraft.pt()).into()
             })
@@ -557,16 +595,24 @@ impl World {
             .find(|weapon| weapon.source == name)
     }
 
-    /// `load` put onto `aircraft`'s standard configuration, as
-    /// [`LoadoutSpec::apply`] puts it, with each weapon the standard load
-    /// does not carry taken from the records the mission already holds
-    /// (every loadout a revival names was flown in this mission, or is the
-    /// standard one). Returns the configuration and each station's quantity.
+    /// Applies `load` to the aircraft's standard configuration. Open worlds use
+    /// prepared optional import records, including types and stores not flown yet.
+    /// Older synthetic worlds can fall back to records already held by the mission.
+    /// Returns the configuration and each station's quantity.
     pub fn loadout_configuration(
         &self,
         aircraft: AircraftId,
         load: &LoadoutSpec,
     ) -> WorldResult<(live::Configuration, Vec<u16>)> {
+        if let Some(base) = self
+            .choices
+            .loads
+            .iter()
+            .find(|base| base.aircraft == aircraft)
+        {
+            let applied = load.apply(base.clone(), &self.choices.records, None)?;
+            return Ok((applied.configuration, applied.quantities));
+        }
         let mut config = self.standard_configuration(aircraft)?.clone();
         if load.stations.len() != config.stations.len() {
             return Err(format!(
@@ -596,6 +642,7 @@ impl World {
             .combat
             .dummy_types()
             .iter()
+            .chain(self.choices.types.iter())
             .find(|kind| kind.profile.id == aircraft)
             .ok_or_else(|| format!("the mission holds no aircraft type {}", aircraft.pt()))?;
         Ok(kind.profile.fields["internalFuel"].number()? as f64)
@@ -643,9 +690,13 @@ impl World {
     /// Every living aircraft's side and position, the humans' and the AI's:
     /// what [`point`] measures the battle from.
     pub fn living_aircraft(&self) -> Vec<(Side, [f64; 3])> {
+        self.living_aircraft_except(None)
+    }
+
+    fn living_aircraft_except(&self, excluded: Option<PlaneId>) -> Vec<(Side, [f64; 3])> {
         let mut living = Vec::new();
         for plane in self.roster.planes() {
-            if plane.pilot == Pilot::Lost {
+            if plane.pilot == Pilot::Lost || Some(plane.id) == excluded {
                 continue;
             }
             let side = plane.slot.wing.side;
@@ -739,9 +790,38 @@ impl World {
         let aircraft = self
             .aircraft_of(plane)
             .ok_or_else(|| format!("plane {} has no aircraft", plane.0))?;
+        self.revival_spawn_as(aircraft, start, distance_ft, chosen, weapons)
+    }
+
+    /// Revival placement for an accepted aircraft, including a fresh Choice join.
+    pub fn revival_spawn_as(
+        &self,
+        aircraft: AircraftId,
+        start: [f64; 3],
+        distance_ft: f64,
+        chosen: Option<&LoadoutSpec>,
+        weapons: RevivalWeapons,
+    ) -> WorldResult<Spawn> {
+        self.revival_spawn_excluding(None, aircraft, start, distance_ft, chosen, weapons)
+    }
+
+    /// Placement after removing `excluded`, without mutating the mission first.
+    pub fn revival_spawn_excluding(
+        &self,
+        excluded: Option<PlaneId>,
+        aircraft: AircraftId,
+        start: [f64; 3],
+        distance_ft: f64,
+        chosen: Option<&LoadoutSpec>,
+        weapons: RevivalWeapons,
+    ) -> WorldResult<Spawn> {
         let altitude = self.setup.mission.map_or(10_000., |(altitude, _)| altitude);
-        let (centre, position, heading_rad) =
-            point_from_centre(&self.living_aircraft(), start, distance_ft, altitude);
+        let (centre, position, heading_rad) = point_from_centre(
+            &self.living_aircraft_except(excluded),
+            start,
+            distance_ft,
+            altitude,
+        );
         // On the map (slice R1): far revival distances near an edge.
         let position = onto_map(position, centre, &self.map_bounds());
         self.spawn_at(aircraft, position, heading_rad, chosen, weapons)
@@ -773,6 +853,7 @@ impl World {
             .combat
             .dummy_types()
             .iter()
+            .chain(self.choices.types.iter())
             .find(|kind| kind.profile.id == aircraft)
             .ok_or_else(|| format!("the mission holds no aircraft type {}", aircraft.pt()))?;
         let speed_fps = flight::State::new(&kind.profile, position)?.speed;
@@ -787,6 +868,14 @@ impl World {
     /// The oldest abandoned wreck that has rested on the ground for
     /// [`RETIRE_AFTER_TICKS`], which a revival may retire.
     pub fn retirable(&self) -> Option<PlaneId> {
+        if let Some(plane) = self
+            .revival
+            .despawned
+            .keys()
+            .find(|p| self.roster.plane(**p).is_some())
+        {
+            return Some(*plane);
+        }
         let now = self.tick();
         self.revival
             .lost
@@ -864,6 +953,63 @@ impl World {
         };
         self.add_check(&new)?;
         Ok(Plan { new, retire })
+    }
+
+    /// Plans a replacement without changing the old aircraft or its stores.
+    pub fn replacement_plane(
+        &self,
+        old: PlaneId,
+        aircraft: AircraftId,
+        spawn: &Spawn,
+    ) -> WorldResult<NewPlane> {
+        let wing = self
+            .roster
+            .plane(old)
+            .ok_or("no replacement slot")?
+            .slot
+            .wing;
+        let new = NewPlane {
+            plane: self.next_plane_id()?,
+            slot: Slot {
+                wing,
+                member: self.next_member(wing)?,
+            },
+            aircraft,
+            spawn: spawn.clone(),
+        };
+        self.add_check(&new)?;
+        Ok(new)
+    }
+
+    /// Applies a host-accepted replacement. Lost planes remain wrecks; a living
+    /// AI default vanishes cleanly. The new plane keeps the slot's lineage.
+    pub fn replace_plane(&mut self, seat: SeatId, old: PlaneId, new: &NewPlane) -> WorldResult<()> {
+        let expected = self.replacement_plane(old, new.aircraft, &new.spawn)?;
+        if expected != *new {
+            return Err("replacement identity differs".into());
+        }
+        let root = self.revival.root_of(old);
+        if self.roster.seat(seat).is_some_and(|s| s.plane == Some(old)) {
+            self.can_abandon(seat)?;
+        } else if self.roster.seat(seat).is_some_and(|s| s.plane.is_some()) {
+            return Err("replacement seat already flies another plane".into());
+        }
+        if !self.room_for_one() {
+            return Err("no room for a replacement".into());
+        }
+        if self.roster.planes().len() >= MAX_PLANES {
+            self.retire_plane(self.retirable().ok_or("no room for a replacement")?)?;
+        }
+        if self.roster.seat(seat).is_some_and(|s| s.plane == Some(old)) {
+            self.abandon_plane(seat)?;
+        } else if !self.head_lost(old) {
+            self.despawn_plane(old)?;
+        }
+        self.add_plane(new)?;
+        self.revival.roots.insert(new.plane, root);
+        self.join_objectives(root, new.plane);
+        self.take_plane(seat, new.plane)?;
+        Ok(())
     }
 
     /// Whether `seat` can be revived at `spawn` now: it flies a lost plane,
@@ -1091,12 +1237,14 @@ impl World {
             .ok_or_else(|| format!("plane {} is not in the mission", root.0))?
             .slot
             .wing;
-        let aircraft = self
-            .lineage(root)
-            .into_iter()
-            .rev()
-            .find_map(|plane| self.aircraft_of(plane))
+        let aircraft = self.choices.ai_defaults[crate::mission::MissionSpec::wing_index(wing)]
             .or_else(|| self.launch_of(wing).map(|launch| launch.aircraft))
+            .or_else(|| {
+                self.lineage(root)
+                    .into_iter()
+                    .rev()
+                    .find_map(|plane| self.aircraft_of(plane))
+            })
             .ok_or_else(|| format!("the lineage of plane {} has no aircraft", root.0))?;
         Ok((wing, aircraft))
     }
@@ -1263,6 +1411,7 @@ impl World {
             .combat
             .dummy_types()
             .iter()
+            .chain(self.choices.types.iter())
             .find(|kind| kind.profile.id == new.aircraft)
             .ok_or_else(|| format!("the mission holds no aircraft type {}", new.aircraft.pt()))?;
         let (config, quantities) = self.loadout_configuration(new.aircraft, &new.spawn.loadout)?;
@@ -1362,8 +1511,34 @@ impl World {
     /// An AI wreck whose lineage respawned (slice R1) retires the same way:
     /// its AI actor goes too, and the retired entry names nobody as its
     /// pilot ([`Pilot::Lost`]).
+    /// Clean removal retains a slot identity for a later human revival.
+    /// It emits no damage, loss, debris or kill event.
+    pub fn despawn_plane(&mut self, plane: PlaneId) -> WorldResult<()> {
+        if self.roster.plane(plane).is_none() {
+            return Err(format!("plane {} is not in the mission", plane.0).into());
+        }
+        if let Some(aircraft) = self.aircraft_of(plane) {
+            self.revival.despawned.insert(plane, aircraft);
+        }
+        if let Some(seat) = self.roster.seat_of(plane) {
+            self.roster.release_plane(seat);
+        }
+        if let Some(wings) = &mut self.ai_wings {
+            wings.retire_actor(plane.0);
+        }
+        self.cockpits.retain(|cockpit| cockpit.plane != plane);
+        self.combat.remove_ownship(plane.0);
+        self.combat
+            .state
+            .targets
+            .retain(|target| target.id != plane.0);
+        self.refresh_friendlies();
+        Ok(())
+    }
+
     pub fn retire_plane(&mut self, plane: PlaneId) -> WorldResult<()> {
-        let ai_wreck = self.revival.lost.iter().any(|lost| lost.plane == plane)
+        let ai_wreck = (self.revival.despawned.contains_key(&plane)
+            || self.revival.lost.iter().any(|lost| lost.plane == plane))
             && self.roster.plane(plane).map(|p| p.pilot) == Some(Pilot::Ai);
         if self.roster.plane(plane).map(|p| p.pilot) != Some(Pilot::Lost) && !ai_wreck {
             return Err(format!("plane {} is not an abandoned wreck", plane.0).into());

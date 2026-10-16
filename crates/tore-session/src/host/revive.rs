@@ -106,6 +106,8 @@ pub(super) struct Player {
 pub(super) enum Pending {
     /// A new plane at the revival point.
     Revive { seat: SeatId },
+    /// A newly joining human replaces an empty AI-off slot, without using a life.
+    Join { seat: SeatId, plane: PlaneId },
     /// A free AI aircraft.
     AiSlot { seat: SeatId, plane: PlaneId },
 }
@@ -119,6 +121,7 @@ struct Made {
     new: Option<NewPlane>,
     /// The AI aircraft taken (the `ai-slot` rule).
     taken: Option<PlaneId>,
+    uses_life: bool,
 }
 
 /// The host's revival state for the flying mission: the session's, which
@@ -127,6 +130,7 @@ struct Made {
 pub(super) struct Revivals {
     /// By player (its join order, as the scores keep them).
     pub(super) players: BTreeMap<u64, Player>,
+    pub(super) choices: BTreeMap<PlaneId, tore_formats::aircraft::AircraftId>,
     /// Seats held for players in the lobby whose plane is lost: the seat
     /// keeps the wreck until the player flies again or leaves the game.
     pub(super) held: BTreeMap<ConnectionId, SeatId>,
@@ -173,7 +177,9 @@ fn clock(seconds: u64) -> String {
 impl Pending {
     fn seat(self) -> SeatId {
         match self {
-            Pending::Revive { seat } | Pending::AiSlot { seat, .. } => seat,
+            Pending::Revive { seat }
+            | Pending::Join { seat, .. }
+            | Pending::AiSlot { seat, .. } => seat,
         }
     }
 }
@@ -275,7 +281,78 @@ impl Host {
     /// The player asks to fly again after a loss (message 28), answered by
     /// a Seated message or a refusal. The caller has checked the mission's
     /// number.
+    pub(super) fn revive_selected(
+        &mut self,
+        connection: ConnectionId,
+        aircraft: Option<tore_formats::aircraft::AircraftId>,
+        loadout: Option<tore_world::mission::LoadoutSpec>,
+    ) -> Result<(), String> {
+        if aircraft.is_none() && loadout.is_none() {
+            return self.revive_request(connection);
+        }
+        if self.settings.respawn() != Respawn::Revive {
+            return Err("Aircraft and loadout choices require respawn revive; ai-slot takes an existing aircraft.".into());
+        }
+        let peer = self.peers.get(&connection).ok_or("No player.")?;
+        let lost = peer
+            .plane
+            .or_else(|| {
+                self.revival
+                    .players
+                    .get(&peer.lobby.order)
+                    .and_then(|p| p.lost.map(|(p, _)| p))
+            })
+            .ok_or("No lost aircraft.")?;
+        let root = self.world.revival.root_of(lost);
+        let slot = self
+            .spec
+            .open_planes()
+            .into_iter()
+            .find(|p| p.id == root.0)
+            .ok_or("No such slot.")?;
+        let aircraft = aircraft
+            .or_else(|| self.world.aircraft_of(lost))
+            .ok_or("No aircraft.")?;
+        if !self.spec.player_choice[tore_world::mission::MissionSpec::wing_index(slot.wing)]
+            && aircraft != slot.aircraft
+        {
+            return Err("This slot has a fixed aircraft.".into());
+        }
+        let mut candidate = self.spec.clone();
+        if self.spec.player_choice[tore_world::mission::MissionSpec::wing_index(slot.wing)] {
+            candidate.plane_aircraft.insert(root.0, aircraft);
+        }
+        candidate.validate().map_err(|e| e.to_string())?;
+        if let Some(why) = self.mission_gap_refusal(&candidate) {
+            return Err(why);
+        }
+        let kind = tore_world::aircraft_type::AircraftType::load(&*self.resources, aircraft)
+            .map_err(|e| e.to_string())?;
+        if let Some(load) = &loadout {
+            load.check_in(&kind.profile, &*self.resources, &candidate)
+                .map_err(|e| e.to_string())?;
+            if let Some(why) = self.loadout_gap_refusal(load) {
+                return Err(why);
+            }
+        }
+        // Check construction before accepting the request, with no state change.
+        self.world
+            .revival_loadout(aircraft, loadout.as_ref(), self.settings.revive_weapons())
+            .map_err(|e| e.to_string())?;
+        self.revive_request(connection)?;
+        self.revival.choices.insert(lost, aircraft);
+        self.peers
+            .get_mut(&connection)
+            .ok_or("No player.")?
+            .lobby
+            .loadout = loadout;
+        Ok(())
+    }
+
     pub(super) fn revive_request(&mut self, connection: ConnectionId) -> Result<(), String> {
+        if let Some(why) = self.runtime_content_refusal() {
+            return Err(why);
+        }
         if !matches!(self.life, Life::Flying) {
             return Err("The mission is not flying.".into());
         }
@@ -304,6 +381,12 @@ impl Host {
 
     /// Join (Take plane) from the lobby by a player whose plane is lost
     /// counts as flying again: `Some` with the outcome when it is one.
+    pub(super) fn join_empty(&mut self, connection: ConnectionId, seat: SeatId, plane: PlaneId) {
+        self.revival
+            .pending
+            .insert(connection, Pending::Join { seat, plane });
+    }
+
     pub(super) fn revive_join(&mut self, connection: ConnectionId) -> Option<Result<(), String>> {
         if let Some(seat) = self.revival.held.get(&connection).copied() {
             return Some(self.revive_now(connection, seat));
@@ -488,6 +571,25 @@ impl Host {
     /// the step: a held seat whose player has gone is abandoned, and each
     /// revival asked for is made if it still may be.
     pub(super) fn revive_commands(&mut self, tick: u64, commands: &mut Vec<MissionCommand>) {
+        if !self.revival.choices.is_empty() {
+            let mut held = Vec::new();
+            for peer in self
+                .peers
+                .values()
+                .filter(|p| !matches!(p.stage, Stage::Closing { .. }))
+            {
+                held.extend(peer.plane);
+                held.extend(peer.lobby.slot.map(|slot| self.world.lineage_head(slot)));
+                held.extend(
+                    self.revival
+                        .players
+                        .get(&peer.lobby.order)
+                        .and_then(|p| p.lost.map(|(plane, _)| plane)),
+                );
+            }
+            self.revival.choices.retain(|plane, _| held.contains(plane));
+        }
+
         self.revival.making.clear();
         // Held seats whose player left the game: the wreck is the mission's.
         let gone: Vec<(ConnectionId, SeatId)> = self
@@ -515,13 +617,39 @@ impl Host {
                 continue;
             };
             let flying_lost = peer.stage == Stage::Seated;
-            if !(flying_lost
+            if !(matches!(wanted, Pending::Join { .. })
+                || flying_lost
                 || self.revival.held.contains_key(&connection)
                 || self.seatless_lost(connection))
             {
                 continue;
             }
             match wanted {
+                Pending::Join { seat, plane } => {
+                    if let Some(why) = self.refusal(seat, plane, connection) {
+                        self.refuse_revival(connection, why);
+                        continue;
+                    }
+                    let Some(order) = self.order_of(connection) else {
+                        continue;
+                    };
+                    if !self.revival.choices.contains_key(&plane)
+                        && let Some(aircraft) = self.world.aircraft_of(plane)
+                    {
+                        self.revival.choices.insert(plane, aircraft);
+                    }
+                    self.revival_note_lost(order, plane, tick);
+                    let before = self.revival.making.len();
+                    self.make_revival(connection, seat, commands);
+                    if let Some(made) = self.revival.making.get_mut(before) {
+                        made.uses_life = false;
+                    } else {
+                        self.revival
+                            .pending
+                            .insert(connection, Pending::Join { seat, plane });
+                    }
+                    self.revival.players.entry(order).or_default().lost = None;
+                }
                 Pending::Revive { seat } => self.make_revival(connection, seat, commands),
                 Pending::AiSlot { seat, plane } => {
                     if self
@@ -549,6 +677,7 @@ impl Host {
                         seat,
                         new: None,
                         taken: Some(plane),
+                        uses_life: true,
                     });
                 }
             }
@@ -591,35 +720,60 @@ impl Host {
             .seat(seat)
             .is_some_and(|s| s.plane.is_some());
         let lost = self.lost_plane(connection, seat);
-        let made = match (holds, lost) {
-            (false, Some(lost)) => self
-                .world
-                .revival_plane_from(lost, &spawn)
-                .map(|new| (new, Some(lost))),
-            _ => self
-                .world
-                .revival_plane(seat, &spawn)
-                .map(|new| (new, None)),
+        let selection = lost.and_then(|old| {
+            self.revival
+                .choices
+                .get(&old)
+                .map(|aircraft| (old, *aircraft))
+        });
+        let made = if let Some((old, aircraft)) = selection {
+            self.world
+                .replacement_plane(old, aircraft, &spawn)
+                .map(|new| (new, Some(old)))
+        } else {
+            match (holds, lost) {
+                (false, Some(lost)) => self
+                    .world
+                    .revival_plane_from(lost, &spawn)
+                    .map(|new| (new, Some(lost))),
+                _ => self
+                    .world
+                    .revival_plane(seat, &spawn)
+                    .map(|new| (new, None)),
+            }
         };
         match made {
             Ok((new, from)) => {
-                commands.push(match from {
-                    Some(plane) => MissionCommand::ReviveLost {
+                commands.push(if let Some((old, _)) = selection {
+                    MissionCommand::ReplacePlane {
                         seat,
-                        plane,
-                        spawn: Box::new(spawn),
-                    },
-                    None => MissionCommand::Revive {
-                        seat,
-                        spawn: Box::new(spawn),
-                    },
+                        old,
+                        aircraft: new.aircraft,
+                        spawn: Box::new(new.spawn.clone()),
+                    }
+                } else {
+                    match from {
+                        Some(plane) => MissionCommand::ReviveLost {
+                            seat,
+                            plane,
+                            spawn: Box::new(spawn),
+                        },
+                        None => MissionCommand::Revive {
+                            seat,
+                            spawn: Box::new(spawn),
+                        },
+                    }
                 });
+                if let Some((old, _)) = selection {
+                    self.revival.choices.remove(&old);
+                }
                 self.start_making(connection, seat);
                 self.revival.making.push(Made {
                     connection,
                     seat,
                     new: Some(new),
                     taken: None,
+                    uses_life: true,
                 });
             }
             Err(error) => self.refuse_revival(connection, error.to_string()),
@@ -632,19 +786,16 @@ impl Host {
     fn revival_spawn(&mut self, connection: ConnectionId, seat: SeatId) -> Option<Spawn> {
         let lost = self.lost_plane(connection, seat)?;
         let side = self.world.roster.plane(lost)?.slot.wing.side;
-        let aircraft = aircraft_of(&self.world, lost)?;
-        let chosen = self.peers.get(&connection).and_then(|peer| {
-            let slot = peer.lobby.slot?;
-            let slot_aircraft = self
-                .spec
-                .open_planes()
-                .into_iter()
-                .find(|p| p.id == slot.0)?
-                .aircraft;
-            (slot_aircraft == aircraft)
-                .then(|| peer.lobby.loadout.clone())
-                .flatten()
-        });
+        let aircraft = self
+            .revival
+            .choices
+            .get(&lost)
+            .copied()
+            .or_else(|| self.world.aircraft_of(lost))?;
+        let chosen = self
+            .peers
+            .get(&connection)
+            .and_then(|peer| peer.lobby.loadout.clone());
         let start = self.revival.starts[side_index(side)]
             .or_else(|| self.world.side_mean(side))
             .unwrap_or([0., 0., 0.]);
@@ -652,15 +803,35 @@ impl Host {
         let weapons = self.settings.revive_weapons();
         let spawn = self
             .world
-            .revival_spawn_from(lost, start, distance, chosen.as_ref(), weapons)
+            .revival_spawn_excluding(
+                Some(lost),
+                aircraft,
+                start,
+                distance,
+                chosen.as_ref(),
+                weapons,
+            )
             // A lobby loadout that no longer fits gives way to the standard
             // load.
             .or_else(|_| {
-                self.world
-                    .revival_spawn_from(lost, start, distance, None, weapons)
+                self.world.revival_spawn_excluding(
+                    Some(lost),
+                    aircraft,
+                    start,
+                    distance,
+                    None,
+                    weapons,
+                )
             });
         match spawn {
-            Ok(spawn) => Some(spawn),
+            Ok(mut spawn) => {
+                if self.revival.choices.contains_key(&lost)
+                    && let Some(chosen) = chosen
+                {
+                    spawn.loadout.fuel_lbs = chosen.fuel_lbs;
+                }
+                Some(spawn)
+            }
             Err(error) => {
                 self.refuse_revival(connection, error.to_string());
                 None
@@ -754,7 +925,7 @@ impl Host {
             self.revival.held.remove(&made.connection);
             if let Some(order) = self.order_of(made.connection) {
                 let player = self.revival.players.entry(order).or_default();
-                player.used += 1;
+                player.used += u32::from(made.uses_life);
                 player.lost = None;
             }
             self.roster_dirty = true;
@@ -940,12 +1111,22 @@ impl Host {
             };
             // The built flight includes loads inherited from its human lead.
             // Keep the accepted start load, not the AI's spent stores.
+            let default = self
+                .spec
+                .open_planes()
+                .into_iter()
+                .find(|p| p.id == root.0)
+                .and_then(|p| {
+                    let wing = tore_world::mission::MissionSpec::wing_index(p.wing);
+                    self.spec.player_choice[wing].then_some(self.spec.wings[wing].aircraft)
+                });
             let chosen = self
                 .world
                 .setup
                 .ai
                 .as_ref()
                 .and_then(|ai| ai.loadouts.get(&root.0))
+                .filter(|load| default.is_none_or(|aircraft| load.aircraft == aircraft))
                 .map(tore_world::mission::LoadoutSpec::of);
             let spawn = self
                 .world

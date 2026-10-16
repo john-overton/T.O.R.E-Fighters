@@ -15,7 +15,9 @@ use tore_sim::ai::launch::{Side, WingId};
 use tore_sim::cheats::{Cheats, Damage};
 
 /// The states a snapshot can show.
-pub const STATES: [&str; 45] = [
+pub const STATES: [&str; 47] = [
+    "lobby-choice",
+    "lobby-ai-off",
     "lobby-king",
     "lobby-joiner",
     "lobby-unable",
@@ -127,6 +129,7 @@ pub(crate) fn slots(holders: &[(u32, u8)]) -> Vec<LobbySlot> {
             (1, (plane - 4) as u8, AircraftId::F18)
         };
         slots.push(LobbySlot {
+            choice: None,
             plane,
             wing: WingId {
                 side: Side::Friendly,
@@ -196,6 +199,7 @@ pub(crate) fn crowd(you: u8, slot_count: u32, player_count: u8, pvp: bool) -> Lo
                 (false, n) => (Side::Friendly, n as u8),
             };
             LobbySlot {
+                choice: None,
                 plane,
                 wing: WingId { side, index },
                 member: (plane % 5) as u8,
@@ -293,6 +297,18 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
     let mut lobby = sample(1);
     let mut hosting = true;
     match state {
+        "lobby-choice" | "lobby-ai-off" => {
+            for slot in &mut lobby.slots {
+                slot.choice = Some(AircraftId::F18);
+            }
+            if state == "lobby-ai-off" {
+                lobby
+                    .settings
+                    .retain(|s| s.0 != tore_session::settings::number::AI);
+                lobby.settings.push((tore_session::settings::number::AI, 0));
+            }
+        }
+
         "lobby-joiner" => {
             lobby = sample(2);
             hosting = false;

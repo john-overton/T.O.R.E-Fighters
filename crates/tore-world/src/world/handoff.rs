@@ -90,6 +90,7 @@ impl World {
             .combat
             .dummy_types()
             .iter()
+            .chain(self.choices.types.iter())
             .find(|kind| kind.profile.id == aircraft)
             .cloned()
             .ok_or_else(|| format!("the mission holds no aircraft type for plane {}", plane.0))?;

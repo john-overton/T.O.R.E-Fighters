@@ -5834,6 +5834,7 @@ impl State {
                             is_aircraft_gun(w),
                             p.owner,
                             w.flags,
+                            true,
                         ));
                         impacts.push((
                             position,
@@ -6152,7 +6153,7 @@ impl State {
         if self.cheats.invulnerable() {
             ownship_hits.clear();
         }
-        for (n, amount, section, direct_gun, owner, weapon_flags) in ownship_hits {
+        for (n, amount, section, direct_gun, owner, weapon_flags, recorded) in ownship_hits {
             let own = &mut ships[rows[n].index];
             own.localized_damage
                 .record(section, amount, own.config.damage_capacity);
@@ -6187,7 +6188,11 @@ impl State {
                         category: own.config.target_category,
                         aircraft: true,
                     };
-                    self.ledger.damaged(credit);
+                    if recorded {
+                        self.ledger.damaged(credit);
+                    } else {
+                        self.ledger.blasted(credit);
+                    }
                     if own.hp == 0 {
                         self.ledger.kill(credit);
                     }
@@ -6528,15 +6533,15 @@ pub fn motor_powered(w: &Weapon, p: &Projectile, now: u16) -> bool {
     phase == super::EnginePhase::Powered
 }
 
-/// Whether `w` is a gun: an aircraft's gun record or a surface gun of the AAA
-/// tuning table. Gun rounds are hit-tested against the aircraft volume, spread
-/// by the gun dispersion and never home.
 /// The SUU-16 gun pod: an external store that fires a gun, hung under the
 /// aircraft and drawn there, its hardware mass kept until it is removed
 /// (the F-4J's default station, the F-4B's centreline option).
 pub fn is_gun_pod(w: &Weapon) -> bool {
     w.source == "SUU16.JT"
 }
+/// Whether `w` is a gun: an aircraft's gun record or a surface gun of the AAA
+/// tuning table. Gun rounds are hit-tested against the aircraft volume, spread
+/// by the gun dispersion and never home.
 pub fn is_gun(w: &Weapon) -> bool {
     is_aircraft_gun(w) || super::surface_guns::is_surface_gun(&w.source)
 }
@@ -6909,6 +6914,78 @@ mod tests {
             load.cheat = true;
             assert_eq!(load.capacity(0, &weapon), count);
         }
+    }
+
+    #[test]
+    fn the_f16c_wingtip_pair_takes_the_amraam_and_nothing_else_changes() {
+        use crate::combat::loadout::Loadout;
+        use tore_formats::aircraft::Hardpoint;
+        let tip = Hardpoint {
+            location: 5,
+            flags: 0x85,
+            position: [54, 2, -14],
+            store: None,
+            count: 2,
+            weight_class: 4,
+        };
+        let mut config = fixture(false).own().configuration().clone();
+        let mut weapon = config.stations[0].weapon.clone();
+        config.stations.truncate(1);
+        config.hardpoint_slots = vec![None; 10];
+        config.hardpoint_slots[8] = Some(0);
+        config.tanks.clear();
+        let mut load = Loadout {
+            aircraft: AircraftId::F16C,
+            configuration: config,
+            quantities: vec![0],
+            fuel_lbs: 0.,
+            internal_capacity_lbs: 5000.,
+            empty_lbs: 10000.,
+            maximum_lbs: 50000.,
+            hardpoints: vec![tip],
+            tank_hardpoints: vec![],
+            cheat: false,
+        };
+        let set = |w: &mut Weapon, source: &str, flags, signature, weight| {
+            w.source = source.into();
+            w.flags = flags;
+            w.seeker.signature = signature;
+            w.weight = weight;
+            w.burst.projectiles_in_pod = 1;
+        };
+        // The AIM-120 (a radar missile of 345 lb) gets the row's own count,
+        // one a tip, although the infrared-only mask and 400 lb class refuse it.
+        set(&mut weapon, "AIM120.JT", 0x1204f, 3, 345);
+        assert_eq!(load.capacity(0, &weapon), 2);
+        // Every other store keeps the source row's rule: the Sidewinder two,
+        // the heavier Archer one, radar and bomb stores none.
+        set(&mut weapon, "AIM9M.JT", 0x1204f, 2, 190);
+        assert_eq!(load.capacity(0, &weapon), 2);
+        set(&mut weapon, "AA11.JT", 0x1204f, 2, 230);
+        assert_eq!(load.capacity(0, &weapon), 1);
+        set(&mut weapon, "AIM7.JT", 0x1234f, 3, 505);
+        assert_eq!(load.capacity(0, &weapon), 0);
+        set(&mut weapon, "MK82.JT", 0x22012, 0, 500);
+        assert_eq!(load.capacity(0, &weapon), 0);
+        // Only the reviewed, appended F-16C row 8: an F-16C record without
+        // the appended row (nine rows), another row, or another aircraft
+        // gets the plain mask rule.
+        set(&mut weapon, "AIM120.JT", 0x1204f, 3, 345);
+        load.configuration.hardpoint_slots.truncate(9);
+        assert_eq!(load.capacity(0, &weapon), 0);
+        load.configuration.hardpoint_slots.push(None);
+        load.configuration.hardpoint_slots.swap(7, 8);
+        assert_eq!(load.capacity(0, &weapon), 0);
+        load.configuration.hardpoint_slots.swap(7, 8);
+        load.aircraft = AircraftId::F18;
+        assert_eq!(load.capacity(0, &weapon), 0);
+        load.aircraft = AircraftId::F16C;
+        assert_eq!(load.capacity(0, &weapon), 2);
+        // Cheat loading is unchanged: the row's raw capacity.
+        load.cheat = true;
+        assert_eq!(load.capacity(0, &weapon), 2);
+        set(&mut weapon, "AIM54C.JT", 0x1206f, 3, 975);
+        assert_eq!(load.capacity(0, &weapon), 2);
     }
 
     #[test]

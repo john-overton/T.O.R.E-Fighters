@@ -242,6 +242,25 @@ impl CombatView {
         Ok(kind)
     }
 
+    /// Adds presentation resources for an aircraft introduced by a live revival.
+    pub fn prepare_spawn(
+        &mut self,
+        world: &crate::world::World,
+        new: &tore_session::wire::messages::Spawned,
+        data: &BTreeMap<String, Vec<u8>>,
+    ) -> AppResult<()> {
+        if !self
+            .models
+            .iter()
+            .any(|model| model.profile.id == new.aircraft)
+        {
+            self.load_model(new.aircraft, data)?;
+        }
+        let (config, _) = world.loadout_configuration(new.aircraft, &new.spawn.loadout)?;
+        self.art.add_weapon_shapes(&config, data);
+        Ok(())
+    }
+
     /// Loads the weapon shapes of the other aircraft combat gained since the
     /// last call.
     fn load_weapon_shapes(&mut self, combat: &Combat, data: &BTreeMap<String, Vec<u8>>) {

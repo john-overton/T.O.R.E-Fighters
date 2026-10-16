@@ -21,6 +21,17 @@ pub trait ResourceSource {
     /// The bytes of one resource, if the import has it.
     fn get(&self, name: &str) -> Option<&Vec<u8>>;
 
+    /// Optional runtime choices, excluded from the current mission manifest.
+    /// A host checks selected aircraft and stores against the content catalogue.
+    fn optional(&self, name: &str) -> Option<&Vec<u8>> {
+        self.get(name)
+    }
+
+    /// Optional stores for in-flight selection, without recording manifest reads.
+    fn optional_stores(&self) -> BTreeMap<String, Vec<u8>> {
+        BTreeMap::new()
+    }
+
     /// The theater catalog: each base theater's name and every `~` layout
     /// variant, as `tore_formats::theater::map_catalog` lists them. It parses
     /// every theater grid; a build that needs one theater's label asks
@@ -62,6 +73,17 @@ fn label_in(map: &BTreeMap<String, Vec<u8>>, code: &str) -> tore_formats::Result
 }
 
 impl ResourceSource for BTreeMap<String, Vec<u8>> {
+    fn optional_stores(&self) -> BTreeMap<String, Vec<u8>> {
+        self.iter()
+            .filter(|(name, _)| {
+                [".JT", ".GAS", ".SEE"]
+                    .iter()
+                    .any(|ext| name.ends_with(ext))
+            })
+            .map(|(name, bytes)| (name.clone(), bytes.clone()))
+            .collect()
+    }
+
     fn get(&self, name: &str) -> Option<&Vec<u8>> {
         BTreeMap::get(self, name)
     }
@@ -122,6 +144,14 @@ impl<'a> ResourceReads<'a> {
 }
 
 impl ResourceSource for ResourceReads<'_> {
+    fn optional_stores(&self) -> BTreeMap<String, Vec<u8>> {
+        self.map.optional_stores()
+    }
+
+    fn optional(&self, name: &str) -> Option<&Vec<u8>> {
+        self.map.get(name)
+    }
+
     fn get(&self, name: &str) -> Option<&Vec<u8>> {
         self.note(name);
         self.map.get(name)

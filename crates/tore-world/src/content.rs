@@ -237,13 +237,16 @@ fn weapon_items(resources: &BTreeMap<String, Vec<u8>>) -> Vec<Item> {
     let offered = |name: &str| {
         (name.ends_with(".JT")
             && (!name.starts_with('~') || tore_sim::combat::loadout::novelty(name)))
+            || name.ends_with(".GAS")
             || tore_sim::combat::sight::DESIGNATOR_PODS.contains(&name)
     };
     resources
         .iter()
         .filter(|(name, _)| offered(name))
         .filter(|(name, bytes)| {
-            if name.ends_with(".SEE") {
+            if name.ends_with(".GAS") {
+                tore_sim::combat::live::TankStore::parse(name, bytes).is_ok()
+            } else if name.ends_with(".SEE") {
                 tore_sim::combat::sight::DesignatorStore::parse(name, bytes).is_ok()
             } else {
                 Weapon::parse(name, bytes).is_ok()

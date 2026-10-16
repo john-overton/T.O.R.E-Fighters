@@ -415,6 +415,22 @@ mod tests {
         )
     }
     #[test]
+    fn ai_off_is_a_mission_override_and_does_not_leak_to_the_next_entry() {
+        let rotation = parse(
+            "tore-rotation 1\nmission choice.txt\nai off\nmission fixed.txt",
+            "ai on",
+        )
+        .unwrap();
+        assert!(mission_setting("ai"));
+        for (entry, expected) in rotation.entries.iter().zip([false, true]) {
+            let mut settings =
+                tore_session::settings::Store::defaults(tore_session::settings::Mode::Coop);
+            settings.apply(&entry.config.settings).unwrap();
+            assert_eq!(settings.ai(), expected);
+        }
+    }
+
+    #[test]
     fn overrides_layer_on_server_values_and_validate_effective_mode() {
         let r = parse("tore-rotation 1\nmission a.txt\n kill-limit 10\n time-limit 20\nmission a.txt\nfight free-for-all", "mode pvp\ntime-limit 5\nfriendly-fire off").unwrap();
         assert_eq!(r.entries[0].config.mission, Path::new("/config/maps/a.txt"));
@@ -549,7 +565,8 @@ mod tests {
     }
     #[test]
     fn docs_example_parses_verbatim() {
-        let docs = include_str!("../../../docs/DEDICATED-SERVER.md");
+        // A Windows checkout may give the guide CRLF line ends.
+        let docs = include_str!("../../../docs/DEDICATED-SERVER.md").replace("\r\n", "\n");
         let text = docs
             .split("```text\ntore-rotation 1\n")
             .nth(1)

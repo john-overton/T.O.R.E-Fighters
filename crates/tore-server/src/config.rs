@@ -372,7 +372,7 @@ impl Config {
 
 /// Every setting's name, in the guide's order: the server's own, then the
 /// King's (stage F phase 2) by their registry names.
-pub const SETTINGS: [&str; 39] = [
+pub const SETTINGS: [&str; 40] = [
     "name",
     "port",
     "address",
@@ -412,6 +412,7 @@ pub const SETTINGS: [&str; 39] = [
     "observer-delay",
     "idle-ai",
     "ai-respawn",
+    "ai",
 ];
 
 /// How many of the registry's units one of the file's is: `revive-delay` and
@@ -913,6 +914,7 @@ mod tests {
             "observer-delay 0",
             "idle-ai 10",
             "ai-respawn off",
+            "ai off",
         ];
         assert_eq!(samples.len(), SETTINGS.len());
         for (sample, name) in samples.iter().zip(SETTINGS) {

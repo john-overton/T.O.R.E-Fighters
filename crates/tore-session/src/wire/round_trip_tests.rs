@@ -527,6 +527,7 @@ fn tank_loadout_messages_preserve_explicit_empty_and_source_defaults() {
         }]),
     ] {
         let message = Message::Loadout(Box::new(Loadout {
+            aircraft: None,
             mission: 7,
             plane: 2,
             loadout: Some(LoadoutSpec {

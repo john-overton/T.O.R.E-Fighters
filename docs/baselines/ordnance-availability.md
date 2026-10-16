@@ -95,9 +95,16 @@ refused without Cheat loading). For each new row it loads
 the full set, checks capacity, tank and weapon exclusion, fuel feed, Shift+K
 and selected-store jettison, saves, and an old saved load with the row empty.
 
+The [F-16C wingtip AIM-120](../spec/stores-on-pylons.md#the-f-16c-wingtip-aim-120)
+(John, 2026-10-16) adds one weapon placement, so the audit now pins 3,402
+(the AIM-120 on the F-16C tip row, two a load; nothing else moves: tanks, records and
+Cheat-only placements are unchanged). The audit also checks that every other
+supported weapon keeps the tip row's source rule, loads two AIM-120s, saves and
+restores them, and fires one from each tip's edge with guidance.
+
 The [Phantoms' gun pod of 2026-10-16](../spec/stores-on-pylons.md#the-phantoms-gun-pod-2026-10-16)
 lets the F-4B's centreline row take the SUU-16 in place of its stores. The audit
-now pins 3,402 weapon placements (+1: the pod on `F4B.PT` row 3, one a station,
+now pins 3,403 weapon placements (+1 on the F-16C wingtip's 3,402: the pod on `F4B.PT` row 3, one a station,
 the row's own capacity of four capped at one); every other count is unchanged,
 the Cheat catalog still lists the pod only for an aircraft that has one (the
 F-4B and F-4J), and the pod is refused on every other station. A dedicated step

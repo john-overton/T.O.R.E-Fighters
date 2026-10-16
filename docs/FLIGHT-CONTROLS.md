@@ -255,6 +255,11 @@ thought,telemetry,guidance,comms,menu` also opens those panels, for captures.
 
 Working menu actions include views, instrument windows, time/pause, cockpit, pitch ladder, weapon diagnostics, debug panels, HUD brightness, ending flight and exiting. Sound currently toggles effects; the original volume mixer is not implemented. Working cheats are listed under [cheats](#cheats). Other preferences, cheats, multiplayer and position commands are navigable placeholders with feedback. The bottom Resume / Restart / Keyboard Shortcuts actions are documented development additions. Menus do not silently enable unsupported cheats or alter the aircraft when an unrelated modifier shortcut is pressed.
 
+With multiplayer `respawn revive`, the running-flight aircraft/loadout selector
+uses this same menu widget and navigation. It does not pause the mission. Done
+stages a draft for the normal Enter-to-revive request; Escape discards menu edits.
+The timer remains visible. See [multiplayer revival](MULTIPLAYER.md#ai-aircraft-and-player-choice).
+
 ## HUD and presentation limits
 
 The HUD uses imported `HUD11.FNT`; instrument/menu text uses `WIN11.FNT`. It shows wrapped heading, true airspeed in knots, MSL altitude, G, throttle, afterburner and actual gear/flap/brake/hook state. AGL and vertical speed are reserved for ILS approaches. The enlarged pitch ladder uses five-degree steps, dashed below zero, and a literal degree scale (equal spacing, about 7.26 pixels per degree at unit zoom, no compression or growth) whose spacing and motion follow actual pitch and bank, including readable +/-90-degree marks. The zero bar is the ladder's zero rung on that same scale and meets level-flight velocity to within a few pixels. The flight-path marker comes from current kinematic vertical speed and airspeed. No target, weapon solution or navigation waypoint is invented.

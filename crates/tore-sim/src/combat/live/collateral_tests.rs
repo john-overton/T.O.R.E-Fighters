@@ -529,6 +529,9 @@ fn an_aircraft_missile_splash_reaches_the_player() {
             .any(|e| matches!(e, Event::OwnshipDamaged { aircraft: 0, .. }))
     );
     assert!(s.own().hp < before);
+    // The blast is no hit on the player, so it makes the shooter no last
+    // attacker: a later loss of the player credits nobody.
+    assert_eq!(s.ledger.credit(0), None);
 }
 
 // ---- Launch grace (John, 2026-10-13) ----------------------------------
@@ -893,4 +896,118 @@ fn howitzer_mixed_group_splash_applies_for_player_and_ai_shells() {
             }
         }
     }
+}
+
+// ---- Who counts as the last attacker (nr-collkill, 2026-10-16) ---------
+
+/// Runs `burst` over the scene's targets, as the step does, with no ownships.
+fn burst_over(s: &mut State, burst: &Burst) {
+    let (mut events, mut strikes, mut hits, mut impacts, mut scored) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    s.apply_burst(
+        burst,
+        &[],
+        false,
+        &|_, _| false,
+        Outputs {
+            events: &mut events,
+            strikes: &mut strikes,
+            ownship_hits: &mut hits,
+            impacts: &mut impacts,
+            scored: &mut scored,
+        },
+    );
+}
+/// Puts aircraft `a` and `b` nose to nose on the same spot and steps a tick.
+fn collide(s: &mut State, a: u32, b: u32) -> Vec<Event> {
+    for (id, z, v) in [(a, 1000., 600.), (b, 1035., -600.)] {
+        let t = s.targets.iter_mut().find(|t| t.id == id).unwrap();
+        t.position = [0., 8000., z];
+        t.velocity = [0., 0., v];
+    }
+    run_from(s, 1, far())
+}
+
+#[test]
+fn a_bystander_nicked_by_splash_is_no_ones_kill_when_it_later_collides() {
+    // The Sparrow strikes aircraft 1 and its blast damages the wingman 2.
+    let mut s = scene();
+    sparrow_at_a_formation(&mut s, BLUE);
+    assert!(hp(&s, 2) < 1000, "the wingman was damaged by the blast");
+    let shooter = Kill {
+        owner: SHOOTER,
+        victim: 1,
+        category: 0x80,
+        aircraft: true,
+    };
+    assert_eq!(s.ledger.credit(1), Some(shooter), "the struck aircraft");
+    assert_eq!(s.ledger.credit(2), None, "the bystander is no recorded hit");
+    // The two then fly into each other: both are destroyed, only the one the
+    // shot struck is credited, once.
+    let events = collide(&mut s, 1, 2);
+    assert!(events.contains(&Event::Destroyed(1)) && events.contains(&Event::Destroyed(2)));
+    assert_eq!(hp(&s, 1), 0);
+    assert_eq!(hp(&s, 2), 0);
+    assert_eq!(s.ledger.credit(1), Some(shooter));
+    assert_eq!(s.ledger.credit(2), None);
+    assert!(
+        s.ledger.kills().is_empty(),
+        "a collision is no recorded kill"
+    );
+}
+
+#[test]
+fn a_collision_of_two_aircraft_nobody_hit_credits_nobody() {
+    let mut s = scene();
+    s.targets.push(aircraft(1, [0., 8000., 0.], BLUE));
+    s.targets.push(aircraft(2, [0., 8000., 0.], BLUE));
+    let events = collide(&mut s, 1, 2);
+    assert!(events.contains(&Event::Destroyed(1)) && events.contains(&Event::Destroyed(2)));
+    assert_eq!((hp(&s, 1), hp(&s, 2)), (0, 0));
+    assert_eq!((s.ledger.credit(1), s.ledger.credit(2)), (None, None));
+}
+
+#[test]
+fn a_burst_that_is_the_shots_own_outcome_makes_its_shooter_the_last_attacker() {
+    // A flak shell that struck nothing resolves as a hit if its burst
+    // damages anyone, so each aircraft it damaged has a hit behind it.
+    let w = sparrow();
+    let mut s = scene();
+    s.targets.push(aircraft(SHOOTER, [0., 5000., -3000.], RED));
+    s.targets.push(aircraft(1, [0., 5000., 100.], BLUE));
+    let shell = round(70, SHOOTER, &w, [0., 5000., 0.], [0., 5000., 1.]);
+    s.ledger.launch(
+        70,
+        SHOOTER,
+        Some(1),
+        crate::combat::ledger::ShotKind::AirToAir,
+    );
+    let burst = Burst::new(
+        &shell,
+        &w,
+        Shooter {
+            side: RED,
+            surface: None,
+            ownship: false,
+        },
+        [0., 5000., 0.],
+        Detonation::Air,
+        None,
+        true,
+    );
+    burst_over(&mut s, &burst);
+    assert!(hp(&s, 1) < 1000);
+    assert_eq!(
+        s.ledger.credit(1),
+        Some(Kill {
+            owner: SHOOTER,
+            victim: 1,
+            category: 0x80,
+            aircraft: true,
+        })
+    );
+    let tally = s
+        .ledger
+        .total(|k| k.owner == SHOOTER && k.kind == crate::combat::ledger::ShotKind::AirToAir);
+    assert_eq!((tally.launched, tally.hit), (1, 1));
 }

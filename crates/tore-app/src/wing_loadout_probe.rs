@@ -95,6 +95,24 @@ pub fn run(assets: &Assets, out: &Path) -> AppResult<()> {
         verify(&world, &with_tank)?;
         println!("qmc wing loadout: one tank matches");
     }
+    // The wingtip AIM-120 (one a tip) is an accepted normal load: the flight
+    // leader's wingmen carry it, at start and after a restart, and the
+    // multiplayer lobby's check takes it.
+    let mut tips = load.clone();
+    let tip = tips.configuration.hardpoint_slots[tore_formats::aircraft::stations::F16_TIP]
+        .ok_or("no wingtip station")?;
+    tips.select(tip, Weapon::parse("AIM120.JT", &data["AIM120.JT"])?)?;
+    if tips.quantities[tip] != 2 {
+        return Err("wingtip AIM-120 did not load one a tip".into());
+    }
+    tips.validate()?;
+    spec.loadout = Some(LoadoutSpec::of(&tips));
+    let mut world = World::new(&spec, data, Seating::SinglePlayer)?;
+    verify(&world, &tips)?;
+    world.restart(&kind, data)?;
+    verify(&world, &tips)?;
+    LoadoutSpec::of(&tips).check_for_plane(&kind.profile, data, false)?;
+    println!("qmc wing loadout: wingtip AIM-120 matches, restarts and passes the lobby check");
     let mut cheat = load.clone();
     cheat.cheat = true;
     let novelty = Weapon::parse("~BLDR.JT", data.get("~BLDR.JT").ok_or("missing Boulder")?)?;

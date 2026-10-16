@@ -125,6 +125,11 @@ pub struct Ledger {
     /// The last shooter to damage each target, credited if it is later lost
     /// another way, such as its pilot ejecting or the wreck crashing.
     last_hit: BTreeMap<u32, Kill>,
+    /// The last shooter whose blast damaged each aircraft that was only a
+    /// bystander of the shot (the shot's recorded hit was elsewhere). It names
+    /// the damage in a recording (see [`Ledger::attacker`]) and credits
+    /// nothing: no hit in the tally stands behind it.
+    blasted: BTreeMap<u32, Kill>,
     /// Aircraft lost with no shooter to blame (out of bounds): nobody is
     /// credited with them, whatever hit them earlier.
     uncredited: std::collections::BTreeSet<u32>,
@@ -220,7 +225,18 @@ impl Ledger {
     /// so the last attacker always has a recorded hit behind it.
     pub fn damaged(&mut self, hit: Kill) {
         if !self.uncredited.contains(&hit.victim) {
+            self.blasted.remove(&hit.victim);
             self.last_hit.insert(hit.victim, hit);
+        }
+    }
+    /// Remembers that `hit.owner`'s shot damaged the aircraft `hit.victim`
+    /// only by its blast, as a bystander of a shot whose recorded hit was
+    /// elsewhere. No hit in the tally stands behind it, so it makes no one the
+    /// victim's last attacker and credits no later loss (docs/spec/debrief.md,
+    /// "One record"); it only lets a recording name who hurt the aircraft.
+    pub fn blasted(&mut self, hit: Kill) {
+        if !self.uncredited.contains(&hit.victim) {
+            self.blasted.insert(hit.victim, hit);
         }
     }
     /// `victim` was lost for a reason no shooter caused (it flew out of
@@ -228,6 +244,7 @@ impl Ledger {
     pub fn lose_without_credit(&mut self, victim: u32) {
         self.uncredited.insert(victim);
         self.last_hit.remove(&victim);
+        self.blasted.remove(&victim);
         self.kills.retain(|k| k.victim != victim);
     }
     /// The kill a lost aircraft is credited with: its recorded kill, else the
@@ -239,6 +256,21 @@ impl Ledger {
         self.kills
             .iter()
             .find(|k| k.victim == victim)
+            .or_else(|| self.last_hit.get(&victim))
+            .copied()
+    }
+    /// Whoever most recently damaged `victim`, for naming the damage in a
+    /// recording: its recorded kill, else the shooter whose blast last
+    /// reached it, else its credited last attacker. Unlike [`Ledger::credit`]
+    /// it includes a bystander's blast damage, which credits no loss.
+    pub fn attacker(&self, victim: u32) -> Option<Kill> {
+        if self.uncredited.contains(&victim) {
+            return None;
+        }
+        self.kills
+            .iter()
+            .find(|k| k.victim == victim)
+            .or_else(|| self.blasted.get(&victim))
             .or_else(|| self.last_hit.get(&victim))
             .copied()
     }
@@ -274,6 +306,40 @@ impl Ledger {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn kill_of(owner: u32, victim: u32) -> Kill {
+        Kill {
+            owner,
+            victim,
+            category: 0x80,
+            aircraft: true,
+        }
+    }
+    #[test]
+    fn a_bystanders_blast_names_the_damage_but_credits_no_loss() {
+        let mut ledger = Ledger::default();
+        ledger.blasted(kill_of(3, 8));
+        assert_eq!(ledger.credit(8), None, "no hit stands behind a blast");
+        assert_eq!(ledger.attacker(8), Some(kill_of(3, 8)));
+        // A recorded hit before the blast stays the credited last attacker,
+        // while the blast names the latest damage.
+        ledger.damaged(kill_of(2, 8));
+        assert_eq!(ledger.credit(8), Some(kill_of(2, 8)));
+        assert_eq!(ledger.attacker(8), Some(kill_of(2, 8)), "the hit is newer");
+        ledger.blasted(kill_of(3, 8));
+        assert_eq!(ledger.credit(8), Some(kill_of(2, 8)));
+        assert_eq!(
+            ledger.attacker(8),
+            Some(kill_of(3, 8)),
+            "the blast is newer"
+        );
+        // A recorded kill outranks both, and a loss with no shooter drops all.
+        ledger.kill(kill_of(4, 8));
+        assert_eq!(ledger.attacker(8), Some(kill_of(4, 8)));
+        ledger.blasted(kill_of(3, 9));
+        ledger.lose_without_credit(9);
+        ledger.blasted(kill_of(3, 9));
+        assert_eq!((ledger.credit(9), ledger.attacker(9)), (None, None));
+    }
     #[test]
     fn launches_resolve_once_and_spoofed_missiles_are_not_also_failed() {
         let mut ledger = Ledger::default();

@@ -318,6 +318,9 @@ impl World {
     /// never models, so a fresh world gives the same table.
     fn models(&self) -> Result<Models, CheckpointError> {
         let mut table = Models::default();
+        for kind in &self.choices.types {
+            table.insert(kind.profile.id, kind.model().clone())?;
+        }
         for aircraft in self.combat.dummy_types() {
             table.insert(aircraft.profile.id, aircraft.model().clone())?;
         }
@@ -419,6 +422,7 @@ impl World {
         let World {
             // Mission setup: the fresh world has it.
             setup: _,
+            choices: _,
             // Mission setup but for the weather clock, the weather section.
             terrain,
             roster,

@@ -425,16 +425,22 @@ hold the byte layouts and the corrections to the survey.
 copies a human's accepted load to the unoccupied AI slots in that human's wing.
 Other wings keep their loads. A slot occupied by another human keeps that
 human's own load; an explicit mission-file plane load is never replaced for
-an AI slot. One aircraft type is selected per wing; a mismatched member keeps
-its type's default. Agent decision for a wing containing several humans: the
+an AI slot. Fixed wings select one aircraft type; a mismatched member keeps
+its type's default. [Player Choice](quick-mission-menu.md#multiplayer-player-choice)
+adds per-player types. Agent decision for a wing containing several humans: the
 human in the lowest member slot supplies the AI members' load. The lobby's
 slot, side, lead ownership and rest-of-flight rules are otherwise unchanged.
 
 The existing FlightLoadouts message carries the expanded per-plane choices to
 clients. The mission text sent to late joiners and the standby flight includes
 them too. AI respawn reads its original accepted load from the built mission,
-not its spent stores or the pre-flight lobby spec. Existing revival rules still
-restore full internal fuel and apply the King's revival weapons restriction.
+not its spent stores or the pre-flight lobby spec. A departed Choice slot returns
+to its authored AI default; the original accepted load is kept when it belongs
+to that type, otherwise the type's standard load is used. Unedited revivals restore
+full internal fuel. The in-flight selection requested on 2026-10-16 keeps explicit
+fuel choices instead (agent implementation decision). Both paths apply the King's
+revival weapons restriction. The `ai-slot` rule still takes an existing aircraft,
+without changing its type or choosing new stores.
 A new round rebuilds from the lobby and applies the humans' current choices.
 No message layout changes; QMC mission text gains `share-flight-loadout yes`.
 Older mission parsers do not understand that key, so the lead must account for

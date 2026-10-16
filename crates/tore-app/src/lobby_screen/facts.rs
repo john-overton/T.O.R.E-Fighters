@@ -71,6 +71,7 @@ pub struct Facts {
     pub waiting: Vec<String>,
     /// How many players hold a slot.
     pub holders: usize,
+    pub ai_waiting: usize,
     /// The game is PvP, so the side boxes show and slots wear their side.
     pub pvp: bool,
     /// How players choose their side (always free outside PvP).
@@ -98,6 +99,7 @@ impl Facts {
                 unable: unable.map(str::to_owned),
                 waiting: Vec::new(),
                 holders: 0,
+                ai_waiting: 0,
                 pvp: false,
                 sides: Sides::Free,
                 side: None,
@@ -126,6 +128,21 @@ impl Facts {
                 .map(|p| p.callsign.clone())
                 .collect(),
             holders: holders.len(),
+            ai_waiting: if lobby.settings.iter().any(|s| s.0 == number::AI && s.1 == 0) {
+                lobby
+                    .slots
+                    .iter()
+                    .filter(|s| {
+                        s.lock != Lock::Closed
+                            && !lobby
+                                .players
+                                .iter()
+                                .any(|p| p.slot == Some(s.plane) && p.ready && p.unable.is_none())
+                    })
+                    .count()
+            } else {
+                0
+            },
             pvp: sides::is_pvp(lobby),
             sides: sides::rule(lobby),
             side: me
@@ -136,7 +153,7 @@ impl Facts {
 
     /// The King's Start is accepted now (the host's own rule).
     pub fn all_ready(&self) -> bool {
-        self.holders > 0 && self.waiting.is_empty()
+        self.holders > 0 && self.waiting.is_empty() && self.ai_waiting == 0
     }
 }
 
@@ -318,6 +335,12 @@ pub fn hint(facts: &Facts) -> String {
     if let Some(reason) = &facts.unable {
         return reason.clone();
     }
+    if facts.phase == LobbyPhase::Lobby && facts.ai_waiting > 0 {
+        return format!(
+            "Waiting for {} more ready players: AI is off.",
+            facts.ai_waiting
+        );
+    }
     match facts.phase {
         LobbyPhase::Flying => match (facts.flying, facts.holds, facts.ready) {
             (true, ..) => "You are flying.".into(),
@@ -457,7 +480,13 @@ pub fn slot_rows(lobby: &LobbyState) -> Vec<Row> {
                             u32::from(slot.member) + 1
                         )
                     }),
-                    Cell::Text(slot.aircraft.label().to_owned()),
+                    Cell::Text(match slot.choice {
+                        Some(ai) if slot.holder.is_none() => {
+                            format!("Choice AI: {}", ai.short_label())
+                        }
+                        Some(_) => format!("Choice: {}", slot.aircraft.short_label()),
+                        None => slot.aircraft.label().to_owned(),
+                    }),
                     Cell::Text(slot_holder_text(slot, holder)),
                 ],
             );

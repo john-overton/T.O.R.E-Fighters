@@ -20,7 +20,7 @@ use tore_world::mission::{LoadoutSpec, MissionSpec};
 const AIRCRAFT: usize = 36;
 const RECOVERED_STATIONS: usize = 12;
 const TANK_RECORDS: usize = 9;
-const WEAPON_PLACEMENTS: usize = 3402;
+const WEAPON_PLACEMENTS: usize = 3403;
 const TANK_PLACEMENTS: usize = 175;
 /// Station and novelty-record pairs the Cheat loading accepts and the normal
 /// loading refuses (A2G decision 16).
@@ -284,7 +284,13 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                     weapon.source.as_str(),
                     "AA10.JT" | "R27ER.JT" | "R27T.JT" | "R27ET.JT"
                 );
-                let expected = if r27
+                // The F-16C wingtip pair also takes the AIM-120, one a tip.
+                let tip_amraam = id == AircraftId::F16C
+                    && hardpoint == tore_formats::aircraft::stations::F16_TIP
+                    && weapon.source == "AIM120.JT";
+                let expected = if tip_amraam {
+                    2
+                } else if r27
                     || matches!((id, hardpoint), (AircraftId::F15, 6) | (AircraftId::F22, 8))
                 {
                     rows.iter()
@@ -605,6 +611,9 @@ fn extra_stations(
 ) -> AppResult<()> {
     use tore_sim::{attitude::Basis, combat::live, sensors};
     gun_pod_row(standard, aircraft, data)?;
+    if aircraft.id == AircraftId::F16C {
+        check_f16_tip(standard, aircraft, data)?;
+    }
     let (rows, name, count, fuel, shell): (&[usize], _, _, _, _) = match aircraft.id {
         AircraftId::F15 => (&[6, 7], "F610.GAS", 3, 12078., 1296.),
         AircraftId::F16C => (&[9], "F370.GAS", 2, 4884., 524.),
@@ -934,6 +943,158 @@ fn gun_pod_row(
         "gun pod {}: row {row} takes one SUU-16 in place of {default} x{}; weight, 600 logical units (1,200 rounds), Tab, Guns only, save, lobby rule, firing from the pod's nose and jettison passed",
         aircraft.id.pt(),
         standard.quantities[slot]
+    );
+    Ok(())
+}
+
+/// The F-16C wingtip pair (stations 1 and 9) takes the AIM-120 as well as the
+/// AIM-9, one a tip, and nothing else changes: every other supported weapon
+/// keeps exactly the source row's mask and weight rule, the AIM-120 loads,
+/// saves, restores and leaves like any other store, and the other rows are
+/// untouched.
+fn check_f16_tip(
+    standard: &Loadout,
+    aircraft: &Aircraft,
+    data: &BTreeMap<String, Vec<u8>>,
+) -> AppResult<()> {
+    use tore_formats::aircraft::stations::F16_TIP;
+    let slot = standard.configuration.hardpoint_slots[F16_TIP].ok_or("F-16C tip slot")?;
+    let source = &aircraft.hardpoints[F16_TIP];
+    if (
+        source.location,
+        source.flags,
+        source.count,
+        source.weight_class,
+    ) != (5, 0x85, 2, 4)
+    {
+        return Err("F-16C wingtip row is not the reviewed source row".into());
+    }
+    let rule = loading::Station::from_source(source)?;
+    for name in SUPPORTED_WEAPONS {
+        let weapon = Weapon::parse(name, &data[*name])?;
+        let expected = if *name == "AIM120.JT" {
+            2
+        } else {
+            rule.allowed_count(
+                loading::Store::weapon(&weapon),
+                source.store.as_deref() == Some(*name),
+            )
+            .max(0)
+        };
+        let expected = if weapon.source == "SUU16.JT" {
+            0
+        } else {
+            expected
+        };
+        let capacity = standard.capacity(slot, &weapon);
+        if capacity != expected {
+            return Err(
+                format!("F-16C wingtip {name}: capacity {capacity}, expected {expected}").into(),
+            );
+        }
+    }
+    let amraam = Weapon::parse("AIM120.JT", &data["AIM120.JT"])?;
+    let mut tips = standard.clone();
+    tips.select(slot, amraam.clone())?;
+    if tips.quantities[slot] != 2 || tips.configuration.stations[slot].count != 2 {
+        return Err("F-16C wingtip AIM-120 did not load one a tip".into());
+    }
+    tips.validate()?;
+    assert_roundtrip(&tips, standard, aircraft, data)?;
+    // The wingtip AIM-120 releases from the tip's edge, one from each tip.
+    let state = tore_sim::combat::live::State::new(tips.configuration.clone(), true)?;
+    if state.own().rounds(slot) != 2 {
+        return Err("F-16C wingtip AIM-120 live rounds".into());
+    }
+    // It fires: the trigger releases one missile from each tip in turn, from
+    // the tip's edge (17 ft out, left then right), flying the AIM-120's own
+    // guided record.
+    let launcher = tore_sim::combat::live::Launcher {
+        position: [0., 5000., 0.],
+        basis: tore_sim::attitude::Basis::new(0., 0., 0.),
+        speed_fps: 500.,
+        velocity: [0., 0., 500.],
+        bay_ready: true,
+        radar_power: true,
+        radar: true,
+        jammer: false,
+        alive: true,
+        body_present: true,
+        controls: tore_sim::sensors::Controls::default(),
+    };
+    let mut state = tore_sim::combat::live::State::new(tips.configuration.clone(), true)?;
+    state.own_mut().selected = slot;
+    state.own_mut().armed = true;
+    let mut released: Vec<f64> = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for tick in 0..2400 {
+        // One press every half second: a missile leaves per press.
+        let held = released.len() < 2 && tick % 60 < 30;
+        state.step(
+            &[tore_sim::combat::live::OwnshipInput {
+                aircraft: 0,
+                held,
+                launcher,
+            }],
+            |_, _| 0.,
+        );
+        for p in &state.projectiles {
+            if p.station == slot && seen.insert(p.id) && released.len() < 2 {
+                if p.weapon.as_ref().is_some_and(|w| w.source != "AIM120.JT") {
+                    return Err("F-16C wingtip fired another record".into());
+                }
+                if p.guidance.is_none() {
+                    return Err("F-16C wingtip AIM-120 flies unguided".into());
+                }
+                released.push(p.position[0]);
+            }
+        }
+        if released.len() == 2 && state.own().rounds(slot) == 0 {
+            break;
+        }
+    }
+    let tip_edge = |x: f64| (x.abs() - 17.).abs() < 1.;
+    if released.len() != 2
+        || !released.iter().all(|x| tip_edge(*x))
+        || released[0].signum() == released[1].signum()
+        || state.own().rounds(slot) != 0
+    {
+        return Err(format!(
+            "F-16C wingtip AIM-120 firing: released {released:?}, {} left",
+            state.own().rounds(slot)
+        )
+        .into());
+    }
+    // The AIM-9 stays at its old count, and one step down leaves one.
+    let sidewinder = Weapon::parse("AIM9M.JT", &data["AIM9M.JT"])?;
+    if standard.capacity(slot, &sidewinder) != 2 {
+        return Err("F-16C wingtip AIM-9 capacity changed".into());
+    }
+    tips.change(slot, -1);
+    if tips.quantities[slot] != 1 {
+        return Err("F-16C wingtip AIM-120 quantity step".into());
+    }
+    // Other aircraft and the F-16C's other rows are untouched.
+    for row in 0..aircraft.hardpoints.len() {
+        if row == F16_TIP {
+            continue;
+        }
+        if let Some(other) = standard.configuration.hardpoint_slots[row] {
+            let h = &aircraft.hardpoints[row];
+            let r = loading::Station::from_source(h)?;
+            let want = r
+                .allowed_count(
+                    loading::Store::weapon(&amraam),
+                    h.store.as_deref() == Some("AIM120.JT"),
+                )
+                .max(0);
+            if standard.capacity(other, &amraam) != want {
+                return Err(format!("F-16C row {row} AIM-120 capacity changed").into());
+            }
+        }
+    }
+    println!(
+        "F-16C wingtip AIM-120: two a load (one a tip), saved, restored and fired guided from each tip edge; every other tip store unchanged"
     );
     Ok(())
 }
