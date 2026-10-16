@@ -982,10 +982,10 @@ fn records_code_against_baselines_up_to_127_snapshots_back() {
     }
 }
 
-/// A Stores event (protocol 27) costs a few bytes for a release: an
-/// aircraft's six drawn stations are 14 bytes with the code; a full
-/// loadout's 64 stations, each with 65,535, at most 243. Stations out of order or past the
-/// loadout's 64 are refused.
+/// A Stores event (protocol 27, station index widened in protocol 50) costs
+/// a few bytes for a release. Stations out of order, or at index 128 or
+/// above, are refused. An F-16C cheat load of air-to-ground stores carries
+/// tank hardpoint 9 as station 64, which six bits could not hold.
 #[test]
 fn a_stores_event_is_small_and_checked() {
     let bytes = |loads: Vec<StationStores>| {
@@ -1007,7 +1007,7 @@ fn a_stores_event_is_small_and_checked() {
             items: u16::MAX,
         })
         .collect();
-    assert_eq!(bytes(worst), Ok(243));
+    assert_eq!(bytes(worst), Ok(251));
     let unordered = vec![
         StationStores {
             station: 3,
@@ -1020,8 +1020,57 @@ fn a_stores_event_is_small_and_checked() {
     ];
     assert!(bytes(unordered).is_err());
     let past = vec![StationStores {
-        station: 64,
+        station: 128,
         items: 1,
     }];
     assert!(bytes(past).is_err());
+    // The F-16C pattern that dropped `net-a2g-stores`: Mk 82s on the first
+    // external stations, the centreline tank, an empty tank row, and the
+    // inner wet pair at hardpoint 9 (station 64).
+    let f16 = vec![
+        StationStores {
+            station: 1,
+            items: 2,
+        },
+        StationStores {
+            station: 2,
+            items: 2,
+        },
+        StationStores {
+            station: 3,
+            items: 2,
+        },
+        StationStores {
+            station: 60,
+            items: 1,
+        },
+        StationStores {
+            station: 61,
+            items: 0,
+        },
+        StationStores {
+            station: 64,
+            items: 0,
+        },
+    ];
+    let event = WireEvent::Stores {
+        aircraft: 0,
+        loads: f16.clone(),
+    };
+    let section = EventsSection {
+        events: vec![SectionEvent {
+            number: 1,
+            ticks_back: 0,
+            event,
+        }],
+    };
+    let coded = section.encode().unwrap();
+    let decoded = EventsSection::decode(&coded).unwrap();
+    assert_eq!(
+        decoded.events[0].event,
+        WireEvent::Stores {
+            aircraft: 0,
+            loads: f16,
+        }
+    );
 }
