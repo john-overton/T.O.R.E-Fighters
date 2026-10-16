@@ -266,6 +266,49 @@ impl Marks {
         marks
     }
 
+    /// Whether `owner`'s laser shows in the recording at all: it has a
+    /// laser sight (a pod or a built-in designator).
+    pub fn lased(&self, owner: u32) -> bool {
+        self.lasers.contains_key(&owner)
+    }
+
+    /// `owner`'s laser at `tick` as a cockpit says it (LASE, LSR RDY, MASK
+    /// or OFF) with why it is masked; `None` before its first entry.
+    pub fn laser_state(&self, owner: u32, tick: u64) -> Option<(&'static str, Option<String>)> {
+        let keys = self.lasers.get(&owner)?;
+        let at = keys.partition_point(|k| k.tick <= tick).checked_sub(1)?;
+        let key = &keys[at];
+        Some(match key.phase {
+            Phase::Lasing => ("LASE", None),
+            Phase::Ready => ("LSR RDY", None),
+            Phase::Masked => ("MASK", key.mask.clone()),
+            Phase::Off => ("OFF", None),
+        })
+    }
+
+    /// `owner`'s guided weapons and bombs with a recorded landing, each with
+    /// the tick it was released (its first mode change, else its first aim)
+    /// and the tick it landed, in projectile order.
+    pub fn timeline_of(&self, owner: u32) -> Vec<Timed> {
+        self.flights
+            .iter()
+            .filter(|(_, f)| f.owner == owner)
+            .filter_map(|(&projectile, f)| {
+                let released = f
+                    .modes
+                    .first()
+                    .map(|m| m.tick)
+                    .or_else(|| f.aims.first().map(|a| a.0))?;
+                Some(Timed {
+                    projectile,
+                    released,
+                    landed: f.landing.as_ref().map(|l| l.tick),
+                    guided: !f.modes.is_empty(),
+                })
+            })
+            .collect()
+    }
+
     /// Whether the recording has anything to draw: the overlay is on by
     /// default only for one that does.
     pub fn any(&self) -> bool {
@@ -362,6 +405,17 @@ impl Marks {
         }
         scene
     }
+}
+
+/// One of an aircraft's guided weapons on the timeline: when it left and
+/// when it landed (the Sensor View's time to impact).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Timed {
+    pub projectile: u32,
+    pub released: u64,
+    pub landed: Option<u64>,
+    /// It has guidance modes (a laser bomb, a JDAM, an AT-2).
+    pub guided: bool,
 }
 
 /// A laser spot on the view.

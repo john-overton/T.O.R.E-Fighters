@@ -182,7 +182,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     # Replay lane.
     "replay-recording": (
         "recording, reading and corrupting replay files",
-        ("replay-banner-*", "replay-stores-*", "replay-rec-*", "replay-surface", "replay-a2g", "replay-city-strike", "replay-city-smoke-seek", "replay-corrupt-*", "replay-watch-*", "ai-record-*", "ai-determinism-recordings"),
+        ("replay-banner-*", "replay-stores-*", "replay-rec-*", "replay-surface", "replay-a2g", "replay-city-strike", "replay-city-smoke-seek", "replay-taped-views", "replay-corrupt-*", "replay-watch-*", "ai-record-*", "ai-determinism-recordings"),
     ),
     "replay-cli": (
         "command-line errors, speeds, ticks, small tools",
@@ -801,6 +801,7 @@ RULES: tuple[Rule, ...] = (
     _r("tools/battery_scenarios/surface_parked.py", ("surface",), "parked aircraft scenarios", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/surface_fires.py", ("surface",), "burning city fill scenarios", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/replay_city.py", ("replay-recording",), "the recorded city strike scenario", unit_tests=("test_battery",)),
+    _r("tools/battery_scenarios/replay_views.py", ("replay-recording",), "the replay's HUD camera and Sensor View", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/a2g_radar.py", ("a2g",), "ground page scenarios", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/a2g_release_origin.py", ("a2g",), "release origin scenario", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/bomb_flight.py", ("a2g",), "recorded bomb flight acceptance", unit_tests=("test_battery",)),

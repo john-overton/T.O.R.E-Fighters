@@ -593,6 +593,30 @@ pub const ENTRIES: &[Entry] = &[
         &["Ctrl-\\"],
     ),
     cmd(
+        "sight-whot",
+        "Sight: white hot (AC-130 console)",
+        Weapons,
+        &["Shift-F5"],
+    ),
+    cmd(
+        "sight-bhot",
+        "Sight: black hot (AC-130 console)",
+        Weapons,
+        &["Shift-F6"],
+    ),
+    cmd(
+        "sight-tv",
+        "Sight: TV (AC-130 console)",
+        Weapons,
+        &["Shift-F7"],
+    ),
+    cmd(
+        "sight-nvg",
+        "Sight: night vision (AC-130 console)",
+        Weapons,
+        &["Shift-F8"],
+    ),
+    cmd(
         "console-range",
         "Sensor console radar range 5 / 10 / 25 nm (AC-130 console)",
         Weapons,

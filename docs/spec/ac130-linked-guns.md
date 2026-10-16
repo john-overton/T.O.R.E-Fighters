@@ -380,6 +380,7 @@ for Backslash, Shift+Backslash and the zoom keys.
 | Next gun candidate / link or unlink it | Ctrl+7 / Ctrl+8 | View + D-pad up / down |
 | Open or close the sensor console (orbit hold) | Ctrl+9 | View + Xbox |
 | In the console: picture white hot, black hot, TV, night vision | Ctrl+Backslash | none |
+| In the console: straight to white hot / black hot / TV / night vision | Shift+F5 / F6 / F7 / F8 | none |
 | In the console: radar range 5, 10, 25 nm | Ctrl+0 | none |
 | In the console: next / previous radar target the sensor sees, zoomed to fill | T / Shift+T | as T |
 | Live-fire range reset (developer fixture) | Ctrl+Shift+Backslash | none |
@@ -515,7 +516,8 @@ every tracer. The rules key on the round's weapon record (C_105.JT), so they
 apply to every 105 round the simulation marks as a tracer. In daylight and thermal views, at gunship ranges (thousands of feet), these
 ribbons remain under a pixel wide on the 138 x 114 target camera page.
 Visible-light night views now share the [night tracer rule](damage-smoke.md#night-tracer-visibility),
-including its small pixel floor; the 105's relative radiance stays unchanged.
+including its hot red-orange streak and bounded soft red halo; the 105's
+relative radiance and physical width stay unchanged.
 
 **The 25 mm flickers.** It never holds a steady glow (John, 2026-10-10): its
 size and brightness change every tick while the trigger is held, as the table

@@ -49,6 +49,10 @@ pub enum Action {
     Follow(u32),
     /// The front view from the aircraft: the cockpit for the player.
     Cockpit(u32),
+    /// The replay's HUD camera on the aircraft (nr-replayviews).
+    HudCamera(u32),
+    /// The replay's Sensor View from the aircraft's targeting sight.
+    SensorView(u32),
     /// The follow drone beside the aircraft.
     Drone(u32),
     /// A free drone beside the missile.
@@ -126,6 +130,9 @@ pub struct Aircraft {
     pub member: u16,
     /// Flown by the AI, so it has thinking to show.
     pub ai: bool,
+    /// It has a targeting sight (a laser pod, a laser, a FLIR or the
+    /// AC-130's console): the replay offers its Sensor View.
+    pub sight: bool,
 }
 
 impl Aircraft {
@@ -165,6 +172,10 @@ pub fn aircraft_items(aircraft: &Aircraft, options: Options) -> Vec<Item> {
         Item::new("Cockpit view", Action::Cockpit(id)),
     ];
     if !options.live {
+        items.push(Item::new("HUD camera", Action::HudCamera(id)));
+        if aircraft.sight {
+            items.push(Item::new("Sensor view", Action::SensorView(id)));
+        }
         items.push(Item::new("Drone here", Action::Drone(id)));
     }
     object_items(&mut items, Target::Aircraft(id), options);
@@ -682,6 +693,7 @@ mod tests {
             wing,
             member,
             ai: id != 0,
+            sight: false,
         };
         vec![
             a(4, "Enemy 2-2", Side::Enemy, 2, 2),
@@ -705,6 +717,7 @@ mod tests {
             [
                 "Follow (chase view)",
                 "Cockpit view",
+                "HUD camera",
                 "Drone here",
                 "View from here",
                 "Look at this",
@@ -731,10 +744,33 @@ mod tests {
             ]
         );
         let items = aircraft_items(&fleet[2], replay);
-        assert_eq!(items[3].action, Some(Action::ViewFrom(Target::Aircraft(3))));
-        assert_eq!(items[4].action, Some(Action::LookAt(Target::Aircraft(3))));
-        assert_eq!(items[8].detail, "On");
-        assert_eq!(items[9].detail, "Off");
+        assert_eq!(items[2].action, Some(Action::HudCamera(3)));
+        assert_eq!(items[4].action, Some(Action::ViewFrom(Target::Aircraft(3))));
+        assert_eq!(items[5].action, Some(Action::LookAt(Target::Aircraft(3))));
+        assert_eq!(items[9].detail, "On");
+        assert_eq!(items[10].detail, "Off");
+        // An aircraft with a targeting sight offers its Sensor View too.
+        let pod = Aircraft {
+            sight: true,
+            ..fleet[2].clone()
+        };
+        let items = aircraft_items(&pod, replay);
+        assert_eq!(
+            labels(&items[..5]),
+            [
+                "Follow (chase view)",
+                "Cockpit view",
+                "HUD camera",
+                "Sensor view",
+                "Drone here"
+            ]
+        );
+        assert_eq!(items[3].action, Some(Action::SensorView(3)));
+        assert!(
+            labels(&aircraft_items(&pod, live))
+                .iter()
+                .all(|l| l != "Sensor view" && l != "HUD camera")
+        );
         let missile = missile_items(7, Some(&fleet[2]), replay);
         assert_eq!(missile[0].action, Some(Action::Guidance(7)));
         assert_eq!(
@@ -901,10 +937,11 @@ mod tests {
         );
         let centre = |r: Rect| Some((f64::from(r.0 + r.2 / 2), f64::from(r.1 + r.3 / 2)));
         let row = |i: usize| centre(menu.row_rect(i));
-        // AI thinking, after the replay's two object view items.
-        let (third, fourth) = (row(5), row(6));
+        // AI thinking, after the replay's HUD camera and two object view
+        // items.
+        let (third, fourth) = (row(6), row(7));
         menu.pointer(third);
-        assert_eq!(menu.focus, 5);
+        assert_eq!(menu.focus, 6);
         assert!(menu.down(third));
         assert_eq!(menu.up(fourth), Outcome::Handled);
         assert!(menu.down(third));

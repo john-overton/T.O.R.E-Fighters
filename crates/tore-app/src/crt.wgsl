@@ -19,6 +19,16 @@ struct Crt {
  e:vec4<f32>,
  // bloom strength, soft shoulder (0/1), unused x2
  f:vec4<f32>,
+ // Tape (crt.rs `Tape`): luma blur, chroma blur, chroma delay (px at 1080 rows), saturation
+ g:vec4<f32>,
+ // black level, white level, edge sharpening, bloom
+ h:vec4<f32>,
+ // cast I, cast Q, line jitter (px), frame jitter (px)
+ i:vec4<f32>,
+ // head switching band (share of height), tracking band strength, its height (0 top..1 bottom), chroma noise
+ j:vec4<f32>,
+ // tape on (0/1), dropout row (0..1, negative none), dropout start, dropout length (shares of the width)
+ k:vec4<f32>,
 }
 @group(0) @binding(0) var crt_source:texture_2d<f32>;
 @group(0) @binding(1) var crt_overlay:texture_2d<f32>;
@@ -91,6 +101,7 @@ fn crt_compose(uv:vec2<f32>,shift:vec2<f32>)->vec3<f32> {
  return c;
 }
 @fragment fn crt_fragment(in:CrtOut)->@location(0) vec4<f32> {
+ if crt.k.x>0.5 {return tape_fragment(in);}
  let px=in.uv*crt.d.xy;
  let unit=crt_unit();
  let level=clamp(crt.a.y,0.0,1.0);
@@ -136,4 +147,131 @@ fn crt_compose(uv:vec2<f32>,shift:vec2<f32>)->vec3<f32> {
   if streak<0.03*level {c*=0.2;}
  }
  return vec4<f32>(clamp(c,vec3<f32>(0.0),vec3<f32>(1.0)),1.0);
+}
+
+// ---------------------------------------------------------------------------
+// The videotape look (crt.rs `Tape`, the replay's HUD camera): the picture and
+// its overlay recorded on VHS. The tape keeps little horizontal detail, and
+// far less for colour than for brightness, so each line is low-passed in YIQ:
+// brightness gently, colour widely and a little late. Then the grade (lifted
+// blacks, crushed and blooming highlights, less colour with a green-cyan
+// cast), the recorder's edge ringing, the time-base wobble of each line, the
+// head-switching tear at the bottom, an occasional tracking band and dropout,
+// grain and chroma noise, the tape's 240-line scanlines and a vignette. The
+// noise and events come from the field number (the replay tick), so a still
+// at a tick is always the same picture.
+fn tape_composite(uv:vec2<f32>)->vec3<f32> {
+ // Half a row down: the linear sampler blends each line with the next, the
+ // tape's soft vertical detail (240 lines a field).
+ let at=uv+vec2<f32>(0.0,0.5*crt_unit()/crt.d.y);
+ var c=textureSampleLevel(crt_source,crt_sampler,at,0.0).rgb;
+ if crt.d.w>0.5 {
+  let o=textureSampleLevel(crt_overlay,crt_sampler,at,0.0);
+  c=mix(c,o.rgb,o.a);
+ }
+ // The tape's signal is gamma encoded, as video is: the grade works on it.
+ return pow(max(c,vec3<f32>(0.0)),vec3<f32>(1.0/2.2));
+}
+fn tape_y(c:vec3<f32>)->f32 {return dot(c,vec3<f32>(0.299,0.587,0.114));}
+fn tape_iq(c:vec3<f32>)->vec2<f32> {
+ return vec2<f32>(dot(c,vec3<f32>(0.596,-0.274,-0.322)),dot(c,vec3<f32>(0.211,-0.523,0.312)));
+}
+fn tape_rgb(y:f32,iq:vec2<f32>)->vec3<f32> {
+ return vec3<f32>(y+0.956*iq.x+0.621*iq.y,y-0.272*iq.x-0.647*iq.y,y-1.106*iq.x+1.703*iq.y);
+}
+// The recorded signal at `uv`: low-passed brightness with its edge ring, the
+// wide and late colour, graded.
+fn tape_signal(uv:vec2<f32>)->vec3<f32> {
+ let unit=crt_unit();
+ let step_y=crt.g.x*unit/crt.d.x;
+ // Brightness: five taps of a Gaussian of the luma blur, and two wider ones
+ // for the ring of the recorder's edge enhancement.
+ let w=array<f32,5>(0.0545,0.2442,0.4026,0.2442,0.0545);
+ var y=0.0;
+ for(var n=0;n<5;n++){
+  y+=w[n]*tape_y(tape_composite(uv+vec2<f32>(f32(n-2)*step_y,0.0)));
+ }
+ let wide=0.5*(tape_y(tape_composite(uv+vec2<f32>(3.0*step_y,0.0)))+tape_y(tape_composite(uv-vec2<f32>(3.0*step_y,0.0))));
+ y=y+crt.h.z*(y-mix(wide,y,0.4));
+ // Colour: seven taps over the chroma blur, delayed to the right.
+ let step_c=crt.g.y*unit/crt.d.x*0.7;
+ let late=crt.g.z*unit/crt.d.x;
+ let wc=array<f32,7>(0.0366,0.1113,0.2167,0.2707,0.2167,0.1113,0.0366);
+ var iq=vec2<f32>(0.0);
+ for(var n=0;n<7;n++){
+  iq+=wc[n]*tape_iq(tape_composite(uv+vec2<f32>(f32(n-3)*step_c-late,0.0)));
+ }
+ // The grade: lifted blacks and a soft shoulder under the white level.
+ y=crt.h.x+(crt.h.y-crt.h.x)*clamp(y,0.0,1.1);
+ y=y-0.35*pow(max(y-0.74,0.0),1.5);
+ iq=iq*crt.g.w+crt.i.xy;
+ return tape_rgb(y,iq);
+}
+fn tape_fragment(in:CrtOut)->vec4<f32> {
+ let unit=crt_unit();
+ let field=u32(crt.a.x*60.0+0.5);
+ let seed=u32(crt.d.z);
+ let size=crt.d.xy;
+ var uv=in.uv;
+ // The whole frame shakes a little from field to field.
+ let shake=vec2<f32>(crt_random(field,11u,seed)-0.5,crt_random(field,12u,seed)-0.5)*2.0*crt.i.w*unit;
+ uv+=shake*vec2<f32>(1.0,0.5)/size;
+ let px=uv*size;
+ let row=u32(max(px.y,0.0)/max(unit,1.0));
+ // Each line slips sideways (time-base error), much more in a tracking band.
+ var slip=(crt_random(row,field,seed^0x2c1bu)-0.5)*2.0*crt.i.z*unit;
+ let band=crt.j.y*exp(-pow((in.uv.y-crt.j.z)/0.035,2.0));
+ slip+=band*(crt_random(row/2u,field,seed^0x77u)-0.5)*9.0*unit;
+ // Head switching: the last lines of the picture tear to the right.
+ let tear=clamp((in.uv.y-(1.0-crt.j.x))/crt.j.x,0.0,1.0);
+ slip+=tear*(10.0+6.0*crt_random(row/3u,field,seed^0x19u))*unit;
+ uv.x-=slip/size.x;
+ // Chromatic aberration: red and blue pulled apart, more toward the edges.
+ let from_centre=uv-vec2<f32>(0.5);
+ let shift=from_centre*2.0*crt.a.z*unit/size*(0.35+length(from_centre)*1.3);
+ let centre=tape_signal(uv);
+ var c=vec3<f32>(tape_signal(uv+shift).r,centre.g,tape_signal(uv-shift).b);
+ c=mix(centre,c,0.75);
+ // Highlights bloom over their surroundings (eight taps on two rings).
+ var halo=0.0;
+ for(var n=0;n<8;n++){
+  let a=f32(n)*0.785398;
+  let ring=select(7.0,15.0,(n&1)==1)*unit;
+  let t=tape_composite(uv+vec2<f32>(cos(a),sin(a))*ring/size);
+  halo+=max(tape_y(t)-0.72,0.0);
+ }
+ c+=vec3<f32>(1.0,0.97,0.9)*halo*crt.h.w/8.0;
+ // Grain in the brightness, and blotchy coloured noise in the chroma.
+ let grain=vec2<u32>(px/max(2.0*unit,1.0));
+ let g=crt_random(grain.x,grain.y,field^seed)-0.5;
+ let blot=vec2<u32>(u32(px.x/max(7.0*unit,1.0)),u32(px.y/max(2.0*unit,1.0)));
+ let n_i=crt_random(blot.x,blot.y,field^seed^0x3a1u)-0.5;
+ let n_q=crt_random(blot.x,blot.y,field^seed^0x3a2u)-0.5;
+ c+=vec3<f32>(g*crt.b.z)+tape_rgb(0.0,vec2<f32>(n_i,n_q)*2.0*crt.j.w);
+ // The tracking band: a bright, noisy smear across the picture.
+ if band>0.01 {
+  let spark=crt_random(u32(px.x/max(3.0*unit,1.0)),row,field^seed^0x99u);
+  c=c*(1.0-0.25*band)+vec3<f32>(band*(0.12+0.5*pow(spark,6.0)));
+ }
+ // Head switching's band is noisy and a little bright.
+ if tear>0.0 {
+  c=mix(c,vec3<f32>(crt_random(grain.x,row,field^seed^0x41u)*0.6+0.2),0.35*tear);
+ }
+ // A dropout: a short white streak on two lines.
+ if crt.k.y>=0.0 {
+  let dy=abs(in.uv.y-crt.k.y)*size.y;
+  if dy<1.5*unit && in.uv.x>=crt.k.z && in.uv.x<=crt.k.z+crt.k.w {
+   c=mix(c,vec3<f32>(0.92),0.7);
+  }
+ }
+ // The tape's 240 lines a field (a period of 4.5 rows at 1080), the field
+ // that is not shown a little darker (interlace).
+ let line=0.5+0.5*cos(6.2831853*px.y/(4.5*unit));
+ c*=1.0-crt.b.x*line;
+ let odd=f32((u32(px.y/(2.25*unit))+field)&1u);
+ c*=1.0-0.02*odd;
+ // Vignette.
+ let edge=length(from_centre*vec2<f32>(1.0,size.y/size.x)*1.6);
+ c*=1.0-crt.b.y*pow(clamp(edge,0.0,1.4),2.4);
+ return vec4<f32>(pow(clamp(c,vec3<f32>(0.0),vec3<f32>(1.0)),vec3<f32>(2.2)),1.0);
 }

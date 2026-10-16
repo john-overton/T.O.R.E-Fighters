@@ -1452,6 +1452,10 @@ as in flight.
 | F1 to F10, F12 | The flight views, on the selected aircraft; F6 again for the next wingman |
 | Alt / Ctrl + F1 to F10, F12 | The same views from the selected aircraft's target / its newest missile; Alt+F4 still quits |
 | O / Shift+O | [Object view](#object-view): look at the next or previous object present now |
+| V / Shift+V | The [HUD camera](#hud-camera) / the [Sensor View](#sensor-view) on the selected aircraft |
+| 1 / 2 / 3 / 4 | In the Sensor View: white hot / black hot / TV / night vision |
+| Shift+F5 / F6 / F7 / F8 | The Sensor View in white hot / black hot / TV / night vision, from any view (the same keys as flight's AC-130 console) |
+| Backslash | In the Sensor View: the next picture |
 | Keypad 5 or Shift+/ | Recenter the look, keeping the view and zoom |
 | + / - (keypad too) | Zoom in or out, 1.1 times a press, 0.5x to 4x |
 | Backquote | Drone following the selected aircraft, then flying free, then back |
@@ -1578,6 +1582,94 @@ are agent choices (2026-09-28).
   for example after stepping back before a missile hit. F-keys leave it as
   usual, Tab selects an aircraft to start from, and the camera button steps
   to it after F12 once something to look at has been chosen.
+- <a id="hud-camera"></a>**HUD camera** (V; the right-click menu's **HUD
+  camera** on an aircraft, and the camera button's menu). The selected
+  aircraft's HUD as a 1980s or 1990s HUD video recorder put it on tape:
+  the forward view from the pilot's eye with the HUD drawn as the recorded
+  aircraft's HUD shows it, and no cockpit, canopy or panel. Opinionated,
+  requested by John on 2026-10-16 ("like an old style VHS recording of the
+  HUD ... chromatic aberration, colour graded", then "zoomed in a bit ...
+  a nice VHS texture smoothing"); everything below is an agent decision,
+  tuned on offscreen renders so the HUD's numbers stay readable.
+  - **The HUD** is the one the promo director already rebuilt from the
+    recording: the flight data (heading, pitch ladder, flight path marker,
+    speed, altitude, G, throttle), the target box on the aircraft's recorded
+    target (an air target, its designation, or the ground object its
+    recorded target names) with the gun pipper on an air target, and the
+    laser rows (`LSR 2.4`, `LSR RDY`, `MASK`, `BUD`) with the time to
+    impact (`TTI 0:17`, counted from the recorded landing, so exact) from the
+    [laser and bomb events](#air-to-ground-events). Weapon readiness and a
+    bomb's CCIP pipper are not recorded and do not show.
+  - **Framing.** The HUD's drawn area (the same 640 x 480 raster on every
+    aircraft) fills 86% of the picture's height: zoom 1.6, a 39 degree
+    field instead of the front view's 60. + and - still zoom.
+  - **The tape** (`crt.rs` `VHS`, `crt.wgsl`): each line low-passed as tape
+    keeps it, brightness over 1.7 px and colour over 6.5 px and 2.5 px late
+    (pixels at 1080 rows), each line blended with the next; lifted blacks
+    (6.5%), crushed highlights (92%) with a soft shoulder and a bloom; 62% of
+    the colour with a green-cyan cast; a faint edge ring; red and blue
+    pulled apart 2.4 px toward the edges; grain and blotchy chroma noise;
+    240-line scanlines with the other field a little darker; a 30% vignette;
+    each line slipping up to 0.45 px and the frame up to 0.5 px; the
+    head-switching tear along the bottom 1.6%; a faint tracking band rolling
+    up the picture for 1.5 s in three of every ten 7.5 s windows; and a
+    dropout streak in 2.5% of fields. The recorder's lines are burned in:
+    REC with its light, `HUD`, the tape counter (mission time), the aircraft
+    and its type, and `SP`. The symbols are recorded a little bolder and
+    whiter with a soft dark halo so they read over a bright sky.
+  - Every part of the look comes from the replay tick, 60 fields a second,
+    not the wall clock: a still or a paused picture is always the same, at
+    any speed, while scrubbing and in `--replay-stills`.
+- <a id="sensor-view"></a>**Sensor View** (Shift+V; the right-click menu's
+  **Sensor view** on an aircraft that has one). The [AC-130 sensor
+  console](spec/target-window.md#sensor-console) from the selected
+  aircraft's targeting sight, through the same renderer, picture modes and
+  CRT. Offered only when the aircraft has a sight
+  ([who has a sight](spec/air-to-ground.md#who-has-a-sight)): the AC-130's
+  console; its own laser or FLIR record (the F-16C's and A-10's Pave Spike,
+  the Su-25's and V-22's laser, the Rafale's AAS-38, the internal FLIRs);
+  or a loaded Pave Spike, which the recording does not list, so an aircraft
+  with no sight of its own counts as carrying one when the recording shows
+  its laser. Otherwise the key says so in the message line and the view
+  stays. Opinionated (John, 2026-10-16); the layout and rules are agent
+  decisions, spelled out in [the target window
+  spec](spec/target-window.md#sensor-view-in-a-replay).
+  - **What the recording holds and what is worked out.** A recording holds
+    no sight pointing, zoom or picture mode. The line of sight comes, in
+    this order, from the aircraft's own laser spot, its designation (the
+    object where it is now, or the pinned point), its guided weapon's aim,
+    the ground object its recorded target names, the AC-130's orbit centre
+    (`player.orbit`), where its rounds burst on the ground from 2 s before
+    to 3 s after the tick (`combat.ground_impact`: an AI gunship's or a
+    strafer's aim), its latest bomb landing, else the sight's default look;
+    the picture says which (`LOS FROM LASER SPOT`, ... `NO LOS RECORDED`).
+    The zoom is the sight's default step (7.5 degrees); + and - zoom it. The
+    picture starts in white hot and 1 to 4, Backslash or Shift+F5 to
+    Shift+F8 change it; the choice stays for the session.
+  - **The AC-130** shows its console exactly as in flight, from the
+    recorded state: the same symbology, gimbal graphic and modes. What the
+    recording lacks shows empty: the gun rounds (`----`), the readiness and
+    the pipper (the status line gives the sight line's source instead), the
+    A-G radar (`A-G OFF`).
+  - **Other aircraft** show their own symbology on the same console: the
+    aircraft and its type (not the pod or sensor's name: John, 2026-10-16),
+    `LASE` (boxed and
+    blinking while lasing), `LSR RDY`, `MASK` or `OFF` with the laser's range
+    in feet and nautical miles, `BUDDY 1-2 2.8NM` when its weapon follows
+    another aircraft's spot, the weapon it last released, `TTI 0:22` (`X2`
+    for several, `IMPACT` for a second), the designated target with range
+    and bearing, the landing's words for twenty seconds, and marks on the
+    picture: a laser spot (a buddy's in a dashed ring), the designated
+    target's box, the weapon's aim point and a landing's X.
+  - The camera sits at the sensor's eye (the AC-130's dome, 4 ft under the
+    aircraft for a pod, the centre for a built-in sensor), held inside the
+    sight's gimbal; at its edge `GIMBAL LIMIT` flashes.
+- Both views follow Tab's selection, work paused, at every speed and while
+  scrubbing, and leave to any other view with its key. On an aircraft that
+  is not in the recording now they say so and show it from outside. The
+  offscreen director draws them as views 4 (HUD camera) and 5 to 8 (the
+  Sensor View in white hot, black hot, TV and night vision), so
+  `--replay-stills` renders them (`--reel-render` too).
 - **Drone.** Backquote switches to a drone that follows the selected
   aircraft at a fixed offset in world axes, so the aircraft stays where it
   was framed while the drone travels with it; Backquote again lets it fly
@@ -1654,7 +1746,8 @@ under the playhead:
 - Each aircraft's pylons and the stores still on them, from the recorded
   [stores](#stores) at that tick; none in a recording from before them.
 
-There is no cockpit, HUD, instrument panel or mirror in a replay.
+There is no cockpit, instrument panel or mirror in a replay; the HUD shows
+only in the [HUD camera](#hud-camera).
 
 ### Interface parts
 
@@ -1908,8 +2001,17 @@ about 1,200 ticks a frame, frames take about 2 ms more.
 
 ### Known limits
 
-- No cockpit, HUD or instruments and no music yet, and the keys cannot be
-  rebound. Replay sound has not been checked by ear.
+- No cockpit or instruments and no music yet (the HUD only in the HUD
+  camera), and the keys cannot be rebound. Replay sound has not been checked
+  by ear.
+- The Sensor View's line of sight, zoom and picture are worked out, not
+  recorded (see [the Sensor View](#sensor-view)); recording the sight's look
+  would be a new event.
+- An aircraft recorded without its PT name (the air-to-ground driver's
+  `--buddy` runs and its A-10 runs record the player's type by name only)
+  is known by its exact type name since nr-replayviews (agent fix,
+  `convert::by_label`), so it draws as itself and its sight is found; an
+  older viewer drew it as an F/A-18D.
 - Checked by eye with synthetic recordings and headless AI probe
   recordings; a recording of a flight flown by hand has not been watched
   yet.

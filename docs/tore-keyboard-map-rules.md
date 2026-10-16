@@ -75,6 +75,12 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
   13 px so the legend keeps its box clear of the keypad. The other
   air-to-ground keys are on that sheet as well: Tab (fire the gun, held), Ctrl+M
   on M (delivery mode) and Ctrl+R with Shift+R (the S/C badge) on R.
+- Shift+F5 to Shift+F8 (the console's picture straight to white hot, black
+  hot, TV and night vision, nr-replayviews 2026-10-16) light F5 to F8 on Fly &
+  Fight in the sight's coral with an S badge (`WHOT`, `BHOT`, `TV`, `NVG`).
+  On the Replay sheet the same keys add an S row under the views (the
+  Sensor View in that picture), V reads `HUD CAM` with S `SENSOR`, 1 to 4 the
+  four pictures and Backslash `PICTURE` (both only in the Sensor View).
 - The wing orders that reach the ground are on the Comms sheet in coral: Alt+E
   and Alt+R (engage, an aircraft or a ground object), Alt+W (engage the
   target's class, `ENG CLS`), Alt+F (engage the IR/laser target, `ENG IR`) and

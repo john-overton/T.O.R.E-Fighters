@@ -53,8 +53,146 @@ pub const SENSOR: Settings = Settings {
     monochrome: true,
 };
 
-/// The pass's uniform: six vectors of four (`crt.wgsl`'s `Crt`).
-const UNIFORM_FLOATS: usize = 24;
+/// The replay's HUD camera tape (nr-replayviews, 2026-10-16): a colour
+/// picture with a stronger aberration, the tape's own scanline period and no
+/// block pixelation (the tape's softness comes from [`Tape`]). Agent
+/// decision, tuned on offscreen renders.
+pub const TAPE_SCREEN: Settings = Settings {
+    aberration_px: 2.4,
+    pixel_px: 1.,
+    scanline: 0.09,
+    vignette: 0.30,
+    noise: 0.032,
+    soft_px: 0.,
+    monochrome: false,
+};
+
+/// An analogue videotape recording of the picture (VHS): what a 1980s or
+/// 1990s HUD video recorder put on tape. Pixel sizes are for a 1080-row
+/// output and scale with the output's height. Opinionated (John,
+/// 2026-10-16: "like an old style VHS recording of the HUD ... chromatic
+/// aberration, colour graded to an old VHS style recording", then "a nice
+/// VHS texture smoothing"); every number is an agent decision, tuned on
+/// offscreen renders so the HUD's numbers stay readable.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tape {
+    /// The tape's limited horizontal resolution: the picture's brightness
+    /// is low-passed along each line with a Gaussian of this many pixels.
+    pub luma_blur_px: f32,
+    /// The colour is low-passed much more (VHS keeps about a tenth of the
+    /// brightness bandwidth for colour): this many pixels.
+    pub chroma_blur_px: f32,
+    /// The colour arrives late along the line, this many pixels to the right.
+    pub chroma_delay_px: f32,
+    /// Colour saturation kept, 0..1.
+    pub saturation: f32,
+    /// Black level (lifted blacks) and white level (crushed highlights).
+    pub black: f32,
+    pub white: f32,
+    /// A recorder's edge enhancement: a faint ring beside each edge.
+    pub sharpen: f32,
+    /// Bright parts bloom over their surroundings.
+    pub bloom: f32,
+    /// The grade's cast in YIQ (I, Q): negative I and Q tint toward green
+    /// and cyan.
+    pub cast: [f32; 2],
+    /// Each line slips sideways up to this many pixels (time-base error).
+    pub line_jitter_px: f32,
+    /// The whole frame shakes up to this many pixels.
+    pub frame_jitter_px: f32,
+    /// The head-switching band at the bottom, a share of the height.
+    pub head_switch: f32,
+    /// Coloured noise in the chroma.
+    pub chroma_noise: f32,
+}
+
+/// The HUD camera's tape (nr-replayviews, agent decision).
+pub const VHS: Tape = Tape {
+    luma_blur_px: 1.7,
+    chroma_blur_px: 6.5,
+    chroma_delay_px: 2.5,
+    saturation: 0.62,
+    black: 0.065,
+    white: 0.92,
+    sharpen: 0.16,
+    bloom: 0.55,
+    cast: [-0.018, -0.022],
+    line_jitter_px: 0.45,
+    frame_jitter_px: 0.5,
+    head_switch: 0.016,
+    chroma_noise: 0.028,
+};
+
+/// [`VHS`] without its smoothing: the brightness and colour kept sharp and
+/// no edge ring (the before half of the smoothing's before-and-after
+/// renders, `TORE_REPLAY_TAPE_SMOOTHING=0`).
+pub const VHS_SHARP: Tape = Tape {
+    luma_blur_px: 0.05,
+    chroma_blur_px: 0.05,
+    chroma_delay_px: 0.,
+    sharpen: 0.,
+    bloom: 0.,
+    ..VHS
+};
+
+/// What changes on the tape from one field to the next, from the replay
+/// tick alone, so a still at a tick always draws the same frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TapeField {
+    /// A tracking band rolling through: its strength 0..1 and its height
+    /// on the picture, 0 top to 1 bottom.
+    pub tracking: f32,
+    pub tracking_y: f32,
+    /// A dropout (a white streak where the oxide flaked): its row (0..1),
+    /// start (0..1 of the width) and length (0..1), or `None`.
+    pub dropout: Option<[f32; 3]>,
+}
+
+/// The tape plays at 60 fields a second: two simulation ticks a field.
+pub const TICKS_PER_FIELD: u64 = 2;
+/// A tracking band comes in some of these windows of ticks (7.5 s).
+pub const TRACKING_WINDOW_TICKS: u64 = 900;
+/// The share of windows with a band, and how long one takes to roll up the
+/// picture, ticks (agent decision: occasional and faint).
+pub const TRACKING_CHANCE: f32 = 0.3;
+pub const TRACKING_TICKS: u64 = 180;
+/// A tracking band's strength at the middle of its run (faint: the HUD
+/// under it stays readable).
+pub const TRACKING_STRENGTH: f32 = 0.5;
+/// The chance of a dropout in a field.
+pub const DROPOUT_CHANCE: f32 = 0.025;
+
+impl TapeField {
+    /// The field shown at simulation tick `tick`.
+    pub fn at(tick: u64, seed: u32) -> Self {
+        let window = (tick / TRACKING_WINDOW_TICKS) as u32;
+        let mut field = Self::default();
+        if random(window, 0x7a3e, seed) < TRACKING_CHANCE {
+            let span = TRACKING_WINDOW_TICKS - TRACKING_TICKS;
+            let start = (random(window, 0x51ed, seed) * span as f32) as u64;
+            let into = tick % TRACKING_WINDOW_TICKS;
+            if (start..start + TRACKING_TICKS).contains(&into) {
+                let t = (into - start) as f32 / TRACKING_TICKS as f32;
+                // Rolls up from below the picture to above it, strongest
+                // in the middle of its run.
+                field.tracking_y = 1.1 - 1.2 * t;
+                field.tracking = (std::f32::consts::PI * t).sin() * TRACKING_STRENGTH;
+            }
+        }
+        let number = (tick / TICKS_PER_FIELD) as u32;
+        if random(number, 0xd409, seed) < DROPOUT_CHANCE {
+            field.dropout = Some([
+                random(number, 0xd40a, seed),
+                random(number, 0xd40b, seed) * 0.8,
+                0.02 + random(number, 0xd40c, seed) * 0.12,
+            ]);
+        }
+        field
+    }
+}
+
+/// The pass's uniform: eleven vectors of four (`crt.wgsl`'s `Crt`).
+const UNIFORM_FLOATS: usize = 44;
 
 /// One frame's worth of the look: the settings, the clock, the static level
 /// and how the source is mapped.
@@ -86,9 +224,23 @@ pub struct Frame {
     /// instead of clipping: a high-gain picture's lights keep their
     /// falloff (GPU pass only).
     pub shoulder: bool,
+    /// Show the picture as a videotape recording ([`Tape`], GPU pass only),
+    /// with this field's tracking band and dropout.
+    pub tape: Option<(Tape, TapeField)>,
 }
 
 impl Frame {
+    /// The HUD camera's tape at simulation tick `tick`: [`TAPE_SCREEN`] and
+    /// [`VHS`], the noise and the field's events all from the tick, so a
+    /// still at a tick is always the same picture.
+    pub fn tape(tick: u64, seed: u32) -> Self {
+        let mut frame = Self::new(TAPE_SCREEN, tick as f64 / 120., 0.);
+        frame.seed = seed;
+        frame.colour = true;
+        frame.tape = Some((VHS, TapeField::at(tick, seed)));
+        frame
+    }
+
     pub fn new(settings: Settings, seconds: f64, static_level: f32) -> Self {
         Self {
             settings,
@@ -102,12 +254,16 @@ impl Frame {
             colour: false,
             bloom: 0.,
             shoulder: false,
+            tape: None,
         }
     }
 
     /// The pass's uniform, as `crt.wgsl` reads it.
     fn uniform(&self, size: [u32; 2], overlay: bool) -> [f32; UNIFORM_FLOATS] {
         let s = &self.settings;
+        let (tape, field) = self.tape.unwrap_or((VHS, TapeField::default()));
+        let on = f32::from(u8::from(self.tape.is_some()));
+        let dropout = field.dropout.unwrap_or([-1., 0., 0.]);
         [
             (self.seconds % 3600.) as f32,
             self.static_level,
@@ -133,6 +289,26 @@ impl Frame {
             f32::from(u8::from(self.shoulder)),
             0.,
             0.,
+            tape.luma_blur_px,
+            tape.chroma_blur_px,
+            tape.chroma_delay_px,
+            tape.saturation,
+            tape.black,
+            tape.white,
+            tape.sharpen,
+            tape.bloom,
+            tape.cast[0],
+            tape.cast[1],
+            tape.line_jitter_px,
+            tape.frame_jitter_px,
+            tape.head_switch,
+            field.tracking,
+            field.tracking_y,
+            tape.chroma_noise,
+            on,
+            dropout[0],
+            dropout[1],
+            dropout[2],
         ]
     }
 }

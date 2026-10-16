@@ -565,7 +565,8 @@ mod tests {
     }
     #[test]
     fn docs_example_parses_verbatim() {
-        let docs = include_str!("../../../docs/DEDICATED-SERVER.md");
+        // A Windows checkout may give the guide CRLF line ends.
+        let docs = include_str!("../../../docs/DEDICATED-SERVER.md").replace("\r\n", "\n");
         let text = docs
             .split("```text\ntore-rotation 1\n")
             .nth(1)
