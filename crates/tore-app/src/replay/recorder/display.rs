@@ -267,7 +267,8 @@ fn sight_of(sight: &Sight) -> SightSample {
         mode,
         point: match sight.mode {
             SightMode::Pinned(point) => Some(point),
-            _ => sight.aim,
+            SightMode::Tracked(_) => sight.aim,
+            SightMode::Free => None,
         },
         tracked: sight.mode.tracked(),
         ..SightSample::default()

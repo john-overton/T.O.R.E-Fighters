@@ -229,9 +229,12 @@ where
             el: sight.look[1],
             zoom: sight.zoom,
             mode: mode_word(sight.mode, sight.returning),
+            // A free look's ground point moves with the aircraft and is
+            // worked out again on playback, so a free sight stays unwritten.
             point: match sight.mode {
                 SightMode::Pinned(point) => Some(point),
-                _ => sight.aim,
+                SightMode::Tracked(_) => sight.aim,
+                SightMode::Free => None,
             },
             tracked: sight.mode.tracked(),
             ..SightSample::default()
@@ -332,5 +335,49 @@ where
         radar: readout.sensors.air_ground,
         range: range_index,
         gun_lock: guns.gun_lock,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tore_replay::vocab::kind;
+
+    fn sights(events: &[Event]) -> usize {
+        events
+            .iter()
+            .filter(|event| event.kind == kind::AIRCRAFT_SIGHT)
+            .count()
+    }
+
+    #[test]
+    fn a_tracked_point_sliding_every_tick_writes_ten_times_a_second() {
+        let mut seen = Seen::default();
+        let mut written = 0;
+        for tick in 0..120u64 {
+            let sight = SightSample {
+                mode: "track".into(),
+                tracked: Some(5),
+                point: Some([tick as f64 * 60., 0., 0.]),
+                ..SightSample::default()
+            };
+            seen.note_samples(1, tick, HudSample::default(), Some(sight));
+            written += sights(&seen.take_events(tick, |_, _| None));
+        }
+        assert_eq!(written, 10, "the first sample, then one every 12 ticks");
+        assert!(seen.changes.is_empty(), "taken ticks are not kept");
+    }
+
+    #[test]
+    fn a_free_fighter_sight_is_not_written() {
+        let mut seen = Seen::default();
+        for tick in 0..24u64 {
+            let sight = SightSample {
+                az: tick as f64 * 0.01,
+                ..SightSample::default()
+            };
+            seen.note_samples(1, tick, HudSample::default(), Some(sight));
+            assert_eq!(sights(&seen.take_events(tick, |_, _| None)), 0);
+        }
     }
 }

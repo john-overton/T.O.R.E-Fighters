@@ -229,7 +229,8 @@ impl SightSample {
             || self.tracked.is_some()
     }
 
-    /// A change of mode, lock, rounds or radar: written at once.
+    /// A change of mode, lock, rounds or radar, or a new pin: written at
+    /// once. A tracked aim point that moves is a slew.
     pub fn stepped(&self, other: &Self) -> bool {
         self.gunship != other.gunship
             || self.zoom != other.zoom
@@ -242,15 +243,18 @@ impl SightSample {
             || self.radar != other.radar
             || self.range != other.range
             || self.train.is_some() != other.train.is_some()
-            || point_stepped(self.point, other.point)
+            || self.point.is_some() != other.point.is_some()
+            || (self.mode == "point" && point_stepped(self.point, other.point))
             || point_stepped(self.gun_lock, other.gun_lock)
     }
 
-    /// A stepped change, or the sight and the trains having slewed.
+    /// A stepped change, or the sight, its aim point and the trains having
+    /// slewed.
     pub fn differs(&self, other: &Self) -> bool {
         self.stepped(other)
             || stepped(self.az, other.az, ANGLE_STEP)
             || stepped(self.el, other.el, ANGLE_STEP)
+            || point_stepped(self.point, other.point)
             || match (self.train, other.train) {
                 (Some(a), Some(b)) => a.iter().zip(b).any(|(p, q)| {
                     stepped(p[0], q[0], ANGLE_STEP) || stepped(p[1], q[1], ANGLE_STEP)
@@ -583,5 +587,34 @@ mod tests {
         assert!(!slew.stepped(&guns));
         guns.rounds[0] = 249;
         assert!(guns.stepped(&slew));
+    }
+
+    #[test]
+    fn a_moving_track_point_is_a_slew_and_a_moved_pin_is_not() {
+        let track = sight();
+        let moved = SightSample {
+            point: track.point.map(|p| [p[0] + 60., p[1], p[2]]),
+            ..track.clone()
+        };
+        assert!(moved.differs(&track));
+        assert!(!moved.stepped(&track));
+        let pin = SightSample {
+            mode: "point".into(),
+            ..track.clone()
+        };
+        let repinned = SightSample {
+            mode: "point".into(),
+            ..moved
+        };
+        assert!(repinned.stepped(&pin));
+        let free = SightSample {
+            gunship: false,
+            mode: "free".into(),
+            point: None,
+            tracked: None,
+            gun_lock: None,
+            ..SightSample::default()
+        };
+        assert!(!free.notable());
     }
 }
