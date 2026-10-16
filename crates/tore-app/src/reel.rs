@@ -35,7 +35,7 @@ pub struct Gpu {
     buffer: wgpu::Buffer,
     /// The sensor console's world picture, CRT pass and overlay, made on
     /// first use ([`Gpu::console_pixels`]).
-    console: Option<(wgpu::Texture, crate::crt::Crt, wgpu::Texture)>,
+    console: Option<(wgpu::Texture, crate::crt::Crt, wgpu::Texture, [u32; 2])>,
 }
 static WEATHER: std::sync::OnceLock<std::collections::BTreeMap<String, Vec<u8>>> =
     std::sync::OnceLock::new();
@@ -160,6 +160,27 @@ impl Gpu {
         frame: &crate::crt::Frame,
         overlay: &[u8],
     ) -> AppResult<Vec<u8>> {
+        self.console_pixels_sized(camera, world, scenery, frame, overlay, [WIDTH, HEIGHT])
+    }
+    /// [`Self::console_pixels`] with an overlay of `overlay_size` (the
+    /// CRT pass stretches it over the picture): the replay's HUD camera and
+    /// Sensor View (nr-replayviews).
+    pub fn console_pixels_sized(
+        &mut self,
+        camera: &Camera,
+        world: &Terrain,
+        scenery: &Scenery,
+        frame: &crate::crt::Frame,
+        overlay: &[u8],
+        overlay_size: [u32; 2],
+    ) -> AppResult<Vec<u8>> {
+        if self
+            .console
+            .as_ref()
+            .is_some_and(|(.., size)| *size != overlay_size)
+        {
+            self.console = None;
+        }
         if self.console.is_none() {
             let picture = self.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("Reel sensor console world"),
@@ -181,11 +202,11 @@ impl Gpu {
                 &self.queue,
                 wgpu::TextureFormat::Rgba8UnormSrgb,
             );
-            let layer = crate::crt::overlay_texture(&self.device, [WIDTH, HEIGHT]);
-            self.console = Some((picture, crt, layer));
+            let layer = crate::crt::overlay_texture(&self.device, overlay_size);
+            self.console = Some((picture, crt, layer, overlay_size));
         }
-        let (picture, crt, layer) = self.console.as_ref().expect("made above");
-        crate::crt::write_overlay(&self.queue, layer, [WIDTH, HEIGHT], overlay);
+        let (picture, crt, layer, _) = self.console.as_ref().expect("made above");
+        crate::crt::write_overlay(&self.queue, layer, overlay_size, overlay);
         let picture = picture.create_view(&Default::default());
         let layer = layer.create_view(&Default::default());
         let view = self.texture.create_view(&Default::default());

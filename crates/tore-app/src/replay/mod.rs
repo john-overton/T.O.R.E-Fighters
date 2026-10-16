@@ -33,6 +33,7 @@ pub mod screen;
 pub mod sound;
 pub(crate) mod store_art;
 pub(crate) mod stores_check;
+pub mod tape_views;
 pub mod tracks;
 pub mod trails;
 pub mod trees;

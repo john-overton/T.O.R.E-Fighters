@@ -128,6 +128,33 @@ impl Viewer {
         } else {
             None
         };
+        // Views 4 to 8 (nr-replayviews): the replay's HUD camera on the
+        // anchor, then its Sensor View in white hot, black hot, TV and night
+        // vision, exactly as the viewer draws them.
+        let taped = if (4..=8).contains(&frame.view) && frame.anchor < crate::reel::WORLD_ANCHOR {
+            self.select(frame.anchor);
+            self.drone = None;
+            self.zoom = 1.;
+            self.view = if frame.view == 4 {
+                crate::replay::tape_views::HUD_CAMERA
+            } else {
+                self.sensor_mode =
+                    crate::sensor_console::SensorMode::ALL[usize::from(frame.view - 5)];
+                crate::replay::tape_views::SENSOR
+            };
+            let taped = self
+                .taped_view(&picture, tick, [crate::reel::WIDTH, crate::reel::HEIGHT])
+                .ok_or_else(|| {
+                    format!(
+                        "the HUD camera or Sensor View cannot be shown on aircraft {} at tick {tick}: {}",
+                        frame.anchor,
+                        self.camera_error.unwrap_or("unknown")
+                    )
+                })?;
+            Some(taped)
+        } else {
+            None
+        };
         // Resolve mutable camera state before borrowing an aircraft model.
         let object_camera = if frame.view == 3 && self.look_at.is_some() {
             self.select(frame.anchor);
@@ -178,6 +205,9 @@ impl Viewer {
             camera.pitch = state.pitch as f32;
             camera.roll = -state.bank as f32;
             camera.hidden_target = Some(frame.anchor);
+        }
+        if let Some(t) = &taped {
+            camera = copy(&t.camera);
         }
         // HUD/cockpit sound is heard inside the watched aircraft.
         let mut listener = copy(&camera);
@@ -485,7 +515,17 @@ impl Viewer {
                 &[],
             );
         }
-        let mut pixels = gpu.pixels(&camera, &self.world, &self.scenery)?;
+        let mut pixels = match &taped {
+            Some(t) => gpu.console_pixels_sized(
+                &camera,
+                &self.world,
+                &self.scenery,
+                &t.frame,
+                &t.overlay,
+                t.overlay_size,
+            )?,
+            None => gpu.pixels(&camera, &self.world, &self.scenery)?,
+        };
         if gpu.symbols.is_some() {
             gpu.symbols = Some(if cockpit_view {
                 gpu.hud_symbols()?

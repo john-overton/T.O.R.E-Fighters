@@ -8,6 +8,7 @@
 //! the renderer at them; leaving hands the renderer back to the game's.
 pub(crate) mod banner_check;
 mod director;
+mod views;
 use crate::aircraft::Airframe;
 use crate::flight;
 use crate::flight_canvas::FlightCanvas;
@@ -28,6 +29,7 @@ use crate::replay::panels::{self, Data, Kind, Panels, RecordedTrees};
 use crate::replay::pause;
 use crate::replay::playback::Playback;
 use crate::replay::sound::{self, ReplaySound};
+use crate::replay::tape_views;
 use crate::replay::tracks::{Scanner, Tracks};
 use crate::replay::trails;
 use crate::replay::weather::WeatherTrack;
@@ -259,6 +261,8 @@ fn view_name(view: u8) -> &'static str {
         flight_views::FLY_BY => "F9 Fly-by",
         flight_views::MISSILE => "F12 Missile",
         OBJECT => "O Object view",
+        tape_views::HUD_CAMERA => "V HUD camera",
+        tape_views::SENSOR => "Shift+V Sensor view",
         _ => "View",
     }
 }
@@ -297,6 +301,8 @@ fn copy(camera: &Camera) -> Camera {
     out.zoom = camera.zoom;
     out.near_clip = camera.near_clip;
     out.keys = camera.keys.clone();
+    out.thermal = camera.thermal;
+    out.sensor = camera.sensor;
     out
 }
 
@@ -856,6 +862,21 @@ pub struct Viewer {
     last_frame: Option<Instant>,
     /// Set while the recording grows as it plays (an observer's).
     growth: Option<Growth>,
+    /// Each aircraft's type, by its recorded id.
+    kinds: BTreeMap<u32, AircraftId>,
+    /// The targeting sight of each aircraft type's own sensor records, read
+    /// from the import (the Sensor View, nr-replayviews).
+    sights: Vec<(
+        AircraftId,
+        Option<(String, tore_sim::combat::sight::SightSensor)>,
+    )>,
+    /// Each aircraft type's gun, for the HUD camera's pipper.
+    guns: Vec<(AircraftId, tore_formats::weapons::Weapon, [f64; 3])>,
+    /// The Sensor View's picture: white hot, black hot, TV or night vision.
+    sensor_mode: crate::sensor_console::SensorMode,
+    /// Each aircraft's weapon bursts on the ground (`combat.ground_impact`)
+    /// in tick order: where an AC-130's or a strafer's rounds went.
+    ground_impacts: BTreeMap<u32, Vec<(u64, [f64; 3])>>,
 }
 
 /// How much of a growing recording can be scrubbed: the last ten minutes
@@ -953,6 +974,7 @@ impl Viewer {
             growth,
         )?;
         viewer.playback.add_motors(resources);
+        viewer.load_sights(resources);
         // Other aircraft's launches name their weapon record.
         viewer
             .sound
@@ -1114,6 +1136,11 @@ impl Viewer {
             entered: false,
             last_frame: None,
             growth,
+            kinds: BTreeMap::new(),
+            sights: Vec::new(),
+            guns: Vec::new(),
+            sensor_mode: Default::default(),
+            ground_impacts: BTreeMap::new(),
         };
         viewer.read_events();
         if options.drone {
@@ -1146,6 +1173,24 @@ impl Viewer {
         self.missiles = missiles(&self.recording);
         self.devices = DeviceTrack::new(events);
         self.marks = ground_marks::Marks::from_events(events);
+        self.kinds = convert::Identities::of(&self.recording).aircraft;
+        self.ground_impacts = BTreeMap::new();
+        for e in events
+            .iter()
+            .filter(|e| e.event.kind == vocab::kind::COMBAT_GROUND_IMPACT)
+        {
+            if let (Some(id), Some(x), Some(y), Some(z)) = (
+                e.event.subject,
+                e.event.num("x_ft"),
+                e.event.num("y_ft"),
+                e.event.num("z_ft"),
+            ) {
+                self.ground_impacts
+                    .entry(id)
+                    .or_default()
+                    .push((e.tick, [x, y, z]));
+            }
+        }
         if let Some(growth) = &mut self.growth {
             growth.events = events.len();
         }
@@ -1938,6 +1983,11 @@ impl Viewer {
             }
             "p" => return Command::Screenshot,
             "Escape" => self.open_pause(),
+            // The HUD camera and the Sensor View (nr-replayviews): the
+            // aircraft's video recorder, the HUD's tape and the pod's.
+            "v" if shift => self.taped_view_key(tape_views::SENSOR),
+            "v" => self.taped_view_key(tape_views::HUD_CAMERA),
+            key if self.sensor_mode_key(key, shift) => {}
             key => {
                 if let Some(view) = flight_views::key(key) {
                     self.set_view(view);
@@ -2339,6 +2389,7 @@ impl Viewer {
             wing: info.map_or(0, |a| a.wing),
             member: info.map_or(0, |a| a.member),
             ai: id != self.player && info.is_some_and(|a| !a.human),
+            sight: self.sight_of(id).is_some(),
         }
     }
 
@@ -2426,7 +2477,7 @@ impl Viewer {
     fn open_camera_menu(&mut self, at: (f64, f64)) {
         let mut items: Vec<_> = VIEW_ORDER
             .into_iter()
-            .chain([2, OBJECT])
+            .chain([2, OBJECT, tape_views::HUD_CAMERA, tape_views::SENSOR])
             .map(|view| Item {
                 label: view_name(view).into(),
                 detail: if self.drone.is_none() && self.view == view {
@@ -2435,7 +2486,12 @@ impl Viewer {
                     ""
                 }
                 .into(),
-                action: (view != OBJECT || self.look_at.is_some()).then_some(Action::Camera(view)),
+                action: match view {
+                    OBJECT => self.look_at.is_some(),
+                    tape_views::SENSOR => self.sight_of(self.selected).is_some(),
+                    _ => true,
+                }
+                .then_some(Action::Camera(view)),
             })
             .collect();
         for (mode, label) in [(Mode::Follow, "Drone follow"), (Mode::Free, "Drone free")] {
@@ -2489,7 +2545,18 @@ impl Viewer {
     fn perform(&mut self, action: Action) {
         match action {
             Action::Camera(OBJECT) => self.object_view(),
+            Action::Camera(view @ (tape_views::HUD_CAMERA | tape_views::SENSOR)) => {
+                self.taped_view_key(view)
+            }
             Action::Camera(view) => self.set_view(view),
+            Action::HudCamera(id) => {
+                self.select(id);
+                self.taped_view_key(tape_views::HUD_CAMERA);
+            }
+            Action::SensorView(id) => {
+                self.select(id);
+                self.taped_view_key(tape_views::SENSOR);
+            }
             Action::DroneMode(mode) => self.drone_mode(Some(mode)),
             Action::Follow(id) => {
                 self.select(id);
@@ -2681,6 +2748,15 @@ impl Viewer {
             return self.object_camera(picture, tick);
         }
         let scene = self.scene(picture, tick);
+        if matches!(self.view, tape_views::HUD_CAMERA | tape_views::SENSOR) {
+            // The HUD camera and the Sensor View make their own camera
+            // (viewer/views.rs); this is the view from outside they fall
+            // back to when they cannot be shown.
+            return self
+                .rig
+                .camera(EXTERNAL, &scene, Camera::new(), [0.; 2], 1.)
+                .unwrap_or_else(|_| copy(&self.camera));
+        }
         let result = if self.view == flight_views::MISSILE
             && self.rig.reference == Reference::Aircraft(self.selected)
         {
@@ -3201,6 +3277,13 @@ impl Viewer {
         self.follow_city(tick);
         let player = self.player_state(&picture, tick);
         let camera = self.frame_camera(&picture, tick, seconds, shift);
+        // The HUD camera and the Sensor View: their own camera, and a
+        // picture shown through the CRT pass with their overlay.
+        let taped = self.taped_view(&picture, tick, renderer.flight_size());
+        let camera = match &taped {
+            Some(t) => copy(&t.camera),
+            None => camera,
+        };
         // The back view from the player's seat draws its airframe but is
         // heard from the cockpit, as flight hears it.
         let seat = crate::mirrors::pilot_eye(
@@ -3371,6 +3454,9 @@ impl Viewer {
             canvas.legacy_layer(screen, 1.);
         }
         let drawn = Instant::now();
+        if let Some(t) = taped {
+            renderer.set_console(t.frame, t.overlay, t.overlay_size);
+        }
         let presented = renderer.draw(
             &canvas.pixels,
             Some((&camera, &self.world, &self.scenery)),
@@ -4442,7 +4528,7 @@ mod tests {
             let menu = v.menu.as_mut().unwrap();
             assert!(menu.camera_choices);
             assert_eq!(menu.title, "Choose view");
-            assert_eq!(menu.items.len(), VIEW_ORDER.len() + 4);
+            assert_eq!(menu.items.len(), VIEW_ORDER.len() + 6);
             menu.focus = menu
                 .items
                 .iter()
@@ -4495,9 +4581,10 @@ mod tests {
         v.pointer(Some([700., 480.]), [700., 480.], size, [0.; 2]);
         v.right(false, [700., 480.], Some([640., 480.]), size, 4.);
         assert!(v.menu.is_none());
-        // Keys move through the menu and choose: AI thinking.
+        // Keys move through the menu and choose: AI thinking, after the
+        // HUD camera.
         right_click(&mut v, [640., 480.], size);
-        for _ in 0..5 {
+        for _ in 0..6 {
             assert_eq!(press(&mut v, "ArrowDown"), Command::None);
         }
         assert_eq!(press(&mut v, "Enter"), Command::None);
@@ -4567,6 +4654,45 @@ mod tests {
 
     fn toast(v: &Viewer) -> String {
         v.toast.as_ref().map(|(t, _)| t.clone()).unwrap_or_default()
+    }
+
+    #[test]
+    fn v_opens_the_hud_camera_and_shift_v_needs_a_sight() {
+        let dir = TempDir::new("viewer-taped");
+        let mut v = viewer(&dir, &Options::default());
+        let shifted = |v: &mut Viewer, key: &str| {
+            v.key(key, false, false, true);
+            v.key(key, true, false, true)
+        };
+        // The fixture's aircraft have no sight: the Sensor View says so and
+        // the view stays.
+        let before = v.view;
+        shifted(&mut v, "v");
+        assert_eq!(v.view, before);
+        assert!(toast(&v).contains("no targeting sight"), "{}", toast(&v));
+        press(&mut v, "v");
+        assert_eq!(v.view, tape_views::HUD_CAMERA);
+        // Digits are the Sensor View's pictures only inside it.
+        press(&mut v, "2");
+        assert_eq!(v.sensor_mode, crate::sensor_console::SensorMode::WhiteHot);
+        // Give the selected aircraft's type a sight: Shift+F7 opens the
+        // Sensor View in TV, and 4, 1 and Backslash change the picture.
+        let kind = v.kinds[&v.selected];
+        v.sights
+            .push((kind, Some(("TEST POD".into(), tape_views::pave_spike()))));
+        shifted(&mut v, "F7");
+        assert_eq!(v.view, tape_views::SENSOR);
+        assert_eq!(v.sensor_mode, crate::sensor_console::SensorMode::Tv);
+        press(&mut v, "4");
+        assert_eq!(
+            v.sensor_mode,
+            crate::sensor_console::SensorMode::NightVision
+        );
+        press(&mut v, "\\");
+        assert_eq!(v.sensor_mode, crate::sensor_console::SensorMode::WhiteHot);
+        // An F-key leaves to the flight view.
+        press(&mut v, "F1");
+        assert_eq!(v.view, 0);
     }
 
     fn forward(c: &Camera) -> [f64; 3] {

@@ -1416,6 +1416,11 @@ impl App {
             "sight-next" => return self.sight_next_key(),
             // The sensor console's white hot / black hot (presentation).
             "sight-polarity" => return self.sight_polarity_key(),
+            // Shift+F5 to Shift+F8: straight to one picture (nr-replayviews).
+            "sight-whot" | "sight-bhot" | "sight-tv" | "sight-nvg" => {
+                return sensor_console::SensorMode::of_action(name.as_str())
+                    .map_or(Action::None, |mode| self.sight_picture_key(mode));
+            }
             // The sensor console radar's range (5, 10, 25 nm).
             "console-range" => return self.console_range_key(),
             // Tab is a hold: `queue_gun_key` reads it every tick.
@@ -2247,6 +2252,18 @@ impl App {
             return Action::Click;
         }
         self.console.mode = self.console.mode.cycled();
+        Action::None
+    }
+    /// Shift+F5 to Shift+F8: the AC-130 sensor console's picture straight
+    /// to white hot, black hot, TV or night vision (nr-replayviews,
+    /// 2026-10-16). Only the console shows it; elsewhere the key does
+    /// nothing.
+    fn sight_picture_key(&mut self, mode: sensor_console::SensorMode) -> Action {
+        let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
+        if !sensor_console::console_active(&frame.readout, frame.flight) {
+            return Action::Click;
+        }
+        self.console.mode = mode;
         Action::None
     }
     /// Ctrl+0: the sensor console radar's range, 5, 10 and 25 nm in turn.

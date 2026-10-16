@@ -80,6 +80,8 @@ fn help_lines(_: &[MenuNode]) -> Vec<String> {
         "F1 to F10, F12: the flight views, on the selected aircraft",
         "Alt / Ctrl + view: from its target / its newest missile",
         "O / Shift-O: object view, look at the next / previous object",
+        "V: HUD camera | Shift-V: Sensor View (an aircraft with a sight)",
+        "Sensor View: 1-4 or Shift-F5 to F8 WHOT/BHOT/TV/NVG; \\ next",
         "Keypad 5 or Shift-/: recenter | + / -: zoom",
         "Backquote: follow drone, then free drone, then back",
         "W A S D, E / Q: move the drone, climb / descend; Shift 4x faster",

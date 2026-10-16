@@ -176,6 +176,10 @@ and a gamepad's View+stick defaults avoid the problem.
 | Sight: zoom in | Shift+Apostrophe | - | RB (in the AC-130 console) |
 | Sight: zoom out | Shift+Semicolon | - | LB (in the AC-130 console) |
 | Sight: white hot / black hot / TV / night vision (AC-130 console) | Ctrl+Backslash | - | D-pad left (in the AC-130 console) |
+| Sight: white hot (AC-130 console) | Shift+F5 | - | - |
+| Sight: black hot (AC-130 console) | Shift+F6 | - | - |
+| Sight: TV (AC-130 console) | Shift+F7 | - | - |
+| Sight: night vision (AC-130 console) | Shift+F8 | - | - |
 | Sensor console radar range 5 / 10 / 25 nm (AC-130 console) | Ctrl+0 | - | D-pad right (in the AC-130 console) |
 | Sight: slew left/right | - | - | View + Right stick X or Left stick X (in the AC-130 console) |
 | Sight: slew up/down | - | - | View + Right stick Y or Left stick Y (in the AC-130 console) |
@@ -428,6 +432,8 @@ and a gamepad's View+stick defaults avoid the problem.
 | Replay viewer | O / Shift+O | Object view: look at the next or previous aircraft, weapon or ground object present now |
 | Replay viewer | Keypad 5 or Shift+/ | Recenter the look, keeping the view and zoom |
 | Replay viewer | + / - (keypad too) | Zoom in or out, 0.5x to 4x |
+| Replay viewer | V / Shift+V | [HUD camera](REPLAYS.md#hud-camera) / [Sensor View](REPLAYS.md#sensor-view) on the selected aircraft; the Sensor View only for an aircraft with a targeting sight (a laser pod, a laser, a FLIR or the AC-130's console) |
+| Replay viewer, Sensor View | 1 / 2 / 3 / 4, Shift+F5 / F6 / F7 / F8, Backslash | White hot / black hot / TV / night vision; Shift+F5 to Shift+F8 also open the Sensor View in that picture from any view; Backslash steps through them |
 | Replay viewer | Mouse wheel | Scroll a debug panel or menu under the pointer; otherwise configured drone speed controls (default wheel) from 20 to 5,000 feet per second, or zoom in a flight view |
 | Replay viewer | Hold right button and drag | Look around in a flight view; the drone uses its configured look hold (default right button) |
 | Replay viewer | Left click, drag on the timeline | Transport bar buttons; jump to or scrub through a moment |

@@ -50,6 +50,10 @@ bind keyboard Ctrl-Delete console-flare press\n\
 bind keyboard Shift-' sight-zoom-in press\n\
 bind keyboard Shift-; sight-zoom-out press\n\
 bind keyboard Ctrl-\\ sight-polarity press\n\
+bind keyboard Shift-F5 sight-whot press\n\
+bind keyboard Shift-F6 sight-bhot press\n\
+bind keyboard Shift-F7 sight-tv press\n\
+bind keyboard Shift-F8 sight-nvg press\n\
 bind keyboard Ctrl-0 console-range press\n\
 bind keyboard Alt-ArrowLeft sight-left hold\n\
 bind keyboard Alt-ArrowRight sight-right hold\n\
@@ -1577,6 +1581,10 @@ mod tests {
             "sight-zoom-in",
             "sight-zoom-out",
             "sight-polarity",
+            "sight-whot",
+            "sight-bhot",
+            "sight-tv",
+            "sight-nvg",
             "console-range",
         ] {
             let entry = ENTRIES
@@ -2007,6 +2015,10 @@ mod tests {
             (";", M::SHIFT, "sight-zoom-out"),
             ("\\", M::CONTROL, "sight-polarity"),
             ("0", M::CONTROL, "console-range"),
+            ("F5", M::SHIFT, "sight-whot"),
+            ("F6", M::SHIFT, "sight-bhot"),
+            ("F7", M::SHIFT, "sight-tv"),
+            ("F8", M::SHIFT, "sight-nvg"),
         ] {
             assert!(i.key(key, true, modifiers), "{key}");
             assert_eq!(
