@@ -410,20 +410,22 @@ def other_weapon_sound_check(work: Path, output: str) -> list[str]:
     if not path.exists():
         return ["missing weapon sound audit"]
     rows = list(csv.DictReader(path.open(), delimiter="\t"))
-    heard = [r for r in rows if r["selected"] == "true"]
+    heard = [r for r in rows if r["selected"] == "true" and r["event"].startswith("audio.other.")]
     problems = []
     if not heard:
         problems.append("no other shooter audible")
     previous = {}
-    for row in heard:
+    for row in sorted(heard, key=lambda r: int(r.get("emitted_tick", r["tick"]))):
         if row["clip_present"] != "true" or not 0 < float(row["gain"]) <= 0.104001:
             problems.append("missing recording or invalid cockpit gain")
         if row["gun"] == "true":
             key = (row["shooter"], row["sound"])
-            tick = int(row["tick"])
+            tick = int(row.get("emitted_tick", row["tick"]))
             if tick - previous.get(key, -30) < 30:
                 problems.append("gun sound repeated per round")
             previous[key] = tick
+        if float(row["distance_ft"]) > 100 and int(row["tick"]) <= int(row.get("emitted_tick", row["tick"])):
+            problems.append("remote weapon sound did not travel")
     if "guns" in work.name and not previous:
         problems.append("no audible gun burst")
     return problems

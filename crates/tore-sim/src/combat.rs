@@ -37,7 +37,7 @@ pub fn release_sound(w: &tore_formats::weapons::Weapon) -> Option<&str> {
     if matches!(w.source.as_str(), "~BLDR.JT" | "~MOOSE.JT") {
         w.fire_sound.as_deref()
     } else if ballistics::is_bomb(w) || guided::is_glide_bomb(w) {
-        Some("&bomb.11k")
+        Some("&BOMB.11K")
     } else {
         w.fire_sound.as_deref()
     }

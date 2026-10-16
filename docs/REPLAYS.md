@@ -1749,10 +1749,12 @@ far from the map's corner the flight is.
 
 For a device-free weapon sound check, set `TORE_WEAPON_SOUND_LOG=1` when
 running `--recording-log FILE --out DIR`. With an imported profile in
-`TORE_DATA_DIR`, this also writes `weapon-sound.tsv`: source tick, sound,
-shooter, gun flag, distance, gain before preference volumes, burst selection,
-and whether the imported sound exists. It uses the viewer's source lookup and
-the mixer's shared burst selector. The listener follows the recorded player;
+`TORE_DATA_DIR`, this also writes `weapon-sound.tsv`: arrival tick, emission
+tick, sound, shooter, gun flag, arrival distance, gain before preference
+volumes and whether the imported sound exists. Rows are arriving other-shooter
+reports and immediate own releases. `store-sound.tsv` checks all virtual bomb
+and R-27 variants against the loaded weapon and PCM catalogs. It uses the
+viewer's source lookup and the mixer's shared emission selector and wavefront. The listener follows the recorded player;
 `TORE_WEAPON_SOUND_SUBJECT=ID` follows another aircraft externally. The audit
 reads the entire recording regardless of log export filters. It neither plays
 sound nor changes the recording.
