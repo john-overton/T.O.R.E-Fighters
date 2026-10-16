@@ -333,6 +333,21 @@ mod tests {
         State::new(config, true).unwrap()
     }
     #[test]
+    fn appended_wet_row_jettisons_and_duplicate_fuel_banks_are_rejected() {
+        let mut config = loaded().own().configuration().clone();
+        config.tanks[0].hardpoint = 6;
+        config.tanks[1].hardpoint = 9;
+        config.refresh_tanks().unwrap();
+        assert_eq!(config.external_fuel_lbs[0], 1000.);
+        let mut state = State::new(config.clone(), true).unwrap();
+        state.command(0, Command::JettisonTanks, launcher());
+        assert_eq!(state.own().external_fuel_lbs(), [0.; 9]);
+        assert_eq!(state.projectiles.len(), 3);
+        config.tanks[0].hardpoint = 0;
+        assert!(config.refresh_tanks().is_err());
+    }
+
+    #[test]
     fn tanks_leave_weapons_alone_and_drop_all_shell_and_fuel_mass() {
         let mut s = loaded();
         let ammo = s.own().ammo.clone();

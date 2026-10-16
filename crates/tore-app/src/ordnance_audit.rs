@@ -18,13 +18,13 @@ use tore_world::mission::{LoadoutSpec, MissionSpec};
 /// record why in `docs/baselines/ordnance-availability.md`, when the supported
 /// weapon list, the tank records or the aircraft change.
 const AIRCRAFT: usize = 36;
-const RECOVERED_STATIONS: usize = 9;
-const TANK_RECORDS: usize = 4;
-const WEAPON_PLACEMENTS: usize = 3319;
-const TANK_PLACEMENTS: usize = 146;
+const RECOVERED_STATIONS: usize = 10;
+const TANK_RECORDS: usize = 6;
+const WEAPON_PLACEMENTS: usize = 3372;
+const TANK_PLACEMENTS: usize = 161;
 /// Station and novelty-record pairs the Cheat loading accepts and the normal
 /// loading refuses (A2G decision 16).
-const NOVELTY_PLACEMENTS: usize = 160;
+const NOVELTY_PLACEMENTS: usize = 162;
 /// Station and designator-pod pairs the normal rules accept (A2G decision 7).
 const POD_PLACEMENTS: usize = 130;
 
@@ -134,6 +134,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                 .cloned()
                 .ok_or_else(|| std::io::Error::other(format!("ordnance audit missing {name}")))
         })?;
+        extra_stations(&standard, &aircraft, data)?;
         let rows = standard.editable_stations();
         if !rows
             .windows(2)
@@ -582,6 +583,119 @@ fn check_novelty(standard: &Loadout, novelty: &[Weapon], pt: &str) -> AppResult<
         }
     }
     Ok(placements)
+}
+
+/// Full requested loads, through the same selector, save and live paths as flight.
+fn extra_stations(
+    standard: &Loadout,
+    aircraft: &Aircraft,
+    data: &BTreeMap<String, Vec<u8>>,
+) -> AppResult<()> {
+    use tore_sim::{attitude::Basis, combat::live, sensors};
+    let (rows, name, count, fuel, shell): (&[usize], _, _, _, _) = match aircraft.id {
+        AircraftId::F15 => (&[6, 7], "F610.GAS", 3, 12078., 1296.),
+        AircraftId::F16C => (&[9], "F370.GAS", 2, 4884., 524.),
+        _ => return Ok(()),
+    };
+    let mut full = standard.clone();
+    let before_ammo = full.ammunition()?;
+    let before_fuel = full.external_fuel_lbs();
+    let before_shell = full.tank_shell_lbs();
+    for &row in rows {
+        let slot = full
+            .configuration
+            .tanks
+            .iter()
+            .position(|s| s.hardpoint == row)
+            .ok_or("derived tank row missing")?;
+        if full.configuration.tanks[slot].quantity != 0 {
+            return Err("derived row starts loaded".into());
+        }
+        let tank = TankStore::parse(name, data.get(name).ok_or("derived tank missing")?)?;
+        let expected = if row == 6 { 1 } else { 2 };
+        if full.tank_capacity(slot, &tank) != expected {
+            return Err("derived tank capacity".into());
+        }
+        full.select_tank(slot, tank)?;
+    }
+    if full.ammunition()? != before_ammo
+        || full.external_fuel_lbs() != before_fuel + fuel
+        || full.tank_shell_lbs() != before_shell + shell
+    {
+        return Err("extra tanks changed weapons or mass".into());
+    }
+    full.validate()?;
+    assert_roundtrip(&full, standard, aircraft, data)?;
+    if aircraft.id == AircraftId::F15 {
+        let mut sparrows = full.clone();
+        let slot = sparrows.configuration.hardpoint_slots[4].ok_or("missing fuselage row")?;
+        sparrows.select(slot, Weapon::parse("AIM7.JT", &data["AIM7.JT"])?)?;
+        if sparrows.quantities[slot] != 4 || sparrows.external_fuel_lbs() != 12078. {
+            return Err("four Sparrows cannot coexist with three tanks".into());
+        }
+        assert_roundtrip(&sparrows, standard, aircraft, data)?;
+    }
+    // A pre-addition save ends before the appended optional weapon slot.
+    let mut old = LoadoutSpec::of(standard);
+    if aircraft.id == AircraftId::F16C {
+        old.stations.pop();
+    }
+    let restored = old.apply(standard.clone(), data, None)?;
+    if restored.ammunition()? != before_ammo || restored.external_fuel_lbs() != before_fuel {
+        return Err("old loadout did not preserve defaults with empty added rows".into());
+    }
+    let mut feeding = tore_sim::aircraft_systems::Fuel::new(full.configuration.external_fuel_lbs);
+    let mut internal = full.fuel_lbs;
+    feeding.consume(&mut internal, before_fuel + fuel);
+    if internal != full.fuel_lbs || feeding.external_lbs() != 0. {
+        return Err("extra tanks did not feed".into());
+    }
+    let launcher = live::Launcher {
+        position: [0., 5000., 0.],
+        basis: Basis::new(0., 0., 0.),
+        speed_fps: 500.,
+        velocity: [0., 0., 500.],
+        bay_ready: true,
+        radar_power: true,
+        radar: true,
+        jammer: false,
+        alive: true,
+        body_present: true,
+        controls: sensors::Controls::default(),
+    };
+    let mut state = live::State::new(full.configuration.clone(), true)?;
+    let mass = state.own().payload_lbs();
+    let ammo = state.own().ammo.clone();
+    state.command(0, live::Command::JettisonTanks, launcher);
+    if state.own().external_fuel_lbs().iter().sum::<f64>() != 0.
+        || state.own().ammo != ammo
+        || (mass - state.own().payload_lbs() - fuel - shell - before_fuel - before_shell).abs()
+            > 1e-6
+    {
+        return Err("extra tank jettison lost weapons or retained tank mass".into());
+    }
+    if aircraft.id == AircraftId::F16C {
+        let slot = standard.configuration.hardpoint_slots[9].ok_or("wet weapon slot missing")?;
+        for weapon in ["MK82.JT", "AGM65G.JT"] {
+            let mut armed = standard.clone();
+            armed.select(slot, Weapon::parse(weapon, &data[weapon])?)?;
+            if armed.quantities[slot] != 2 {
+                return Err("wet weapon capacity".into());
+            }
+            assert_roundtrip(&armed, standard, aircraft, data)?;
+            let mut state = live::State::new(armed.configuration.clone(), true)?;
+            state.own_mut().selected = slot;
+            state.command(0, live::Command::Jettison, launcher);
+            if state.own().rounds(slot) != 0 {
+                return Err("wet selected store did not jettison".into());
+            }
+        }
+    }
+    println!(
+        "derived stations {}: {count} extra tanks, {fuel} lb fuel, {shell} lb shells; feed, jettison, save and old load passed",
+        aircraft.id.pt()
+    );
+    Ok(())
 }
 
 fn assert_roundtrip(

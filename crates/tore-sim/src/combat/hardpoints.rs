@@ -120,6 +120,10 @@ pub const SHOULDER_OUT: f64 = 1.25;
 /// elevated above the stores on the main wing pylon"; the gap is fitted).
 pub const SHOULDER_GAP: f64 = 0.05;
 
+/// Eagle twin shoulder rails, feet either side of the shared pylon. Fitted
+/// to clear the 610 gallon tank and rolled Sidewinder fins (2026-10-15).
+pub const TWIN_SHOULDER_OUT: f64 = 1.75;
+
 /// How far above its pylon's foot a store of `size` on the shoulder rail
 /// has its centre line, feet: its body's half depth and [`SHOULDER_GAP`].
 pub fn shoulder_rise(size: StoreSize) -> f64 {
@@ -509,6 +513,13 @@ impl Rack {
         size: StoreSize,
     ) -> Vector {
         let mut offset = slot_offset(k, on, size);
+        if self.location() == Location::Shoulder && on == 2 {
+            offset[0] = if k == 0 {
+                -TWIN_SHOULDER_OUT
+            } else {
+                TWIN_SHOULDER_OUT
+            };
+        }
         if side == 1 && self.two_sided(mount) {
             offset[0] = -offset[0];
         }
@@ -828,6 +839,9 @@ pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
         // in tandem per side; wing dual rails a little further aft.
         (AircraftId::F15, 4) => at(Location::Fuselage, 5., -1., Hang::FromBelow { up: -8. }),
         (AircraftId::F15, 5) => at(Location::Wing, 50. / 3., -5.5, Hang::AsRecorded),
+        (AircraftId::F15, 6) => at(Location::Centerline, 0., -3., Hang::FromBelow { up: -8. }),
+        (AircraftId::F15, 7) => at(Location::Wing, 50. / 3., -4.3, Hang::AsRecorded),
+        (AircraftId::F16C, 9) => at(Location::Wing, 7., -1., Hang::FromBelow { up: -6. }),
         // Mi-24's source row is ahead of the stub wing, so it sees the
         // rotor disk. Put the twin rails near the outer stub-wing ends,
         // behind the leading edge and clear of the baked-in pods.
@@ -968,6 +982,11 @@ pub fn placed_on(
     mount[0] = moved.right;
     mount[2] = moved.forward;
     let mut rack = Rack::from_source(h);
+    // The Eagle's two Sidewinder rails sit on the sides of the wing pylon,
+    // above the independent tank's lugs (fitted; requested 2026-10-15).
+    if id == AircraftId::F15 && hardpoint == 5 {
+        rack.location = SHOULDER_BYTE;
+    }
     let (pylon, forward) = match moved.hang {
         Hang::Shoulder { pylon_forward } => {
             rack.location = SHOULDER_BYTE;
@@ -1769,7 +1788,7 @@ mod tests {
             assert!((pair[0][0].abs() + pair[1][0].abs() - 100. / 3.).abs() < 1e-9);
             assert!(
                 pair.iter()
-                    .all(|p| p[2] == -5.5 && (p[1] + size.top).abs() < 1e-6)
+                    .all(|p| p[2] == -5.5 && (p[1] - shoulder_rise(size)).abs() < 1e-6)
             );
         }
         for (index, x, forward) in [(6, 32, -3.), (7, 43, -7.)] {

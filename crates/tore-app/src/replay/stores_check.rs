@@ -50,12 +50,32 @@ fn check_shapes(stores: &[StorePose], art: &CombatArt) -> AppResult<()> {
 
 fn check_load(id: AircraftId, resources: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     let profile = Aircraft::parse(resources.get(id.pt()).ok_or("missing aircraft")?)?;
-    let config = live::Configuration::from_source(&profile, |name| {
+    let mut load = tore_sim::combat::loadout::Loadout::new(&profile, |name| {
         resources
             .get(name)
             .cloned()
             .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
     })?;
+    let added: &[usize] = match id {
+        AircraftId::F15 => &[6, 7],
+        AircraftId::F16C => &[9],
+        _ => &[],
+    };
+    for &row in added {
+        let name = if id == AircraftId::F15 {
+            "F610.GAS"
+        } else {
+            "F370.GAS"
+        };
+        let slot = load
+            .configuration
+            .tanks
+            .iter()
+            .position(|t| t.hardpoint == row)
+            .ok_or("missing added tank row")?;
+        load.select_tank(slot, live::TankStore::parse(name, &resources[name])?)?;
+    }
+    let config = load.configuration;
     let loaded = |i: usize| config.stations[i].count > 0;
     let mut rounds: Vec<_> = config
         .stations
@@ -85,6 +105,22 @@ fn check_load(id: AircraftId, resources: &BTreeMap<String, Vec<u8>>) -> AppResul
             );
             expected.push(now);
         }
+    }
+    if !added.is_empty() {
+        let mut dropped = config.clone();
+        for tank in &mut dropped.tanks {
+            tank.quantity = 0;
+        }
+        dropped.refresh_tanks()?;
+        let now = store_poses(&dropped, |i| rounds[i], loaded);
+        let tick = expected.len() as u64;
+        events.extend(
+            watch
+                .events(7, &now)
+                .into_iter()
+                .map(|event| TimedEvent { tick, event }),
+        );
+        expected.push(now);
     }
     let mut art = CombatArt::load(resources)?;
     art.add_shapes(super::store_art::station_shapes(&events), resources);

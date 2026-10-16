@@ -530,12 +530,10 @@ aft, near mid-chord. Pylon depth remains 1 ft, the twin bar
 and 45-degree fin roll remain unchanged, and tanks selected on this row
 use the same aft position.
 
-The source has no centreline carrier row. Its tank-capable rows are the
-two existing missile rows; selecting a tank replaces that row's weapons.
-Consequently the current loadout cannot carry eight missiles plus tanks,
-or a centreline tank. This slice does not invent a carrier row or promise
-centreline clearance for an unavailable load. Adding those stations is a
-separate loadout decision.
+The source has no centreline carrier row. T.O.R.E now appends the
+[derived tank stations](#derived-f-15c-and-f-16c-stations) requested by John.
+The original missile rows retain their loading rules; their tanks still
+replace weapons on those rows. The new wing tank row is independent.
 
 The same table builds weapons, optional loads and tank positions. Flight,
 network seats and newly recorded store layouts use those positions;
@@ -556,9 +554,10 @@ changes are **opinionated**, requested by John; exact origins below are
 | 7 | Outer underwing 2/8 | 14.33 / -3.67 | 14.33 / -7 | One pylon per wing, farther aft under the chord |
 | 8 | Wingtip 1/9 | Source 18 / -4.67, fitted to the tip at 17 ft out | Unchanged | Stores sit on the model's tip launcher |
 
-The inner wet pair, real stations 4/6, has no source row. It is not
-invented by this placement fix. Tank selections on existing compatible
-rows retain their capacities and replace the weapons on that row.
+The inner wet pair, real stations 4/6, has no source row. The
+[derived station addition](#derived-f-15c-and-f-16c-stations) supplies it.
+Tank selections on existing compatible rows retain their capacities and
+replace the weapons on that row.
 
 At 10.67 ft out the model wing runs from about 2.25 ft forward to 7 ft
 aft. The Maverick's drawn centre is 0.34 ft ahead of its release origin,
@@ -605,3 +604,87 @@ separate length, body diameter and fin-span refits. Pylon placement and
 released-store rendering use the same size table. See the canonical
 [smaller guided bomb specification](missiles.md#smaller-guided-bomb-stores)
 for dimensions and provenance.
+
+## Derived F-15C and F-16C stations
+
+**Opinionated**, John, 2026-10-15: add the missing F-15C centreline and
+independent wing tank carriers and the F-16C inner wet pair. These are
+new gameplay capabilities, not recovered original-game behaviour.
+Exact positions, load limits, tank shell masses and tank shapes are
+**fitted agent decisions**. Defaults remain unchanged; all added rows
+start empty. Retail files are never edited.
+
+| Aircraft / appended row (zero based) | Real stations | Capacity | Origin, feet right / forward |
+| --- | --- | --- | --- |
+| F15.PT / 6 | Centreline 5 | One tank, 4,500 lb | 0 / -3 |
+| F15.PT / 7 | Wing pylons 2 and 8 | Two tanks, 9,000 lb total | +/-16.67 / -4.3 |
+| F16C.PT / 9 | Inner wet 4 and 6 | Two stores, 6,000 lb total | +/-7 / -1 |
+
+The F-15 can retain its four fuselage AIM-7/AIM-120 and four wing
+Sidewinders while carrying three `F610.GAS` tanks. The Sidewinders sit
+above the shared pylon foot on its two side rails, each 1.75 ft from the
+pylon centre to clear the tank and the rolled fins. The F-16 row accepts
+two `F370.GAS` tanks or compatible bombs/missiles, including Mk 82 and
+AGM-65G, with one store per wing. It uses the existing loading masks,
+not a separate release path. Tank and weapon selections exclude each
+other on the F-16 wet row. F-15 centreline bombs are not added: exact
+F-15C carriage limits remain unknown; review a C-model loading manual
+before enabling them.
+
+A 610 US gallon tank contains 4,026 lb fuel and a fitted 432 lb shell;
+a 370 US gallon tank contains 2,442 lb fuel and a fitted 262 lb shell.
+Fuel density is the existing 6.6 lb/gal class convention. Shell mass
+scales the existing 350 gallon class's 248 lb shell. The normal selector
+limits the new tank identities to the above carriers; Cheat retains its
+existing unrestricted rules. Existing tank types keep their old rules.
+Full F-15 additions total 12,078 lb fuel plus 1,296 lb shells. Full F-16
+additions total 4,884 lb fuel plus 524 lb shells, independent of its
+existing centreline tank.
+
+Heights sample the model underside with 1 ft wing pylons and the existing
+2 inch centreline rail. The F-15 centreline search starts 8 ft below the
+reference and the F-16 wet pair 6 ft below. Tank bodies keep the existing
+volume-scaled shape rule; no exact real tank contour is claimed.
+Weight, external-store drag, fuel-first consumption, Shift+K tank
+jettison, Ctrl+Shift+K selected weapon jettison, AI mission loadouts and
+recorded store poses use the shared configuration. No AI decision rule
+changes. Older saved loads retain their weapon indices and leave added
+rows empty.
+
+The parser appends only when every original station field matches the
+reviewed F15.PT or F16C.PT signature. Edited rows suppress the addition.
+The nine serialized fuel banks stay unchanged: F-16 source row 9 uses
+bank 0, unused by its fixed visual sensor. Duplicate bank allocations
+are rejected. Equipment damage still refers to source rows, so a visual
+sensor hit does not empty the added tanks. This added row has no new
+retail subsystem-damage roll. Peers must agree on derived resources,
+row definitions, fuel-bank assignment and placement. No protocol number
+or checkpoint layout changes in this slice.
+
+Real-carriage context: the [USAF F-15 fact sheet](https://www.af.mil/About-Us/Fact-Sheets/Display/Article/104501/f-15-eagle/level/f-15-eagle/)
+describes three external tanks; [Kunsan maintenance](https://www.kunsan.af.mil/News/Article/2440224/maintainers-construct-external-fuel-tanks/)
+identifies 370 gallon F-16 wing tanks. The requested 610 gallon Eagle
+class is used as John's requested size, not a measurement from the game.
+
+### Other light loadouts, review only
+
+The 2026-10-15 roster screen compared the 36 supported retail identities'
+source carrier rows with documented real tank carriage. No other aircraft
+is changed. This is a candidate list for a future opinionated correction,
+not evidence of original-game behaviour or a certification review.
+
+| Aircraft | Source limitation | Real-carriage evidence and next step |
+| --- | --- | --- |
+| MIG29.PT, Fulcrum-C | Rows 5 to 7 are three wing pairs; no centreline carrier | The [German MiG-29 flight manual](https://jasonblair.net/wp-content/uploads/2015/06/MIG29-Flight-Manual-Pt-1.pdf) describes a 1,500 litre centreline tank. Confirm the roster C variant's tank and gun-clearance restrictions before adding it. |
+| A10.PT | Rows 5 to 8 are wing weapon groups; no centreline carrier and no tank permission bit on those rows | [USAF](https://www.127wg.ang.af.mil/Media/Articles/Article/865880/selfridge-angb-home-of-the-drop-tank/) confirms external tanks for long-distance flight. [Eglin](https://www.eglin.af.mil/News/Article-Display/Article/814477/40th-fts-expands-a-10-fuel-limitations-in-combat/) distinguishes the later 600 gallon combat-clearance work. Review period A-10A stations and ferry restrictions. |
+| RAFALE.PT, Rafale C | Centreline row 4 is occupied by AAS38.SEE and retained as equipment; wing rows 6/7 lack tank permission | [Dassault](https://www.dassault-aviation.com/en/defense/rafale/adapt-and-deliver/) specifies five heavy/wet stations. Resolve the retained pod and period C-model tank types; some missing capability is compatibility, not absent rows. |
+| F22.PT | Only internal carrier rows 5 to 7; none has tank permission | [USAF](https://www.af.mil/About-Us/Fact-Sheets/Display/Article/104506/f-22-raptor/) specifies two external wing fuel tanks. Review the game's prototype model geometry and period pylon configuration. Do not substitute F22N.PT or the opinionated FA-XX. |
+
+F-14, F/A-18D, A-4E and F-4 family source groups already represent the
+centreline or independent tank positions relevant to this screen. A-7,
+AV-8, MiG-17, MiG-21, MiG-23, F-104 and Su-25 have tank-capable carrier
+rows, although class sizes and grouped weapon/tank tradeoffs still need
+variant-specific review. Su-27/Su-35 and experimental/rotorcraft entries
+were not declared deficient merely because their row counts differ from
+real station counts. A grouped row can represent several physical
+stations. No claim of exhaustive real-world certification coverage is made.

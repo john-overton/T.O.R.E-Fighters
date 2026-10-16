@@ -109,6 +109,7 @@ pub(super) fn apply(w: &mut Weapon) {
 /// Add virtual donor records in memory when loading a user's pack. Parsing the
 /// virtual name applies its variant above. Existing explicit records win.
 pub fn extend_resources(resources: &mut std::collections::BTreeMap<String, Vec<u8>>) {
+    crate::aircraft::stations::extend_resources(resources);
     for (name, donor, _, _, shape) in SMALL_BOMBS {
         if let Some(bytes) = resources.get(donor).cloned() {
             if let Ok(weapon) = Weapon::parse(donor, &bytes)

@@ -335,7 +335,9 @@ pub fn take_system_hits(
         while flight.systems.counts[index] < terms.subsystem_counts[index] {
             flight.systems.hit(index, flight.throttle);
             if let Some(hardpoint) = index.checked_sub(36) {
-                if config.external_fuel_lbs[hardpoint] > 0. {
+                if config.tanks.iter().any(|tank| tank.hardpoint == hardpoint)
+                    && config.external_fuel_lbs[hardpoint] > 0.
+                {
                     flight.systems.fuel.external[hardpoint] = 0.;
                     flight.systems.notify(format!(
                         "External fuel tank {} damaged: fuel lost",

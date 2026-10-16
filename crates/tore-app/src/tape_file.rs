@@ -37,11 +37,12 @@ fn fingerprint(data: &BTreeMap<String, Vec<u8>>) -> u64 {
     // guard only (not a cryptographic integrity guarantee).
     let mut h = 0xcbf29ce484222325u64;
     for (name, bytes) in data {
-        // Virtual donor aliases are a loader feature, not changed retail
-        // media. Preserve old tapes' import identity; explicit different
-        // variant bytes still participate in the asset guard.
+        // Virtual donor aliases and canonical authored tanks are loader
+        // features, not changed retail media. Preserve old tapes' import
+        // identity; edited variant bytes still participate in the guard.
         if tore_formats::weapons::corrections::resource_donor(name, data)
             .is_some_and(|donor| data.get(&donor) == Some(bytes))
+            || tore_formats::aircraft::stations::resource(name).as_ref() == Some(bytes)
         {
             continue;
         }
@@ -509,7 +510,7 @@ mod tests {
         let original = super::fingerprint(&data);
         tore_formats::weapons::corrections::extend_resources(&mut data);
         assert_eq!(super::fingerprint(&data), original);
-        for name in ["GBU12.JT", "GBU16.JT", "GBU38.JT"] {
+        for name in ["GBU12.JT", "GBU16.JT", "GBU38.JT", "F610.GAS", "F370.GAS"] {
             let mut changed = data.clone();
             changed.get_mut(name).unwrap().push(6);
             assert_ne!(super::fingerprint(&changed), original);

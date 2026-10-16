@@ -445,6 +445,31 @@ fn shoulder_rail(
     size: StoreSize,
 ) {
     let p = pylon.point;
+    if pylon.slots.len() == 2 {
+        // F-15 twin shoulder rails share the central wing tank pylon.
+        let foot = p[1] - shoulder_rise(size);
+        hanger(
+            out,
+            at,
+            airframe,
+            &PylonPlace {
+                point: [p[0], foot - dims.top, p[2]],
+                slots: pylon.slots.clone(),
+            },
+            dims,
+            1,
+            size,
+        );
+        let spread = tore_sim::combat::hardpoints::TWIN_SHOULDER_OUT;
+        block(
+            out,
+            at,
+            [p[0], p[1] + dims.top + ARM / 2., p[2] + dims.middle],
+            [2. * spread, ARM, (0.6 * dims.length).clamp(3., 6.)],
+            PYLON,
+        );
+        return;
+    }
     let side = if p[0] < 0. { -1. } else { 1. };
     let inboard = p[0] - side * SHOULDER_OUT;
     let foot = p[1] - shoulder_rise(size);

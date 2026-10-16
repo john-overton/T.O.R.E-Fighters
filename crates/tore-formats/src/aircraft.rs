@@ -5,6 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 pub mod corrections;
 #[path = "aircraft_schema.rs"]
 pub(crate) mod schema;
+#[path = "aircraft_stations.rs"]
+pub mod stations;
 #[derive(Clone, Debug)]
 pub struct Token {
     pub kind: String,
@@ -894,6 +896,7 @@ impl Aircraft {
                 weight_class: f["maxWeight"].number()?,
             });
         }
+        stations::append(id, &mut hardpoints);
         let (min, max) = (plane["envMin"].number()?, plane["envMax"].number()?);
         let env = b.block("env")?;
         if min > 0 || max < 1 || min < -20 || max > 30 || env.len() != (max - min + 1) as usize * 44

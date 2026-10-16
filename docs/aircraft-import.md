@@ -431,3 +431,8 @@ Aircraft use the shared warm, continuous surface lighting and geometric shadows
 in smooth weather. See the [surface spec](spec/surface-lighting.md) for coverage,
 night lighting and transparent-material exceptions. Imported shadow shapes remain
 unresolved and are not required by this geometry-based presentation.
+
+The guarded F-15C and F-16C [derived stations](spec/stores-on-pylons.md#derived-f-15c-and-f-16c-stations)
+are appended in memory after parsing. Their tank records are authored at pack
+load. They need no reimport, keep source indices and default loads, and do not
+modify user media. Edited station records suppress the additions.

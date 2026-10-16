@@ -1043,7 +1043,8 @@ impl MissionSpec {
             if let Some(tanks) = &load.tanks
                 && (tanks.len() > 9
                     || tanks.iter().any(|tank| {
-                        tank.hardpoint >= 9
+                        tore_formats::aircraft::stations::fuel_bank(usize::from(tank.hardpoint))
+                            .is_none()
                             || !resource_name(&tank.tank)
                             || !tank.tank.ends_with(".GAS")
                     }))
@@ -1581,7 +1582,10 @@ impl LoadParts {
                 };
                 let hardpoint = u8::try_from(whole(hardpoint, "the tank hardpoint")?)
                     .or_else(|_| refuse("tank hardpoint is 0 to 8".into()))?;
-                if hardpoint >= 9 || !resource_name(tank) || !tank.ends_with(".GAS") {
+                if tore_formats::aircraft::stations::fuel_bank(usize::from(hardpoint)).is_none()
+                    || !resource_name(tank)
+                    || !tank.ends_with(".GAS")
+                {
                     return refuse("invalid tank hardpoint or GAS resource".into());
                 }
                 let quantity = u16::try_from(whole(quantity, "the tank quantity")?)
