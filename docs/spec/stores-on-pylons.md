@@ -810,3 +810,98 @@ describes a 1,500 litre centreline tank, but is not C-model certification.
 identifies 14 Rafale hardpoints, five suitable for heavy stores and tanks.
 John's requested configuration defines the gameplay scope where period or
 variant-specific evidence is incomplete.
+
+## The Phantoms' gun pod, 2026-10-16
+
+Implementation specification, **opinionated**, requested by John on 2026-10-16:
+"There is a gun pod missing from the Phantom B, at least as an option to load.
+I think the other variants had gun pods available to them as well." The records,
+the real-aircraft basis and every choice below that John did not name are
+**agent decisions**, for his review. They are not claims about original-game
+behaviour.
+
+**What the data holds.** The import has one gun pod record, `SUU16.JT`
+(SUU-16 gun pod, 1,200 rounds, 1,702 lb). There is no Mk 4, SUU-23 or other
+pod record. The Phantoms' source stations:
+
+| Phantom | Built-in gun | Gun pod before | Gun pod now |
+| --- | --- | --- | --- |
+| F-4B (`F4B.PT`) | none | none | SUU-16 on the centreline, optional (below) |
+| F-4J (`F4J.PT`) | none | SUU-16 on its own fixed row 3 (loaded by default; the page can take it off, but the row takes nothing else) | unchanged; now drawn and fired from its nose |
+| F-4E (`F4E.PT`) | M61 | none | none (open question, below) |
+| F-4G (`F4.PT`) | M61 | none | none (as the F-4E) |
+
+**The F-4B's centreline.** The B's source row 3 is its centreline station, which
+carries four AIM-9Bs by default and takes the other single-rack stores (bombs,
+rocket pods). The SUU-16 now loads there, one pod in place of whatever the row
+carries, through the normal Load Ordnance selector (it is listed on the
+air-to-air page with the other weapons; the card reads "SUU-16 Gun Pod, 1
+loaded (max 1)"). A real Phantom's centreline is one station, so the pod
+replaces the row's stores rather than adding a second centreline row: the
+default load (four AIM-9Bs, four Mk 82s on the fuselage pairs, four on the
+wing pair and two 350 gallon tanks) is unchanged, and taking the pod off
+restores the row's stores. Carrying it, the B weighs 53,416 lb, against 52,394 lb
+without it (the pod's 1,702 lb replaces four 170 lb Sidewinders; the same
+weight accounting as the F-4J's pod). It starts empty-of-pod; saved loadouts
+and mission files from before carry the row's own weapon and load as they did.
+
+- **One pod a station**, Cheat loading too (`Loadout::capacity`), and only on the
+  B's row 3 or a row whose source record names the pod (the F-4J's): the pod
+  is refused on every other station.
+- **Ammunition and mass** follow the F-4J's fitted interpretation: 600 logical
+  units for the record's 1,200 rounds (two rounds a unit), the 1,702 lb pod
+  counted in the weight whether or not it holds rounds, until it is removed or
+  jettisoned. A pod row with a missile on it carries no pod: the entry in the
+  configuration (`GunPod`) counts only while the station's weapon is the pod
+  (`Configuration::gun_pod`).
+- **The Phantom B's stand-in.** The real US Navy pod was the Mk 4 (a 20 mm
+  M61A1 pod, 750 rounds); the data has no Mk 4 record, so the SUU-16 (the
+  same gun in a ram-air driven pod, 1,200 rounds) stands in, with its record's
+  numbers. Agent decision, 2026-10-16.
+- **Selecting and firing.** The pod is a gun (`AircraftId::mounts_gun`, the
+  Guns only rule): GUN on the selection ring picks it, Tab fires it, with the
+  aircraft's own gun first where it has one (none on the B or J). The F-4B has
+  no installed gun, so `AircraftId::F4B.guns()` stays empty and
+  `gun_pods()` names the pod it can carry.
+- **Where the rounds start.** At the nose of the pod as it hangs, under the
+  centreline: the drawn pod's middle (`Station::release_point`) and half the
+  pod's 15.7 ft length ahead (`Station::muzzle`, `gun_mount`), for the player,
+  the AI, the gun sight and the AI's ground-gun cue alike. The F-4J's pod
+  fired from its record's position, 3.3 ft ahead of and 6.7 ft below the
+  aircraft's reference point; it now fires from the same place as the B's,
+  on the belly (agent decision).
+- **Drawing.** The pod is a store on its pylon like a rocket pod: a fitted body
+  15.7 ft by 1.8 ft (the real SUU-16/A is about 16 ft by 22 inches; fitted,
+  `store_sizes::pod_body`), 2 inches under the body (a centreline rail),
+  drawn on both Phantoms that carry it (the F-4J's pod was not drawn before) and
+  in outside views, replays and on every network client from the same
+  `Stores` event. It stays while it has no rounds and leaves only when it is
+  jettisoned (Ctrl+Shift+K, with the selected store).
+- **External stores.** The pod counts as one external store of 1,702 lb in the
+  radar signature, as the F-4J's does; a pod row holding missiles counts the
+  missiles.
+- **AI wingmen** carrying the lead's flight loadout carry the pod, fire it as
+  a gun (600 units, from its nose) and keep it through a restart. No AI default
+  load changes: AI Phantoms keep their source stores.
+
+Weight, the nose position and the F-4J's centreline are checked by the
+`--validate-ordnance` pod audit ("gun pod F4B.PT: ..."), the wing check in
+`--validate-wing-loadout` and the pod snapshot (`ordnance-gun-pod`).
+
+**Limitation.** The F-4J's centreline row (source row 4, empty by default) does
+not take the pod: the J already has its own. A J carrying its pod and a centreline
+store on row 4 draws both on the belly, one through the other (the real
+aircraft's centreline is one station). Not prevented; recorded here.
+
+**Open question for John: the F-4E and F-4G.** Both are built with an M61. Real
+F-4Es could in principle carry a centreline SUU-23/A, but the evidence in hand
+is thin and a second gun on an aircraft that has one adds little, so neither
+gets a pod. Adding one needs a new centreline row (the E's centreline row 4 is
+a tank row with no unguided-store bits), appended and signature-guarded like
+the rows above; the SUU-16 would stand in for the SUU-23 (there is no SUU-23
+record).
+
+**Wire.** Peers must agree on which rows take the pod and its capacity (the F-4B's
+row 3, one pod) and on the `Stores` event listing a gun pod station with one
+store while it hangs. A host and client that disagree refuse or misdraw a
+Phantom carrying a pod. The lead assigns the protocol change.

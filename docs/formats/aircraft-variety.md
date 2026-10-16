@@ -85,7 +85,9 @@ AC130 exposes C_25, C_40 and C_105 together; MIG17F exposes GSH30 and GSH23.
 Source choices are preserved even where they differ from real-aircraft
 expectations: V22 installs T30_1.JT with KA50 laser/ECM records; AH64 installs
 F18R.SEE, F18.ECM and M61.JT; F4.PT installs M61.JT; IL76 installs E3R.SEE.
-F4J's gun is its source SUU16.JT pod. The F4 variants retain their own fuel,
+F4J's gun is its source SUU16.JT pod; the F4B can carry that record on its
+centreline row as an option, though it is built with no gun (the F4B's
+`guns()` stays empty, `gun_pods()` names the pod). The F4 variants retain their own fuel,
 stores, sensors and exterior references.
 
 The AC130 PT's zero-based hardpoints 4, 5 and 6 retain the following raw

@@ -3129,7 +3129,10 @@ again with an observer; the capture format did not change for it.
   replacement commands, so an older game must not join;
   49 since the collision credit fix (slice nr-collkill): splash on a
   bystander no longer makes its shooter the last attacker, which changes
-  kill credit and the combat checkpoint, so an older game must not join.
+  kill credit and the combat checkpoint, so an older game must not join;
+  50 since the F-4B gun pod option (slice nr-f4gun): the F-4B's centreline
+  row takes one SUU-16, which an older game refuses, and the `Stores` event
+  lists a hung gun pod as one store, so an older game must not join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

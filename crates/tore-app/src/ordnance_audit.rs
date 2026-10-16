@@ -20,7 +20,7 @@ use tore_world::mission::{LoadoutSpec, MissionSpec};
 const AIRCRAFT: usize = 36;
 const RECOVERED_STATIONS: usize = 12;
 const TANK_RECORDS: usize = 9;
-const WEAPON_PLACEMENTS: usize = 3402;
+const WEAPON_PLACEMENTS: usize = 3403;
 const TANK_PLACEMENTS: usize = 175;
 /// Station and novelty-record pairs the Cheat loading accepts and the normal
 /// loading refuses (A2G decision 16).
@@ -259,8 +259,12 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
         for (hardpoint, source) in aircraft.hardpoints.iter().enumerate() {
             let rule = loading::Station::from_source(source)?;
             for weapon in &weapons {
-                // The only reviewed installed gun-pod mount is source-default SUU16.
-                if weapon.source == "SUU16.JT" && source.store.as_deref() != Some("SUU16.JT") {
+                // The reviewed gun-pod mounts are the source-default SUU16 (the
+                // F-4J's) and the F-4B's centreline row.
+                if weapon.source == "SUU16.JT"
+                    && source.store.as_deref() != Some("SUU16.JT")
+                    && tore_formats::aircraft::stations::gun_pod_row(id) != Some(hardpoint)
+                {
                     continue;
                 }
                 let expected = rule.allowed_count(
@@ -270,6 +274,12 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                             .filter(|_| weapon.source.starts_with("GBU"))
                             .is_some_and(|donor| source.store.as_deref() == Some(donor)),
                 );
+                // One pod a station, whatever the row's own capacity.
+                let expected = if weapon.source == "SUU16.JT" {
+                    expected.min(1)
+                } else {
+                    expected
+                };
                 let r27 = matches!(
                     weapon.source.as_str(),
                     "AA10.JT" | "R27ER.JT" | "R27T.JT" | "R27ET.JT"
@@ -600,6 +610,7 @@ fn extra_stations(
     data: &BTreeMap<String, Vec<u8>>,
 ) -> AppResult<()> {
     use tore_sim::{attitude::Basis, combat::live, sensors};
+    gun_pod_row(standard, aircraft, data)?;
     if aircraft.id == AircraftId::F16C {
         check_f16_tip(standard, aircraft, data)?;
     }
@@ -770,6 +781,168 @@ fn extra_stations(
     println!(
         "derived stations {}: {count} extra tanks, {fuel} lb fuel, {shell} lb shells; feed, jettison, save and old load passed",
         aircraft.id.pt()
+    );
+    Ok(())
+}
+
+/// The F-4B's centreline row takes the SUU-16 gun pod in place of its stores
+/// (2026-10-16): one pod, 1,702 lb counted in the weight whether it holds
+/// rounds or not, the row's own stores back when the pod is taken off, the
+/// saved load and the lobby rule agreeing, and the pod fired and jettisoned
+/// through the live state. No other row and no other aircraft but the F-4J's
+/// own fixed pod takes one.
+fn gun_pod_row(
+    standard: &Loadout,
+    aircraft: &Aircraft,
+    data: &BTreeMap<String, Vec<u8>>,
+) -> AppResult<()> {
+    use tore_sim::{attitude::Basis, combat::live, sensors};
+    let pod = Weapon::parse("SUU16.JT", &data["SUU16.JT"])?;
+    let Some(row) = tore_formats::aircraft::stations::gun_pod_row(aircraft.id) else {
+        // Elsewhere the pod loads only on a source row that names it.
+        for slot in 0..standard.configuration.stations.len() {
+            let own = standard.configuration.stations[slot].weapon.source == "SUU16.JT";
+            if (standard.capacity(slot, &pod) > 0) != own {
+                return Err(
+                    format!("{} station {slot} gun pod permission", aircraft.id.pt()).into(),
+                );
+            }
+        }
+        return Ok(());
+    };
+    let slot = standard.configuration.hardpoint_slots[row].ok_or("pod row has no weapon slot")?;
+    let default = standard.configuration.stations[slot].weapon.source.clone();
+    if standard.configuration.gun_pod(slot).is_some()
+        || standard.configuration.gun_pods.len() != 1
+        || standard.quantities[slot] == 0
+        || default == "SUU16.JT"
+        || standard.capacity(slot, &pod) != 1
+    {
+        return Err("the F-4B starts with the pod or cannot take one".into());
+    }
+    for other in (0..standard.configuration.stations.len()).filter(|s| *s != slot) {
+        if standard.capacity(other, &pod) != 0 {
+            return Err("the gun pod loads off its centreline row".into());
+        }
+    }
+    let mut armed = standard.clone();
+    armed.select(slot, pod.clone())?;
+    let pod_lbs = f64::from(armed.configuration.gun_pods[0].weight_lbs);
+    let swapped_out = f64::from(standard.configuration.stations[slot].weapon.weight)
+        * f64::from(standard.quantities[slot]);
+    if armed.quantities[slot] != 1
+        || armed.configuration.gun_pod(slot).map(|p| p.quantity) != Some(1)
+        || pod_lbs != 1702.
+        || (armed.total_lbs() - standard.total_lbs() - (pod_lbs - swapped_out)).abs() > 1e-6
+    {
+        return Err("the pod's weight or count is wrong".into());
+    }
+    // 1,200 rounds are 600 logical units, the F-4J's interpretation.
+    if armed.ammunition()?[slot] != 600 {
+        return Err("the pod does not hold 600 logical units (1,200 rounds)".into());
+    }
+    armed.validate()?;
+    assert_roundtrip(&armed, standard, aircraft, data)?;
+    // Taking the pod off restores the row's stores and the pod's mass goes.
+    let mut back = armed.clone();
+    back.select(slot, standard.configuration.stations[slot].weapon.clone())?;
+    if back.quantities[slot] != standard.quantities[slot]
+        || back.configuration.gun_pod(slot).is_some()
+        || back.configuration.gun_pods[0].quantity != 0
+        || back.total_lbs() != standard.total_lbs()
+    {
+        return Err("taking the pod off left its mass or lost the stores".into());
+    }
+    let mut none = armed.clone();
+    none.change(slot, -1);
+    if none.configuration.gun_pods[0].quantity != 0 || none.total_lbs() >= armed.total_lbs() {
+        return Err("removing the pod left its mass".into());
+    }
+    // Guns only keeps the pod, and a tank on the row refuses it.
+    let mut guns = armed.clone();
+    guns.restrict_to_guns();
+    if guns.quantities[slot] != 1 || guns.quantities.iter().sum::<u16>() != 1 {
+        return Err("Guns only does not keep exactly the gun pod".into());
+    }
+    let mut cheat = standard.clone();
+    cheat.cheat = true;
+    if cheat.capacity(slot, &pod) != 1 {
+        return Err("Cheat loading gives more than one pod".into());
+    }
+    // In flight: Tab's gun is the pod, it fires from the pod's nose under the
+    // aircraft and is jettisoned with its mass.
+    let launcher = live::Launcher {
+        position: [0., 5000., 0.],
+        basis: Basis::new(0., 0., 0.),
+        speed_fps: 500.,
+        velocity: [0., 0., 500.],
+        bay_ready: true,
+        radar_power: true,
+        radar: true,
+        jammer: false,
+        alive: true,
+        body_present: true,
+        controls: sensors::Controls::default(),
+    };
+    let mut state = live::State::new(armed.configuration.clone(), true)?;
+    if live::key_gun_station(&armed.configuration, |i| state.own().rounds(i)) != Some(slot) {
+        return Err("Tab does not pick the gun pod".into());
+    }
+    let station = &armed.configuration.stations[slot];
+    let muzzle = station.muzzle();
+    if !(muzzle[1] < -1. && muzzle[2] > station.mount[2] && muzzle[0].abs() < 1e-9) {
+        return Err(format!("the gun pod's muzzle {muzzle:?} is not under the aircraft").into());
+    }
+    // Held trigger: the first round starts at the pod's nose, rounds keep
+    // coming, and the pod and its mass stay when it has fired.
+    let mut firing = state.clone();
+    firing.own_mut().selected = slot;
+    let expected = std::array::from_fn::<f64, 3, _>(|i| {
+        launcher.position[i]
+            + launcher.basis.right[i] * muzzle[0]
+            + launcher.basis.up[i] * muzzle[1]
+            + launcher.basis.forward[i] * muzzle[2]
+    });
+    let mut first = None;
+    for _ in 0..60 {
+        firing.step(
+            &[live::OwnshipInput {
+                aircraft: 0,
+                held: true,
+                launcher,
+            }],
+            |_, _| -10000.,
+        );
+        if first.is_none() {
+            first = firing.projectiles.first().map(|p| p.previous);
+        }
+    }
+    let Some(first) = first else {
+        return Err("the gun pod fired nothing".into());
+    };
+    if first
+        .iter()
+        .zip(expected)
+        .any(|(a, b)| (a - b).abs() > 1e-6)
+        || firing.projectiles.len() < 5
+        || firing.own().rounds(slot) >= 600
+        || firing.own().payload_lbs() != state.own().payload_lbs()
+    {
+        return Err(format!(
+            "the gun pod's rounds did not leave its nose: first {first:?}, wanted {expected:?}"
+        )
+        .into());
+    }
+    let payload = state.own().payload_lbs();
+    state.own_mut().selected = slot;
+    state.command(0, live::Command::Jettison, launcher);
+    if state.own().rounds(slot) != 0 || payload - state.own().payload_lbs() < pod_lbs - 1e-6 {
+        return Err("the gun pod did not jettison with its mass".into());
+    }
+    println!(
+        "gun pod {}: row {row} takes one SUU-16 in place of {default} x{}; weight, 600 logical units (1,200 rounds), Tab, Guns only, save, lobby rule, firing from the pod's nose and jettison passed",
+        aircraft.id.pt(),
+        standard.quantities[slot]
     );
     Ok(())
 }

@@ -42,8 +42,8 @@ impl Configuration {
             if self.designator_pods.iter().any(|p| p.station == index) {
                 continue;
             }
-            if let Some(pod) = self.gun_pods.iter().find(|p| p.station == index) {
-                if station.weapon.source == "SUU16.JT" && pod_fitted(index) {
+            if let Some(pod) = self.gun_pod(index) {
+                if pod_fitted(index) {
                     count += u64::from(pod.quantity);
                     lbs += f64::from(pod.quantity) * f64::from(pod.weight_lbs.max(0));
                 }
@@ -240,6 +240,33 @@ mod tests {
         // An aircraft flying without external stores carries none.
         let bare = Ownship::new(0, NO_SIDE, with_tanks(raptor(), 2), false).unwrap();
         assert_eq!(bare.external_stores(), sensors::Stores::NONE);
+    }
+
+    #[test]
+    fn a_pod_row_counts_its_missiles_until_the_gun_pod_takes_its_place() {
+        use super::super::GunPod;
+        // The F-4B's centreline: a row that can take the SUU-16 keeps an
+        // empty pod entry whatever else it carries (2026-10-16).
+        let mut config = raptor();
+        config.stations[2].count = 4;
+        config.gun_pods = vec![GunPod {
+            station: 2,
+            quantity: 0,
+            rounds_per_pod: 600,
+            weight_lbs: 1702,
+        }];
+        let missiles = Ownship::new(0, NO_SIDE, config.clone(), true).unwrap();
+        assert_eq!(missiles.external_stores().count, 4.);
+        assert!((missiles.external_stores().lbs - 4. * 345.).abs() < 1e-9);
+        // The pod in their place: one store of 1,702 lb, pod hardware only.
+        config.stations[2].weapon.source = "SUU16.JT".into();
+        config.stations[2].weapon.weight = 0;
+        config.stations[2].count = 1;
+        config.gun_pods[0].quantity = 1;
+        config.refresh_tanks().unwrap();
+        let pod = Ownship::new(0, NO_SIDE, config, true).unwrap();
+        assert_eq!(pod.external_stores().count, 1.);
+        assert!((pod.external_stores().lbs - 1702.).abs() < 1e-9);
     }
 
     #[test]
