@@ -3125,7 +3125,10 @@ again with an observer; the capture format did not change for it.
   refuses the load, so an older game must not join;
   48 since Player Choice and AI off (slice nr-mpchoice): the ai setting,
   Choice slots, aircraft in loadouts and revivals, and the despawn and
-  replacement commands, so an older game must not join.
+  replacement commands, so an older game must not join;
+  49 since the collision credit fix (slice nr-collkill): splash on a
+  bystander no longer makes its shooter the last attacker, which changes
+  kill credit and the combat checkpoint, so an older game must not join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

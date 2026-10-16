@@ -240,7 +240,10 @@ pub fn path_words(path: Path) -> &'static str {
 /// 48 since Player Choice and AI off (slice nr-mpchoice): the ai setting,
 /// Choice slots, aircraft in loadouts and revivals, and the despawn and
 /// replacement commands, so an older game must not join.
-pub const PROTOCOL_VERSION: u16 = 48;
+/// 49 since the collision credit fix (slice nr-collkill): splash on a
+/// bystander no longer makes its shooter the last attacker, which changes
+/// kill credit and the combat checkpoint, so an older game must not join.
+pub const PROTOCOL_VERSION: u16 = 49;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
