@@ -32,6 +32,7 @@ use tore_world::snapshot::DEVICES;
 use tore_world::world::World;
 
 pub(crate) mod banner;
+pub mod display;
 pub(crate) mod events;
 pub(crate) mod smooth;
 pub mod stores;
@@ -760,6 +761,28 @@ impl Conversion {
                 .filter(|(at, _)| tick.saturating_sub(*at) <= banner::HOLD_TICKS)
                 .map(|(_, facts)| facts);
             frame.events.extend(banner_watch.events(facts));
+            // The local seat's HUD and sight (nr-replayhud). The weapon name
+            // comes from the mission loadout; the wire does not carry it.
+            for (id, hud, sight) in seen.display.rows(tick) {
+                if let Some(mut hud) = hud {
+                    if hud.weapon.is_empty()
+                        && let Some(station) = self
+                            .client
+                            .mission()
+                            .and_then(|world| world.aircraft_configuration(id))
+                            .and_then(|config| config.stations.get(usize::from(hud.station)))
+                    {
+                        hud.weapon = station.weapon.source.clone();
+                        if hud.mount == [0.; 3] {
+                            hud.mount = station.mount;
+                        }
+                    }
+                    frame.events.push(hud.event(id));
+                }
+                if let Some(sight) = sight {
+                    frame.events.push(sight.event(id));
+                }
+            }
             while let Some((_, event)) = net.next_if(|(t, _)| *t <= tick) {
                 frame.events.push(event);
             }
