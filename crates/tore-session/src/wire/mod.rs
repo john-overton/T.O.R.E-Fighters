@@ -217,7 +217,10 @@ pub fn path_words(path: Path) -> &'static str {
 /// GBU-38 join the store catalog, so an older game must not join.
 /// 40 since the AC-130 damage pass (slice nr-nightfx): the 40 mm and 105 mm
 /// shells do twice the damage, so an older game must not join.
-pub const PROTOCOL_VERSION: u16 = 40;
+/// 41 since the contact bounds fix (slice nr-mav): thin line geometry no
+/// longer inflates surface objects' solid contact boxes, so an older game
+/// must not join.
+pub const PROTOCOL_VERSION: u16 = 41;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
