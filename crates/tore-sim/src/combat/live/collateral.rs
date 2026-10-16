@@ -201,8 +201,10 @@ pub(super) fn foot(bounds: &OrientedBox) -> Vector {
 }
 
 /// An ownship's share of a burst, in the step's ownship-hit form: row, amount,
-/// section, direct gun hit, owner and weapon flags.
-pub(super) type OwnshipHit = (usize, i32, DamageSection, bool, u32, u32);
+/// section, direct gun hit, owner, weapon flags and whether the damage is the
+/// shot's recorded hit (it makes its shooter the last attacker; splash on a
+/// bystander does not, see [`Burst::resolves`]).
+pub(super) type OwnshipHit = (usize, i32, DamageSection, bool, u32, u32, bool);
 
 /// The tick's shared lists a burst adds to.
 pub(super) struct Outputs<'a> {
@@ -264,8 +266,15 @@ impl State {
                 } else {
                     burst.owner
                 };
-                out.ownship_hits
-                    .push((n, amount, section, false, owner, burst.flags));
+                out.ownship_hits.push((
+                    n,
+                    amount,
+                    section,
+                    false,
+                    owner,
+                    burst.flags,
+                    burst.resolves,
+                ));
                 out.events.push(Event::Jolt(super::Jolt {
                     target: t.id,
                     from: burst.position,
@@ -341,8 +350,18 @@ impl State {
                     category: t.category,
                     aircraft,
                 };
+                // An aircraft is the shooter's last attacker only by damage
+                // the shot's own recorded hit holds. Splash on a bystander
+                // aircraft of a shot that struck or resolved elsewhere is no
+                // hit in the tally, so it credits no later loss
+                // (docs/spec/debrief.md, "One record"); a splash kill below
+                // is still credited, and so is splash on a ground object.
                 if applied > 0 && credited {
-                    ledger.damaged(credit);
+                    if burst.resolves || !aircraft {
+                        ledger.damaged(credit);
+                    } else {
+                        ledger.blasted(credit);
+                    }
                 }
                 out.events.push(Event::Hit(t.id));
                 if credited {

@@ -176,7 +176,9 @@ which `--recording-diff` uses. Every gun round is its own launch and
 outcome, as the debrief counts them, so the summary's shot table lists a
 burst round by round.
 
-The attacker on `combat.hit` comes from the debrief ledger's last shooter,
+The attacker on `combat.hit` comes from the debrief ledger's last shooter
+(`Ledger::attacker`: that includes a shooter whose blast only reached a
+bystander aircraft, who is named but credited with nothing),
 and its projectile from the same tick's shot outcomes; two hits on one
 aircraft in one tick can be credited to the later shooter. A headless probe
 runs no weather, crew voice, music or cockpit messages, and its header says
