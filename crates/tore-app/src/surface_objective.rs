@@ -890,7 +890,8 @@ impl Record {
             outcomes: &out.outcomes,
             journal: out.journal.as_ref(),
         });
-        self.recorder.sounds(&out.emissions, &[]);
+        let releases = crate::seat_releases(world, SEAT, &out.releases);
+        self.recorder.sounds(&out.emissions, &releases);
         self.recorder.end(None, &mut world.combat);
         if let Some(pictures) = &mut self.pictures {
             pictures.push(world.combat.render_snapshot().clone());

@@ -207,9 +207,9 @@ pub fn one_sound_per_release<'a>(releases: &[Launch<'a>]) -> Vec<Launch<'a>> {
 /// The most other aircraft's launches one tick sounds (agent decision).
 /// Anything more is a mass salvo too far off to tell apart; the nearest win.
 pub const OTHER_LAUNCH_VOICES: usize = 4;
-/// Of `sounds`, the other aircraft's launches the listener can hear, nearest
-/// first and at most `limit`. The listener's own launches (no shooter) are
-/// not among them.
+/// Rank other-shooter emissions by distance before the voice cap. Hearing
+/// range applies at arrival: a moving listener may enter range in flight.
+/// The listener's own launches (no shooter) are not among them.
 pub fn nearest_launches<'a>(
     sounds: &[Launch<'a>],
     listener: tore_sim::acoustics::Listener,
@@ -219,13 +219,9 @@ pub fn nearest_launches<'a>(
         .iter()
         .filter_map(|launch| {
             let shooter = launch.shooter?;
-            let mix =
-                tore_sim::acoustics::launch_mix(shooter.position, listener, launch.max_distance_ft);
-            (mix.gain > 0.).then(|| {
-                let d: [f64; 3] =
-                    std::array::from_fn(|i| shooter.position[i] - listener.position[i]);
-                (d[0] * d[0] + d[1] * d[1] + d[2] * d[2], *launch)
-            })
+            let d: [f64; 3] = std::array::from_fn(|i| shooter.position[i] - listener.position[i]);
+            let distance = d.iter().map(|v| v * v).sum::<f64>();
+            distance.is_finite().then_some((distance, *launch))
         })
         .collect();
     heard.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -1619,7 +1615,10 @@ impl Mixer {
         if enabled {
             let sounds = one_sound_per_release(releases);
             for launch in sounds.iter().filter(|l| l.shooter.is_none()) {
-                if let Some(clip) = clips.get(launch.name) {
+                if let Some(clip) = clips
+                    .get(launch.name)
+                    .or_else(|| clips.get(&launch.name.to_ascii_uppercase()))
+                {
                     if listener.external {
                         self.spatial.weapon(
                             clip.clone(),
@@ -1992,7 +1991,7 @@ mod tests {
         let ids: Vec<u32> = heard.iter().map(|l| l.shooter.unwrap().id).collect();
         assert_eq!(ids, [1, 2, 3, 4]);
         let all = nearest_launches(&launches, listener, 99);
-        assert_eq!(all.len(), 6, "1,000 to 6,000 ft: 7,000 is silent");
+        assert_eq!(all.len(), 8, "range is evaluated after travel");
     }
 
     #[test]
@@ -2022,6 +2021,20 @@ mod tests {
                 None,
                 &[],
             );
+            assert_eq!(m.spatial.voice_count(), 0, "report must travel first");
+            for _ in 0..1000 {
+                m.spatial.other_weapons(
+                    &clips,
+                    Listener {
+                        position: [0.; 3],
+                        right: [1., 0., 0.],
+                        view: 0,
+                        external,
+                        own: None,
+                    },
+                    &[],
+                );
+            }
             m
         };
         // From an external view and from a cockpit alike, an AI launch
@@ -2247,6 +2260,120 @@ mod tests {
             shooter_position(&snapshot, 0x4000_0004, None),
             Some([90., 0., 190.])
         );
+    }
+
+    #[test]
+    fn virtual_store_catalog_preserves_donor_sounds() {
+        #[allow(dead_code)]
+        mod schema {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../tore-formats/src/aircraft_schema.rs"
+            ));
+        }
+        use tore_world::test_support::resources::{add_a2g_stores, loadable_missile};
+        let mut resources = BTreeMap::new();
+        add_a2g_stores(&mut resources);
+        let bomb = resources["GBU10.JT"].clone();
+        resources.insert("PAVEWAY.JT".into(), bomb.clone());
+        resources.insert("GBU29.JT".into(), bomb);
+        let bytes = loadable_missile("AA10.JT");
+        let text = String::from_utf8(bytes).unwrap();
+        let mut lines: Vec<_> = text.lines().map(str::to_owned).collect();
+        let field = schema::PROJECTILE
+            .iter()
+            .position(|(_, name)| *name == "fireSound")
+            .unwrap();
+        lines[1 + schema::OBJECT.len() + field] = "ptr fire_clip".into();
+        assert_eq!(lines.pop().as_deref(), Some("end"));
+        let text = lines.join("\n") + "\n:fire_clip\nstring \"&hvymiss.11k\"\nend\n";
+        resources.insert("AA10.JT".into(), text.into_bytes());
+        tore_formats::weapons::corrections::extend_resources(&mut resources);
+        let catalog = LaunchSounds::of(&resources);
+        for record in tore_formats::weapons::corrections::R27_DERIVED
+            .into_iter()
+            .chain(tore_formats::weapons::corrections::SMALL_BOMBS.map(|b| b.0))
+        {
+            let (sound, _) = catalog.get(record).expect(record);
+            assert_eq!(
+                sound,
+                if record.starts_with("GBU") {
+                    "&BOMB.11K"
+                } else {
+                    "&HVYMISS.11K"
+                }
+            );
+            let weapon = tore_formats::weapons::Weapon::parse(record, &resources[record]).unwrap();
+            assert_eq!(Some(sound), tore_sim::combat::release_sound(&weapon));
+            assert_eq!(
+                catalog.heard(record, 1, [3000., 0., 0.]).unwrap().sound,
+                sound
+            );
+        }
+    }
+
+    #[test]
+    fn derived_store_release_names_resolve_to_pcm_and_own_cockpit_is_immediate() {
+        let state = tore_world::test_support::combat_fixture(true);
+        let template = state.ownships()[0].configuration().stations[0]
+            .weapon
+            .clone();
+        for (record, bomb) in [
+            ("GBU12.JT", true),
+            ("GBU16.JT", true),
+            ("GBU38.JT", true),
+            ("R27ER.JT", false),
+            ("R27T.JT", false),
+            ("R27ET.JT", false),
+        ] {
+            let mut weapon = template.clone();
+            weapon.source = record.into();
+            weapon.flags = if bomb { 0x2a043 } else { 0x1234f };
+            weapon.seeker.signature = if bomb { 0 } else { 3 };
+            if bomb {
+                weapon.movement.fuel_t = 0;
+                weapon.movement.ignite_t = 0;
+            }
+            weapon.fire_sound = Some("&HVYMISS.11K".into());
+            let sound = tore_sim::combat::release_sound(&weapon).unwrap();
+            assert_eq!(sound, if bomb { "&BOMB.11K" } else { "&HVYMISS.11K" });
+            let clips = BTreeMap::from([(sound.to_owned(), flat_clip(192))]);
+            let mut mixer = test_mixer();
+            mixer.voices.clear();
+            let listener = tore_sim::acoustics::Listener {
+                position: [0.; 3],
+                right: [1., 0., 0.],
+                external: false,
+                view: 0,
+                own: Some(0),
+            };
+            mixer.spatial_tick(
+                &clips,
+                listener,
+                &[],
+                &[],
+                &[Launch::new(sound, 6000)],
+                [3000., 0., 0.],
+                None,
+                &[],
+            );
+            assert_eq!(mixer.voices.len(), 1, "{record} cockpit immediate");
+            // Old recordings contain the erroneous lowercase bomb name.
+            if bomb {
+                mixer.voices.clear();
+                mixer.spatial_tick(
+                    &clips,
+                    listener,
+                    &[],
+                    &[],
+                    &[Launch::named("&bomb.11k")],
+                    [0.; 3],
+                    None,
+                    &[],
+                );
+                assert_eq!(mixer.voices.len(), 1);
+            }
+        }
     }
 
     #[test]

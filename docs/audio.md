@@ -92,7 +92,7 @@ decay.
 
 Impact/explosion positions come from the actual combat effect producer, never
 a target's later location. Simultaneous equal recordings at different positions
-remain separate. Weapon launches and bomb releases start at once in every view
+remain separate. The player's own weapon launches and bomb releases start at once in every view
 and fade in the original's straight line to the record's `maxSndDist`; one
 sound plays per fire call, so a bomb pack is one sound
 ([spec](spec/sound.md#weapon-launch-and-bomb-release)). A chaff or flare release takes its distances and level from the
@@ -100,15 +100,15 @@ sound plays per fire call, so a bomb pack is one sound
 against the 255 of a weapon release. The player's own release plays in the
 cockpit at once, centered, at its peak gain, as the original does. In external
 views, chaff and flare releases and other aircraft's releases travel from the
-release point; weapon launches, the player's own and other aircraft's, do not
-wait for travel. Another aircraft's launch (AI wingmen and enemies, other
+release point. Other shooters' weapon reports now use the same moving-listener
+wavefront model, as requested on 2026-10-15; the player's own stays immediate. Another aircraft's launch (AI wingmen and enemies, other
 players online, AI in replays) is heard from where that aircraft fired, in a
 cockpit through the canopy like any outside sound; one sound plays per aircraft
 per release, and when more than four aircraft launch in one tick the four
 nearest sound. Surface units' missile launches (SAM sites, ships, any
 surface launcher) are heard the same way from the launcher's mount, one sound
 per launcher per release. Aircraft and surface guns play bounded bursts of
-the gun's own recording, with at most four concurrent bursts. Other shooters'
+the gun's own recording, with emission-time selection and at most four concurrent arriving bursts. Other shooters'
 weapons use 65 percent of the own external level before canopy muffling. A multiplayer client and a replay find the record's reach by the
 weapon's name in the local weapon catalog
 ([spec](spec/sound.md#other-aircrafts-launches)).

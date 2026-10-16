@@ -6681,7 +6681,7 @@ mod tests {
                 let body = Body::of(&w);
                 assert_eq!(body.mass, f64::from(weight) / 32.);
                 assert_eq!(body.steering, if source == "GBU38.JT" { 2 } else { 1 });
-                assert_eq!(crate::combat::release_sound(&w), Some("&bomb.11k"));
+                assert_eq!(crate::combat::release_sound(&w), Some("&BOMB.11K"));
                 assert!(body.area < 0.1323 * 4_f64.powf(2. / 3.) * 1.3);
                 let mut larger = w.clone();
                 larger.source = donor.into();

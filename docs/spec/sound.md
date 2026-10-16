@@ -52,6 +52,8 @@ Bombs use `&bomb.11k` on release, including slick, retarded, cluster, packed,
 laser and coordinate stores (opinionated, John, 2026-10-15). The novelty
 ~BLDR and ~MOOSE keep their own `&mothbf.11k`. One shared `release_sound`
 helper supplies cockpit, other-aircraft, multiplayer and replay playback.
+The resource key is canonical uppercase `&BOMB.11K`, including virtual GBU-12,
+GBU-16 and GBU-38 records. R-27 variants inherit their donor firing recording.
 Impact sounds are unchanged. Other weapons keep their record's firing sound:
 a Maverick, for example, plays `&ASHVMIS.11K`.
 
@@ -93,7 +95,7 @@ bomb release and another player's Maverick online are heard.
 
 - **Same distance rule as the external view.** Full within 100 ft of the firing
   aircraft, a straight-line fade to silence at the record's `maxSndDist`,
-  nothing beyond, starting at once. In a cockpit it is heard through the
+  nothing beyond. The report travels at the speed of sound. In a cockpit it is heard through the
   canopy (40 percent, no treble), as every outside sound is. Other shooters'
   weapons use 65 percent of the own external weapon level (fitted agent
   choice, 2026-10-15), before canopy and preference volumes.
@@ -115,14 +117,15 @@ bomb release and another player's Maverick online are heard.
   shooters silent. New rounds start a burst of at most 0.25 seconds; rounds
   from the same shooter and recording cannot start another until 30 simulation
   ticks have passed. Sustained fire repeats those bursts, not one sound per
-  round. At most four bursts are active, with nearer new sources chosen first;
-  an active burst holds its slot until the quarter second ends. Gun reach is
+  round. At most four bursts are selected per 30-tick emission window, with
+  nearer new sources chosen first. At arrival the mixer also holds at most four
+  gun voices, replacing its quietest gun if arrivals bunch together. Gun reach is
   the record's positive distance capped at 6,000 ft, or 4,500 ft when absent.
   The first 5 ms fade in and last 30 ms fade out to avoid clicks. These burst,
   cap and range rules are fitted agent choices (2026-10-15), not recovered
   retail behavior. Slow cannon reports can be shortened by the burst limit.
-- **Voices.** At most the four nearest non-gun launches sound in a tick (agent
-  decision); the placed-sound pool still drops the quietest when it is full.
+- **Voices.** At most the four nearest non-gun launches are selected per
+  emission tick (agent decision); the placed-sound pool still drops the quietest when it is full.
 - **Online and replays.** The wire and a recording name the weapon (and the
   shooter), not the recording or the reach, so the game looks the weapon up in
   its own weapon catalog by name: the same `fireSound` and `maxSndDist` the
@@ -143,9 +146,21 @@ and every surface missile record carries the same `fireSound` and
 ground units reach `PROJFire` through the same NPC weapon service as aircraft
 was not traced, so that a SAM site sounds in retail is expected, not seen.
 
-Agent decisions: the four-voice limit, the canopy muffling inside a cockpit
-(consistent with the other outside sounds) and starting at once with no travel
-delay (as the player's own external launch). Not heard by ear yet.
+Other shooters' gun bursts, missiles, rockets, bombs and surface reports use
+travel time in live play, multiplayer clients and replays (opinionated, John,
+2026-10-15). The existing model expands a spherical wave from the emission
+position at the sound speed for the mean source/listener altitude at emission.
+Each 120 Hz tick compares its radius with the listener's current distance.
+At sea level, 3,000 ft takes about 2.7 seconds. Movement toward or away from
+the source changes arrival time. The firing cockpit stays immediate.
+
+Agent decision: apply release grouping, nearest-source selection and the
+30-tick shooter/recording cooldown at emission, not arrival. Hearing range
+and canopy mix are evaluated at arrival, so a listener can enter hearing
+range while a wave travels. Pending reports share the existing 256-wave bound in a separate weapon field; overflow drops the oldest.
+Mute and replay reset discard pending reports. No sound device is needed for
+the recording-log arrival audit. These are fitted presentation limits,
+not recovered retail behavior. Not heard by ear yet.
 
 ## Flak bursts
 

@@ -228,6 +228,7 @@ impl Scene {
         let passes = self.passes.step(listener, sources);
         if !enabled {
             self.field.clear();
+            self.other_fire = super::other::Fire::default();
             self.voices.clear();
             return;
         }
@@ -316,7 +317,8 @@ impl Scene {
         listener: Listener,
         launches: &[super::Launch<'_>],
     ) {
-        for launch in self.other_fire.step(launches, listener) {
+        for report in self.other_fire.step(launches, listener) {
+            let launch = report.launch();
             let Some(clip) = clips.get(launch.name) else {
                 continue;
             };
@@ -475,6 +477,20 @@ mod tests {
         )])
     }
     #[test]
+    fn muting_discards_pending_weapon_reports() {
+        let clips = clips();
+        let mut scene = Scene::default();
+        let shot = super::super::Launch::by(1, [3000., 0., 0.], "&EXPL12.5K", 6000);
+        scene.other_weapons(&clips, listener(), &[shot]);
+        assert_eq!(scene.voice_count(), 0);
+        scene.tick(&clips, listener(), &[], &[], false);
+        for _ in 0..400 {
+            scene.other_weapons(&clips, listener(), &[]);
+        }
+        assert_eq!(scene.voice_count(), 0);
+    }
+
+    #[test]
     fn other_guns_have_four_voices_and_a_quarter_second_envelope() {
         let clips = BTreeMap::from([(
             "gun".into(),
@@ -488,6 +504,9 @@ mod tests {
             .collect();
         let mut scene = Scene::default();
         scene.other_weapons(&clips, listener(), &guns);
+        for _ in 0..11 {
+            scene.other_weapons(&clips, listener(), &[]);
+        }
         assert_eq!(scene.voice_count(), 4);
         let mut energy = 0.;
         for _ in 0..2000 {
@@ -497,6 +516,9 @@ mod tests {
         assert_eq!(scene.sample(8000.), [0.; 2]);
         scene.clear();
         scene.other_weapons(&clips, listener(), &guns);
+        for _ in 0..11 {
+            scene.other_weapons(&clips, listener(), &[]);
+        }
         assert_eq!(scene.voice_count(), 4, "reset releases the burst slots");
     }
 

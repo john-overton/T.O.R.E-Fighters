@@ -236,7 +236,23 @@ pub fn audit(path: &std::path::Path, folder: &std::path::Path) -> crate::AppResu
     let assets = crate::assets::Assets::load(&crate::assets::data_directory()?)?;
     let recording = Arc::new(Recording::open(path)?);
     let mut sound = ReplaySound::new(Arc::clone(&recording), std::iter::empty());
-    sound.set_launches(audio::LaunchSounds::of(&assets.theater_resources));
+    let catalog = audio::LaunchSounds::of(&assets.theater_resources);
+    let mut stores =
+        std::io::BufWriter::new(std::fs::File::create(folder.join("store-sound.tsv"))?);
+    writeln!(stores, "record\tsound\tclip_present")?;
+    for record in tore_formats::weapons::corrections::R27_DERIVED
+        .into_iter()
+        .chain(tore_formats::weapons::corrections::SMALL_BOMBS.map(|b| b.0))
+    {
+        let name = catalog.get(record).map_or("", |(name, _)| name);
+        writeln!(
+            stores,
+            "{record}\t{name}\t{}",
+            assets.sounds.contains_key(name)
+        )?;
+    }
+    stores.flush()?;
+    sound.set_launches(catalog);
     let player = sound.playback.presentation.player;
     let selected = std::env::var("TORE_WEAPON_SOUND_SUBJECT")
         .ok()
@@ -247,7 +263,7 @@ pub fn audit(path: &std::path::Path, folder: &std::path::Path) -> crate::AppResu
         std::io::BufWriter::new(std::fs::File::create(folder.join("weapon-sound.tsv"))?);
     writeln!(
         output,
-        "tick\tevent\tshooter\tsound\tgun\tdistance_ft\tgain\tselected\tclip_present"
+        "tick\tevent\tshooter\tsound\tgun\tdistance_ft\tgain\tselected\tclip_present\temitted_tick"
     )?;
     let mut candidates = 0;
     let mut audible = 0;
@@ -280,6 +296,14 @@ pub fn audit(path: &std::path::Path, folder: &std::path::Path) -> crate::AppResu
         );
         for (_, cue) in cues {
             let Cue::Tick(t) = cue else { continue };
+            for name in &t.releases {
+                let canonical = name.to_ascii_uppercase();
+                writeln!(
+                    output,
+                    "{tick}\taudio.own.release\t{player}\t{canonical}\tfalse\t0\t1\ttrue\t{}\t{tick}",
+                    assets.sounds.contains_key(&canonical)
+                )?;
+            }
             let shots: Vec<_> = t
                 .others
                 .iter()
@@ -289,7 +313,9 @@ pub fn audit(path: &std::path::Path, folder: &std::path::Path) -> crate::AppResu
                 })
                 .collect();
             let heard = fire.step(&shots, listener);
-            for launch in audio::one_sound_per_release(&shots) {
+            candidates += shots.len();
+            for report in heard {
+                let launch = report.launch();
                 let mix = audio::other::mix(launch, listener);
                 let shooter = launch.shooter.unwrap();
                 let distance = shooter
@@ -299,14 +325,10 @@ pub fn audit(path: &std::path::Path, folder: &std::path::Path) -> crate::AppResu
                     .map(|(a, b)| (a - b).powi(2))
                     .sum::<f64>()
                     .sqrt();
-                let played = heard
-                    .iter()
-                    .any(|h| h.shooter == launch.shooter && h.name == launch.name);
-                candidates += 1;
-                audible += usize::from(played);
+                audible += 1;
                 writeln!(
                     output,
-                    "{}\taudio.other.{}\t{}\t{}\t{}\t{:.1}\t{:.6}\t{}\t{}",
+                    "{}\taudio.other.{}\t{}\t{}\t{}\t{:.1}\t{:.6}\ttrue\t{}\t{}",
                     tick,
                     if launch.gun { "burst" } else { "release" },
                     shooter.id,
@@ -314,8 +336,8 @@ pub fn audit(path: &std::path::Path, folder: &std::path::Path) -> crate::AppResu
                     launch.gun,
                     distance,
                     mix.gain,
-                    played,
-                    assets.sounds.contains_key(launch.name)
+                    assets.sounds.contains_key(launch.name),
+                    recording.first_tick().unwrap_or(0) + report.emitted_tick - 1
                 )?;
             }
         }
@@ -1800,7 +1822,11 @@ mod tests {
             .map(|l| audio::Launch::by(l.shooter, l.position, "gun", 6000).with_gun(true))
             .collect();
         let listener = Listener {
-            position: position(1, 250),
+            position: {
+                let mut p = position(1, 250);
+                p[0] += 3000.;
+                p
+            },
             right: [1., 0., 0.],
             view: 0,
             external: true,
@@ -1808,9 +1834,34 @@ mod tests {
         };
         let mut a = audio::other::Fire::default();
         let mut b = audio::other::Fire::default();
-        for _ in 0..60 {
-            assert_eq!(a.step(&replay, listener), b.step(&network, listener));
+        let mut live = audio::other::Fire::default();
+        let live_launch = network
+            .iter()
+            .copied()
+            .filter(|l| l.shooter.unwrap().id == 1)
+            .collect::<Vec<_>>();
+        let mut arrivals = Vec::new();
+        for tick in 1..=400 {
+            let heard = a.step(if tick == 1 { &replay } else { &[] }, listener);
+            assert_eq!(
+                heard,
+                b.step(if tick == 1 { &network } else { &[] }, listener)
+            );
+            let live_heard = live.step(if tick == 1 { &live_launch } else { &[] }, listener);
+            assert_eq!(
+                heard
+                    .iter()
+                    .filter(|r| r.heard.shooter == 1)
+                    .collect::<Vec<_>>(),
+                live_heard.iter().collect::<Vec<_>>()
+            );
+            if !live_heard.is_empty() {
+                arrivals.push(tick);
+            }
         }
+        let expected = (3000. / tore_sim::acoustics::speed_of_sound(listener.position[1]) * 120.)
+            .ceil() as u64;
+        assert_eq!(arrivals, [expected]);
         // Following the shooter still hears it; selection is not a filter.
         host.selected = 1;
         host.clock.seek(250.);

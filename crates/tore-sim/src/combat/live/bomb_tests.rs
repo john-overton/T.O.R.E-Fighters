@@ -613,7 +613,7 @@ fn release_sound_is_shared_by_every_bomb_class_except_novelty() {
         let mut w = mk82();
         w.source = name.into();
         w.fire_sound = Some("&bomb2.11k".into());
-        assert_eq!(crate::combat::release_sound(&w), Some("&bomb.11k"));
+        assert_eq!(crate::combat::release_sound(&w), Some("&BOMB.11K"));
     }
     for name in [
         "GBU10.JT",
@@ -627,7 +627,7 @@ fn release_sound_is_shared_by_every_bomb_class_except_novelty() {
     ] {
         let mut w = super::guided_tests::gbu10();
         w.source = name.into();
-        assert_eq!(crate::combat::release_sound(&w), Some("&bomb.11k"));
+        assert_eq!(crate::combat::release_sound(&w), Some("&BOMB.11K"));
     }
     for name in ["~BLDR.JT", "~MOOSE.JT"] {
         let mut w = mk82();

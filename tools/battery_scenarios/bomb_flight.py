@@ -1,7 +1,8 @@
 """Recorded acceptance cases for the shared fitted bomb model."""
 import re
 
-from battery import Scenario
+from battery import Scenario, Step
+import csv
 
 
 def guided_problems(output):
@@ -18,6 +19,23 @@ def guided_problems(output):
     impact = re.search(r"a2g-run: impact .*point-miss ([\d.]+)", output)
     if impact is None or float(impact[1]) > 60:
         problems.append("guided impact misses its stored point by more than 60 ft")
+    return problems
+
+
+def sound_problems(work, output):
+    rows = list(csv.DictReader((work / "sound-log" / "weapon-sound.tsv").open(), delimiter="\t"))
+    own = [r for r in rows if r["event"] == "audio.own.release" and r["sound"] == "&BOMB.11K"]
+    problems = []
+    if not own or any(r["clip_present"] != "true" for r in own):
+        problems.append("GBU-12 release did not resolve bomb PCM")
+    catalog = work / "sound-log" / "store-sound.tsv"
+    if not catalog.exists():
+        return problems + ["missing derived-store sound audit"]
+    stores = list(csv.DictReader(catalog.open(), delimiter="\t"))
+    if len(stores) != 6 or any(r["clip_present"] != "true" for r in stores):
+        problems.append("derived bomb or R-27 recording missing")
+    if any(r["sound"] != "&BOMB.11K" for r in stores if r["record"].startswith("GBU")):
+        problems.append("derived bomb does not use shared release recording")
     return problems
 
 
@@ -39,6 +57,9 @@ def scenarios():
               "--seconds", "150", "--record", "{work}/flight.tore-replay",
               "--verify-render", *extra],
         outputs=["flight.tore-replay"], timeout=300,
+        env={"TORE_WEAPON_SOUND_LOG": "1"} if name == "gbu12-level" else {},
+        then=[Step(["--recording-log", "{work}/flight.tore-replay", "--out", "{work}/sound-log", "--rate", "1"], timeout=300)] if name == "gbu12-level" else [],
+        check_work=sound_problems if name == "gbu12-level" else None,
         check=guided_problems if attack in ("laser", "jdam") else None,
         forbid=[r"a2g-run: impact .*unseen"],
         expect=[r"a2g-run: impact", r"a2g-run: done",
