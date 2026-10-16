@@ -996,7 +996,7 @@ fn read_flattened(r: &mut BitReader<'_>) -> WireResult<Vec<u32>> {
 }
 
 /// A Stores event's stations: the aircraft, the count, then each station's
-/// index (6 bits, ascending) and its whole stores (a varint).
+/// index (7 bits, ascending) and its whole stores (a varint).
 fn write_stores(w: &mut BitWriter, aircraft: u32, loads: &[StationStores]) -> WireResult<()> {
     if loads.len() > limits::STORE_STATIONS {
         return Err(WireError::TooMany {
@@ -1009,7 +1009,7 @@ fn write_stores(w: &mut BitWriter, aircraft: u32, loads: &[StationStores]) -> Wi
         .any(|pair| pair[1].station <= pair[0].station)
         || loads
             .iter()
-            .any(|load| usize::from(load.station) >= limits::STORE_STATIONS)
+            .any(|load| usize::from(load.station) >= STATION_INDEX_LIMIT)
     {
         return Err(WireError::Invalid("store stations"));
     }
@@ -1038,8 +1038,16 @@ fn read_stores(r: &mut BitReader<'_>) -> WireResult<Vec<StationStores>> {
     Ok(loads)
 }
 
-/// Bits of a station index in a Stores event: a loadout has at most 64.
-const STATION_BITS: u32 = 6;
+/// Bits of a station index in a Stores event. Six bits reached 0 to 63:
+/// weapon stations (0 to 31), and tank hardpoints 0 to 8 at codes 55 to 63.
+/// Hardpoint 9 (the F-16C inner wet pair and the Rafale centreline tank) is
+/// code 64, the largest a configuration allows, so the field is 7 bits
+/// (protocol 51). A loadout still lists at most 64
+/// stations; the index may be higher than the count.
+const STATION_BITS: u32 = 7;
+
+/// The largest station index a Stores event carries, one past the 7-bit field.
+const STATION_INDEX_LIMIT: usize = 1 << STATION_BITS;
 
 /// Reads a varint that must fit 16 bits.
 fn read_u16(r: &mut BitReader<'_>) -> WireResult<u16> {

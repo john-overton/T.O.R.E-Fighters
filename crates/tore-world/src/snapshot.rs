@@ -163,7 +163,10 @@ pub use tore_sim::combat::store_sizes::{POD_BODY, pod_body, tank_body};
 /// from the aircraft's loadout ([`store_poses_of`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct StationStores {
-    /// Weapon station 0..31, or 55 + hardpoint (0..8) for a tank row.
+    /// Weapon station 0..31, or 55 + hardpoint for a tank row. Hardpoints 0
+    /// to 8 are codes 55 to 63. Hardpoint 9 (the F-16C inner wet pair and the
+    /// Rafale centreline) is code 64, which the Stores event carries in 7
+    /// bits (protocol 51).
     pub station: u8,
     /// Whole stores still on it (pods and single stores).
     pub items: u16,
