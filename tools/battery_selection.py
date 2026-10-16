@@ -151,7 +151,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     "menus-screens": ("menu screens captured on the CPU", ("menus-snap-*", "menus-flight-map-*", "replay-snapshot-*")),
     "menus-creator": (
         "the Quick Mission creator, start-up runs and loadout pages",
-        ("qmc-wing-loadout", "menus-start-*", "menus-loadout-*", "menus-tanks-*", "menus-ordnance-*", "menus-validate-creator", "menus-snap-quick-*"),
+        ("qmc-wing-loadout", "menus-start-*", "menus-loadout-*", "menus-tanks-*", "menus-ordnance-*", "menus-derived-stations", "menus-validate-creator", "menus-snap-quick-*"),
     ),
     "menus-validate": (
         "text, maps, weather, creator and ILS validators",

@@ -506,6 +506,8 @@ mod tests {
             ("OTHER".into(), vec![4, 5]),
             ("PAVEWAY.JT".into(), vec![7, 8]),
             ("GBU29.JT".into(), vec![9, 10]),
+            ("F15.PT".into(), vec![11]),
+            ("F16C.PT".into(), vec![12]),
         ]);
         let original = super::fingerprint(&data);
         tore_formats::weapons::corrections::extend_resources(&mut data);

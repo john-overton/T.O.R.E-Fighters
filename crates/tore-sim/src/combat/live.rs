@@ -6784,7 +6784,10 @@ mod tests {
     fn derived_wet_rows_enforce_capacity_and_feed_without_changing_fuel_layout() {
         use crate::combat::{loading, loadout::Loadout};
         use tore_formats::aircraft::{Hardpoint, stations};
-        let mut resources = std::collections::BTreeMap::new();
+        let mut resources = std::collections::BTreeMap::from([
+            ("F15.PT".to_owned(), Vec::new()),
+            ("F16C.PT".to_owned(), Vec::new()),
+        ]);
         stations::extend_resources(&mut resources);
         for (id, row, name, count, limit) in [
             (AircraftId::F15, 6, "F610.GAS", 1, 45),

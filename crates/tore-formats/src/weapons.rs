@@ -614,7 +614,7 @@ end
             ("TEST.SH".into(), vec![1, 2, 3]),
         ]);
         corrections::extend_resources(&mut data);
-        assert_eq!(data.len(), 11);
+        assert_eq!(data.len(), 9);
         for (name, donor, _, _, shape) in corrections::SMALL_BOMBS {
             assert_eq!(
                 corrections::resource_donor(name, &data).as_deref(),
@@ -675,7 +675,7 @@ end
         let once = resources.clone();
         corrections::extend_resources(&mut resources);
         assert_eq!(resources, once);
-        assert_eq!(resources.len(), 7);
+        assert_eq!(resources.len(), 5);
     }
 
     #[test]
@@ -752,7 +752,7 @@ end
         let once = map.clone();
         corrections::extend_resources(&mut map);
         assert_eq!(map, once);
-        assert_eq!(map.len(), 6);
+        assert_eq!(map.len(), 4);
     }
 
     #[test]

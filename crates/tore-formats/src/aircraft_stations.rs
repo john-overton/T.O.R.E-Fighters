@@ -19,11 +19,16 @@ pub fn resource(name: &str) -> Option<Vec<u8>> {
     Some(format!("[brent's_relocatable_format]\nbyte 8\nptr si_names\nword {shell}\nbyte 1\ndword {fuel}\n:si_names\nstring \"{gallons} gallon tank\"\nstring \"{gallons} Gallon External Fuel Tank\"\nstring \"{name}\"\nend\n").into_bytes())
 }
 
+/// Adds each authored tank only to a pack holding its carrier, as the
+/// derived bombs need their donor: a pack without the F-15C or F-16C stays
+/// exactly as imported.
 pub fn extend_resources(resources: &mut std::collections::BTreeMap<String, Vec<u8>>) {
-    for (name, ..) in TANKS {
-        resources
-            .entry(name.into())
-            .or_insert_with(|| resource(name).expect("known authored tank"));
+    for ((name, ..), carrier) in TANKS.iter().zip(["F15.PT", "F16C.PT"]) {
+        if resources.contains_key(carrier) {
+            resources
+                .entry((*name).into())
+                .or_insert_with(|| resource(name).expect("known authored tank"));
+        }
     }
 }
 
@@ -148,6 +153,10 @@ mod tests {
     #[test]
     fn authored_tanks_parse_and_explicit_records_win() {
         let mut data = std::collections::BTreeMap::new();
+        extend_resources(&mut data);
+        assert!(data.is_empty(), "no carrier, no authored tank");
+        data.insert("F15.PT".into(), Vec::new());
+        data.insert("F16C.PT".into(), Vec::new());
         extend_resources(&mut data);
         for (name, _, fuel, shell) in TANKS {
             let t = crate::weapons::Tank::parse(&data[name]).unwrap();
