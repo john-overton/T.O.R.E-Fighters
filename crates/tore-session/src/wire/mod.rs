@@ -232,7 +232,10 @@ pub fn path_words(path: Path) -> &'static str {
 /// 45 since the ordnance page pass (slice nr-ordui): the Pave Knife is no
 /// longer a weapon item and a loadout naming it loads the Pave Spike, so an
 /// older game must not join.
-pub const PROTOCOL_VERSION: u16 = 45;
+/// 46 since the store signature (slice nr-rcs): external stores raise the
+/// radar signature every radar and seeker reads, so an older game must not
+/// join.
+pub const PROTOCOL_VERSION: u16 = 46;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

@@ -3116,7 +3116,10 @@ again with an observer; the capture format did not change for it.
   three tank records, so an older game must not join;
   45 since the ordnance page pass (slice nr-ordui): the Pave Knife is no
   longer a weapon item and a loadout naming it loads the Pave Spike, so an
-  older game must not join.
+  older game must not join;
+  46 since the store signature (slice nr-rcs): external stores raise the
+  radar signature every radar and seeker reads, so an older game must not
+  join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
