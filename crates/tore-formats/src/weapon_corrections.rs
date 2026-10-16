@@ -29,6 +29,12 @@ pub fn identity(source: &str) -> Option<(&'static str, &'static str)> {
 }
 
 pub(super) fn apply(w: &mut Weapon) {
+    // Opinionated, John 2026-10-15: double shell damage, not blast geometry.
+    if matches!(w.source.as_str(), "C_40.JT" | "C_105.JT") {
+        for amount in &mut w.damage.by_class {
+            *amount = amount.saturating_mul(2);
+        }
+    }
     if let Some((short, long)) = identity(&w.source) {
         w.hud_name = short.into();
         w.name = long.into();

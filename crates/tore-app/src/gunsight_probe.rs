@@ -400,6 +400,28 @@ fn pin_orbit(config: &Configuration, dump: Option<&std::path::Path>) -> AppResul
 /// craters where the line of sight meets the ground.
 fn fire_no_target(config: &Configuration) -> AppResult<()> {
     let mut report = Report::default();
+    for (source, damage) in [
+        ("C_25.JT", [33, 3, 9, 9, 33]),
+        ("C_40.JT", [100; 5]),
+        ("C_105.JT", [300; 5]),
+    ] {
+        let weapon = &config
+            .stations
+            .iter()
+            .find(|s| s.weapon.source == source)
+            .ok_or("missing gunship record")?
+            .weapon;
+        report.check(
+            weapon.damage.by_class == damage,
+            format!("{source} corrected damage {damage:?}"),
+        );
+        println!(
+            "gunship damage {source}: {:?}, collateral radius={} percent={}",
+            weapon.damage.by_class,
+            weapon.damage.collateral_radius,
+            weapon.damage.collateral_percent
+        );
+    }
     let mut s = state(config)?;
     let l = launcher([0., 3000., 0.], 0., 0., 300.);
     // The guns come round to the default view first.

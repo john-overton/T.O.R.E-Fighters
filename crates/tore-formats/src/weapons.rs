@@ -573,6 +573,27 @@ mod tests {
     }
 
     #[test]
+    fn gunship_damage_correction_preserves_all_other_record_fields() {
+        let bytes = fixture_damage("150");
+        let original = Weapon::parse("C_25.JT", bytes.as_bytes()).unwrap();
+        assert_eq!(original.damage.by_class, [150; 5]);
+        for source in ["C_40.JT", "C_105.JT"] {
+            let mut corrected = Weapon::parse(source, bytes.as_bytes()).unwrap();
+            assert_eq!(
+                corrected.damage.by_class,
+                original.damage.by_class.map(|v| v.saturating_mul(2))
+            );
+            corrected.damage.by_class = original.damage.by_class;
+            corrected.source = original.source.clone();
+            assert_eq!(corrected, original);
+        }
+        assert_eq!(
+            Weapon::parse("C_25.JT", bytes.as_bytes()).unwrap(),
+            original
+        );
+    }
+
+    #[test]
     fn derived_r27_records_change_guidance_motor_and_names_at_parse() {
         let bytes = fixture();
         let mut donor = Weapon::parse("AA10.JT", bytes.as_bytes()).unwrap();
@@ -662,6 +683,9 @@ mod tests {
         assert!(Tank::parse(&s[..s.len() - 5]).is_err());
     }
     fn fixture() -> String {
+        fixture_damage("0")
+    }
+    fn fixture_damage(damage: &str) -> String {
         let mut s = "[brent's_relocatable_format]\n".to_string();
         for (layout, fields) in [
             ("object", crate::aircraft::schema::OBJECT),
@@ -675,6 +699,7 @@ mod tests {
                     (_, "utilProc") => "_PROJProc",
                     (_, "si_names") | (_, "ot_names") => "names",
                     (_, "_maxSpeed") => "500",
+                    ("object", name) if name.starts_with("damage[") => damage,
                     _ => "0",
                 };
                 let kind = if kind == "ptr" && v == "0" {

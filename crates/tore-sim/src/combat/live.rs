@@ -8348,6 +8348,26 @@ mod tests {
         p.gun_round = Some(1);
         assert_eq!(projectile_damage(&p, w, 10), 1);
         assert_eq!(projectile_damage(&p, w, 2), 0);
+        // nr-nightfx: corrected record values, all truck/tank/SAM classes.
+        for (source, before, after, expected) in [
+            ("C_40.JT", 50, 100, [17, 16]),
+            ("C_105.JT", 150, 300, [50, 50]),
+            ("C_25.JT", 30, 30, [5, 5]),
+        ] {
+            w.source = source.into();
+            for class in 0..5 {
+                w.damage.by_class[class] = after;
+                for (round, expected) in expected.into_iter().enumerate() {
+                    p.gun_round = Some(round as u8);
+                    assert_eq!(
+                        projectile_damage(&p, w, i32::from(w.damage.by_class[class])),
+                        expected
+                    );
+                    let old = projectile_damage(&p, w, before);
+                    assert!(expected >= old);
+                }
+            }
+        }
     }
 
     #[test]

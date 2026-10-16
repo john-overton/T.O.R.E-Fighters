@@ -793,3 +793,22 @@ fn a_flak_burst_knocks_aircraft_half_as_hard() {
     // percent falling to nothing at 400 ft (27 percent at 100 ft).
     assert_eq!(burst(&flak, Detonation::Air).percent_at(100.), 27);
 }
+
+#[test]
+fn gunship_corrected_damage_reaches_collateral_without_changing_coverage() {
+    for raw in [50, 150] {
+        let mut weapon = sparrow();
+        weapon.damage.by_class = [raw; 5];
+        let old = burst(&weapon, Detonation::Ground);
+        weapon.damage.by_class = [raw * 2; 5];
+        let new = burst(&weapon, Detonation::Ground);
+        assert_eq!(old.radius, new.radius);
+        for category in [0x100, 0x2000, 0x800] {
+            for distance in [0., old.radius / 2., old.radius] {
+                let before = old.nominal(category, distance);
+                let after = new.nominal(category, distance);
+                assert!((after - before * 2).abs() <= 1);
+            }
+        }
+    }
+}
