@@ -871,7 +871,7 @@ cargo run --locked -p tore-app -- --quick-mission --snapshot-state theaters --sn
 and `debrief-1` through `debrief-5` (the retail reference result on DEBSCV);
 they use the original 640×480 menu canvas. The empty/drag ordnance fixtures
 support CPU snapshots for inspecting card outlines and the carried thumbnail.
-`ordnance-message` previews the Cheat notice; `ordnance-message-long` previews
+`ordnance-pod` and `ordnance-pod-yellow` hang the Pave Spike on the first station that takes it with the station's blink held on its red or yellow phase, and `ordnance-authored-tank` loads the first authored tank (the F-16C's 370 gallon one); `ordnance-message` previews the Cheat notice; `ordnance-message-long` previews
 the single-line notice's ellipsis and fitted background width. `ordnance-laser` (and
 `lobby-ordnance-laser`) load a laser missile or bomb to show the laser warning and the
 sensor helper line; `first-load` shows the creator as a first load draws it, every

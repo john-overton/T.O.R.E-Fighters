@@ -13200,6 +13200,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     | "lobby-ordnance-gaps"
                     | "ordnance-laser"
                     | "lobby-ordnance-laser"
+                    | "ordnance-pod"
+                    | "ordnance-pod-yellow"
+                    | "ordnance-authored-tank"
             ) {
                 quick.ordnance = Some(ordnance::Ordnance::new(
                     tore_sim::combat::loadout::Loadout::new(&hornet.profile, |n| {
