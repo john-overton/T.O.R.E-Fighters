@@ -50,6 +50,10 @@ const PIN_IN_FLIGHT: &str = "A pin made in flight applies when the lobby returns
 /// Why a dedicated server's snapshot rate row is greyed (slice R1): its
 /// operator sets it in the configuration file.
 const RATE_IS_THE_SERVERS: &str = "This server's snapshot rate is set by its operator.";
+/// Why the minimum players row is greyed: the server's operator sets it in
+/// the configuration file or the rotation (John, 2026-10-16); nobody in the
+/// lobby changes it.
+const MIN_IS_THE_OPERATORS: &str = "The server operator sets the minimum players.";
 /// Why the AI respawn row is greyed: with revival `none` nothing comes back.
 pub const AI_RESPAWN_NEEDS_REVIVAL: &str = "With Revival none, no aircraft comes back.";
 /// The most bytes of a game's name (the host's rule).
@@ -205,6 +209,7 @@ pub fn page_rows(page: Page) -> Vec<Kind> {
         ],
         Page::Revival => vec![
             Kind::Setting(number::AI),
+            Kind::Setting(number::MIN_PLAYERS),
             Kind::Setting(number::RESPAWN),
             Kind::Setting(number::LIVES),
             Kind::Setting(number::REVIVE_DELAY),
@@ -258,6 +263,7 @@ pub fn row_label(kind: Kind) -> &'static str {
             number::OBSERVER_DELAY => "Observer delay",
             number::IDLE_AI => "AI flies idle aircraft after",
             number::SNAPSHOT_RATE => "Snapshot rate",
+            number::MIN_PLAYERS => "Players, at least",
             number::AI_RESPAWN => "AI respawn",
             number::AI => "AI aircraft",
             _ => "",
@@ -377,6 +383,9 @@ impl Context {
 pub fn row_state(kind: Kind, ctx: &Context) -> Result<(), String> {
     if !ctx.king {
         return Err("Only the King may change the settings.".into());
+    }
+    if kind == Kind::Setting(number::MIN_PLAYERS) {
+        return Err(MIN_IS_THE_OPERATORS.into());
     }
     let in_lobby_only = match kind {
         Kind::Setting(n) => settings::setting(n).is_some_and(|s| s.change == Change::InLobby),

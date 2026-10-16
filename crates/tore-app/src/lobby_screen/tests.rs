@@ -411,6 +411,52 @@ fn a_dedicated_servers_lobby_has_no_kings_controls_and_states_its_rule() {
     );
 }
 
+fn set_setting(state: &mut LobbyState, number: u8, value: u32) {
+    state.settings.retain(|s| s.0 != number);
+    state.settings.push((number, value));
+}
+
+#[test]
+fn the_lobby_says_it_waits_for_the_minimum_players_as_the_host_does() {
+    use tore_session::settings::number;
+    // The sample has two slots held: Maverick's, not ready, and Goose's.
+    let mut state = sample(2);
+    state.king = None;
+    state.host = None;
+    state.start = StartRule::FirstReady;
+    set_setting(&mut state, number::MIN_PLAYERS, 4);
+    let facts = Facts::of(Some(&state), None);
+    assert_eq!((facts.min_players, facts.min_waiting), (4, 3));
+    assert!(!facts.all_ready());
+    assert_eq!(
+        facts::hint(&facts),
+        "Waiting for 3 more ready players (minimum 4)."
+    );
+    assert!(
+        facts::ready_hint(&facts).is_some_and(|hint| hint.contains("minimum number of players"))
+    );
+    // Met: the wait line goes.
+    set_setting(&mut state, number::MIN_PLAYERS, 1);
+    let facts = Facts::of(Some(&state), None);
+    assert_eq!(facts.min_waiting, 0);
+    assert!(!facts::hint(&facts).starts_with("Waiting for"));
+    // Never more than the six slots, or the player limit.
+    set_setting(&mut state, number::MIN_PLAYERS, 30);
+    assert_eq!(Facts::of(Some(&state), None).min_players, 6);
+    set_setting(&mut state, number::MAX_PLAYERS, 3);
+    assert_eq!(Facts::of(Some(&state), None).min_players, 3);
+    // AI off needs every open slot held and ready: its line is the
+    // stricter one and says so.
+    set_setting(&mut state, number::MAX_PLAYERS, 30);
+    set_setting(&mut state, number::MIN_PLAYERS, 2);
+    set_setting(&mut state, number::AI, 0);
+    let facts = Facts::of(Some(&state), None);
+    assert_eq!(
+        facts::hint(&facts),
+        "Waiting for 5 more ready players: AI is off."
+    );
+}
+
 #[test]
 fn the_players_list_marks_the_crown_the_house_ready_and_unable() {
     let mut state = king();

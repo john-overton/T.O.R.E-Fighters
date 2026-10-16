@@ -1780,3 +1780,6 @@ fn final_rotation_round_with_zero_delay_delivers_its_debrief_before_closing() {
     assert!(rig.run_until(Duration::from_secs(3), |r| r.closed(client)));
     assert!(rig.clients[client].debrief.is_some());
 }
+
+#[path = "min_players_tests.rs"]
+mod min_players_tests;

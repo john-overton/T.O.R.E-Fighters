@@ -561,6 +561,8 @@ impl Host {
             overloads: _,
             roster_dirty: _,
             lobby_dirty: _,
+            // The last wait-to-start line logged: log bookkeeping only.
+            wait_logged: _,
             // Tests only.
             #[cfg(test)]
                 unforeseen_log: _,

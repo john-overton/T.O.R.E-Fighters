@@ -268,6 +268,10 @@ pub enum HostLog {
     Overloaded { tick: u64, ticks_behind: u64 },
     /// The mission could not go on (a step or a rebuild failed).
     Fault { tick: u64, text: String },
+    /// Something the host did on purpose that is neither a fault nor a
+    /// player's doing: why the mission waits to start, a departed player's
+    /// aircraft removed because AI is off.
+    Note { tick: u64, text: String },
     /// The host stopped.
     Stopped { tick: u64 },
     /// Something a player did in the lobby, or that happened to it there.
@@ -325,6 +329,7 @@ impl HostLog {
             | Self::MissionRestarted { tick }
             | Self::Overloaded { tick, .. }
             | Self::Fault { tick, .. }
+            | Self::Note { tick, .. }
             | Self::Stopped { tick }
             | Self::Lobby { tick, .. }
             | Self::Chat { tick, .. }
@@ -548,6 +553,14 @@ struct Peer {
     gaps_sent: bool,
 }
 
+/// What stops the lobby's mission starting now.
+enum StartBlock {
+    /// Players are still to come: not an error, the lobby waits.
+    Wait(String),
+    /// The mission cannot be flown as it is (a gap in the content).
+    Refused(String),
+}
+
 /// The lifecycle's own state.
 #[derive(Clone, Copy, Debug)]
 enum Life {
@@ -650,6 +663,9 @@ pub struct Host {
     compat: content::Compat,
     /// The loading thread's socket and timing (protocol 28, `loading`).
     loader: loading::Loader,
+    /// The last wait-to-start line logged, so a line is logged when the
+    /// reason changes and not on every attempt.
+    wait_logged: Option<String>,
     /// What each seat's game could not foresee, by tick (tests only).
     #[cfg(test)]
     unforeseen_log: Vec<(u64, SeatId, Unforeseen)>,
@@ -959,12 +975,15 @@ impl Host {
             listing: None,
             compat,
             loader: loading::Loader::default(),
+            wait_logged: None,
             court,
             settings,
             config,
         };
-        if host.config.start == StartMode::Now && host.settings.ai() {
+        if host.start_rule() == StartMode::Now {
             host.start_flying().map_err(HostError::Mission)?;
+        } else {
+            host.note_start_wait(true);
         }
         Ok(host)
     }
@@ -1077,7 +1096,10 @@ impl Host {
     /// ready player holding a slot in it.
     pub fn start_now(&mut self) {
         if matches!(self.life, Life::Lobby) {
-            // A failure is logged as a fault; the lobby stays.
+            // A failure is logged (a wait as a note, a build failure as a
+            // fault); the lobby stays. The operator asked, so a wait is
+            // said again even when it is the same as the last.
+            self.wait_logged = None;
             let _ = self.start_flying();
             self.send_lobby();
         }
@@ -2342,7 +2364,13 @@ impl Host {
         if ready {
             match self.life {
                 Life::Lobby if self.start_rule() == StartMode::FirstPlayer => {
-                    self.start_flying()?;
+                    match self.start_block() {
+                        // Not an error: the player is ready, and the
+                        // mission starts when the others are.
+                        Some(StartBlock::Wait(_)) => self.note_start_wait(false),
+                        Some(StartBlock::Refused(why)) => return Err(why),
+                        None => self.start_flying()?,
+                    }
                 }
                 Life::Flying => {
                     if let Some(plane) = slot {
@@ -3005,42 +3033,115 @@ impl Host {
 
     // ----- The clock and the tick ----------------------------------------
 
-    /// The mission starts flying: built again with the loadouts of the held
-    /// slots, which every player is sent to build its copy again with, and
-    /// every ready player holding a slot takes its plane at the first tick.
-    /// AI-off games cannot bypass the ready requirement, even from the console.
+    /// Why an AI-off lobby is not starting: open slots not yet held by a
+    /// ready player (the console's `start now` cannot bypass it).
     pub fn ai_wait_reason(&self) -> Option<String> {
+        let missing = self.ai_missing();
+        crate::settings::start_wait_text(missing, 0, 0).filter(|_| missing > 0)
+    }
+
+    /// Whether `peer` counts as a ready player: it holds a slot, is ready,
+    /// can play the mission and is not leaving. The AI-off rule and the
+    /// minimum players both count this way (and so does the start rule).
+    fn ready_holder(peer: &Peer) -> bool {
+        peer.lobby.slot.is_some()
+            && peer.lobby.ready
+            && peer.lobby.unable.is_none()
+            && !matches!(peer.stage, Stage::Closing { .. })
+    }
+
+    /// With AI off, the open slots that no ready player holds yet; 0 with
+    /// AI on.
+    fn ai_missing(&self) -> usize {
         if self.settings.ai() {
-            return None;
+            return 0;
         }
-        let missing = self
-            .slots()
+        self.slots()
             .iter()
             .filter(|slot| {
                 !self.closed_slot(slot.id)
                     && !self.peers.values().any(|peer| {
-                        peer.lobby.slot == Some(PlaneId(slot.id))
-                            && peer.lobby.ready
-                            && peer.lobby.unable.is_none()
-                            && !matches!(peer.stage, Stage::Closing { .. })
+                        peer.lobby.slot == Some(PlaneId(slot.id)) && Self::ready_holder(peer)
                     })
             })
-            .count();
-        (missing > 0).then(|| format!("Waiting for {missing} more ready players: AI is off."))
+            .count()
     }
 
-    fn start_flying(&mut self) -> Result<(), String> {
+    /// The minimum players the lobby waits for: the `min-players` setting,
+    /// never more than the host can seat (a player limit the King lowered
+    /// or closed slots cannot make the mission wait for ever).
+    pub fn min_players_needed(&self) -> usize {
+        self.settings.min_players().min(self.capacity())
+    }
+
+    /// How many more ready players the minimum needs; 0 when met.
+    fn min_missing(&self) -> usize {
+        let ready = self
+            .peers
+            .values()
+            .filter(|p| Self::ready_holder(p))
+            .count();
+        self.min_players_needed().saturating_sub(ready)
+    }
+
+    /// Why the mission is not starting yet, in words: AI off with a slot
+    /// not yet held by a ready player, or fewer ready players than
+    /// `min-players`; whichever needs more players. `None` when neither
+    /// waits.
+    pub fn start_wait_reason(&self) -> Option<String> {
+        crate::settings::start_wait_text(
+            self.ai_missing(),
+            self.min_missing(),
+            self.min_players_needed(),
+        )
+    }
+
+    /// What stops the mission starting now, if anything.
+    fn start_block(&self) -> Option<StartBlock> {
         if !self.spec.plane_aircraft.is_empty()
             && let Some(why) = self.mission_gap_refusal(&self.spec)
         {
-            return Err(why);
+            return Some(StartBlock::Refused(why));
         }
-        if let Some(why) = self.ai_wait_reason() {
-            self.log(HostLog::Fault {
-                tick: self.world.tick(),
-                text: why.clone(),
-            });
-            return Err(why);
+        self.start_wait_reason().map(StartBlock::Wait)
+    }
+
+    /// Logs why the lobby waits to start, once for each reason (`fresh`
+    /// for a lobby just opened). A wait is not a fault: nothing went
+    /// wrong, the server is waiting for players.
+    fn note_start_wait(&mut self, fresh: bool) {
+        if fresh {
+            self.wait_logged = None;
+        }
+        let Some(text) = self.start_wait_reason() else {
+            self.wait_logged = None;
+            return;
+        };
+        // A fresh lobby that only waits for its first player says nothing
+        // more than the start rule's own line.
+        if fresh && self.settings.ai() && self.min_players_needed() <= 1 {
+            return;
+        }
+        if self.wait_logged.as_deref() != Some(text.as_str()) {
+            self.wait_logged = Some(text.clone());
+            let tick = self.world.tick();
+            self.log(HostLog::Note { tick, text });
+        }
+    }
+
+    /// The mission starts flying: built again with the loadouts of the held
+    /// slots, which every player is sent to build its copy again with, and
+    /// every ready player holding a slot takes its plane at the first tick.
+    /// The AI-off rule and the minimum players cannot be bypassed, even from
+    /// the console: the lobby waits.
+    fn start_flying(&mut self) -> Result<(), String> {
+        match self.start_block() {
+            Some(StartBlock::Refused(why)) => return Err(why),
+            Some(StartBlock::Wait(why)) => {
+                self.note_start_wait(false);
+                return Err(why);
+            }
+            None => {}
         }
         let lobby_manifest = self.manifest.clone();
         let mut spec = self.spec.clone();
@@ -3216,7 +3317,7 @@ impl Host {
         // pilot gone) is held for its player while it stays connected, and
         // abandoned to the mission when it goes (stage F phase 2).
         let mut given = Vec::new();
-        for (seat, _callsign) in std::mem::take(&mut self.gives) {
+        for (seat, callsign) in std::mem::take(&mut self.gives) {
             if self
                 .world
                 .roster
@@ -3242,6 +3343,12 @@ impl Host {
                 });
             if (!self.settings.ai() || choice_departure) && self.world.can_give_back(seat).is_ok() {
                 if let Some(plane) = self.world.roster.seat(seat).and_then(|s| s.plane) {
+                    if !self.settings.ai() {
+                        self.log(HostLog::Note {
+                            tick,
+                            text: format!("{callsign} left: plane {} removed (AI is off)", plane.0),
+                        });
+                    }
                     commands.push(MissionCommand::Despawn { plane });
                 }
                 given.push(seat);
@@ -3898,6 +4005,8 @@ impl Host {
                 if self.start_rule() == StartMode::Now {
                     // A failure is logged as a fault; the lobby stays.
                     let _ = self.start_flying();
+                } else {
+                    self.note_start_wait(true);
                 }
             }
             Err(error) => {

@@ -71,7 +71,13 @@ pub struct Facts {
     pub waiting: Vec<String>,
     /// How many players hold a slot.
     pub holders: usize,
+    /// With AI off, the open slots no ready player holds yet.
     pub ai_waiting: usize,
+    /// How many more ready players `min-players` needs (0 when met or none).
+    pub min_waiting: usize,
+    /// The minimum players the lobby waits for, as the host counts it:
+    /// `min-players`, never more than the game can seat.
+    pub min_players: usize,
     /// The game is PvP, so the side boxes show and slots wear their side.
     pub pvp: bool,
     /// How players choose their side (always free outside PvP).
@@ -100,6 +106,8 @@ impl Facts {
                 waiting: Vec::new(),
                 holders: 0,
                 ai_waiting: 0,
+                min_waiting: 0,
+                min_players: 0,
                 pvp: false,
                 sides: Sides::Free,
                 side: None,
@@ -108,6 +116,27 @@ impl Facts {
         let me = lobby.me();
         let holders: Vec<&LobbyPlayer> =
             lobby.players.iter().filter(|p| p.slot.is_some()).collect();
+        // The host's own count: ready players holding a slot, against the
+        // minimum, which never asks for more than the game can seat.
+        let setting = |n: u8| {
+            lobby
+                .settings
+                .iter()
+                .find(|s| s.0 == n)
+                .map_or(0, |s| s.1 as usize)
+        };
+        let open = lobby
+            .slots
+            .iter()
+            .filter(|s| s.lock != Lock::Closed)
+            .count();
+        let min_players = setting(number::MIN_PLAYERS)
+            .min(open)
+            .min(setting(number::MAX_PLAYERS));
+        let ready_holders = holders
+            .iter()
+            .filter(|p| p.ready && p.unable.is_none())
+            .count();
         Self {
             connected: true,
             king: lobby.is_king(),
@@ -143,6 +172,8 @@ impl Facts {
             } else {
                 0
             },
+            min_waiting: min_players.saturating_sub(ready_holders),
+            min_players,
             pvp: sides::is_pvp(lobby),
             sides: sides::rule(lobby),
             side: me
@@ -153,7 +184,7 @@ impl Facts {
 
     /// The King's Start is accepted now (the host's own rule).
     pub fn all_ready(&self) -> bool {
-        self.holders > 0 && self.waiting.is_empty() && self.ai_waiting == 0
+        self.holders > 0 && self.waiting.is_empty() && self.ai_waiting == 0 && self.min_waiting == 0
     }
 }
 
@@ -302,6 +333,9 @@ pub fn ready_hint(facts: &Facts) -> Option<&'static str> {
             (StartRule::Flying, _) => {
                 "This server's mission is always flying: take a slot and press Ready to join it."
             }
+            (StartRule::FirstReady, _) if facts.min_players > 1 => {
+                "The mission starts when the minimum number of players holding slots are ready."
+            }
             (StartRule::FirstReady, _) => {
                 "The mission starts as soon as the first player holding a slot is ready."
             }
@@ -335,11 +369,11 @@ pub fn hint(facts: &Facts) -> String {
     if let Some(reason) = &facts.unable {
         return reason.clone();
     }
-    if facts.phase == LobbyPhase::Lobby && facts.ai_waiting > 0 {
-        return format!(
-            "Waiting for {} more ready players: AI is off.",
-            facts.ai_waiting
-        );
+    if facts.phase == LobbyPhase::Lobby
+        && let Some(wait) =
+            settings::start_wait_text(facts.ai_waiting, facts.min_waiting, facts.min_players)
+    {
+        return wait;
     }
     match facts.phase {
         LobbyPhase::Flying => match (facts.flying, facts.holds, facts.ready) {
