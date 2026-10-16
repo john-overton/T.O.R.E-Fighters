@@ -72,6 +72,7 @@ pub struct Config {
     pub max_players: u8,
     /// The mission file, made absolute against the configuration file's folder.
     pub mission: PathBuf,
+    pub rotation: Option<PathBuf>,
     pub open_planes: OpenPlanes,
     pub snapshot_rate: u32,
     pub start: StartMode,
@@ -117,6 +118,7 @@ impl Config {
             password: None,
             max_players: MAX_PLAYERS,
             mission: base.join("mission.txt"),
+            rotation: None,
             open_planes: OpenPlanes::Friendly,
             snapshot_rate: tore_session::host::config::DEFAULT_SNAPSHOT_RATE,
             start: StartMode::FirstPlayer,
@@ -168,6 +170,12 @@ impl Config {
             config.set(name, value, base).map_err(fail)?;
             lines.push((line, name));
         }
+        if seen.contains("mission") && seen.contains("rotation") {
+            return Err(ConfigError {
+                line: lines.iter().find(|(_, n)| *n == "rotation").unwrap().0,
+                message: "`mission` and `rotation` are mutually exclusive".into(),
+            });
+        }
         config.check_king_settings(&lines)?;
         Ok(config)
     }
@@ -175,7 +183,7 @@ impl Config {
     /// The checks across lines: a setting that applies only in PvP needs
     /// `mode pvp` (agent decision: a co-op server would never use it), and
     /// `king-mission` needs a King.
-    fn check_king_settings(&self, lines: &[(usize, &str)]) -> Result<(), ConfigError> {
+    pub(crate) fn check_king_settings(&self, lines: &[(usize, &str)]) -> Result<(), ConfigError> {
         let line_of = |key: &str| lines.iter().find(|(_, n)| *n == key).map_or(0, |(l, _)| *l);
         let pvp = self
             .settings
@@ -205,7 +213,7 @@ impl Config {
         Ok(())
     }
 
-    fn set(&mut self, name: &str, value: &str, base: &Path) -> Result<(), String> {
+    pub(crate) fn set(&mut self, name: &str, value: &str, base: &Path) -> Result<(), String> {
         match name {
             "name" => {
                 let length = value.chars().count();
@@ -239,6 +247,7 @@ impl Config {
             "max-players" => {
                 self.max_players = number(name, value, 1, u32::from(MAX_PLAYERS))? as u8;
             }
+            "rotation" => self.rotation = Some(base.join(value)),
             "mission" => {
                 let path = PathBuf::from(value);
                 self.mission = if path.is_absolute() {
@@ -345,6 +354,7 @@ impl Config {
                 let setting =
                     settings::by_name(king).expect("the name was checked against SETTINGS");
                 let value = king_value(setting, value)?;
+                self.settings.retain(|(n, _)| *n != setting.number);
                 self.settings.push((setting.number, value));
             }
         }
@@ -362,13 +372,14 @@ impl Config {
 
 /// Every setting's name, in the guide's order: the server's own, then the
 /// King's (stage F phase 2) by their registry names.
-pub const SETTINGS: [&str; 38] = [
+pub const SETTINGS: [&str; 39] = [
     "name",
     "port",
     "address",
     "password",
     "max-players",
     "mission",
+    "rotation",
     "open-planes",
     "snapshot-rate",
     "start",
@@ -869,6 +880,7 @@ mod tests {
             "password x",
             "max-players 1",
             "mission x",
+            "rotation x",
             "open-planes all",
             "snapshot-rate 10",
             "start now",

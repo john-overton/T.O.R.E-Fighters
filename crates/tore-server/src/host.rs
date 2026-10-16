@@ -23,6 +23,7 @@ pub type Time = Duration;
 
 /// What a host is built from.
 pub struct HostSetup {
+    pub rotation: Option<crate::rotation::Rotation>,
     /// The settings, with `--port` and `--mission` applied.
     pub config: Config,
     /// The mission, parsed from the mission file. A restart builds from it again.
@@ -223,6 +224,12 @@ pub trait Host {
 
     /// Ends the mission and starts it again at once.
     fn restart_mission(&mut self);
+    fn rotation_status(&self) -> Option<String> {
+        None
+    }
+    fn rotation_command(&mut self, _command: &crate::console::Command) -> Result<String, String> {
+        Err("No rotation is configured.".into())
+    }
 
     /// Tells every player the server is stopping and sends what is queued.
     fn stop(&mut self, now: Time);

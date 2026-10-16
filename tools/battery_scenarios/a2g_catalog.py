@@ -5,7 +5,7 @@
 `a2g-catalog` runs `--validate-ordnance`, whose audit now also covers the 14
 bomb, cluster bomb and pod records the A2G round added (Mk 84, FAB-250, -500
 and -1000, Mk 82 3-pack, Snakeye, 6-pack and 7-pack, CBU-87, CBU-97, Mk 20,
-RBK-250, RBK-500 and LAU-10), the Pave Spike and Pave Knife pods and the novelty
+RBK-250, RBK-500 and LAU-10), the Pave Spike pod and the novelty
 bombs:
 
 * all 54 supported records are found and every compatible station takes them;
@@ -67,7 +67,7 @@ def scenarios() -> list[Scenario]:
             timeout=600,
             expect=[
                 r"ordnance audit: 36 aircraft, 12 recovered weapon stations, \d+ weapon placements, 175 tank placements, \d+ weapon and 9 tank records; passed",
-                r"ordnance audit: 2 designator pods, \d+ pod placements, one to an aircraft, loaded and restored through the saved mission; passed",
+                r"ordnance audit: 1 designator pods, \d+ pod placements, one to an aircraft, loaded and restored through the saved mission; passed",
                 r"ordnance audit: 2 novelty records, 166 Cheat-only placements, refused without Cheat loading, listed only in the Cheat catalog; passed",
             ],
             forbid=[r"PROBLEM"],

@@ -365,7 +365,7 @@ impl Ownship {
             position: launcher.position,
             velocity: launcher.velocity,
             basis: launcher.basis,
-            configuration: sensors::Configuration::CLEAN,
+            configuration: sensors::Configuration::carrying(self.external_stores()),
             signature: config.sensors.signature,
             jammer: if self.ecm_failed {
                 None

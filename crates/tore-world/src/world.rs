@@ -1151,8 +1151,7 @@ impl World {
                         member: plane.slot.member,
                     },
                     &cockpit.flight,
-                    ownship.hp,
-                    ownship.configuration(),
+                    ownship,
                 ));
             }
             // The humans' locked targets (G2): the data link's picture of

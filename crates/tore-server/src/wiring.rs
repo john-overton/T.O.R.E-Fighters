@@ -56,6 +56,7 @@ pub fn start_host_with(
 ) -> Result<Box<dyn Host>, String> {
     let HostSetup {
         config: c,
+        rotation,
         spec,
         resources,
         socket,
@@ -120,6 +121,10 @@ pub fn start_host_with(
     config.retail_stall_speeds = false;
     let mut host = tore_session::Host::new(spec, resources, config)
         .map_err(|error| format!("The host session cannot start: {error}"))?;
+    let rotation = rotation.map(|r| std::sync::Arc::new(std::sync::Mutex::new(r)));
+    if let Some(rotation) = &rotation {
+        host.set_mission_sequence(Box::new(crate::rotation::Shared(rotation.clone())));
+    }
     // Protocol 28 (slice NET2): while the server builds a mission its
     // loading thread keeps every player connected, on a clone of its socket.
     if let Ok(base) = socket.try_clone() {
@@ -138,6 +143,7 @@ pub fn start_host_with(
     // After the checks above: a start that is refused asks the router nothing.
     let keeper = mapping.map(|mapping| Keeper::start(mapping, port));
     Ok(Box::new(SessionHost {
+        rotation,
         host,
         socket,
         events: VecDeque::from([Event::Note(content_line)]),
@@ -150,6 +156,7 @@ pub fn start_host_with(
 }
 
 struct SessionHost {
+    rotation: Option<std::sync::Arc<std::sync::Mutex<crate::rotation::Rotation>>>,
     host: tore_session::Host,
     socket: ServerSocket,
     events: VecDeque<Event>,
@@ -426,6 +433,10 @@ impl Host for SessionHost {
 
     fn take_events(&mut self) -> Vec<Event> {
         self.drain_log();
+        if let Some(rotation) = &self.rotation {
+            self.events
+                .extend(rotation.lock().unwrap().notes.drain(..).map(Event::Note));
+        }
         self.events.drain(..).collect()
     }
 
@@ -494,7 +505,23 @@ impl Host for SessionHost {
         self.host.end();
     }
 
+    fn rotation_status(&self) -> Option<String> {
+        self.rotation.as_ref().map(|r| {
+            let r = r.lock().unwrap();
+            format!("rotation {}/{}", r.current + 1, r.entries.len())
+        })
+    }
+    fn rotation_command(&mut self, command: &crate::console::Command) -> Result<String, String> {
+        let rotation = self.rotation.as_ref().ok_or("No rotation is configured.")?;
+        crate::rotation::command(rotation, &mut self.host, command)
+    }
+
     fn restart_mission(&mut self) {
+        if let Some(rotation) = &self.rotation {
+            let mut r = rotation.lock().unwrap();
+            let current = r.current + 1;
+            let _ = r.goto(current);
+        }
         self.host.restart();
     }
 

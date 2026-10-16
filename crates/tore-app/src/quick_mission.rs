@@ -1969,7 +1969,10 @@ impl QuickMission {
             | "ordnance-drag"
             | "ordnance-message"
             | "ordnance-message-long"
-            | "ordnance-laser" => {
+            | "ordnance-laser"
+            | "ordnance-pod"
+            | "ordnance-pod-yellow"
+            | "ordnance-authored-tank" => {
                 if let Some(ordnance) = &mut self.ordnance {
                     ordnance.preview(name);
                 }

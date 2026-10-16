@@ -163,7 +163,20 @@ mod tests {
         let internal = a.flight().fuel;
         let ammo = a.stations()[0].rounds();
         wings.configs.insert(id, config);
+        // The radar signature follows the live loadout (docs/radar.md,
+        // "External stores"): the tank, then the strike stores, stop counting.
+        let mut rows = spawned();
+        let carried = |wings: &AiWings, rows: &mut [live::Target]| {
+            wings.mirror_pose_out(rows);
+            let row = rows.iter().find(|t| t.id == id).unwrap();
+            assert_eq!(row.configuration.stores, wings.external_stores(id));
+            row.configuration.stores
+        };
+        let loaded = carried(&wings, &mut rows);
         apply(&mut wings, &mut state, &[(id, Drop::Tanks)]).unwrap();
+        let dry = carried(&wings, &mut rows);
+        assert_eq!(dry.count, loaded.count - 1.);
+        assert!((loaded.lbs - dry.lbs - 1100.).abs() < 1e-9);
         let a = wings.mission.actor(id).unwrap();
         assert_eq!(a.flight().payload_lbs, mass - 1100.);
         assert_eq!(a.flight().systems.fuel.external_lbs(), 0.);
@@ -171,6 +184,9 @@ mod tests {
         assert_eq!(a.stations()[0].rounds(), ammo);
         assert!(!a.stations()[1].is_empty());
         apply(&mut wings, &mut state, &[(id, Drop::CombatLoad)]).unwrap();
+        let clean = carried(&wings, &mut rows);
+        assert_eq!(clean.count, dry.count - 2.);
+        assert!((dry.lbs - clean.lbs - 1000.).abs() < 1e-9);
         let a = wings.mission.actor(id).unwrap();
         assert!(a.stations()[1].is_empty());
         assert!(!a.stations()[0].is_empty());

@@ -2606,7 +2606,7 @@ What travels:
   added. Their ends are the Hit, Ground and Effect events every weapon
   already had.
 - **Loadouts.** A loadout row's weapon may name a laser designator pod's SEE
-  record (`PAVESPK.SEE`, `PAVEKNF.SEE`; X1 writes the pod there), with its
+  record (`PAVESPK.SEE`, or the retired `PAVEKNF.SEE`, which a host builds as the Pave Spike; X1 writes the pod there), with its
   count and a quantity of 0; the Loadout and Flight loadouts messages carry
   it as any name. The content check counts the pods, and Cheat loading's
   novelty stores (`~BLDR.JT`, `~MOOSE.JT`), as weapon items, so a loadout
@@ -3114,7 +3114,13 @@ again with an observer; the capture format did not change for it.
   older game must not join;
   44 since the second stations pass (slice nr-stations2): F-15C centreline
   bomb rack, F-22 wing stations, MiG-29 and Rafale centreline tanks and
-  three tank records, so an older game must not join.
+  three tank records, so an older game must not join;
+  45 since the ordnance page pass (slice nr-ordui): the Pave Knife is no
+  longer a weapon item and a loadout naming it loads the Pave Spike, so an
+  older game must not join;
+  46 since the store signature (slice nr-rcs): external stores raise the
+  radar signature every radar and seeker reads, so an older game must not
+  join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

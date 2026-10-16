@@ -419,7 +419,12 @@ impl LoadoutSpec {
                 // A laser designator pod on this station (decision 7): the
                 // station keeps its own weapon, unloaded.
                 base.quantities[index] = 0;
-                pods.push((index, load.weapon.clone()));
+                // A retired pod (the Pave Knife) loads as the pod that
+                // replaced it (agent decision, 2026-10-16).
+                pods.push((
+                    index,
+                    tore_sim::combat::sight::pod_record(&load.weapon).to_owned(),
+                ));
                 continue;
             }
             if station.weapon.source != load.weapon {

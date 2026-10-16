@@ -882,8 +882,9 @@ player sees:
 - **Bombs and guided weapons on every screen.** Every player sees a bomb fall
   (a pack's bombs spread as the host released them), rockets leave their pods
   and a guided weapon steer onto its spot, where the host has them.
-- **Pods in the lobby.** The lobby's Load Ordnance offers the Pave Spike and
-  Pave Knife, as single player does; Cheat loading (the King's `loadouts any`)
+- **Pods in the lobby.** The lobby's Load Ordnance offers the Pave Spike, as
+  single player does (the Pave Knife was dropped on 2026-10-16; a request naming it
+  is built with the Pave Spike on the same station); Cheat loading (the King's `loadouts any`)
   offers the novelty stores too. A player whose import lacks a pod or a
   store someone chose, or has it differently, is told before the flight, as
   for any weapon.

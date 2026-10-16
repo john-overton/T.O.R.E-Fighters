@@ -72,6 +72,7 @@ mod observation_reference;
 mod sighting;
 #[cfg(test)]
 mod sighting_tests;
+mod store_signature;
 #[cfg(test)]
 mod strafe_tests;
 #[cfg(test)]
@@ -1904,7 +1905,9 @@ fn ownship_target(own: &Ownship, launcher: Launcher) -> Target {
         position: launcher.position,
         velocity: launcher.velocity,
         basis: launcher.basis,
-        configuration: sensors::Configuration::CLEAN,
+        // What it carries outside: the same count the RCS page and an AI's
+        // view of a human seat use.
+        configuration: sensors::Configuration::carrying(own.external_stores()),
         signature: own.config.sensors.signature,
         jammer: None,
         jammer_active: false,

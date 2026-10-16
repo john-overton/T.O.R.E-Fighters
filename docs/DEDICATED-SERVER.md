@@ -30,6 +30,7 @@ proposal unless it is credited to John.
 - [Running it](#running-it)
 - [The configuration file](#the-configuration-file)
 - [The mission file](#the-mission-file)
+- [Map rotation](#map-rotation)
 - [The mission lifecycle](#the-mission-lifecycle)
 - [The lobby](#the-lobby)
 - [Joining from the game](#joining-from-the-game)
@@ -94,7 +95,7 @@ tore-server --config server.conf
 | `--data-dir DIR` | The data folder holding the import and the logs |
 | `--import FOLDER` | Import the game, then exit |
 | `--port N`, `--mission FILE` | Override those two settings of the configuration file |
-| `--check` | Load the import and the mission, print the mission's aircraft with their plane numbers, its runways, its content manifest and the import's content, then exit without opening the port |
+| `--check` | Validate the configuration and import; with rotation, build every entry and report its summary/settings. Print the selected mission's aircraft, runways, manifest and import content. Exit without opening the port |
 | `--help`, `--version` | Print the options, or the version and commit, and exit |
 
 *Built (D7b).* *Agent decisions:* with no `server.conf` in the data folder the
@@ -153,13 +154,14 @@ start, so a typo never passes silently.
 | `address` | `any` | The local address to listen on; `any` listens on every IPv4 and IPv6 address the machine has |
 | `password` | none | A password players must give. It crosses the network as plain text |
 | `max-players` | `30` | 1 to 30 (John's default, 2026-09-28); a co-op mission seats at most its 15 friendly planes |
+| `rotation` | none | Rotation file, relative to this configuration file. Mutually exclusive with an explicit `mission` or `--mission`; see [map rotation](#map-rotation) |
 | `mission` | `mission.txt` | The [mission file](#the-mission-file), relative to the configuration file |
 | `open-planes` | `friendly` | Which planes humans may take: `friendly` (the mode's planes: the friendly ones in co-op, every plane with `mode pvp`), `all` or a list of plane numbers. A listed plane opens its whole lineage: a revival's or the AI's respawn of it is open too |
 | `snapshot-rate` | `60` | Snapshots a second to each player: 10, 12, 15, 20, 24, 30, 40 or 60 (John, 2026-10-06; 30 before). Aircraft far from a player update 4 times a second at most. Halving it roughly halves the server's upload ([performance](#performance)). It is the server's own: the lobby shows it and the King cannot turn it (a game a player hosts has the King's lobby setting of 60, 30 or 20 instead, slice R1) |
 | `start` | `first-player` | `first-player`: the lobby waits, the mission not flying, until the first player holding a slot is ready; `now`: it flies from the start ([the lobby](#the-lobby)) |
 | `time-limit` | `0` | Minutes after which the mission ends; 0 for none. The King's own time limit (below) replaces it until the server goes back to its file |
 | `empty-timeout` | `60` | Seconds the mission keeps flying after the last player leaves, before it ends |
-| `after-end` | `restart` | `restart` the same mission, or `quit` |
+| `after-end` | `restart` | Repeat the mission, or quit. With rotation, continue the sequence, or quit after one cycle |
 | `restart-delay` | `30` | Seconds between a mission's end and the next start |
 | `status-interval` | `10` | Seconds between status lines; 0 for none |
 | `broadcast` | `off` | `on` lists the server on the Internet Lobby, so players find it there ([broadcasting](#broadcasting-on-the-internet-lobby)); `off` keeps it private: players join by address or find it on their local network (John, 2026-10-05, as OpenRA's servers do) |
@@ -305,6 +307,88 @@ knots so nothing is rounded; the optional altitude on a ground start, the flight
 model, enemy skill, fixture wings and loadout lines are the parser's additions
 for the game's own use of the same text.
 
+## Map rotation
+
+*Opinionated, requested by John on 2026-10-16.* Set `rotation rotation.txt`
+in `server.conf` to run a sequence of missions. With neither `rotation` nor
+`mission`, the existing `mission.txt` default applies. **The lead chose the
+strict line format below**, matching `server.conf`, instead of adding a JSON
+parser. John asked for “json or something”, not specifically this syntax.
+
+This full example is parsed directly by a unit test:
+
+```text
+tore-rotation 1
+order in-order          # or shuffle
+mission pvp-ukr.txt
+  mode pvp
+  time-limit 20
+  kill-limit 10
+mission coop-baltic.txt
+  mode co-op
+  respawn none
+mission pvp-ukr.txt
+  mode pvp
+  fight free-for-all
+```
+
+The version line comes first. `order` is optional (default `in-order`), once,
+before the first mission. Each `mission FILE` starts an entry; paths are relative
+to the rotation file. Spaces in paths are allowed, quotes are not needed.
+Comments start with `#`. Indentation is optional. A file may appear more than
+once with different settings. Unknown names, missing values, duplicate settings
+within an entry, and misplaced lines are refused with the file and line number.
+At least one entry is required.
+
+Each entry inherits the explicit `server.conf` values, then overrides them.
+The **mission-scoped settings** are the King's table above except `visibility`,
+plus `time-limit`: `mode`, `join-in-progress`, `friendly-fire`, `lock-sides`,
+`loadouts`, `respawn`, `lives`, `revive-delay`, `revive-distance`, `revive-weapons`,
+`fight`, `tally`, `kill-limit`, `kill-owner`, `observer-delay`, `ai-respawn`,
+and `idle-ai`. New mission settings use the same shared registry and validation.
+Server-wide settings, including name, port, address, password, player capacity,
+visibility, broadcast, master, telemetry, port mapping, snapshot rate, King,
+start rule, restart delay and empty timeout, are refused inside entries.
+PvP-only settings require `mode pvp` in the effective configuration. For example,
+an entry changing an explicitly configured PvP server to co-op must not inherit
+explicit PvP-only settings. Mode defaults fill values neither file sets.
+
+`--check` builds every entry once, prints every summary and its effective
+mission settings that differ from the co-op defaults, and fails if any entry
+cannot parse or build. It also prints the selected mission's detailed plane,
+runway and content report. It opens no port. Normal startup validates the whole
+rotation as well. Mission files are read again at each boundary. If an entry
+then cannot be read or built, it is logged and skipped. If every candidate
+fails, the server logs that fact and stops.
+
+Every normal mission end, including time limit, kill limit, empty timeout,
+the King ending the mission, and console `end`, advances after `restart-delay`.
+Players keep their connections and debriefs. The new mission clears slots,
+loadouts, ready marks, side assignments and slot locks. Its mission and settings
+reach the lobby and Internet Lobby through the existing update paths.
+At the end, players and the console receive `Next mission: <summary>` using the
+existing notice message. A later failed build can change that announced choice.
+Start logs include `Rotation: N missions, in order` (or `shuffle`) and each
+selected mission logs `Rotation 2/5: <summary>`. Status adds `rotation 2/5`.
+
+*Agent decisions:* `after-end restart` continues indefinitely. `after-end quit`
+stops at the end of one cycle, after the final restart delay. Queued debriefs
+get the existing acknowledgement grace, at most another five seconds. Shuffle draws a
+fresh permutation each cycle and avoids repeating an entry across the boundary
+when there are at least two. Repeated file paths are distinct entries; the
+shuffle also separates repeated paths where possible. A one-entry list repeats.
+A King's mission change with `king first-player` and `king-mission open`
+replaces only the current round; the next rotation entry still follows it.
+`king-mission locked` keeps its existing restrictions.
+
+`next` ends with debriefs and advances after the delay. `goto N` selects a
+one-based file entry for that boundary; subsequent rounds continue from its
+position in the current cycle. `restart` repeats the current rotation entry
+immediately. `reload` parses and trial-builds the entire new file before accepting
+it; any error keeps the old rotation. An accepted reload starts a fresh cycle
+at the next boundary, taking precedence over a pending `goto`. It uses the
+original `server.conf` values; it does not reread `server.conf`.
+
 ## The mission lifecycle
 
 ```mermaid
@@ -366,7 +450,8 @@ flowchart TD
   seconds to the next one. A player who ends the mission on their side gets
   their debrief at once, is back in the lobby, and the mission flies on for
   the others.
-- **Next.** After the restart delay the same mission starts again from its
+- **Next.** With rotation, the [next entry](#map-rotation) loads. Without it,
+  after the restart delay the same mission starts again from its
   file, fresh, back in the lobby (or flying, with `start now`), or the server
   exits. With `after-end quit` every player is disconnected with the text
   "server stopping" once its messages are acknowledged, and the host stops
@@ -412,7 +497,8 @@ dedicated server has none. *The dedicated server's rules, agent decisions:*
 - **After a mission**: `after-end restart` keeps every player connected,
   back in the lobby with its slot and loadout and its ready mark cleared,
   and after the restart delay the fresh mission waits in the lobby (or flies,
-  with `start now`); `after-end quit` disconnects everyone and exits.
+  with `start now`). With rotation this loads the next entry; `after-end quit`
+  disconnects everyone after the cycle. Without rotation it quits after one mission.
 - **Nobody is King** by default: the King's requests (change the mission and
   the settings, start, end the mission, kick, pass the crown, lock a slot)
   are refused with "Only the King may do that."; the console still ends and
@@ -720,7 +806,11 @@ The server reads commands from its standard input:
 | `kick SEAT` | Gives the plane back to the AI and disconnects the player (a seated player; one in the lobby has no seat) |
 | `kick-player ID [REASON]` | Removes the player with that lobby id (the `players` table's first column), in the lobby or flying, telling it the reason; its plane, if it flies one, goes back to the AI with no debrief (EF4) |
 | `end` | Ends the mission now, with debriefs |
-| `restart` | Ends the mission and starts it again at once |
+| `restart` | Ends the mission and starts it again at once (the current entry with rotation) |
+| `rotation` | Lists rotation entries, marking the current entry with `*` |
+| `next` | Ends with debriefs and advances after `restart-delay` |
+| `goto N` | Ends with debriefs and selects rotation entry N after the delay |
+| `reload` | Validates the rotation again; applies a valid replacement at the next mission boundary |
 | `broadcast on`, `broadcast off` | Lists the server on the Internet Lobby, or takes it off at once, whatever the configuration said (I3) |
 | `quit` | Tells every player the server is stopping, then exits |
 

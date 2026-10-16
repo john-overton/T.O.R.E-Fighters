@@ -41,7 +41,8 @@ NORMAL_STATES = [
 # Quick Mission mode states, the loadout page states and the debrief pages.
 QUICK_STATES = [
     "normal", "first-load", "aircraft", "theaters", "help", "ordnance", "ordnance-tanks", "ordnance-empty", "ordnance-drag",
-    "ordnance-message", "ordnance-message-long", "ordnance-laser", "lobby-ordnance-laser", "debrief", "debrief-2", "debrief-3", "debrief-4",
+    "ordnance-message", "ordnance-message-long", "ordnance-laser", "lobby-ordnance-laser",
+    "ordnance-pod", "ordnance-pod-yellow", "ordnance-authored-tank", "debrief", "debrief-2", "debrief-3", "debrief-4",
     "debrief-5", "debrief-success", "objectives", "ground-start", "airports",
     "ground-start-auto", "ground-target", "ground-target-last",
     "objective-1", "objective-2", "objective-3", "objective-4", "objective-5", "objective-6",
@@ -216,10 +217,10 @@ def map_plot_filled():
 
 def ordnance_notes(warning: bool, helper: bool, lobby: bool = False):
     """The Load Ordnance page's laser warning (dim amber, in the message band) and sensor helper line
-    (blue-grey, under the title bar), found by their exact ink: the tint times the font's own colour
-    (slice BQ, B24; wording and colours the lead's defaults)."""
+    (light blue-grey, below the Select Plane and Fly buttons since 2026-10-16), found by their exact
+    ink: the tint times the font's own colour (slice BQ, B24; wording and colours the lead's defaults)."""
     base = menu_picture()
-    amber, grey = (178, 126, 47), (136, 155, 162)
+    amber, grey = (178, 126, 47), (189, 208, 215)
 
     def count(pixels: bytes, width: int, rows: range, ink) -> int:
         found = 0
@@ -243,7 +244,7 @@ def ordnance_notes(warning: bool, helper: bool, lobby: bool = False):
         width, pixels = int(header.group(1)), data[header.end():]
         low = range(64, 86) if lobby else range(335, 355)
         got_warning = count(pixels, width, low, amber) > 30
-        got_helper = count(pixels, width, range(64, 86), grey) > 30
+        got_helper = count(pixels, width, range(458, 476), grey) > 30
         if got_warning != warning:
             problems.append(f"laser warning shown={got_warning}, expected {warning}")
         if got_helper != helper:
@@ -604,7 +605,7 @@ def scenarios() -> list[Scenario]:
     for a, state, warning, helper, lobby in (
         ("f18", "ordnance", False, True, False),
         ("f18", "ordnance-laser", True, True, False),
-        ("f18", "lobby-ordnance-laser", True, False, True),
+        ("f18", "lobby-ordnance-laser", True, True, True),
         ("su25", "ordnance-laser", False, True, False),
         ("f16c", "ordnance-laser", False, True, False),
         ("mig29", "ordnance", False, True, False),
@@ -617,6 +618,23 @@ def scenarios() -> list[Scenario]:
                 timeout=120,
                 expect=[r"Menu preview:"],
                 check=ordnance_notes(warning, helper, lobby),
+            )
+        )
+    # The page's authored tank graphic and the pod station's blink phases (John, 2026-10-16), on the
+    # F-16C, whose inner wet pair takes the 370 gallon tank and whose pod station blinks.
+    for a, state in (
+        ("f16c", "ordnance-authored-tank"),
+        ("f16c", "ordnance-pod"),
+        ("f16c", "ordnance-pod-yellow"),
+    ):
+        out.append(
+            Scenario(
+                name=f"menus-snap-quick-{state}-{a}",
+                lane="menus",
+                args=["--aircraft", a, "--quick-mission", "--snapshot", "{work}/shot.ppm", "--snapshot-state", state, "--no-audio"],
+                timeout=120,
+                expect=[r"Menu preview:"],
+                check=menu_picture(),
             )
         )
     # The creator on every base theater, with its theater popup open. The
