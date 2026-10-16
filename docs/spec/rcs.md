@@ -65,7 +65,9 @@ configuration effects. Do not copy the drawing buckets as the detection model.
 The authored replacement uses one aircraft-aspect calculation for detection and
 the exposure display. Its observer-relative response and smooth contour are
 opinionated choices in the [component guide](../radar.md), not these original
-integer rules. Active transmissions and physical reflection stay distinguishable
+integer rules. Its [external-store term](../radar.md#external-stores) (John,
+2026-10-16) is likewise authored; the retail helper's unresolved configuration
+flags are not claimed to be stores. Active transmissions and physical reflection stay distinguishable
 in that model. No autonomous threat behaviour is included.
 
 Remaining retail questions: precise RCS zoom steps, full contact eligibility and

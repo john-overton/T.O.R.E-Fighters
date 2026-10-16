@@ -394,10 +394,16 @@ pub fn rcs(
 ) -> Rcs {
     let signature = config.sensors.signature;
     let basis = Basis::new(s.yaw, s.pitch, s.bank);
+    // The external stores as the simulation counts them for every radar
+    // (docs/radar.md, "External stores"), from the seat's live rounds.
     let configuration = sensors::Configuration {
         gear: s.gear,
         flaps: s.flaps,
         bay: s.bay,
+        stores: config.external_stores(
+            |station| u32::from(readout.stores.rounds(station)),
+            |station| readout.stores.was_loaded(station),
+        ),
     };
     Rcs {
         contour: signature.exposure_contour(&basis, configuration, 5.),

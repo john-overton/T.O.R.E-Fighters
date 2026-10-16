@@ -115,7 +115,7 @@ impl GroundFacts<'_> {
             // aircraft types carry the flag).
             listed: parked || listing.is_some_and(|l| l.flags & LISTED_FLAG != 0),
             max_visible: listing.map_or(0, |l| l.max_visible),
-            radar: t.signature.radar,
+            radar: t.signature.loaded_radar(t.configuration),
             infrared: t.signature.infrared,
             emitting: t.radar_emitting || t.jammer_active,
             aircraft: t.role == TargetRole::Aircraft

@@ -116,12 +116,7 @@ pub fn roster_probe(
                     |x, z| f64::from(world.height(x as f32, z as f32)),
                 );
                 let own = combat.own();
-                let human = HumanAircraft::new(
-                    HumanSlot::SINGLE_PLAYER,
-                    &player,
-                    own.hp,
-                    own.configuration(),
-                );
+                let human = HumanAircraft::new(HumanSlot::SINGLE_PLAYER, &player, own);
                 bridge.step(&mut combat, &[human], world)?;
                 for (actor, (was_alive, mut replay)) in bridge.mission().actors().iter().zip(before)
                 {
