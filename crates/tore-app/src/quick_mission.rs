@@ -1972,6 +1972,7 @@ impl QuickMission {
             | "ordnance-laser"
             | "ordnance-pod"
             | "ordnance-pod-yellow"
+            | "ordnance-gun-pod"
             | "ordnance-tip-amraam"
             | "ordnance-authored-tank" => {
                 if let Some(ordnance) = &mut self.ordnance {

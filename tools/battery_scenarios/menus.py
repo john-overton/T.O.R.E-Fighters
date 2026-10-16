@@ -348,11 +348,11 @@ def scenarios() -> list[Scenario]:
     out.append(Scenario(
         name="qmc-wing-loadout", lane="menus",
         args=["--validate-wing-loadout", "{work}/wing-loadout", "--no-audio"],
-        expect=[r"qmc wing loadout: four F16 aircraft match, airborne, ground and restart passed", r"qmc wing loadout: one tank matches", r"qmc wing loadout: wingtip AIM-120 matches, restarts and passes the lobby check", r"qmc wing loadout: cheat Boulder carriage matches"],
+        expect=[r"qmc wing loadout: four F16 aircraft match, airborne, ground and restart passed", r"qmc wing loadout: one tank matches", r"qmc wing loadout: wingtip AIM-120 matches, restarts and passes the lobby check", r"qmc wing loadout: cheat Boulder carriage matches", r"qmc wing loadout: F-4B gun pod matches on 6 wingman starts, rounds and muzzle, airborne and restart passed"],
         outputs=[f"wing-loadout/{label}.toreplay" for label in ("before", "after", "ground")],
         then=[Step(["--recording-log", f"{{work}}/wing-loadout/{label}.toreplay"]) for label in ("before", "after", "ground")],
         check_work=wing_loadout_recording_problems,
-        notes="QMC four-ship F-16 custom Mk82/AIM9 load, removed tanks and reduced fuel, recorded before/after at start; airborne, ground and restart equality.",
+        notes="QMC four-ship F-16 custom Mk82/AIM9 load, removed tanks and reduced fuel, recorded before/after at start; airborne, ground and restart equality; the F-4B's centreline gun pod shared with its wingmen (rounds, muzzle, restart).",
     ))
     out.append(Scenario(
         name="menus-derived-stations", lane="menus",
@@ -366,15 +366,16 @@ def scenarios() -> list[Scenario]:
             r"F-16C wingtip AIM-120: two a load \(one a tip\), saved, restored and fired guided from each tip edge; every other tip store unchanged",
             r"derived weapons F15.PT row 6: MK82.JT:3, MK84.JT:2, .*GBU12.JT:3, .*GBU38.JT:3",
             r"(?m)derived weapons F22.PT row 8: AIM9X.JT:4, AIM120.JT:4, AIM9M.JT:4, AIM9B.JT:4$",
+            r"gun pod F4B.PT: row 3 takes one SUU-16 in place of AIM9B.JT x4; weight, 600 logical units \(1,200 rounds\), Tab, Guns only, save, lobby rule, firing from the pod's nose and jettison passed",
         ],
-        notes="Derived Eagle, Falcon, Raptor, Fulcrum-C and Rafale C rows through normal selection, capacity, fuel, jettison, mission and profile saves, and old-load restoration.",
+        notes="Derived Eagle, Falcon, Raptor, Fulcrum-C and Rafale C rows through normal selection, capacity, fuel, jettison, mission and profile saves, and old-load restoration; the F-4B's centreline SUU-16 gun pod (weight, rounds, Tab, Guns only, save, lobby rule, fired from its nose, jettisoned).",
     ))
     out.append(
         Scenario(
             name="menus-ordnance-availability",
             lane="menus",
             args=["--validate-ordnance", "--no-audio"],
-            expect=[r"ordnance audit: 36 aircraft, 12 recovered weapon stations, 3402 weapon placements, 175 tank placements, 78 weapon and 9 tank records; passed"],
+            expect=[r"ordnance audit: 36 aircraft, 12 recovered weapon stations, 3403 weapon placements, 175 tank placements, 78 weapon and 9 tank records; passed"],
             notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration. The audit fails when a supported weapon or tank record is missing or a pinned count moves (ordnance_audit.rs).",
         )
     )
@@ -628,6 +629,8 @@ def scenarios() -> list[Scenario]:
         ("f16c", "ordnance-tip-amraam"),
         ("f16c", "ordnance-pod"),
         ("f16c", "ordnance-pod-yellow"),
+        # The F-4B's centreline gun pod (John, 2026-10-16), in place of its four Sidewinders.
+        ("f4b", "ordnance-gun-pod"),
     ):
         out.append(
             Scenario(

@@ -73,7 +73,7 @@ def catalog_output(cheat=55, normal=38, empty_normal=0, records=54):
             f"0 tank placements; defaults and restart passed; catalog {n} normal, {cheat} Cheat"
         )
     rows.append(
-        "ordnance audit: 36 aircraft, 12 recovered weapon stations, 3402 weapon placements, 175 tank placements, "
+        "ordnance audit: 36 aircraft, 12 recovered weapon stations, 3403 weapon placements, 175 tank placements, "
         f"{records} weapon and 9 tank records; passed"
     )
     return "\n".join(rows)

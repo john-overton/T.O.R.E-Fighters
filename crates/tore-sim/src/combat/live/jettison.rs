@@ -103,11 +103,7 @@ impl State {
             .filter(|s| !s.internal)
         {
             let mut weapon = station.weapon.clone();
-            let pod = own
-                .config
-                .gun_pods
-                .iter()
-                .find(|p| p.station == own.selected);
+            let pod = own.config.gun_pod(own.selected);
             let count = pod.map_or_else(
                 || {
                     own.rounds(own.selected)
@@ -121,7 +117,7 @@ impl State {
                     }
                 },
             );
-            if super::super::ballistics::is_pod(&weapon) {
+            if super::super::ballistics::is_pod(&weapon) || super::is_gun_pod(&weapon) {
                 weapon.shape = Some(body_shape(store_sizes::pod_body(&weapon.source)));
             } else if weapon.shape.is_none() {
                 weapon.shape = Some(body_shape(store_sizes::PLAIN));
@@ -153,12 +149,7 @@ impl State {
                 }
             }
             unload(&mut own.ammo[own.cockpit.selected], 0);
-            if own
-                .config
-                .gun_pods
-                .iter()
-                .any(|p| p.station == own.selected)
-            {
+            if own.config.gun_pod(own.selected).is_some() {
                 own.ever_loaded[own.cockpit.selected] = false;
             }
             own.release();

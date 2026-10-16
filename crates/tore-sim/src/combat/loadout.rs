@@ -434,6 +434,9 @@ impl Loadout {
             })
             .unwrap_or(0)
             .max(0)
+            // One pod a station, whatever the row's own capacity and weight
+            // class allow (the F-4B's centreline row holds four Sidewinders).
+            .min(if live::is_gun_pod(w) { 1 } else { i32::MAX })
     }
     /// How many of a designator pod station `slot` takes: one where the
     /// retail equipment rule allows it (a pod station, flag 0x400, within
@@ -561,11 +564,7 @@ impl Loadout {
     }
     pub fn restrict_to_guns(&mut self) {
         for (station, count) in self.configuration.stations.iter().zip(&mut self.quantities) {
-            if !self
-                .aircraft
-                .guns()
-                .contains(&station.weapon.source.as_str())
-            {
+            if !self.aircraft.mounts_gun(&station.weapon.source) {
                 *count = 0;
             }
         }
