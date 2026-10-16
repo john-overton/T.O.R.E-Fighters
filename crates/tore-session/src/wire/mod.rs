@@ -237,7 +237,10 @@ pub fn path_words(path: Path) -> &'static str {
 /// join.
 /// 47 since the F-16C wingtip AIM-120 (slice nr-f16tip): an older game
 /// refuses the load, so an older game must not join.
-pub const PROTOCOL_VERSION: u16 = 47;
+/// 48 since Player Choice and AI off (slice nr-mpchoice): the ai setting,
+/// Choice slots, aircraft in loadouts and revivals, and the despawn and
+/// replacement commands, so an older game must not join.
+pub const PROTOCOL_VERSION: u16 = 48;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
