@@ -453,7 +453,9 @@ mod tests {
         // The point law is unchanged. Area lights (a radius) use it too, then
         // a warm reflectance so green ground does not glow green.
         assert!(shader.contains("let add=flare.w*facing*edge*edge/(d2+FLARE_SOFTENING);"));
+        assert!(shader.contains("albedo*FLARE_COLOR*parts.x"));
         assert!(shader.contains("fire_reflectance(albedo)*FLARE_COLOR*parts.y"));
+        assert!(shader.contains("mix(vec3<f32>(l),albedo,0.3)"));
         assert!(!shader.contains("fn fire_glow"));
         assert!(!shader.contains("FIRE_GLOW_MIN_RADIUS"));
         let glow = include_str!("night_glow.wgsl");

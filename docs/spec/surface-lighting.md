@@ -81,11 +81,13 @@ night boost and the daylight colors it shows at night are in
 [countermeasure presentation](countermeasures.md#flare-light).
 Fire, fireball and impact sources use the same flare point law. The rejected
 nr-nightfx finite footprint and additional warm surface term are removed
-(John, 2026-10-15). A source with a radius reflects mostly as its brightness,
-with 30 percent of the surface hue, so green grass lit by a fire stays warm
-orange (John, 2026-10-16). A point source still shows the art colour. Whole
-flame sprites remain emissive; persistent fires have reserved night slots as
-described in [night effect light](explosions.md#night-glow).
+(John, 2026-10-15). On terrain and objects, a source with a radius reflects
+mostly as its brightness, with 30 percent of the surface hue, so green grass
+lit by a fire stays warm orange, and snow or sand stays warm too (John,
+2026-10-16). A point source still shows the art colour. Water keeps its fitted
+dark-sea tint times the same orange, and clouds and smoke keep their own art
+times that orange. Whole flame sprites remain emissive; persistent fires have
+reserved night slots as described in [night effect light](explosions.md#night-glow).
 
 ## Geometry shadows
 
