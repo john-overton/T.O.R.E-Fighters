@@ -914,18 +914,21 @@ def drive_lineage_join(d: Drive) -> None:
 
 def drive_lead_hold_callsign(d: Drive) -> None:
     """The lead hold's line names the owner's player (the lobby pass's follow-up F1): `respawn revive` and
-    `ai-respawn off` on the guide's mission; `tore-bot --revive 12` Phoenix leads Friendly Wing 1 (plane 0) and a
-    second bot, Wing, flies its plane 1. When Phoenix ejects, Wing, the flight's lowest flying human, stands in and
-    reads "You lead the flight until Phoenix flies again." (the host named both players to the mission core); the
-    server's log has the stand-in."""
+    `ai-respawn off` on the guide's mission. Wing takes plane 1 and is seated before Phoenix starts, so Phoenix's
+    eject (`tore-bot --revive 12`, twelve seconds after Phoenix is seated) cannot fire while Wing is still building
+    the mission. Phoenix then leads Friendly Wing 1 (plane 0). When Phoenix ejects, Wing, the flight's lowest flying
+    human, stands in and reads "You lead the flight until Phoenix flies again." (the host named both players to the
+    mission core); the server's log has the stand-in."""
     port = d.port()
     server = start_server(d, port, guide_mission(), respawn="revive", ai_respawn="off")
-    phoenix = start_bots(d, port, "phoenix", 45, "--callsign", "Phoenix", "--slot", "0", "--revive", "12")
-    if not phoenix.wait_for(r"^Phoenix: seat \d+, plane 0, at tick \d+$", 90):
-        raise DriveError("Phoenix was never seated in plane 0")
-    wing = start_bots(d, port, "wing", 40, "--callsign", "Wing", "--slot", "1")
-    phoenix.finish(120, 0)
-    wing.finish(120, 0)
+    # Wing first, and seated, before Phoenix's eject clock starts. A fixed sleep
+    # cannot cover a slow content load; waiting on the seating line can.
+    wing = start_bots(d, port, "wing", 120, "--callsign", "Wing", "--slot", "1")
+    if not wing.wait_for(r"^Wing: seat \d+, plane 1, at tick \d+$", 90):
+        raise DriveError("Wing was never seated in plane 1")
+    phoenix = start_bots(d, port, "phoenix", 60, "--callsign", "Phoenix", "--slot", "0", "--revive", "12")
+    phoenix.finish(90, 0)
+    wing.finish(150, 0)
     server.finish(40, 0)
     wing.expect(r"^Wing: seat \d+, plane 1, at tick \d+$", "the wingman flies plane 1")
     wing.expect(r"^Wing: line: You lead the flight until Phoenix flies again\.$", "the stand-in's line, by callsign")
