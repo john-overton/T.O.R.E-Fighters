@@ -30,8 +30,6 @@ pub enum Action {
     FreeFlight,
     Mission,
     MissionFly,
-    Theater(usize),
-    Aircraft(usize),
     Back,
     Exit,
     /// A lever on a settings screen reached its sounding frame.

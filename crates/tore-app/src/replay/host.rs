@@ -58,15 +58,36 @@ impl App {
     /// `Action::WatchReplay`: opens the viewer, or explains on the menu why
     /// it could not.
     pub(crate) fn watch_replay(&mut self, path: &Path) {
-        match Viewer::open(path, &self.theater_resources, &Options::default()) {
-            Ok(viewer) => self.start_replay(viewer, None),
-            Err(error) => {
-                log::warn!("Replay {}: {error}", path.display());
-                self.menu.state.toast = Some((
-                    format!("Could not open the replay: {error}"),
-                    Instant::now(),
-                ));
+        let path = path.to_owned();
+        let resources = std::sync::Arc::clone(&self.theater_resources);
+        let graphics = self
+            .renderer
+            .as_ref()
+            .map(crate::renderer::Renderer::loading_factory);
+        match crate::loading::Job::spawn(move |progress| {
+            progress.stage(crate::loading::Stage::Replay);
+            let mut viewer = Viewer::open(&path, &resources, &Options::default())
+                .map_err(|error| error.to_string())?;
+            progress.stage(crate::loading::Stage::Graphics);
+            let graphics = graphics.map(|build| {
+                build(
+                    &viewer.scenery,
+                    &viewer.ownship,
+                    viewer.loading_models(),
+                    viewer.loading_art(),
+                    None,
+                )
+            });
+            if graphics.is_some() {
+                viewer.loading_entered();
             }
+            Ok(crate::loading::Prepared::Replay(
+                Box::new(viewer),
+                graphics.map(Box::new),
+            ))
+        }) {
+            Ok(job) => self.loading = Some(job),
+            Err(error) => self.menu.state.toast = Some((error, Instant::now())),
         }
     }
 

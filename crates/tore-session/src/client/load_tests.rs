@@ -161,3 +161,88 @@ fn a_quick_build_joins_and_flies() {
     let (phase, _) = join_with_a_build_of(Duration::ZERO);
     assert_eq!(phase, ClientPhase::Flying);
 }
+
+/// A real background build remains blocked on a channel while the calling
+/// thread services transport for longer than the silence timeout. No sockets.
+fn background_join_with_delayed_build(blocked_build: usize) {
+    let host_address = "127.0.0.1:26900".parse().unwrap();
+    let client_address = "127.0.0.1:40000".parse().unwrap();
+    let to_host: Queue = Rc::default();
+    let to_client: Queue = Rc::default();
+    let resources = Arc::new(resources());
+    let mut host = Host::new(
+        spec(2, 2, 20),
+        Arc::clone(&resources),
+        HostConfig::new(build()),
+    )
+    .unwrap();
+    let mut host_end = End {
+        me: host_address,
+        inbox: Rc::clone(&to_host),
+        outbox: Rc::clone(&to_client),
+    };
+    let mut client_end = End {
+        me: client_address,
+        inbox: to_client,
+        outbox: to_host,
+    };
+    let config = ClientConfig::new(host_address, "Loader test", build());
+    let mut client = Client::connect(config, resources, Duration::ZERO).unwrap();
+    let (release, wait) = std::sync::mpsc::channel();
+    let building = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let worker_building = Arc::clone(&building);
+    client.set_background_mission_builder(Box::new(move |spec, reads| {
+        let number = worker_building.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        if number == blocked_build {
+            wait.recv().unwrap();
+        }
+        World::new(spec, reads, Seating::Open)
+    }));
+    let mut pending = 0;
+    let mut released = false;
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let mut now = Duration::ZERO;
+    while std::time::Instant::now() < deadline {
+        host.receive_from(now, &mut host_end).unwrap();
+        host.update(now);
+        host.transmit(&mut host_end).unwrap();
+        client.receive_from(now, &mut client_end).unwrap();
+        client.update(now, &Controls::default());
+        client.transmit(&mut client_end).unwrap();
+        if client.is_building()
+            && !released
+            && building.load(std::sync::atomic::Ordering::SeqCst) == blocked_build
+        {
+            pending += 1;
+            if pending == 700 {
+                release.send(()).unwrap();
+                released = true;
+            }
+        }
+        assert_ne!(
+            client.phase(),
+            ClientPhase::Closed,
+            "events: {:?}; build={}; pending={pending}",
+            client.events,
+            building.load(std::sync::atomic::Ordering::SeqCst)
+        );
+        if released && !client.is_building() && client.phase() == ClientPhase::Flying {
+            break;
+        }
+        // Virtual transport time covers seven seconds. The worker gets real
+        // scheduler time after release without making the test take seven seconds.
+        now += Duration::from_millis(10);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(pending, 700);
+    assert_eq!(client.phase(), ClientPhase::Flying);
+}
+
+#[test]
+fn background_join_services_transport_while_mission_worker_waits() {
+    background_join_with_delayed_build(1);
+}
+#[test]
+fn background_flight_loadouts_preserve_order_while_worker_waits() {
+    background_join_with_delayed_build(2);
+}

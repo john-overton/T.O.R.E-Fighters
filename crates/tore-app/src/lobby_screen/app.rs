@@ -133,6 +133,9 @@ impl App {
 
     /// The lobby's turn each frame, before a frame is drawn.
     pub(crate) fn lobby_tick(&mut self) {
+        if self.pending_join.is_some() {
+            return;
+        }
         if self.lobby.screen.is_none() {
             return;
         }

@@ -896,6 +896,16 @@ struct Growth {
 }
 
 impl Viewer {
+    pub(crate) fn loading_art(&self) -> &CombatArt {
+        &self.art
+    }
+    pub(crate) fn loading_models(&self) -> &[Airframe] {
+        &self.models
+    }
+    pub(crate) fn loading_entered(&mut self) {
+        self.entered = true;
+    }
+
     /// Opens a recording and loads what drawing it needs: its world, the
     /// player's airframe, the other aircraft models and the weapon art.
     pub fn open(

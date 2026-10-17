@@ -86,6 +86,7 @@ mod input_script;
 mod instruments;
 mod internet_screen;
 mod lens_flare;
+mod loading;
 mod lobby_screen;
 mod locate;
 mod look;
@@ -296,6 +297,20 @@ fn sync_stability(
     }
 }
 struct App {
+    creator_loading_view: Option<loading::CreatorView>,
+    network_loading_stage: Option<(loading::Stage, Instant)>,
+    loading_heartbeat: Option<Instant>,
+    loading_max_gap: Duration,
+    background_finishes: Vec<std::thread::JoinHandle<()>>,
+    pending_host: Option<(net::options::HostOptions, bool)>,
+    loading_pixels: Vec<u8>,
+    pending_join: Option<(net::session::Join, String)>,
+    loading: Option<loading::Job<loading::Prepared>>,
+    mission_selection_ready: bool,
+    restart_recorded: bool,
+    prepared_recording: Option<Option<replay::recorder::Recorder>>,
+    prepared_restart: Option<world::Restarted>,
+    prepared_scenery: Option<(scenery::Scenery, Option<renderer::LoadingGraphics>)>,
     preference_path: Option<PathBuf>,
     preference_saved: String,
     input: input::Input,
@@ -304,7 +319,7 @@ struct App {
     recorded_ticks: u64,
     performance: performance::Performance,
     /// Every piece of mutable mission state; see world.rs.
-    world: world::World,
+    world: loading::WorldSlot,
     /// What the renderer draws of the world's terrain: art, palettes, camera
     /// weather and the render origin. Rebuilt wherever the terrain is.
     scenery: scenery::Scenery,
@@ -1076,116 +1091,126 @@ impl App {
     /// Starts recording the flight that was just set up. A recording that
     /// cannot start is logged and the flight goes on unrecorded.
     fn start_replay_recording(&mut self) {
-        use replay::{convert, recorder};
-        let Some(library) = &self.replay_library else {
+        if let Some(recording) = self.prepared_recording.take() {
+            self.replay_recorder = recording;
             return;
-        };
-        // Commands from before this flight belong to no recording.
-        let _ = self.world.combat.take_notes();
-        let started = std::time::SystemTime::now();
-        let snapshot = self.world.combat.render_snapshot();
-        let presentation =
-            convert::Presentation::of(snapshot).with_player(self.world.cockpits[OWN].plane.0);
-        let aircraft = convert::identity_key(self.hornet.profile.id);
-        let path = match library.new_path(
-            started,
-            self.world.terrain.layout.trim_end_matches(".MM"),
-            aircraft.trim_end_matches(".PT"),
-        ) {
-            Ok(path) => path,
-            Err(error) => {
-                log::info!("Recording unavailable: {error}");
-                return;
-            }
-        };
-        let mut extra = vec![
-            (
-                "flight_model".to_owned(),
-                if self.native_tables.is_some() {
-                    "native-tables"
-                } else if self.researched_flight {
-                    "researched"
-                } else {
-                    "legacy"
-                }
-                .to_owned(),
-            ),
-            ("player.aircraft".into(), aircraft.into()),
-            (
-                "audio".into(),
-                if self.audio.is_some() { "on" } else { "off" }.into(),
-            ),
-        ];
-        if let Some((altitude, fuel)) = self.world.setup.mission {
-            extra.push((
-                "mission.start".into(),
-                self.world
-                    .setup
-                    .ground_start
-                    .map_or("airborne".to_owned(), |object| format!("runway {object}")),
-            ));
-            extra.push(("mission.altitude_ft".into(), altitude.to_string()));
-            extra.push(("mission.fuel_lb".into(), fuel.to_string()));
-            extra.push(("ai.mission".into(), self.ai_mission.to_string()));
-            extra.push((
-                "ai.aircraft".into(),
-                self.world
-                    .ai_wings
-                    .as_ref()
-                    .map_or(0, ai_wings::AiWings::len)
-                    .to_string(),
-            ));
         }
-        if self.world.combat.range {
-            extra.push(("range".into(), "live fire".into()));
-        }
-        let cheats = recorder::cheats_on(&self.flight_ui.cheats);
-        if !cheats.is_empty() {
-            extra.push(("cheats".into(), cheats.join(",")));
-        }
-        let mission = if self.world.setup.mission.is_some() {
-            tore_replay::MissionKind::QuickMission
-        } else {
-            tore_replay::MissionKind::FreeFlight
-        };
-        let header = recorder::header(mission, &self.world.terrain, &presentation, extra, started);
-        let (player, others) = recorded_humans(&self.world, SEAT, &self.hornet.profile.name);
-        let roster = recorder::roster(
-            snapshot,
-            &player,
-            &others,
-            self.world.ai_wings.as_ref(),
-            self.world.combat.dummy_types(),
-        );
-        let mut recording = match recorder::Recorder::start(path, &header, &roster) {
-            Ok(recording) => recording.for_seat(SEAT, player.id),
-            Err(error) => {
-                log::info!("Recording unavailable: {error}");
-                return;
-            }
-        };
-        // The flight as it starts, before the first tick.
-        let idle = flight::PilotInput::default();
-        let crews = other_crews(&self.world.cockpits, self.world.cockpits[OWN].plane, &idle);
-        recording.begin(recorder::Tick {
-            snapshot: self.world.combat.render_snapshot(),
-            combat: &self.world.combat,
-            flight: &self.world.cockpits[OWN].flight,
-            previous: &self.world.cockpits[OWN].flight,
-            pilot: &idle,
-            others: &crews,
-            wings: self.world.ai_wings.as_ref(),
-            world: &self.world.terrain,
-            events: &[],
-            outcomes: &[],
-            journal: None,
-        });
-        recording.end(None, &mut self.world.combat);
-        self.replay_recorder = Some(recording);
+        let start = self.recording_starter();
+        self.replay_recorder = start(&mut self.world);
     }
 
-    /// Finishes the flight's recording, if one is running, and applies the
-    /// auto-delete settings. `reason` says why the flight ended.
+    fn recording_starter(
+        &self,
+    ) -> impl FnOnce(&mut world::World) -> Option<replay::recorder::Recorder> + Send + 'static {
+        let library = self.replay_library.clone();
+        let aircraft_id = self.hornet.profile.id;
+        let aircraft_name = self.hornet.profile.name.clone();
+        let model = if self.native_tables.is_some() {
+            "native-tables"
+        } else if self.researched_flight {
+            "researched"
+        } else {
+            "legacy"
+        };
+        let audio = self.audio.is_some();
+        let ai_mission = self.ai_mission.to_string();
+        let cheats = replay::recorder::cheats_on(&self.flight_ui.cheats);
+        move |world| {
+            let _timing = loading::timing("recording initialization");
+            use replay::{convert, recorder};
+            let library = library?;
+            // Commands from before this flight belong to no recording.
+            let _ = world.combat.take_notes();
+            let started = std::time::SystemTime::now();
+            let snapshot = world.combat.render_snapshot();
+            let presentation =
+                convert::Presentation::of(snapshot).with_player(world.cockpits[OWN].plane.0);
+            let aircraft = convert::identity_key(aircraft_id);
+            let path = match library.new_path(
+                started,
+                world.terrain.layout.trim_end_matches(".MM"),
+                aircraft.trim_end_matches(".PT"),
+            ) {
+                Ok(path) => path,
+                Err(error) => {
+                    log::info!("Recording unavailable: {error}");
+                    return None;
+                }
+            };
+            let mut extra = vec![
+                ("flight_model".to_owned(), model.to_owned()),
+                ("player.aircraft".into(), aircraft.into()),
+                ("audio".into(), if audio { "on" } else { "off" }.into()),
+            ];
+            if let Some((altitude, fuel)) = world.setup.mission {
+                extra.push((
+                    "mission.start".into(),
+                    world
+                        .setup
+                        .ground_start
+                        .map_or("airborne".to_owned(), |object| format!("runway {object}")),
+                ));
+                extra.push(("mission.altitude_ft".into(), altitude.to_string()));
+                extra.push(("mission.fuel_lb".into(), fuel.to_string()));
+                extra.push(("ai.mission".into(), ai_mission));
+                extra.push((
+                    "ai.aircraft".into(),
+                    world
+                        .ai_wings
+                        .as_ref()
+                        .map_or(0, ai_wings::AiWings::len)
+                        .to_string(),
+                ));
+            }
+            if world.combat.range {
+                extra.push(("range".into(), "live fire".into()));
+            }
+            let cheats = cheats;
+            if !cheats.is_empty() {
+                extra.push(("cheats".into(), cheats.join(",")));
+            }
+            let mission = if world.setup.mission.is_some() {
+                tore_replay::MissionKind::QuickMission
+            } else {
+                tore_replay::MissionKind::FreeFlight
+            };
+            let header = recorder::header(mission, &world.terrain, &presentation, extra, started);
+            let (player, others) = recorded_humans(world, SEAT, &aircraft_name);
+            let roster = recorder::roster(
+                snapshot,
+                &player,
+                &others,
+                world.ai_wings.as_ref(),
+                world.combat.dummy_types(),
+            );
+            let mut recording = match recorder::Recorder::start(path, &header, &roster) {
+                Ok(recording) => recording.for_seat(SEAT, player.id),
+                Err(error) => {
+                    log::info!("Recording unavailable: {error}");
+                    return None;
+                }
+            };
+            // The flight as it starts, before the first tick.
+            let idle = flight::PilotInput::default();
+            let crews = other_crews(&world.cockpits, world.cockpits[OWN].plane, &idle);
+            recording.begin(recorder::Tick {
+                snapshot: world.combat.render_snapshot(),
+                combat: &world.combat,
+                flight: &world.cockpits[OWN].flight,
+                previous: &world.cockpits[OWN].flight,
+                pilot: &idle,
+                others: &crews,
+                wings: world.ai_wings.as_ref(),
+                world: &world.terrain,
+                events: &[],
+                outcomes: &[],
+                journal: None,
+            });
+            recording.end(None, &mut world.combat);
+            Some(recording)
+        }
+    }
+
     fn finish_replay_recording(&mut self, reason: &str) {
         let Some(mut recording) = self.replay_recorder.take() else {
             return;
@@ -1207,17 +1232,26 @@ impl App {
             report.as_ref(),
             reason,
         );
-        if recording.finish(&footer).is_some()
-            && let Some(library) = &self.replay_library
-        {
-            let settings = library.settings();
-            let cleanup = library.cleanup(&settings, std::time::SystemTime::now(), &[]);
-            for path in &cleanup.deleted {
-                log::info!("Recording auto-deleted: {}", path.display());
-            }
-            for (path, error) in &cleanup.failed {
-                log::info!("Recording not deleted: {}: {error}", path.display());
-            }
+        let library = self.replay_library.clone();
+        let finish = std::thread::Builder::new()
+            .name("recording-finish".into())
+            .spawn(move || {
+                if recording.finish(&footer).is_some()
+                    && let Some(library) = &library
+                {
+                    let settings = library.settings();
+                    let cleanup = library.cleanup(&settings, std::time::SystemTime::now(), &[]);
+                    for path in &cleanup.deleted {
+                        log::info!("Recording auto-deleted: {}", path.display());
+                    }
+                    for (path, error) in &cleanup.failed {
+                        log::info!("Recording not deleted: {}: {error}", path.display());
+                    }
+                }
+            });
+        match finish {
+            Ok(handle) => self.background_finishes.push(handle),
+            Err(error) => log::warn!("Could not finish the recording: {error}"),
         }
     }
 
@@ -2568,7 +2602,7 @@ impl App {
     /// names, `World::build` makes the mission from it, and the drawn models
     /// of the aircraft it loaded and the combat art are made for the new
     /// world. The error is the line the pilot reads on the Load Ordnance page.
-    fn build_mission(&mut self) -> Result<(world::Built, combat_view::CombatView), String> {
+    fn build_mission(&mut self) -> Result<(), String> {
         let mut spec = self.quick.mission_spec()?;
         spec.share_flight_loadout = true;
         spec.cheats = self.flight_ui.cheats;
@@ -2585,41 +2619,103 @@ impl App {
                 .loadout,
         ));
         spec.weather = scenery::launch_overrides().map_err(|error| error.to_string())?;
-        // The drawn model of each other aircraft type, loaded as the build
-        // asks for its simulation half.
-        let resources = &*self.theater_resources;
-        let mut models = Vec::new();
-        let mut load = |id| -> tore_world::WorldResult<Arc<aircraft_type::AircraftType>> {
-            let model = aircraft::Airframe::load(resources, id)?;
-            let kind = Arc::clone(&model.kind);
-            models.push(model);
-            Ok(kind)
+        let resources = Arc::clone(&self.theater_resources);
+        let player = Arc::clone(&self.hornet.kind);
+        let graphics = self
+            .renderer
+            .as_ref()
+            .map(renderer::Renderer::loading_factory);
+        let check_restart = self.smoke_test && self.creator_loading_view.is_some();
+        let start_recording = self.recording_starter();
+        self.loading = Some(loading::Job::spawn(move |progress| {
+            let (mut built, view, mut scenery) =
+                loading::prepare_mission(&spec, &resources, Arc::clone(&player), &progress)?;
+            if check_restart {
+                built.restarted = loading::verify_restart(&mut built.world, &player, &resources)?;
+            }
+            let graphics = if let Some(build) = graphics {
+                let aircraft = aircraft::Airframe::load(&resources, spec.player())
+                    .map_err(|e| e.to_string())?;
+                let geometry = Arc::clone(scenery.static_geometry(
+                    &built.world.combat.state.targets,
+                    &built.world.combat.surface,
+                ));
+                Some(build(
+                    &scenery,
+                    &aircraft,
+                    &view.models,
+                    &view.art,
+                    Some(&geometry),
+                ))
+            } else {
+                None
+            };
+            let recording = start_recording(&mut built.world);
+            Ok(loading::Prepared::Mission(Box::new((
+                built, view, scenery, graphics, recording,
+            ))))
+        })?);
+        Ok(())
+    }
+
+    fn finish_creator_launch(&mut self, event_loop: &ActiveEventLoop) {
+        let Some((view, reference, look, zoom)) = self.creator_loading_view.take() else {
+            return;
         };
-        let font = ordnance::label_font();
-        let label = ordnance::weapon_label(resources, &font);
-        let built = world::World::build(
-            &spec,
-            resources,
-            world::Seating::SinglePlayer,
-            &mut world::Hooks {
-                player: Some(Arc::clone(&self.hornet.kind)),
-                load: Some(&mut load),
-                weapon_label: Some(&label),
-                ground_variation: None,
-            },
-        )
-        .map_err(|error| error.to_string())?;
-        if let Some(why) = &built.world.terrain.surface.unresolved {
-            log::warn!("Surface: the ground target stands nowhere: {why}");
+        self.flight_view = view;
+        self.view_rig.select(reference);
+        self.flight_ui.look = look;
+        self.flight_ui.zoom = zoom;
+        if self.world.setup.mission.is_none() && self.error.is_none() {
+            self.error = Some("Quick Mission could not launch the selected setup".into());
+            event_loop.exit();
+        } else if self.error.is_none() {
+            let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
+            let listed = combat_view::readout(
+                &self.world.combat,
+                frame.config,
+                &frame.readout,
+                frame.flight,
+                self.instruments.controls(),
+                1.,
+            )
+            .weapons;
+            println!(
+                "Quick Mission launch: ground={:?} player_position={:?} supported={} airborne_targets={} parked_targets={} enemy_nm={:.1} ammo={:?} listed={:?}",
+                self.world.setup.ground_start,
+                self.world.cockpits[OWN].flight.position,
+                self.world.cockpits[OWN].flight.supported_at(
+                    self.world
+                        .terrain
+                        .surface(
+                            self.world.cockpits[OWN].flight.position[0],
+                            self.world.cockpits[OWN].flight.position[2]
+                        )
+                        .height
+                ),
+                self.world
+                    .combat
+                    .state
+                    .targets
+                    .iter()
+                    .filter(|t| t.airborne && !t.on_ground)
+                    .count(),
+                self.world
+                    .combat
+                    .state
+                    .targets
+                    .iter()
+                    .filter(|t| t.on_ground)
+                    .count(),
+                self.world
+                    .combat
+                    .mission_layout
+                    .as_ref()
+                    .map_or(0., |l| l.enemy.distance_ft / mission_layout::FEET_PER_NM),
+                frame.readout.stores.ammo,
+                listed,
+            );
         }
-        let view = combat_view::CombatView::with_models(
-            &built.world.combat,
-            built.world.picture_plane().0,
-            resources,
-            models,
-        )
-        .map_err(|error| error.to_string())?;
-        Ok((built, view))
     }
 
     /// Starts a flight: what ends the old one, the world (a free flight
@@ -2630,8 +2726,10 @@ impl App {
         event_loop: &ActiveEventLoop,
         mission: Option<(world::Built, combat_view::CombatView)>,
     ) {
+        let _timing = loading::timing("flight installation");
         // A flight still recording is being restarted.
-        let restarted = self.replay_recorder.is_some();
+        let restarted =
+            std::mem::take(&mut self.restart_recorded) || self.replay_recorder.is_some();
         self.finish_replay_recording("restart");
         if let Some(audio) = &self.audio {
             audio.restart_flight();
@@ -2649,9 +2747,17 @@ impl App {
             Some((built, view)) => {
                 self.mission_markup =
                     Some(quick_mission::map::mission_plan(&built.world, false, None));
-                self.world = built.world;
+                self.world.0 = Some(built.world);
                 self.combat_view = view;
-                match scenery::Scenery::build(&self.theater_resources, &self.world.terrain) {
+                let prepared = self.prepared_scenery.take();
+                let (scenery, graphics) = match prepared {
+                    Some((scenery, graphics)) => (Ok(scenery), graphics),
+                    None => (
+                        scenery::Scenery::build(&self.theater_resources, &self.world.terrain),
+                        None,
+                    ),
+                };
+                match scenery {
                     Ok(scenery) => self.scenery = scenery,
                     Err(error) => {
                         self.error = Some(error);
@@ -2660,12 +2766,21 @@ impl App {
                     }
                 }
                 if let Some(renderer) = &mut self.renderer {
-                    renderer.set_scenery(&self.scenery);
-                    renderer.prepare_aircraft(&self.hornet);
+                    if let Some(graphics) = graphics {
+                        renderer.install_loading(graphics);
+                    } else {
+                        renderer.set_scenery(&self.scenery);
+                        renderer.prepare_aircraft(&self.hornet);
+                    }
                 }
                 built.restarted
             }
-            None => match self.world.restart(&self.hornet, &*self.theater_resources) {
+            None => match self
+                .prepared_restart
+                .take()
+                .map(Ok)
+                .unwrap_or_else(|| self.world.restart(&self.hornet, &*self.theater_resources))
+            {
                 Ok(restarted) => restarted,
                 Err(error) => {
                     self.error = Some(error);
@@ -2735,6 +2850,18 @@ impl App {
         self.world.combat.cancel();
         self.quick.cancel();
         self.frame_time = Instant::now();
+        // A loader completion enters here without going through Action's
+        // shared menu/title update at the end of the input callback.
+        if let Some(renderer) = &self.renderer {
+            renderer.window.set_title(&format!(
+                "T.O.R.E-Fighters - {} Free Flight",
+                self.hornet.profile.id.label()
+            ));
+            renderer.window.request_redraw();
+        }
+        if let Some(audio) = &self.audio {
+            audio.scene(audio::music::Scene::Score(0));
+        }
     }
 
     fn action(&mut self, event_loop: &ActiveEventLoop, action: Action) {
@@ -2771,109 +2898,6 @@ impl App {
                 event_loop.exit();
                 return;
             }
-            Action::Theater(index) => {
-                if let Err(e) = self.finish_combat_tape() {
-                    self.error = Some(e);
-                    event_loop.exit();
-                    return;
-                }
-                if let Some((code, _)) = self.world.terrain.catalog.get(index) {
-                    let built = scenery::launch_terrain(&self.theater_resources, code, None)
-                        .and_then(|world| {
-                            let scenery = scenery::Scenery::build(&self.theater_resources, &world)?;
-                            Ok((world, scenery))
-                        });
-                    match built {
-                        Ok((world, scenery)) => {
-                            self.world.setup.ground_start = None;
-                            let service =
-                                match tore_sim::airport::Service::new(&world.airport_scene) {
-                                    Ok(service) => service,
-                                    Err(error) => {
-                                        self.error = Some(std::io::Error::other(error).into());
-                                        event_loop.exit();
-                                        return;
-                                    }
-                                };
-                            if let Some(renderer) = &mut self.renderer {
-                                renderer.set_scenery(&scenery);
-                                diagnostics::stage("aircraft graphics preparation");
-                                renderer.prepare_aircraft(&self.hornet);
-                                diagnostics::stage_done();
-                            }
-                            self.camera = camera::Camera::for_world(&world);
-                            self.world.terrain = world;
-                            self.scenery = scenery;
-                            self.world.cockpits[OWN].airport_service = service;
-                        }
-                        Err(error) => {
-                            self.error = Some(error);
-                            event_loop.exit();
-                        }
-                    }
-                }
-            }
-            Action::Aircraft(index) => {
-                if let Err(e) = self.finish_combat_tape() {
-                    self.error = Some(e);
-                    event_loop.exit();
-                    return;
-                }
-                if let Some(&id) = tore_formats::aircraft::AircraftId::SELECTABLE.get(index) {
-                    match aircraft::Airframe::load(&self.theater_resources, id) {
-                        Ok(aircraft) => {
-                            if let Some(renderer) = &mut self.renderer {
-                                renderer.prepare_aircraft(&aircraft);
-                            }
-                            self.hornet = aircraft;
-                            self.world.reset_weather();
-                            self.scenery.reset_presentations();
-                            self.world.cockpits[OWN].flight =
-                                self.hornet.start(&self.world.terrain);
-                            self.reset_vapor();
-                            match combat::Combat::new(
-                                &self.hornet,
-                                &*self.theater_resources,
-                                self.world.combat.range,
-                            )
-                            .and_then(|mut c| {
-                                let view = combat_view::CombatView::new(
-                                    &c,
-                                    c.own_id(),
-                                    &self.theater_resources,
-                                )?;
-                                c.reset(&mut self.world.cockpits[OWN].flight)?;
-                                if c.uses_normal_startup_defaults() {
-                                    c.apply_startup_weapons();
-                                }
-                                c.add_scene_targets(&self.world.terrain)?;
-                                Ok((c, view))
-                            }) {
-                                Ok((c, view)) => {
-                                    self.world.combat = c;
-                                    self.combat_view = view;
-                                    self.world.cockpits[OWN].airport_nav_mode = false;
-                                    self.instruments.navigation = navigation::Navigation::default();
-                                }
-                                Err(e) => {
-                                    self.error = Some(e);
-                                    event_loop.exit();
-                                    return;
-                                }
-                            }
-                            self.world.cockpits[OWN].previous_flight =
-                                self.world.cockpits[OWN].flight.clone();
-                            self.instruments.cameras.clear();
-                            self.instruments.cancel_press();
-                            self.flight_canvas = flight_canvas::FlightCanvas::default();
-                        }
-                        Err(error) => {
-                            self.error = Some(error);
-                            event_loop.exit();
-                        }
-                    }
-                }
-            }
             Action::QuickMission => {
                 self.screen = Screen::Quick;
                 self.menu.state.cancel();
@@ -2882,16 +2906,75 @@ impl App {
                 let Some(id) = self.quick.player() else {
                     return;
                 };
-                let index = tore_formats::aircraft::AircraftId::SELECTABLE
-                    .iter()
-                    .position(|v| *v == id)
-                    .unwrap();
-                self.action(event_loop, Action::Theater(self.quick.theater_index()));
-                if self.error.is_some() {
-                    return;
-                }
-                self.action(event_loop, Action::Aircraft(index));
-                if self.error.is_some() {
+                if !std::mem::take(&mut self.mission_selection_ready) {
+                    if let Err(error) = self.finish_combat_tape() {
+                        self.error = Some(error);
+                        event_loop.exit();
+                        return;
+                    }
+                    let code = self.world.terrain.catalog[self.quick.theater_index()]
+                        .0
+                        .clone();
+                    let mut world = self.world.0.take().expect("active world");
+                    let resources = Arc::clone(&self.theater_resources);
+                    let graphics = self
+                        .renderer
+                        .as_ref()
+                        .map(renderer::Renderer::loading_factory);
+                    let job = loading::Job::spawn(move |progress| {
+                        let result = (|| -> AppResult<_> {
+                            let terrain = scenery::launch_terrain(&resources, &code, None)?;
+                            world.setup.ground_start = None;
+                            world.cockpits[OWN].airport_service =
+                                tore_sim::airport::Service::new(&terrain.airport_scene)
+                                    .map_err(std::io::Error::other)?;
+                            world.terrain = terrain;
+                            progress.stage(loading::Stage::Aircraft);
+                            let aircraft = aircraft::Airframe::load(&resources, id)?;
+                            world.reset_weather();
+                            world.cockpits[OWN].flight = aircraft.start(&world.terrain);
+                            let mut combat =
+                                combat::Combat::new(&aircraft, &*resources, world.combat.range)?;
+                            let view =
+                                combat_view::CombatView::new(&combat, combat.own_id(), &resources)?;
+                            combat.reset(&mut world.cockpits[OWN].flight)?;
+                            if combat.uses_normal_startup_defaults() {
+                                combat.apply_startup_weapons();
+                            }
+                            combat.add_scene_targets(&world.terrain)?;
+                            world.combat = combat;
+                            world.cockpits[OWN].airport_nav_mode = false;
+                            world.cockpits[OWN].previous_flight =
+                                world.cockpits[OWN].flight.clone();
+                            progress.stage(loading::Stage::Scenery);
+                            let mut scenery = scenery::Scenery::build(&resources, &world.terrain)?;
+                            progress.stage(loading::Stage::Graphics);
+                            let geometry = Arc::clone(scenery.static_geometry(
+                                &world.combat.state.targets,
+                                &world.combat.surface,
+                            ));
+                            let graphics = graphics.map(|build| {
+                                build(
+                                    &scenery,
+                                    &aircraft,
+                                    &view.models,
+                                    &view.art,
+                                    Some(&geometry),
+                                )
+                            });
+                            Ok(loading::Prepared::Selection(Box::new((
+                                world, aircraft, view, scenery, graphics,
+                            ))))
+                        })();
+                        result.map_err(|e| e.to_string())
+                    });
+                    match job {
+                        Ok(job) => self.loading = Some(job),
+                        Err(error) => {
+                            self.error = Some(error.into());
+                            event_loop.exit();
+                        }
+                    }
                     return;
                 }
                 let result = (|| -> AppResult<()> {
@@ -2988,23 +3071,36 @@ impl App {
                     return;
                 }
                 match self.build_mission() {
-                    Ok(built) => {
-                        // The load that flew is kept for this mission.
-                        if self.quick.draft.values[18] != 0
-                            && let Some(memory) = &mut self.quick_loadouts
-                            && let Some(o) = &self.quick.ordnance
-                        {
-                            memory.flown(
-                                &self.quick.mission_fingerprint(),
-                                mission::LoadoutSpec::of(&o.loadout),
-                            );
-                        }
-                        self.begin_flight(event_loop, Some(built))
-                    }
+                    Ok(()) => {}
                     Err(message) => self.quick.ordnance.as_mut().unwrap().message = Some(message),
                 }
             }
-            Action::FreeFlight => self.begin_flight(event_loop, None),
+            Action::FreeFlight => {
+                self.restart_recorded = self.replay_recorder.is_some();
+                self.finish_replay_recording("restart");
+                if self.recorded_ticks > 0 {
+                    self.finish_recording();
+                }
+                let start_recording = self.recording_starter();
+                let mut world = self.world.0.take().expect("active world");
+                let resources = Arc::clone(&self.theater_resources);
+                let aircraft = Arc::clone(&self.hornet.kind);
+                match loading::Job::spawn(move |_| {
+                    let restarted = world
+                        .restart(&aircraft, &*resources)
+                        .map_err(|e| e.to_string())?;
+                    let recording = start_recording(&mut world);
+                    Ok(loading::Prepared::Restart(Box::new((
+                        world, restarted, recording,
+                    ))))
+                }) {
+                    Ok(job) => self.loading = Some(job),
+                    Err(message) => {
+                        self.error = Some(message.into());
+                        event_loop.exit();
+                    }
+                }
+            }
             Action::Back => {
                 if self.screen == Screen::Flight && self.world.setup.mission.is_some() {
                     if let Some(report) = debrief::capture(&self.world, SEAT) {
@@ -3052,6 +3148,16 @@ impl App {
                 self.quick.cancel();
             }
             _ => {}
+        }
+        if self.loading.is_some() {
+            self.input.context(true, self.focused);
+            if let Some(audio) = &self.audio {
+                audio.action(action);
+            }
+            if let Some(renderer) = &self.renderer {
+                renderer.window.request_redraw();
+            }
+            return;
         }
         if let Some(renderer) = &self.renderer {
             renderer.window.set_title(&match self.screen {
@@ -3648,113 +3754,13 @@ impl ApplicationHandler for App {
                     }
                 }
                 if std::mem::take(&mut self.launch_creator) {
-                    let view = self.flight_view;
-                    let reference = self.view_rig.reference;
-                    let look = self.flight_ui.look;
-                    let zoom = self.flight_ui.zoom;
+                    self.creator_loading_view = Some((
+                        self.flight_view,
+                        self.view_rig.reference,
+                        self.flight_ui.look,
+                        self.flight_ui.zoom,
+                    ));
                     self.action(event_loop, Action::Mission);
-                    if self.smoke_test && self.world.setup.mission.is_some() && self.error.is_none()
-                    {
-                        let initial = (
-                            self.world.cockpits[OWN].flight.position,
-                            self.world.cockpits[OWN].flight.yaw,
-                            self.world.cockpits[OWN].flight.speed,
-                            self.world.cockpits[OWN].flight.gear,
-                            self.world.cockpits[OWN].flight.fuel,
-                            self.world.cockpits[OWN].flight.payload_lbs,
-                            self.world.cockpits[OWN].airport_service.selected(),
-                        );
-                        let targets: Vec<_> = self
-                            .world
-                            .combat
-                            .state
-                            .targets
-                            .iter()
-                            .map(|t| (t.id, t.position, t.hp))
-                            .collect();
-                        self.action(event_loop, Action::FreeFlight);
-                        let restarted = (
-                            self.world.cockpits[OWN].flight.position,
-                            self.world.cockpits[OWN].flight.yaw,
-                            self.world.cockpits[OWN].flight.speed,
-                            self.world.cockpits[OWN].flight.gear,
-                            self.world.cockpits[OWN].flight.fuel,
-                            self.world.cockpits[OWN].flight.payload_lbs,
-                            self.world.cockpits[OWN].airport_service.selected(),
-                        );
-                        let restarted_targets: Vec<_> = self
-                            .world
-                            .combat
-                            .state
-                            .targets
-                            .iter()
-                            .map(|t| (t.id, t.position, t.hp))
-                            .collect();
-                        if initial != restarted || targets != restarted_targets {
-                            self.error = Some(
-                                "Quick Mission restart did not restore the accepted start".into(),
-                            );
-                            event_loop.exit();
-                        } else {
-                            println!("Quick Mission restart: PASS");
-                        }
-                    }
-                    self.flight_view = view;
-                    self.view_rig.select(reference);
-                    self.flight_ui.look = look;
-                    self.flight_ui.zoom = zoom;
-                    if self.world.setup.mission.is_none() && self.error.is_none() {
-                        self.error =
-                            Some("Quick Mission could not launch the selected setup".into());
-                        event_loop.exit();
-                    } else if self.error.is_none() {
-                        let frame =
-                            net::play::current_frame(&self.world, &self.net_flight, &self.net);
-                        let listed = combat_view::readout(
-                            &self.world.combat,
-                            frame.config,
-                            &frame.readout,
-                            frame.flight,
-                            self.instruments.controls(),
-                            1.,
-                        )
-                        .weapons;
-                        println!(
-                            "Quick Mission launch: ground={:?} player_position={:?} supported={} airborne_targets={} parked_targets={} enemy_nm={:.1} ammo={:?} listed={:?}",
-                            self.world.setup.ground_start,
-                            self.world.cockpits[OWN].flight.position,
-                            self.world.cockpits[OWN].flight.supported_at(
-                                self.world
-                                    .terrain
-                                    .surface(
-                                        self.world.cockpits[OWN].flight.position[0],
-                                        self.world.cockpits[OWN].flight.position[2]
-                                    )
-                                    .height
-                            ),
-                            self.world
-                                .combat
-                                .state
-                                .targets
-                                .iter()
-                                .filter(|t| t.airborne && !t.on_ground)
-                                .count(),
-                            self.world
-                                .combat
-                                .state
-                                .targets
-                                .iter()
-                                .filter(|t| t.on_ground)
-                                .count(),
-                            self.world
-                                .combat
-                                .mission_layout
-                                .as_ref()
-                                .map_or(0., |l| l.enemy.distance_ft / mission_layout::FEET_PER_NM),
-                            frame.readout.stores.ammo,
-                            listed,
-                        );
-                    }
                 } else if self.screen == Screen::Flight {
                     // A flight started straight from the command line records
                     // itself like one started from the menu; captures, smoke
@@ -3770,6 +3776,67 @@ impl ApplicationHandler for App {
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         if self.finished {
+            return;
+        }
+        if self.loading.is_some() {
+            if self.net.is_some()
+                && matches!(&event, WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed && event.logical_key == Key::Named(winit::keyboard::NamedKey::Escape))
+            {
+                self.loading = None;
+                self.net_ending = Some("Join cancelled".into());
+                self.end_session(event_loop);
+                return;
+            }
+            if matches!(event, WindowEvent::RedrawRequested) && self.world.0.is_some() {
+                self.net_tick(event_loop);
+            }
+            if let Some(renderer) = &mut self.renderer {
+                if renderer.window.id() != id {
+                    return;
+                }
+                match event {
+                    WindowEvent::CloseRequested => {
+                        self.finished = true;
+                        event_loop.exit();
+                    }
+                    WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                        renderer.resize()
+                    }
+                    WindowEvent::Focused(focused) => {
+                        self.focused = focused;
+                        self.input.context(true, focused);
+                    }
+                    WindowEvent::RedrawRequested => {
+                        renderer.set_veil([0., 0.]);
+                        let window = renderer.window.inner_size();
+                        let lobby = self.net.as_ref().and_then(|session| session.client.lobby());
+                        let name = lobby.map_or_else(
+                            || self.net.as_ref().map_or("", |session| session.game_label()),
+                            |lobby| lobby.name.as_str(),
+                        );
+                        let players = lobby
+                            .map(|lobby| {
+                                lobby
+                                    .players
+                                    .iter()
+                                    .map(|p| p.callsign.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            })
+                            .unwrap_or_default();
+                        let size = self.loading.as_ref().unwrap().draw(
+                            &mut self.loading_pixels,
+                            [window.width, window.height],
+                            [name, &players],
+                        );
+                        if let Err(error) = renderer.draw(&self.loading_pixels, None, Some(size)) {
+                            self.error = Some(error);
+                            event_loop.exit();
+                        }
+                    }
+                    _ => {}
+                }
+            }
             return;
         }
         // The replay viewer takes its own input and drawing; what it leaves
@@ -3792,6 +3859,89 @@ impl ApplicationHandler for App {
             self.net_tick(event_loop);
             self.direct_tick(event_loop);
             self.internet_tick(event_loop);
+        }
+        if self.pending_host.is_some()
+            || self.pending_join.is_some()
+            || self.net.as_ref().is_some_and(|session| {
+                session.client.is_building()
+                    || matches!(
+                        session.client.phase(),
+                        tore_session::ClientPhase::Connecting | tore_session::ClientPhase::Loading
+                    )
+            })
+        {
+            if matches!(&event, WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed && event.logical_key == Key::Named(winit::keyboard::NamedKey::Escape))
+            {
+                self.net_ending = Some("Join cancelled".into());
+                self.end_session(event_loop);
+                return;
+            }
+            if matches!(event, WindowEvent::RedrawRequested) {
+                let lobby = self.net.as_ref().and_then(|session| session.client.lobby());
+                let name = lobby.map_or_else(
+                    || {
+                        self.pending_join
+                            .as_ref()
+                            .map(|(_, label)| label.as_str())
+                            .or_else(|| {
+                                self.pending_host
+                                    .as_ref()
+                                    .map(|(options, _)| options.name.as_str())
+                            })
+                            .or_else(|| self.net.as_ref().map(|session| session.game_label()))
+                            .unwrap_or("")
+                    },
+                    |lobby| lobby.name.as_str(),
+                );
+                let players = lobby
+                    .map(|lobby| {
+                        lobby
+                            .players
+                            .iter()
+                            .map(|p| p.callsign.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.set_veil([0., 0.]);
+                    let window = renderer.window.inner_size();
+                    let stage = if self.pending_join.is_some() || self.pending_host.is_some() {
+                        loading::Stage::Content
+                    } else if self.net.as_ref().is_some_and(|s| s.client.is_building()) {
+                        loading::Stage::Mission
+                    } else if self
+                        .net
+                        .as_ref()
+                        .is_some_and(|s| s.client.phase() == tore_session::ClientPhase::Loading)
+                    {
+                        loading::Stage::Waiting
+                    } else {
+                        loading::Stage::Connecting
+                    };
+                    let (previous, started) = self
+                        .network_loading_stage
+                        .get_or_insert((stage, Instant::now()));
+                    if *previous != stage {
+                        *previous = stage;
+                        *started = Instant::now();
+                    }
+                    let size = loading::draw_window(
+                        &mut self.loading_pixels,
+                        [window.width, window.height],
+                        0,
+                        stage,
+                        started.elapsed().as_secs_f64(),
+                        [name, &players],
+                    );
+                    if let Err(error) = renderer.draw(&self.loading_pixels, None, Some(size)) {
+                        self.error = Some(error);
+                        event_loop.exit();
+                    }
+                    renderer.window.request_redraw();
+                }
+                return;
+            }
         }
         let Some(renderer) = self.renderer.as_mut() else {
             return;
@@ -5966,7 +6116,9 @@ impl ApplicationHandler for App {
         self.net = None;
         // Release GPU backends while the event loop's display connection is alive.
         self.input.stop();
-        self.finish_replay_recording("exit");
+        if self.world.0.is_some() {
+            self.finish_replay_recording("exit");
+        }
         self.save_preferences();
         if let Some(recording) = &mut self.input_recording {
             use std::io::Write;
@@ -5974,13 +6126,186 @@ impl ApplicationHandler for App {
                 self.error = Some(error.into());
             }
         }
-        if let Err(e) = self.finish_combat_tape() {
+        if self.world.0.is_some()
+            && let Err(e) = self.finish_combat_tape()
+        {
             self.error = Some(e);
         }
         self.renderer = None;
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Measure event-loop service, not the arrival of window events: a
+        // minimized or untouched window can legitimately receive none.
+        let preparing = self.loading.is_some()
+            || self.pending_join.is_some()
+            || self.pending_host.is_some()
+            || self.net.as_ref().is_some_and(|s| {
+                s.client.is_building()
+                    || matches!(
+                        s.client.phase(),
+                        tore_session::ClientPhase::Connecting | tore_session::ClientPhase::Loading
+                    )
+            });
+        let now = Instant::now();
+        if let Some(last) = self.loading_heartbeat.take() {
+            let gap = now - last;
+            self.loading_max_gap = self.loading_max_gap.max(gap);
+            if gap > Duration::from_millis(100) {
+                log::info!(
+                    "loading event-loop service gap: {:.3} ms",
+                    gap.as_secs_f64() * 1000.
+                );
+            }
+            if !preparing {
+                log::info!(
+                    "loading maximum event-loop service gap: {:.3} ms",
+                    self.loading_max_gap.as_secs_f64() * 1000.
+                );
+            }
+        }
+        if preparing {
+            self.loading_heartbeat = Some(now);
+        } else {
+            self.loading_max_gap = Duration::ZERO;
+            self.network_loading_stage = None;
+        }
+
+        if self.pending_host.is_some() {
+            if net::session::content_ready(&self.theater_resources) {
+                let (options, lobby) = self.pending_host.take().unwrap();
+                let name = options.name.clone();
+                match self.begin_hosting(options, lobby) {
+                    Ok(()) if lobby && self.net.is_some() => self.open_lobby(&name, true),
+                    Ok(()) => {}
+                    Err(error) => self.message(error),
+                }
+            }
+            if let Some(renderer) = &self.renderer {
+                renderer.window.request_redraw();
+            }
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(16),
+            ));
+            return;
+        }
+
+        if self.pending_join.is_some() {
+            if net::session::content_ready(&self.theater_resources) {
+                let (join, label) = self.pending_join.take().unwrap();
+                self.start_join(join, &label);
+            }
+            if let Some(renderer) = &self.renderer {
+                renderer.window.request_redraw();
+            }
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(16),
+            ));
+            return;
+        }
+
+        if let Some(job) = &self.loading {
+            if let Some(result) = job.poll() {
+                self.loading = None;
+                match result {
+                    Ok(loading::Prepared::Mission(parts)) => {
+                        // The load that flew is kept for this mission.
+                        if self.quick.draft.values[18] != 0
+                            && let Some(memory) = &mut self.quick_loadouts
+                            && let Some(o) = &self.quick.ordnance
+                        {
+                            memory.flown(
+                                &self.quick.mission_fingerprint(),
+                                mission::LoadoutSpec::of(&o.loadout),
+                            );
+                        }
+                        let (built, view, scenery, graphics, recording) = *parts;
+                        self.prepared_recording = Some(recording);
+                        self.prepared_scenery = Some((scenery, graphics));
+                        self.begin_flight(event_loop, Some((built, view)));
+                        self.finish_creator_launch(event_loop);
+                    }
+                    Ok(loading::Prepared::Selection(parts)) => {
+                        let (world, aircraft, view, scenery, graphics) = *parts;
+                        self.world.0 = Some(world);
+                        self.hornet = aircraft;
+                        self.combat_view = view;
+                        self.scenery = scenery;
+                        self.camera = camera::Camera::for_world(&self.world.terrain);
+                        if let (Some(renderer), Some(graphics)) = (&mut self.renderer, graphics) {
+                            renderer.install_loading(graphics);
+                        }
+                        self.reset_vapor();
+                        self.instruments.navigation = navigation::Navigation::default();
+                        self.instruments.cameras.clear();
+                        self.instruments.cancel_press();
+                        self.flight_canvas = flight_canvas::FlightCanvas::default();
+                        self.mission_selection_ready = true;
+                        self.action(event_loop, Action::Mission);
+                        if self.loading.is_none() && self.creator_loading_view.is_some() {
+                            self.finish_creator_launch(event_loop);
+                        }
+                    }
+                    Ok(loading::Prepared::Restart(parts)) => {
+                        let (world, restarted, recording) = *parts;
+                        self.prepared_recording = Some(recording);
+                        self.world.0 = Some(world);
+                        self.prepared_restart = Some(restarted);
+                        self.begin_flight(event_loop, None);
+                    }
+                    Ok(loading::Prepared::NetRebuilt(built)) => {
+                        if self.net.is_some() {
+                            self.net_built = Some(*built);
+                        }
+                    }
+                    Ok(loading::Prepared::Net(parts)) => {
+                        if self.net.is_some() {
+                            self.finish_session_loading(*parts);
+                        }
+                    }
+                    Ok(loading::Prepared::Replay(viewer, graphics)) => {
+                        if let (Some(renderer), Some(graphics)) = (&mut self.renderer, graphics) {
+                            renderer.install_loading(*graphics);
+                        }
+                        self.start_replay(*viewer, None);
+                    }
+                    Err(message) => {
+                        log::warn!("Loading failed: {message}");
+                        if self.net.is_some() {
+                            self.net_ending = Some(message);
+                            self.end_session(event_loop);
+                            return;
+                        }
+                        if self.world.0.is_none() || self.creator_loading_view.is_some() {
+                            self.error = Some(message.into());
+                            event_loop.exit();
+                            return;
+                        }
+                        if let Some(ordnance) = &mut self.quick.ordnance {
+                            ordnance.message = Some(message.clone());
+                        }
+                        self.menu.state.toast = Some((message, Instant::now()));
+                    }
+                }
+                self.frame_time = Instant::now();
+            }
+            if let Some(renderer) = &self.renderer {
+                renderer.window.request_redraw();
+            }
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(16),
+            ));
+            return;
+        }
         self.run_script(event_loop);
+        if self.loading.is_some() || self.pending_join.is_some() || self.pending_host.is_some() {
+            if let Some(renderer) = &self.renderer {
+                renderer.window.request_redraw();
+            }
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(16),
+            ));
+            return;
+        }
         // The replay viewer shows instead of the Replays screen, which stays
         // open underneath and reads the list again when it is back.
         if self.screen != Screen::Main
@@ -6098,6 +6423,9 @@ impl ApplicationHandler for App {
                     }
                     let result = self.input_action(action);
                     self.action(event_loop, result);
+                    if self.loading.is_some() {
+                        return;
+                    }
                     if was_frozen != self.flight_ui.frozen() || was_respawn != self.respawn_open() {
                         self.camera.keys.clear();
                         self.release_trigger();
@@ -11775,6 +12103,25 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     if snapshot.is_none() && !smoke_test && snapshot_state != "normal" {
         return Err("--snapshot-state requires --snapshot or --smoke-test".into());
     }
+    if let Some(path) = &snapshot
+        && snapshot_state.starts_with("loading")
+    {
+        use std::io::Write;
+        let mut pixels = vec![0; menu::WIDTH * menu::HEIGHT * 4];
+        loading::draw(
+            &mut pixels,
+            usize::from(snapshot_state == "loading-thunderbirds"),
+            loading::Stage::Scenery,
+            2.5,
+        );
+        let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
+        write!(out, "P6\n{} {}\n255\n", menu::WIDTH, menu::HEIGHT)?;
+        for p in pixels.chunks_exact(4) {
+            out.write_all(&p[..3])?;
+        }
+        println!("Menu preview: {}", path.display());
+        return Ok(Outcome::Done);
+    }
     // The locate screen owns no imported media, so its preview is written
     // before any pack is looked for.
     if let Some(path) = &snapshot
@@ -14520,6 +14867,14 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         None
     };
     let mut app = App {
+        creator_loading_view: None,
+        network_loading_stage: None,
+        loading_heartbeat: None,
+        loading_max_gap: Duration::ZERO,
+        background_finishes: Vec::new(),
+        pending_host: None,
+        loading_pixels: Vec::new(),
+        pending_join: None,
         net: None,
         net_built: None,
         mission_markup: None,
@@ -14535,7 +14890,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         ai_wings_enabled: !fixture_wings,
         enemy_skill,
         ai_mission,
-        world,
+        world: loading::WorldSlot(Some(world)),
         scenery,
         combat_view,
         combat_tape,
@@ -14544,6 +14899,12 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         } else {
             None
         },
+        loading: None,
+        mission_selection_ready: false,
+        restart_recorded: false,
+        prepared_recording: None,
+        prepared_restart: None,
+        prepared_scenery: None,
         preference_saved: String::new(),
         graphics,
         graphics_path,
@@ -14757,6 +15118,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     );
     diagnostics::stage_done();
     shared_event_loop(event_loop)?.run_app_on_demand(&mut app)?;
+    // The window is closed before waiting for disk flushes and footer writing.
+    for finish in app.background_finishes.drain(..) {
+        let _ = finish.join();
+    }
     if let Some(error) = app.error {
         return Err(error);
     }

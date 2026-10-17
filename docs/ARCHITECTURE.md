@@ -10961,3 +10961,14 @@ FlightLoadouts message. AI respawn reads the built setup's accepted load.
 [The behavior contract](spec/quick-mission-menu.md#the-players-flight-loadout)
 and [multiplayer ownership](spec/multiplayer.md#human-flight-loadouts) define
 scope and provenance.
+
+## Flight loading ownership
+
+The app lends its world to a loader during restart and Quick Mission setup.
+Only loading-screen event handling runs until ownership returns. Mission, scenery,
+recording initialization and thread-safe wgpu preparation run on workers; the
+window and surface remain on the event thread. The multiplayer client opts into
+a background mission builder while virtual-time headless clients retain the
+synchronous default. Transport updates continue, and session events retain their
+order behind the pending build. See the [loading specification](spec/loading-screen.md)
+and [CPU measurement](baselines/loading-screen.md).

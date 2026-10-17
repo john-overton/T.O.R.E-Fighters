@@ -1,6 +1,7 @@
 # Bundled assets
 
-Everything in this directory is either openly licensed or our own work.
+Everything in this directory is openly licensed, our own work, or supplied
+by John for bundling.
 None of it contains retail game data.
 
 ## Menu font atlases
@@ -128,3 +129,32 @@ python3 tools/package/build_icons.py
 `tore-app.exe` on windows-msvc. The packaging scripts read the PNGs for the
 Linux desktop entry and the macOS `.icns`. The app embeds `tore-64.rgba` for
 the main-menu badge; no external image or runtime image decoder is needed.
+
+## Loading photographs and squadron patch
+
+John requested these bundled images on 2026-10-16. The photos are his supplied
+website images, with existing ownership retained, not GPL-licensed retail data.
+See [website provenance](../../../docs/WEBSITE.md#images).
+
+`loading/harrier.rgb` is resized from John's original
+`.local/webpage-pics/harrier_sunset_full.jpg`, preferred over its website WebP
+copy as requested. `loading/thunderbirds.rgb` is resized from
+`docs/images/homepage/f-16-thunderbirds.webp`. `loading/logo.rgba` comes from
+`docs/images/tore-fighters-logo.png`. Photos fit inside 960 by 640 pixels;
+the patch fits inside 220 by 220. ImageMagick converts them at asset-generation
+time, so no runtime image decoder or dependency is added. Each file begins with
+two little-endian u32 dimensions, followed by packed 8-bit RGB or RGBA pixels.
+The three assets total approximately 3.7 MiB. Runtime cover-fits and shades the
+photos and alpha-composites the patch. These are source-art conversions, not
+screenshots or generated retail derivatives.
+
+| Loading asset | Bytes |
+| --- | ---: |
+| `loading/harrier.rgb` | 1,843,208 |
+| `loading/thunderbirds.rgb` | 1,843,208 |
+| `loading/logo.rgba` | 193,608 |
+
+To regenerate, use ImageMagick `magick SOURCE -resize '960x640>' -depth 8 rgb:-`
+for each photo and `magick SOURCE -resize '220x220>' -depth 8 rgba:-` for the
+patch. Prefix each output with the resized width and height as little-endian
+u32 values, obtained with `magick SOURCE -resize SIZE -format '%w %h' info:`.

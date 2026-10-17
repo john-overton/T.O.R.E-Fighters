@@ -632,6 +632,7 @@ RULES: tuple[Rule, ...] = (
     ),
     _r("crates/tore-master/*", ("net-master", "net-migrate-relay"), "the master server, its configuration and its flood tool"),
     _r("crates/tore-realtime-native/*", ALL_FAMILIES, "host and shared-worker scheduling on macOS", windowed=True),
+    _r("crates/tore-app/src/loading.rs", ("menus-screens", "menus-creator", "net-fly", "net-content", "replay-recording"), "flight loading workers and screen"),
     # tore-app: rendering (windowed).
     _r("crates/tore-app/src/*.wgsl", RENDER_FAMILIES, "shaders", windowed=True),
     _r("crates/tore-app/src/*renderer*.rs", RENDER_FAMILIES, "renderers", windowed=True),
