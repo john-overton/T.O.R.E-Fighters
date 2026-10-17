@@ -355,6 +355,17 @@ offscreen GPU job, not a GPU-free test. Use an isolated profile and the machine'
 current throttle. `frame-cost.txt` keeps the mean of eight frames after warmup,
 from CPU submission until GPU idle, with vegetation off/on and their difference.
 
+`tore-app --vegetation-preview OUT lowpass` flies a 100 ft, 480 kt, 3 nm
+straight pass through the densest vegetation in UKR, FRA, NSK, EGY, PGU, IRA,
+TVIET, APA, WTA and KURILE. It samples 1,350 frames (60 per second of the 22.5 s
+run) at 3840x2160 and 2560x1440, High and Ultra, and leaves the other Graphics
+vegetation settings at their defaults. GPU timestamps compare objects and grass
+on and off. Ground detail stays on in both. Warmup, while the patch cache fills
+at the in-flight budget, is reported separately. `TORE_VEG_LOWPASS_STRIDE=2`
+samples every second frame when a full run is too slow. Optional
+`TORE_VEG_LOWPASS_THEATERS`, `TORE_VEG_LOWPASS_SIZES`, `TORE_VEG_LOWPASS_DENSITIES`
+and `TORE_VEG_LOWPASS_FRAMES` limit a partial run. This is an offscreen GPU job.
+
 Set `TORE_VEG_GPU_TIMING=1` to also emit `GPU` lines using timestamp queries.
 These measure the GPU commands without CPU placement/submission or readback.
 An adapter without the required timestamp features returns an explicit error.

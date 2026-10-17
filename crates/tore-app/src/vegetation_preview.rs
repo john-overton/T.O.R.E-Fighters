@@ -8,9 +8,11 @@
 //! `ab` (the chase view with and without an afterburner's light, and the
 //! ground detail's energy in each), `egy`, `pgu`, `ira` (desert views at
 //! 100, 300, 500, 1,000 and 5,000 ft, a dune field, rocky ground, an oasis
-//! when the tile art has one, a wadi and a river), `cost` (frame cost at 1440p and 4K, Medium, High and Ultra) and
-//! `overlay` (top-down classification pictures, Ukraine and Egypt). No job
-//! named runs `ukr`, `ab`, `egy` and `pgu`.
+//! when the tile art has one, a wadi and a river), `cost` (one Ukraine camera
+//! at 1440p and 4K, Medium, High and Ultra), `lowpass` (a 100 ft, 480 kt, 3 nm
+//! pass through the densest stand in ten theaters, at 1440p and 4K, High and
+//! Ultra) and `overlay` (top-down classification pictures, Ukraine and Egypt).
+//! No job named runs `ukr`, `ab`, `egy` and `pgu`.
 //!
 //! Every shot's camera is written to `cameras.txt`; `TORE_VEG_PREVIEW_CAMERAS`
 //! renders such a file's cameras instead, so another build can take the
@@ -179,6 +181,7 @@ pub fn run() -> AppResult<()> {
             }
             "ab" => afterburner(resources, out, size)?,
             "cost" => cost(resources, out)?,
+            "lowpass" => lowpass(resources, out)?,
             "overlay" => overlay(resources, out)?,
             other => println!("vegetation preview: unknown job {other}"),
         }
@@ -211,13 +214,13 @@ fn scenes(
         }
     }
     let found = crate::vegetation::spots(atlas, &world);
+    let mut gpu = pollster::block_on(View::new(&scenery, size, options(density), false))?;
     for spot in &found {
         println!(
             "  spot {} at {:.0}, {:.0} heading {:.0}",
             spot.label, spot.x, spot.z, spot.heading
         );
     }
-    let mut gpu = pollster::block_on(View::new(&scenery, size, options(density)))?;
     for shot in shots {
         let Some(spot) = found.iter().find(|s| s.label == shot.spot) else {
             println!("  skip {} (no {} spot)", shot.name, shot.spot);
@@ -273,7 +276,7 @@ fn afterburner(
         .iter()
         .find(|s| s.label == "open")
         .ok_or("no open spot")?;
-    let mut gpu = pollster::block_on(View::new(&scenery, size, options(density()?)))?;
+    let mut gpu = pollster::block_on(View::new(&scenery, size, options(density()?), false))?;
     gpu.set_shown(true);
     let devices = tore_sim::combat::countermeasures::Devices::default();
     let guns = crate::gun_flash::Drawn::default();
@@ -357,7 +360,8 @@ fn cost(resources: &std::collections::BTreeMap<String, Vec<u8>>, out: &Path) -> 
                 crate::graphics::VegDensity::High,
                 crate::graphics::VegDensity::Ultra,
             ] {
-                let mut gpu = pollster::block_on(View::new(&scenery, size, options(density)))?;
+                let mut gpu =
+                    pollster::block_on(View::new(&scenery, size, options(density), false))?;
                 gpu.set_shown(false);
                 let off = gpu.time(&camera, &world, &scenery)?;
                 let gpu_off = gpu.gpu_time(&camera, &world, &scenery)?;
@@ -396,6 +400,629 @@ fn cost(resources: &std::collections::BTreeMap<String, Vec<u8>>, out: &Path) -> 
         }
     }
     std::fs::write(out.join("frame-cost.txt"), report)?;
+    Ok(())
+}
+
+/// Theaters the low pass flies, in the order John asked for on 2026-10-17.
+const LOWPASS_THEATERS: &[(&str, &str)] = &[
+    ("UKR", "temperate"),
+    ("FRA", "temperate"),
+    ("NSK", "temperate"),
+    ("EGY", "desert"),
+    ("PGU", "desert"),
+    ("IRA", "desert"),
+    ("TVIET", "tropical"),
+    ("APA", "tropical"),
+    ("WTA", "tropical"),
+    ("KURILE", "arctic"),
+];
+
+/// One timed frame of a low pass. GPU times are timestamp queries.
+#[derive(Clone, Copy)]
+struct Sample {
+    frame: usize,
+    gpu_off: f64,
+    gpu_on: f64,
+    placed: u32,
+    tufts: u64,
+    object_chunks: u64,
+    grass_chunks: u64,
+    build_ms: f64,
+    submit_ms: f64,
+}
+
+impl Sample {
+    fn added(self) -> f64 {
+        self.gpu_on - self.gpu_off
+    }
+
+    fn builds(self) -> u64 {
+        self.object_chunks + self.grass_chunks
+    }
+}
+
+struct RunStats {
+    samples: usize,
+    added_mean: f64,
+    added_p95: f64,
+    added_max: f64,
+    on_mean: f64,
+    on_max: f64,
+    placed_mean: f64,
+    placed_max: u32,
+    tufts_mean: f64,
+    tufts_max: u64,
+    builds_mean: f64,
+    builds_max: u64,
+    object_builds: u64,
+    grass_builds: u64,
+    rebuild_max: f64,
+    rebuild_frame: usize,
+    submit_max: f64,
+}
+
+/// A 100 ft, 480 kt, 3 nm pass through each theater's densest vegetation.
+/// Graphics distances stay at their defaults. Only density changes.
+/// Vegetation off suppresses objects and grass and leaves ground detail on.
+/// The patch cache uses the in-flight budget (a few chunks a frame), not the
+/// preview's settle-everything path. Warmup is the fill at the start pose.
+fn lowpass(resources: &std::collections::BTreeMap<String, Vec<u8>>, out: &Path) -> AppResult<()> {
+    let theaters = lowpass_theaters()?;
+    let sizes = lowpass_sizes()?;
+    let densities = lowpass_densities()?;
+    let frames = lowpass_frames()?;
+    let stride = lowpass_stride()?;
+    let indices = lowpass_indices(frames, stride);
+    println!(
+        "vegetation preview: low pass, {frames} frames, stride {stride}, {} samples, {} theaters",
+        indices.len(),
+        theaters.len()
+    );
+    let mut report = std::io::BufWriter::new(std::fs::File::create(out.join("frame-cost.txt"))?);
+    let mut cameras = std::fs::File::create(out.join("cameras.txt"))?;
+    writeln!(
+        report,
+        "100 ft AGL, 480 kt, 3 nm, {frames} frames over 22.5 s (stride {stride}, {} samples).\n\
+         Nose-down 4 degrees, level roll. Ground detail stays at its default in both passes.\n\
+         Off suppresses vegetation objects and grass only. Density is High or Ultra.\n\
+         Draw distance and detail stay at the Graphics defaults (4 nm and 2 nm).\n\
+         GPU times are timestamp queries around the frame. Rebuild cost is CPU time\n\
+         spent building object chunks and grass chunks. The in-flight budget is 3 object\n\
+         chunks and 2 grass chunks per frame. Warmup repeats the start pose until a frame\n\
+         builds nothing, and is not included in the pass statistics.",
+        indices.len()
+    )?;
+    let mut rows = Vec::new();
+    let mut notes = Vec::new();
+    let mut images = Vec::new();
+    for (code, climate) in theaters {
+        println!("vegetation preview: low pass {code}");
+        let world = Terrain::for_mission(resources, code, Some(0), &overrides([12, 0])?)?;
+        let scenery = Scenery::build(resources, &world)?;
+        let atlas = scenery
+            .vegetation
+            .as_ref()
+            .ok_or("vegetation atlas missing (TORE_VEGETATION=0)")?;
+        println!("  choosing the densest stand");
+        let started = Instant::now();
+        let (spot, candidates) = crate::vegetation::densest(atlas, &world);
+        println!(
+            "  {code} {} at {:.0}, {:.0} heading {:.0}: {} instances within 1 nm ({:.1} s)",
+            spot.label,
+            spot.x,
+            spot.z,
+            spot.heading,
+            spot.instances,
+            started.elapsed().as_secs_f64()
+        );
+        writeln!(
+            report,
+            "\n{code} ({climate}) spot {} at {:.1}, {:.1} heading {:.1}: {} instances within 1 nm",
+            spot.label, spot.x, spot.z, spot.heading, spot.instances
+        )?;
+        for candidate in &candidates {
+            writeln!(
+                report,
+                "  candidate {} at {:.1}, {:.1} heading {:.1}: {} instances",
+                candidate.label, candidate.x, candidate.z, candidate.heading, candidate.instances
+            )?;
+        }
+        let flight = lowpass_flight(&world, &spot, frames, &indices);
+        let outside = flight
+            .iter()
+            .filter(|(_, camera)| lowpass_outside(&world, camera))
+            .count();
+        if outside > 0 {
+            writeln!(
+                report,
+                "  {outside} of {} samples are outside the map; height is clamped to the edge",
+                flight.len()
+            )?;
+        }
+        let start = lowpass_camera(&world, &spot, -1.5 * crate::vegetation::NM);
+        let mut gpu = pollster::block_on(View::new(
+            &scenery,
+            sizes[0],
+            lowpass_options(densities[0]),
+            true,
+        ))?;
+        for &size in &sizes {
+            for density in &densities {
+                println!("  {code} {}x{} {}", size[0], size[1], density.label());
+                gpu.begin_run(size, *density)?;
+                let warm = gpu.warmup(&start, &world, &scenery)?;
+                println!("    warmup {} frames", warm.len());
+                let refs: Vec<(usize, &Camera)> = flight
+                    .iter()
+                    .map(|(frame, camera)| (*frame, camera))
+                    .collect();
+                let timed = gpu.measure(&refs, &world, &scenery)?;
+                let stats = run_stats(&timed);
+                let warm_stats = run_stats(&warm);
+                let detail = format_run(
+                    code,
+                    size,
+                    density.label(),
+                    &stats,
+                    &warm,
+                    &warm_stats,
+                    &timed,
+                );
+                print!("{detail}");
+                write!(report, "{detail}")?;
+                report.flush()?;
+                rows.push(summary_row(
+                    code,
+                    climate,
+                    &spot,
+                    size,
+                    density.label(),
+                    &stats,
+                    warm.len(),
+                ));
+                if stats.added_p95 > 3. || stats.added_max > 10. {
+                    notes.push(format_note(code, size, density.label(), &stats, &timed));
+                }
+                write_summary(out, &rows, &notes)?;
+                if size == [3840, 2160] && *density == crate::graphics::VegDensity::High {
+                    gpu.set_vegetation(true);
+                    for (name, along) in [
+                        ("start", -1.5 * crate::vegetation::NM),
+                        ("dense", 0.),
+                        ("end", 1.5 * crate::vegetation::NM),
+                    ] {
+                        let camera = lowpass_camera(&world, &spot, along);
+                        writeln!(
+                            cameras,
+                            "{code}-3840x2160-high-{name} {code} 0 12 0 {} {} {} {} {}",
+                            camera.position[0],
+                            camera.position[1],
+                            camera.position[2],
+                            camera.yaw,
+                            camera.pitch
+                        )?;
+                        let pixels = gpu.pixels(&camera, &world, &scenery)?;
+                        let file = format!("{code}-3840x2160-high-{name}.png");
+                        write_png(out, &file, size, &pixels)?;
+                        images.push((file, code.to_string(), name.to_string(), spot.instances));
+                        println!("    wrote {code}-3840x2160-high-{name}.png");
+                    }
+                    write_lowpass_readme(out, &images)?;
+                }
+            }
+        }
+    }
+    write_summary(out, &rows, &notes)?;
+    write_lowpass_readme(out, &images)?;
+    println!("vegetation preview: low pass wrote frame-cost.txt and SUMMARY.md");
+    Ok(())
+}
+
+fn lowpass_theaters() -> AppResult<Vec<(&'static str, &'static str)>> {
+    let Ok(text) = std::env::var("TORE_VEG_LOWPASS_THEATERS") else {
+        return Ok(LOWPASS_THEATERS.to_vec());
+    };
+    let mut out = Vec::new();
+    for part in text.split(',') {
+        let code = part.trim().to_ascii_uppercase();
+        if code.is_empty() {
+            continue;
+        }
+        let Some(row) = LOWPASS_THEATERS.iter().find(|(name, _)| *name == code) else {
+            return Err(format!("unknown lowpass theater {code}").into());
+        };
+        out.push(*row);
+    }
+    if out.is_empty() {
+        return Err("TORE_VEG_LOWPASS_THEATERS is empty".into());
+    }
+    Ok(out)
+}
+
+fn lowpass_sizes() -> AppResult<Vec<[u32; 2]>> {
+    let Ok(text) = std::env::var("TORE_VEG_LOWPASS_SIZES") else {
+        return Ok(vec![[3840, 2160], [2560, 1440]]);
+    };
+    let mut out = Vec::new();
+    for part in text.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let (w, h) = part
+            .split_once('x')
+            .ok_or_else(|| format!("TORE_VEG_LOWPASS_SIZES wants WxH, got {part}"))?;
+        out.push([w.parse()?, h.parse()?]);
+    }
+    if out.is_empty() {
+        return Err("TORE_VEG_LOWPASS_SIZES is empty".into());
+    }
+    Ok(out)
+}
+
+fn lowpass_densities() -> AppResult<Vec<crate::graphics::VegDensity>> {
+    let Ok(text) = std::env::var("TORE_VEG_LOWPASS_DENSITIES") else {
+        return Ok(vec![
+            crate::graphics::VegDensity::High,
+            crate::graphics::VegDensity::Ultra,
+        ]);
+    };
+    let mut out = Vec::new();
+    for part in text.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        out.push(
+            crate::graphics::VegDensity::parse(part)
+                .ok_or_else(|| format!("bad lowpass density {part}"))?,
+        );
+    }
+    if out.is_empty() {
+        return Err("TORE_VEG_LOWPASS_DENSITIES is empty".into());
+    }
+    Ok(out)
+}
+
+fn lowpass_frames() -> AppResult<usize> {
+    let frames = match std::env::var("TORE_VEG_LOWPASS_FRAMES") {
+        Ok(text) => text.parse()?,
+        Err(_) => 1_350,
+    };
+    if !(2..=1_350).contains(&frames) {
+        return Err("TORE_VEG_LOWPASS_FRAMES must be 2 to 1350".into());
+    }
+    Ok(frames)
+}
+
+fn lowpass_stride() -> AppResult<usize> {
+    let stride = match std::env::var("TORE_VEG_LOWPASS_STRIDE") {
+        Ok(text) => text.parse()?,
+        Err(_) => 1,
+    };
+    if stride == 0 {
+        return Err("TORE_VEG_LOWPASS_STRIDE must be at least 1".into());
+    }
+    Ok(stride)
+}
+
+fn lowpass_indices(frames: usize, stride: usize) -> Vec<usize> {
+    let mut indices: Vec<usize> = (0..frames).step_by(stride).collect();
+    if indices.last().copied() != Some(frames - 1) {
+        indices.push(frames - 1);
+    }
+    indices
+}
+
+fn lowpass_options(density: crate::graphics::VegDensity) -> crate::graphics::Options {
+    crate::graphics::Options {
+        vegetation_density: density,
+        ..Default::default()
+    }
+}
+
+fn lowpass_camera(
+    world: &Terrain,
+    spot: &crate::vegetation::DensityCandidate,
+    along: f64,
+) -> Camera {
+    let yaw = spot.heading.to_radians();
+    let x = spot.x + along * yaw.sin();
+    let z = spot.z + along * yaw.cos();
+    let ground = f64::from(world.height(x as f32, z as f32));
+    let mut camera = Camera::new();
+    camera.position = [x, ground + 100., z];
+    camera.yaw = yaw as f32;
+    camera.pitch = -4_f32.to_radians();
+    camera.roll = 0.;
+    camera
+}
+
+fn lowpass_flight(
+    world: &Terrain,
+    spot: &crate::vegetation::DensityCandidate,
+    frames: usize,
+    indices: &[usize],
+) -> Vec<(usize, Camera)> {
+    indices
+        .iter()
+        .map(|&frame| {
+            let along = -1.5 * crate::vegetation::NM
+                + 3. * crate::vegetation::NM * frame as f64 / (frames - 1) as f64;
+            (frame, lowpass_camera(world, spot, along))
+        })
+        .collect()
+}
+
+fn lowpass_outside(world: &Terrain, camera: &Camera) -> bool {
+    tore_world::terrain::edge_distance_nm(
+        world.theater.cols,
+        world.theater.rows,
+        camera.position[0],
+        camera.position[2],
+    ) > 0.
+}
+
+fn run_stats(samples: &[Sample]) -> RunStats {
+    let mut added: Vec<f64> = samples.iter().map(|sample| sample.added()).collect();
+    let added_mean = mean(&added);
+    let added_p95 = percentile(&mut added, 0.95);
+    let added_max = maximum(&added);
+    let on: Vec<f64> = samples.iter().map(|sample| sample.gpu_on).collect();
+    let placed_max = samples
+        .iter()
+        .map(|sample| sample.placed)
+        .max()
+        .unwrap_or(0);
+    let tufts_max = samples.iter().map(|sample| sample.tufts).max().unwrap_or(0);
+    let builds_max = samples
+        .iter()
+        .map(|sample| sample.builds())
+        .max()
+        .unwrap_or(0);
+    let rebuild = samples
+        .iter()
+        .max_by(|a, b| a.build_ms.total_cmp(&b.build_ms));
+    RunStats {
+        samples: samples.len(),
+        added_mean,
+        added_p95,
+        added_max,
+        on_mean: mean(&on),
+        on_max: maximum(&on),
+        placed_mean: mean(
+            &samples
+                .iter()
+                .map(|sample| sample.placed as f64)
+                .collect::<Vec<_>>(),
+        ),
+        placed_max,
+        tufts_mean: mean(
+            &samples
+                .iter()
+                .map(|sample| sample.tufts as f64)
+                .collect::<Vec<_>>(),
+        ),
+        tufts_max,
+        builds_mean: mean(
+            &samples
+                .iter()
+                .map(|sample| sample.builds() as f64)
+                .collect::<Vec<_>>(),
+        ),
+        builds_max,
+        object_builds: samples.iter().map(|sample| sample.object_chunks).sum(),
+        grass_builds: samples.iter().map(|sample| sample.grass_chunks).sum(),
+        rebuild_max: rebuild.map(|sample| sample.build_ms).unwrap_or(0.),
+        rebuild_frame: rebuild.map(|sample| sample.frame).unwrap_or(0),
+        submit_max: maximum(
+            &samples
+                .iter()
+                .map(|sample| sample.submit_ms)
+                .collect::<Vec<_>>(),
+        ),
+    }
+}
+
+fn maximum(values: &[f64]) -> f64 {
+    values.iter().copied().reduce(f64::max).unwrap_or(0.)
+}
+
+fn mean(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        0.
+    } else {
+        values.iter().sum::<f64>() / values.len() as f64
+    }
+}
+
+fn percentile(values: &mut [f64], p: f64) -> f64 {
+    if values.is_empty() {
+        return 0.;
+    }
+    values.sort_by(f64::total_cmp);
+    let index = ((values.len() as f64) * p).ceil() as usize - 1;
+    values[index.min(values.len() - 1)]
+}
+
+fn format_run(
+    code: &str,
+    size: [u32; 2],
+    density: &str,
+    stats: &RunStats,
+    warm: &[Sample],
+    warm_stats: &RunStats,
+    timed: &[Sample],
+) -> String {
+    let mut text = format!(
+        "\n{code} {}x{} {density}\n\
+         warmup frames {}: added mean {:.3} ms, max {:.3} ms, on mean {:.3} ms, max {:.3} ms\n\
+         warmup builds: {} object chunks, {} grass chunks, worst rebuild {:.3} ms, worst submit {:.3} ms\n\
+         samples {}: added mean {:.3} ms, p95 {:.3} ms, max {:.3} ms\n\
+         on mean {:.3} ms, max {:.3} ms\n\
+         instances mean {:.0}, max {}\n\
+         grass tufts mean {:.0}, max {}\n\
+         cache during pass: {} object chunks, {} grass chunks, {:.2} builds/frame mean, {} max\n\
+         worst rebuild {:.3} ms at frame {}, worst submit {:.3} ms\n",
+        size[0],
+        size[1],
+        warm.len(),
+        warm_stats.added_mean,
+        warm_stats.added_max,
+        warm_stats.on_mean,
+        warm_stats.on_max,
+        warm.iter().map(|sample| sample.object_chunks).sum::<u64>(),
+        warm.iter().map(|sample| sample.grass_chunks).sum::<u64>(),
+        warm_stats.rebuild_max,
+        warm_stats.submit_max,
+        stats.samples,
+        stats.added_mean,
+        stats.added_p95,
+        stats.added_max,
+        stats.on_mean,
+        stats.on_max,
+        stats.placed_mean,
+        stats.placed_max,
+        stats.tufts_mean,
+        stats.tufts_max,
+        stats.object_builds,
+        stats.grass_builds,
+        stats.builds_mean,
+        stats.builds_max,
+        stats.rebuild_max,
+        stats.rebuild_frame,
+        stats.submit_max
+    );
+    let mut spikes: Vec<&Sample> = timed.iter().filter(|sample| sample.added() > 10.).collect();
+    spikes.sort_by(|a, b| b.added().total_cmp(&a.added()));
+    spikes.truncate(8);
+    for sample in spikes {
+        text += &format!(
+            "  spike frame {}: added {:.3} ms, on {:.3} ms, instances {}, tufts {}, object chunks {}, grass chunks {}, rebuild {:.3} ms, submit {:.3} ms\n",
+            sample.frame,
+            sample.added(),
+            sample.gpu_on,
+            sample.placed,
+            sample.tufts,
+            sample.object_chunks,
+            sample.grass_chunks,
+            sample.build_ms,
+            sample.submit_ms
+        );
+    }
+    text
+}
+
+fn summary_row(
+    code: &str,
+    climate: &str,
+    spot: &crate::vegetation::DensityCandidate,
+    size: [u32; 2],
+    density: &str,
+    stats: &RunStats,
+    warmup: usize,
+) -> String {
+    format!(
+        "| {code} | {climate} | {} ({}) | {}x{} | {density} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} | {:.0} / {} | {:.0} / {} | {:.2} / {} | {:.2} | {warmup} |",
+        spot.label,
+        spot.instances,
+        size[0],
+        size[1],
+        stats.added_mean,
+        stats.added_p95,
+        stats.added_max,
+        stats.on_mean,
+        stats.on_max,
+        stats.placed_mean,
+        stats.placed_max,
+        stats.tufts_mean,
+        stats.tufts_max,
+        stats.builds_mean,
+        stats.builds_max,
+        stats.rebuild_max,
+    )
+}
+
+fn format_note(
+    code: &str,
+    size: [u32; 2],
+    density: &str,
+    stats: &RunStats,
+    timed: &[Sample],
+) -> String {
+    let hot: Vec<&Sample> = timed
+        .iter()
+        .filter(|sample| sample.added() >= stats.added_p95 && stats.added_p95 > 0.)
+        .collect();
+    let cool: Vec<&Sample> = timed
+        .iter()
+        .filter(|sample| sample.added() < stats.added_p95)
+        .collect();
+    let avg = |list: &[&Sample], f: fn(&Sample) -> f64| -> f64 {
+        mean(&list.iter().map(|sample| f(sample)).collect::<Vec<_>>())
+    };
+    format!(
+        "{code} {}x{} {density}: p95 {:.2} ms, max {:.2} ms. Frames at or above the 95th percentile \
+         averaged {:.0} instances, {:.0} grass tufts and {:.2} ms of patch builds, against {:.0}, \
+         {:.0} and {:.2} ms on the other frames. Worst rebuild was {:.2} ms at frame {} (submit {:.2} ms).\n",
+        size[0],
+        size[1],
+        stats.added_p95,
+        stats.added_max,
+        avg(&hot, |sample| sample.placed as f64),
+        avg(&hot, |sample| sample.tufts as f64),
+        avg(&hot, |sample| sample.build_ms),
+        avg(&cool, |sample| sample.placed as f64),
+        avg(&cool, |sample| sample.tufts as f64),
+        avg(&cool, |sample| sample.build_ms),
+        stats.rebuild_max,
+        stats.rebuild_frame,
+        stats.submit_max
+    )
+}
+
+fn write_summary(out: &Path, rows: &[String], notes: &[String]) -> AppResult<()> {
+    let mut text = String::from(
+        "# Low-level pass\n\n\
+         100 ft above the ground, 480 kt, 3 nm, nose 4 degrees down. Added cost is GPU time \
+         with vegetation objects and grass on, minus the same frame with them off. Ground \
+         detail stays on in both. High and Ultra change density only. Distances stay at the \
+         Graphics defaults, 4 nm draw and 2 nm detail. Instances are the objects submitted \
+         to the cull. Grass tufts are the blades submitted, before the shader drops any. \
+         Rebuilds are object and grass chunks built during the pass, after warmup.\n\n\
+         | Theater | Climate | Spot (instances in 1 nm) | Size | Density | Added mean | Added p95 | Added max | On mean | On max | Instances mean / max | Tufts mean / max | Builds per frame mean / max | Worst rebuild ms | Warmup frames |\n\
+         | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n",
+    );
+    for row in rows {
+        text.push_str(row);
+        text.push('\n');
+    }
+    text.push_str("\n## Above 3 ms at the 95th percentile, or a frame above 10 ms\n\n");
+    if notes.is_empty() {
+        text.push_str("No run crossed either line.\n");
+    } else {
+        for note in notes {
+            text.push_str(note);
+            text.push('\n');
+        }
+    }
+    std::fs::write(out.join("SUMMARY.md"), text)?;
+    Ok(())
+}
+
+fn write_lowpass_readme(out: &Path, images: &[(String, String, String, usize)]) -> AppResult<()> {
+    let mut text = String::from(
+        "# Low-pass frames\n\n\
+         3840 by 2160, High density, noon, clear. The camera is 100 ft above the ground, \
+         level, nose 4 degrees down, looking along the pass. `start` is 1.5 nm before the \
+         densest point, `dense` is that point, `end` is 1.5 nm past it.\n\n",
+    );
+    for (file, code, name, instances) in images {
+        text.push_str(&format!(
+            "- `{file}`: {code} {name}, {instances} High-density instances within 1 nm of the dense point\n"
+        ));
+    }
+    std::fs::write(out.join("README.md"), text)?;
     Ok(())
 }
 
@@ -470,7 +1097,8 @@ fn replay_cameras(
                 &overrides(cam.time)?,
             )?;
             let scenery = Scenery::build(resources, &world)?;
-            let mut view = pollster::block_on(View::new(&scenery, size, options(density()?)))?;
+            let mut view =
+                pollster::block_on(View::new(&scenery, size, options(density()?), false))?;
             view.set_shown(true);
             current = Some((cam.code.clone(), world, scenery, view));
         }
@@ -680,6 +1308,7 @@ impl View {
         scenery: &Scenery,
         size: [u32; 2],
         options: crate::graphics::Options,
+        force_timestamps: bool,
     ) -> AppResult<Self> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let adapter = instance
@@ -690,7 +1319,7 @@ impl View {
             })
             .await?;
         println!("vegetation preview adapter: {}", adapter.get_info().name);
-        let timing = std::env::var("TORE_VEG_GPU_TIMING").as_deref() == Ok("1");
+        let timing = force_timestamps || std::env::var("TORE_VEG_GPU_TIMING").as_deref() == Ok("1");
         let features = if timing {
             wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS
         } else {
@@ -752,6 +1381,208 @@ impl View {
             vegetation.set_suppressed(!on);
             vegetation.set_settle(true);
         }
+    }
+
+    fn begin_run(&mut self, size: [u32; 2], density: crate::graphics::VegDensity) -> AppResult<()> {
+        self.ensure_size(size);
+        let options = lowpass_options(density);
+        self.options = options;
+        self.sim.set_graphics(&self.device, options, 4);
+        let vegetation = self
+            .sim
+            .vegetation
+            .as_mut()
+            .ok_or("vegetation renderer missing")?;
+        vegetation.set_settle(false);
+        vegetation.set_suppressed(false);
+        vegetation.reset_cache();
+        Ok(())
+    }
+
+    fn ensure_size(&mut self, size: [u32; 2]) {
+        if self.size == size {
+            return;
+        }
+        self.size = size;
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        self.texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Vegetation preview"),
+            size: wgpu::Extent3d {
+                width: size[0],
+                height: size[1],
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        self.buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Vegetation preview readback"),
+            size: u64::from(size[0]) * u64::from(size[1]) * 4,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+    }
+
+    fn set_vegetation(&mut self, on: bool) {
+        if let Some(vegetation) = &mut self.sim.vegetation {
+            vegetation.set_suppressed(!on);
+        }
+    }
+
+    /// Fills the patch cache at the production per-frame budget. Stops on the
+    /// first frame that builds nothing.
+    fn warmup(
+        &mut self,
+        camera: &Camera,
+        world: &Terrain,
+        scenery: &Scenery,
+    ) -> AppResult<Vec<Sample>> {
+        let mut frames = Vec::new();
+        while frames.len() < 4_000 {
+            let start = frames.len();
+            let batch = (8).min(4_000 - start);
+            let jobs: Vec<(usize, &Camera)> = (0..batch).map(|i| (start + i, camera)).collect();
+            let samples = self.measure(&jobs, world, scenery)?;
+            if let Some(idle) = samples
+                .iter()
+                .position(|sample| sample.object_chunks == 0 && sample.grass_chunks == 0)
+            {
+                frames.extend(samples.into_iter().take(idle + 1));
+                break;
+            }
+            frames.extend(samples);
+        }
+        Ok(frames)
+    }
+
+    /// One off frame and one on frame per camera. GPU timestamps exclude the
+    /// CPU patch build, which is recorded separately from the on frame.
+    fn measure(
+        &mut self,
+        frames: &[(usize, &Camera)],
+        world: &Terrain,
+        scenery: &Scenery,
+    ) -> AppResult<Vec<Sample>> {
+        let period = f64::from(self.queue.get_timestamp_period());
+        if period <= 0. {
+            return Err("GPU timestamp period is zero".into());
+        }
+        let mut out = Vec::with_capacity(frames.len());
+        for chunk in frames.chunks(8) {
+            let count = (chunk.len() * 4) as u32;
+            let queries = self.device.create_query_set(&wgpu::QuerySetDescriptor {
+                label: Some("Lowpass timestamps"),
+                ty: wgpu::QueryType::Timestamp,
+                count,
+            });
+            let bytes = u64::from(count) * 8;
+            let resolved = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Lowpass timestamps resolved"),
+                size: bytes,
+                usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            });
+            let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Lowpass timestamps readback"),
+                size: bytes,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let mut cpu = Vec::with_capacity(chunk.len());
+            for (i, (frame, camera)) in chunk.iter().enumerate() {
+                self.set_vegetation(false);
+                self.stamp(&queries, (i * 4) as u32, camera, world, scenery);
+                self.set_vegetation(true);
+                let started = Instant::now();
+                self.stamp(&queries, (i * 4 + 2) as u32, camera, world, scenery);
+                let cache = self
+                    .sim
+                    .vegetation
+                    .as_ref()
+                    .map(|vegetation| vegetation.cache_frame())
+                    .unwrap_or_default();
+                let (placed, tufts) = self
+                    .sim
+                    .vegetation
+                    .as_ref()
+                    .map(|vegetation| (vegetation.placed(), vegetation.tufts_drawn()))
+                    .unwrap_or_default();
+                cpu.push((
+                    *frame,
+                    placed,
+                    tufts,
+                    cache,
+                    started.elapsed().as_secs_f64() * 1_000.,
+                ));
+            }
+            let mut encoder = self.device.create_command_encoder(&Default::default());
+            encoder.resolve_query_set(&queries, 0..count, &resolved, 0);
+            encoder.copy_buffer_to_buffer(&resolved, 0, &readback, 0, bytes);
+            self.queue.submit([encoder.finish()]);
+            let (tx, rx) = std::sync::mpsc::channel();
+            readback
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, move |result| {
+                    let _ = tx.send(result);
+                });
+            self.wait()?;
+            rx.recv()??;
+            let mapped = readback.slice(..).get_mapped_range();
+            let ticks: Vec<u64> = mapped
+                .chunks_exact(8)
+                .map(|word| u64::from_le_bytes(word.try_into().expect("timestamp")))
+                .collect();
+            drop(mapped);
+            readback.unmap();
+            for (i, (frame, placed, tufts, cache, submit_ms)) in cpu.into_iter().enumerate() {
+                out.push(Sample {
+                    frame,
+                    gpu_off: ticks[i * 4 + 1].saturating_sub(ticks[i * 4]) as f64 * period
+                        / 1_000_000.,
+                    gpu_on: ticks[i * 4 + 3].saturating_sub(ticks[i * 4 + 2]) as f64 * period
+                        / 1_000_000.,
+                    placed,
+                    tufts,
+                    object_chunks: cache.object_chunks,
+                    grass_chunks: cache.grass_chunks,
+                    build_ms: cache.build_ms,
+                    submit_ms,
+                });
+            }
+            if out.len() % 120 < 8 || out.len() == frames.len() {
+                println!("    sampled {}/{}", out.len(), frames.len());
+            }
+        }
+        Ok(out)
+    }
+
+    fn stamp(
+        &mut self,
+        queries: &wgpu::QuerySet,
+        index: u32,
+        camera: &Camera,
+        world: &Terrain,
+        scenery: &Scenery,
+    ) {
+        let view = self.texture.create_view(&Default::default());
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        encoder.write_timestamp(queries, index);
+        self.sim.draw(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &view,
+            self.size,
+            camera,
+            world,
+            scenery,
+        );
+        encoder.write_timestamp(queries, index + 1);
+        self.queue.submit([encoder.finish()]);
     }
 
     fn draw(&mut self, camera: &Camera, world: &Terrain, scenery: &Scenery) {

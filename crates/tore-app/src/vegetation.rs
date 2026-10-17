@@ -1485,6 +1485,24 @@ impl Atlas {
         }
         out
     }
+
+    /// Horizontal positions of the chunk's objects at `density` (1 is High).
+    /// `cache` must be used at that same density for the whole search.
+    fn chunk_positions<'a>(
+        &'a self,
+        world: &Terrain,
+        cache: &'a mut BTreeMap<(i64, i64), Vec<[f32; 2]>>,
+        cx: i64,
+        cz: i64,
+        density: f32,
+    ) -> &'a [[f32; 2]] {
+        cache.entry((cx, cz)).or_insert_with(|| {
+            self.chunk(world, cx, cz, 0., 1., density)
+                .iter()
+                .map(|inst| [inst.pos[0], inst.pos[2]])
+                .collect()
+        })
+    }
 }
 
 /// One texel of a chunk's table.
@@ -1698,8 +1716,12 @@ pub struct Placement {
     full: f32,
     eye_cell: Option<(i64, i64)>,
     settled: Option<(i64, i64, u32, u32)>,
-    /// Number of patch builds, for cache diagnostics.
+    /// Object chunks built, for cache diagnostics.
     pub builds: u64,
+    /// Grass chunks built, for cache diagnostics.
+    pub grass_builds: u64,
+    /// CPU time spent inside object-chunk and grass-chunk builds, nanoseconds.
+    pub build_ns: u64,
 }
 
 struct Chunk {
@@ -1727,7 +1749,22 @@ impl Placement {
             eye_cell: None,
             settled: None,
             builds: 0,
+            grass_builds: 0,
+            build_ns: 0,
         }
+    }
+
+    /// Drops cached object and grass chunks so the next view fills them again.
+    pub fn reset_cache(&mut self) {
+        self.chunks.clear();
+        self.grass.clear();
+        self.settled = None;
+        self.eye_cell = None;
+        self.full = 0.;
+        self.squeeze = 1.;
+        self.total = 0;
+        self.capped = false;
+        self.generation = self.generation.wrapping_add(1);
     }
 
     pub fn set_density(&mut self, density: f32) {
@@ -1845,7 +1882,11 @@ impl Placement {
                 }
                 // Full candidates are cached independently of camera distance.
                 // Distance thinning belongs to selection and the GPU, never a rebuild.
+                let started = std::time::Instant::now();
                 let objects = self.atlas.chunk(world, key.0, key.1, 0., 1., self.density);
+                self.build_ns = self.build_ns.saturating_add(
+                    u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                );
                 self.chunks.insert(*key, Chunk { objects });
                 self.builds += 1;
                 built += 1;
@@ -1973,8 +2014,13 @@ impl Placement {
                     done = false;
                     continue;
                 }
-                self.grass
-                    .insert(key, Arc::new(self.atlas.patches(world, key.0, key.1)));
+                let started = std::time::Instant::now();
+                let patches = self.atlas.patches(world, key.0, key.1);
+                self.build_ns = self.build_ns.saturating_add(
+                    u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                );
+                self.grass.insert(key, Arc::new(patches));
+                self.grass_builds += 1;
                 built += 1;
             }
             let patches = &self.grass[&key];
@@ -2488,6 +2534,116 @@ pub fn spots(atlas: &Atlas, world: &Terrain) -> Vec<Spot> {
         });
     }
     out
+}
+
+/// A place the low pass can fly through, with the High-density instance
+/// count inside one nautical mile.
+#[derive(Clone, Debug)]
+pub struct DensityCandidate {
+    pub x: f64,
+    pub z: f64,
+    pub heading: f64,
+    pub label: String,
+    pub instances: usize,
+}
+
+/// The densest High-density stand within one nautical mile.
+///
+/// Candidates are the preview [`spots`] plus up to eight separated samples
+/// of tree, bush and rock cover. The count is the cached chunk's full
+/// candidate set (no distance thinning) clipped to the disk. Ties prefer a
+/// named spot.
+pub fn densest(atlas: &Atlas, world: &Terrain) -> (DensityCandidate, Vec<DensityCandidate>) {
+    let mut pending: Vec<(f64, f64, f64, String)> = spots(atlas, world)
+        .into_iter()
+        .map(|spot| (spot.x, spot.z, spot.heading, spot.label.to_string()))
+        .collect();
+    let mut scored = Vec::new();
+    for &key in atlas.placements.keys() {
+        for (u, v) in [(0.25f64, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)] {
+            let x = (f64::from(key.0) + u) * CELL as f64;
+            let z = (f64::from(key.1) + v) * CELL as f64;
+            let site = atlas.site(world, x, z);
+            let score = atlas.tree_density(&site)
+                + 0.5 * atlas.bush_density(&site)
+                + 0.25 * atlas.rock_density(&site);
+            if score > 0.05 {
+                scored.push((score, x, z));
+            }
+        }
+    }
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.total_cmp(&b.1)));
+    let mut taken = 0usize;
+    for (_, x, z) in scored {
+        if taken == 8 {
+            break;
+        }
+        let near = pending.iter().any(|(px, pz, _, _)| {
+            let dx = px - x;
+            let dz = pz - z;
+            dx * dx + dz * dz < NM * NM
+        });
+        if near {
+            continue;
+        }
+        pending.push((x, z, 35., "scan".to_string()));
+        taken += 1;
+    }
+    let mut cache = BTreeMap::new();
+    let mut found = Vec::new();
+    for (x, z, heading, label) in pending {
+        found.push(DensityCandidate {
+            instances: instances_within(atlas, world, &mut cache, x, z, NM, 1.),
+            x,
+            z,
+            heading,
+            label,
+        });
+    }
+    found.sort_by(|a, b| {
+        b.instances
+            .cmp(&a.instances)
+            .then((a.label == "scan").cmp(&(b.label == "scan")))
+            .then(a.label.cmp(&b.label))
+    });
+    let winner = found.first().cloned().unwrap_or(DensityCandidate {
+        x: 0.,
+        z: 0.,
+        heading: 35.,
+        label: "center".to_string(),
+        instances: 0,
+    });
+    (winner, found)
+}
+
+/// High-density objects (`density` 1) whose positions lie within `radius` feet.
+fn instances_within(
+    atlas: &Atlas,
+    world: &Terrain,
+    cache: &mut BTreeMap<(i64, i64), Vec<[f32; 2]>>,
+    x: f64,
+    z: f64,
+    radius: f64,
+    density: f32,
+) -> usize {
+    let r2 = radius * radius;
+    let c0x = ((x - radius) / CHUNK as f64).floor() as i64;
+    let c1x = ((x + radius) / CHUNK as f64).floor() as i64;
+    let c0z = ((z - radius) / CHUNK as f64).floor() as i64;
+    let c1z = ((z + radius) / CHUNK as f64).floor() as i64;
+    let mut n = 0usize;
+    for cz in c0z..=c1z {
+        for cx in c0x..=c1x {
+            for pos in atlas.chunk_positions(world, cache, cx, cz, density) {
+                let dx = f64::from(pos[0]) - x;
+                let dz = f64::from(pos[1]) - z;
+                if dx * dx + dz * dz <= r2 {
+                    n += 1;
+                }
+            }
+        }
+    }
+    n
 }
 
 /// A water texel and a nearby open point on the bank: water x, z, then land x, z.

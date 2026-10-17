@@ -50,6 +50,16 @@ pub struct Renderer {
     density: f32,
     grass_radius: f32,
     tufts: u32,
+    /// Object chunks, grass chunks and CPU build time on the last `prepare`.
+    last_cache: CacheFrame,
+}
+
+/// Cache work done while preparing one frame. Zeros when vegetation is hidden.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CacheFrame {
+    pub object_chunks: u64,
+    pub grass_chunks: u64,
+    pub build_ms: f64,
 }
 
 impl Renderer {
@@ -196,6 +206,7 @@ impl Renderer {
             density: 1.,
             grass_radius: 0.,
             tufts: 0,
+            last_cache: CacheFrame::default(),
         }
     }
 
@@ -250,6 +261,22 @@ impl Renderer {
         self.settle = settle;
     }
 
+    /// Drops the patch cache so the next frames fill it at the current budget.
+    pub fn reset_cache(&mut self) {
+        self.placement.reset_cache();
+        self.uploaded = u64::MAX;
+        self.since_upload = 0;
+        self.count = 0;
+        self.rings.clear();
+        self.prepared = false;
+        self.last_cache = CacheFrame::default();
+    }
+
+    /// Chunks built while preparing the last frame, and the CPU time that took.
+    pub fn cache_frame(&self) -> CacheFrame {
+        self.last_cache
+    }
+
     /// Objects placed around the camera.
     pub fn placed(&self) -> u32 {
         self.count
@@ -299,8 +326,12 @@ impl Renderer {
         self.prepared = false;
         self.rings.clear();
         if self.suppressed || self.draw_nm <= 0. || camera.position[1] > 16_000. {
+            self.last_cache = CacheFrame::default();
             return;
         }
+        let objects_before = self.placement.builds;
+        let grass_before = self.placement.grass_builds;
+        let build_before = self.placement.build_ns;
         let eye2 = [camera.position[0], camera.position[2]];
         let full = self.detail_nm * vegetation::NM as f32 * 0.4;
         let draw = self.draw_nm * vegetation::NM as f32;
@@ -331,6 +362,11 @@ impl Renderer {
             [fx, rx, ux],
             [aspect / f, 1. / f],
         );
+        self.last_cache = CacheFrame {
+            object_chunks: self.placement.builds.saturating_sub(objects_before),
+            grass_chunks: self.placement.grass_builds.saturating_sub(grass_before),
+            build_ms: self.placement.build_ns.saturating_sub(build_before) as f64 / 1_000_000.,
+        };
         if self.count == 0 {
             self.prepared = !self.rings.is_empty();
             return;
