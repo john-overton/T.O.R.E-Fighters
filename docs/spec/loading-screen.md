@@ -15,11 +15,19 @@ This is host behaviour, not a claim about the retail game's loading screens.
 
 ## Presentation
 
-The two backgrounds are John's Harrier sunset and mirrored Thunderbirds photos.
-They alternate for preparation jobs. Photos cover the whole window, with a dark
-gradient for readable text. The patch is 220 pixels across on the 640 by 480
-menu canvas. The progress bar is 480 by 16 logical pixels. Text uses the
-bundled Noto Sans menu font. Image provenance is in
+The two backgrounds are John's Harrier sunset and Thunderbirds canopy-to-canopy
+photos. He supplied the full-size originals on 2026-10-16. The build bundles
+them as 2560 by 1707 baseline JPEGs. They alternate for preparation jobs.
+The loading worker decodes a JPEG with `zune-jpeg` before the window samples
+it. The window thread never decodes. Photos cover the whole window, with a
+dark gradient for readable text. The CPU cover-fit samples the decoded photo
+into the logical canvas, and the GPU stretches that canvas to the window, as
+before. If a decode fails, the screen logs one line and keeps a plain dark
+background under the same patch, stage and progress bar. The connecting screen,
+which can appear before a flight loader exists, starts that decode on a short
+background thread, still not on the window thread. The patch is 220 pixels
+across on the 640 by 480 menu canvas. The progress bar is 480 by 16 logical
+pixels. Text uses the bundled Noto Sans menu font. Image provenance is in
 [website images](../WEBSITE.md#images); asset format and sizes are in the
 [bundled asset notes](../../crates/tore-app/assets/README.md).
 
@@ -60,6 +68,10 @@ graphics retirement and a load still running finish off the event thread; shutdo
 
 CPU previews: `--snapshot FILE.ppm --snapshot-state loading` and
 `--snapshot-state loading-thunderbirds`. Neither requires media or a GPU.
+A window size may be appended, as in `loading-1920x1080` or
+`loading-thunderbirds-1920x1080`. The file is still the logical canvas for
+that window, the same buffer the GPU stretches, not a separate full-window
+render.
 The in-memory multiplayer test holds the worker while the caller continues
 servicing transport for seven seconds of virtual time, then requires flight.
 The local-only ignored loading profile test measures the caller's heartbeat

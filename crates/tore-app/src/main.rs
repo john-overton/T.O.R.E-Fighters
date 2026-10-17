@@ -12151,15 +12151,21 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && snapshot_state.starts_with("loading")
     {
         use std::io::Write;
-        let mut pixels = vec![0; menu::WIDTH * menu::HEIGHT * 4];
-        loading::draw(
+        let (photo, window) = loading::snapshot_window(&snapshot_state)
+            .ok_or_else(|| format!("unknown loading snapshot: {snapshot_state}"))?;
+        // Headless, before any window: decode here, then sample.
+        loading::prepare_photos();
+        let mut pixels = Vec::new();
+        let size = loading::draw_window(
             &mut pixels,
-            usize::from(snapshot_state == "loading-thunderbirds"),
+            window,
+            photo,
             loading::Stage::Scenery,
             2.5,
+            ["", ""],
         );
         let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
-        write!(out, "P6\n{} {}\n255\n", menu::WIDTH, menu::HEIGHT)?;
+        write!(out, "P6\n{} {}\n255\n", size[0], size[1])?;
         for p in pixels.chunks_exact(4) {
             out.write_all(&p[..3])?;
         }

@@ -1,7 +1,11 @@
 //! Flight preparation without holding the window event callback.
 //! Behaviour: docs/spec/loading-screen.md.
 use std::{
-    sync::{Arc, Mutex, mpsc},
+    sync::{
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     time::Instant,
 };
 
@@ -107,6 +111,8 @@ impl<T: Send + 'static> Job<T> {
         let thread = std::thread::Builder::new()
             .name("flight-loader".into())
             .spawn(move || {
+                // Decode before mission work, on this thread, not the window thread.
+                prepare_photos();
                 let result = work(status.clone());
                 // A failed load is not completion: leave the last real stage up.
                 if result.is_ok() {
@@ -141,16 +147,159 @@ impl<T: Send + 'static> Job<T> {
         draw_window(pixels, size, self.photo, stage, elapsed, details)
     }
 }
+struct Rgb {
+    width: usize,
+    height: usize,
+    pixels: Vec<u8>,
+}
+struct Photos {
+    frames: [Option<Rgb>; 2],
+    #[cfg(test)]
+    decode_ms: f64,
+}
+fn bundled_jpegs() -> [(&'static str, &'static [u8]); 2] {
+    [
+        (
+            "harrier.jpg",
+            include_bytes!("../assets/loading/harrier.jpg"),
+        ),
+        (
+            "thunderbirds.jpg",
+            include_bytes!("../assets/loading/thunderbirds.jpg"),
+        ),
+    ]
+}
+fn decode_jpeg(bytes: &[u8]) -> Result<Rgb, String> {
+    use zune_jpeg::JpegDecoder;
+    use zune_jpeg::zune_core::bytestream::ZCursor;
+    use zune_jpeg::zune_core::colorspace::ColorSpace;
+    use zune_jpeg::zune_core::options::DecoderOptions;
+    let options = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGB);
+    let mut decoder = JpegDecoder::new_with_options(ZCursor::new(bytes), options);
+    let pixels = decoder.decode().map_err(|error| error.to_string())?;
+    let info = decoder
+        .info()
+        .ok_or_else(|| "jpeg has no dimensions".to_string())?;
+    let width = usize::from(info.width);
+    let height = usize::from(info.height);
+    if width == 0 || height == 0 || pixels.len() != width * height * 3 {
+        return Err(format!(
+            "jpeg decoded to {width}x{height}, {} bytes",
+            pixels.len()
+        ));
+    }
+    Ok(Rgb {
+        width,
+        height,
+        pixels,
+    })
+}
+fn load_photos() -> Photos {
+    let started = Instant::now();
+    let mut frames = [None, None];
+    for (index, (name, bytes)) in bundled_jpegs().into_iter().enumerate() {
+        match decode_jpeg(bytes) {
+            Ok(photo) => frames[index] = Some(photo),
+            Err(error) => log::error!("loading: {name} decode failed: {error}"),
+        }
+    }
+    let decode_ms = started.elapsed().as_secs_f64() * 1000.;
+    let describe = |photo: &Option<Rgb>| match photo {
+        Some(photo) => format!("{}x{}", photo.width, photo.height),
+        None => "failed".to_string(),
+    };
+    log::info!(
+        "loading: jpeg decode {decode_ms:.3} ms on {} ({}, {})",
+        std::thread::current().name().unwrap_or("unnamed"),
+        describe(&frames[0]),
+        describe(&frames[1]),
+    );
+    Photos {
+        frames,
+        #[cfg(test)]
+        decode_ms,
+    }
+}
+static PHOTOS: OnceLock<Photos> = OnceLock::new();
+static DECODE_STARTED: AtomicBool = AtomicBool::new(false);
+fn cached_photos() -> Option<&'static Photos> {
+    PHOTOS.get()
+}
+/// Decode both photographs on this thread. The flight loader calls this
+/// before mission work. The headless snapshot calls it because that path
+/// has no window. The window thread must not.
+pub(crate) fn prepare_photos() {
+    DECODE_STARTED.store(true, Ordering::Release);
+    let _ = PHOTOS.get_or_init(load_photos);
+}
+fn request_background_decode() {
+    if PHOTOS.get().is_some() || DECODE_STARTED.load(Ordering::Acquire) {
+        return;
+    }
+    if DECODE_STARTED.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    if let Err(error) = std::thread::Builder::new()
+        .name("loading-photos".into())
+        .spawn(|| {
+            let _ = PHOTOS.get_or_init(load_photos);
+        })
+    {
+        DECODE_STARTED.store(false, Ordering::Release);
+        log::error!("loading: jpeg decode thread failed: {error}");
+    }
+}
+/// `loading`, `loading-thunderbirds`, or either name with a `-WIDTHxHEIGHT`
+/// window. The battery states stay 640 by 480.
+pub(crate) fn snapshot_window(state: &str) -> Option<(usize, [u32; 2])> {
+    let rest = state.strip_prefix("loading")?;
+    let (label, window) = match rest.rsplit_once('-') {
+        Some((label, size)) => match parse_window(size) {
+            Some(window) => (label, window),
+            None => (rest, [640, 480]),
+        },
+        None => (rest, [640, 480]),
+    };
+    Some((usize::from(label.contains("thunderbirds")), window))
+}
+fn parse_window(size: &str) -> Option<[u32; 2]> {
+    let (width, height) = size.split_once('x')?;
+    let width = width.parse::<u32>().ok()?;
+    let height = height.parse::<u32>().ok()?;
+    ((320..=7680).contains(&width) && (240..=4320).contains(&height)).then_some([width, height])
+}
+fn blit_photo(pixels: &mut [u8], width: usize, height: usize, photo: Option<&Rgb>) {
+    let Some(photo) = photo else {
+        pixels.fill(0);
+        for pixel in pixels.chunks_exact_mut(4) {
+            pixel[3] = 255;
+        }
+        return;
+    };
+    let (w, h) = (photo.width, photo.height);
+    let scale = (width as f64 / w as f64).max(height as f64 / h as f64);
+    for y in 0..height {
+        for x in 0..width {
+            let sx = ((x as f64 - width as f64 / 2.) / scale + w as f64 / 2.)
+                .clamp(0., (w - 1) as f64) as usize;
+            let sy = ((y as f64 - height as f64 / 2.) / scale + h as f64 / 2.)
+                .clamp(0., (h - 1) as f64) as usize;
+            let shade = 0.85 - 0.55 * y as f64 / height as f64;
+            let dst = (y * width + x) * 4;
+            let src = (sy * w + sx) * 3;
+            for c in 0..3 {
+                pixels[dst + c] = (photo.pixels[src + c] as f64 * shade) as u8;
+            }
+            pixels[dst + 3] = 255;
+        }
+    }
+}
 fn dimensions(bytes: &[u8]) -> (usize, usize) {
     (
         u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize,
         u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize,
     )
 }
-pub(crate) fn draw(pixels: &mut [u8], photo: usize, stage: Stage, elapsed: f64) {
-    draw_sized(pixels, [640, 480], photo, stage, elapsed, ["", ""]);
-}
-
 /// Keep the photograph's aspect ratio and cover the whole window. Text stays
 /// in a centered 640x480 logical area, matching the bundled menu font metrics.
 pub(crate) fn draw_window(
@@ -168,6 +317,11 @@ pub(crate) fn draw_window(
         [640, (640. / ratio).round() as u32]
     };
     pixels.resize(size[0] as usize * size[1] as usize * 4, 0);
+    // The window thread only samples. A loader that has not finished yet
+    // leaves a dark field until the next redraw.
+    if cached_photos().is_none() {
+        request_background_decode();
+    }
     draw_sized(pixels, size, photo, stage, elapsed, details);
     size
 }
@@ -181,28 +335,8 @@ fn draw_sized(
 ) {
     use crate::menu::{Canvas, HEIGHT, WIDTH};
     let (width, height) = (size[0] as usize, size[1] as usize);
-    let photo: &[u8] = if photo.is_multiple_of(2) {
-        include_bytes!("../assets/loading/harrier.rgb")
-    } else {
-        include_bytes!("../assets/loading/thunderbirds.rgb")
-    };
-    let (w, h) = dimensions(photo);
-    let scale = (width as f64 / w as f64).max(height as f64 / h as f64);
-    for y in 0..height {
-        for x in 0..width {
-            let sx = ((x as f64 - width as f64 / 2.) / scale + w as f64 / 2.)
-                .clamp(0., (w - 1) as f64) as usize;
-            let sy = ((y as f64 - height as f64 / 2.) / scale + h as f64 / 2.)
-                .clamp(0., (h - 1) as f64) as usize;
-            let shade = 0.85 - 0.55 * y as f64 / height as f64;
-            let dst = (y * width + x) * 4;
-            let src = 8 + (sy * w + sx) * 3;
-            for c in 0..3 {
-                pixels[dst + c] = (photo[src + c] as f64 * shade) as u8;
-            }
-            pixels[dst + 3] = 255;
-        }
-    }
+    let decoded = cached_photos().and_then(|photos| photos.frames[photo & 1].as_ref());
+    blit_photo(pixels, width, height, decoded);
     let left = (width - WIDTH) / 2;
     let top = (height - HEIGHT) / 2;
     let mut overlay = vec![0; WIDTH * HEIGHT * 4];
@@ -401,6 +535,7 @@ mod tests {
     }
     #[test]
     fn loading_photo_covers_wide_and_tall_windows() {
+        prepare_photos();
         let mut pixels = Vec::new();
         for size in [[1920, 1080], [800, 1200]] {
             let drawn = draw_window(
@@ -415,6 +550,33 @@ mod tests {
                 (drawn[0] as f64 / drawn[1] as f64 - size[0] as f64 / size[1] as f64).abs() < 0.003
             );
             assert!(pixels.chunks_exact(4).all(|p| p[3] == 255));
+            assert!(pixels.chunks_exact(4).any(|p| p[..3] != [0, 0, 0]));
+        }
+    }
+    #[test]
+    fn a_missing_photo_is_a_plain_dark_background() {
+        let mut pixels = vec![7; 2 * 2 * 4];
+        blit_photo(&mut pixels, 2, 2, None);
+        assert!(pixels.chunks_exact(4).all(|p| p == [0, 0, 0, 255]));
+    }
+    #[test]
+    fn a_bad_jpeg_is_rejected() {
+        assert!(decode_jpeg(b"not a jpeg").is_err());
+    }
+    #[test]
+    fn flight_loader_decodes_the_bundled_jpegs() {
+        std::thread::Builder::new()
+            .name("flight-loader".into())
+            .spawn(prepare_photos)
+            .unwrap()
+            .join()
+            .unwrap();
+        let photos = cached_photos().expect("decoded photographs");
+        eprintln!("loading jpeg decode {:.3} ms", photos.decode_ms);
+        for frame in &photos.frames {
+            let frame = frame.as_ref().expect("bundled jpeg");
+            assert_eq!((frame.width, frame.height), (2560, 1707));
+            assert_eq!(frame.pixels.len(), 2560 * 1707 * 3);
         }
     }
     #[test]
@@ -431,21 +593,27 @@ mod tests {
         send.send(()).unwrap();
     }
     #[test]
-    fn loading_art_has_valid_dimensions() {
-        for (bytes, channels) in [
-            (
-                include_bytes!("../assets/loading/harrier.rgb").as_slice(),
-                3,
-            ),
-            (
-                include_bytes!("../assets/loading/thunderbirds.rgb").as_slice(),
-                3,
-            ),
-            (include_bytes!("../assets/loading/logo.rgba").as_slice(), 4),
-        ] {
-            let (w, h) = dimensions(bytes);
-            assert_eq!(bytes.len(), 8 + w * h * channels);
-        }
+    fn loading_patch_has_valid_dimensions() {
+        let logo = include_bytes!("../assets/loading/logo.rgba").as_slice();
+        let (w, h) = dimensions(logo);
+        assert_eq!(logo.len(), 8 + w * h * 4);
+    }
+    #[test]
+    fn loading_snapshot_states_keep_the_battery_size() {
+        assert_eq!(snapshot_window("loading"), Some((0, [640, 480])));
+        assert_eq!(
+            snapshot_window("loading-thunderbirds"),
+            Some((1, [640, 480]))
+        );
+        assert_eq!(
+            snapshot_window("loading-1920x1080"),
+            Some((0, [1920, 1080]))
+        );
+        assert_eq!(
+            snapshot_window("loading-thunderbirds-1920x1080"),
+            Some((1, [1920, 1080]))
+        );
+        assert_eq!(snapshot_window("normal"), None);
     }
 }
 
