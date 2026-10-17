@@ -13,7 +13,7 @@
 //! Every rule below that the design leaves open is an agent decision, named
 //! as such in docs/ARCHITECTURE.md's "Built (F2-1)" notes.
 
-use super::config::{PUBLIC_IS_BROADCAST, RATE_IS_THE_FILES};
+use super::config::{MIN_IS_THE_FILES, PUBLIC_IS_BROADCAST, RATE_IS_THE_FILES};
 use super::{ConnectionId, CrownRule, Host, HostError, Life, LobbyEvent, Stage, StartMode};
 use crate::settings::{self, Change, LoadoutRule, Mode, Store, number};
 use crate::wire::messages::{Lock, Message, PasswordChange, SettingsChange};
@@ -109,7 +109,11 @@ impl Host {
             && self.king_id().is_some()
         {
             StartMode::King
-        } else if !self.settings.ai() && self.config.start == StartMode::Now {
+        } else if self.config.start == StartMode::Now
+            && (!self.settings.ai() || self.settings.min_players() > 0)
+        {
+            // Waiting on ready players (AI off, or a minimum): the first
+            // ready player's start attempt, and each after it, decides.
             StartMode::FirstPlayer
         } else {
             self.config.start
@@ -412,7 +416,12 @@ impl Host {
                             self.config.max_players
                         ));
                     }
+                    let min = self.settings.min_players();
+                    if (value as usize) < min {
+                        return Err(format!("min-players is {min}: the limit cannot be lower."));
+                    }
                 }
+                number::MIN_PLAYERS => return Err(MIN_IS_THE_FILES.into()),
                 number::HOST => self.host_pin_refusal(value)?,
                 number::VISIBILITY
                     if value == settings::Visibility::Public.value() && !self.config.listable =>

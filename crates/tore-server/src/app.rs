@@ -164,7 +164,7 @@ pub fn serve_with(
         format!("Listening on UDP {}", listening.join(" and ")),
         broadcast_line(&config),
     ];
-    let (status_interval, start_mode) = (config.status_interval_seconds, config.start);
+    let (status_interval, start_line) = (config.status_interval_seconds, start_line(&config));
     let install_id = install_id(&data_dir, config.telemetry);
 
     if let Some(rotation) = &rotation {
@@ -184,15 +184,36 @@ pub fn serve_with(
     for line in &start_lines {
         log.log(timer.unix_seconds(), line);
     }
-    log.log(
-        timer.unix_seconds(),
-        match start_mode {
-            StartMode::FirstPlayer => "Waiting for players",
-            StartMode::Now => "Flying: the mission started without waiting",
-        },
-    );
+    log.log(timer.unix_seconds(), &start_line);
     match Loop::new(timer, &mut log, &commands, status_interval).run(host.as_mut()) {
         Ended::Quit | Ended::Finished => Ok(()),
+    }
+}
+
+/// The line that says whether the mission is flying yet: `start now` flies at
+/// once only when nothing waits on ready players (`min-players` above 0, or
+/// `ai off`, which needs every open slot ready), and then the host's own
+/// note says how many it waits for.
+fn start_line(config: &crate::config::Config) -> String {
+    use tore_session::settings::number;
+    let setting = |n: u8| {
+        config
+            .settings
+            .iter()
+            .find(|(m, _)| *m == n)
+            .map(|&(_, v)| v)
+    };
+    let min = setting(number::MIN_PLAYERS).unwrap_or(0);
+    let ai_off = setting(number::AI) == Some(0);
+    match config.start {
+        StartMode::Now if min == 0 && !ai_off => {
+            "Flying: the mission started without waiting".into()
+        }
+        StartMode::Now => "Waiting for players: the mission starts once they are ready".into(),
+        StartMode::FirstPlayer if min > 1 => {
+            format!("Waiting for players: the mission starts when {min} are ready")
+        }
+        StartMode::FirstPlayer => "Waiting for players".into(),
     }
 }
 
@@ -250,6 +271,30 @@ pub fn install_id(data_dir: &std::path::Path, telemetry: bool) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_start_line_says_whether_the_mission_flies_or_waits() {
+        let line = |text: &str| {
+            start_line(&crate::config::Config::parse(text, std::path::Path::new(".")).unwrap())
+        };
+        assert_eq!(line(""), "Waiting for players");
+        assert_eq!(line("min-players 1"), "Waiting for players");
+        assert_eq!(
+            line("min-players 3"),
+            "Waiting for players: the mission starts when 3 are ready"
+        );
+        assert_eq!(
+            line("start now"),
+            "Flying: the mission started without waiting"
+        );
+        assert_eq!(
+            line("start now\nmin-players 0"),
+            "Flying: the mission started without waiting"
+        );
+        assert!(line("start now\nmin-players 2").starts_with("Waiting for players"));
+        assert!(line("start now\nai off").starts_with("Waiting for players"));
+    }
+
     use crate::{
         clock::fake::FakeTimer,
         config::Listen,

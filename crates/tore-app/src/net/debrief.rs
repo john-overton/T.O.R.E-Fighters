@@ -550,6 +550,7 @@ mod tests {
             slots: Vec::new(),
             settings: Vec::new(),
             mission_locked: false,
+            force_seconds: None,
         }
     }
 

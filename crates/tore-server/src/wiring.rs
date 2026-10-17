@@ -372,6 +372,7 @@ impl SessionHost {
                     "overloaded: the tick loop is {ticks_behind} ticks behind real time"
                 )),
                 HostLog::Fault { text, .. } => Event::Note(format!("fault: {text}")),
+                HostLog::Note { text, .. } => Event::Note(text),
                 // The program logs "Stopped" itself.
                 HostLog::Stopped { .. } => continue,
                 HostLog::Lobby {

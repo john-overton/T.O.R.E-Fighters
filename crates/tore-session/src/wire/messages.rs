@@ -120,6 +120,9 @@ pub mod kind {
     pub const TAKEN_OVER: u8 = 52;
     pub const RELEASE: u8 = 53;
     pub const REJOIN: u8 = 54;
+    /// The King starts or cancels a force start (nr-lobbyui). The lead
+    /// numbers the protocol; the kind is the next free one.
+    pub const FORCE_START: u8 = 55;
 }
 
 /// The limits of stage L's messages (protocol 10; net-protocol.md, "Limits").
@@ -761,6 +764,10 @@ pub struct LobbyState {
     /// mission, so the lobby shows the King the mission read-only. Always
     /// false in a game a player hosts.
     pub mission_locked: bool,
+    /// Seconds left on the King's force-start countdown, 1 to 10. None
+    /// when no countdown is running. The host owns the number, so every
+    /// player sees the same one (nr-lobbyui).
+    pub force_seconds: Option<u8>,
 }
 
 impl LobbyState {
@@ -983,6 +990,9 @@ pub enum Message {
     ChangeMission(String),
     /// The King starts the mission (client to host).
     Start,
+    /// The King starts a 10 second force start, or cancels one that is
+    /// already running (client to host, nr-lobbyui). Empty body.
+    ForceStart,
     /// The King removes a player (client to host).
     Kick(Kick),
     /// The King ends the mission for everyone (client to host).
@@ -1274,6 +1284,7 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
         slots,
         settings,
         mission_locked,
+        force_seconds,
     } = lobby;
     for (count, limit, what) in [
         (players.len(), PLAYERS_LIMIT, "players"),
@@ -1369,6 +1380,11 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
         w.write_varint(u64::from(*value));
     }
     w.write_bool(*mission_locked);
+    // The countdown, 4 bits, only while it runs (nr-lobbyui). A lobby with
+    // no countdown is one extra 0 bit.
+    bits::write_option(w, *force_seconds, |w, secs| {
+        let _ = w.write_bits(u64::from(secs.min(10)), 4);
+    });
     Ok(())
 }
 
@@ -1449,6 +1465,14 @@ fn read_lobby(r: &mut BitReader<'_>) -> WireResult<LobbyState> {
         settings.push((read_id(r)?, read_u32(r)?));
     }
     let mission_locked = r.read_bool()?;
+    let force_seconds = bits::read_option(r, |r| {
+        let secs = r.read_bits(4)? as u8;
+        if (1..=10).contains(&secs) {
+            Ok(secs)
+        } else {
+            Err(WireError::Invalid("force start seconds"))
+        }
+    })?;
     Ok(LobbyState {
         name,
         summary,
@@ -1462,6 +1486,7 @@ fn read_lobby(r: &mut BitReader<'_>) -> WireResult<LobbyState> {
         slots,
         settings,
         mission_locked,
+        force_seconds,
     })
 }
 
@@ -2431,6 +2456,7 @@ impl Message {
             Self::TakenOver(_) => kind::TAKEN_OVER,
             Self::Release(_) => kind::RELEASE,
             Self::Rejoin(_) => kind::REJOIN,
+            Self::ForceStart => kind::FORCE_START,
         }
     }
 
@@ -2466,6 +2492,7 @@ impl Message {
                 | Self::TakenOver(_)
                 | Self::Release(_)
                 | Self::Rejoin(_)
+                | Self::ForceStart
         )
     }
 
@@ -2584,7 +2611,7 @@ impl Message {
                 w.write_bool(ready.ready);
             }
             Self::ChangeMission(spec) => write_long_str(&mut w, spec),
-            Self::Start | Self::EndMission => {}
+            Self::Start | Self::EndMission | Self::ForceStart => {}
             Self::Kick(kick) => {
                 let _ = w.write_bits(u64::from(kick.player), 8);
                 write_str(&mut w, &kick.reason);
@@ -2903,6 +2930,7 @@ impl Message {
             kind::TAKEN_OVER => Self::TakenOver(migration::read_taken_over(r)?),
             kind::RELEASE => Self::Release(read_u32(r)?),
             kind::REJOIN => Self::Rejoin(tore_net::Token::read(r)?),
+            kind::FORCE_START => Self::ForceStart,
             _ => return Err(WireError::Invalid("message kind")),
         };
         bits::end(r)?;

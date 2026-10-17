@@ -304,6 +304,7 @@ fn each_setting_the_king_changes_reaches_every_lobby_state() {
     expected.push((number::HOST, 0));
     expected.push((number::SNAPSHOT_RATE, 60));
     expected.push((number::AI, 1));
+    expected.push((number::MIN_PLAYERS, 0));
     expected.sort_unstable();
     for p in [king, cobra] {
         let lobby = rig.lobby(p).unwrap();
@@ -1214,6 +1215,15 @@ fn ai_off_departure_reopens_slot_and_a_late_join_uses_a_fresh_plane() {
     let now = rig.net.now();
     rig.client(cobra).leave_game(now);
     rig.run(Duration::from_secs(1));
+    // The log says the departed player's aircraft was removed, as a note.
+    assert!(
+        rig.logs.iter().any(|log| matches!(
+            log,
+            HostLog::Note { text, .. } if text == "Cobra left: plane 1 removed (AI is off)"
+        )),
+        "{:?}",
+        rig.logs
+    );
     assert!(
         rig.host.world.combat.state.targets.is_empty(),
         "targets: {:?}, actors: {}, cockpits: {}",
@@ -1547,4 +1557,32 @@ fn choice_late_join_replaces_ai_and_departure_returns_the_default() {
         returned.spawn.loadout.stations, authored.stations,
         "a matching authored AI load survives Choice departure"
     );
+}
+
+#[test]
+fn the_king_cannot_change_the_minimum_players_and_a_mode_change_keeps_it() {
+    let mut rig = Rig::new(spec(2, 0), |config| {
+        config.settings = vec![(number::MIN_PLAYERS, 2)];
+        config.crown = CrownRule::FirstPlayer;
+        config.start = StartMode::FirstPlayer;
+    });
+    let king = rig.join("Viper");
+    let cobra = rig.join("Cobra");
+    rig.gather(&[king, cobra]);
+    assert_eq!(rig.host.settings().min_players(), 2);
+    rig.change(king, &[(number::MIN_PLAYERS, 1)]);
+    rig.run(300 * MS);
+    assert_eq!(rig.host.settings().min_players(), 2);
+    assert!(
+        rig.refusals(king)
+            .iter()
+            .any(|r| r.1.contains("min-players")),
+        "{:?}",
+        rig.refusals(king)
+    );
+    // A mode change keeps the operator's minimum.
+    rig.change(king, &[(number::MODE, 1)]);
+    rig.run(300 * MS);
+    assert_eq!(rig.host.settings().mode(), Mode::Pvp);
+    assert_eq!(rig.host.settings().min_players(), 2);
 }

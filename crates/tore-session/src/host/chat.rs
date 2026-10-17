@@ -112,6 +112,20 @@ impl Host {
         self.send(connection, &Message::ChatLine(ChatLine::system(text)));
     }
 
+    /// A system line for everyone still in the game (a force start).
+    pub(super) fn announce(&mut self, text: &str) {
+        let line = Message::ChatLine(ChatLine::system(text));
+        let ids: Vec<ConnectionId> = self
+            .peers
+            .iter()
+            .filter(|(_, peer)| !matches!(peer.stage, Stage::Closing { .. }))
+            .map(|(id, _)| *id)
+            .collect();
+        for id in ids {
+            self.send(id, &line);
+        }
+    }
+
     /// Refuses a line: the reason is said to the sender and noted in the
     /// log (once a second at most for the same reason).
     fn chat_refused(&mut self, connection: ConnectionId, refusal: Refusal) {

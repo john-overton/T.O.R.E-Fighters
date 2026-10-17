@@ -50,8 +50,7 @@ use crate::net::{
 use crate::ui_text;
 use crate::widgets::{
     Align, Backdrop, Background, Button, Cell, CheckBox, Column, Filter, Focus, Icon, Kit, List,
-    MessageBox, Outcome as Wo, Pager, Point, Route, Row, TextField, Widget as _, draw_panel, fit,
-    tone,
+    MessageBox, Outcome as Wo, Point, Route, Row, TextField, Widget as _, draw_panel, fit, tone,
 };
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -287,7 +286,7 @@ impl InternetScreen {
             full,
             other,
             games: List::new((48, 185), 200, 4)
-                .with_pager(Pager::NEWNET)
+                .with_scroll_bar((252, 185))
                 .with_columns(games_columns),
             players: List::new((346, 185), 242, 5).with_columns(players_columns),
             messages: MessageBox::newnet(),

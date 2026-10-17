@@ -25,7 +25,8 @@
 use crate::menu::{Canvas, text_width};
 use crate::ui_text;
 use crate::widgets::{
-    Button, Filter, Kit, Outcome, Point, Rect, TextField, draw_panel, fit, inside,
+    ArrowBar, ArrowRows, Button, Filter, Kit, Outcome, Point, Rect, RowPress, TextField,
+    draw_panel, fit, inside,
 };
 use tore_session::settings::{self, Allowed, Change, Setting, number};
 use tore_session::wire::messages::{LobbyPhase, LobbyState, PasswordChange, SettingsChange};
@@ -40,6 +41,10 @@ const PITCH: i32 = 21;
 /// The Game page has twelve rows since the Host row (stage K), so its rows
 /// sit a little closer to leave the foot's line its place.
 const GAME_PITCH: i32 = 19;
+/// The row window ends at the foot line. A page taller than this scrolls.
+const VIEW_BOTTOM: i32 = PANEL.1 + 300;
+/// The map's arrow bar, inside the panel's right edge.
+const BAR_X: i32 = PANEL.0 + PANEL.2 - 36;
 const ROW_HEIGHT: i32 = 18;
 /// The frame lines' colour and the selected row's.
 const LINE: [u8; 4] = [174, 174, 174, 255];
@@ -50,6 +55,10 @@ const PIN_IN_FLIGHT: &str = "A pin made in flight applies when the lobby returns
 /// Why a dedicated server's snapshot rate row is greyed (slice R1): its
 /// operator sets it in the configuration file.
 const RATE_IS_THE_SERVERS: &str = "This server's snapshot rate is set by its operator.";
+/// Why the minimum players row is greyed: the server's operator sets it in
+/// the configuration file or the rotation (John, 2026-10-16); nobody in the
+/// lobby changes it.
+const MIN_IS_THE_OPERATORS: &str = "The server operator sets the minimum players.";
 /// Why the AI respawn row is greyed: with revival `none` nothing comes back.
 pub const AI_RESPAWN_NEEDS_REVIVAL: &str = "With Revival none, no aircraft comes back.";
 /// The most bytes of a game's name (the host's rule).
@@ -205,6 +214,7 @@ pub fn page_rows(page: Page) -> Vec<Kind> {
         ],
         Page::Revival => vec![
             Kind::Setting(number::AI),
+            Kind::Setting(number::MIN_PLAYERS),
             Kind::Setting(number::RESPAWN),
             Kind::Setting(number::LIVES),
             Kind::Setting(number::REVIVE_DELAY),
@@ -258,6 +268,7 @@ pub fn row_label(kind: Kind) -> &'static str {
             number::OBSERVER_DELAY => "Observer delay",
             number::IDLE_AI => "AI flies idle aircraft after",
             number::SNAPSHOT_RATE => "Snapshot rate",
+            number::MIN_PLAYERS => "Players, at least",
             number::AI_RESPAWN => "AI respawn",
             number::AI => "AI aircraft",
             _ => "",
@@ -377,6 +388,9 @@ impl Context {
 pub fn row_state(kind: Kind, ctx: &Context) -> Result<(), String> {
     if !ctx.king {
         return Err("Only the King may change the settings.".into());
+    }
+    if kind == Kind::Setting(number::MIN_PLAYERS) {
+        return Err(MIN_IS_THE_OPERATORS.into());
     }
     let in_lobby_only = match kind {
         Kind::Setting(n) => settings::setting(n).is_some_and(|s| s.change == Change::InLobby),
@@ -628,10 +642,10 @@ pub fn place(page: Page, index: usize) -> Place {
         let x = PANEL.0 + 22 + column as i32 * 262;
         let y = ROWS_TOP + line as i32 * PITCH;
         Place {
-            row: (x - 4, y - 1, 256, ROW_HEIGHT + 2),
+            row: (x - 4, y - 1, 230, ROW_HEIGHT + 2),
             label: (x, y + 3),
-            label_width: 160,
-            value: (x + 164, y, 88, ROW_HEIGHT),
+            label_width: 140,
+            value: (x + 144, y, 80, ROW_HEIGHT),
         }
     } else {
         let x = PANEL.0 + 24;
@@ -642,11 +656,26 @@ pub fn place(page: Page, index: usize) -> Place {
         };
         let y = ROWS_TOP + index as i32 * pitch;
         Place {
-            row: (x - 4, y - 1, 510, row_height),
+            row: (x - 4, y - 1, 490, row_height),
             label: (x, y + 3),
             label_width: 200,
-            value: (x + 226, y, 270, ROW_HEIGHT),
+            value: (x + 226, y, 250, ROW_HEIGHT),
         }
+    }
+}
+
+/// How many rows of `page` fit above the foot line.
+pub fn window_rows(page: Page) -> usize {
+    if page == Page::Realism {
+        // Two columns of eight: the page fits, and still has the bar.
+        page_rows(page).len()
+    } else {
+        let pitch = if page == Page::Game {
+            GAME_PITCH
+        } else {
+            PITCH
+        };
+        ((VIEW_BOTTOM - ROWS_TOP) / pitch).max(1) as usize
     }
 }
 
@@ -663,6 +692,10 @@ pub struct SettingsPanel {
     shown_name: String,
     notice: Option<String>,
     ctx: Context,
+    /// The first row of the window. The host row scrolls in when the page
+    /// is taller than the window.
+    first: usize,
+    bar: ArrowBar,
 }
 
 impl SettingsPanel {
@@ -682,13 +715,13 @@ impl SettingsPanel {
             close: Button::new("Close", (PANEL.0 + PANEL.2 / 2 - 42, PANEL.1 + 322), 85),
             name: TextField::line(
                 (place(Page::Game, 0).value.0, place(Page::Game, 0).value.1),
-                270,
+                250,
                 Filter::Text,
             )
             .with_max(NAME_BYTES),
             password: TextField::line(
                 (place(Page::Game, 5).value.0, place(Page::Game, 5).value.1),
-                270,
+                250,
                 Filter::Text,
             )
             .masked()
@@ -696,6 +729,8 @@ impl SettingsPanel {
             shown_name: ctx.name.clone(),
             notice: None,
             ctx,
+            first: 0,
+            bar: ArrowBar::vertical((BAR_X, ROWS_TOP), VIEW_BOTTOM - ROWS_TOP),
         };
         panel.name.set_text(&panel.ctx.name.clone());
         panel.refresh();
@@ -763,13 +798,99 @@ impl SettingsPanel {
     fn go_to(&mut self, page: Page) {
         self.page = page;
         self.selected = 0;
+        self.first = 0;
         self.notice = None;
         self.refresh();
+        self.sync_fields();
+    }
+
+    fn window(&self) -> usize {
+        window_rows(self.page).min(self.rows().len().max(1))
+    }
+
+    fn max_first(&self) -> usize {
+        self.rows().len().saturating_sub(self.window())
+    }
+
+    /// Where row `index` is drawn now, or none when it is scrolled away.
+    fn drawn_place(&self, index: usize) -> Option<Place> {
+        if index < self.first || index >= self.first + self.window() {
+            return None;
+        }
+        let mut at = place(self.page, index);
+        if self.page != Page::Realism {
+            let pitch = if self.page == Page::Game {
+                GAME_PITCH
+            } else {
+                PITCH
+            };
+            let shift = self.first as i32 * pitch;
+            at.row.1 -= shift;
+            at.label.1 -= shift;
+            at.value.1 -= shift;
+        }
+        Some(at)
+    }
+
+    fn scroll_to(&mut self, first: usize) {
+        self.first = first.min(self.max_first());
+        self.sync_fields();
+    }
+
+    fn scroll_by(&mut self, rows: i32) {
+        let next = (self.first as i64 + i64::from(rows)).clamp(0, self.max_first() as i64);
+        self.scroll_to(next as usize);
+    }
+
+    fn reveal(&mut self) {
+        let window = self.window();
+        if self.selected < self.first {
+            self.first = self.selected;
+        } else if self.selected >= self.first + window {
+            self.first = self.selected + 1 - window;
+        }
+        self.first = self.first.min(self.max_first());
+        self.sync_fields();
+    }
+
+    fn sync_fields(&mut self) {
+        let name = self.rows().iter().position(|k| *k == Kind::Name);
+        let password = self.rows().iter().position(|k| *k == Kind::Password);
+        if let Some(index) = name {
+            let at = self
+                .drawn_place(index)
+                .map(|p| (p.value.0, p.value.1))
+                .unwrap_or((-400, -400));
+            self.name.move_to(at);
+        }
+        if let Some(index) = password {
+            let at = self
+                .drawn_place(index)
+                .map(|p| (p.value.0, p.value.1))
+                .unwrap_or((-400, -400));
+            self.password.move_to(at);
+        }
+    }
+
+    fn bar_rows(&self) -> ArrowRows {
+        ArrowRows {
+            total: self.rows().len(),
+            visible: self.window(),
+            first: self.first,
+        }
+    }
+
+    /// The wheel over the panel: positive goes up, toward the first row.
+    pub fn wheel(&mut self, notches: i32) {
+        if notches != 0 {
+            self.scroll_by(-notches);
+        }
     }
 
     fn select(&mut self, index: usize) {
         let n = self.rows().len();
         self.selected = index.min(n.saturating_sub(1));
+        self.reveal();
     }
 
     /// What a turn of row `index` answers, and the reason when it is greyed.
@@ -857,11 +978,17 @@ impl SettingsPanel {
             tab.pointer_move(point);
         }
         self.close.pointer_move(point);
+        if let Some(point) = point
+            && let Some(first) = self.bar.drag_rows(point, self.bar_rows())
+        {
+            self.scroll_to(first);
+        }
     }
 
     /// The row under `point`, if any.
     fn row_at(&self, point: Point) -> Option<usize> {
-        (0..self.rows().len()).find(|&i| inside(place(self.page, i).row, point))
+        (0..self.rows().len())
+            .find(|&i| self.drawn_place(i).is_some_and(|at| inside(at.row, point)))
     }
 
     /// A mouse button went down or up at `point`. `right` is the right
@@ -883,6 +1010,26 @@ impl SettingsPanel {
             return Answer::None;
         };
         if pressed {
+            match self.bar.press_rows(point, self.bar_rows()) {
+                RowPress::Miss => {}
+                RowPress::Less => {
+                    self.scroll_by(-1);
+                    return Answer::None;
+                }
+                RowPress::More => {
+                    self.scroll_by(1);
+                    return Answer::None;
+                }
+                RowPress::PageLess => {
+                    self.scroll_by(-(self.window() as i32));
+                    return Answer::None;
+                }
+                RowPress::PageMore => {
+                    self.scroll_by(self.window() as i32);
+                    return Answer::None;
+                }
+                RowPress::Grab => return Answer::None,
+            }
             if right {
                 return self.row_pressed(kit, point, false);
             }
@@ -892,6 +1039,7 @@ impl SettingsPanel {
             self.close.press(point);
             return self.row_pressed(kit, point, true);
         }
+        self.bar.release();
         if right {
             return Answer::None;
         }
@@ -966,7 +1114,9 @@ impl SettingsPanel {
             tab.draw(canvas, kit, false);
         }
         for (i, kind) in self.rows().into_iter().enumerate() {
-            let at = place(self.page, i);
+            let Some(at) = self.drawn_place(i) else {
+                continue;
+            };
             let grey = row_state(kind, &self.ctx).is_err();
             let text_font = if grey { dim } else { font };
             if i == self.selected {
@@ -1006,6 +1156,7 @@ impl SettingsPanel {
             );
         }
         self.close.draw(canvas, kit, false);
+        self.bar.draw_rows(canvas, self.bar_rows());
     }
 }
 
@@ -1028,5 +1179,27 @@ impl SettingsPanel {
     }
     pub fn tab_default(&self, page: Page) -> bool {
         self.tabs[page.index()].is_default()
+    }
+}
+
+#[cfg(test)]
+mod bar_layout {
+    use super::*;
+
+    #[test]
+    fn the_bar_sits_inside_the_panel_and_clear_of_the_rows() {
+        let bar = (BAR_X, ROWS_TOP, 16, VIEW_BOTTOM - ROWS_TOP);
+        let (x, y, w, h) = bar;
+        assert!(x >= PANEL.0 + 12 && y >= PANEL.1 + 24);
+        assert!(x + w <= PANEL.0 + PANEL.2 - 12);
+        assert!(y + h <= PANEL.1 + 300);
+        for page in Page::ALL {
+            for i in 0..page_rows(page).len() {
+                let row = place(page, i).row;
+                let apart =
+                    row.0 + row.2 <= x || x + w <= row.0 || row.1 + row.3 <= y || y + h <= row.1;
+                assert!(apart, "{page:?} row {i} overlaps the bar");
+            }
+        }
     }
 }

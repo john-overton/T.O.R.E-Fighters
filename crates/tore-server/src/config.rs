@@ -55,6 +55,24 @@ pub enum StartMode {
     Now,
 }
 
+/// Which file a setting was written in, for a message that names its line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Source {
+    /// The configuration file (`server.conf`).
+    ConfigFile,
+    /// The rotation file.
+    Rotation,
+}
+
+impl Source {
+    pub fn words(self) -> &'static str {
+        match self {
+            Self::ConfigFile => "the configuration file",
+            Self::Rotation => "the rotation file",
+        }
+    }
+}
+
 /// What happens when a mission ends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AfterEnd {
@@ -103,8 +121,12 @@ pub struct Config {
     /// settings.
     pub king_mission_locked: bool,
     /// The King's settings the file gives (by registry number, in file
-    /// order), beyond `max-players`, `password` and `time-limit`.
+    /// order), beyond `max-players`, `password` and `time-limit`; the
+    /// operator's `min-players` is one (John, 2026-10-16).
     pub settings: Vec<(u8, u32)>,
+    /// Where `min-players` was written, when it was, so that a check that
+    /// needs the mission (its open slots) can name the line.
+    pub min_players_at: Option<(Source, usize)>,
 }
 
 impl Config {
@@ -134,6 +156,7 @@ impl Config {
             king: false,
             king_mission_locked: false,
             settings: Vec::new(),
+            min_players_at: None,
         }
     }
 
@@ -168,6 +191,9 @@ impl Config {
                 return Err(fail(format!("`{name}` needs a value")));
             }
             config.set(name, value, base).map_err(fail)?;
+            if name == "min-players" {
+                config.min_players_at = Some((Source::ConfigFile, line));
+            }
             lines.push((line, name));
         }
         if seen.contains("mission") && seen.contains("rotation") {
@@ -201,6 +227,20 @@ impl Config {
                 message: format!(
                     "`{}` applies only in PvP: add `mode pvp`, or leave it out",
                     setting.name
+                ),
+            });
+        }
+        if let Some(&(_, min)) = self
+            .settings
+            .iter()
+            .find(|(n, _)| *n == number::MIN_PLAYERS)
+            && min > u32::from(self.max_players)
+        {
+            return Err(ConfigError {
+                line: line_of("min-players"),
+                message: format!(
+                    "`min-players` is {min}, but `max-players` is {max}: the minimum must be 0 to {max}",
+                    max = self.max_players
                 ),
             });
         }
@@ -372,7 +412,7 @@ impl Config {
 
 /// Every setting's name, in the guide's order: the server's own, then the
 /// King's (stage F phase 2) by their registry names.
-pub const SETTINGS: [&str; 40] = [
+pub const SETTINGS: [&str; 41] = [
     "name",
     "port",
     "address",
@@ -413,6 +453,7 @@ pub const SETTINGS: [&str; 40] = [
     "idle-ai",
     "ai-respawn",
     "ai",
+    "min-players",
 ];
 
 /// How many of the registry's units one of the file's is: `revive-delay` and
@@ -630,6 +671,54 @@ mod tests {
             "line 1: `king-mission` needs a King: add `king first-player`"
         );
         assert!(parse("king none\nking-mission open\nmode co-op\ntime-limit 90").is_ok());
+    }
+
+    /// John, 2026-10-16: `min-players`, 0 to the player limit.
+    #[test]
+    fn min_players_is_zero_to_the_player_limit() {
+        assert_eq!(parse("").unwrap().settings, []);
+        assert_eq!(
+            parse("min-players 4").unwrap().settings,
+            [(number::MIN_PLAYERS, 4)]
+        );
+        assert_eq!(
+            parse("min-players none").unwrap().settings,
+            [(number::MIN_PLAYERS, 0)]
+        );
+        assert_eq!(
+            parse("min-players 0\nmax-players 1").unwrap().settings,
+            [(number::MIN_PLAYERS, 0)]
+        );
+        // The registry's range: 0 to 30; words and numbers only.
+        assert_eq!(
+            refused("min-players 31"),
+            "line 1: `min-players` must be 0 to 30, not `31`"
+        );
+        assert_eq!(
+            refused("min-players -1"),
+            "line 1: `min-players` must be 0 to 30, not `-1`"
+        );
+        assert!(refused("min-players some").contains("not `some`"));
+        assert_eq!(
+            refused("min-players"),
+            "line 1: `min-players` needs a value"
+        );
+        assert_eq!(
+            refused("min-players 2\nmin-players 3"),
+            "line 2: `min-players` appears twice"
+        );
+        // Against `max-players`, whichever line comes first: the error names
+        // the minimum's line.
+        let error = refused("max-players 4\nmin-players 5");
+        assert_eq!(
+            error,
+            "line 2: `min-players` is 5, but `max-players` is 4: the minimum must be 0 to 4"
+        );
+        assert!(refused("min-players 5\nmax-players 4").starts_with("line 1: `min-players`"));
+        assert!(parse("max-players 4\nmin-players 4").is_ok());
+        // A server's file may give it with a King; the King's change is
+        // refused by the host.
+        assert!(parse("king first-player\nmin-players 2").is_ok());
     }
 
     /// The lobby pass (slice W0): `lock-sides balanced`, the revival
@@ -915,6 +1004,7 @@ mod tests {
             "idle-ai 10",
             "ai-respawn off",
             "ai off",
+            "min-players 2",
         ];
         assert_eq!(samples.len(), SETTINGS.len());
         for (sample, name) in samples.iter().zip(SETTINGS) {

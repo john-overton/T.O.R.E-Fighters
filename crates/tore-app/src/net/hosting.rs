@@ -1609,6 +1609,7 @@ pub fn log_line(entry: &HostLog) -> String {
             format!("overloaded: the tick loop is {ticks_behind} ticks behind real time")
         }
         HostLog::Fault { text, .. } => format!("fault: {text}"),
+        HostLog::Note { text, .. } => text.clone(),
         HostLog::Stopped { .. } => "stopped".to_owned(),
         HostLog::Lobby {
             callsign, event, ..

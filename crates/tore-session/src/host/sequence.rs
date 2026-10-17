@@ -101,6 +101,8 @@ impl Host {
                 }
                 self.roster_dirty = true;
                 self.log(HostLog::MissionRestarted { tick: 0 });
+                // The new round's own minimum (and AI rule) apply from here.
+                self.note_start_wait(true);
                 Ok(())
             });
             match result {

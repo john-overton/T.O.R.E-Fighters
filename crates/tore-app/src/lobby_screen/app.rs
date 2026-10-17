@@ -347,6 +347,7 @@ impl App {
                 client.set_ready(ready)
             }
             Request::Start => client.start_mission(),
+            Request::ForceStart => client.force_start(),
             Request::EndMission => client.end_mission(),
             Request::Kick { player, reason } => {
                 let name = client
