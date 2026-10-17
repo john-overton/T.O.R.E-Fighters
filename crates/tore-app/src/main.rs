@@ -1250,8 +1250,28 @@ impl App {
                 }
             });
         match finish {
-            Ok(handle) => self.background_finishes.push(handle),
+            Ok(handle) => self.shelve_background(handle),
             Err(error) => log::warn!("Could not finish the recording: {error}"),
+        }
+    }
+
+    /// Keeps a finished or still-running cleanup worker until the window has
+    /// closed. Completed handles are dropped here so a long session does not
+    /// accumulate them.
+    fn shelve_background(&mut self, handle: std::thread::JoinHandle<()>) {
+        self.background_finishes
+            .retain(|finished| !finished.is_finished());
+        self.background_finishes.push(handle);
+    }
+
+    /// Drops a loading job without installing its result, and keeps the
+    /// worker so shutdown can wait for it. The receiver goes with the job,
+    /// so a late result cannot be installed.
+    fn dismiss_loading(&mut self) {
+        if let Some(job) = self.loading.take()
+            && let Some(handle) = job.into_thread()
+        {
+            self.shelve_background(handle);
         }
     }
 
@@ -2765,13 +2785,19 @@ impl App {
                         return;
                     }
                 }
-                if let Some(renderer) = &mut self.renderer {
+                let retired = if let Some(renderer) = &mut self.renderer {
                     if let Some(graphics) = graphics {
-                        renderer.install_loading(graphics);
+                        renderer.install_loading(graphics)
                     } else {
                         renderer.set_scenery(&self.scenery);
                         renderer.prepare_aircraft(&self.hornet);
+                        None
                     }
+                } else {
+                    None
+                };
+                if let Some(handle) = retired {
+                    self.shelve_background(handle);
                 }
                 built.restarted
             }
@@ -3780,9 +3806,13 @@ impl ApplicationHandler for App {
         }
         if self.loading.is_some() {
             if self.net.is_some()
+                && self.world.0.is_some()
                 && matches!(&event, WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed && event.logical_key == Key::Named(winit::keyboard::NamedKey::Escape))
             {
-                self.loading = None;
+                // The live world is still on this thread. A theater change or
+                // restart has moved it into the worker; dropping that job
+                // would discard it. Those loads run to completion.
+                self.dismiss_loading();
                 self.net_ending = Some("Join cancelled".into());
                 self.end_session(event_loop);
                 return;
@@ -6231,8 +6261,15 @@ impl ApplicationHandler for App {
                         self.combat_view = view;
                         self.scenery = scenery;
                         self.camera = camera::Camera::for_world(&self.world.terrain);
-                        if let (Some(renderer), Some(graphics)) = (&mut self.renderer, graphics) {
-                            renderer.install_loading(graphics);
+                        let retired = if let (Some(renderer), Some(graphics)) =
+                            (&mut self.renderer, graphics)
+                        {
+                            renderer.install_loading(graphics)
+                        } else {
+                            None
+                        };
+                        if let Some(handle) = retired {
+                            self.shelve_background(handle);
                         }
                         self.reset_vapor();
                         self.instruments.navigation = navigation::Navigation::default();
@@ -6263,8 +6300,15 @@ impl ApplicationHandler for App {
                         }
                     }
                     Ok(loading::Prepared::Replay(viewer, graphics)) => {
-                        if let (Some(renderer), Some(graphics)) = (&mut self.renderer, graphics) {
-                            renderer.install_loading(*graphics);
+                        let retired = if let (Some(renderer), Some(graphics)) =
+                            (&mut self.renderer, graphics)
+                        {
+                            renderer.install_loading(*graphics)
+                        } else {
+                            None
+                        };
+                        if let Some(handle) = retired {
+                            self.shelve_background(handle);
                         }
                         self.start_replay(*viewer, None);
                     }
@@ -15118,7 +15162,13 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     );
     diagnostics::stage_done();
     shared_event_loop(event_loop)?.run_app_on_demand(&mut app)?;
-    // The window is closed before waiting for disk flushes and footer writing.
+    // The window is closed before waiting for disk flushes, footer writing
+    // and any load or graphics retirement still running.
+    if let Some(job) = app.loading.take()
+        && let Some(handle) = job.into_thread()
+    {
+        let _ = handle.join();
+    }
     for finish in app.background_finishes.drain(..) {
         let _ = finish.join();
     }

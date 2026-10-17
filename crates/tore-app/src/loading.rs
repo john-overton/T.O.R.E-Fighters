@@ -94,6 +94,7 @@ pub(crate) struct Job<T> {
     receive: mpsc::Receiver<Result<T, String>>,
     pub progress: Progress,
     photo: usize,
+    thread: Option<std::thread::JoinHandle<()>>,
 }
 impl<T: Send + 'static> Job<T> {
     pub fn spawn(
@@ -103,11 +104,14 @@ impl<T: Send + 'static> Job<T> {
         let (send, receive) = mpsc::channel();
         let progress = Progress::new();
         let status = progress.clone();
-        std::thread::Builder::new()
+        let thread = std::thread::Builder::new()
             .name("flight-loader".into())
             .spawn(move || {
                 let result = work(status.clone());
-                status.stage(Stage::Ready);
+                // A failed load is not completion: leave the last real stage up.
+                if result.is_ok() {
+                    status.stage(Stage::Ready);
+                }
                 let _ = send.send(result);
             })
             .map_err(|e| e.to_string())?;
@@ -115,7 +119,13 @@ impl<T: Send + 'static> Job<T> {
             receive,
             progress,
             photo: PHOTO.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 2,
+            thread: Some(thread),
         })
+    }
+    /// The worker, still running or finished. Dropping the job discards its
+    /// result; the caller joins this handle after the window closes.
+    pub fn into_thread(mut self) -> Option<std::thread::JoinHandle<()>> {
+        self.thread.take()
     }
     pub fn poll(&self) -> Option<Result<T, String>> {
         match self.receive.try_recv() {
@@ -443,16 +453,26 @@ mod tests {
 mod profile_probe {
     use super::*;
     /// Explicit local-only measurement. The path must be a private profile copy.
+    /// `TORE_LOADING_THEATER` selects the theater (default `UKR`).
+    /// `TORE_LOADING_REPEAT=1` times a second build in the same process.
     #[test]
     #[ignore = "requires TORE_LOADING_PROFILE pointing to a private imported profile"]
     fn real_mission_worker_services_headless_heartbeat() {
         let path = std::env::var_os("TORE_LOADING_PROFILE").expect("private profile path");
+        let theater = std::env::var("TORE_LOADING_THEATER").unwrap_or_else(|_| "UKR".to_string());
+        eprintln!("loading theater: {theater}");
         let assets = crate::assets::Assets::load(std::path::Path::new(&path)).unwrap();
         let resources = assets.theater_resources;
         let player =
             crate::aircraft::Airframe::load(&resources, tore_formats::aircraft::AircraftId::F18)
                 .unwrap();
-        let spec = crate::mission::MissionSpec::new("UKR", tore_formats::aircraft::AircraftId::F18);
+        let spec =
+            crate::mission::MissionSpec::new(&theater, tore_formats::aircraft::AircraftId::F18);
+        // A second build shows the process-wide city-fill layout cache. The
+        // copy is outside the heartbeat timer.
+        let resources_repeat = std::env::var_os("TORE_LOADING_REPEAT")
+            .is_some()
+            .then(|| resources.clone());
         let job =
             Job::spawn(move |progress| prepare_mission(&spec, &resources, player.kind, &progress))
                 .unwrap();
@@ -479,6 +499,35 @@ mod profile_probe {
         );
         assert!(polls > 1);
         assert!(max_gap < std::time::Duration::from_millis(250));
+        if let Some(resources) = resources_repeat {
+            let spec =
+                crate::mission::MissionSpec::new(&theater, tore_formats::aircraft::AircraftId::F18);
+            let player = crate::aircraft::Airframe::load(
+                &resources,
+                tore_formats::aircraft::AircraftId::F18,
+            )
+            .unwrap();
+            let again = Instant::now();
+            let job = Job::spawn(move |progress| {
+                prepare_mission(&spec, &resources, player.kind, &progress)
+            })
+            .unwrap();
+            loop {
+                if let Some(result) = job.poll() {
+                    result.unwrap();
+                    break;
+                }
+                assert!(
+                    again.elapsed().as_secs() < 120,
+                    "cached loader did not finish"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            eprintln!(
+                "loading cache repeat: total_ms={:.3}",
+                again.elapsed().as_secs_f64() * 1000.
+            );
+        }
     }
 }
 

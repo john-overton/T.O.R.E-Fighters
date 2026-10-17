@@ -1062,6 +1062,8 @@ impl Terrain {
         target: Option<&crate::surface::resolve::GroundTarget>,
         area: Option<&crate::surface::resolve::AreaDefense>,
     ) -> WorldResult<Self> {
+        let probe = std::env::var_os("TORE_LOADING_PROFILE").is_some();
+        let probe_started = probe.then(std::time::Instant::now);
         let required = |n: &str| {
             resources
                 .get(n)
@@ -1200,17 +1202,35 @@ impl Terrain {
                 }
             }
         }
+        if let Some(started) = probe_started {
+            eprintln!(
+                "loading stage Terrain: {:.3} ms",
+                started.elapsed().as_secs_f64() * 1000.
+            );
+        }
         if recorded.map_or(overrides.city_fill, |r| r.city_fill) {
             let cap = match recorded {
                 Some(_) => None,
                 None => overrides.city_fill_cap,
             };
+            let city_started = probe.then(std::time::Instant::now);
             out.city_fill = crate::city::CityFill::for_terrain(
                 resources,
                 &out,
                 cap.unwrap_or(crate::city::fill::MAX_INSTANCES),
             )
             .map(std::sync::Arc::new);
+            if let Some(started) = city_started {
+                let instances = out
+                    .city_fill
+                    .as_ref()
+                    .map(|fill| fill.layout.instances.len())
+                    .unwrap_or(0);
+                eprintln!(
+                    "loading stage CityFill: {:.3} ms instances={instances}",
+                    started.elapsed().as_secs_f64() * 1000.
+                );
+            }
         }
         Ok(out)
     }

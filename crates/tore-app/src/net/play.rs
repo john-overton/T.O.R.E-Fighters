@@ -667,13 +667,19 @@ impl App {
             hornet: std::mem::replace(&mut self.hornet, hornet),
             scenery: std::mem::replace(&mut self.scenery, scenery),
         };
-        if let Some(renderer) = &mut self.renderer {
+        let retired = if let Some(renderer) = &mut self.renderer {
             if let Some(graphics) = graphics {
-                renderer.install_loading(graphics);
+                renderer.install_loading(graphics)
             } else {
                 renderer.set_scenery(&self.scenery);
                 renderer.prepare_aircraft(&self.hornet);
+                None
             }
+        } else {
+            None
+        };
+        if let Some(handle) = retired {
+            self.shelve_background(handle);
         }
         if let Some(audio) = &self.audio {
             audio.restart_flight();
@@ -1015,7 +1021,7 @@ impl App {
                 .name("host-finish".into())
                 .spawn(move || drop(host))
             {
-                Ok(handle) => self.background_finishes.push(handle),
+                Ok(handle) => self.shelve_background(handle),
                 Err(error) => log::warn!("Host cleanup worker: {error}"),
             }
         }

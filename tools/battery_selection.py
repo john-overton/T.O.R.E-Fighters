@@ -182,7 +182,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     # Replay lane.
     "replay-recording": (
         "recording, reading and corrupting replay files",
-        ("replay-banner-*", "replay-stores-*", "replay-rec-*", "replay-surface", "replay-a2g", "replay-city-strike", "replay-city-smoke-seek", "replay-taped-views", "replay-corrupt-*", "replay-watch-*", "ai-record-*", "ai-determinism-recordings"),
+        ("replay-banner-*", "replay-stores-*", "replay-rec-*", "replay-surface", "replay-a2g", "replay-city-strike", "replay-city-smoke-seek", "replay-taped-views", "replay-hud-state", "replay-corrupt-*", "replay-watch-*", "ai-record-*", "ai-determinism-recordings"),
     ),
     "replay-cli": (
         "command-line errors, speeds, ticks, small tools",

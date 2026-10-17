@@ -182,10 +182,26 @@ impl CityFill {
                     for name in &layout.inputs {
                         resources.get(name);
                     }
+                    if std::env::var_os("TORE_LOADING_PROFILE").is_some() {
+                        eprintln!(
+                            "loading stage CityFillGeneration: 0.000 ms cached instances={}",
+                            layout.instances.len()
+                        );
+                    }
                     Arc::clone(layout)
                 }
                 None => {
+                    let generated = std::env::var_os("TORE_LOADING_PROFILE")
+                        .is_some()
+                        .then(std::time::Instant::now);
                     let layout = Arc::new(build_layout(resources, terrain, cap));
+                    if let Some(started) = generated {
+                        eprintln!(
+                            "loading stage CityFillGeneration: {:.3} ms instances={}",
+                            started.elapsed().as_secs_f64() * 1000.,
+                            layout.instances.len()
+                        );
+                    }
                     cache.insert(key, Arc::clone(&layout));
                     layout
                 }
@@ -542,6 +558,8 @@ pub(crate) fn build_layout(
 }
 
 fn build_layout_from(resources: &dyn ResourceSource, terrain: &Terrain, cap: usize) -> Layout {
+    let probe = std::env::var_os("TORE_LOADING_PROFILE").is_some();
+    let mask_started = probe.then(std::time::Instant::now);
     let base = tore_formats::theater::base_theater(&terrain.layout).unwrap_or("");
     // A theater with no city pictures fills its retail clusters' footprints
     // at the retail shape scale, three times their drawn size.
@@ -563,6 +581,22 @@ fn build_layout_from(resources: &dyn ResourceSource, terrain: &Terrain, cap: usi
         })
         .collect();
     let map = mask::LightMap::build(resources, &terrain.environment, base, &districts);
+    if let Some(started) = mask_started {
+        let synthetic = map
+            .tiles
+            .values()
+            .filter(|tile| tile.texture.is_empty())
+            .count();
+        eprintln!(
+            "loading stage CityFillMask: {:.3} ms input_districts={} districts={} tiles={} synthetic={}",
+            started.elapsed().as_secs_f64() * 1000.,
+            districts.len(),
+            map.districts.len(),
+            map.tiles.len(),
+            synthetic
+        );
+    }
+    let place_started = probe.then(std::time::Instant::now);
     let kit = kit::Kit::load(resources);
     let keepouts = layout_keepouts(terrain);
     // City names: the layout's named placements (its airfields).
@@ -587,6 +621,14 @@ fn build_layout_from(resources: &dyn ResourceSource, terrain: &Terrain, cap: usi
         .unwrap_or_default();
     let (cities, instances, candidates) =
         fill::place(&map, &kit, &terrain.layout, &keepouts, &names, cap);
+    if let Some(started) = place_started {
+        eprintln!(
+            "loading stage CityFillPlace: {:.3} ms instances={} candidates={}",
+            started.elapsed().as_secs_f64() * 1000.,
+            instances.len(),
+            candidates
+        );
+    }
     Layout {
         layout: terrain.layout.clone(),
         map,

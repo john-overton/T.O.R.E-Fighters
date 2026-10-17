@@ -2418,31 +2418,51 @@ impl Client {
     /// Builds `spec` from the import, comparing the manifest with the
     /// host's as `check` says.
     fn build_mission(&mut self, spec: MissionSpec, number: u32, check: Check<'_>) {
-        if let Some(mut builder) = self.background_builder.take() {
+        if let Some(builder) = self.background_builder.take() {
             let resources = Arc::clone(&self.resources);
             let mission = spec.clone();
             let (send, receive) = std::sync::mpsc::channel();
             let started = std::time::Instant::now();
+            // Held until the worker starts, so a failed spawn can build on
+            // this thread instead of losing the builder.
+            let held = Arc::new(std::sync::Mutex::new(Some(builder)));
+            let worker_held = Arc::clone(&held);
             let spawn = std::thread::Builder::new()
                 .name("mission-loader".into())
                 .spawn(move || {
+                    let Some(mut builder) =
+                        worker_held.lock().unwrap_or_else(|e| e.into_inner()).take()
+                    else {
+                        return;
+                    };
                     let reads = ResourceReads::new(&resources);
                     let built = builder(&mission, &reads).map_err(|e| e.to_string());
                     let _ = send.send((builder, built, reads.manifest()));
                 });
-            self.background_build = Some(BackgroundBuild {
-                receive,
-                spec,
-                number,
-                manifest: match check {
-                    Check::Whole(m) | Check::Added(m) => Some(m.clone()),
-                    Check::None => None,
-                },
-                added: matches!(check, Check::Added(_)),
-                started,
-            });
             if let Err(error) = spawn {
                 self.log("mission-worker-failed", &[&error.to_string()]);
+                if let Some(mut builder) = held.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                    let reads = ResourceReads::new(&self.resources);
+                    let started = std::time::Instant::now();
+                    let built = builder(&spec, &reads);
+                    self.background_builder = Some(builder);
+                    self.last_build = Some(started.elapsed());
+                    self.builds += 1;
+                    let ours = reads.manifest();
+                    self.finish_mission_build(spec, number, check, built, ours);
+                }
+            } else {
+                self.background_build = Some(BackgroundBuild {
+                    receive,
+                    spec,
+                    number,
+                    manifest: match check {
+                        Check::Whole(m) | Check::Added(m) => Some(m.clone()),
+                        Check::None => None,
+                    },
+                    added: matches!(check, Check::Added(_)),
+                    started,
+                });
             }
             return;
         }

@@ -164,19 +164,27 @@ impl Renderer {
             LoadingGraphics { sim, cockpit }
         }
     }
-    pub fn install_loading(&mut self, graphics: LoadingGraphics) {
+    pub fn install_loading(
+        &mut self,
+        graphics: LoadingGraphics,
+    ) -> Option<std::thread::JoinHandle<()>> {
         self.previews.clear();
         self.mirror_vertices.clear();
         let old = LoadingGraphics {
             sim: std::mem::replace(&mut self.sim, graphics.sim),
             cockpit: std::mem::replace(&mut self.cockpit, graphics.cockpit),
         };
-        // Driver resource destruction can be expensive too.
-        if let Err(error) = std::thread::Builder::new()
+        // Driver resource destruction can be expensive too. The caller joins
+        // this after the window closes.
+        match std::thread::Builder::new()
             .name("graphics-retire".into())
             .spawn(move || drop(old))
         {
-            log::warn!("Graphics retirement worker: {error}");
+            Ok(handle) => Some(handle),
+            Err(error) => {
+                log::warn!("Graphics retirement worker: {error}");
+                None
+            }
         }
     }
     pub fn prepare_aircraft(&mut self, hornet: &crate::aircraft::Airframe) {

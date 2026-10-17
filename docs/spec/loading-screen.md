@@ -1,5 +1,13 @@
 # Flight loading screen
 
+> **T.O.R.E: Tasteful Opinionated Reverse Engineered.**
+> The thing being reverse engineered is the *experience*, not the executable. We
+> trace what a player does and what the game does back, down to the numbers they
+> would notice. How the original code achieved it is history: useful evidence,
+> never a blueprint. If a sentence below reads like an instruction to reproduce
+> the original's internals, it is out of date.
+> <!-- tore-header v2 -->
+
 Implementation mode. **Opinionated**, requested by John on 2026-10-16:
 flight preparation shows the main T.O.R.E squadron patch, an aircraft photograph,
 a named stage and a progress bar while the window continues receiving events.
@@ -41,10 +49,12 @@ Host and join content hashing waits are polled, never joined on the event thread
 Multiplayer re-entry also builds on a worker.
 
 Escape while multiplayer content or a mission is building cancels the join and returns to
-the existing connection screen. The detached worker can finish but cannot
-install its result after cancellation. The window can be closed or resized
-while preparation runs. Simulation does not advance during single-player loading. Recording initialization runs with the flight loader. Finalization
-and cleanup run off the event thread; shutdown waits after closing the window.
+the existing connection screen, when the live world is still on the event thread.
+A theater change or restart that has moved the world into the worker runs to
+completion, so cancellation cannot discard that world. The worker can finish
+but cannot install its result after cancellation. The window can be closed or resized
+while preparation runs. Simulation does not advance during single-player loading. Recording initialization runs with the flight loader. Finalization,
+graphics retirement and a load still running finish off the event thread; shutdown waits for them after closing the window.
 
 ## Validation and remaining coverage
 
