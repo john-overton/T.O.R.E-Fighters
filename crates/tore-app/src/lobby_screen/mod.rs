@@ -143,6 +143,8 @@ pub enum Request {
     SetReady(bool),
     /// The King's Fly.
     Start,
+    /// The King's Force Start: begin the countdown, or cancel it.
+    ForceStart,
     /// The King ends the flying mission for everyone.
     EndMission,
     Kick {
@@ -220,18 +222,18 @@ mod layout {
     /// has it (agent decision: the plan's table said 152, which would leave
     /// the two headings on different lines).
     pub const PLAYERS_HEADING: Point = (380, 140);
-    /// The Slots frame (outline), the list inside it and its scroll bar's art
-    /// (34 wide, the list's height).
+    /// The Slots frame (outline), the list inside it and its scroll bar
+    /// (the map's arrow bar, 16 wide, the list's height).
     pub const SLOTS_FRAME: Rect = (40, 164, 335, 97);
     pub const SLOTS_LIST: Point = (45, 168);
     pub const SLOTS_WIDTH: i32 = 286;
-    pub const SLOTS_BAR: Point = (336, 168);
+    pub const SLOTS_BAR: Point = (355, 168);
     /// The Players box (filled), its frame, the list and its scroll bar.
     pub const PLAYERS_BOX: Rect = (380, 165, 224, 95);
     pub const PLAYERS_FRAME: Rect = (379, 164, 226, 97);
     pub const PLAYERS_LIST: Point = (384, 168);
     pub const PLAYERS_WIDTH: i32 = 186;
-    pub const PLAYERS_BAR: Point = (570, 168);
+    pub const PLAYERS_BAR: Point = (585, 168);
     /// The hint line under the lists.
     pub const HINT: Point = (45, 266);
     pub const MESSAGES_HEADING: Point = (45, 282);
@@ -666,8 +668,10 @@ impl LobbyScreen {
         self.fly.set_enabled(b.fly.is_enabled());
         self.ready.set_label(facts::ready_label(&self.facts));
         self.fly.set_label(match b.fly_as {
-            FlyAs::Fly => "Fly",
-            FlyAs::EndMission => "End Mission",
+            FlyAs::Fly => "Fly".into(),
+            FlyAs::ForceStart => "Force Start".into(),
+            FlyAs::Counting(seconds) => format!("Starting in {seconds}"),
+            FlyAs::EndMission => "End Mission".into(),
         });
         self.fly
             .set_default(self.default == Some(DefaultButton::Fly));
@@ -675,11 +679,24 @@ impl LobbyScreen {
             .set_default(self.default == Some(DefaultButton::Ready));
         // The buttons shown fill the row from the left for the King and from
         // the right for the others, so Leave is always in the last place.
+        let counting = matches!(b.fly_as, FlyAs::Counting(_));
         let places: &[(Id, usize)] = if b.players.is_shown() {
             &[
                 (Id::Mission, 0),
                 (Id::Settings, 1),
                 (Id::PlayersPanel, 2),
+                (Id::Loadout, 3),
+                (Id::Ready, 4),
+                (Id::Fly, 5),
+                (Id::Leave, 6),
+            ]
+        } else if counting {
+            // *Agent decision*: while the countdown shows, a joiner's row
+            // shifts left so the countdown sits where the King's Fly is
+            // and Leave stays last.
+            &[
+                (Id::Mission, 1),
+                (Id::Settings, 2),
                 (Id::Loadout, 3),
                 (Id::Ready, 4),
                 (Id::Fly, 5),
@@ -797,7 +814,10 @@ impl LobbyScreen {
     /// Which buttons are drawn, and so can be reached.
     fn shown(&self, id: Id) -> bool {
         match id {
-            Id::PlayersPanel | Id::Fly => self.buttons.players.is_shown(),
+            Id::Fly => {
+                self.buttons.players.is_shown() || matches!(self.buttons.fly_as, FlyAs::Counting(_))
+            }
+            Id::PlayersPanel => self.buttons.players.is_shown(),
             _ => true,
         }
     }
@@ -910,6 +930,7 @@ impl LobbyScreen {
             }
             Id::Fly => Some(match self.buttons.fly_as {
                 FlyAs::Fly => Request::Start,
+                FlyAs::ForceStart | FlyAs::Counting(_) => Request::ForceStart,
                 FlyAs::EndMission => Request::EndMission,
             }),
             Id::Leave => self.leave_pressed(),
@@ -1259,6 +1280,10 @@ impl LobbyScreen {
         let Some(p) = self.pointer else {
             return;
         };
+        if let Some(panel) = &mut self.settings_panel {
+            panel.wheel(notches);
+            return;
+        }
         if self.overlaid() {
             return;
         }

@@ -576,7 +576,9 @@ These empty aircraft can retire immediately when room is needed.
 
 Session revival pending tag 2 is `Join`, followed by seat and plane. It uses
 revival placement without charging a life. The per-tick `Made.uses_life` flag is
-scratch and is not checkpointed. The settings registry gains number 24. Mission
+scratch and is not checkpointed. The settings registry gains number 24 (and, with nr-minplayers, number 25,
+`min-players`: the saved settings list is one entry longer, with no layout
+change). Mission
 strings preserve the Choice markers and per-plane aircraft map. Protocol and
 checkpoint compatibility require lead integration; no version is bumped here.
 

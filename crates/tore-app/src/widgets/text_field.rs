@@ -78,6 +78,13 @@ pub struct TextField {
 }
 
 impl TextField {
+    /// Moves the box without changing its size. The settings panel does this
+    /// when a page scrolls.
+    pub fn move_to(&mut self, at: Point) {
+        self.rect.0 = at.0;
+        self.rect.1 = at.1;
+    }
+
     /// NEWNET's flat bar of `width` by 13 at `at` (the callsign is 139 wide).
     pub fn bar(at: Point, width: i32, filter: Filter) -> Self {
         Self::new((at.0, at.1, width, 13), filter)

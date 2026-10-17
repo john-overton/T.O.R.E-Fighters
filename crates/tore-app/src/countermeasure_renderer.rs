@@ -64,7 +64,9 @@ pub struct Afterburner {
 pub struct FlareLight {
     /// Persistent fire, reserved ahead of transient flashes at night.
     pub sustained: bool,
-    /// Source extent in feet, retained in the upload layout; lighting uses a point.
+    /// Source extent in feet. Falloff stays the flare point law. A positive
+    /// radius is a fire, fireball or impact flash and reflects mostly surface
+    /// brightness; zero is a point source and keeps the art colour.
     pub radius: f64,
     pub position: [f64; 3],
     pub strength: f64,

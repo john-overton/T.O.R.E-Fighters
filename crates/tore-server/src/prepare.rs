@@ -282,7 +282,43 @@ pub fn validate_world(config: &Config, spec: &MissionSpec, world: &World) -> Res
             ));
         }
     }
+    let min = config
+        .settings
+        .iter()
+        .find(|(n, _)| *n == tore_session::settings::number::MIN_PLAYERS)
+        .map_or(0, |&(_, v)| v);
+    let open = open_slots(config, spec);
+    if min > open {
+        let at = config
+            .min_players_at
+            .map_or(String::new(), |(source, line)| {
+                format!(" (`min-players` is on line {line} of {})", source.words())
+            });
+        return Err(format!(
+            "min-players is {min}, but the mission in {} has only {open} open slot{} for players{at}. --check lists the planes; `open-planes` and `mode` change which are open.",
+            config.mission.display(),
+            if open == 1 { "" } else { "s" }
+        ));
+    }
     Ok(())
+}
+
+/// How many planes of `spec` players may take under `config`: the friendly
+/// planes (both sides in PvP) or the ones `open-planes` names.
+pub fn open_slots(config: &Config, spec: &MissionSpec) -> u32 {
+    use tore_session::settings::{Mode, number};
+    let pvp = config
+        .settings
+        .iter()
+        .any(|&(n, v)| n == number::MODE && v == Mode::Pvp.value());
+    spec.open_planes()
+        .iter()
+        .filter(|plane| match &config.open_planes {
+            OpenPlanes::Friendly => !plane.wing.side.is_enemy() || pvp,
+            OpenPlanes::All => true,
+            OpenPlanes::List(planes) => planes.contains(&plane.id),
+        })
+        .count() as u32
 }
 
 #[cfg(test)]
@@ -482,6 +518,57 @@ pub mod tests {
         let prepared = prepare(&Options::default(), &dir).unwrap();
         let source = Source::parse(&prepared.resources[RESOURCE]).unwrap();
         assert_eq!((source.build, source.importer), (Some(Build::Disc10), None));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn min_players_cannot_exceed_the_mission_s_open_slots() {
+        let dir = data_folder("prep-min", true);
+        // MISSION has two friendly and two enemy planes.
+        fs::write(dir.join("mission.txt"), MISSION).unwrap();
+        fs::write(dir.join("server.conf"), "min-players 3\n").unwrap();
+        let error = prepare(&Options::default(), &dir).err().unwrap();
+        assert!(
+            error.contains("min-players is 3")
+                && error.contains("only 2 open slots")
+                && error.contains("line 1 of the configuration file"),
+            "{error}"
+        );
+        // The same file is fine in PvP, where both sides' planes are open, and
+        // with a list of open planes it counts the list.
+        fs::write(dir.join("server.conf"), "min-players 3\nmode pvp\n").unwrap();
+        assert!(prepare(&Options::default(), &dir).is_ok());
+        fs::write(
+            dir.join("server.conf"),
+            "min-players 3\nopen-planes 0 1 2\n",
+        )
+        .unwrap();
+        assert!(prepare(&Options::default(), &dir).is_ok());
+        fs::write(dir.join("server.conf"), "min-players 3\nopen-planes 0\n").unwrap();
+        assert!(
+            prepare(&Options::default(), &dir)
+                .err()
+                .unwrap()
+                .contains("only 1 open slot ")
+        );
+        fs::write(dir.join("server.conf"), "min-players 2\n").unwrap();
+        assert!(prepare(&Options::default(), &dir).is_ok());
+        // Each rotation entry is checked on its own, and the message names it.
+        fs::write(dir.join("server.conf"), "rotation rotation.txt\n").unwrap();
+        fs::write(dir.join("one.txt"), MISSION).unwrap();
+        fs::write(
+            dir.join("rotation.txt"),
+            "tore-rotation 1\nmission one.txt\nmin-players 2\nmission one.txt\nmin-players 3\n",
+        )
+        .unwrap();
+        let error = prepare(&Options::default(), &dir).err().unwrap();
+        assert!(
+            error.contains("Rotation entry 2 (line 4)")
+                && error.contains("min-players is 3")
+                && error.contains("line 5 of the rotation file"),
+            "{error}"
+        );
+        assert!(!error.contains("Rotation entry 1"), "{error}");
         let _ = fs::remove_dir_all(dir);
     }
 

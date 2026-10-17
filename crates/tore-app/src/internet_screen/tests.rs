@@ -717,10 +717,11 @@ fn the_mouse_picks_games_and_presses_buttons() {
     s.moved(Some((50.0, 430.0)));
     s.button(true);
     assert!(matches!(s.button(false), Outcome::Host(_)));
-    // The wheel moves the selection.
+    // The wheel slides the window and leaves the selection.
     s.moved(Some((100.0, 194.0)));
     s.wheel(-1);
-    assert_eq!(s.selected_entry().unwrap().name, "Friday night");
+    assert_eq!(s.selected_entry().unwrap().name, "Iceman's lobby");
+    assert_eq!(s.games.first_row(), 1);
 }
 
 // ---- the browse, on a real master ----

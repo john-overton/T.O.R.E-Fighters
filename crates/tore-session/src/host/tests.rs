@@ -132,6 +132,8 @@ struct TestClient {
     /// Every Observing message and Notice (phase 2, slice F2-A).
     observing: Vec<crate::wire::messages::Observing>,
     notices: Vec<String>,
+    /// System and player lines, so a force-start announcement is not an error.
+    chat: Vec<String>,
     /// Every Token message (stage K, slice K5).
     tokens: Vec<crate::wire::migration::TokenGrant>,
 }
@@ -182,6 +184,7 @@ impl TestClient {
             spawned: Vec::new(),
             observing: Vec::new(),
             notices: Vec::new(),
+            chat: Vec::new(),
             tokens: Vec::new(),
         }
     }
@@ -344,6 +347,7 @@ impl TestClient {
             }
             Message::MissionEnded(ended) => self.ended = Some(ended),
             Message::Notice(text) => self.notices.push(text),
+            Message::ChatLine(line) => self.chat.push(line.text),
             Message::Token(grant) => self.tokens.push(grant),
             Message::Scores(scores) => self.scores.push(*scores),
             Message::Results(results) => self.results.push(*results),
@@ -1780,3 +1784,9 @@ fn final_rotation_round_with_zero_delay_delivers_its_debrief_before_closing() {
     assert!(rig.run_until(Duration::from_secs(3), |r| r.closed(client)));
     assert!(rig.clients[client].debrief.is_some());
 }
+
+#[path = "min_players_tests.rs"]
+mod min_players_tests;
+
+#[path = "force_start_tests.rs"]
+mod force_start_tests;

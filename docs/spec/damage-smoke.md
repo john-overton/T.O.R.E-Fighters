@@ -318,6 +318,10 @@ catalogue, so none is invented. SMLARMS.JT is shared across sides and stays red;
 colour never follows faction. PHALANX.JT, M113.JT and M2.JT stay red. The
 catalogue's sometimes surprising aircraft-to-gun mappings are preserved.
 Green applies in day and night, with the same night geometry, glow and range.
+It is the gun tracer ribbon only. Fires, explosions, wreck glows, smoke,
+flares, muzzle flashes and every other effect keep their own colours. A
+burning wreck lights the ground with the warm fire reflectance in
+[night glow](explosions.md#night-glow), never with this family.
 Thermal views retain their old geometry, palette and heat response.
 Red daytime vertex payload and shader arithmetic remain unchanged; full-frame
 byte identity awaits the lead's GPU comparisons of red-only scenes.

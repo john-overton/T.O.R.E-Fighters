@@ -326,6 +326,14 @@ pre-nr-nightfx scene firelight. Fire, fireball and impact lights use the
 original flare point law, with no finite sphere, minimum radius, extra warm
 surface term or long tail. Strength, source height, inverse-square softening
 of 25 square feet, 1,500 ft base reach and fourfold night gain are unchanged.
+A light with a radius (a fire, a fireball, an impact flash) returns that
+orange off the surface brightness and 30 percent of the surface hue, so green
+ground stays a warm fire glow (John, 2026-10-16: burning wrecks on grass were
+glowing green). Snow and sand take the same mix and stay warm. Water keeps
+its fitted dark-sea tint times the orange flare colour, and clouds and smoke
+keep their own art times that colour. A point source still multiplies the art
+colour. The removed nr-nightfx warm term stays removed. Green tracer ribbons
+do not colour fires.
 The whole sprite emits its full daylight palette, without the former 1.6
 palette multiplier. Near-view night haze does not dim it; distant haze and
 cloud occlusion still apply. The close halo returns to 0.8 times art width,
