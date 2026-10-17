@@ -985,6 +985,23 @@ mod shader_tests {
                 &["fill_shadow_vertex2", "shadow_fragment"],
                 2,
             ),
+            ("vegetation", &["veg_vertex", "veg_fragment"], 2),
+            ("grass", &["grass_vertex", "grass_fragment"], 2),
+            (
+                "vegetation shadow 0",
+                &["veg_shadow_vertex0", "terrain_shadow_fragment"],
+                2,
+            ),
+            (
+                "vegetation shadow 1",
+                &["veg_shadow_vertex1", "terrain_shadow_fragment"],
+                2,
+            ),
+            (
+                "vegetation shadow 2",
+                &["veg_shadow_vertex2", "terrain_shadow_fragment"],
+                2,
+            ),
         ];
         let module = naga::front::wgsl::parse_str(&world).unwrap();
         for entry in &module.entry_points {
