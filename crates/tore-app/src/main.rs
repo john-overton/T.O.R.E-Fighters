@@ -2938,9 +2938,9 @@ impl App {
                         event_loop.exit();
                         return;
                     }
-                    let code = self.world.terrain.catalog[self.quick.theater_index()]
-                        .0
-                        .clone();
+                    let Some(code) = self.quick.theater_code().map(str::to_owned) else {
+                        return;
+                    };
                     let mut world = self.world.0.take().expect("active world");
                     let resources = Arc::clone(&self.theater_resources);
                     let graphics = self
