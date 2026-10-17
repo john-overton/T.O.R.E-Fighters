@@ -39,6 +39,7 @@ shown below the options.
 | Vegetation distance | 2 nm, 4 nm, 6 nm, 8 nm | 4 nm |
 | Vegetation detail | 1 nm, 2 nm, 3 nm, 4 nm | 2 nm |
 | Vegetation density | Low, Med, High, Ultra | High |
+| Vegetation cards | Facing, Cross, Cross+top, Face+top | Facing |
 | Frame rate counter | Off, On | Off |
 
 Choices are saved in `graphics-v1.conf` in the application data directory,
@@ -194,19 +195,26 @@ third of that, single stones at about an eighth), and the grass carpet
 reaches half the detail distance at most. Tree clumps (retail grove
 shapes) stand in for single trees from about a third of the full
 density distance outwards. The trees, bushes, palms and rocks are the
-camera-facing sprites from retail art, low-poly fallbacks or John's generated v2
-pack. The developer environment switch `TORE_VEGETATION_SPRITES=retail|pack|mixed`
-is read at scene startup, with `mixed` the branch default. There is no new saved
-Graphics row, since changing this art requires rebuilding the scene atlas. Sprites draw with a 1.5 pixel size floor. **Vegetation density** is Low, Med, High or Ultra
-(about 0.4, 0.7, 1.0 and 1.65 times the High placement), and also sets
-the grass carpet:
+cutout sprites from retail art and John's supplied v2/Sahara packs. The developer
+switch `TORE_VEGETATION_SPRITES=retail|pack|mixed` selects art at scene startup,
+with `mixed` the branch default. Missing retail species use supplied art.
+**Vegetation cards** switches live between Facing, Cross, Cross+top and Face+top.
+`TORE_VEGETATION_CARDS=billboard|cross|cross-top|billboard-top` overrides that row
+for a run and is not saved. Sprites have a 1.5 pixel floor and a smooth fade over
+the outer 30% of draw range. Distant forest coverage continues on the terrain.
+
+**Vegetation density** is Low, Med, High or Ultra. John requested a one-step
+reduction on 2026-10-17: new Ultra equals previous High, High equals previous
+Medium, and Medium equals previous Low. The new Low is an **agent choice** at
+half the previous Low candidate density. Default remains High. Relative to the
+previous High grid, the multipliers are 0.2, 0.4, 0.7 and 1.0.
 
 | Density | Grass radius | Tufts per 32 ft patch near the camera | Objects kept at most |
 | --- | --- | --- | --- |
-| Low | 700 ft | 48 | 65,536 |
-| Med | 1,100 ft | 96 | 131,072 |
-| High | 1,500 ft | 160 | 262,144 |
-| Ultra | 2,200 ft | 256 | 524,288 |
+| Low | 450 ft | 24 | 32,768 |
+| Med | 700 ft | 48 | 65,536 |
+| High | 1,100 ft | 96 | 131,072 |
+| Ultra | 1,500 ft | 160 | 262,144 |
 
 Each tuft has five blades. Grass thins in four rings: full within 14%
 of its radius, then half, a quarter and an eighth. Where a view would
@@ -219,9 +227,9 @@ every distance and reaches farther. Objects also fade out with height,
 full below about 7,000 ft and gone by about 15,000 ft, and nothing is
 placed above 16,000 ft.
 
-The five values are saved in `graphics-v1.conf` only when they differ
+The six values are saved in `graphics-v1.conf` only when they differ
 from the defaults (`vegetation-texture`, `vegetation-texture-distance`,
-`vegetation-distance`, `vegetation-detail`, `vegetation-density`). An
+`vegetation-distance`, `vegetation-detail`, `vegetation-density`, `vegetation-cards`). An
 older file that has none of them reads as the defaults. Apply puts them
 into effect at once, the same way as the building settings. Original
 graphics turns the texture off and leaves the object distances at the
@@ -231,10 +239,19 @@ defaults, as it does for buildings.
 
 Requested by John on 2026-10-17. Off by default. On draws a single line in
 the top right of the window, over the picture, in the bundled Noto face:
-`62 fps  16.1 ms   low 48`. The rate and the milliseconds are the mean
+`62 fps  16.1 ms  cpu 4.2  gpu 11.8  low 48`. The rate and the milliseconds are the mean
 frame over about the last half second. `low` is the slowest frame in the
-last second, written as a rate. A gap longer than half a second is treated
-as a pause and is not counted.
+last second, written as a rate. Slow rendering frames, including frames longer
+than half a second, count. Disabling the counter resets its history. While enabled, presentation requests the next
+redraw continuously, including idle menus and paused flight/replay, so the line
+measures the actual render load. CPU milliseconds include main-thread frame
+preparation and encoding, excluding surface acquisition waits. GPU milliseconds
+are asynchronous timestamps around the main window command encoder, including
+scene and interface passes, excluding separately submitted mirrors, queued staging
+uploads, CPU time and presentation waits. CPU/GPU values average up to 30 recent samples. Three
+readback slots never wait on the GPU. Adapters without both timestamp features
+show `gpu --`, never an estimate. GPU/CPU timings overlap and need not sum to the
+frame interval. These measurement choices are agent decisions.
 
 The line is drawn only when the window is presented. Offscreen renders,
 previews, recordings and `P` screenshots copy the picture before that pass,

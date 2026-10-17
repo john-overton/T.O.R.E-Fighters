@@ -57,7 +57,7 @@ pub(crate) fn bytes(values: &[f32]) -> Vec<u8> {
 }
 /// The shared `Scene` uniform, ending with the graphics `quality` and
 /// `viewport` vectors.
-const UNIFORM_BYTES: u64 = 1440;
+const UNIFORM_BYTES: u64 = 1488;
 type AircraftBatch = (wgpu::BindGroup, wgpu::Buffer, u32);
 /// One other aircraft inside a geometry batch, for the spotting aid: its
 /// vertex range, presented position and airframe extent in feet.
@@ -1697,11 +1697,34 @@ impl SimRenderer {
         uniform.extend([
             veg_mode,
             veg_reach,
-            0.,
+            self.options.vegetation_cards.effective() as u8 as f32,
             crate::vegetation::climate_id(&world.layout) as f32,
         ]);
+        uniform.extend(scenery.canopy.area);
+        let visible = self.vegetation.as_ref().is_some_and(|v| !v.suppressed());
+        uniform.extend([
+            scenery.canopy.first as f32,
+            scenery.canopy.pages_x as f32,
+            self.vegetation
+                .as_ref()
+                .map_or(0., |v| v.draw_reach())
+                .max(1.),
+            if visible {
+                self.options.vegetation_density.scale()
+            } else {
+                0.
+            },
+        ]);
+        uniform.extend([
+            self.options.vegetation_detail_nm as f32
+                * 6_076.115_5
+                * 0.4
+                * self.vegetation.as_ref().map_or(1., |v| v.squeeze()),
+            0.,
+            0.,
+            0.,
+        ]);
         debug_assert_eq!(uniform.len() * 4, UNIFORM_BYTES as usize);
-        queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
         // The burning city fill buildings: the nearest fires and columns of
         // the camera, replaced every draw (`crate::city_fires`).
         match world.city_fill.as_ref().filter(|_| self.city_fires_on) {
@@ -1808,7 +1831,13 @@ impl SimRenderer {
         }
         if let Some(vegetation) = &mut self.vegetation {
             vegetation.prepare(queue, encoder, camera, world, scenery.origin, size);
+            // Use this frame's uploaded circle for the terrain hand-off too.
+            let end = uniform.len();
+            uniform[end - 6] = vegetation.draw_reach().max(1.);
+            uniform[end - 4] =
+                self.options.vegetation_detail_nm as f32 * 6_076.115_5 * 0.4 * vegetation.squeeze();
         }
+        queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
         if self
             .lighting
             .prepare(queue, camera, world, scenery, &lights)

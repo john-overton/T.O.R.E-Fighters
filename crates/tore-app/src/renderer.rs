@@ -85,6 +85,8 @@ pub struct Renderer {
     /// Frame times for the optional corner readout. Drawn only in this
     /// window pass, never into a capture.
     frame_rate: crate::frame_rate::Meter,
+    frame_gpu: crate::frame_gpu::Timer,
+    frame_cpu: Option<std::time::Instant>,
     sim: crate::sim_renderer::SimRenderer,
     cockpit: crate::cockpit_renderer::CockpitRenderer,
     mirror_camera: crate::camera::Camera,
@@ -320,6 +322,10 @@ impl Renderer {
             self.samples(self.graphics.anti_aliasing),
         );
     }
+    pub fn begin_cpu_frame(&mut self) {
+        self.frame_cpu = Some(std::time::Instant::now());
+    }
+
     pub fn graphics(&self) -> crate::graphics::Options {
         self.graphics
     }
@@ -377,7 +383,7 @@ impl Renderer {
             adapter.features() & wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
-                required_features: specific,
+                required_features: specific | crate::frame_gpu::features(adapter.features()),
                 ..Default::default()
             })
             .await?;
@@ -531,6 +537,8 @@ impl Renderer {
             ui_text,
             menu_text_visible: false,
             frame_rate: crate::frame_rate::Meter::default(),
+            frame_gpu: crate::frame_gpu::Timer::new(&device, &queue),
+            frame_cpu: None,
             previews: Default::default(),
             sim,
             window,
@@ -897,6 +905,10 @@ impl Renderer {
         if s.width == 0 || s.height == 0 {
             return Ok(false);
         }
+        let cpu_before_acquire = self
+            .frame_cpu
+            .take()
+            .map_or(0., |start| start.elapsed().as_secs_f64());
         let frame = match self.surface.get_current_texture() {
             Ok(frame) => frame,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
@@ -909,6 +921,9 @@ impl Renderer {
             }
             Err(error) => return Err(error.into()),
         };
+        let cpu_started = std::time::Instant::now();
+        let show_counter = crate::frame_rate::shown(self.graphics.show_frame_rate);
+        let gpu_ms = self.frame_gpu.poll(&self.device);
         let size = flight_size.unwrap_or([WIDTH as u32, HEIGHT as u32]);
         self.canvas_texture(size);
         self.write_veil(flight_size.is_some());
@@ -938,6 +953,9 @@ impl Renderer {
         }
         let view = frame.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
+        if show_counter {
+            self.frame_gpu.begin(&mut encoder);
+        }
         let console = self.console.take().filter(|_| flight_size.is_some());
         if let (Some((crt, overlay, overlay_size)), Some((camera, world, scenery))) =
             (&console, scene)
@@ -1017,10 +1035,12 @@ impl Renderer {
         }
         // After every other layer, and only on the window. Captures read the
         // scene or the CPU canvas and never this pass.
-        self.frame_rate.tick();
-        if crate::frame_rate::shown(self.graphics.show_frame_rate)
-            && let Some(line) = self.frame_rate.line()
-        {
+        if show_counter {
+            self.frame_rate.tick();
+        } else {
+            self.frame_rate = Default::default();
+        }
+        if show_counter && let Some(line) = self.frame_rate.line() {
             let place = crate::frame_rate::anchor([s.width, s.height], readout);
             let glyphs = crate::frame_rate::quads(&line, place, self.ui_text.linear());
             self.ui_text.draw_window(
@@ -1038,13 +1058,28 @@ impl Renderer {
                 frame_started.elapsed().as_secs_f64() * 1000.
             );
         }
+        if show_counter {
+            self.frame_gpu.end(&mut encoder);
+        }
         self.queue.submit([encoder.finish()]);
+        if show_counter {
+            self.frame_gpu.submitted();
+            self.frame_rate.work(
+                (cpu_before_acquire + cpu_started.elapsed().as_secs_f64()) * 1000.,
+                gpu_ms,
+            );
+        }
         // Wayland frame callbacks throttle redraw requests to compositor refresh.
         // Only request that pacing when the surface must fall back to FIFO.
         if self.config.present_mode == wgpu::PresentMode::Fifo {
             self.window.pre_present_notify();
         }
         frame.present();
+        // Keep menus and paused views rendering while measuring rendering load.
+        // Requesting the next frame here covers every surface using this presenter.
+        if show_counter {
+            self.window.request_redraw();
+        }
         self.first_frame.complete();
         Ok(true)
     }

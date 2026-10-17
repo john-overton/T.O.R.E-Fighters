@@ -30,7 +30,12 @@ use tore_world::{
     terrain::Terrain,
 };
 
+#[path = "vegetation_canopy.rs"]
+pub mod canopy;
 /// Feet in a nautical mile, matching the city fill.
+#[path = "vegetation_coast.rs"]
+mod coast;
+
 pub const NM: f64 = 6_076.115_49;
 const CELL: i64 = mask::TILE_FT / 4;
 const TEXEL: i64 = mask::TEXEL_FT;
@@ -358,6 +363,7 @@ pub struct Atlas {
     /// Placement key to (picture, rotation).
     placements: BTreeMap<(i32, i32), (u16, u8)>,
     water: WaterMap,
+    coast: coast::Coast,
     /// The theater's median terrain height, feet: hills are measured from it.
     median_height: f32,
     /// Each terrain cell corner's palette index and the theater's columns:
@@ -399,6 +405,7 @@ impl Atlas {
         atlas.cells = (0..theater.rows)
             .flat_map(|row| (0..theater.cols).map(move |col| theater.cell(col, row).color))
             .collect();
+        atlas.coast = coast::Coast::build(&atlas);
         Ok(Some(atlas))
     }
 
@@ -444,6 +451,7 @@ impl Atlas {
             pictures,
             placements,
             water: WaterMap::empty(),
+            coast: Default::default(),
             median_height: 0.,
             cells: Vec::new(),
             cols: 0,
@@ -607,6 +615,7 @@ impl Atlas {
             BTreeMap::from([((0, 0), (0, 0))]),
         );
         atlas.tone = Tone::FIXED;
+        atlas.coast = coast::Coast::build(&atlas);
         atlas
     }
 
@@ -648,6 +657,34 @@ impl Atlas {
         }
     }
 
+    /// A reproducible beach/green boundary camera, independent of object art.
+    pub fn coast_spot(&self) -> Option<Spot> {
+        for &(kx, kz) in self.placements.keys() {
+            for v in (0..256).step_by(8) {
+                for u in (0..256).step_by(8) {
+                    let x = i64::from(kx) * CELL + u * TEXEL;
+                    let z = i64::from(kz) * CELL + v * TEXEL;
+                    if !self.coast.contains(x, z) {
+                        continue;
+                    }
+                    for (dx, dz) in [(1024, 0), (-1024, 0), (0, 1024), (0, -1024)] {
+                        if !self.coast.contains(x + dx, z + dz)
+                            && matches!(self.kind_at(x + dx, z + dz), Kind::Grass | Kind::Forest)
+                        {
+                            return Some(Spot {
+                                x: x as f64,
+                                z: z as f64,
+                                heading: (-(dx as f64)).atan2(-(dz as f64)).to_degrees(),
+                                label: "coast",
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
     pub fn color_at(&self, x: i64, z: i64) -> [u8; 3] {
         match self.index_at(x, z) {
             Some(index) if index != 255 => self.palette[usize::from(index)],
@@ -661,7 +698,7 @@ impl Atlas {
     }
 
     fn blocked(&self, world: &Terrain, x: i64, z: i64, kind: Kind) -> bool {
-        if !kind.open() {
+        if !kind.open() || self.coast.contains(x, z) {
             return true;
         }
         if paved(world, x as f64, z as f64) {
@@ -1397,7 +1434,7 @@ impl Atlas {
                 match s.kind {
                     Kind::Grass => (1., if climate == 3 { 4. } else { 0. }, 2.1 * vary * tall),
                     Kind::Field => (0.9, 1., 1.6 * vary),
-                    Kind::Forest => (0.5, 2., 1.5 * vary * tall),
+                    Kind::Forest => (0.25, 2., 1.5 * vary * tall),
                     Kind::Scrub => (0.6, 0., 1.4 * vary),
                     Kind::Rock => (0.3, 3., 1.0 * vary),
                     Kind::Sand => (0.15, 3., 1.0),
@@ -1711,6 +1748,7 @@ pub struct Placement {
     /// ran out before the draw distance.
     total: usize,
     capped: bool,
+    available: f32,
     /// Bumped whenever the drawn set changes.
     pub generation: u64,
     full: f32,
@@ -1744,6 +1782,7 @@ impl Placement {
             squeeze: 1.,
             total: 0,
             capped: false,
+            available: 0.,
             generation: 0,
             full: 0.,
             eye_cell: None,
@@ -1764,6 +1803,7 @@ impl Placement {
         self.squeeze = 1.;
         self.total = 0;
         self.capped = false;
+        self.available = 0.;
         self.generation = self.generation.wrapping_add(1);
     }
 
@@ -1813,7 +1853,7 @@ impl Placement {
             (cx as f64 + 0.5) * CHUNK as f64,
             (cz as f64 + 0.5) * CHUNK as f64,
         ];
-        let draw = draw + CHUNK as f32;
+        let draw = draw + 2. * CHUNK as f32;
         for _ in 0..12 {
             let done = self.pass(world, eye, full, draw, budget);
             let rescaled = done && self.rescale();
@@ -1873,11 +1913,13 @@ impl Placement {
         let mut done = true;
         let mut total = 0usize;
         let mut capped = false;
+        let mut available = draw;
         for (d, key) in &wanted {
             let stale = !self.chunks.contains_key(key);
             if stale {
                 if budget.is_some_and(|b| built >= b) {
                     done = false;
+                    available = available.min(*d);
                     continue;
                 }
                 // Full candidates are cached independently of camera distance.
@@ -1900,11 +1942,11 @@ impl Placement {
             });
             if total > self.budget {
                 capped = true;
-                break;
             }
         }
         self.total = total;
         self.capped = capped;
+        self.available = available;
         if changed {
             self.generation += 1;
         }
@@ -1935,6 +1977,12 @@ impl Placement {
         true
     }
 
+    /// Complete cached circle around this eye, before publication/upload.
+    pub(super) fn available(&self, eye: [f64; 2]) -> f32 {
+        let center = eye.map(|v| ((v / CHUNK as f64).floor() + 0.5) * CHUNK as f64);
+        (self.available - (eye[0] - center[0]).hypot(eye[1] - center[1]) as f32).max(0.)
+    }
+
     /// Feet to the farthest chunk [`Self::objects`] keeps.
     pub fn kept_reach(&self, eye: [f64; 2]) -> f32 {
         let mut keys: Vec<(f32, usize)> = self
@@ -1958,26 +2006,10 @@ impl Placement {
     /// The current objects, nearest chunks first, capped.
     #[cfg(test)]
     pub fn objects(&self, eye: [f64; 2]) -> Vec<Inst> {
-        let mut keys: Vec<(f32, (i64, i64))> = self
-            .chunks
-            .keys()
-            .map(|&(cx, cz)| (chunk_distance(eye, cx, cz), (cx, cz)))
-            .collect();
-        keys.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-        let mut out = Vec::new();
-        for (d, key) in keys {
-            let objects: Vec<_> = self.chunks[&key]
-                .objects
-                .iter()
-                .copied()
-                .filter(|i| i.rank < i.species.share((d - 2. * CHUNK as f32).max(0.), self.full))
-                .collect();
-            if out.len() + objects.len() > self.budget {
-                break;
-            }
-            out.extend_from_slice(&objects);
-        }
-        out
+        self.object_chunks(eye)
+            .into_iter()
+            .flat_map(|(_, v)| v)
+            .collect()
     }
 
     /// Same nearest-first selection, retaining chunk identity for streaming.
@@ -1997,12 +2029,22 @@ impl Placement {
                 .copied()
                 .filter(|i| i.rank < i.species.share((d - 2. * CHUNK as f32).max(0.), self.full))
                 .collect();
-            if total + objects.len() > self.budget {
-                break;
-            }
             total += objects.len();
             if !objects.is_empty() {
                 out.push((key, objects));
+            }
+        }
+        if total > self.budget {
+            // Uniform seeded ranks retain every part of the ring. Never truncate
+            // a nearest-first chunk prefix, which creates a square pop-in front.
+            let mut ranks: Vec<_> = out
+                .iter()
+                .flat_map(|(_, v)| v.iter().map(|i| i.rank.to_bits()))
+                .collect();
+            ranks.select_nth_unstable(self.budget);
+            let limit = ranks[self.budget];
+            for (_, objects) in &mut out {
+                objects.retain(|i| i.rank.to_bits() < limit);
             }
         }
         out
@@ -2070,6 +2112,11 @@ impl Placement {
 }
 
 /// Feet from `eye` to the nearest point of chunk `(cx, cz)`.
+#[cfg(test)]
+fn distance_fade(distance: f32, draw: f32) -> f32 {
+    1. - smoothstep(draw * 0.70, draw, distance)
+}
+
 fn chunk_distance(eye: [f64; 2], cx: i64, cz: i64) -> f32 {
     let x0 = (cx * CHUNK) as f64;
     let z0 = (cz * CHUNK) as f64;
@@ -2622,7 +2669,15 @@ pub fn densest(atlas: &Atlas, world: &Terrain) -> (DensityCandidate, Vec<Density
     let mut found = Vec::new();
     for (x, z, heading, label) in pending {
         found.push(DensityCandidate {
-            instances: instances_within(atlas, world, &mut cache, x, z, NM, 1.),
+            instances: instances_within(
+                atlas,
+                world,
+                &mut cache,
+                x,
+                z,
+                NM,
+                crate::graphics::VegDensity::High.scale(),
+            ),
             x,
             z,
             heading,
@@ -2643,6 +2698,18 @@ pub fn densest(atlas: &Atlas, world: &Terrain) -> (DensityCandidate, Vec<Density
         instances: 0,
     });
     (winner, found)
+}
+
+pub fn count_high(atlas: &Atlas, world: &Terrain, x: f64, z: f64) -> usize {
+    instances_within(
+        atlas,
+        world,
+        &mut BTreeMap::new(),
+        x,
+        z,
+        NM,
+        crate::graphics::VegDensity::High.scale(),
+    )
 }
 
 /// High-density objects (`density` 1) whose positions lie within `radius` feet.
@@ -2731,6 +2798,38 @@ mod tests {
         placement.objects(eye)
     }
 
+    #[test]
+    fn fade_is_a_smooth_per_instance_distance_gradient() {
+        let draw = 10000.;
+        assert_eq!(distance_fade(7000., draw), 1.);
+        assert!((distance_fade(8500., draw) - 0.5).abs() < 1e-6);
+        assert_eq!(distance_fade(10000., draw), 0.);
+        let values: Vec<_> = (0..=100)
+            .map(|n| distance_fade(7000. + n as f32 * 30., draw))
+            .collect();
+        assert!(
+            values
+                .windows(2)
+                .all(|w| w[0] >= w[1] && w[0] - w[1] < 0.016)
+        );
+        // Two neighbours across a 2,048 ft patch boundary have nearly equal fade.
+        assert!((distance_fade(8191.9, draw) - distance_fade(8192.1, draw)).abs() < 0.001);
+        assert!(
+            include_str!("vegetation_cull.wgsl")
+                .contains("smoothstep(params.tiers.y * 0.70, params.tiers.y, dist)")
+        );
+    }
+    #[test]
+    fn a_small_budget_keeps_a_whole_ring_instead_of_a_chunk_prefix() {
+        let mut placement = Placement::new(Arc::new(Atlas::synthetic(solid(10), 0)));
+        placement.set_budget(64);
+        placement.update(&flat(), [16384., 16384.], 2000., 4000., None);
+        let chunks = placement.object_chunks([16384., 16384.]);
+        assert!(chunks.iter().map(|(_, v)| v.len()).sum::<usize>() <= 64);
+        assert!(chunks.iter().any(|((x, _), _)| *x < 8));
+        assert!(chunks.iter().any(|((x, _), _)| *x > 8));
+        assert!(placement.available([16384., 16384.]) > 4000.);
+    }
     #[test]
     fn instance_size_distribution_is_seeded_natural_and_habitat_aware() {
         let sizes: Vec<_> = (0..10000)

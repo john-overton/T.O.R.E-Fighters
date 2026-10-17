@@ -8,9 +8,10 @@ use std::{
 };
 
 pub const PAGE: usize = 256;
-// Two maximum 8 nm rings have 4034 chunks. Each can waste one partial page.
+// Two maximum 8 nm rings with a two-chunk guard fit within 5120 chunks.
+// Each can waste one partial page.
 // Two object budgets plus this slack hold the published and staged selections.
-pub const SPARE_PAGES: usize = 4096;
+pub const SPARE_PAGES: usize = 5120;
 pub const UPLOAD_BYTES: usize = 256 * 1024;
 pub const UPLOAD_WRITES: usize = 16;
 pub type Key = (i64, i64);
@@ -34,6 +35,8 @@ pub struct Ready {
     pub grass: Vec<Patch>,
     pub squeeze: f32,
     pub reach: f32,
+    pub available: f32,
+    pub eye: [f64; 2],
     pub done: bool,
     pub cache: CacheFrame,
 }
@@ -140,6 +143,8 @@ impl Worker {
                         grass,
                         squeeze: placement.squeezed(1.),
                         reach: placement.kept_reach(request.eye),
+                        available: placement.available(request.eye),
+                        eye: request.eye,
                         done: done && grass_done,
                         cache: CacheFrame {
                             object_chunks: placement.builds - before.0,

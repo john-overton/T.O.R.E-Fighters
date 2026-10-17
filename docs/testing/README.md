@@ -347,7 +347,10 @@ a window or creating a GPU adapter. Use the same resulting camera file for both
 builds via `TORE_VEG_PREVIEW_CAMERAS`. This checks camera coverage, not rendered
 appearance. The synthetic vegetation unit tests cover placement, scale, missing
 cutouts and indexed atlas selection. `tools/test_slice_vegetation.py` checks the
-generated pack's alpha, gutters and fringe removal.
+generated packs' alpha, gutters, chroma removal and local glow rejection.
+The CPU-only `vegetation-pass5-cameras` case selects coast, forest hand-off and
+top-view situations. `--vegetation-preview OUT pass5-cameras` writes that list.
+These reproduce the requested situations; player screenshot coordinates are unknown.
 
 On `exp/vegetation`, `tore-app --vegetation-preview OUT cost` renders open
 country and woods at 1440p and 4K, at Medium, High and Ultra. This is an
@@ -359,12 +362,17 @@ from CPU submission until GPU idle, with vegetation off/on and their difference.
 straight pass through the densest vegetation in UKR, FRA, NSK, EGY, PGU, IRA,
 TVIET, APA, WTA and KURILE. It samples 1,350 frames (60 per second of the 22.5 s
 run) at 3840x2160 and 2560x1440, High and Ultra, and leaves the other Graphics
-vegetation settings at their defaults. GPU timestamps compare objects and grass
+vegetation settings at their defaults. GPU timestamps compare objects, canopy and grass
 on and off. Ground detail stays on in both. Warmup, while the patch cache fills
 at the in-flight budget, is reported separately. `TORE_VEG_LOWPASS_STRIDE=2`
 samples every second frame when a full run is too slow. Optional
 `TORE_VEG_LOWPASS_THEATERS`, `TORE_VEG_LOWPASS_SIZES`, `TORE_VEG_LOWPASS_DENSITIES`
-and `TORE_VEG_LOWPASS_FRAMES` limit a partial run. This is an offscreen GPU job.
+and `TORE_VEG_LOWPASS_FRAMES` limit a partial run.
+`TORE_VEG_LOWPASS_CAMERAS` points at the baseline lowpass `cameras.txt` to reuse
+its exact dense coordinates and heading. Run each
+`TORE_VEGETATION_CARDS=billboard|cross|cross-top|billboard-top` at High and both
+resolutions. Old and new High differ intentionally by one density step; their
+cost difference includes that reduction. This is an offscreen GPU job.
 
 Set `TORE_VEG_GPU_TIMING=1` to also emit `GPU` lines using timestamp queries.
 These measure the GPU commands without CPU placement/submission or readback.

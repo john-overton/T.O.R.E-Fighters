@@ -136,7 +136,7 @@ impl GroundTexture {
     }
 }
 
-/// How thick the vegetation objects are, relative to the high setting.
+/// How thick the vegetation objects are, relative to the pre-Pass-5 High setting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VegDensity {
     Low,
@@ -146,13 +146,29 @@ pub enum VegDensity {
 }
 impl VegDensity {
     pub const ALL: [Self; 4] = [Self::Low, Self::Medium, Self::High, Self::Ultra];
-    /// Placement multiplier. High is the tuned density.
+    /// John requested a one-step reduction on 2026-10-17. Low is an agent choice.
     pub fn scale(self) -> f32 {
         match self {
-            Self::Low => 0.4,
-            Self::Medium => 0.7,
-            Self::High => 1.,
-            Self::Ultra => 1.65,
+            Self::Low => 0.2,
+            Self::Medium => 0.4,
+            Self::High => 0.7,
+            Self::Ultra => 1.,
+        }
+    }
+    pub fn object_budget(self) -> usize {
+        match self {
+            Self::Low => 32_768,
+            Self::Medium => 65_536,
+            Self::High => 131_072,
+            Self::Ultra => 262_144,
+        }
+    }
+    pub fn grass(self) -> (f32, u32) {
+        match self {
+            Self::Low => (450., 24),
+            Self::Medium => (700., 48),
+            Self::High => (1_100., 96),
+            Self::Ultra => (1_500., 160),
         }
     }
     pub fn label(self) -> &'static str {
@@ -173,6 +189,58 @@ impl VegDensity {
     }
     pub fn parse(text: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|a| a.key() == text)
+    }
+}
+
+/// Presentation geometry only. Environment override is useful for the lead matrix.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum VegCards {
+    #[default]
+    Billboard,
+    Cross,
+    CrossTop,
+    BillboardTop,
+}
+impl VegCards {
+    pub const ALL: [Self; 4] = [
+        Self::Billboard,
+        Self::Cross,
+        Self::CrossTop,
+        Self::BillboardTop,
+    ];
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Billboard => "billboard",
+            Self::Cross => "cross",
+            Self::CrossTop => "cross-top",
+            Self::BillboardTop => "billboard-top",
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Billboard => "Facing",
+            Self::Cross => "Cross",
+            Self::CrossTop => "Cross+top",
+            Self::BillboardTop => "Face+top",
+        }
+    }
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|v| v.key() == text)
+    }
+    pub fn effective(self) -> Self {
+        std::env::var("TORE_VEGETATION_CARDS")
+            .ok()
+            .as_deref()
+            .and_then(Self::parse)
+            .unwrap_or(self)
+    }
+    pub fn vertices(self) -> u32 {
+        match self {
+            Self::Billboard => 6,
+            Self::CrossTop => 18,
+            _ => 12,
+        }
     }
 }
 
@@ -216,6 +284,7 @@ pub struct Options {
     pub vegetation_detail_nm: u32,
     /// How thick the vegetation is. One of `VegDensity::ALL`.
     pub vegetation_density: VegDensity,
+    pub vegetation_cards: VegCards,
     /// The frames-per-second readout in the window's top right. Off by
     /// default (John, 2026-10-17). `TORE_SHOW_FPS=1` shows it for one run
     /// without saving.
@@ -235,6 +304,7 @@ impl Default for Options {
             vegetation_distance_nm: DEFAULT_VEGETATION_DISTANCE,
             vegetation_detail_nm: DEFAULT_VEGETATION_DETAIL,
             vegetation_density: DEFAULT_VEGETATION_DENSITY,
+            vegetation_cards: VegCards::Billboard,
             show_frame_rate: false,
         }
     }
@@ -256,6 +326,7 @@ impl Options {
             vegetation_distance_nm: DEFAULT_VEGETATION_DISTANCE,
             vegetation_detail_nm: DEFAULT_VEGETATION_DETAIL,
             vegetation_density: DEFAULT_VEGETATION_DENSITY,
+            vegetation_cards: VegCards::Billboard,
             show_frame_rate: false,
         }
     }
@@ -296,6 +367,9 @@ impl Options {
         if self.vegetation_density != DEFAULT_VEGETATION_DENSITY {
             text += &format!("vegetation-density {}\n", self.vegetation_density.key());
         }
+        if self.vegetation_cards != VegCards::Billboard {
+            text += &format!("vegetation-cards {}\n", self.vegetation_cards.key());
+        }
         if self.show_frame_rate {
             text += "frame-rate true\n";
         }
@@ -324,6 +398,7 @@ impl Options {
             "vegetation-distance",
             "vegetation-detail",
             "vegetation-density",
+            "vegetation-cards",
             "frame-rate",
         ]
         .iter()
@@ -385,6 +460,10 @@ impl Options {
             vegetation_density: match values.get("vegetation-density") {
                 None => DEFAULT_VEGETATION_DENSITY,
                 Some(v) => VegDensity::parse(v).ok_or("invalid vegetation-density")?,
+            },
+            vegetation_cards: match values.get("vegetation-cards") {
+                None => VegCards::Billboard,
+                Some(v) => VegCards::parse(v).ok_or("invalid vegetation-cards")?,
             },
             show_frame_rate: match values.get("frame-rate") {
                 None => false,
@@ -497,6 +576,27 @@ impl Options {
 mod tests {
     use super::*;
     #[test]
+    fn density_steps_shift_down_and_default_remains_high() {
+        assert_eq!(VegDensity::ALL.map(VegDensity::scale), [0.2, 0.4, 0.7, 1.]);
+        assert_eq!(
+            VegDensity::ALL.map(VegDensity::object_budget),
+            [32768, 65536, 131072, 262144]
+        );
+        assert_eq!(
+            VegDensity::ALL.map(VegDensity::grass),
+            [(450., 24), (700., 48), (1100., 96), (1500., 160)]
+        );
+        assert_eq!(Options::default().vegetation_density, VegDensity::High);
+    }
+    #[test]
+    fn all_card_modes_roundtrip_and_have_the_expected_card_count() {
+        for mode in VegCards::ALL {
+            assert_eq!(VegCards::parse(mode.key()), Some(mode));
+        }
+        assert_eq!(VegCards::ALL.map(VegCards::vertices), [6, 12, 18, 12]);
+        assert_eq!(VegCards::parse("triangle"), None);
+    }
+    #[test]
     fn roundtrip_and_reject_malformed() {
         let options = Options {
             anti_aliasing: AntiAliasing::X8,
@@ -510,6 +610,7 @@ mod tests {
             vegetation_distance_nm: 6,
             vegetation_detail_nm: 1,
             vegetation_density: VegDensity::Low,
+            vegetation_cards: VegCards::CrossTop,
             show_frame_rate: true,
         };
         assert_eq!(Options::parse(&options.text()).unwrap(), options);

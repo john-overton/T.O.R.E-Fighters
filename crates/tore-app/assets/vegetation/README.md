@@ -28,8 +28,8 @@ fog and shadows are the same as for retail vegetation.
 `TORE_VEGETATION_SPRITES=retail|pack|mixed` selects art at scene construction.
 Mixed is this branch's default: retail conifers and groves, pack broadleaf,
 palms, shrubs and rocks. Pack replaces all available equivalents, including
-groves with large tree silhouettes. Dead trees and acacias retain their retail
-or drawn fallback because v2 does not provide those species. Tropical broadleaf
+groves with large tree silhouettes. Sahara supplies dead trees and acacias. Every missing retail species now uses a
+supplied cutout, including conifers; no code-drawn fallback remains. Tropical broadleaf
 uses the jungle tree; desert rocks use the dry rock cells. The saguaro, small
 cactus and prickly pear are sliced for completeness but never selected. No
 Old World theater receives them. Agave/yucca and dry scrub are the experimental
@@ -38,3 +38,32 @@ Old World desert choices requested by John, not a surveyed botanical claim.
 Tests: `python3 -m unittest discover -s tools -p test_slice_vegetation.py`.
 Pillow is needed for the synthetic slicer test, but not the atlas integrity test
 or the game. No runtime dependency was added.
+
+
+Pass 5 adds **generated Sahara and top-view sprite sheets supplied by John,
+2026-10-17**. Source identities:
+
+- `john-sahara-sprites.png`, 1536 by 1024, SHA-256
+  `7b0516ae7489678ede80835629a30232080bba9cf5bddf7d3cdd220976c84b73`.
+- `john-topdown-tileset.png`, 2172 by 724, SHA-256
+  `8fa71c2dcfd24beadc7c2d6c407a80e0a9b65dd7f8c3018779fb7a3ec3949ea5`.
+
+`tools/slice_vegetation_pass5.py SAHARA TOP OUTPUT` rebuilds the `pass5/` folder.
+It requires Pillow and numpy for authoring only, adding no game dependency.
+The tool records every crop. Sahara segmentation fits a robust local cubic RGB
+background to low-gradient pixels, then keeps foreground residuals connected to
+strong cores and textured outlines. Smooth residual blobs are rejected, including
+those beside trunks; small disconnected debris is removed. It does not assume a
+black background or subtract glow colours from valid bark. The top sheet's black
+matte and white/grey outline are removed separately. All output alpha is binary;
+transparent RGB is zero. Conservative edge cleanup can lose faint leaf tips.
+
+There are 21 Sahara side sprites, their 21 matching top views, and 31 v2 top
+views. `pass5/pack.rgba` contains 19 RGBA pages, with the same 124 px cells and
+2 px gutters as v2. Individual PNGs, page PNGs, `review.png`, JSON metadata and
+`layout.rs` are review/rebuild artifacts. The Sahara palms, acacias, bare trees,
+shrubs and rocks are selected for desert equivalents. Saguaro remains excluded.
+Top modes use the corresponding supplied top cell; retail side silhouettes use
+a fitted equivalent from that sheet. Local scale/width variation is unchanged.
+The whole contact sheet was reviewed against a contrasting background and the
+synthetic glow test passed. In-game GPU appearance still requires lead review.

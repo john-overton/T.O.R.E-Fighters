@@ -98,6 +98,38 @@ pub fn run() -> AppResult<()> {
     }
     let assets = crate::reel::load_assets()?;
     let resources = &assets.theater_resources;
+    if jobs.iter().any(|job| job == "pass5-cameras") {
+        let mut file = std::fs::File::create(out.join("pass5-cameras.txt"))?;
+        for (code, label, kind, agl, pitch) in [
+            ("UKR", "UKR-forest-popin", "wood", 300., 8.),
+            ("UKR", "UKR-coast", "coast", 450., 14.),
+            ("TVIET", "TVIET-coast", "coast", 450., 14.),
+            ("EGY", "EGY-acacias", "wadi", 100., 4.),
+            ("UKR", "UKR-forest-far-1000ft", "wood", 1000., 5.),
+            ("UKR", "UKR-forest-far-3000ft", "wood", 3000., 7.),
+            ("UKR", "UKR-top-2000ft", "wood", 2000., 89.5),
+            ("EGY", "EGY-top-2000ft", "wadi", 2000., 89.5),
+        ] {
+            let world = Terrain::for_mission(resources, code, Some(0), &overrides([12, 0])?)?;
+            let atlas =
+                crate::vegetation::Atlas::build(resources, &world)?.ok_or("vegetation disabled")?;
+            let spots = crate::vegetation::spots(&atlas, &world);
+            let coast = atlas.coast_spot();
+            let spot = if kind == "coast" {
+                coast.as_ref()
+            } else {
+                spots.iter().find(|s| s.label == kind)
+            }
+            .ok_or_else(|| format!("no {code} {kind} camera"))?;
+            let cam = look_at(&world, spot, &shot(label, kind, agl, pitch, 0.));
+            writeln!(
+                file,
+                "{label} {code} 0 12 0 {} {} {} {} {}",
+                cam.position[0], cam.position[1], cam.position[2], cam.yaw, cam.pitch
+            )?;
+        }
+        return Ok(());
+    }
     if jobs.iter().any(|job| job == "cameras") {
         // CPU only: freeze additional camera coordinates before either build
         // renders. These are terrain-class candidates, not surveyed locations.
@@ -487,7 +519,7 @@ fn lowpass(resources: &std::collections::BTreeMap<String, Vec<u8>>, out: &Path) 
         report,
         "100 ft AGL, 480 kt, 3 nm, {frames} frames over 22.5 s (stride {stride}, {} samples).\n\
          Nose-down 4 degrees, level roll. Ground detail stays at its default in both passes.\n\
-         Off suppresses vegetation objects and grass only. Density is High or Ultra.\n\
+         Off suppresses vegetation objects, canopy and grass. Density follows the requested matrix.\n\
          Draw distance and detail stay at the Graphics defaults (4 nm and 2 nm).\n\
          GPU times are timestamp queries around the frame. Rebuild cost is CPU time\n\
          spent building object chunks and grass chunks on the worker. Each worker job\n\
@@ -510,7 +542,22 @@ fn lowpass(resources: &std::collections::BTreeMap<String, Vec<u8>>, out: &Path) 
             .ok_or("vegetation atlas missing (TORE_VEGETATION=0)")?;
         println!("  choosing the densest stand");
         let started = Instant::now();
-        let (spot, candidates) = crate::vegetation::densest(atlas, &world);
+        let (mut spot, candidates) = crate::vegetation::densest(atlas, &world);
+        if let Ok(path) = std::env::var("TORE_VEG_LOWPASS_CAMERAS") {
+            // Freeze the baseline's exact dense camera, avoiding a changed
+            // coast mask or density choosing a different benchmark location.
+            let text = std::fs::read_to_string(path)?;
+            let fields = text
+                .lines()
+                .map(|line| line.split_whitespace().collect::<Vec<_>>())
+                .find(|f| f.len() == 10 && f[1] == code && f[0].ends_with("-high-dense"))
+                .ok_or_else(|| format!("missing baseline lowpass camera for {code}"))?;
+            spot.x = fields[5].parse()?;
+            spot.z = fields[7].parse()?;
+            spot.heading = fields[8].parse::<f64>()?.to_degrees();
+            spot.label = "baseline-locked".into();
+            spot.instances = crate::vegetation::count_high(atlas, &world, spot.x, spot.z);
+        }
         println!(
             "  {code} {} at {:.0}, {:.0} heading {:.0}: {} instances within 1 nm ({:.1} s)",
             spot.label,
@@ -1027,7 +1074,7 @@ fn write_summary(out: &Path, rows: &[String], notes: &[String]) -> AppResult<()>
     let mut text = String::from(
         "# Low-level pass\n\n\
          100 ft above the ground, 480 kt, 3 nm, nose 4 degrees down. Added cost is GPU time \
-         with vegetation objects and grass on, minus the same frame with them off. Ground \
+         with vegetation objects, canopy and grass on, minus the same frame with them off. Ground \
          detail stays on in both. High and Ultra change density only. Distances stay at the \
          Graphics defaults, 4 nm draw and 2 nm detail. Instances are the objects submitted \
          to the cull. Grass tufts are the blades submitted, before the shader drops any. \

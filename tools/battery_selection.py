@@ -42,7 +42,7 @@ from typing import Iterable, Optional, Sequence
 # --------------------------------------------------------------------------
 
 FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
-    "vegetation": ("CPU vegetation terrain-class camera coverage", ("vegetation-cpu-cameras",)),
+    "vegetation": ("CPU vegetation terrain-class camera coverage", ("vegetation-cpu-cameras", "vegetation-pass5-cameras")),
     "render-night-light-slots": (
         "headless persistent fire reservation through effect and scene light budgets",
         ("render-night-light-slots",),
@@ -332,6 +332,7 @@ MENU_FAMILIES = ("menus-screens", "menus-creator", "menus-validate")
 RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/vegetation*", ("vegetation", "flight-views"), "vegetation placement and atlas rendering", windowed=True),
     _r("crates/tore-app/assets/vegetation/*", ("vegetation", "flight-views"), "generated vegetation art", windowed=True),
+    _r("tools/slice_vegetation_pass5.py", ("vegetation",), "supplied Sahara and top-view slicer", unit_tests=("test_slice_vegetation",)),
     _r("tools/slice_vegetation.py", ("vegetation",), "generated sprite slicer", unit_tests=("test_slice_vegetation",)),
     _r("tools/battery_scenarios/vegetation.py", ("vegetation",), "CPU vegetation regression coverage"),
     # Documentation and tests change no scenario output.

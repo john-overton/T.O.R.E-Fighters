@@ -12,8 +12,6 @@ use std::collections::VecDeque;
 /// Capitals of the readout, in window pixels. One line this tall fits in the
 /// margin above the large instrument window from 1080p up.
 pub const LINE_PX: f32 = 13.0;
-/// How long a gap has to be before it is dropped instead of counted as a frame.
-const PAUSE: f64 = 0.5;
 /// The average uses about this many seconds of recent frames.
 const AVERAGE: f64 = 0.5;
 /// The slowest frame is taken from this many seconds.
@@ -24,12 +22,29 @@ const WORST: f64 = 1.0;
 pub struct Meter {
     last: Option<std::time::Instant>,
     samples: VecDeque<f64>,
+    cpu: VecDeque<f64>,
+    gpu: VecDeque<f64>,
 }
 
 impl Meter {
-    /// One presented frame. The first call only starts the clock. A gap
-    /// longer than half a second (a pause, a load) is not a frame: the
-    /// history starts again on the next one.
+    /// Render preparation and encoding, excluding swapchain waits. GPU samples
+    /// arrive asynchronously and never block presentation.
+    pub fn work(&mut self, cpu_ms: f64, gpu_ms: Option<f64>) {
+        fn add(samples: &mut VecDeque<f64>, value: f64) {
+            if value.is_finite() && value >= 0.0 {
+                samples.push_back(value);
+                if samples.len() > 30 {
+                    samples.pop_front();
+                }
+            }
+        }
+        add(&mut self.cpu, cpu_ms);
+        if let Some(ms) = gpu_ms {
+            add(&mut self.gpu, ms);
+        }
+    }
+    /// One continuously presented frame. The first call starts the clock.
+    /// Slow frames count too. Disabling the counter resets its history.
     pub fn tick(&mut self) {
         let now = std::time::Instant::now();
         if let Some(last) = self.last.replace(now) {
@@ -39,8 +54,10 @@ impl Meter {
 
     /// Record one frame of `dt` seconds. Used by [`tick`] and the tests.
     pub fn push(&mut self, dt: f64) {
-        if !(dt.is_finite() && dt > 0.0 && dt <= PAUSE) {
+        if !(dt.is_finite() && dt > 0.0) {
             self.samples.clear();
+            self.cpu.clear();
+            self.gpu.clear();
             return;
         }
         self.samples.push_back(dt);
@@ -50,7 +67,7 @@ impl Meter {
         }
     }
 
-    /// `62 fps  16.1 ms   low 48`, or nothing until a frame has been counted.
+    /// `62 fps  16.1 ms  cpu 4.2  gpu 11.8  low 48`, or nothing until a frame has been counted.
     /// The rate and the milliseconds are the mean frame over about the last
     /// half second. `low` is the slowest frame in the last second, as a rate.
     pub fn line(&self) -> Option<String> {
@@ -68,10 +85,19 @@ impl Meter {
         }
         let mean = sum / count as f64;
         let worst = self.samples.iter().copied().fold(0.0, f64::max);
+        let time = |v: &VecDeque<f64>| {
+            if v.is_empty() {
+                "--".to_owned()
+            } else {
+                format!("{:.1}", v.iter().sum::<f64>() / v.len() as f64)
+            }
+        };
         Some(format!(
-            "{} fps  {:.1} ms   low {}",
+            "{} fps  {:.1} ms  cpu {}  gpu {}  low {}",
             rate(mean),
             mean * 1000.0,
+            time(&self.cpu),
+            time(&self.gpu),
             rate(worst)
         ))
     }
@@ -147,7 +173,7 @@ fn menu_anchor(width: u32, height: u32) -> Anchor {
 
 /// A rectangle the line must miss: left, top, right, bottom.
 fn hits(top: f32, right: f32, block: [f32; 4]) -> bool {
-    let left = right - 280.0;
+    let left = right - 420.0;
     let bottom = top + LINE_PX + 2.0;
     left < block[2] && right > block[0] && top < block[3] && bottom > block[1]
 }
@@ -266,6 +292,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn work_times_are_measured_separately_and_unavailable_gpu_stays_unknown() {
+        let mut m = Meter::default();
+        m.push(0.0161);
+        m.work(4.2, None);
+        assert_eq!(
+            m.line().unwrap(),
+            "62 fps  16.1 ms  cpu 4.2  gpu --  low 62"
+        );
+        m.work(4.2, Some(11.8));
+        assert_eq!(
+            m.line().unwrap(),
+            "62 fps  16.1 ms  cpu 4.2  gpu 11.8  low 62"
+        );
+        m = Meter::default();
+        m.push(0.0161);
+        assert!(m.line().unwrap().contains("cpu --  gpu --"));
+        // Every window surface uses Renderer::draw, which schedules another
+        // frame when shown, including paused flight and idle menus.
+        let render = include_str!("renderer.rs");
+        let tail = render.split("frame.present();").nth(1).unwrap();
+        assert!(
+            tail.split("self.first_frame.complete()")
+                .next()
+                .unwrap()
+                .contains("request_redraw()")
+        );
+    }
+    #[test]
     fn the_average_is_half_a_second_and_low_is_the_slowest_frame() {
         let mut meter = Meter::default();
         assert_eq!(meter.line(), None);
@@ -273,18 +327,26 @@ mod tests {
         for _ in 0..30 {
             meter.push(0.0161);
         }
-        assert_eq!(meter.line().as_deref(), Some("62 fps  16.1 ms   low 62"));
+        assert_eq!(
+            meter.line().as_deref(),
+            Some("62 fps  16.1 ms  cpu --  gpu --  low 62")
+        );
         // One slow frame in the last second. The half-second mean moves a
         // little; the low follows the slow frame.
         meter.push(1.0 / 48.0);
         let line = meter.line().unwrap();
         assert!(line.ends_with("low 48"), "{line}");
         assert!(line.contains("fps  "));
-        // A pause is not a frame, and the history starts again.
+        // Slow renders count, even when longer than the averaging window.
         meter.push(2.0);
+        assert!(meter.line().unwrap().contains("2000.0 ms"));
+        meter = Meter::default();
         assert_eq!(meter.line(), None);
         meter.push(0.0161);
-        assert_eq!(meter.line().as_deref(), Some("62 fps  16.1 ms   low 62"));
+        assert_eq!(
+            meter.line().as_deref(),
+            Some("62 fps  16.1 ms  cpu --  gpu --  low 62")
+        );
     }
 
     #[test]

@@ -15,6 +15,7 @@ struct Mesh {
   info: vec4<f32>,
   // Mean linear colour of a recoloured texture.
   mean: vec4<f32>,
+  top: vec4<f32>,
 }
 struct Params {
   origin: vec4<f32>,
@@ -38,6 +39,7 @@ struct Drawn {
   shape: vec4<f32>,
   tint: vec4<f32>,
   mean: vec4<f32>,
+  top: vec4<f32>,
 }
 
 @group(0) @binding(0) var<storage, read> instances: array<Inst>;
@@ -80,7 +82,7 @@ fn share(dist: f32, full: f32) -> f32 {
   let thin = clamp((s - rank) / (0.2 * s + 0.0001), 0.0, 1.0);
   // Gone once the camera is high: the retail tile is the view from altitude.
   let alt = 1.0 - smoothstep(7000.0, 15000.0, params.view.w);
-  let edge = clamp((params.tiers.y - dist) / max(params.tiers.y * 0.12, 1.0), 0.0, 1.0);
+  let edge = 1.0 - smoothstep(params.tiers.y * 0.70, params.tiers.y, dist);
   let r = max(inst.d.z, height * 0.5);
   let px = max(height, r * 2.0) * params.view.z / max(dist, 1.0);
   if px < params.tiers.w { return; }
@@ -93,6 +95,7 @@ fn share(dist: f32, full: f32) -> f32 {
   out.shape = vec4<f32>(inst.b.y, inst.b.z, inst.b.w, m.info.y);
   out.tint = vec4<f32>(inst.c.xyz, m.info.z * 1.02);
   out.mean = m.mean;
+  out.top = m.top;
   let z = dot(d, params.forward.xyz);
   if z < -r { return; }
   if abs(dot(d, params.right.xyz)) > z * params.view.x + r * 1.6 { return; }

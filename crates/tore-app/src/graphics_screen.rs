@@ -11,7 +11,8 @@ use crate::controls_editor::{
 };
 use crate::graphics::{
     AntiAliasing, BUILDING_DETAILS, BUILDING_DISTANCES, GROUND_TEXTURE_DISTANCES, GroundTexture,
-    Options, RENDER_SCALES, SpottingAid, VEGETATION_DETAILS, VEGETATION_DISTANCES, VegDensity,
+    Options, RENDER_SCALES, SpottingAid, VEGETATION_DETAILS, VEGETATION_DISTANCES, VegCards,
+    VegDensity,
 };
 use crate::menu::Canvas;
 use std::path::Path;
@@ -31,6 +32,7 @@ enum Row {
     VegetationDistance,
     VegetationDetail,
     VegetationDensity,
+    VegetationCards,
 }
 const BASE_ROWS: [Row; 5] = [
     Row::AntiAliasing,
@@ -52,7 +54,7 @@ fn rows() -> &'static [Row] {
         (false, false) => &BASE_ROWS,
     }
 }
-const ALL_ROWS: [Row; 12] = [
+const ALL_ROWS: [Row; 13] = [
     Row::AntiAliasing,
     Row::RenderScale,
     Row::SpottingAid,
@@ -65,6 +67,7 @@ const ALL_ROWS: [Row; 12] = [
     Row::VegetationDistance,
     Row::VegetationDetail,
     Row::VegetationDensity,
+    Row::VegetationCards,
 ];
 const CITY_ONLY: [Row; 7] = [
     Row::AntiAliasing,
@@ -75,7 +78,7 @@ const CITY_ONLY: [Row; 7] = [
     Row::BuildingDistance,
     Row::BuildingDetail,
 ];
-const VEG_ONLY: [Row; 10] = [
+const VEG_ONLY: [Row; 11] = [
     Row::AntiAliasing,
     Row::RenderScale,
     Row::SpottingAid,
@@ -86,6 +89,7 @@ const VEG_ONLY: [Row; 10] = [
     Row::VegetationDistance,
     Row::VegetationDetail,
     Row::VegetationDensity,
+    Row::VegetationCards,
 ];
 impl Row {
     fn label(self) -> &'static str {
@@ -102,6 +106,7 @@ impl Row {
             Row::VegetationDistance => "Vegetation distance",
             Row::VegetationDetail => "Vegetation detail",
             Row::VegetationDensity => "Vegetation density",
+            Row::VegetationCards => "Vegetation cards",
         }
     }
     fn description(self) -> &'static str {
@@ -117,7 +122,7 @@ impl Row {
             }
             Row::TerrainFiltering => "Reduces shimmer and crawling patterns on distant ground.",
             Row::FrameRate => {
-                "Shows frames per second, the average frame time and the slowest recent frame in the corner of the window."
+                "Shows frame rate, CPU/GPU milliseconds and the recent low. Keeps rendering while menus or flight are paused."
             }
             Row::BuildingDistance => "How far away city buildings are drawn.",
             Row::BuildingDetail => {
@@ -131,7 +136,10 @@ impl Row {
             }
             Row::VegetationDistance => "How far away trees, bushes and ground clutter are drawn.",
             Row::VegetationDetail => {
-                "Vegetation inside this distance is a full mesh. Farther pieces are flat crosses."
+                "Vegetation stays denser inside this distance and thins gradually beyond it."
+            }
+            Row::VegetationCards => {
+                "Camera-facing cards, fixed crossed cards, or either with a canopy top view."
             }
             Row::VegetationDensity => {
                 "How thick the vegetation is. High is the tuned look. Ultra is denser."
@@ -154,6 +162,7 @@ impl Row {
             Row::VegetationDistance => VEGETATION_DISTANCES.map(|n| format!("{n} nm")).to_vec(),
             Row::VegetationDetail => VEGETATION_DETAILS.map(|n| format!("{n} nm")).to_vec(),
             Row::VegetationDensity => VegDensity::ALL.map(|a| a.label().to_owned()).to_vec(),
+            Row::VegetationCards => VegCards::ALL.map(|a| a.label().to_owned()).to_vec(),
         }
     }
 }
@@ -178,7 +187,7 @@ const CHOICE_W: i32 = 62;
 const CHOICE_GAP: i32 = 4;
 const OUTLINE: [u8; 4] = [110, 130, 156, 255];
 
-/// Row step, settings panel and about panel. Twelve rows (city fill and
+/// Row step, settings panel and about panel. Thirteen rows (city fill and
 /// vegetation both on, plus the frame-rate counter) use a tighter step so
 /// the about panel still sits above the status bar.
 fn layout() -> (i32, Rect, Rect) {
@@ -279,6 +288,7 @@ impl Editor {
                 .iter()
                 .position(|n| *n == d.vegetation_detail_nm)
                 .unwrap_or(1),
+            Row::VegetationCards => d.vegetation_cards as usize,
             Row::VegetationDensity => VegDensity::ALL
                 .iter()
                 .position(|a| *a == d.vegetation_density)
@@ -302,6 +312,7 @@ impl Editor {
             Row::VegetationDistance => d.vegetation_distance_nm = VEGETATION_DISTANCES[i],
             Row::VegetationDetail => d.vegetation_detail_nm = VEGETATION_DETAILS[i],
             Row::VegetationDensity => d.vegetation_density = VegDensity::ALL[i],
+            Row::VegetationCards => d.vegetation_cards = VegCards::ALL[i],
         }
     }
     fn available(&self, row: usize, i: usize) -> bool {
@@ -649,7 +660,7 @@ impl Editor {
             MUTED,
             &fit(
                 font,
-                "The original game had none of these. All off, at 100%, is closest to its look.",
+                "These are optional presentation choices. Render scale 100% uses the window resolution.",
                 width,
             ),
             (panel.0 + 8, panel.1 + 76),

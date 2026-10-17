@@ -131,11 +131,12 @@ It is not part of the terrain-detail behaviour above.
 
 ## Exploratory vegetation and ground detail
 
-`exp/vegetation` only. Everything in this section is **opinionated**:
-John asked for vegetation on 2026-10-16 and for the second pass the
-same day (retail trees, placement from the tile art, denser grass, a
-better desert); the rules and numbers are agent choices, fitted by eye
-on offscreen renders for passes 1 and 2. Pass 3 was reviewed by John; pass 4 awaits GPU visual and timing validation.
+`exp/vegetation` only. John's requested visual additions are **opinionated**:
+vegetation on 2026-10-16 and a second pass the same day (retail trees, placement
+from tile art, denser grass and a better desert). The placement and shading
+constants are **fitted agent choices**, initially fitted by eye in passes 1 and
+2. Runtime retail resources retain their source provenance; the code implements
+this behaviour specification rather than original control flow. John reviewed passes 3 and 4. Pass 5, requested on 2026-10-17, awaits GPU visual and timing validation.
 The new placement is not a claim about retail placement. Nothing is
 collidable or part of the simulation, the network session, replays or
 checkpoints.
@@ -147,58 +148,78 @@ numbers are **opinionated agent decisions**, pending offscreen visual review.
 The retail asset evidence and unresolved original distance rules are in
 [objects and shapes](../formats/objects-and-shapes.md#vegetation-card-assets).
 
-All trees, bushes, clumps, palms and rocks draw as upright camera-facing
-impostors at all ranges, two triangles each. At scene startup a CPU rasterizer
-bakes four horizontal views, 90 degrees apart, into indexed 256 by 256 pages.
-This retains the imported PIC transparency and live weather palette. Runtime
-art stays in memory. Nothing retail is embedded or written into the repository.
-The optional generated v2 pack uses eight 256 px indexed atlas pages with four
-128 px cells per page and transparent gutters. It is supplied by John, not retail
-art. `TORE_VEGETATION_SPRITES=retail|pack|mixed` is read at scene construction;
-this exploratory branch defaults to `mixed`. Mixed keeps retail conifers and
-groves and uses the pack for the other available kinds. Pack mode uses large
-single-tree silhouettes for groves. Dead trees and acacias keep the existing
-fallbacks because v2 has no equivalent. Tropical broadleaf uses the jungle tree,
-and desert rocks use dry rock variants. Saguaro and prickly pear are never
-selected. See [generated art provenance](../../crates/tore-app/assets/vegetation/README.md).
-Generated RGB is reduced to 78% before matching the theater palette; live weather
-palette rows, local tint and scene lighting apply to both art sources.
-Missing retail cutouts reject that source and use a fallback, never a solid
-black polygon. Baked rock brightness is normalized against the visible sprite's
-mean linear colour, including drawn fallback rocks. Rock cards use the ground
-slope normal for lighting, avoiding dark silhouettes from the shared quad's
-vertical normal and double multiplication of ground tint. The source meshes are not drawn each frame, including at close range. This
-agent choice avoids a second geometry path; close views need visual review.
+Trees, bushes, clumps, palms and rocks use indexed cutout cards. Four modes are
+available in Graphics and through `TORE_VEGETATION_CARDS`: `billboard` (default),
+`cross`, `cross-top`, and `billboard-top`. A facing card has two triangles; a
+fixed seeded cross has four. Top modes add two triangles for a horizontal card
+at 80% of tree height or 65% of shrub/rock height, spanning the side silhouette's
+width in both horizontal axes. These heights are **fitted agent choices**.
+Crosses retain their orientation as the camera moves. They may expose their X
+at oblique angles and cost more covered pixels; no speed advantage is claimed.
+Every side card starts at the base supplied through `tore_world::grounding`.
+Top cards are part of that grounded instance, never separately terrain-snapped.
 
-The source art is `TREEA` through `TREED`, `BUSH1` through `BUSH4`, `GROVA`
-through `GROVD`, `GROVPA` through `GROVPC`, `PLMGA` through `PLMGC`, `ROCK`,
-`ROCKA`, `ROCKB`, `ROCKC` and `ROCKE`, with the textures they name. Single palms
-are cut from palm groves. Missing art, acacias and loose boulders use generated
-low-poly sources, baked in the same startup pass. Individual fallback plants
-use a few dozen triangles; fallback groves combine several plants. There are
-no vegetation shadow passes. Grass remains its separate existing layer.
+At scene startup a CPU rasterizer bakes four horizontal retail views, 90 degrees
+apart, into indexed 256 by 256 pages. Imported PIC transparency and live weather
+palettes remain. Runtime retail art stays in memory. John's v2, Sahara and
+matching top-view sheets supply tightly cropped cutouts in 128 px cells with
+transparent gutters, sharing the same indexed texture array. Source RGB is
+reduced to 78% before matching the theater palette. The supplied-art provenance,
+crop boxes and cleanup process are in the
+[asset README](../../crates/tore-app/assets/vegetation/README.md).
 
-A 2,048 ft terrain patch caches full candidates independent of camera distance.
-Only newly entering patches build; departing patches are evicted. Density changes
-invalidate candidates. Detail distance changes select from the cache without
-rebuilding it. GPU culling selects view, distance, density rank and pixel size.
-One indirect instance stream covers the indexed atlas. A depth-only sprite pass
-precedes colour, with matching alpha-tested edges and sample coverage. No size,
-placement, fade or distance rule changes in the performance pass requested by
-John on 2026-10-17. Worker scheduling and bounded uploads may delay publication
-of a changed selection; moving-view equivalence and the CPU/GPU timing targets
-await the lead's comparison. The streaming design is an agent decision described
-in [architecture](../ARCHITECTURE.md#exploratory-vegetation-rendering).
-Sprites fade from three
-pixels down to the 1.5 pixel rejection floor, and over the outer 12% of the
-configured distance. Existing altitude fades and grass rings remain.
+`TORE_VEGETATION_SPRITES=retail|pack|mixed` is read at scene construction; `mixed`
+is the branch default. Mixed keeps usable retail conifers and groves. Missing
+species in every mode use supplied cutouts. Sahara supplies acacias and bare
+trees, and desert palms, shrubs and rocks. No code-drawn tree, shrub or rock
+fallback remains. No current theater selects saguaro, cactus or prickly pear.
+Top cards use the corresponding supplied top view, including for a retail side
+silhouette. A retail grove's overhead image is therefore a fitted single crown.
+Rocks retain visible-pixel mean normalization and slope lighting.
+
+Each 2,048 ft patch caches candidates. The worker builds a ring with two extra
+chunks beyond draw distance and uploads it through bounded persistent pages.
+A budget can thin ranks across the ring but never truncate a prefix of whole
+patches. The visible radius is bounded by the completely built and uploaded
+circle, reduced by camera movement since that result. During loading or a
+teleport it expands at up to 6,000 ft/s. These are **agent choices** to prevent
+partial patches becoming visible. A late worker can temporarily shorten range;
+CPU tests do not establish that streaming keeps up on every host.
+
+Every instance, including rocks, fades by smoothstep over the outer 30% of that
+radius, with full coverage at 70%, half at 85% and zero at 100%. The existing
+seeded sample coverage and 3 to 1.5 pixel fade apply in both depth and colour
+passes. Altitude coverage is full below 7,000 ft and zero at 15,000 ft. There
+are no vegetation shadow passes. See the
+[streaming design](../ARCHITECTURE.md#exploratory-vegetation-rendering).
+
+### Distant forest canopy
+
+The terrain carries a world-anchored forest representation beyond sprite reach,
+and fills the missing share inside it as trees thin. At startup each 512 ft map
+cell samples four of the same placement sites, including slopes, tree lines,
+fields, water and coast exclusions. Expected crown area comes from tree density,
+selected species height/width and the sprite radius. Colour comes from the actual
+selected sprites' visible-pixel means and local foliage tint, quantized into the
+live theater palette. Nothing retail-derived is saved to disk.
+
+The shader blends those samples, adds band-limited 76 ft crown mottling, and uses
+`1 - exp(-expected_area * density)` for coverage. It fills the complement of
+`distance_density_share * instance_distance_fade`, using the actual streaming
+radius and density squeeze. It receives surface lighting, flare lighting and
+atmosphere on the terrain path. Ground-detail Off does not turn off the canopy;
+`TORE_VEGETATION=0` and benchmark object suppression do. Desert ground shaders
+and their dune/colour rules are unchanged and receive no forest canopy layer.
+This is a **fitted agent representation**, not distant 3D trees. Its 512 ft map
+can soften narrow habitat boundaries. Colour/coverage matching and the horizon
+hand-off still need the lead's GPU captures at 1,000 and 3,000 ft.
 
 ### Where things grow
 
 Placement still reads the theater's own palette, ground slope and water map.
-The following High settings scale candidate count with density:
+The following base grids scale candidate count with the [density table](graphics-options.md#vegetation-texture-and-vegetation-objects). The base scale of 1.0 is now Ultra:
 
-- Trees use a 42 ft High candidate grid, bushes 44 ft and small rocks 52 ft.
+- Trees use a 42 ft base candidate grid, bushes 44 ft and small rocks 52 ft.
   Woodland probability is 0.70 plus 0.25 times the local woodland share.
   Meadow retains a 0.001 background plus 0.045 times woodland proximity and
   patchy copses, with probability up to 0.18 in the existing 1,400 ft noise.
@@ -218,8 +239,8 @@ The following High settings scale candidate count with density:
   44 ft grid. Near water, tree probability is 0.72 on sand or 0.80 on green
   terrain, times squared water proximity. Proximity is full within 300 ft and
   zero at 2,600 ft. The 512 ft water grid accepts one eighth wet coverage so
-  narrow mapped delta branches survive. This also creates coastal belts and
-  can overstate small water features; river identity is not geographically
+  narrow mapped delta branches survive. The beach exclusion below overrides this belt and
+  the water-distance approximation can still overstate small inland features; river identity is not geographically
   recovered. Wadi banks add 0.10 and beds 0.025 tree probability. Wet-bank
   bushes are green; remote shrubs remain brown and olive. Palms, acacias and
   broadleaf represent the belt; there is no dedicated reed or tamarisk asset.
@@ -241,13 +262,25 @@ The following High settings scale candidate count with density:
   3.5% of a plot edge. Both shaded colour and flare albedo receive the same
   correction. This softens seams without changing terrain or simulation data.
 
+Coast exclusion, **fitted agent rule** for John's 2026-10-17 request: a 512 ft
+cell must be at least 75% actual water cutouts, and a 5 by 5 group of such cells
+seeds broad water (2,560 ft across). Narrow rivers do not seed beaches. On the
+128 ft art grid, light sand within 8,192 ft of that water starts the exclusion.
+Sand uses reference-palette luma at least 105, red at least 92% of green, green
+at least 90% of blue, and red no more than 8 below blue. The mask then propagates
+only toward broad water through all colours. Green patches seaward of sand are
+excluded; dark bands behind it remain eligible. Sand far inland is unchanged.
+The mask is shared by trees, shrubs, rocks, grass and canopy site sampling.
+These thresholds are colour/topology heuristics, not recovered coast geography.
+
 `--vegetation-preview OUT overlay` writes classification pictures. These are
 placement heuristics, not claims of original scenery or geographic river data.
 
 ### Grass
 
 A carpet of grass tufts, each five tapered blades, on meadow, field
-edges, woodland floor and desert gravel (dry straw there). Its radius
+edges, woodland floor and desert gravel (dry straw there). Woodland floor uses
+25% of the full grass density, half the previous amount under dense crowns. Its radius
 and density follow the
 [density setting](graphics-options.md#vegetation-texture-and-vegetation-objects).
 

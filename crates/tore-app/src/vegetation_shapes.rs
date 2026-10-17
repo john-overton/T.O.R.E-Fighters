@@ -1,6 +1,5 @@
 //! Startup impostor sources: retail tree, bush, grove, palm and rock shapes
-//! from the player's import where it has them, drawn fallbacks where it
-//! does not. Retail textures are appended to the scenery's static art
+//! from the player's import, with supplied cutouts for every missing species. Retail textures are appended to the scenery's static art
 //! pages at runtime; nothing retail is compiled in.
 //!
 //! Every mesh is normalised to a height of 1 standing on y = 0 (x east,
@@ -17,13 +16,6 @@ use crate::vegetation::Species;
 use std::{collections::BTreeMap, ops::Range};
 
 pub const FLOATS: usize = 10;
-/// Foliage, in the instance's colour.
-pub const PART_LEAF: f32 = -1.;
-/// Bark and dead wood.
-pub const PART_WOOD: f32 = -2.;
-/// Rock, in the instance's colour.
-pub const PART_ROCK: f32 = -3.;
-
 /// How a mesh is lit and coloured.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Look {
@@ -43,12 +35,15 @@ pub struct Mesh {
     /// Recolour a retail texture to the instance's colour by its brightness
     /// (retail rock), with the texture's mean linear colour.
     pub recolour: Option<[f32; 3]>,
-    /// Where it came from: a retail shape name, or "drawn".
+    /// Where it came from: a retail shape name or a supplied sprite.
     pub source: String,
     /// First of four indexed impostor pages, generated once at scene startup.
     pub sprite_layer: usize,
     /// Packed generated art uses one of four 128 px cells, with a 2 px gutter.
     pub sprite_tile: Option<u8>,
+    /// Encoded top-view atlas cell and its height relative to the grounded base.
+    pub top: [f32; 2],
+    pub mean_color: [f32; 3],
 }
 
 pub struct Library {
@@ -72,7 +67,7 @@ enum Cut {
 }
 
 /// Which retail shapes stand for each species, tried in order. A species
-/// with none found uses its drawn fallback.
+/// with none found uses its supplied-art fallback.
 const RETAIL: &[(Species, &[&str], Cut)] = &[
     (Species::Broadleaf, &["TREEA.SH"], Cut::Whole),
     (Species::Autumn, &["TREEB.SH"], Cut::Whole),
@@ -151,50 +146,12 @@ impl Library {
                 }
             }
         }
-        // Drawn species and fallbacks.
-        for species in Species::ALL {
-            let drawn: Vec<(Vec<f32>, Look)> = match species {
-                Species::Broadleaf | Species::Autumn => vec![(broadleaf(), Look::Foliage)],
-                Species::Dead => vec![(dead(), Look::Foliage)],
-                Species::Conifer => vec![(conifer(), Look::Foliage)],
-                Species::Palm => vec![(palm(), Look::Foliage)],
-                Species::Grove | Species::PineGrove | Species::PalmGrove => {
-                    vec![(grove(), Look::Foliage)]
-                }
-                Species::DryBush | Species::GreenBush => vec![(bush(), Look::Foliage)],
-                Species::Acacia => vec![(acacia(1), Look::Foliage), (acacia(2), Look::Foliage)],
-                Species::Stone => vec![
-                    (rock(11, 0.55, 2), Look::Solid),
-                    (rock(12, 0.7, 2), Look::Solid),
-                ],
-                Species::Boulder => vec![
-                    (rock(21, 0.7, 2), Look::Solid),
-                    (rock(22, 0.85, 2), Look::Solid),
-                    (rock(23, 0.6, 2), Look::Solid),
-                ],
-                Species::Outcrop => vec![
-                    (outcrop(31), Look::Solid),
-                    (outcrop(32), Look::Solid),
-                    (outcrop(33), Look::Solid),
-                ],
-            };
-            // Stones keep drawn variants beside the single retail stone, for
-            // variety; other species only fall back.
-            let has_retail = !lib.variants[species as usize].is_empty();
-            if has_retail && species != Species::Stone {
-                continue;
-            }
-            for (verts, look) in drawn {
-                let radius = radius_of(&verts);
-                lib.push(species, verts, radius, look, None, "drawn");
-            }
-        }
         lib.bake(pages, &first_layer, palette);
         lib
     }
 
-    /// Add the generated pack to the same indexed texture array and draw stream.
-    /// No cacti are selected: none of this branch's arid theaters is New World.
+    /// Supplied art fills every missing species, even in retail mode. No code-
+    /// drawn tree, shrub or rock survives. Sahara replaces desert equivalents.
     pub fn add_pack(
         &mut self,
         mode: &str,
@@ -203,99 +160,98 @@ impl Library {
         pages: &mut Vec<u8>,
         first: usize,
     ) {
-        if mode == "retail" {
-            return;
-        }
-        if !matches!(mode, "pack" | "mixed") {
-            eprintln!("vegetation: invalid TORE_VEGETATION_SPRITES={mode}, using mixed");
-        }
-        let rgba = include_bytes!("../assets/vegetation/pack.rgba");
-        // Quantize once into the theater palette. The shader uses live weather
-        // palette rows, local leaf tint, sunlight, fog and existing night light.
-        let mut lookup = BTreeMap::new();
-        for pixel in rgba.chunks_exact(4) {
-            if pixel[3] < 128 {
-                pages.push(255);
-                continue;
-            }
-            let rgb: [u8; 3] = std::array::from_fn(|k| (f32::from(pixel[k]) * 0.78) as u8);
-            let index = *lookup.entry(rgb).or_insert_with(|| {
-                (0..255)
-                    .min_by_key(|&i| {
-                        (0..3)
-                            .map(|k| (i32::from(palette[i][k]) - i32::from(rgb[k])).pow(2))
-                            .sum::<i32>()
-                    })
-                    .unwrap_or(0) as u8
-            });
-            pages.push(index);
-        }
+        let base_start = pages.len();
+        append_rgba(
+            include_bytes!("../assets/vegetation/pack.rgba"),
+            palette,
+            pages,
+        );
+        let extra_first = first + 8;
+        append_rgba(
+            include_bytes!("../assets/vegetation/pass5/pack.rgba"),
+            palette,
+            pages,
+        );
         let tropical = region.climate == 3;
         let desert = region.climate == 1;
-        let choices: &[(Species, &[usize])] = &[
-            (Species::Broadleaf, if tropical { &[21] } else { &[9, 11] }),
-            (Species::Autumn, &[10]),
-            (Species::Conifer, &[15]),
-            (Species::Palm, &[19, 20]),
-            (Species::DryBush, &[3, 4, 5, 29]),
-            (
-                Species::GreenBush,
-                if tropical {
-                    &[22, 23, 24, 25]
-                } else {
-                    &[12, 14]
-                },
-            ),
-            (Species::Stone, if desert { &[8] } else { &[18, 30] }),
-            (Species::Boulder, if desert { &[7] } else { &[17, 27] }),
-            (Species::Outcrop, if desert { &[6] } else { &[16, 26] }),
-            (Species::Grove, if tropical { &[21] } else { &[9, 11] }),
-            (Species::PineGrove, &[15]),
-            (Species::PalmGrove, &[19, 20]),
-        ];
-        for &(species, ids) in choices {
-            // Mixed preserves the retail conifers and grove silhouettes.
-            if mode != "pack"
-                && matches!(
-                    species,
-                    Species::Conifer | Species::Grove | Species::PineGrove | Species::PalmGrove
-                )
-            {
+        for species in Species::ALL {
+            let (ids, extra): (&[usize], bool) = match species {
+                Species::Dead => (&[8], true),
+                Species::Acacia => (&[4, 5], true),
+                Species::Palm | Species::PalmGrove if desert => (&[0, 1, 2, 3], true),
+                Species::DryBush if desert => (&[7, 9, 11, 12, 14], true),
+                Species::GreenBush if desert => (&[6, 13], true),
+                Species::Stone if desert => (&[19, 20], true),
+                Species::Boulder if desert => (&[17, 18], true),
+                Species::Outcrop if desert => (&[15, 16], true),
+                Species::Broadleaf | Species::Grove => {
+                    (if tropical { &[21] } else { &[9, 11] }, false)
+                }
+                Species::Autumn => (&[10], false),
+                Species::Conifer | Species::PineGrove => (&[15], false),
+                Species::Palm | Species::PalmGrove => (&[19, 20], false),
+                Species::DryBush => (&[3, 4, 5, 29], false),
+                Species::GreenBush => (
+                    if tropical {
+                        &[22, 23, 24, 25]
+                    } else {
+                        &[12, 14]
+                    },
+                    false,
+                ),
+                Species::Stone => (&[18, 30], false),
+                Species::Boulder => (&[17, 27], false),
+                Species::Outcrop => (&[16, 26], false),
+            };
+            let retain = !self.variants[species as usize].is_empty()
+                && !extra
+                && (mode == "retail"
+                    || (mode != "pack"
+                        && matches!(
+                            species,
+                            Species::Conifer
+                                | Species::Grove
+                                | Species::PineGrove
+                                | Species::PalmGrove
+                        )));
+            if retain {
+                let top_id = 42 + ids[0];
+                for &id in &self.variants[species as usize] {
+                    self.meshes[usize::from(id)].top =
+                        [packed_page(extra_first, top_id), canopy_height(species)];
+                }
                 continue;
             }
             self.variants[species as usize].clear();
             for &id in ids {
-                let (name, radius) = PACK[id];
+                let (name, radius) = if extra { EXTRA[id] } else { PACK[id] };
+                let first_page = if extra { extra_first } else { first };
+                let start = base_start + (first_page - first + id / 4) * 65536;
+                let cell: Vec<_> = (0..128)
+                    .flat_map(|y| {
+                        let row = start + (id % 4 / 2 * 128 + y) * 256 + id % 2 * 128;
+                        pages[row..row + 128].iter().copied()
+                    })
+                    .collect();
+                let mean = indexed_mean(&cell, palette).unwrap_or([0.; 3]);
+                let solid = matches!(
+                    species,
+                    Species::Stone | Species::Boulder | Species::Outcrop
+                );
                 self.variants[species as usize].push(self.meshes.len() as u16);
                 self.meshes.push(Mesh {
                     range: 0..6,
                     radius,
-                    look: if matches!(
-                        species,
-                        Species::Stone | Species::Boulder | Species::Outcrop
-                    ) {
-                        Look::Solid
-                    } else {
-                        Look::Foliage
-                    },
-                    recolour: if matches!(
-                        species,
-                        Species::Stone | Species::Boulder | Species::Outcrop
-                    ) {
-                        let start = pages.len() - rgba.len() / 4 + id / 4 * 65536;
-                        let cell: Vec<u8> = (0..128)
-                            .flat_map(|y| {
-                                let row = start + (id % 4 / 2 * 128 + y) * 256 + id % 2 * 128;
-                                pages[row..row + 128].iter().copied()
-                            })
-                            .collect();
-                        indexed_mean(&cell, palette)
-                    } else {
-                        None
-                    },
-                    source: format!("pack/{name}"),
-                    sprite_layer: first + id / 4,
+                    look: if solid { Look::Solid } else { Look::Foliage },
+                    recolour: solid.then_some(mean),
+                    mean_color: mean,
+                    source: format!("supplied/{name}"),
+                    sprite_layer: first_page + id / 4,
                     sprite_tile: Some((id % 4) as u8),
+                    top: [
+                        packed_page(extra_first, if extra { id + 21 } else { id + 42 }),
+                        canopy_height(species),
+                    ],
                 });
             }
         }
@@ -317,6 +273,8 @@ impl Library {
                 let page = bake_view(vertices, mesh.radius, angle, pages, first(pages), palette);
                 pages.extend(page);
             }
+            mesh.mean_color =
+                indexed_mean(&pages[pages.len() - 4 * 65536..], palette).unwrap_or([0.; 3]);
             if mesh.look == Look::Solid {
                 // The source mesh no longer supplies colour or normals. All
                 // rock sprites, including drawn fallbacks, need a brightness
@@ -339,6 +297,9 @@ impl Library {
             self.vertices
                 .extend([x, y, 0., (x + 1.) * 0.5, 1. - y, 0., 0., 0., 1., 0.]);
         }
+        let card = self.vertices.clone();
+        self.vertices.extend_from_slice(&card);
+        self.vertices.extend_from_slice(&card);
         for mesh in &mut self.meshes {
             mesh.range = 0..6;
         }
@@ -365,6 +326,8 @@ impl Library {
             source: source.to_string(),
             sprite_layer: 0,
             sprite_tile: None,
+            top: [0., 0.75],
+            mean_color: [0.; 3],
         });
     }
 
@@ -758,13 +721,6 @@ fn normalise(
     )))
 }
 
-fn radius_of(verts: &[f32]) -> f32 {
-    verts
-        .chunks_exact(FLOATS)
-        .map(|v| v[0].hypot(v[2]))
-        .fold(0.05, f32::max)
-}
-
 fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
@@ -787,334 +743,36 @@ fn normalize(n: [f32; 3]) -> [f32; 3] {
 }
 
 /// A flat-shaded triangle in a drawn part.
-fn tri(out: &mut Vec<f32>, a: [f32; 3], b: [f32; 3], c: [f32; 3], part: f32) {
-    let n = normalize(cross(sub(b, a), sub(c, a)));
-    for p in [a, b, c] {
-        out.extend([p[0], p[1], p[2], 0., 0., -1., n[0], n[1], n[2], part]);
+fn packed_page(first: usize, id: usize) -> f32 {
+    -((first * 4 + id + 1) as f32)
+}
+fn canopy_height(species: Species) -> f32 {
+    match species {
+        Species::Stone | Species::Boulder | Species::Outcrop => 0.65,
+        Species::DryBush | Species::GreenBush => 0.65,
+        _ => 0.80,
     }
 }
-
-/// Small deterministic noise for drawn shapes.
-fn jitter(seed: u32, i: u32) -> f32 {
-    let mut n = seed.wrapping_mul(0x9e37_79b1) ^ i.wrapping_mul(0x85eb_ca6b);
-    n ^= n >> 15;
-    n = n.wrapping_mul(0x2c1b_3c6d);
-    n ^= n >> 12;
-    (n & 0xffff) as f32 / 65_535.
-}
-
-fn trunk(out: &mut Vec<f32>, r0: f32, r1: f32, y0: f32, y1: f32, lean: [f32; 2], sides: u32) {
-    for i in 0..sides {
-        let a0 = i as f32 / sides as f32 * std::f32::consts::TAU;
-        let a1 = (i + 1) as f32 / sides as f32 * std::f32::consts::TAU;
-        let p = |a: f32, r: f32, y: f32, t: f32| {
-            [a.cos() * r + lean[0] * t, y, a.sin() * r + lean[1] * t]
-        };
-        let (b0, b1, t0, t1) = (
-            p(a0, r0, y0, 0.),
-            p(a1, r0, y0, 0.),
-            p(a0, r1, y1, 1.),
-            p(a1, r1, y1, 1.),
-        );
-        tri(out, b0, t0, b1, PART_WOOD);
-        tri(out, b1, t0, t1, PART_WOOD);
-    }
-}
-
-/// A lumpy foliage ball: an octahedron subdivided once, pushed out by noise.
-fn blob(out: &mut Vec<f32>, center: [f32; 3], radius: [f32; 3], seed: u32, part: f32) {
-    let shell = sphere(seed, 0.22);
-    for t in shell.chunks_exact(3) {
-        let p = |v: [f32; 3]| {
-            [
-                center[0] + v[0] * radius[0],
-                center[1] + v[1] * radius[1],
-                center[2] + v[2] * radius[2],
-            ]
-        };
-        tri(out, p(t[0]), p(t[1]), p(t[2]), part);
-    }
-}
-
-/// Eight source triangles from an octahedron, each vertex
-/// pushed in or out by up to `rough`, deterministic by `seed`.
-fn sphere(seed: u32, rough: f32) -> Vec<[f32; 3]> {
-    let v = [
-        [1., 0., 0.],
-        [-1., 0., 0.],
-        [0., 1., 0.],
-        [0., -1., 0.],
-        [0., 0., 1.],
-        [0., 0., -1.],
-    ];
-    let faces = [
-        (0, 2, 4),
-        (4, 2, 1),
-        (1, 2, 5),
-        (5, 2, 0),
-        (4, 3, 0),
-        (1, 3, 4),
-        (5, 3, 1),
-        (0, 3, 5),
-    ];
-    let tris: Vec<[[f32; 3]; 3]> = faces.iter().map(|&(a, b, c)| [v[a], v[b], v[c]]).collect();
-    // Displace by a hash of the rounded direction, so shared vertices move together.
-    let push = |p: [f32; 3]| {
-        let key = |x: f32| ((x * 1000.).round() as i32) as u32;
-        let h = jitter(
-            seed,
-            key(p[0]).wrapping_mul(73) ^ key(p[1]).wrapping_mul(151) ^ key(p[2]).wrapping_mul(283),
-        );
-        let s = 1. + (h - 0.5) * 2. * rough;
-        [p[0] * s, p[1] * s, p[2] * s]
-    };
-    tris.into_iter().flat_map(|t| t.map(push)).collect()
-}
-
-fn broadleaf() -> Vec<f32> {
-    let mut o = Vec::new();
-    trunk(&mut o, 0.05, 0.035, 0., 0.5, [0., 0.], 6);
-    blob(&mut o, [0., 0.66, 0.], [0.42, 0.32, 0.42], 1, PART_LEAF);
-    blob(&mut o, [0.18, 0.56, 0.1], [0.28, 0.24, 0.28], 2, PART_LEAF);
-    blob(&mut o, [-0.16, 0.6, -0.12], [0.3, 0.26, 0.3], 3, PART_LEAF);
-    blob(&mut o, [0.02, 0.84, 0.02], [0.26, 0.17, 0.26], 4, PART_LEAF);
-    o
-}
-
-fn conifer() -> Vec<f32> {
-    let mut o = Vec::new();
-    trunk(&mut o, 0.035, 0.02, 0., 0.3, [0., 0.], 5);
-    for (y0, y1, r) in [(0.14, 0.52, 0.27), (0.34, 0.74, 0.21), (0.56, 1.0, 0.14)] {
-        let sides = 8;
-        for i in 0..sides {
-            let a0 = i as f32 / sides as f32 * std::f32::consts::TAU;
-            let a1 = (i + 1) as f32 / sides as f32 * std::f32::consts::TAU;
-            let rr = |k: u32| r * (0.85 + 0.3 * jitter(7, k + (y0 * 100.) as u32));
-            let p0 = [a0.cos() * rr(i), y0, a0.sin() * rr(i)];
-            let p1 = [a1.cos() * rr(i + 1), y0, a1.sin() * rr(i + 1)];
-            tri(&mut o, [0., y1, 0.], p1, p0, PART_LEAF);
-            tri(&mut o, p0, p1, [0., y0 + 0.02, 0.], PART_LEAF);
+fn append_rgba(rgba: &[u8], palette: &[[u8; 3]; 256], pages: &mut Vec<u8>) {
+    let mut lookup = BTreeMap::new();
+    for pixel in rgba.chunks_exact(4) {
+        if pixel[3] < 128 {
+            pages.push(255);
+            continue;
         }
-    }
-    o
-}
-
-fn palm() -> Vec<f32> {
-    let mut o = Vec::new();
-    let lean = [0.06, 0.02];
-    trunk(&mut o, 0.03, 0.022, 0., 0.86, lean, 6);
-    let top = [lean[0], 0.86, lean[1]];
-    for i in 0..9 {
-        let a = i as f32 / 9. * std::f32::consts::TAU + jitter(5, i) * 0.4;
-        let (s, c) = a.sin_cos();
-        let reach = 0.36 + 0.08 * jitter(6, i);
-        let mid = [
-            top[0] + c * reach * 0.5,
-            top[1] + 0.07,
-            top[2] + s * reach * 0.5,
-        ];
-        let tip = [top[0] + c * reach, top[1] - 0.16, top[2] + s * reach];
-        let side = [-s * 0.07, 0., c * 0.07];
-        let l = [mid[0] + side[0], mid[1], mid[2] + side[2]];
-        let r = [mid[0] - side[0], mid[1], mid[2] - side[2]];
-        tri(&mut o, top, l, r, PART_LEAF);
-        tri(&mut o, l, tip, r, PART_LEAF);
-    }
-    o
-}
-
-fn dead() -> Vec<f32> {
-    let mut o = Vec::new();
-    trunk(&mut o, 0.04, 0.02, 0., 0.85, [0.03, 0.], 5);
-    for (i, (y, a, l)) in [
-        (0.45, 0.4, 0.35),
-        (0.6, 2.6, 0.3),
-        (0.72, 4.4, 0.25),
-        (0.35, 5.5, 0.2),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let (s, c) = (a as f32).sin_cos();
-        let from = [0.015 * i as f32, y, 0.];
-        let to = [c * l, y + l * 0.55, s * l];
-        let w = [-s * 0.012, 0., c * 0.012];
-        tri(
-            &mut o,
-            [from[0] + w[0], from[1], from[2] + w[2]],
-            to,
-            [from[0] - w[0], from[1], from[2] - w[2]],
-            PART_WOOD,
-        );
-        tri(
-            &mut o,
-            [from[0], from[1] + 0.02, from[2]],
-            to,
-            [from[0], from[1] - 0.02, from[2]],
-            PART_WOOD,
-        );
-    }
-    o
-}
-
-/// Flat-topped acacia: a short forked trunk under a wide, thin canopy.
-fn acacia(seed: u32) -> Vec<f32> {
-    let mut o = Vec::new();
-    trunk(&mut o, 0.04, 0.03, 0., 0.45, [0., 0.], 5);
-    for k in 0..3 {
-        let a = k as f32 * 2.1 + jitter(seed, k);
-        let d = [a.cos() * 0.35, a.sin() * 0.35];
-        trunk(&mut o, 0.025, 0.015, 0.4, 0.8, d, 4);
-    }
-    let sides = 12;
-    let rim = |i: u32| {
-        let a = i as f32 / sides as f32 * std::f32::consts::TAU;
-        let r = 0.75 + 0.3 * jitter(seed + 9, i % sides);
-        [
-            a.cos() * r,
-            0.8 + 0.06 * jitter(seed + 3, i % sides),
-            a.sin() * r,
-        ]
-    };
-    for i in 0..sides {
-        let (p, q) = (rim(i), rim(i + 1));
-        tri(&mut o, [0., 1.0, 0.], q, p, PART_LEAF);
-        tri(&mut o, p, q, [0., 0.74, 0.], PART_LEAF);
-    }
-    o
-}
-
-fn bush() -> Vec<f32> {
-    let mut o = Vec::new();
-    blob(&mut o, [0., 0.42, 0.], [0.7, 0.45, 0.7], 41, PART_LEAF);
-    blob(&mut o, [0.35, 0.3, 0.2], [0.45, 0.32, 0.45], 42, PART_LEAF);
-    fit(&mut o, 0.);
-    o
-}
-
-fn grove() -> Vec<f32> {
-    let mut o = Vec::new();
-    for (i, (x, z, h)) in [
-        (0., 0., 1.),
-        (1.1, 0.4, 0.85),
-        (-0.9, 0.7, 0.9),
-        (0.4, -1.0, 0.8),
-        (-0.6, -0.8, 0.95),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        trunk(&mut o, 0.05, 0.035, 0., 0.45 * h, [x, z], 5);
-        let tree = |c: [f32; 3], r: [f32; 3], s: u32, o: &mut Vec<f32>| blob(o, c, r, s, PART_LEAF);
-        tree(
-            [x, 0.66 * h, z],
-            [0.5, 0.34 * h, 0.5],
-            60 + i as u32,
-            &mut o,
-        );
-    }
-    o
-}
-
-/// A boulder or stone: a rough sphere flattened and sunk a little into the
-/// ground, `squash` its height over its width.
-fn rock(seed: u32, squash: f32, _detail: u32) -> Vec<f32> {
-    let mut o = Vec::new();
-    let shell = sphere(seed, 0.28);
-    let stretch = 0.8 + 0.4 * jitter(seed, 99);
-    for t in shell.chunks_exact(3) {
-        let p = |v: [f32; 3]| {
-            // Flatter underneath, so it sits.
-            let y = if v[1] < 0. { v[1] * 0.4 } else { v[1] };
-            [
-                v[0] * 0.5 / squash * stretch,
-                (y + 0.3) / 1.3,
-                v[2] * 0.5 / squash,
-            ]
-        };
-        tri(&mut o, p(t[0]), p(t[1]), p(t[2]), PART_ROCK);
-    }
-    fit(&mut o, 0.12);
-    o
-}
-
-/// Rescales a flat-shaded drawn mesh's heights to run from `-sink` to 1,
-/// recomputing its normals.
-fn fit(verts: &mut [f32], sink: f32) {
-    let (lo, hi) = verts
-        .chunks_exact(FLOATS)
-        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), v| {
-            (lo.min(v[1]), hi.max(v[1]))
-        });
-    let span = (hi - lo).max(1e-4);
-    for v in verts.chunks_exact_mut(FLOATS) {
-        v[1] = (v[1] - lo) / span * (1. + sink) - sink;
-    }
-    for t in verts.chunks_exact_mut(FLOATS * 3) {
-        let p = |k: usize| [t[k * FLOATS], t[k * FLOATS + 1], t[k * FLOATS + 2]];
-        let n = normalize(cross(sub(p(1), p(0)), sub(p(2), p(0))));
-        for k in 0..3 {
-            t[k * FLOATS + 6..k * FLOATS + 9].copy_from_slice(&n);
-        }
+        let rgb: [u8; 3] = std::array::from_fn(|k| (f32::from(pixel[k]) * 0.78) as u8);
+        pages.push(*lookup.entry(rgb).or_insert_with(|| {
+            (0..255)
+                .min_by_key(|&i| {
+                    (0..3)
+                        .map(|k| (i32::from(palette[i][k]) - i32::from(rgb[k])).pow(2))
+                        .sum::<i32>()
+                })
+                .unwrap_or(0) as u8
+        }));
     }
 }
-
-/// A layered outcrop: two or three stacked, jittered tiers, each narrower,
-/// like weathered sandstone, with a fallen block beside it.
-fn outcrop(seed: u32) -> Vec<f32> {
-    let mut o = Vec::new();
-    let tiers = 2 + (seed % 2);
-    let sides = 9;
-    let mut y = -0.08;
-    let mut radius = 0.9;
-    for t in 0..tiers {
-        let h = (1.08 / tiers as f32) * (0.8 + 0.4 * jitter(seed, t + 50));
-        let ring = |i: u32, r: f32| {
-            let a = i as f32 / sides as f32 * std::f32::consts::TAU;
-            let rr = r * (0.7 + 0.45 * jitter(seed + t, i % sides));
-            [a.cos() * rr * 1.2, a.sin() * rr]
-        };
-        let top_r = radius * (0.72 + 0.15 * jitter(seed, t + 70));
-        for i in 0..sides {
-            let (a, b) = (ring(i, radius), ring(i + 1, radius));
-            let (c, d) = (ring(i, top_r), ring(i + 1, top_r));
-            let y1 = (y + h).min(1.);
-            tri(
-                &mut o,
-                [a[0], y, a[1]],
-                [c[0], y1, c[1]],
-                [b[0], y, b[1]],
-                PART_ROCK,
-            );
-            tri(
-                &mut o,
-                [b[0], y, b[1]],
-                [c[0], y1, c[1]],
-                [d[0], y1, d[1]],
-                PART_ROCK,
-            );
-            // Cap, slightly domed.
-            tri(
-                &mut o,
-                [0., y1 + 0.03, 0.],
-                [d[0], y1, d[1]],
-                [c[0], y1, c[1]],
-                PART_ROCK,
-            );
-        }
-        y += h * 0.92;
-        radius = top_r * 0.95;
-    }
-    let shell = rock(seed + 5, 0.7, 2);
-    for v in shell.chunks_exact(FLOATS) {
-        let mut v = v.to_vec();
-        v[0] = v[0] * 0.35 + 1.15;
-        v[1] *= 0.3;
-        v[2] = v[2] * 0.35 + 0.3;
-        o.extend(v);
-    }
-    o
-}
+include!("../assets/vegetation/pass5/layout.rs");
 
 include!("../assets/vegetation/pack_layout.rs");
 
@@ -1185,11 +843,7 @@ mod tests {
                     &mut pages,
                     7,
                 );
-                if mode == "retail" {
-                    assert!(pages.is_empty());
-                    continue;
-                }
-                assert_eq!(pages.len(), 8 * 65536);
+                assert_eq!(pages.len(), 27 * 65536);
                 for mesh in &lib.meshes {
                     assert!(
                         !mesh.source.contains("cactus")
@@ -1204,9 +858,7 @@ mod tests {
                     }));
                     assert_eq!(mesh.range, 0..6);
                 }
-                if mode == "mixed" {
-                    assert!(lib.variants[Species::Conifer as usize].is_empty());
-                }
+                assert!(!lib.variants[Species::Conifer as usize].is_empty());
             }
         }
     }
@@ -1259,65 +911,28 @@ mod tests {
     }
 
     #[test]
-    fn sprite_species_selects_stable_views_and_shared_quad() {
+    fn missing_imports_use_supplied_cutouts_for_every_species() {
         let mut pages = Vec::new();
-        let lib = Library::build(
+        let mut lib = Library::build(
             &BTreeMap::new(),
             &BTreeMap::new(),
             &[[80; 3]; 256],
             &mut pages,
             |p| p.len() / 65536,
         );
-        assert_eq!(lib.vertices.len(), 6 * FLOATS);
-        for species in Species::ALL {
-            let id = lib.mesh_for(species, 7);
-            assert!(lib.variants[species as usize].contains(&id));
-            let mesh = &lib.meshes[usize::from(id)];
-            assert_eq!(mesh.range, 0..6);
-            for angle in 0..4 {
-                let page = &pages[(mesh.sprite_layer + angle) * 65536..][..65536];
-                assert!(page.iter().any(|&p| p != 255), "{species:?}, view {angle}");
-            }
-        }
-    }
-
-    #[test]
-    fn without_an_import_every_species_has_a_drawn_mesh() {
-        let mut pages = Vec::new();
-        let lib = Library::build(
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &[[0; 3]; 256],
+        lib.add_pack(
+            "mixed",
+            crate::vegetation::region("UKR"),
+            &[[80; 3]; 256],
             &mut pages,
-            |p| p.len() / 65536,
+            0,
         );
-        assert_eq!(pages.len(), lib.meshes.len() * 4 * 65536);
-        for s in Species::ALL {
-            let m = lib.mesh_for(s, 7);
-            let mesh = &lib.meshes[usize::from(m)];
-            assert!(!mesh.range.is_empty(), "{s:?}");
-            assert_eq!(mesh.source, "drawn");
-        }
-    }
-
-    #[test]
-    fn drawn_meshes_stand_on_the_ground_and_reach_height_one() {
-        for verts in [
-            broadleaf(),
-            conifer(),
-            palm(),
-            acacia(1),
-            bush(),
-            rock(1, 0.6, 2),
-            outcrop(31),
-        ] {
-            let (lo, hi) = verts
-                .chunks_exact(FLOATS)
-                .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), v| {
-                    (lo.min(v[1]), hi.max(v[1]))
-                });
-            assert!((-0.15..=0.05).contains(&lo), "{lo}");
-            assert!((0.85..=1.12).contains(&hi), "{hi}");
+        assert_eq!(lib.vertices.len(), 18 * FLOATS);
+        for species in Species::ALL {
+            let mesh = &lib.meshes[usize::from(lib.mesh_for(species, 7))];
+            assert!(mesh.source.starts_with("supplied/"));
+            assert!(mesh.top[0] < 0.);
+            assert!((0.5..1.).contains(&mesh.top[1]));
         }
     }
 }

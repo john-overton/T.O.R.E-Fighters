@@ -16,10 +16,26 @@ def check_cameras(work, _output):
     return []
 
 
+def check_pass5_cameras(work, _output):
+    lines=(work/'cameras'/'pass5-cameras.txt').read_text().splitlines()
+    expected={'UKR-forest-popin','UKR-coast','TVIET-coast','EGY-acacias',
+              'UKR-forest-far-1000ft','UKR-forest-far-3000ft','UKR-top-2000ft','EGY-top-2000ft'}
+    if {line.split()[0] for line in lines} != expected:
+        return ['missing Pass 5 coast/forest/top camera']
+    if any(len(line.split())!=10 or not all(math.isfinite(float(v)) for v in line.split()[5:]) for line in lines):
+        return ['invalid Pass 5 camera']
+    return []
+
+
 def scenarios():
     return [Scenario(
         name='vegetation-cpu-cameras', lane='menus',
         args=['--vegetation-preview', '{work}/cameras', 'cameras'],
         env={'TORE_VEGETATION': '1'}, timeout=120,
         outputs=['cameras/extra-cameras.txt'], check_work=check_cameras,
+    ), Scenario(
+        name='vegetation-pass5-cameras', lane='menus',
+        args=['--vegetation-preview', '{work}/cameras', 'pass5-cameras'],
+        env={'TORE_VEGETATION': '1'}, timeout=240,
+        outputs=['cameras/pass5-cameras.txt'], check_work=check_pass5_cameras,
     )]

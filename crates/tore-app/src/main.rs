@@ -68,6 +68,7 @@ mod flight_ui;
 mod flight_views;
 mod flight_watch;
 mod formation_trace;
+mod frame_gpu;
 mod frame_rate;
 mod graphics;
 mod graphics_screen;
@@ -3808,6 +3809,11 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         if self.finished {
             return;
+        }
+        if matches!(event, WindowEvent::RedrawRequested)
+            && let Some(renderer) = &mut self.renderer
+        {
+            renderer.begin_cpu_frame();
         }
         if self.loading.is_some() {
             if self.net.is_some()

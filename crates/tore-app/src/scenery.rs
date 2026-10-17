@@ -92,6 +92,7 @@ pub struct Scenery {
     pub vegetation: Option<Arc<crate::vegetation::Atlas>>,
     /// The vegetation meshes, their retail textures in the static art pages.
     pub vegetation_meshes: Option<Arc<crate::vegetation_shapes::Library>>,
+    pub canopy: crate::vegetation::canopy::Map,
 }
 
 /// The launch overrides the environment asks for: `TORE_WEATHER_TIME` as
@@ -446,6 +447,7 @@ impl Scenery {
             fill: None,
             vegetation: None,
             vegetation_meshes: None,
+            canopy: Default::default(),
             climate: crate::blast_climate::Climate {
                 humidity: terrain.humidity(),
             },
@@ -476,6 +478,15 @@ impl Scenery {
             library.add_pack(
                 &std::env::var("TORE_VEGETATION_SPRITES").unwrap_or_else(|_| "mixed".into()),
                 crate::vegetation::region(code),
+                &out.palette,
+                &mut out.sky_indices,
+                first,
+            );
+            let first = (terrain_bytes + out.sky_indices.len()) / 65536;
+            out.canopy = crate::vegetation::canopy::Map::build(
+                out.vegetation.as_ref().unwrap(),
+                terrain,
+                &library,
                 &out.palette,
                 &mut out.sky_indices,
                 first,
@@ -1099,6 +1110,7 @@ pub(crate) mod tests {
             fill: None,
             vegetation: None,
             vegetation_meshes: None,
+            canopy: Default::default(),
             fire_widths: Arc::new(BTreeMap::new()),
             climate: crate::blast_climate::Climate::default(),
         }

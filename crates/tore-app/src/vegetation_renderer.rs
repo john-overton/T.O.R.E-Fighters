@@ -12,7 +12,7 @@ use wgpu::util::DeviceExt;
 mod stream;
 
 const INST_STRIDE: u64 = 64;
-const DRAWN_STRIDE: u64 = 80;
+const DRAWN_STRIDE: u64 = 96;
 const PATCH_STRIDE: u64 = 64;
 /// Grass distance rings: outer edge as a share of the grass radius, and
 /// the share of a patch's full tufts drawn in it.
@@ -53,10 +53,13 @@ pub struct Renderer {
     suppressed: bool,
     settle: bool,
     draw_nm: f32,
+    visible_reach: f32,
+    last_prepare: std::time::Instant,
     detail_nm: f32,
     density: f32,
     grass_radius: f32,
     tufts: u32,
+    cards: crate::graphics::VegCards,
     /// Object chunks, grass chunks and CPU build time on the last `prepare`.
     last_cache: CacheFrame,
 }
@@ -126,7 +129,7 @@ impl Renderer {
         );
         let meshes = buffer(
             "Vegetation mesh table",
-            (mesh_count as u64).max(1) * 32,
+            (mesh_count as u64).max(1) * 48,
             storage,
         );
         let patches = buffer(
@@ -223,15 +226,19 @@ impl Renderer {
             suppressed: false,
             settle: false,
             draw_nm: 0.,
+            visible_reach: 0.,
+            last_prepare: std::time::Instant::now(),
             detail_nm: 0.,
             density: 1.,
             grass_radius: 0.,
             tufts: 0,
+            cards: Default::default(),
             last_cache: CacheFrame::default(),
         }
     }
 
     pub fn set_options(&mut self, device: &wgpu::Device, options: &crate::graphics::Options) {
+        self.cards = options.vegetation_cards.effective();
         self.draw_nm = options.vegetation_distance_nm as f32;
         self.detail_nm = (options.vegetation_detail_nm as f32).min(self.draw_nm);
         let density = options.vegetation_density;
@@ -261,13 +268,7 @@ impl Renderer {
             self.pages = stream::Slots::new(capacity);
             self.page_count = 0;
         }
-        use crate::graphics::VegDensity;
-        (self.grass_radius, self.tufts) = match density {
-            VegDensity::Low => (700., 48),
-            VegDensity::Medium => (1_100., 96),
-            VegDensity::High => (1_500., 160),
-            VegDensity::Ultra => (2_200., 256),
-        };
+        (self.grass_radius, self.tufts) = density.grass();
         self.grass_radius = self
             .grass_radius
             .min(self.detail_nm * vegetation::NM as f32 * 0.5);
@@ -275,6 +276,10 @@ impl Renderer {
 
     /// The before picture: objects and grass are not drawn. Ground detail
     /// is the graphics option's own switch.
+    pub fn suppressed(&self) -> bool {
+        self.suppressed
+    }
+
     pub fn set_suppressed(&mut self, suppressed: bool) {
         self.suppressed = suppressed;
     }
@@ -314,6 +319,10 @@ impl Renderer {
     }
 
     /// How far full density reaches, as a share of the setting's distance.
+    pub fn draw_reach(&self) -> f32 {
+        self.visible_reach
+    }
+
     pub fn squeeze(&self) -> f32 {
         self.ready.as_ref().map_or(1., |r| r.squeeze)
     }
@@ -419,8 +428,26 @@ impl Renderer {
         }
         self.last_cache.pending =
             self.pages.pending() || self.ready.as_ref().is_none_or(|r| !r.done);
+        // Uploaded coverage defines a circle, never individual patch visibility.
+        // The outer fade stays wholly inside that circle, including during a
+        // teleport or a worker delay. A new circle expands continuously.
+        let available = self
+            .ready
+            .as_ref()
+            .map_or(0., |r| {
+                (r.available - (r.eye[0] - eye2[0]).hypot(r.eye[1] - eye2[1]) as f32).max(0.)
+            })
+            .min(draw);
+        let dt = self.last_prepare.elapsed().as_secs_f32().min(0.1);
+        self.last_prepare = std::time::Instant::now();
+        let (reach, range_pending) =
+            advance_visible_range(self.visible_reach, available, draw, dt, self.settle);
+        self.visible_reach = reach;
+        self.last_cache.pending |= range_pending;
+        let draw = self.visible_reach;
         let full = full * self.squeeze();
         self.upload_meshes(queue);
+        queue.write_buffer(&self.args, 0, &self.cards.vertices().to_le_bytes());
         let (fx, rx, ux) = basis(camera);
         let height = (size[1] as f32 * camera.view_fraction).max(1.);
         let aspect = size[0] as f32 / height;
@@ -478,7 +505,7 @@ impl Renderer {
     fn upload_meshes(&self, queue: &wgpu::Queue) {
         let lib = &self.library;
         let mesh_count = lib.meshes.len();
-        let mut table = Vec::with_capacity(mesh_count * 8);
+        let mut table = Vec::with_capacity(mesh_count * 12);
         for mesh in &lib.meshes {
             let look = match (mesh.look, mesh.recolour.is_some()) {
                 (Look::Foliage, _) => 0.,
@@ -498,6 +525,7 @@ impl Renderer {
                 -((mesh.sprite_layer * 4 + usize::from(tile) + 1) as f32)
             });
             table.extend([mean[0], mean[1], mean[2], page]);
+            table.extend([mesh.top[0], mesh.top[1], 0., 0.]);
         }
         if !table.is_empty() {
             queue.write_buffer(&self.meshes, 0, &bytes_of_f32(&table));
@@ -609,15 +637,27 @@ impl Renderer {
     }
 }
 
+/// Readiness includes the fade circle reaching the requested radius. Otherwise
+/// a fast worker could end benchmark warmup while the visible forest still grows.
+fn advance_visible_range(
+    previous: f32,
+    available: f32,
+    requested: f32,
+    dt: f32,
+    settle: bool,
+) -> (f32, bool) {
+    let target = available.min(requested);
+    let reach = if settle {
+        target
+    } else {
+        (previous + dt.min(0.1) * 6000.).min(target)
+    };
+    (reach, reach + 1. < requested)
+}
+
 /// Objects kept around the camera at most, per density.
 fn object_budget(density: crate::graphics::VegDensity) -> usize {
-    use crate::graphics::VegDensity;
-    match density {
-        VegDensity::Low => 65_536,
-        VegDensity::Medium => 131_072,
-        VegDensity::High => 262_144,
-        VegDensity::Ultra => 524_288,
-    }
+    density.object_budget()
 }
 
 /// The instance list and the two lists the cull pass writes.
@@ -741,7 +781,8 @@ fn render_pipelines(
                 6 => Float32x4,
                 7 => Float32x4,
                 8 => Float32x4,
-                9 => Float32x4
+                9 => Float32x4,
+                10 => Float32x4
             ],
         },
     ];
@@ -884,6 +925,50 @@ fn bytes_of_u32(v: &[u32]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn warmup_waits_for_both_uploaded_range_and_visible_range() {
+        let (mut reach, pending) = super::advance_visible_range(0., 24000., 24000., 0.016, false);
+        assert!(pending);
+        assert!(reach < 100.);
+        for _ in 0..400 {
+            reach = super::advance_visible_range(reach, 24000., 24000., 0.016, false).0;
+        }
+        assert_eq!(
+            super::advance_visible_range(reach, 24000., 24000., 0.016, false),
+            (24000., false)
+        );
+        assert_eq!(
+            super::advance_visible_range(24000., 8000., 24000., 0.016, false),
+            (8000., true)
+        );
+        assert_eq!(
+            super::advance_visible_range(0., 30000., 24000., 0., true),
+            (24000., false)
+        );
+    }
+
+    #[test]
+    fn card_stream_layout_matches_the_compute_output() {
+        let module =
+            wgpu::naga::front::wgsl::parse_str(include_str!("vegetation_cull.wgsl")).unwrap();
+        for (name, bytes) in [
+            ("Inst", super::INST_STRIDE as u32),
+            ("Drawn", super::DRAWN_STRIDE as u32),
+            ("Mesh", 48),
+        ] {
+            let ty = module
+                .types
+                .iter()
+                .find(|(_, ty)| ty.name.as_deref() == Some(name))
+                .unwrap()
+                .1;
+            let wgpu::naga::TypeInner::Struct { span, .. } = ty.inner else {
+                panic!("expected struct")
+            };
+            assert_eq!(span, bytes, "{name}");
+        }
+    }
+
     /// John saw the ground detail vanish with the afterburner lit: a
     /// dynamic light (flare, afterburner, fire, gun flash) swapped in an
     /// undetailed albedo. Both the shaded colour and the flare-lit albedo

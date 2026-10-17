@@ -1,6 +1,6 @@
 struct Band { info:vec4<f32>, ramp:vec4<f32> }
 // scene.view.z is the shared CPU night factor (night_glow::night_factor).
-struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32>, ocean:vec4<f32>, cloud_reflection:vec4<f32>, view:vec4<f32>, quality:vec4<f32>, viewport:vec4<f32>, origin:vec4<f32>, local_eye:vec4<f32>, veg:vec4<f32> }
+struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32>, ocean:vec4<f32>, cloud_reflection:vec4<f32>, view:vec4<f32>, quality:vec4<f32>, viewport:vec4<f32>, origin:vec4<f32>, local_eye:vec4<f32>, veg:vec4<f32>, canopy_area:vec4<f32>, canopy:vec4<f32>, canopy_detail:vec4<f32> }
 // veg: ground-detail mode (0 off, 1 on, 2 fine), detail distance in feet,
 // unused, climate (0 temperate, 1 desert, 2 arctic, 3 tropical).
 // quality: spotting aid strength (0 off), terrain filtering (0/1), thermal
@@ -470,6 +470,41 @@ fn field_margin(color:vec3<f32>,ground:vec3<f32>,uv:vec2<f32>)->vec3<f32> {
  let blend=(1.0-smoothstep(0.0,0.035,edge))*brown*0.85;
  return mix(color,ground,blend);
 }
+// Forest horizon: expected crown coverage and mean art colour from CPU placement.
+// World-anchored texture replaces the missing crown share as objects thin/fade.
+fn canopy_cell(at:vec2<i32>,row:i32,remaps:vec2<f32>)->vec4<f32> {
+ if any(at<vec2<i32>(0)) || any(at>=vec2<i32>(scene.canopy_area.zw)) {return vec4<f32>(0.0);}
+ let page=i32(scene.canopy.x)+(at.y/128)*i32(scene.canopy.y)+at.x/128;
+ let pixel=(at%vec2<i32>(128))*2;
+ let density=f32(read_tile(pixel,page))/63.75;
+ let index=read_tile(pixel+vec2<i32>(1,0),page);
+ var color=shade(index,row).rgb;
+ if remaps.x>=0.0 {color=remap_color(index,remaps);}
+ return vec4<f32>(color*density,density);
+}
+fn forest_canopy(color:vec3<f32>,direction:vec3<f32>,row:i32)->vec3<f32> {
+ if scene.canopy.w<=0.0 || scene.canopy.y<1.0 {return color;}
+ let dist=length(direction);
+ let world=scene.origin.xz+scene.local_eye.xz+direction.xz;
+ let cell=(world-scene.canopy_area.xy)/512.0-vec2<f32>(0.5);
+ let at=vec2<i32>(floor(cell));let f=fract(cell);
+ var remaps=vec2<f32>(-1.0);
+ if row==0 {remaps=ray_rows(dist,scene.eye.y+direction.y);}
+ let c=mix(mix(canopy_cell(at,row,remaps),canopy_cell(at+vec2<i32>(1,0),row,remaps),f.x),
+           mix(canopy_cell(at+vec2<i32>(0,1),row,remaps),canopy_cell(at+vec2<i32>(1,1),row,remaps),f.x),f.y);
+ if c.a<0.001 {return color;}
+ let full=max(scene.canopy_detail.x,1.0);
+ let retained=min(1.0,pow(full/max(dist,full),1.6));
+ let fade=1.0-smoothstep(scene.canopy.z*0.70,scene.canopy.z,dist);
+ let missing=1.0-retained*fade;
+ let footprint=detail_footprint(direction,dist);
+ let grain=detail_noise(world/76.0,0,74u)-0.5;
+ let crowns=1.0+grain*0.38*detail_band(100.0,footprint);
+ let coverage=(1.0-exp(-c.a*scene.canopy.w))*missing;
+ // Fade with the same altitude rule as object crowns, not the near ground grain.
+ let altitude=1.0-smoothstep(7000.0,15000.0,scene.eye.y);
+ return mix(color,c.rgb/c.a*crowns,coverage*altitude);
+}
 @fragment fn terrain_fragment(in:VertexOut)->@location(0) vec4<f32>{
  // Derivatives must be taken before the untextured early return.
  let grad=vec4<f32>(dpdx(in.uv),dpdy(in.uv));
@@ -477,8 +512,10 @@ fn field_margin(color:vec3<f32>,ground:vec3<f32>,uv:vec2<f32>)->vec3<f32> {
  let normal=select(receiver,normalize(in.terrain_normal),dot(in.terrain_normal,in.terrain_normal)>0.1 && smooth_weather());
  if in.layer<0.0 {
   if thermal_on() {return scenery(thermal_grey(thermal_ground(in.albedo,normal,in.direction,in.distance)));}
+  let forest=forest_canopy(in.color,in.direction,0);
+  let bare=forest_canopy(in.albedo,in.direction,base_row());
   let detail=ground_detail(in.color,in.direction,normal);
-  return scenery(aerial_perspective(surface_color(in.color*detail.tint,in.direction,detail.normal,false,receiver,in.albedo*detail.tint),in.direction,in.altitude));
+  return scenery(aerial_perspective(surface_color(forest*detail.tint,in.direction,detail.normal,false,receiver,bare*detail.tint),in.direction,in.altitude));
  }
  var remaps=vec2<f32>(-1.0);
  if in.fog_enabled!=0u {remaps=ray_rows(in.distance,in.altitude);}
@@ -495,7 +532,9 @@ fn field_margin(color:vec3<f32>,ground:vec3<f32>,uv:vec2<f32>)->vec3<f32> {
  let detail=ground_detail(field_color,in.direction,normal);
  var albedo=field_color;
  if flares_burning() {albedo=field_margin(sample_tile(in.uv,i32(in.layer),base_row(),-1,in.light_row,vec2<f32>(-1.0)).rgb,in.albedo,in.uv);}
- return scenery(aerial_perspective(surface_color(field_color*detail.tint,in.direction,detail.normal,false,receiver,albedo*detail.tint),in.direction,in.altitude));
+ let forest=forest_canopy(field_color,in.direction,0);
+ albedo=forest_canopy(albedo,in.direction,base_row());
+ return scenery(aerial_perspective(surface_color(forest*detail.tint,in.direction,detail.normal,false,receiver,albedo*detail.tint),in.direction,in.altitude));
 }
 // Close-range ground detail (exploratory vegetation, 2026-10-16; desert and
 // band-limited rework in pass 2). Presentation only. Colours stay the
@@ -928,7 +967,7 @@ struct VegOut {
 // Solid objects fade by shrinking into the ground: a dithered rock shows
 // as a hatched ghost, a shrinking one only as a smaller rock.
 fn veg_turn(turn:vec4<f32>,shape:vec4<f32>)->vec4<f32> {
- if shape.w>0.5 {return vec4<f32>(turn.xy,turn.z*turn.w,1.0);}
+ // All kinds use the same per-instance coverage fade, including rocks.
  return turn;
 }
 fn veg_place(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,shape:vec4<f32>)->vec3<f32> {
@@ -937,19 +976,34 @@ fn veg_place(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,shape:vec4<f32>)-
  let lean=select(0.0,1.0,shape.w>0.5);
  return place.xyz+vec3<f32>(flat.x,local.y+lean*dot(flat,shape.yz),flat.y);
 }
-@vertex fn veg_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) normal:vec3<f32>,@location(4) part:f32,@location(5) place:vec4<f32>,@location(6) spin:vec4<f32>,@location(7) shape:vec4<f32>,@location(8) tint:vec4<f32>,@location(9) mean:vec4<f32>)->VegOut {
+@vertex fn veg_vertex(@builtin(vertex_index) vertex:u32,@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) normal:vec3<f32>,@location(4) part:f32,@location(5) place:vec4<f32>,@location(6) spin:vec4<f32>,@location(7) shape:vec4<f32>,@location(8) tint:vec4<f32>,@location(9) mean:vec4<f32>,@location(10) top:vec4<f32>)->VegOut {
  let turn=veg_turn(spin,shape);
- // Upright camera-facing impostor, grounded at the original shape base.
+ // Stable seeded crosses, optional horizontal canopy, or a facing card.
+ let mode=u32(scene.veg.z);
+ let card=vertex/6u;
+ let overhead=(mode==2u && card==2u)||(mode==3u && card==1u);
  let facing=scene.local_eye.xz-place.xz;
- let right=normalize(vec2<f32>(facing.y,-facing.x)+vec2<f32>(0.00001,0.0));
- let offset=right*position.x*turn.z*shape.x*tint.w;
- let p=place.xyz+vec3<f32>(offset.x,position.y*turn.z,offset.y);
+ var right=normalize(vec2<f32>(facing.y,-facing.x)+vec2<f32>(0.00001,0.0));
+ if mode==1u || mode==2u {
+  right=spin.xy;
+  if card==1u {right=vec2<f32>(-spin.y,spin.x);}
+ }
+ var offset=right*position.x*turn.z*shape.x*tint.w;
+ var p=place.xyz+vec3<f32>(offset.x,position.y*turn.z,offset.y);
  let azimuth=atan2(facing.x,facing.y)-atan2(spin.y,spin.x);
- let view=u32(floor(azimuth/1.570796327+0.5)+8.0)%4u;
- var sprite=mean.w+f32(view);
+ var view=u32(floor(azimuth/1.570796327+0.5)+8.0)%4u;
+ if mode==1u || mode==2u {view=card%2u;}
+ var code=mean.w;
+ if overhead {
+  code=top.x; view=0u;
+  let local=vec2<f32>(position.x,position.y*2.0-1.0)*turn.z*shape.x*tint.w;
+  offset=vec2<f32>(local.x*spin.x-local.y*spin.y,local.x*spin.y+local.y*spin.x);
+  p=place.xyz+vec3<f32>(offset.x,turn.z*top.y,offset.y);
+ }
+ var sprite=code+f32(view);
  var sprite_uv=uv;
- if mean.w<0.0 {
-  let packed=u32(-mean.w-1.0);
+ if code<0.0 {
+  let packed=u32(-code-1.0);
   sprite=f32(packed/4u);
   let cell=packed%4u;
   sprite_uv=(vec2<f32>(f32(cell%2u),f32(cell/2u))*128.0+vec2<f32>(2.5)+uv*123.0)/256.0;
@@ -964,7 +1018,8 @@ fn veg_place(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,shape:vec4<f32>)-
  // A baked rock card has no useful face normal. Light it with its ground
  // slope, not the arbitrary vertical shared quad normal.
  if shape.w>0.5 {out.normal=normalize(vec3<f32>(-shape.y,1.0,-shape.z));}
- out.fade=vec2<f32>(turn.w,place.w);out.look=shape.w;out.mean=mean.xyz;out.height=position.y;
+ if overhead {out.normal=vec3<f32>(0.0,1.0,0.0);}
+ out.fade=vec2<f32>(turn.w,place.w);out.look=shape.w;out.mean=mean.xyz;out.height=select(position.y,1.0,overhead);
  // Untextured colour: a retail face's palette colour, or a drawn part.
  out.color=base.color;out.albedo=base.albedo;
  if part<0.0 {
@@ -1058,7 +1113,8 @@ fn veg_alpha(uv:vec2<f32>,layer:i32)->f32 {
   let edge=clamp((tex.a-0.5)/max(fwidth(tex.a),0.0001)+0.5,0.0,1.0);
   alpha*=edge;
   var base=tex.rgb;
-  var bare=sample_tile(in.uv,i32(in.layer),base_row(),-1,-1,vec2<f32>(-1.0)).rgb;
+  var bare=base;
+  if flares_burning() || thermal_on() {bare=sample_tile(in.uv,i32(in.layer),base_row(),-1,-1,vec2<f32>(-1.0)).rgb;}
   if in.look>2.5 {
    // Retail rock in the local ground's colour, keeping its shading.
    let k=dot(base,vec3<f32>(0.2126,0.7152,0.0722))/max(dot(in.mean,vec3<f32>(0.2126,0.7152,0.0722)),0.0001);

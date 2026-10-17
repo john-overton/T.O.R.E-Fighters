@@ -260,7 +260,7 @@ See [merged airports](redrawn-airports.md#merged-pairs-airfield-scene-3).
 The `exp/vegetation` renderer samples this theater data and its reference
 palette to place presentation-only sprites. It does not add terrain records
 or establish original vegetation placement. Cached patch, field, road, village
-edge and desert rules are specified in
+edge, desert, broad-water beach exclusion and canopy sampling rules are specified in
 [terrain detail](../spec/terrain-detail.md#where-things-grow); retail card
 records and unresolved original distance rules are in
 [objects and shapes](objects-and-shapes.md#vegetation-card-assets).
