@@ -719,6 +719,19 @@ enum Check<'a> {
 /// Builds the static mission; the default is `World::new` with open seating.
 pub type MissionBuilder = Box<dyn FnMut(&MissionSpec, &dyn ResourceSource) -> WorldResult<World>>;
 
+/// Optional background builder for windowed clients. The default remains synchronous
+/// for deterministic headless drivers that advance virtual time without waiting.
+pub type BackgroundMissionBuilder =
+    Box<dyn FnMut(&MissionSpec, &dyn ResourceSource) -> WorldResult<World> + Send>;
+struct BackgroundBuild {
+    receive: std::sync::mpsc::Receiver<(BackgroundMissionBuilder, Result<World, String>, Manifest)>,
+    spec: MissionSpec,
+    number: u32,
+    manifest: Option<Manifest>,
+    added: bool,
+    started: std::time::Instant,
+}
+
 /// The mission as the client's import builds it.
 struct Loaded {
     world: World,
@@ -766,6 +779,10 @@ pub struct Client {
     ticks_per_snapshot: u32,
     phase: ClientPhase,
     builder: Option<MissionBuilder>,
+    background_builder: Option<BackgroundMissionBuilder>,
+    background_build: Option<BackgroundBuild>,
+    background_events: VecDeque<tore_net::ClientEvent>,
+    background_own: VecDeque<(u8, u16)>,
     mission: Option<Loaded>,
     spec: Option<MissionSpec>,
     roster: Option<Roster>,
@@ -947,6 +964,10 @@ impl Client {
             ticks_per_snapshot: 4,
             phase: ClientPhase::Connecting,
             builder: None,
+            background_builder: None,
+            background_build: None,
+            background_events: VecDeque::new(),
+            background_own: VecDeque::new(),
             mission: None,
             spec: None,
             roster: None,
@@ -1062,6 +1083,16 @@ impl Client {
 
     /// Builds the mission with `builder` instead of `World::new` with open
     /// seating; the game passes one with its drawn-model loader.
+    /// Prepares missions off the caller's event thread. Incoming session events
+    /// remain ordered behind the build; transport updates and keepalives continue.
+    pub fn set_background_mission_builder(&mut self, builder: BackgroundMissionBuilder) {
+        self.background_builder = Some(builder);
+    }
+    /// Whether a background mission is still being prepared.
+    pub fn is_building(&self) -> bool {
+        self.background_build.is_some()
+    }
+
     pub fn set_mission_builder(&mut self, builder: MissionBuilder) {
         self.builder = Some(builder);
     }
@@ -1082,11 +1113,28 @@ impl Client {
         let wire = &self.wire;
         let early = &self.early;
         let seated = self.seat.is_some();
+        let loading = self.background_build.is_some();
+        let queued = &self.background_own;
+
         self.net
             .receive_checked(now, from, datagram, &mut |kind, body| {
                 let Some(wire) = wire else {
                     return false;
                 };
+                if loading && kind == SECTION_OWN_STATE {
+                    let Ok(header) = crate::wire::connection::own_state_header(body) else {
+                        return false;
+                    };
+                    // Acknowledged states can refer to an earlier accepted
+                    // packet still queued behind the mission build. Decode
+                    // them in that same order once the world is available.
+                    if header
+                        .baseline()
+                        .is_none_or(|number| queued.contains(&(header.flight, number)))
+                    {
+                        return true;
+                    }
+                }
                 if kind == SECTION_OWN_STATE && !seated {
                     return early_own_state_fits(early, body);
                 }
@@ -1140,7 +1188,11 @@ impl Client {
         self.now = self.now.max(now);
         let now = self.now;
         self.net.update(now);
+        self.poll_background_build();
         self.pump();
+        if self.background_build.is_some() {
+            return;
+        }
         // Stage K: detection, the race and the resume (slice K4).
         self.migrate_update(now);
         self.pending.extend(sampled.commands);
@@ -2016,8 +2068,41 @@ impl Client {
     }
 
     /// Handles every transport event.
-    fn pump(&mut self) {
+    fn keep_background_events(&mut self) {
         while let Some(event) = self.net.poll_event() {
+            // Bound memory while a pathological build or peer cannot finish.
+            if self.background_events.len() >= 16_384 {
+                self.background_events.clear();
+                self.background_own.clear();
+                self.net.disconnect(DisconnectReason::ProtocolError);
+                return;
+            }
+            if let tore_net::ClientEvent::Connection(Event::Payload { sections, .. }) = &event {
+                for section in sections {
+                    if section.kind == SECTION_OWN_STATE
+                        && let Ok(header) = crate::wire::connection::own_state_header(&section.body)
+                    {
+                        self.background_own
+                            .push_back((header.flight, header.number));
+                        if self.background_own.len() > 64 {
+                            self.background_own.pop_front();
+                        }
+                    }
+                }
+            }
+            self.background_events.push_back(event);
+        }
+    }
+
+    fn pump(&mut self) {
+        while self.background_build.is_none() {
+            let Some(event) = self
+                .background_events
+                .pop_front()
+                .or_else(|| self.net.poll_event())
+            else {
+                break;
+            };
             match event {
                 tore_net::ClientEvent::Connected(welcome) => {
                     self.ticks_per_snapshot = u32::from(welcome.ticks_per_snapshot).max(1);
@@ -2070,6 +2155,11 @@ impl Client {
                     Event::Stalled | Event::Resumed { .. } => {}
                 },
             }
+        }
+        if self.background_build.is_some() {
+            self.keep_background_events();
+        } else if self.background_events.is_empty() {
+            self.background_own.clear();
         }
     }
 
@@ -2334,6 +2424,54 @@ impl Client {
     /// Builds `spec` from the import, comparing the manifest with the
     /// host's as `check` says.
     fn build_mission(&mut self, spec: MissionSpec, number: u32, check: Check<'_>) {
+        if let Some(builder) = self.background_builder.take() {
+            let resources = Arc::clone(&self.resources);
+            let mission = spec.clone();
+            let (send, receive) = std::sync::mpsc::channel();
+            let started = std::time::Instant::now();
+            // Held until the worker starts, so a failed spawn can build on
+            // this thread instead of losing the builder.
+            let held = Arc::new(std::sync::Mutex::new(Some(builder)));
+            let worker_held = Arc::clone(&held);
+            let spawn = std::thread::Builder::new()
+                .name("mission-loader".into())
+                .spawn(move || {
+                    let Some(mut builder) =
+                        worker_held.lock().unwrap_or_else(|e| e.into_inner()).take()
+                    else {
+                        return;
+                    };
+                    let reads = ResourceReads::new(&resources);
+                    let built = builder(&mission, &reads).map_err(|e| e.to_string());
+                    let _ = send.send((builder, built, reads.manifest()));
+                });
+            if let Err(error) = spawn {
+                self.log("mission-worker-failed", &[&error.to_string()]);
+                if let Some(mut builder) = held.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                    let reads = ResourceReads::new(&self.resources);
+                    let started = std::time::Instant::now();
+                    let built = builder(&spec, &reads);
+                    self.background_builder = Some(builder);
+                    self.last_build = Some(started.elapsed());
+                    self.builds += 1;
+                    let ours = reads.manifest();
+                    self.finish_mission_build(spec, number, check, built, ours);
+                }
+            } else {
+                self.background_build = Some(BackgroundBuild {
+                    receive,
+                    spec,
+                    number,
+                    manifest: match check {
+                        Check::Whole(m) | Check::Added(m) => Some(m.clone()),
+                        Check::None => None,
+                    },
+                    added: matches!(check, Check::Added(_)),
+                    started,
+                });
+            }
+            return;
+        }
         let reads = ResourceReads::new(&self.resources);
         let started = std::time::Instant::now();
         let built = match &mut self.builder {
@@ -2343,6 +2481,47 @@ impl Client {
         self.last_build = Some(started.elapsed());
         self.builds += 1;
         let ours = reads.manifest();
+        self.finish_mission_build(spec, number, check, built, ours);
+    }
+
+    fn poll_background_build(&mut self) {
+        let Some(pending) = &self.background_build else {
+            return;
+        };
+        let result = match pending.receive.try_recv() {
+            Ok(result) => Some(result),
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => None,
+        };
+        let pending = self.background_build.take().unwrap();
+        self.last_build = Some(pending.started.elapsed());
+        self.builds += 1;
+        let (built, ours) = match result {
+            Some((builder, built, ours)) => {
+                self.background_builder = Some(builder);
+                (built.map_err(Into::into), ours)
+            }
+            None => (
+                Err("The mission loader stopped unexpectedly".into()),
+                Manifest::default(),
+            ),
+        };
+        let check = match &pending.manifest {
+            Some(m) if pending.added => Check::Added(m),
+            Some(m) => Check::Whole(m),
+            None => Check::None,
+        };
+        self.finish_mission_build(pending.spec, pending.number, check, built, ours);
+    }
+
+    fn finish_mission_build(
+        &mut self,
+        spec: MissionSpec,
+        number: u32,
+        check: Check<'_>,
+        built: WorldResult<World>,
+        ours: Manifest,
+    ) {
         let differences = match check {
             Check::Whole(manifest) => ours.differences(manifest),
             Check::Added(manifest) => manifest

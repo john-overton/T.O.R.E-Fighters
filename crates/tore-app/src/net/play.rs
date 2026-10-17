@@ -137,6 +137,10 @@ impl App {
     /// Starts the session over `join`, naming `server` to the player. False
     /// (with the reason shown) when it could not start.
     pub(crate) fn start_join(&mut self, join: crate::net::session::Join, server: &str) -> bool {
+        if !crate::net::session::content_ready(&self.theater_resources) {
+            self.pending_join = Some((join, server.to_owned()));
+            return true;
+        }
         let data = match crate::assets::data_directory() {
             Ok(data) => data,
             Err(error) => {
@@ -244,7 +248,10 @@ impl App {
         if let Some(session) = &mut self.net {
             session.auto_start(!reading && self.net_flight.is_none());
         }
-        if self.net_flight.is_none() && !self.begin_session_flight(event_loop) {
+        if self.loading.is_none()
+            && self.net_flight.is_none()
+            && !self.begin_session_flight(event_loop)
+        {
             return;
         }
         if self.net_flight.is_some() && self.screen == Screen::Flight {
@@ -525,7 +532,7 @@ impl App {
         }
         let stash = flight.stash;
         self.mission_markup = stash.markup;
-        self.world = stash.world;
+        self.world.0 = Some(stash.world);
         self.combat_view = stash.combat_view;
         self.hornet = stash.hornet;
         self.scenery = stash.scenery;
@@ -562,15 +569,18 @@ impl App {
         // mission again (the others fly on) has the game build it again.
         let built = match self.net_built.take() {
             Some(built) => built,
-            None => match self.net.as_mut().and_then(NetSession::rebuild) {
-                Some(Ok(built)) => built,
-                Some(Err(error)) => {
-                    self.net_ending = Some(format!("The mission could not be built: {error}"));
-                    self.end_session(event_loop);
-                    return false;
+            None => {
+                match self.net.as_ref().and_then(NetSession::rebuild_background) {
+                    Some(Ok(job)) => self.loading = Some(job),
+                    Some(Err(error)) => {
+                        self.net_ending = Some(format!("The mission could not be built: {error}"));
+                        self.end_session(event_loop);
+                        return false;
+                    }
+                    None => {}
                 }
-                None => return true,
-            },
+                return true;
+            }
         };
         let plane = plane.0;
         // A page of the lobby still open gives way to the flight.
@@ -595,40 +605,81 @@ impl App {
             }
         };
         let resources = std::sync::Arc::clone(&self.theater_resources);
-        let result = (|| -> crate::AppResult<_> {
-            world
-                .take_plane(SEAT, crate::seats::PlaneId(plane))
-                .map_err(|error| error.to_string())?;
-            let hornet = Airframe::load(&resources, aircraft)?;
-            let mut view = CombatView::with_models(&world.combat, plane, &resources, models)
-                .map_err(|error| error.to_string())?;
-            if let Some(session) = &self.net {
-                for spawned in session.client.spawned() {
-                    view.prepare_spawn(&world, spawned, &resources)?;
+        let spawned = self
+            .net
+            .as_ref()
+            .map(|session| session.client.spawned().to_vec())
+            .unwrap_or_default();
+        let graphics = self
+            .renderer
+            .as_ref()
+            .map(crate::renderer::Renderer::loading_factory);
+        let job = crate::loading::Job::spawn(move |progress| {
+            let result = (|| -> crate::AppResult<_> {
+                world
+                    .take_plane(SEAT, crate::seats::PlaneId(plane))
+                    .map_err(|error| error.to_string())?;
+                progress.stage(crate::loading::Stage::Aircraft);
+                let hornet = Airframe::load(&resources, aircraft)?;
+                let mut view = CombatView::with_models(&world.combat, plane, &resources, models)
+                    .map_err(|error| error.to_string())?;
+                {
+                    for spawned in &spawned {
+                        view.prepare_spawn(&world, spawned, &resources)?;
+                    }
                 }
-            }
-            let scenery = scenery::Scenery::build(&resources, &world.terrain)?;
-            Ok((hornet, view, scenery))
-        })();
-        let (hornet, view, scenery) = match result {
-            Ok(parts) => parts,
+                progress.stage(crate::loading::Stage::Scenery);
+                let mut scenery = scenery::Scenery::build(&resources, &world.terrain)?;
+
+                progress.stage(crate::loading::Stage::Graphics);
+                let geometry = std::sync::Arc::clone(
+                    scenery.static_geometry(&world.combat.state.targets, &world.combat.surface),
+                );
+                let graphics = graphics.map(|build| {
+                    build(&scenery, &hornet, &view.models, &view.art, Some(&geometry))
+                });
+                Ok(crate::loading::Prepared::Net(Box::new((
+                    world, markup, hornet, view, scenery, graphics,
+                ))))
+            })();
+            result.map_err(|e| e.to_string())
+        });
+        match job {
+            Ok(job) => self.loading = Some(job),
             Err(error) => {
-                self.net_ending = Some(format!("The flight could not start: {error}"));
+                self.net_ending = Some(error);
                 self.end_session(event_loop);
                 return false;
             }
-        };
+        }
+        true
+    }
+
+    pub(crate) fn finish_session_loading(&mut self, parts: crate::loading::NetParts) {
+        let _timing = crate::loading::timing("multiplayer flight installation");
+        let (world, markup, hornet, view, scenery, graphics) = parts;
+        let plane = world.picture_plane().0;
         // Single player's state waits aside.
         let stash = Stash {
             markup: self.mission_markup.replace(markup),
-            world: std::mem::replace(&mut self.world, world),
+            world: std::mem::replace(&mut *self.world, world),
             combat_view: std::mem::replace(&mut self.combat_view, view),
             hornet: std::mem::replace(&mut self.hornet, hornet),
             scenery: std::mem::replace(&mut self.scenery, scenery),
         };
-        if let Some(renderer) = &mut self.renderer {
-            renderer.set_scenery(&self.scenery);
-            renderer.prepare_aircraft(&self.hornet);
+        let retired = if let Some(renderer) = &mut self.renderer {
+            if let Some(graphics) = graphics {
+                renderer.install_loading(graphics)
+            } else {
+                renderer.set_scenery(&self.scenery);
+                renderer.prepare_aircraft(&self.hornet);
+                None
+            }
+        } else {
+            None
+        };
+        if let Some(handle) = retired {
+            self.shelve_background(handle);
         }
         if let Some(audio) = &self.audio {
             audio.restart_flight();
@@ -685,7 +736,6 @@ impl App {
             idle: Default::default(),
             surface_units: Default::default(),
         });
-        true
     }
 
     /// This frame's client frame, its effects, and everything it presents.
@@ -939,6 +989,8 @@ impl App {
     /// the player sees the debrief the host sent, or the reason in plain
     /// words on the main menu.
     pub(crate) fn end_session(&mut self, event_loop: &ActiveEventLoop) {
+        self.pending_join = None;
+        self.pending_host = None;
         let reason = self.net_ending.take().unwrap_or_default();
         self.end_observing();
         // The lobby goes with the session: its pages are put away, and the
@@ -962,12 +1014,23 @@ impl App {
             session.client.disconnect(now);
             session.flush();
         }
+        if let Some(host) = self.net.as_mut().and_then(|s| s.hosting.take()) {
+            // Host teardown may wait for an in-progress mission build. Keep
+            // that wait away from the window when cancelling a loading host.
+            match std::thread::Builder::new()
+                .name("host-finish".into())
+                .spawn(move || drop(host))
+            {
+                Ok(handle) => self.shelve_background(handle),
+                Err(error) => log::warn!("Host cleanup worker: {error}"),
+            }
+        }
         self.net = None;
         self.net_built = None;
         if let Some(flight) = self.net_flight.take() {
             let stash = flight.stash;
             self.mission_markup = stash.markup;
-            self.world = stash.world;
+            self.world.0 = Some(stash.world);
             self.combat_view = stash.combat_view;
             self.hornet = stash.hornet;
             self.scenery = stash.scenery;

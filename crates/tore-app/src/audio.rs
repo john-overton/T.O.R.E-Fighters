@@ -657,9 +657,7 @@ pub struct EngineLoops {
 }
 fn cue(action: Action) -> Option<&'static str> {
     match action {
-        Action::Theater(_)
-        | Action::Aircraft(_)
-        | Action::Click
+        Action::Click
         | Action::QuickMission
         | Action::FreeFlight
         | Action::Replays
@@ -2887,7 +2885,7 @@ mod tests {
         assert_eq!(cue(Action::Hover), None);
         assert_eq!(cue(Action::None), None);
         assert_eq!(cue(Action::Click), Some("&BUTTON.11K"));
-        assert_eq!(cue(Action::Aircraft(1)), Some("&BUTTON.11K"));
+        assert_eq!(cue(Action::QuickMission), Some("&BUTTON.11K"));
     }
     #[test]
     fn ordnance_cues_use_imported_samples_and_fuel_does_not_stack() {

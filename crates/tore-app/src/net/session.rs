@@ -136,6 +136,19 @@ pub fn remember_source(multiplayer: &BTreeMap<String, Vec<u8>>) {
     *SOURCE.lock().unwrap_or_else(|e| e.into_inner()) = Some(source);
 }
 
+/// Nonblocking gate used before a windowed join consumes the content cache.
+pub fn content_ready(resources: &Arc<BTreeMap<String, Vec<u8>>>) -> bool {
+    let Ok(mut slot) = CONTENT.0.try_lock() else {
+        return false;
+    };
+    ContentCache::start_in(&mut slot, resources);
+    match &*slot {
+        ContentSlot::Ready(_, _) => true,
+        ContentSlot::Computing(_, handle) => handle.is_finished(),
+        ContentSlot::Idle => false,
+    }
+}
+
 /// This game's content over `resources` with the import's source.
 fn compute_content(resources: &BTreeMap<String, Vec<u8>>) -> GameContent {
     let source = SOURCE.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -245,7 +258,7 @@ fn build_mission(spec: &MissionSpec, resources: &BTreeMap<String, Vec<u8>>) -> W
 }
 
 /// Where the second build of the mission is left for the game.
-type Sink = Rc<RefCell<Option<WorldResult<Built>>>>;
+type Sink = Arc<Mutex<Option<Result<Built, String>>>>;
 
 /// What carries the session's datagrams: a UDP socket to a server, the
 /// in-process link to the host this game runs itself, or the socket a join
@@ -755,7 +768,7 @@ pub struct NetSession {
     sink: Sink,
     /// The mission the host last sent, to build the game's copy of it again
     /// for a plane taken a second time in the same running mission.
-    spec: Rc<RefCell<Option<MissionSpec>>>,
+    spec: Arc<Mutex<Option<MissionSpec>>>,
     resources: Arc<BTreeMap<String, Vec<u8>>>,
     /// Chaff, flares, smoke and contrails, stepped once per client tick.
     pub effects: Effects,
@@ -892,7 +905,7 @@ fn equip(
     again: &Again,
     log: &Rc<RefCell<DatedLog>>,
     sink: &Sink,
-    spec: &Rc<RefCell<Option<MissionSpec>>>,
+    spec: &Arc<Mutex<Option<MissionSpec>>>,
     held: &HeldSpec,
     resources: &Arc<BTreeMap<String, Vec<u8>>>,
 ) -> Option<PathBuf> {
@@ -909,17 +922,18 @@ fn equip(
     client.set_diagnostics(Box::new(SharedLog(Rc::clone(log))));
     // The token the host grants goes to the game's file (stage K).
     client.set_token_store(Box::new(GameStore::new(&again.data, &again.address)));
-    let (map, kept, spec_for_rebuild) = (Arc::clone(resources), Rc::clone(sink), Rc::clone(spec));
+    let (map, kept, spec_for_rebuild) = (Arc::clone(resources), Arc::clone(sink), Arc::clone(spec));
     let held = Arc::clone(held);
-    client.set_mission_builder(Box::new(move |spec, reads: &dyn ResourceSource| {
-        *spec_for_rebuild.borrow_mut() = Some(spec.clone());
+    client.set_background_mission_builder(Box::new(move |spec, reads: &dyn ResourceSource| {
+        *spec_for_rebuild.lock().unwrap_or_else(|e| e.into_inner()) = Some(spec.clone());
         // The standby builds the flight the player holds (stage K).
         *held
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(spec.clone());
         // The game's own build for the screens, then the session's: a
         // failure of either is the mission's.
-        *kept.borrow_mut() = Some(build_mission(spec, &map));
+        *kept.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(build_mission(spec, &map).map_err(|e| e.to_string()));
         // Read every resource the plain build reads, through `reads`, so
         // the manifest the host compares is the simulation's own.
         World::new(spec, reads, Seating::Open)
@@ -934,6 +948,10 @@ pub const LEAVE_GRACE: Duration = Duration::from_secs(8);
 impl NetSession {
     /// The import the session's mission is built from, which its capture
     /// converts with.
+    pub fn game_label(&self) -> &str {
+        &self.again.label
+    }
+
     pub fn resources(&self) -> Arc<BTreeMap<String, Vec<u8>>> {
         Arc::clone(&self.resources)
     }
@@ -1022,8 +1040,8 @@ impl NetSession {
             address,
         };
         let log = Rc::new(RefCell::new(DatedLog::new(data.join(files::LOG_FOLDER))));
-        let sink: Sink = Rc::new(RefCell::new(None));
-        let spec_kept: Rc<RefCell<Option<MissionSpec>>> = Rc::new(RefCell::new(None));
+        let sink: Sink = Arc::new(Mutex::new(None));
+        let spec_kept: Arc<Mutex<Option<MissionSpec>>> = Arc::new(Mutex::new(None));
         let held: HeldSpec = Arc::new(Mutex::new(None));
         let capture = equip(
             &mut client,
@@ -1774,15 +1792,39 @@ impl NetSession {
     /// The game's build of the mission, once the host has sent it. `Some`
     /// once; an `Err` is the build's failure.
     pub fn take_built(&mut self) -> Option<WorldResult<Built>> {
-        self.sink.borrow_mut().take()
+        self.sink
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+            .map(|result| result.map_err(Into::into))
     }
 
     /// The game's build of the running mission again, for a player who left
     /// its flight and takes a plane in the same mission once more (the
     /// first seating took the build [`NetSession::take_built`] gave).
     /// `None` until the host has sent a mission.
+    pub fn rebuild_background(
+        &self,
+    ) -> Option<Result<crate::loading::Job<crate::loading::Prepared>, String>> {
+        let spec = self
+            .spec
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()?;
+        let resources = Arc::clone(&self.resources);
+        Some(crate::loading::Job::spawn(move |_| {
+            build_mission(&spec, &resources)
+                .map(|built| crate::loading::Prepared::NetRebuilt(Box::new(built)))
+                .map_err(|e| e.to_string())
+        }))
+    }
+    #[cfg(test)]
     pub fn rebuild(&mut self) -> Option<WorldResult<Built>> {
-        let spec = self.spec.borrow().clone()?;
+        let spec = self
+            .spec
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()?;
         Some(build_mission(&spec, &self.resources))
     }
 

@@ -14,6 +14,7 @@ AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su2
 
 # Every menu state `--snapshot-state` accepts (normal mode).
 NORMAL_STATES = [
+    "loading", "loading-thunderbirds",
     "normal", "hover", "pressed", "help", "pref", "multi", "notice", "controls", "controls-keyboard",
     "controls-mouse", "controls-head", "controls-search", "controls-search-keys", "graphics", "sound",
     "replays", "replays-settings", "replays-delete", "locate", "locate-importing", "locate-done",

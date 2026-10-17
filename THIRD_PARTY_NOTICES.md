@@ -43,6 +43,13 @@ media; see `docs/formats/menu.md` for provenance and validation scope.
 Rust dependency licenses remain those published by their respective authors.
 `Cargo.lock` records the versions used.
 
+## zune-jpeg
+
+The loading photographs are decoded with
+[zune-jpeg](https://github.com/etemesi254/zune-image) 0.5.15 and its
+`zune-core` dependency. Both are MIT OR Apache-2.0 OR Zlib. This build turns
+default features off, so the decode is the scalar path.
+
 ## OpenFA export tooling references
 
 `tools/openfa/upstream/sh.rs` and `lib_ext.rs` are unmodified OpenFA 0.2.14

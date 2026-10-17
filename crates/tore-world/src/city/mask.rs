@@ -388,8 +388,18 @@ impl LightMap {
         base: &str,
         districts: &[District],
     ) -> Self {
-        let classes = reference_palette(resources, &environment.map)
-            .map_or_else(Classes::ukraine, |p| Classes::from_palette(&p));
+        let palette = reference_palette(resources, &environment.map);
+        if std::env::var_os("TORE_LOADING_PROFILE").is_some() {
+            eprintln!(
+                "loading city palette: {}",
+                if palette.is_some() {
+                    "theater"
+                } else {
+                    "ukraine-fallback"
+                }
+            );
+        }
+        let classes = palette.map_or_else(Classes::ukraine, |p| Classes::from_palette(&p));
         let mut pictures: BTreeMap<String, Option<Vec<u8>>> = BTreeMap::new();
         let mut picture = |name: &str| -> Option<Vec<u8>> {
             pictures

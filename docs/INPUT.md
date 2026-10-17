@@ -1340,3 +1340,7 @@ As in flight, letters are read by their physical key and the keypad works as
 the navigation keys whatever NumLock says. Alt+Enter, Alt+F4 and, on macOS,
 Command+Q still work. The viewer ignores every other Ctrl, Alt or Command
 combination, so Ctrl+B marks a moment only in flight.
+
+During flight preparation, flight controls remain paused. Escape cancels a
+multiplayer join or pending content check and returns to the connection screen.
+Window close and resize remain available. See [loading screen](spec/loading-screen.md).

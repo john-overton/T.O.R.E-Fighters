@@ -361,7 +361,11 @@ impl App {
     /// screen but the flight pauses it, a menu or the pause over the flight
     /// too.
     pub(crate) fn input_paused(&self) -> bool {
-        self.screen != Screen::Flight || self.flight_ui.frozen()
+        self.loading.is_some()
+            || self.pending_join.is_some()
+            || self.pending_host.is_some()
+            || self.screen != Screen::Flight
+            || self.flight_ui.frozen()
     }
 
     /// Take Back Flight on the observer screen's menu: the host gives the

@@ -12,6 +12,8 @@ build = "build.rs"
 tore-diagnostics-native = { path = "../tore-diagnostics-native" }
 tore-realtime-native = { path = "../tore-realtime-native" }
 log = "0.4"
+# Loading photographs. Default features stay off: scalar decode, no SIMD.
+zune-jpeg = { version = "0.5.15", default-features = false }
 # Forward winit's existing tracing events to the same small log sink.
 tracing = { version = "0.1", default-features = false, features = ["log"] }
 tore-input = { path = "../tore-input" }

@@ -1648,6 +1648,10 @@ impl crate::App {
         options: HostOptions,
         lobby: bool,
     ) -> Result<(), String> {
+        if !crate::net::session::content_ready(&self.theater_resources) {
+            self.pending_host = Some((options, lobby));
+            return Ok(());
+        }
         let data = match crate::assets::data_directory() {
             Ok(data) => data,
             Err(error) => {

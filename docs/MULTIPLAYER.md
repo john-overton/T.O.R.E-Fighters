@@ -29,6 +29,11 @@ it carries one of these marks:
 - Where this design departs from retail: [relation to Fighters Anthology](#relation-to-fighters-anthology).
 - Delivery stages, code findings and risks: [multiplayer plan](multiplayer-plan.md).
 
+The client now prepares received missions on a background worker and shows a
+[loading screen](spec/loading-screen.md). Transport updates and the existing
+keepalives continue while it builds. Escape during mission preparation cancels
+the join. Host and join content checks are polled too. Remaining validation is listed in that spec.
+
 ## Contents
 
 - [Goals](#goals)

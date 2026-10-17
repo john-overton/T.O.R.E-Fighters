@@ -1,6 +1,7 @@
 # Bundled assets
 
-Everything in this directory is either openly licensed or our own work.
+Everything in this directory is openly licensed, our own work, or supplied
+by John for bundling.
 None of it contains retail game data.
 
 ## Menu font atlases
@@ -128,3 +129,38 @@ python3 tools/package/build_icons.py
 `tore-app.exe` on windows-msvc. The packaging scripts read the PNGs for the
 Linux desktop entry and the macOS `.icns`. The app embeds `tore-64.rgba` for
 the main-menu badge; no external image or runtime image decoder is needed.
+
+## Loading photographs and squadron patch
+
+John requested these bundled images on 2026-10-16. The photos are his supplied
+images, with existing ownership retained, not GPL-licensed retail data. See
+[website provenance](../../../docs/WEBSITE.md#images).
+
+On 2026-10-16 he supplied the full-size originals
+`~/Pictures/Harrier_Sunset_FullSize.jpg` (6000 by 4000) and
+`~/Pictures/F16s_CanopytoCanopy__V2_FullSize.jpg` (4843 by 3229, the
+Thunderbirds canopy-to-canopy photograph). The bundled files are those
+originals resized to 2560 pixels wide, baseline JPEG, quality 88, 4:2:0,
+metadata stripped. `loading/logo.rgba` still comes from
+`docs/images/tore-fighters-logo.png` and still begins with two little-endian
+u32 dimensions, followed by packed 8-bit RGBA. The patch fits inside 220 by
+220. The loading worker decodes the JPEGs with `zune-jpeg` 0.5.15 (scalar:
+default features off). The window thread only cover-fits and shades the
+decoded pixels. A failed decode logs one line and leaves a plain dark
+background. These are source-art conversions, not screenshots or generated
+retail derivatives.
+
+| Loading asset | Pixels | Bytes |
+| --- | --- | ---: |
+| `loading/harrier.jpg` | 2560 by 1707 | 591,274 |
+| `loading/thunderbirds.jpg` | 2560 by 1707 | 320,584 |
+| `loading/logo.rgba` | 220 by 220 | 193,608 |
+
+To regenerate a photo from John's full-size original:
+
+```sh
+magick SOURCE -resize 2560x -quality 88 -sampling-factor 4:2:0 -strip OUT.jpg
+```
+
+The patch is still `magick SOURCE -resize '220x220>' -depth 8 rgba:-`, with
+the resized width and height prefixed as little-endian u32 values.

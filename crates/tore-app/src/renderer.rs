@@ -101,7 +101,92 @@ pub struct Renderer {
     // Fields drop in declaration order; keep the window alive through GPU cleanup.
     pub window: Arc<Window>,
 }
+pub(crate) struct LoadingGraphics {
+    sim: crate::sim_renderer::SimRenderer,
+    cockpit: crate::cockpit_renderer::CockpitRenderer,
+}
 impl Renderer {
+    /// wgpu resources are thread safe; the window and surface stay on the event thread.
+    pub fn loading_factory(
+        &self,
+    ) -> impl FnOnce(
+        &crate::scenery::Scenery,
+        &crate::aircraft::Airframe,
+        &[crate::aircraft::Airframe],
+        &crate::render_snapshot::CombatArt,
+        Option<&Arc<crate::scenery::StaticGeometry>>,
+    ) -> LoadingGraphics
+    + Send
+    + 'static {
+        let device = self.device.clone();
+        let queue = self.queue.clone();
+        let format = self.config.format;
+        let options = self.graphics;
+        let samples = self.samples(options.anti_aliasing);
+        move |scenery, aircraft, models, art, static_geometry| {
+            let mut sim = crate::sim_renderer::SimRenderer::new(
+                &device, &queue, format, scenery, options, samples,
+            );
+            sim.aircraft(&device, &queue, aircraft, &[]);
+            sim.dummies(
+                &device,
+                &queue,
+                models
+                    .iter()
+                    .map(|model| (model, Vec::new(), Vec::new()))
+                    .collect(),
+            );
+            sim.combat(&device, &queue, &Default::default());
+            sim.effects(&device, &queue, &art.effects, &[], &[]);
+            let smoke = tore_sim::combat::smoke::Smoke::default();
+            sim.smoke(
+                &device,
+                &queue,
+                &art.smoke,
+                [&smoke, &smoke],
+                &Default::default(),
+            );
+            if let Some(escape) = &art.escape {
+                sim.escapees(&device, &queue, escape, &[]);
+            }
+            if let Some(geometry) = static_geometry {
+                sim.airports(&device, &queue, geometry);
+            }
+
+            let mut cockpit = crate::cockpit_renderer::CockpitRenderer::new(&device, format);
+            cockpit.prepare(
+                &device,
+                &queue,
+                &aircraft.sprites[aircraft.profile.id.cockpit()],
+                &aircraft.cockpit_pic,
+                aircraft.profile.id,
+            );
+            LoadingGraphics { sim, cockpit }
+        }
+    }
+    pub fn install_loading(
+        &mut self,
+        graphics: LoadingGraphics,
+    ) -> Option<std::thread::JoinHandle<()>> {
+        self.previews.clear();
+        self.mirror_vertices.clear();
+        let old = LoadingGraphics {
+            sim: std::mem::replace(&mut self.sim, graphics.sim),
+            cockpit: std::mem::replace(&mut self.cockpit, graphics.cockpit),
+        };
+        // Driver resource destruction can be expensive too. The caller joins
+        // this after the window closes.
+        match std::thread::Builder::new()
+            .name("graphics-retire".into())
+            .spawn(move || drop(old))
+        {
+            Ok(handle) => Some(handle),
+            Err(error) => {
+                log::warn!("Graphics retirement worker: {error}");
+                None
+            }
+        }
+    }
     pub fn prepare_aircraft(&mut self, hornet: &crate::aircraft::Airframe) {
         self.previews.clear();
         self.mirror_vertices.clear();
@@ -801,6 +886,7 @@ impl Renderer {
         )>,
         flight_size: Option<[u32; 2]>,
     ) -> AppResult<bool> {
+        let frame_started = std::time::Instant::now();
         self.first_frame.begin("game first frame presentation");
         let s = self.window.inner_size();
         if s.width == 0 || s.height == 0 {
@@ -923,6 +1009,12 @@ impl Renderer {
             if flight_size.is_none() && self.menu_text_visible {
                 self.ui_text.draw(&mut pass);
             }
+        }
+        if frame_started.elapsed() > std::time::Duration::from_millis(100) {
+            log::info!(
+                "slow render preparation: {:.3} ms",
+                frame_started.elapsed().as_secs_f64() * 1000.
+            );
         }
         self.queue.submit([encoder.finish()]);
         // Wayland frame callbacks throttle redraw requests to compositor refresh.
