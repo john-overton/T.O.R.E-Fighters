@@ -10976,7 +10976,10 @@ and [CPU measurement](baselines/loading-screen.md).
 ## Exploratory vegetation rendering
 
 On `exp/vegetation`, vegetation is app presentation data. `Scenery` builds the
-retail-art/fallback impostor atlas once; `Placement` caches terrain patch
+retail-art/fallback impostor atlas and optional generated v2 atlas cells once;
+`TORE_VEGETATION_SPRITES` selects retail, pack or mixed at construction. Packed
+cells use negative page codes in the existing instance record, so there is no
+extra draw or instance stride. `Placement` caches terrain patch
 candidates independently of camera distance. `vegetation_renderer` uploads
 changed batches and GPU-culls them into one indirect sprite draw. The grass
 layer remains separate. No vegetation shadow geometry or vegetation state

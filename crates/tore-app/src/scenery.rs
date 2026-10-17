@@ -465,13 +465,22 @@ impl Scenery {
         out.vegetation = crate::vegetation::Atlas::build(resources, terrain)?.map(Arc::new);
         if out.vegetation.is_some() {
             let terrain_bytes = out.texture_indices.len();
-            out.vegetation_meshes = Some(Arc::new(crate::vegetation_shapes::Library::build(
+            let mut library = crate::vegetation_shapes::Library::build(
                 &crate::vegetation::art(),
                 resources,
                 &out.palette,
                 &mut out.sky_indices,
                 |pages| (terrain_bytes + pages.len()) / 65536,
-            )));
+            );
+            let first = (terrain_bytes + out.sky_indices.len()) / 65536;
+            library.add_pack(
+                &std::env::var("TORE_VEGETATION_SPRITES").unwrap_or_else(|_| "mixed".into()),
+                crate::vegetation::region(code),
+                &out.palette,
+                &mut out.sky_indices,
+                first,
+            );
+            out.vegetation_meshes = Some(Arc::new(library));
         }
         if let Some(fill) = &terrain.city_fill {
             let terrain_bytes = out.texture_indices.len();

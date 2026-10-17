@@ -42,6 +42,7 @@ from typing import Iterable, Optional, Sequence
 # --------------------------------------------------------------------------
 
 FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "vegetation": ("CPU vegetation terrain-class camera coverage", ("vegetation-cpu-cameras",)),
     "render-night-light-slots": (
         "headless persistent fire reservation through effect and scene light budgets",
         ("render-night-light-slots",),
@@ -329,6 +330,10 @@ MENU_FAMILIES = ("menus-screens", "menus-creator", "menus-validate")
 # The first matching rule wins. Patterns are fnmatch on the repository-relative path, where "*" also
 # crosses "/".
 RULES: tuple[Rule, ...] = (
+    _r("crates/tore-app/src/vegetation*", ("vegetation", "flight-views"), "vegetation placement and atlas rendering", windowed=True),
+    _r("crates/tore-app/assets/vegetation/*", ("vegetation", "flight-views"), "generated vegetation art", windowed=True),
+    _r("tools/slice_vegetation.py", ("vegetation",), "generated sprite slicer", unit_tests=("test_slice_vegetation",)),
+    _r("tools/battery_scenarios/vegetation.py", ("vegetation",), "CPU vegetation regression coverage"),
     # Documentation and tests change no scenario output.
     _r("docs/*", (), "documentation"),
     _r("*.md", (), "documentation"),

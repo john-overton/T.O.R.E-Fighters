@@ -340,6 +340,15 @@ reference, before, after and coverage PPMs.
 
 ## Exploratory vegetation benchmark
 
+The `vegetation-cpu-cameras` battery scenario runs the CPU-only
+`--vegetation-preview OUT cameras` job. It writes fixed field-edge, slope,
+Egypt water-belt candidate and Vietnam jungle camera coordinates without opening
+a window or creating a GPU adapter. Use the same resulting camera file for both
+builds via `TORE_VEG_PREVIEW_CAMERAS`. This checks camera coverage, not rendered
+appearance. The synthetic vegetation unit tests cover placement, scale, missing
+cutouts and indexed atlas selection. `tools/test_slice_vegetation.py` checks the
+generated pack's alpha, gutters and fringe removal.
+
 On `exp/vegetation`, `tore-app --vegetation-preview OUT cost` renders open
 country and woods at 1440p and 4K, at Medium, High and Ultra. This is an
 offscreen GPU job, not a GPU-free test. Use an isolated profile and the machine's
@@ -350,5 +359,8 @@ Set `TORE_VEG_GPU_TIMING=1` to also emit `GPU` lines using timestamp queries.
 These measure the GPU commands without CPU placement/submission or readback.
 An adapter without the required timestamp features returns an explicit error.
 Use repeated runs and compare medians, with the same camera and settings.
+Compare `TORE_VEGETATION_SPRITES=retail`, `pack` and `mixed`. The pass 4 acceptance
+target is added GPU cost below 2 ms in woods and 1 ms in open country at 4K High.
+These are targets, not measurements for the current density and pack.
 The placement rules and presentation scope are in the
 [vegetation specification](../spec/terrain-detail.md#sprites-and-cached-placement).

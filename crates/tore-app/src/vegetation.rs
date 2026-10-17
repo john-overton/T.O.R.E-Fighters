@@ -366,6 +366,13 @@ pub struct Atlas {
     cols: usize,
 }
 
+/// A procedural plot edge may border meadow, but never water or a road.
+fn field_edge(a: Kind, b: Kind) -> bool {
+    matches!(a, Kind::Field | Kind::Grass)
+        && matches!(b, Kind::Field | Kind::Grass)
+        && (a == Kind::Field || b == Kind::Field)
+}
+
 /// Fitted tree line by climate and tree mix: full cover below the first
 /// height, none above the second (feet).
 fn tree_line(region: Region) -> (f32, f32) {
@@ -521,8 +528,8 @@ impl Atlas {
         let block = TEXELS / per;
         let cols = ((kx1 - kx0) / 4 + 1) as usize * per;
         let rows = ((kz1 - kz0) / 4 + 1) as usize * per;
-        // Each picture's wet blocks, picture space: at least half the block
-        // wet, so a blue roof or a pool in town art is not a river.
+        // Each picture's wet blocks, picture space: at least one eighth of the block
+        // wet, to retain narrower river branches; town exclusions still apply.
         let wet: Vec<Vec<bool>> = self
             .pictures
             .iter()
@@ -533,7 +540,7 @@ impl Atlas {
                         count[(i / TEXELS / block) * per + (i % TEXELS) / block] += 1;
                     }
                 }
-                count.iter().map(|&n| n * 2 >= block * block).collect()
+                count.iter().map(|&n| n * 8 >= block * block).collect()
             })
             .collect();
         let mut dist = vec![255u8; cols * rows];
@@ -817,12 +824,12 @@ impl Atlas {
         if region.climate == 1 {
             let green = matches!(s.kind, Kind::Scrub | Kind::Forest | Kind::Grass);
             let belt = if green {
-                0.12 * s.near_water.powi(6)
+                0.80 * s.near_water.powi(2)
             } else {
                 0.
             };
-            let oasis = 0.15 * s.near_water.powi(6) * if s.kind == Kind::Sand { 1. } else { 0. };
-            let wadi = 0.015 * s.bank + 0.005 * s.bed;
+            let oasis = 0.72 * s.near_water.powi(2) * if s.kind == Kind::Sand { 1. } else { 0. };
+            let wadi = 0.10 * s.bank + 0.025 * s.bed;
             return (belt + oasis + wadi).min(1.) * region.cover;
         }
         let (full, none) = tree_line(region);
@@ -830,11 +837,11 @@ impl Atlas {
         let hill = smoothstep(3., 13., s.slope);
         let relief = smoothstep(400., 2_500., s.height - self.median_height);
         let mut p = match s.kind {
-            Kind::Forest => 0.08 + 0.12 * s.wood,
+            Kind::Forest => 0.70 + 0.25 * s.wood,
             Kind::Grass => {
-                0.004 * s.wood.powf(0.7)
+                0.045 * s.wood.powf(0.7)
                     + 0.001
-                    + 0.055
+                    + 0.18
                         * smoothstep(
                             0.66,
                             0.8,
@@ -852,7 +859,7 @@ impl Atlas {
             // trees gather along a river through the fields.
             p = 0.03 * s.near_water;
         } else {
-            p += (0.015 * hill + 0.008 * relief) * (1. - p);
+            p += (0.48 * hill + 0.18 * relief) * (1. - p);
             p += 0.08 * s.near_water * (1. - p);
         }
         // Tropical forest is closer and taller; arctic trees are scattered.
@@ -861,7 +868,7 @@ impl Atlas {
             2 => 0.45,
             _ => 1.,
         };
-        (p * line * climate * region.cover).clamp(0., 1.)
+        (p * line * (1. - smoothstep(32., 48., s.slope)) * climate * region.cover).clamp(0., 1.)
     }
 
     /// Bushes per candidate (one per 480 square feet), 0..1.
@@ -876,9 +883,9 @@ impl Atlas {
                 + 0.04 * s.bed
                 + 0.025 * s.gravel
                 + if green {
-                    0.08 * s.near_water
+                    0.55 * s.near_water.powi(2)
                 } else {
-                    0.1 * s.near_water
+                    0.50 * s.near_water.powi(2)
                 })
             .min(1.);
         }
@@ -891,7 +898,12 @@ impl Atlas {
             Kind::Snow => 0.02,
             _ => 0.02,
         };
-        (p + 0.25 * s.near_water * if s.kind == Kind::Field { 0.3 } else { 1. }).min(1.)
+        let (full, none) = tree_line(self.region);
+        let alpine = smoothstep(full - 500., full + 500., s.height);
+        ((p + 0.25 * alpine + 0.25 * s.near_water * if s.kind == Kind::Field { 0.3 } else { 1. })
+            * (1. - smoothstep(none, none + 700., s.height))
+            * (1. - smoothstep(32., 48., s.slope)))
+        .min(1.)
     }
 
     /// Stones and boulders per candidate (one per 680 square feet), 0..1.
@@ -946,8 +958,16 @@ impl Atlas {
                         if u >= share {
                             continue;
                         }
-                        let jx = unit(hash(gx, gz, salt + 1));
-                        let jz = unit(hash(gx, gz, salt + 2));
+                        let jx = if salt == 350 {
+                            0.5
+                        } else {
+                            unit(hash(gx, gz, salt + 1))
+                        };
+                        let jz = if salt == 350 {
+                            0.5
+                        } else {
+                            unit(hash(gx, gz, salt + 2))
+                        };
                         let x = x0 + (i as f64 + jx as f64) * step;
                         let z = z0 + (j as f64 + jz as f64) * step;
                         let site = self.table_site(world, &table, cx, cz, x, z);
@@ -965,7 +985,7 @@ impl Atlas {
                     }
                 }
             };
-        scatter(grid(60.), 100, &mut out, &|s, roll| {
+        scatter(grid(42.), 100, &mut out, &|s, roll| {
             let p = self.tree_density(s);
             (p > 0.).then(|| Plant {
                 p,
@@ -999,7 +1019,7 @@ impl Atlas {
                     return None;
                 }
                 let mut plant = self.tree(s, roll);
-                plant.p = if roadside { 0.35 } else { 0.22 };
+                plant.p = if roadside { 0.80 } else { 0.55 };
                 plant.height = if village {
                     18. + 12. * unit(roll >> 11)
                 } else {
@@ -1036,8 +1056,8 @@ impl Atlas {
         scatter(220., 450, &mut out, &|s, roll| {
             let green = matches!(s.kind, Kind::Scrub | Kind::Forest | Kind::Grass);
             let p = match climate {
-                1 if green => 0.1 * s.near_water.powi(6),
-                1 if s.kind == Kind::Sand => 0.08 * s.near_water.powi(6),
+                1 if green => 0.48 * s.near_water.powi(2),
+                1 if s.kind == Kind::Sand => 0.42 * s.near_water.powi(2),
                 3 if self.region.trees == 2 && s.kind == Kind::Forest => 0.1 + 0.3 * s.near_water,
                 _ => 0.,
             };
@@ -1128,7 +1148,7 @@ impl Atlas {
                 if id % 100 >= 55 {
                     continue;
                 }
-                let step = 48.;
+                let step = 32.;
                 let mut t = 0.;
                 let mut i = 0u32;
                 while t < plot as f64 {
@@ -1156,13 +1176,15 @@ impl Atlas {
                     let a = self.table_site(world, table, cx, cz, ax, az);
                     let b = self.table_site(world, table, cx, cz, bx, bz);
                     let site = self.table_site(world, table, cx, cz, x, z);
-                    if a.kind != Kind::Field || b.kind != Kind::Field || site.blocked {
+                    if !field_edge(a.kind, b.kind) || site.blocked {
                         continue;
                     }
                     let tree = !roll.is_multiple_of(4);
                     let plant = if tree {
                         Plant {
                             p,
+                            height: 42. + 18. * unit(roll >> 12),
+                            width: 0.42,
                             ..self.tree(&site, roll)
                         }
                     } else {
@@ -1255,12 +1277,12 @@ impl Atlas {
 
     fn bush(&self, s: &Site, roll: u32, p: f32) -> Plant {
         let size = unit(roll >> 11);
-        let dry = (self.region.climate == 1 && s.near_water < 0.8 && s.bank < 0.5)
-            || (self.region.climate == 1
-                && !matches!(s.kind, Kind::Scrub | Kind::Forest | Kind::Grass))
-            || matches!(s.kind, Kind::Rock | Kind::Sand)
-            || (self.region.climate != 1 && s.kind == Kind::Scrub)
-            || (self.region.code == "GRE" && unit(roll >> 5) < 0.5);
+        let dry = if self.region.climate == 1 {
+            s.near_water < 0.55
+        } else {
+            matches!(s.kind, Kind::Rock | Kind::Sand | Kind::Scrub)
+                || (self.region.code == "GRE" && unit(roll >> 5) < 0.5)
+        };
         if dry {
             Plant {
                 p,
@@ -1302,15 +1324,13 @@ impl Atlas {
     }
 
     fn instance(&self, s: &Site, plant: Plant, rank: f32, roll: u32) -> Inst {
+        let (scale, aspect) = instance_scale(plant.species, roll, s.wood, s.near_water);
+        let height = plant.height * scale;
         Inst {
-            pos: [
-                s.x as f32,
-                sprite_ground(s.height, plant.height),
-                s.z as f32,
-            ],
+            pos: [s.x as f32, sprite_ground(s.height, height), s.z as f32],
             yaw: unit(roll >> 6) * std::f32::consts::TAU,
-            height: plant.height,
-            width: plant.width,
+            height,
+            width: plant.width * aspect,
             grad: s.grad,
             tint: plant.tint,
             rank: rank.clamp(0., 1.),
@@ -1502,6 +1522,41 @@ pub struct Site {
     pub bed: f32,
     pub bank: f32,
     pub gravel: f32,
+}
+
+/// Opinionated size spread requested by John, 2026-10-16. Independent hashes
+/// avoid correlating shape, acceptance probability and size. Two uniform
+/// samples produce a triangular distribution concentrated around the mean.
+fn instance_scale(species: Species, seed: u32, wood: f32, water: f32) -> (f32, f32) {
+    let a = unit(hash(seed as i32, 0, 1201));
+    let b = unit(hash(seed as i32, 0, 1202));
+    let tree = !matches!(
+        species,
+        Species::DryBush
+            | Species::GreenBush
+            | Species::Stone
+            | Species::Boulder
+            | Species::Outcrop
+    );
+    let spread = if tree { 0.4 } else { 0.65 };
+    let habitat = if tree {
+        if water > 0.65 {
+            1.12
+        } else if wood > 0.8 {
+            1.08
+        } else if wood > 0.05 && wood < 0.6 {
+            0.78
+        } else {
+            1.
+        }
+    } else if wood > 0.05 && wood < 0.6 {
+        0.8
+    } else {
+        1.
+    };
+    let scale = (1. + spread * (a + b - 1.)) * habitat;
+    let aspect = 0.88 + 0.24 * unit(hash(seed as i32, 0, 1203));
+    (scale, aspect)
 }
 
 struct Plant {
@@ -2492,6 +2547,106 @@ mod tests {
     }
 
     #[test]
+    fn instance_size_distribution_is_seeded_natural_and_habitat_aware() {
+        let sizes: Vec<_> = (0..10000)
+            .map(|seed| instance_scale(Species::Broadleaf, seed, 0., 0.).0)
+            .collect();
+        let mean = sizes.iter().sum::<f32>() / sizes.len() as f32;
+        assert!((mean - 1.).abs() < 0.01);
+        assert!(sizes.iter().all(|s| (0.6..=1.4).contains(s)));
+        assert!(sizes.iter().filter(|&&s| (0.8..1.2).contains(&s)).count() > 7000);
+        assert!(sizes.iter().copied().fold(1., f32::min) < 0.65);
+        assert!(sizes.iter().copied().fold(1., f32::max) > 1.35);
+        for seed in 0..100 {
+            let edge = instance_scale(Species::Broadleaf, seed, 0.3, 0.);
+            let interior = instance_scale(Species::Broadleaf, seed, 1., 0.);
+            let river = instance_scale(Species::Broadleaf, seed, 0., 1.);
+            assert!(edge.0 < interior.0 && interior.0 < river.0);
+            assert!((0.88..=1.12).contains(&edge.1));
+            assert_eq!(edge, instance_scale(Species::Broadleaf, seed, 0.3, 0.));
+        }
+        let world = flat();
+        let atlas = Atlas::synthetic(solid(10), 0);
+        let site = atlas.site(&world, 4000., 4000.);
+        let inst = atlas.instance(&site, atlas.tree(&site, 42), 0.5, 42);
+        assert_eq!(inst.pos[1], sprite_ground(site.height, inst.height));
+        let bush: Vec<_> = (0..1000)
+            .map(|seed| instance_scale(Species::DryBush, seed, 0., 0.).0)
+            .collect();
+        assert!(bush.iter().any(|&s| s < 0.5) && bush.iter().any(|&s| s > 1.5));
+    }
+
+    #[test]
+    fn field_plants_follow_plot_edges_and_leave_interiors_open() {
+        let plants = placed(Atlas::synthetic(solid(20), 0), [4000., 4000.], 1.);
+        let rows: Vec<_> = plants
+            .iter()
+            .filter(|p| {
+                p.pos[0] > 512.
+                    && p.pos[0] < 7500.
+                    && p.pos[2] > 512.
+                    && p.pos[2] < 7500.
+                    && matches!(
+                        p.species,
+                        Species::Broadleaf
+                            | Species::Autumn
+                            | Species::Conifer
+                            | Species::Dead
+                            | Species::GreenBush
+                    )
+            })
+            .collect();
+        assert!(rows.len() > 40);
+        for plant in rows {
+            let dx = plant.pos[0].rem_euclid(1024.);
+            let dz = plant.pos[2].rem_euclid(1024.);
+            assert!(dx.min(1024. - dx).min(dz.min(1024. - dz)) <= 3.1);
+        }
+    }
+
+    #[test]
+    fn water_belts_hedges_and_mountain_tree_line() {
+        let world = flat();
+        let desert = Atlas::synthetic(solid(20), 1);
+        let mut site = desert.site(&world, 4000., 4000.);
+        site.kind = Kind::Sand;
+        site.bank = 0.;
+        site.bed = 0.;
+        site.near_water = 1.;
+        let bank = desert.tree_density(&site);
+        assert!(bank > 0.65);
+        assert_eq!(desert.bush(&site, 42, 1.).species, Species::GreenBush);
+        site.near_water = 0.5;
+        assert!(desert.tree_density(&site) < bank * 0.3);
+        site.near_water = 0.;
+        assert_eq!(desert.tree_density(&site), 0.);
+        assert!(field_edge(Kind::Field, Kind::Grass));
+        assert!(field_edge(Kind::Field, Kind::Field));
+        assert!(!field_edge(Kind::Field, Kind::Road));
+        assert!(!field_edge(Kind::Field, Kind::Water));
+        let forest = Atlas::synthetic(solid(10), 0);
+        site.kind = Kind::Forest;
+        site.wood = 1.;
+        site.height = 3000.;
+        site.slope = 18.;
+        assert!(forest.tree_density(&site) > 0.9);
+        site.height = 7000.;
+        assert_eq!(forest.tree_density(&site), 0.);
+        assert!(forest.bush_density(&site) > 0.);
+        site.height = 7800.;
+        assert_eq!(forest.bush_density(&site), 0.);
+        // Mapped thin delta branches must seed the coarse water-distance grid.
+        let mut pixels = solid(20);
+        for y in 0..256 {
+            for x in 124..128 {
+                pixels[y * 256 + x] = 255;
+            }
+        }
+        let delta = Atlas::synthetic(pixels, 1);
+        assert!(delta.water.dist.contains(&0));
+    }
+
+    #[test]
     fn resident_patches_are_built_once_across_camera_and_lod_changes() {
         let world = flat();
         let mut cache = Placement::new(Arc::new(Atlas::synthetic(solid(10), 0)));
@@ -2529,14 +2684,14 @@ mod tests {
         assert_eq!(temperate.bush_density(&site), 0.);
         site.kind = Kind::Forest;
         site.wood = 1.;
-        assert!(temperate.tree_density(&site) <= 0.21);
+        assert!(temperate.tree_density(&site) >= 0.9);
         site.height = 0.;
         site.slope = 0.;
         let tropical = Atlas::synthetic(solid(10), 3);
         let arctic = Atlas::synthetic(solid(10), 2);
-        assert!((temperate.tree_density(&site) - 0.20).abs() < 0.001);
-        assert!((tropical.tree_density(&site) - 0.23).abs() < 0.001);
-        assert!((arctic.tree_density(&site) - 0.09).abs() < 0.001);
+        assert!((temperate.tree_density(&site) - 0.95).abs() < 0.001);
+        assert!((tropical.tree_density(&site) - 1.0).abs() < 0.001);
+        assert!((arctic.tree_density(&site) - 0.4275).abs() < 0.001);
     }
 
     #[test]

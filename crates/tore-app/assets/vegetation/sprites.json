@@ -1,0 +1,188 @@
+[
+  {
+    "name": "saguaro",
+    "page": 0,
+    "tile": 0,
+    "radius": 0.29259259259259257
+  },
+  {
+    "name": "small_cactus",
+    "page": 0,
+    "tile": 1,
+    "radius": 0.2769607843137255
+  },
+  {
+    "name": "prickly_pear",
+    "page": 0,
+    "tile": 2,
+    "radius": 0.4338235294117647
+  },
+  {
+    "name": "dry_shrub",
+    "page": 0,
+    "tile": 3,
+    "radius": 0.6904761904761905
+  },
+  {
+    "name": "yucca",
+    "page": 1,
+    "tile": 0,
+    "radius": 0.5150375939849624
+  },
+  {
+    "name": "dry_scrub",
+    "page": 1,
+    "tile": 1,
+    "radius": 0.6592592592592592
+  },
+  {
+    "name": "desert_rocks",
+    "page": 1,
+    "tile": 2,
+    "radius": 0.7831325301204819
+  },
+  {
+    "name": "desert_boulder",
+    "page": 1,
+    "tile": 3,
+    "radius": 0.7163461538461539
+  },
+  {
+    "name": "desert_stones",
+    "page": 2,
+    "tile": 0,
+    "radius": 0.8298969072164949
+  },
+  {
+    "name": "broadleaf",
+    "page": 2,
+    "tile": 1,
+    "radius": 0.4157706093189964
+  },
+  {
+    "name": "autumn",
+    "page": 2,
+    "tile": 2,
+    "radius": 0.3781362007168459
+  },
+  {
+    "name": "birch",
+    "page": 2,
+    "tile": 3,
+    "radius": 0.37781954887218044
+  },
+  {
+    "name": "green_bush",
+    "page": 3,
+    "tile": 0,
+    "radius": 0.5819672131147541
+  },
+  {
+    "name": "red_bush",
+    "page": 3,
+    "tile": 1,
+    "radius": 0.539568345323741
+  },
+  {
+    "name": "sparse_bush",
+    "page": 3,
+    "tile": 2,
+    "radius": 0.46060606060606063
+  },
+  {
+    "name": "conifer",
+    "page": 3,
+    "tile": 3,
+    "radius": 0.4296482412060301
+  },
+  {
+    "name": "mossy_boulder",
+    "page": 4,
+    "tile": 0,
+    "radius": 0.7880794701986755
+  },
+  {
+    "name": "mossy_rock",
+    "page": 4,
+    "tile": 1,
+    "radius": 0.6697247706422018
+  },
+  {
+    "name": "flat_rock",
+    "page": 4,
+    "tile": 2,
+    "radius": 0.8823529411764706
+  },
+  {
+    "name": "palm_a",
+    "page": 4,
+    "tile": 3,
+    "radius": 0.4061433447098976
+  },
+  {
+    "name": "palm_b",
+    "page": 5,
+    "tile": 0,
+    "radius": 0.298932384341637
+  },
+  {
+    "name": "jungle_tree",
+    "page": 5,
+    "tile": 1,
+    "radius": 0.44346289752650175
+  },
+  {
+    "name": "banana",
+    "page": 5,
+    "tile": 2,
+    "radius": 0.515625
+  },
+  {
+    "name": "fern",
+    "page": 5,
+    "tile": 3,
+    "radius": 0.5
+  },
+  {
+    "name": "jungle_bush",
+    "page": 6,
+    "tile": 0,
+    "radius": 0.46551724137931033
+  },
+  {
+    "name": "tropical_shrub",
+    "page": 6,
+    "tile": 1,
+    "radius": 0.5108695652173914
+  },
+  {
+    "name": "jungle_boulder",
+    "page": 6,
+    "tile": 2,
+    "radius": 0.6766666666666666
+  },
+  {
+    "name": "jungle_rock",
+    "page": 6,
+    "tile": 3,
+    "radius": 0.6869158878504673
+  },
+  {
+    "name": "fallen_log",
+    "page": 7,
+    "tile": 0,
+    "radius": 1.0625
+  },
+  {
+    "name": "grey_shrub",
+    "page": 7,
+    "tile": 1,
+    "radius": 0.5555555555555556
+  },
+  {
+    "name": "small_rock",
+    "page": 7,
+    "tile": 2,
+    "radius": 0.6532258064516129
+  }
+]

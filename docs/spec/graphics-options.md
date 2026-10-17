@@ -192,8 +192,10 @@ third of that, single stones at about an eighth), and the grass carpet
 reaches half the detail distance at most. Tree clumps (retail grove
 shapes) stand in for single trees from about a third of the full
 density distance outwards. The trees, bushes, palms and rocks are the
-four-view camera-facing impostors baked from retail art or low-poly fallbacks
-at startup, with a 1.5 pixel size floor. **Vegetation density** is Low, Med, High or Ultra
+camera-facing sprites from retail art, low-poly fallbacks or John's generated v2
+pack. The developer environment switch `TORE_VEGETATION_SPRITES=retail|pack|mixed`
+is read at scene startup, with `mixed` the branch default. There is no new saved
+Graphics row, since changing this art requires rebuilding the scene atlas. Sprites draw with a 1.5 pixel size floor. **Vegetation density** is Low, Med, High or Ultra
 (about 0.4, 0.7, 1.0 and 1.65 times the High placement), and also sets
 the grass carpet:
 

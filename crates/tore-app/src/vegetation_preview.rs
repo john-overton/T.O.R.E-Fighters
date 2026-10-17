@@ -96,6 +96,33 @@ pub fn run() -> AppResult<()> {
     }
     let assets = crate::reel::load_assets()?;
     let resources = &assets.theater_resources;
+    if jobs.iter().any(|job| job == "cameras") {
+        // CPU only: freeze additional camera coordinates before either build
+        // renders. These are terrain-class candidates, not surveyed locations.
+        let mut file = std::fs::File::create(out.join("extra-cameras.txt"))?;
+        for (code, name, kind, height, pitch) in [
+            ("UKR", "UKR-field-edge-pass4", "field", 220., 10.),
+            ("UKR", "UKR-mountain-slope-pass4", "hill", 700., 10.),
+            ("EGY", "EGY-delta-candidate-pass4", "river", 900., 22.),
+            ("TVIET", "TVIET-jungle-pass4", "wood", 450., 12.),
+        ] {
+            let world = Terrain::for_mission(resources, code, Some(0), &overrides([12, 0])?)?;
+            let atlas =
+                crate::vegetation::Atlas::build(resources, &world)?.ok_or("vegetation disabled")?;
+            let spots = crate::vegetation::spots(&atlas, &world);
+            let spot = spots
+                .iter()
+                .find(|s| s.label == kind)
+                .ok_or_else(|| format!("no {code} {kind} camera candidate"))?;
+            let cam = look_at(&world, spot, &shot(name, kind, height, pitch, 0.));
+            writeln!(
+                file,
+                "{name} {code} 0 12 0 {} {} {} {} {}",
+                cam.position[0], cam.position[1], cam.position[2], cam.yaw, cam.pitch
+            )?;
+        }
+        return Ok(());
+    }
     if let Ok(file) = std::env::var("TORE_VEG_PREVIEW_CAMERAS") {
         return replay_cameras(resources, out, &std::fs::read_to_string(file)?);
     }
@@ -563,6 +590,40 @@ pub fn art() -> AppResult<()> {
                 );
             }
         }
+    }
+    let mut pages = Vec::new();
+    let lib =
+        crate::vegetation_shapes::Library::build(&art, resources, &palette, &mut pages, |p| {
+            p.len() / 65536
+        });
+    for (i, mesh) in lib.meshes.iter().enumerate() {
+        let page = &pages[mesh.sprite_layer * 65536..][..65536];
+        let rgba: Vec<u8> = page
+            .iter()
+            .flat_map(|&index| {
+                if index == 255 {
+                    [0, 0, 0, 0]
+                } else {
+                    let c = palette[usize::from(index)];
+                    [c[0], c[1], c[2], 255]
+                }
+            })
+            .collect();
+        write_png(
+            out,
+            &format!("baked-{i}-{}", mesh.source),
+            [256, 256],
+            &rgba,
+        )?;
+        println!(
+            "baked {i} {} mean {:?} visible {} black {}",
+            mesh.source,
+            mesh.recolour,
+            page.iter().filter(|&&p| p != 255).count(),
+            page.iter()
+                .filter(|&&p| p != 255 && palette[usize::from(p)].iter().all(|&c| c < 8))
+                .count()
+        );
     }
     Ok(())
 }

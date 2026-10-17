@@ -411,7 +411,12 @@ impl Renderer {
                 mesh.radius,
                 f32::from_bits(list.len() as u32),
             ]);
-            table.extend([mean[0], mean[1], mean[2], mesh.sprite_layer as f32]);
+            // Negative page codes carry a generated atlas cell without enlarging
+            // the instance or mesh record. Retail still selects four views.
+            let page = mesh.sprite_tile.map_or(mesh.sprite_layer as f32, |tile| {
+                -((mesh.sprite_layer * 4 + usize::from(tile) + 1) as f32)
+            });
+            table.extend([mean[0], mean[1], mean[2], page]);
         }
         if !table.is_empty() {
             queue.write_buffer(&self.meshes, 0, &bytes_of_f32(&table));

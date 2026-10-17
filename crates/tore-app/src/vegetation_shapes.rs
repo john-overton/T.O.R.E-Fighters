@@ -47,6 +47,8 @@ pub struct Mesh {
     pub source: String,
     /// First of four indexed impostor pages, generated once at scene startup.
     pub sprite_layer: usize,
+    /// Packed generated art uses one of four 128 px cells, with a 2 px gutter.
+    pub sprite_tile: Option<u8>,
 }
 
 pub struct Library {
@@ -191,6 +193,114 @@ impl Library {
         lib
     }
 
+    /// Add the generated pack to the same indexed texture array and draw stream.
+    /// No cacti are selected: none of this branch's arid theaters is New World.
+    pub fn add_pack(
+        &mut self,
+        mode: &str,
+        region: crate::vegetation::Region,
+        palette: &[[u8; 3]; 256],
+        pages: &mut Vec<u8>,
+        first: usize,
+    ) {
+        if mode == "retail" {
+            return;
+        }
+        if !matches!(mode, "pack" | "mixed") {
+            eprintln!("vegetation: invalid TORE_VEGETATION_SPRITES={mode}, using mixed");
+        }
+        let rgba = include_bytes!("../assets/vegetation/pack.rgba");
+        // Quantize once into the theater palette. The shader uses live weather
+        // palette rows, local leaf tint, sunlight, fog and existing night light.
+        let mut lookup = BTreeMap::new();
+        for pixel in rgba.chunks_exact(4) {
+            if pixel[3] < 128 {
+                pages.push(255);
+                continue;
+            }
+            let rgb: [u8; 3] = std::array::from_fn(|k| (f32::from(pixel[k]) * 0.78) as u8);
+            let index = *lookup.entry(rgb).or_insert_with(|| {
+                (0..255)
+                    .min_by_key(|&i| {
+                        (0..3)
+                            .map(|k| (i32::from(palette[i][k]) - i32::from(rgb[k])).pow(2))
+                            .sum::<i32>()
+                    })
+                    .unwrap_or(0) as u8
+            });
+            pages.push(index);
+        }
+        let tropical = region.climate == 3;
+        let desert = region.climate == 1;
+        let choices: &[(Species, &[usize])] = &[
+            (Species::Broadleaf, if tropical { &[21] } else { &[9, 11] }),
+            (Species::Autumn, &[10]),
+            (Species::Conifer, &[15]),
+            (Species::Palm, &[19, 20]),
+            (Species::DryBush, &[3, 4, 5, 29]),
+            (
+                Species::GreenBush,
+                if tropical {
+                    &[22, 23, 24, 25]
+                } else {
+                    &[12, 14]
+                },
+            ),
+            (Species::Stone, if desert { &[8] } else { &[18, 30] }),
+            (Species::Boulder, if desert { &[7] } else { &[17, 27] }),
+            (Species::Outcrop, if desert { &[6] } else { &[16, 26] }),
+            (Species::Grove, if tropical { &[21] } else { &[9, 11] }),
+            (Species::PineGrove, &[15]),
+            (Species::PalmGrove, &[19, 20]),
+        ];
+        for &(species, ids) in choices {
+            // Mixed preserves the retail conifers and grove silhouettes.
+            if mode != "pack"
+                && matches!(
+                    species,
+                    Species::Conifer | Species::Grove | Species::PineGrove | Species::PalmGrove
+                )
+            {
+                continue;
+            }
+            self.variants[species as usize].clear();
+            for &id in ids {
+                let (name, radius) = PACK[id];
+                self.variants[species as usize].push(self.meshes.len() as u16);
+                self.meshes.push(Mesh {
+                    range: 0..6,
+                    radius,
+                    look: if matches!(
+                        species,
+                        Species::Stone | Species::Boulder | Species::Outcrop
+                    ) {
+                        Look::Solid
+                    } else {
+                        Look::Foliage
+                    },
+                    recolour: if matches!(
+                        species,
+                        Species::Stone | Species::Boulder | Species::Outcrop
+                    ) {
+                        let start = pages.len() - rgba.len() / 4 + id / 4 * 65536;
+                        let cell: Vec<u8> = (0..128)
+                            .flat_map(|y| {
+                                let row = start + (id % 4 / 2 * 128 + y) * 256 + id % 2 * 128;
+                                pages[row..row + 128].iter().copied()
+                            })
+                            .collect();
+                        indexed_mean(&cell, palette)
+                    } else {
+                        None
+                    },
+                    source: format!("pack/{name}"),
+                    sprite_layer: first + id / 4,
+                    sprite_tile: Some((id % 4) as u8),
+                });
+            }
+        }
+    }
+
     /// CPU orthographic rasterization at startup. The indexed pages share the
     /// scenery texture array, including its weather palette and transparency.
     fn bake(
@@ -206,6 +316,13 @@ impl Library {
             for angle in 0..4 {
                 let page = bake_view(vertices, mesh.radius, angle, pages, first(pages), palette);
                 pages.extend(page);
+            }
+            if mesh.look == Look::Solid {
+                // The source mesh no longer supplies colour or normals. All
+                // rock sprites, including drawn fallbacks, need a brightness
+                // reference or the local linear ground tint is multiplied by
+                // an already dark texture, producing near-black silhouettes.
+                mesh.recolour = indexed_mean(&pages[pages.len() - 4 * 65536..], palette);
             }
         }
         // All species use the same two triangles. Dimensions and page selection
@@ -247,6 +364,7 @@ impl Library {
             recolour,
             source: source.to_string(),
             sprite_layer: 0,
+            sprite_tile: None,
         });
     }
 
@@ -379,6 +497,27 @@ fn bake_view(
         }
     }
     out
+}
+
+/// Mean visible linear albedo of an actual baked sprite, not its source sheet.
+fn indexed_mean(pixels: &[u8], palette: &[[u8; 3]; 256]) -> Option<[f32; 3]> {
+    let mut sum = [0.; 3];
+    let mut count = 0.;
+    for &index in pixels {
+        if index == 255 {
+            continue;
+        }
+        let rgb = crate::vegetation::lin(palette[usize::from(index)]);
+        for k in 0..3 {
+            sum[k] += rgb[k];
+        }
+        count += 1.;
+    }
+    if count == 0. {
+        return None;
+    }
+    let mean = sum.map(|x| x / count);
+    (mean.iter().sum::<f32>() > 0.0001).then_some(mean)
 }
 
 type Images = BTreeMap<String, Option<(crate::static_art::Image, [f32; 3])>>;
@@ -564,6 +703,9 @@ fn normalise(
             }
             images[&name]
         };
+        if !face.texture.is_empty() && image.is_none() {
+            return Err(format!("missing vegetation cutout {}", face.texture).into());
+        }
         let local = |p: [f32; 3]| [(p[0] - cx) * s, (p[2] - base) * s, (p[1] - cy) * s];
         let a = local(face.positions[0]);
         let mut normal = [0f32; 3];
@@ -974,9 +1116,100 @@ fn outcrop(seed: u32) -> Vec<f32> {
     o
 }
 
+include!("../assets/vegetation/pack_layout.rs");
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rock_brightness_reference_ignores_cutouts_and_keeps_ground_tint() {
+        let mut palette = [[0; 3]; 256];
+        palette[17] = [100, 90, 70];
+        let mean = indexed_mean(&[255, 17, 17, 255], &palette).unwrap();
+        assert_eq!(mean, crate::vegetation::lin(palette[17]));
+        // Uniform rock texture / its reference = 1, preserving local tint.
+        let local = [0.08, 0.1, 0.04];
+        let restored: [f32; 3] = std::array::from_fn(|k| local[k] * mean[k] / mean[k]);
+        for k in 0..3 {
+            assert!((restored[k] - local[k]).abs() < 1e-6);
+        }
+        assert_eq!(indexed_mean(&[255, 255], &palette), None);
+    }
+
+    #[test]
+    fn missing_cutout_rejects_source_instead_of_baking_black_triangles() {
+        let face = tore_formats::shape::Face {
+            positions: vec![[0., 0., 0.], [1., 0., 1.], [-1., 0., 1.]],
+            colors: vec![0; 3],
+            fog: Default::default(),
+            uv: vec![[0., 0.]; 3],
+            texture: "MISSING.PIC".into(),
+            subtype: 0,
+            normal: None,
+            address: 0,
+        };
+        let empty = BTreeMap::new();
+        let result = normalise(
+            &[&face],
+            Cut::Whole,
+            &empty,
+            &empty,
+            &[[0; 3]; 256],
+            &mut Vec::new(),
+            &|p| p.len() / 65536,
+            &mut BTreeMap::new(),
+        );
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("missing vegetation cutout")
+        );
+    }
+
+    #[test]
+    fn pack_selection_has_valid_pages_and_never_selects_new_world_cacti() {
+        for mode in ["retail", "pack", "mixed"] {
+            for code in ["UKR", "EGY", "PGU", "IRA", "TVIET"] {
+                let mut lib = Library {
+                    vertices: vec![0.; 6 * FLOATS],
+                    meshes: Vec::new(),
+                    variants: vec![Vec::new(); Species::ALL.len()],
+                };
+                let mut pages = Vec::new();
+                lib.add_pack(
+                    mode,
+                    crate::vegetation::region(code),
+                    &[[80; 3]; 256],
+                    &mut pages,
+                    7,
+                );
+                if mode == "retail" {
+                    assert!(pages.is_empty());
+                    continue;
+                }
+                assert_eq!(pages.len(), 8 * 65536);
+                for mesh in &lib.meshes {
+                    assert!(
+                        !mesh.source.contains("cactus")
+                            && !mesh.source.contains("saguaro")
+                            && !mesh.source.contains("prickly")
+                    );
+                    let tile = usize::from(mesh.sprite_tile.unwrap());
+                    let page = &pages[(mesh.sprite_layer - 7) * 65536..][..65536];
+                    assert!((0..128).any(|y| {
+                        (0..128)
+                            .any(|x| page[(tile / 2 * 128 + y) * 256 + tile % 2 * 128 + x] != 255)
+                    }));
+                    assert_eq!(mesh.range, 0..6);
+                }
+                if mode == "mixed" {
+                    assert!(lib.variants[Species::Conifer as usize].is_empty());
+                }
+            }
+        }
+    }
 
     #[test]
     fn side_views_select_the_surface_toward_the_camera() {

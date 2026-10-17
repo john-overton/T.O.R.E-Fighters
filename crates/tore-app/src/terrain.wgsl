@@ -461,6 +461,15 @@ fn fill_shadow(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,size:vec4<f32>,
 }
 // Terrain cutouts expose the already rendered ocean/horizon, never the T2
 // land color. Keep this separate from aircraft's base-color texture blending.
+// Blend a narrow tile margin toward the continuous terrain vertex colour.
+// This removes the strongest ploughed-tile seam without blurring roads/water.
+fn field_margin(color:vec3<f32>,ground:vec3<f32>,uv:vec2<f32>)->vec3<f32> {
+ if scene.veg.x<0.5 || scene.veg.w>0.5 {return color;}
+ let brown=smoothstep(0.80,0.95,color.r/max(color.g,0.0001))*smoothstep(1.25,1.6,color.r/max(color.b,0.0001));
+ let edge=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
+ let blend=(1.0-smoothstep(0.0,0.035,edge))*brown*0.85;
+ return mix(color,ground,blend);
+}
 @fragment fn terrain_fragment(in:VertexOut)->@location(0) vec4<f32>{
  // Derivatives must be taken before the untextured early return.
  let grad=vec4<f32>(dpdx(in.uv),dpdy(in.uv));
@@ -482,10 +491,11 @@ fn fill_shadow(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,size:vec4<f32>,
  }
  // One detail term for the shaded colour and the flare-lit albedo, so a
  // dynamic light (flare, afterburner, fire, gun flash) only adds light.
- let detail=ground_detail(tex.rgb,in.direction,normal);
- var albedo=tex.rgb;
- if flares_burning() {albedo=sample_tile(in.uv,i32(in.layer),base_row(),-1,in.light_row,vec2<f32>(-1.0)).rgb;}
- return scenery(aerial_perspective(surface_color(tex.rgb*detail.tint,in.direction,detail.normal,false,receiver,albedo*detail.tint),in.direction,in.altitude));
+ let field_color=field_margin(tex.rgb,in.color,in.uv);
+ let detail=ground_detail(field_color,in.direction,normal);
+ var albedo=field_color;
+ if flares_burning() {albedo=field_margin(sample_tile(in.uv,i32(in.layer),base_row(),-1,in.light_row,vec2<f32>(-1.0)).rgb,in.albedo,in.uv);}
+ return scenery(aerial_perspective(surface_color(field_color*detail.tint,in.direction,detail.normal,false,receiver,albedo*detail.tint),in.direction,in.altitude));
 }
 // Close-range ground detail (exploratory vegetation, 2026-10-16; desert and
 // band-limited rework in pass 2). Presentation only. Colours stay the
@@ -750,8 +760,10 @@ fn ground_detail(color:vec3<f32>,direction:vec3<f32>,normal:vec3<f32>)->Detail {
   coarse*=mix(vec3<f32>(1.0),vec3<f32>(0.88,0.94,0.88),smoothstep(0.55,0.85,n2)*(grass+wood));
   // Fields: a patchwork of plots, each its own crop shade.
   let plot=vec2<i32>(floor(w/1024.0));
-  let crop=detail_hash(plot,52u);
-  coarse*=mix(vec3<f32>(1.0),vec3<f32>(0.9+0.2*crop,0.92+0.14*detail_hash(plot,53u),0.9+0.1*crop),field);
+  let plot_edge=min(min(fract(w.x/1024.0),1.0-fract(w.x/1024.0)),min(fract(w.y/1024.0),1.0-fract(w.y/1024.0)));
+  let plot_blend=smoothstep(0.0,0.035,plot_edge);
+  let crop=mix(detail_noise(w/1024.0,0,52u),detail_hash(plot,52u),plot_blend);
+  coarse*=mix(vec3<f32>(1.0),vec3<f32>(0.9+0.2*crop,0.92+0.14*mix(detail_noise(w/1024.0,0,53u),detail_hash(plot,53u),plot_blend),0.9+0.1*crop),field);
   tint=mix(vec3<f32>(1.0),coarse,far);
   if near>0.01 {
    var v=0.0;
@@ -761,7 +773,7 @@ fn ground_detail(color:vec3<f32>,direction:vec3<f32>,normal:vec3<f32>)->Detail {
    // Furrows run one of four ways per plot.
    let way=f32(u32(crop*4.0))*0.785398;
    let furrow=sin(DETAIL_TAU*dot(q,detail_lattice(way,12.0)));
-   v+=(furrow*0.10*detail_band(12.0,foot)+(fine_noise(q,2.0,59u)-0.5)*0.08*detail_band(2.0,foot))*field;
+   v+=(furrow*plot_blend*0.10*detail_band(12.0,foot)+(fine_noise(q,2.0,59u)-0.5)*0.08*detail_band(2.0,foot))*field;
    v+=((fine_noise(q,8.0,60u)-0.5)*0.22+(fine_noise(q,2.0,61u)-0.5)*0.14*detail_band(2.0,foot))*rock;
    if fine {v+=(fine_noise(q,0.5,62u)-0.5)*0.06*detail_band(0.5,foot)*(grass+field);}
    if climate>1.5 && climate<2.5 {v*=0.5;}
@@ -934,14 +946,24 @@ fn veg_place(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,shape:vec4<f32>)-
  let p=place.xyz+vec3<f32>(offset.x,position.y*turn.z,offset.y);
  let azimuth=atan2(facing.x,facing.y)-atan2(spin.y,spin.x);
  let view=u32(floor(azimuth/1.570796327+0.5)+8.0)%4u;
- let sprite=mean.w+f32(view);
+ var sprite=mean.w+f32(view);
+ var sprite_uv=uv;
+ if mean.w<0.0 {
+  let packed=u32(-mean.w-1.0);
+  sprite=f32(packed/4u);
+  let cell=packed%4u;
+  sprite_uv=(vec2<f32>(f32(cell%2u),f32(cell/2u))*128.0+vec2<f32>(2.5)+uv*123.0)/256.0;
+ }
  let rel=p-scene.local_eye.xyz;
- let base=placed_vertex(p+scene.origin.xyz,rel,uv,sprite,vec3<f32>(1.0),select(-1.0,part,part>=0.0));
+ let base=placed_vertex(p+scene.origin.xyz,rel,sprite_uv,sprite,vec3<f32>(1.0),select(-1.0,part,part>=0.0));
  var out:VegOut;
- out.clip=base.clip;out.uv=uv;out.layer=sprite;out.direction=rel;out.altitude=base.altitude;
+ out.clip=base.clip;out.uv=sprite_uv;out.layer=sprite;out.direction=rel;out.altitude=base.altitude;
  out.fog_enabled=base.fog_enabled;
  let n=vec3<f32>(normal.x*turn.x+normal.z*turn.y,normal.y,normal.z*turn.x-normal.x*turn.y);
  out.normal=normalize(vec3<f32>(n.x,n.y*max(shape.x,0.2),n.z));
+ // A baked rock card has no useful face normal. Light it with its ground
+ // slope, not the arbitrary vertical shared quad normal.
+ if shape.w>0.5 {out.normal=normalize(vec3<f32>(-shape.y,1.0,-shape.z));}
  out.fade=vec2<f32>(turn.w,place.w);out.look=shape.w;out.mean=mean.xyz;out.height=position.y;
  // Untextured colour: a retail face's palette colour, or a drawn part.
  out.color=base.color;out.albedo=base.albedo;

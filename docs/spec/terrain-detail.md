@@ -135,14 +135,14 @@ It is not part of the terrain-detail behaviour above.
 John asked for vegetation on 2026-10-16 and for the second pass the
 same day (retail trees, placement from the tile art, denser grass, a
 better desert); the rules and numbers are agent choices, fitted by eye
-on offscreen renders for passes 1 and 2. Pass 3 is not visually validated.
+on offscreen renders for passes 1 and 2. Pass 3 was reviewed by John; pass 4 awaits GPU visual and timing validation.
 The new placement is not a claim about retail placement. Nothing is
 collidable or part of the simulation, the network session, replays or
 checkpoints.
 
 ### Sprites and cached placement
 
-John requested sprites, lower density and caching on 2026-10-16. The following
+John requested sprites and caching, then denser ecological placement and a generated sprite option on 2026-10-16. The following
 numbers are **opinionated agent decisions**, pending offscreen visual review.
 The retail asset evidence and unresolved original distance rules are in
 [objects and shapes](../formats/objects-and-shapes.md#vegetation-card-assets).
@@ -152,7 +152,22 @@ impostors at all ranges, two triangles each. At scene startup a CPU rasterizer
 bakes four horizontal views, 90 degrees apart, into indexed 256 by 256 pages.
 This retains the imported PIC transparency and live weather palette. Runtime
 art stays in memory. Nothing retail is embedded or written into the repository.
-The source meshes are not drawn each frame, including at close range. This
+The optional generated v2 pack uses eight 256 px indexed atlas pages with four
+128 px cells per page and transparent gutters. It is supplied by John, not retail
+art. `TORE_VEGETATION_SPRITES=retail|pack|mixed` is read at scene construction;
+this exploratory branch defaults to `mixed`. Mixed keeps retail conifers and
+groves and uses the pack for the other available kinds. Pack mode uses large
+single-tree silhouettes for groves. Dead trees and acacias keep the existing
+fallbacks because v2 has no equivalent. Tropical broadleaf uses the jungle tree,
+and desert rocks use dry rock variants. Saguaro and prickly pear are never
+selected. See [generated art provenance](../../crates/tore-app/assets/vegetation/README.md).
+Generated RGB is reduced to 78% before matching the theater palette; live weather
+palette rows, local tint and scene lighting apply to both art sources.
+Missing retail cutouts reject that source and use a fallback, never a solid
+black polygon. Baked rock brightness is normalized against the visible sprite's
+mean linear colour, including drawn fallback rocks. Rock cards use the ground
+slope normal for lighting, avoiding dark silhouettes from the shared quad's
+vertical normal and double multiplication of ground tint. The source meshes are not drawn each frame, including at close range. This
 agent choice avoids a second geometry path; close views need visual review.
 
 The source art is `TREEA` through `TREED`, `BUSH1` through `BUSH4`, `GROVA`
@@ -176,25 +191,48 @@ configured distance. Existing altitude fades and grass rings remain.
 Placement still reads the theater's own palette, ground slope and water map.
 The following High settings scale candidate count with density:
 
-- Trees use a 60 ft candidate grid, bushes 44 ft, small rocks 52 ft. Within
-  woodland, tree probability is 0.08 to 0.20, instead of 0.55 to 1 on a 30 ft
-  grid. Meadow has a 0.001 background plus sparse 1,400 ft copses. Hills add
-  at most 0.023 probability, rather than turning whole slopes into forest.
-- Field interiors remain clear. Existing 1,024 ft plot boundaries carry rows
-  at 48 ft spacing, with three quarters trees and one quarter bushes.
-  Roadside candidates lie within a 96 ft probe of mapped roads. Outside village
-  exclusion circles, a 350 ft band carries smaller tree clumps on a jittered
-  64 ft grid. These are fitted orchard-like clumps, not recovered orchard maps.
-- Water, streets, town centers and runway exclusions remain clear. Grounding
-  continues through `tore_world::grounding`.
-- Desert open sand has dry scrub probability 0.012 on the 44 ft grid, roughly
-  one candidate accepted per 161,000 square feet. Bushes are 1.5 to 4 ft tall,
-  tinted brown-olive. Open sand has no trees. Woody green water belts use the
-  sixth power of the existing water proximity, concentrating them near banks.
-  Wadis have sparse acacias and dry bushes. Rock patches retain the existing
-  slope, gravel and outcrop rules with fewer small rocks.
-- Tropical and arctic keep their climate multipliers (1.15 and 0.45), their
-  species and tree lines, on the same reduced candidate grids.
+- Trees use a 42 ft High candidate grid, bushes 44 ft and small rocks 52 ft.
+  Woodland probability is 0.70 plus 0.25 times the local woodland share.
+  Meadow retains a 0.001 background plus 0.045 times woodland proximity and
+  patchy copses, with probability up to 0.18 in the existing 1,400 ft noise.
+  Hills add up to 0.48 and relief up to 0.18, below the tree line. Slopes fade
+  from 32 to 48 degrees to keep cliffs bare.
+- Field interiors stay clear. Procedural 1,024 ft square plots, independent of
+  retail tile boundaries, carry selected rows at 32 ft spacing. A boundary
+  qualifies when both sides are field, or one is field and the other meadow.
+  Three quarters of row plants are narrow 42 to 60 ft trees, one quarter bushes.
+  A 96 ft mapped-road probe selects rows on a regular 64 ft candidate grid at
+  probability 0.80. Village margins carry orchard-like clumps at probability
+  0.55 in the next 350 ft outside the existing exclusion. These are fitted
+  approximations, not recovered roads or orchard maps.
+- Water, streets, town centers and runway exclusions remain clear. Every sprite
+  is grounded through `tore_world::grounding`, with scale applied from the base.
+- Desert open sand has no trees and retains 0.012 dry-bush probability on the
+  44 ft grid. Near water, tree probability is 0.72 on sand or 0.80 on green
+  terrain, times squared water proximity. Proximity is full within 300 ft and
+  zero at 2,600 ft. The 512 ft water grid accepts one eighth wet coverage so
+  narrow mapped delta branches survive. This also creates coastal belts and
+  can overstate small water features; river identity is not geographically
+  recovered. Wadi banks add 0.10 and beds 0.025 tree probability. Wet-bank
+  bushes are green; remote shrubs remain brown and olive. Palms, acacias and
+  broadleaf represent the belt; there is no dedicated reed or tamarisk asset.
+- Tropical forest uses the 1.15 climate multiplier, capped at probability 1,
+  taller broadleaf and palms near water and low coasts. Arctic uses 0.45.
+  Tree-line full/zero heights are 4,500/7,000 ft for temperate broadleaf,
+  3,800/6,000 ft for temperate conifers, 900/2,400 ft arctic, and 7,500/10,500 ft
+  tropical. Bush cover increases near the tree line and fades to zero by
+  700 ft above it. High cliffs are bare.
+- Instance sizes use independent deterministic placement hashes. Two uniform
+  samples make a triangular scale distribution: trees 0.6 to 1.4, shrubs and
+  rocks 0.35 to 1.65, with most near 1.0. Woodland-edge trees multiply by 0.78,
+  edge shrubs/rocks by 0.8, woodland-interior trees by 1.08 and wet-bank trees
+  by 1.12. Width/height ratio varies independently from 0.88 to 1.12. Existing
+  species base heights remain. These constants are agent choices implementing
+  John's size-variation request of 2026-10-16.
+- Temperate brown tile margins blend up to 85% toward continuous terrain vertex
+  colour over 3.5% of a tile. Procedural plot colour and furrows fade across
+  3.5% of a plot edge. Both shaded colour and flare albedo receive the same
+  correction. This softens seams without changing terrain or simulation data.
 
 `--vegetation-preview OUT overlay` writes classification pictures. These are
 placement heuristics, not claims of original scenery or geographic river data.
