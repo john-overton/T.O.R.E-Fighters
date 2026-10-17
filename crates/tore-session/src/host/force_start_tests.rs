@@ -295,3 +295,205 @@ fn the_minimum_is_not_overridden_and_a_crowned_server_counts_the_same_way() {
     );
     assert!(rig.faults().is_empty(), "{:?}", rig.faults());
 }
+
+fn seconds(rig: &Rig, client: usize) -> Option<u8> {
+    rig.clients[client]
+        .lobby
+        .as_ref()
+        .and_then(|lobby| lobby.force_seconds)
+}
+
+/// The host owns the clock. The King leaving passes the crown. The countdown
+/// keeps going when someone else is still ready, and the new King can cancel
+/// it. It stops when the King was the only ready player.
+#[test]
+fn the_king_leaving_mid_countdown_passes_the_crown_or_cancels() {
+    let mut rig = opened(3, king_config(&[]));
+    let king = player(&mut rig, "Maverick");
+    let goose = player(&mut rig, "Goose");
+    let hawk = player(&mut rig, "Hawk");
+    rig.run(Duration::from_millis(400));
+    hold(&mut rig, king, 0);
+    hold(&mut rig, goose, 1);
+    hold(&mut rig, hawk, 2);
+    mark_ready(&mut rig, king, true);
+    mark_ready(&mut rig, goose, true);
+    rig.run(Duration::from_millis(300));
+    force(&mut rig, king);
+    rig.run(Duration::from_millis(300));
+    assert!(seconds(&rig, hawk).is_some());
+
+    rig.clients[king].client.disconnect(DisconnectReason::Left);
+    assert!(rig.run_until(Duration::from_secs(2), |r| r.closed(king)));
+    rig.run(Duration::from_millis(400));
+    assert_eq!(rig.host.phase(), Phase::Lobby);
+    assert!(
+        seconds(&rig, goose).is_some(),
+        "Goose is still ready, so the host keeps counting"
+    );
+    assert!(
+        rig.clients[goose]
+            .lobby
+            .as_ref()
+            .is_some_and(|lobby| lobby.is_king()),
+        "the crown passed"
+    );
+    force(&mut rig, goose);
+    rig.run(Duration::from_millis(400));
+    assert_eq!(seconds(&rig, goose), None);
+    assert!(
+        rig.clients[hawk]
+            .chat
+            .iter()
+            .any(|line| line == "The King cancelled the force start.")
+    );
+
+    // The only ready player leaving drops the countdown: nobody is ready.
+    let mut rig = opened(2, king_config(&[]));
+    let king = player(&mut rig, "Maverick");
+    let hawk = player(&mut rig, "Hawk");
+    rig.run(Duration::from_millis(400));
+    hold(&mut rig, king, 0);
+    hold(&mut rig, hawk, 1);
+    mark_ready(&mut rig, king, true);
+    rig.run(Duration::from_millis(300));
+    force(&mut rig, king);
+    rig.run(Duration::from_millis(300));
+    assert!(seconds(&rig, hawk).is_some());
+    rig.clients[king].client.disconnect(DisconnectReason::Left);
+    assert!(rig.run_until(Duration::from_secs(2), |r| r.closed(king)));
+    rig.run(Duration::from_millis(400));
+    assert_eq!(rig.host.phase(), Phase::Lobby);
+    assert_eq!(seconds(&rig, hawk), None);
+    assert!(
+        notes(&rig)
+            .iter()
+            .any(|n| n.contains("Force start cancelled") && n.contains("Nobody is ready")),
+        "{:?}",
+        notes(&rig)
+    );
+    assert!(rig.faults().is_empty(), "{:?}", rig.faults());
+}
+
+/// A player unreadying or leaving mid-countdown. The gates still apply: the
+/// count continues while someone is ready and the minimum holds, and it
+/// cancels when the last ready player unreadies, when a departure drops the
+/// minimum, or when `ai off` is left with an empty slot. An unready player
+/// leaving while the AI is on starts at once, the same as everyone readying.
+#[test]
+fn a_player_leaving_or_unreadying_mid_countdown_follows_the_gates() {
+    let mut rig = opened(3, king_config(&[]));
+    let king = player(&mut rig, "Maverick");
+    let goose = player(&mut rig, "Goose");
+    let hawk = player(&mut rig, "Hawk");
+    rig.run(Duration::from_millis(400));
+    hold(&mut rig, king, 0);
+    hold(&mut rig, goose, 1);
+    hold(&mut rig, hawk, 2);
+    mark_ready(&mut rig, king, true);
+    mark_ready(&mut rig, goose, true);
+    rig.run(Duration::from_millis(300));
+    force(&mut rig, king);
+    rig.run(Duration::from_millis(300));
+    mark_ready(&mut rig, goose, false);
+    rig.run(Duration::from_millis(400));
+    assert!(
+        seconds(&rig, hawk).is_some(),
+        "Maverick is still ready and Hawk is not"
+    );
+    assert_eq!(rig.host.phase(), Phase::Lobby);
+
+    // The last ready player unreadying cancels it.
+    mark_ready(&mut rig, king, false);
+    rig.run(Duration::from_millis(400));
+    assert_eq!(seconds(&rig, hawk), None);
+    assert!(
+        notes(&rig)
+            .iter()
+            .any(|n| n.contains("Force start cancelled") && n.contains("Nobody is ready")),
+        "{:?}",
+        notes(&rig)
+    );
+
+    // A departure that drops the minimum cancels a countdown that was legal.
+    let mut rig = opened(
+        3,
+        HostConfig {
+            start: StartMode::FirstPlayer,
+            crown: CrownRule::FirstPlayer,
+            settings: vec![(number::MIN_PLAYERS, 2)],
+            ..config()
+        },
+    );
+    let king = player(&mut rig, "Maverick");
+    let goose = player(&mut rig, "Goose");
+    let hawk = player(&mut rig, "Hawk");
+    rig.run(Duration::from_millis(400));
+    hold(&mut rig, king, 0);
+    hold(&mut rig, goose, 1);
+    hold(&mut rig, hawk, 2);
+    mark_ready(&mut rig, king, true);
+    mark_ready(&mut rig, goose, true);
+    rig.run(Duration::from_millis(300));
+    force(&mut rig, king);
+    rig.run(Duration::from_millis(300));
+    assert!(seconds(&rig, hawk).is_some());
+    rig.clients[goose].client.disconnect(DisconnectReason::Left);
+    assert!(rig.run_until(Duration::from_secs(2), |r| r.closed(goose)));
+    rig.run(Duration::from_millis(400));
+    assert_eq!(rig.host.phase(), Phase::Lobby);
+    assert_eq!(seconds(&rig, hawk), None);
+    assert!(
+        notes(&rig)
+            .iter()
+            .any(|n| n.contains("Force start cancelled") && n.contains("minimum")),
+        "{:?}",
+        notes(&rig)
+    );
+
+    // AI off: the unready holder leaving empties a slot, so the count stops.
+    let mut rig = opened(2, king_config(&[(number::AI, 0)]));
+    let king = player(&mut rig, "Maverick");
+    let hawk = player(&mut rig, "Hawk");
+    rig.run(Duration::from_millis(400));
+    hold(&mut rig, king, 0);
+    hold(&mut rig, hawk, 1);
+    mark_ready(&mut rig, king, true);
+    rig.run(Duration::from_millis(300));
+    force(&mut rig, king);
+    rig.run(Duration::from_millis(300));
+    assert!(seconds(&rig, king).is_some());
+    rig.clients[hawk].client.disconnect(DisconnectReason::Left);
+    assert!(rig.run_until(Duration::from_secs(2), |r| r.closed(hawk)));
+    rig.run(Duration::from_millis(400));
+    assert_eq!(rig.host.phase(), Phase::Lobby);
+    assert_eq!(seconds(&rig, king), None);
+    assert!(
+        notes(&rig)
+            .iter()
+            .any(|n| n.contains("Force start cancelled") && n.contains("AI is off")),
+        "{:?}",
+        notes(&rig)
+    );
+
+    // AI on: the unready player leaving leaves everyone else ready, so the
+    // mission starts at once.
+    let mut rig = opened(2, king_config(&[]));
+    let king = player(&mut rig, "Maverick");
+    let hawk = player(&mut rig, "Hawk");
+    rig.run(Duration::from_millis(400));
+    hold(&mut rig, king, 0);
+    hold(&mut rig, hawk, 1);
+    mark_ready(&mut rig, king, true);
+    rig.run(Duration::from_millis(300));
+    force(&mut rig, king);
+    rig.run(Duration::from_millis(300));
+    rig.clients[hawk].client.disconnect(DisconnectReason::Left);
+    assert!(rig.run_until(Duration::from_secs(2), |r| r.seated(king)));
+    assert!(
+        notes(&rig)
+            .iter()
+            .any(|n| n == "Force start: everyone was ready, so the mission started.")
+    );
+    assert!(rig.faults().is_empty(), "{:?}", rig.faults());
+}

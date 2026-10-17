@@ -1465,7 +1465,14 @@ fn read_lobby(r: &mut BitReader<'_>) -> WireResult<LobbyState> {
         settings.push((read_id(r)?, read_u32(r)?));
     }
     let mission_locked = r.read_bool()?;
-    let force_seconds = bits::read_option(r, |r| Ok(r.read_bits(4)? as u8))?;
+    let force_seconds = bits::read_option(r, |r| {
+        let secs = r.read_bits(4)? as u8;
+        if (1..=10).contains(&secs) {
+            Ok(secs)
+        } else {
+            Err(WireError::Invalid("force start seconds"))
+        }
+    })?;
     Ok(LobbyState {
         name,
         summary,

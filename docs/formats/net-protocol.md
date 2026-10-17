@@ -1583,8 +1583,7 @@ host left the game (4); the King's End mission is reason 3.
   hosts never does. The lobby screen then opens the King's Mission... read
   only, with "This server's mission is fixed.". The host's refusals of the
   King's mission and settings changes are unchanged. After the locked bit,
-  one more optional field (nr-lobbyui; the lead numbers the protocol, which
-  stays 50 until then): a presence bit and, when set, 4 bits of seconds left
+  one more optional field (protocol 52, nr-lobbyui): a presence bit and, when set, 4 bits of seconds left
   on the King's force start, 1 to 10. Absent (one 0 bit) when no countdown
   runs. The host owns the number. **Force start** (kind 55) is empty, from
   the King: it starts that countdown or cancels the one running.
@@ -1871,7 +1870,7 @@ value's coding. The names are the configuration file's and the logs'.
 | 22 | `snapshot-rate` | snapshots a second: 60, 30 or 20 from the King of a game a player hosts (default 60); a dedicated server's file may give 10, 12, 15, 20, 24, 30, 40 or 60, which the lobby state carries as given and the King may not change (slice R1, protocol 17: [what the rate sets](#connecting)) |
 | 23 | `ai-respawn` | 0 off, 1 on (default on in both modes): a lost AI aircraft respawns under the revival rules; no effect while `respawn` is none (protocol 20; John, 2026-10-09; the respawn itself is the lobby pass's slice R1) |
 | 24 | `ai` | 0 off, 1 on; default on. Lobby-only. Off suppresses AI aircraft, AI respawn and idle handoff and requires every open slot ready. |
-| 25 | `min-players` | 0 (none) to 30, default 0: the mission does not start until this many players hold slots and are ready. A dedicated server's file and rotation set it (John, 2026-10-16); the King's change is refused with "The minimum players is set by the server operator's `min-players`." The lobby state carries it like any setting, so the lobby screen says "Waiting for 2 more ready players (minimum 4)." from it; no other wire change. The lobby state grows by one entry, so the lead numbers the protocol (nr-minplayers leaves it at 49). |
+| 25 | `min-players` | 0 (none) to 30, default 0: the mission does not start until this many players hold slots and are ready. A dedicated server's file and rotation set it (John, 2026-10-16); the King's change is refused with "The minimum players is set by the server operator's `min-players`." The lobby state carries it like any setting, so the lobby screen says "Waiting for 2 more ready players (minimum 4)." from it; no other wire change. The lobby state grows by one entry (protocol 52). |
 
 A number the host does not know, or a value outside its list, is refused with
 the setting's name and its values. A setting marked PvP only is refused in
@@ -3144,7 +3143,10 @@ again with an observer; the capture format did not change for it.
   lists a hung gun pod as one store, so an older game must not join;
   51 since the Stores station index (slice nr-basefix): a Stores event's
   station index is 7 bits and can name tank hardpoint 9 (code 64), so an
-  older game must not join.
+  older game must not join;
+  52 since min-players and the King's force start (slices nr-minplayers,
+  nr-lobbyui): the lobby settings list gains min-players, and the Lobby
+  message gains the force-start seconds, so an older game must not join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since

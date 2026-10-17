@@ -2832,8 +2832,18 @@ impl Host {
         }
         let due = self.now >= self.force_deadline.unwrap_or(Duration::MAX);
         if !self.pending_unready() && self.start_block().is_none() {
-            if self.start_flying().is_ok() {
-                self.note("Force start: everyone was ready, so the mission started.");
+            match self.start_flying() {
+                Ok(()) => {
+                    self.note("Force start: everyone was ready, so the mission started.");
+                }
+                Err(why) => {
+                    // A build failure is already a fault. Drop the countdown
+                    // so the next update does not log it again.
+                    self.force_deadline = None;
+                    self.note_force_second();
+                    self.announce("The force start was cancelled.");
+                    self.note(format!("Force start cancelled: {why}"));
+                }
             }
             return;
         }
