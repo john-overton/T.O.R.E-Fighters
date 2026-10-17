@@ -9,7 +9,7 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 #[path = "vegetation_stream.rs"]
-mod stream;
+pub(crate) mod stream;
 
 const INST_STRIDE: u64 = 64;
 const DRAWN_STRIDE: u64 = 96;
@@ -72,6 +72,36 @@ pub struct CacheFrame {
     pub build_ms: f64,
     pub pending: bool,
     pub submit_ms: f64,
+    pub packed_chunks: u64,
+    pub uploaded_bytes: usize,
+    pub upload_chunks: usize,
+    pub upload_bytes: usize,
+    pub worker_pending: bool,
+    pub range_pending: bool,
+    pub available: f32,
+    pub visible: f32,
+}
+
+impl CacheFrame {
+    pub const CSV_HEADER: &str = "frame,object_builds,grass_builds,packed_chunks,uploaded_bytes,upload_chunks,upload_bytes,worker_pending,range_pending,available_ft,visible_ft,pending\n";
+
+    pub fn write_csv(&self, out: &mut impl std::io::Write, frame: usize) -> std::io::Result<()> {
+        writeln!(
+            out,
+            "{frame},{},{},{},{},{},{},{},{},{:.3},{:.3},{}",
+            self.object_chunks,
+            self.grass_chunks,
+            self.packed_chunks,
+            self.uploaded_bytes,
+            self.upload_chunks,
+            self.upload_bytes,
+            self.worker_pending,
+            self.range_pending,
+            self.available,
+            self.visible,
+            self.pending
+        )
+    }
 }
 
 impl Renderer {
@@ -412,6 +442,7 @@ impl Renderer {
             },
             |offset, bytes| {
                 queue.write_buffer(&self.instances, offset, bytes);
+                self.last_cache.uploaded_bytes += bytes.len();
             },
         );
         if !self.pages.pending() && self.incoming.is_some() {
@@ -426,8 +457,9 @@ impl Renderer {
         if !self.pages.pending() && !self.settle {
             worker.request(request);
         }
-        self.last_cache.pending =
-            self.pages.pending() || self.ready.as_ref().is_none_or(|r| !r.done);
+        self.last_cache.worker_pending = worker.busy || self.ready.as_ref().is_none_or(|r| !r.done);
+        (self.last_cache.upload_chunks, self.last_cache.upload_bytes) = self.pages.remaining();
+        self.last_cache.pending = self.pages.pending() || self.last_cache.worker_pending;
         // Uploaded coverage defines a circle, never individual patch visibility.
         // The outer fade stays wholly inside that circle, including during a
         // teleport or a worker delay. A new circle expands continuously.
@@ -443,6 +475,9 @@ impl Renderer {
         let (reach, range_pending) =
             advance_visible_range(self.visible_reach, available, draw, dt, self.settle);
         self.visible_reach = reach;
+        self.last_cache.available = available;
+        self.last_cache.visible = reach;
+        self.last_cache.range_pending = range_pending;
         self.last_cache.pending |= range_pending;
         let draw = self.visible_reach;
         let full = full * self.squeeze();

@@ -98,6 +98,9 @@ pub fn run() -> AppResult<()> {
     }
     let assets = crate::reel::load_assets()?;
     let resources = &assets.theater_resources;
+    if jobs.iter().any(|job| job == "stream-check") {
+        return stream_check(resources, out);
+    }
     if jobs.iter().any(|job| job == "pass5-cameras") {
         let mut file = std::fs::File::create(out.join("pass5-cameras.txt"))?;
         for (code, label, kind, agl, pitch) in [
@@ -463,6 +466,7 @@ struct Sample {
     submit_ms: f64,
     vegetation_submit_ms: f64,
     pending: bool,
+    stream: crate::vegetation_renderer::CacheFrame,
 }
 
 impl Sample {
@@ -542,22 +546,7 @@ fn lowpass(resources: &std::collections::BTreeMap<String, Vec<u8>>, out: &Path) 
             .ok_or("vegetation atlas missing (TORE_VEGETATION=0)")?;
         println!("  choosing the densest stand");
         let started = Instant::now();
-        let (mut spot, candidates) = crate::vegetation::densest(atlas, &world);
-        if let Ok(path) = std::env::var("TORE_VEG_LOWPASS_CAMERAS") {
-            // Freeze the baseline's exact dense camera, avoiding a changed
-            // coast mask or density choosing a different benchmark location.
-            let text = std::fs::read_to_string(path)?;
-            let fields = text
-                .lines()
-                .map(|line| line.split_whitespace().collect::<Vec<_>>())
-                .find(|f| f.len() == 10 && f[1] == code && f[0].ends_with("-high-dense"))
-                .ok_or_else(|| format!("missing baseline lowpass camera for {code}"))?;
-            spot.x = fields[5].parse()?;
-            spot.z = fields[7].parse()?;
-            spot.heading = fields[8].parse::<f64>()?.to_degrees();
-            spot.label = "baseline-locked".into();
-            spot.instances = crate::vegetation::count_high(atlas, &world, spot.x, spot.z);
-        }
+        let (spot, candidates) = dense_spot(atlas, &world, code)?;
         println!(
             "  {code} {} at {:.0}, {:.0} heading {:.0}: {} instances within 1 nm ({:.1} s)",
             spot.label,
@@ -602,7 +591,13 @@ fn lowpass(resources: &std::collections::BTreeMap<String, Vec<u8>>, out: &Path) 
             for density in &densities {
                 println!("  {code} {}x{} {}", size[0], size[1], density.label());
                 gpu.begin_run(size, *density)?;
-                let warm = gpu.warmup(&start, &world, &scenery)?;
+                let trace = out.join(format!(
+                    "{code}-{}x{}-{}-warmup.csv",
+                    size[0],
+                    size[1],
+                    density.label()
+                ));
+                let warm = gpu.warmup(&start, &world, &scenery, &trace)?;
                 println!("    warmup {} frames", warm.len());
                 let refs: Vec<(usize, &Camera)> = flight
                     .iter()
@@ -691,6 +686,85 @@ fn lowpass(resources: &std::collections::BTreeMap<String, Vec<u8>>, out: &Path) 
     write_lowpass_readme(out, &images)?;
     println!("vegetation preview: low pass wrote frame-cost.txt and SUMMARY.md");
     Ok(())
+}
+
+fn stream_check(
+    resources: &std::collections::BTreeMap<String, Vec<u8>>,
+    out: &Path,
+) -> AppResult<()> {
+    use crate::vegetation_renderer::stream::{self, Request};
+    let mut summary = std::fs::File::create(out.join("stream-check.txt"))?;
+    for (code, _) in lowpass_theaters()? {
+        let world = Terrain::for_mission(resources, code, Some(0), &overrides([12, 0])?)?;
+        let scenery = Scenery::build(resources, &world)?;
+        let atlas = scenery
+            .vegetation
+            .as_ref()
+            .ok_or("vegetation atlas missing")?;
+        let library = scenery
+            .vegetation_meshes
+            .as_ref()
+            .ok_or("vegetation library missing")?;
+        let (spot, _) = dense_spot(atlas, &world, code)?;
+        let camera = lowpass_camera(&world, &spot, -1.5 * crate::vegetation::NM);
+        for density in lowpass_densities()? {
+            let options = lowpass_options(density);
+            let full = options.vegetation_detail_nm as f32 * crate::vegetation::NM as f32 * 0.4;
+            let request = Request {
+                epoch: 0,
+                eye: [camera.position[0], camera.position[2]],
+                full,
+                draw: options.vegetation_distance_nm as f32 * crate::vegetation::NM as f32,
+                density: density.scale(),
+                capacity: density.object_budget(),
+                grass_radius: density.grass().0.min(full * 1.25),
+                settle: false,
+            };
+            let mut trace = std::io::BufWriter::new(std::fs::File::create(
+                out.join(format!("{code}-{}-stream.csv", density.label())),
+            )?);
+            let stats = stream::probe(atlas.clone(), library.clone(), &world, request, &mut trace)?;
+            let line = format!(
+                "{code} {}: converged={} frames, builds={}, packed={}, uploaded={} bytes, selected={}, idle=120 frames",
+                density.label(),
+                stats.frames,
+                stats.builds,
+                stats.packed,
+                stats.uploaded,
+                stats.selected
+            );
+            println!("{line}");
+            writeln!(summary, "{line}")?;
+        }
+    }
+    Ok(())
+}
+
+fn dense_spot(
+    atlas: &crate::vegetation::Atlas,
+    world: &Terrain,
+    code: &str,
+) -> AppResult<(
+    crate::vegetation::DensityCandidate,
+    Vec<crate::vegetation::DensityCandidate>,
+)> {
+    let (mut spot, candidates) = crate::vegetation::densest(atlas, world);
+    if let Ok(path) = std::env::var("TORE_VEG_LOWPASS_CAMERAS") {
+        // Freeze the baseline's exact dense camera, avoiding a changed
+        // coast mask or density choosing a different benchmark location.
+        let text = std::fs::read_to_string(path)?;
+        let fields = text
+            .lines()
+            .map(|line| line.split_whitespace().collect::<Vec<_>>())
+            .find(|f| f.len() == 10 && f[1] == code && f[0].ends_with("-high-dense"))
+            .ok_or_else(|| format!("missing baseline lowpass camera for {code}"))?;
+        spot.x = fields[5].parse()?;
+        spot.z = fields[7].parse()?;
+        spot.heading = fields[8].parse::<f64>()?.to_degrees();
+        spot.label = "baseline-locked".into();
+        spot.instances = crate::vegetation::count_high(atlas, world, spot.x, spot.z);
+    }
+    Ok((spot, candidates))
 }
 
 fn lowpass_theaters() -> AppResult<Vec<(&'static str, &'static str)>> {
@@ -1531,13 +1605,30 @@ impl View {
         camera: &Camera,
         world: &Terrain,
         scenery: &Scenery,
+        trace: &Path,
     ) -> AppResult<Vec<Sample>> {
+        let mut trace = std::fs::File::create(trace)?;
+        write!(
+            trace,
+            "{}",
+            crate::vegetation_renderer::CacheFrame::CSV_HEADER
+        )?;
         let mut frames = Vec::new();
         while frames.len() < 4_000 {
             let start = frames.len();
             let batch = (8).min(4_000 - start);
             let jobs: Vec<(usize, &Camera)> = (0..batch).map(|i| (start + i, camera)).collect();
             let samples = self.measure(&jobs, world, scenery)?;
+            for sample in &samples {
+                sample.stream.write_csv(&mut trace, sample.frame)?;
+            }
+            if start % 240 == 0 {
+                println!(
+                    "    warmup frame {}: {:?}",
+                    start + batch,
+                    samples.last().map(|s| s.stream)
+                );
+            }
             if let Some(idle) = samples.iter().position(|sample| {
                 !sample.pending && sample.object_chunks == 0 && sample.grass_chunks == 0
             }) {
@@ -1546,7 +1637,11 @@ impl View {
             }
             frames.extend(samples);
         }
-        Err("vegetation warmup did not converge within 4000 frames".into())
+        Err(format!(
+            "vegetation warmup did not converge within 4000 frames; last state: {:?}",
+            frames.last().map(|s| s.stream)
+        )
+        .into())
     }
 
     /// One off frame and one on frame per camera. GPU timestamps exclude the
@@ -1644,9 +1739,10 @@ impl View {
                     submit_ms,
                     vegetation_submit_ms: cache.submit_ms,
                     pending: cache.pending,
+                    stream: cache,
                 });
             }
-            if out.len() % 120 < 8 || out.len() == frames.len() {
+            if frames.len() > 8 && (out.len() % 120 < 8 || out.len() == frames.len()) {
                 println!("    sampled {}/{}", out.len(), frames.len());
             }
         }

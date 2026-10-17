@@ -994,11 +994,18 @@ fn veg_place(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,shape:vec4<f32>)-
  var view=u32(floor(azimuth/1.570796327+0.5)+8.0)%4u;
  if mode==1u || mode==2u {view=card%2u;}
  var code=mean.w;
+ var coverage=turn.w;
  if overhead {
   code=top.x; view=0u;
+  // The crown sits inside the upright silhouette, relative to its grounded base.
+  let crown=place.xyz+vec3<f32>(0.0,turn.z*top.y,0.0);
+  let ray=scene.local_eye.xyz-crown;
+  // Fitted: hidden through 35 degrees down, fully visible at 80 degrees.
+  // One value for the whole card and both depth/colour passes avoids seams.
+  coverage*=smoothstep(0.57357644,0.98480775,ray.y/max(length(ray),0.0001));
   let local=vec2<f32>(position.x,position.y*2.0-1.0)*turn.z*shape.x*tint.w;
   offset=vec2<f32>(local.x*spin.x-local.y*spin.y,local.x*spin.y+local.y*spin.x);
-  p=place.xyz+vec3<f32>(offset.x,turn.z*top.y,offset.y);
+  p=crown+vec3<f32>(offset.x,0.0,offset.y);
  }
  var sprite=code+f32(view);
  var sprite_uv=uv;
@@ -1019,7 +1026,7 @@ fn veg_place(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,shape:vec4<f32>)-
  // slope, not the arbitrary vertical shared quad normal.
  if shape.w>0.5 {out.normal=normalize(vec3<f32>(-shape.y,1.0,-shape.z));}
  if overhead {out.normal=vec3<f32>(0.0,1.0,0.0);}
- out.fade=vec2<f32>(turn.w,place.w);out.look=shape.w;out.mean=mean.xyz;out.height=select(position.y,1.0,overhead);
+ out.fade=vec2<f32>(coverage,place.w);out.look=shape.w;out.mean=mean.xyz;out.height=select(position.y,1.0,overhead);
  // Untextured colour: a retail face's palette colour, or a drawn part.
  out.color=base.color;out.albedo=base.albedo;
  if part<0.0 {

@@ -55,7 +55,13 @@ background to low-gradient pixels, then keeps foreground residuals connected to
 strong cores and textured outlines. Smooth residual blobs are rejected, including
 those beside trunks; small disconnected debris is removed. It does not assume a
 black background or subtract glow colours from valid bark. The top sheet's black
-matte and white/grey outline are removed separately. All output alpha is binary;
+matte and white/grey/black outline are removed separately. In a four-source-pixel
+edge band, bright neutral pixels (minimum RGB above 155, spread below 38) and
+dark neutral pixels (maximum below 100, spread below 16) become transparent.
+A one-pixel erosion removes the remaining mixed matte edge. Bright stone faces
+and dark bark away from that band are retained. This is a conservative authoring
+choice; thin leaf tips may be lost. Side sheets are unchanged by this cleanup.
+All output alpha is binary;
 transparent RGB is zero. Conservative edge cleanup can lose faint leaf tips.
 
 There are 21 Sahara side sprites, their 21 matching top views, and 31 v2 top

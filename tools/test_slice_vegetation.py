@@ -58,6 +58,28 @@ if __name__ == '__main__':
     unittest.main()
 
 class Pass5AtlasTests(unittest.TestCase):
+    @unittest.skipIf(Image is None,'Pillow needed for authoring tests')
+    def test_top_outline_cleanup_preserves_crown_bark_and_stone_interior(self):
+        try:
+            from slice_vegetation_pass5 import clean_top
+        except ImportError:
+            self.skipTest('numpy needed for authoring tests')
+        source=Image.new('RGBA',(48,48),(0,0,0,255))
+        # White, antialiased grey and dark rings around a coloured crown.
+        for inset,color in [(5,(220,220,220,255)),(6,(110,115,112,255)),
+                            (7,(32,32,32,255)),(8,(30,80,38,255))]:
+            for y in range(inset,48-inset):
+                for x in range(inset,48-inset):source.putpixel((x,y),color)
+        for y in range(18,30):
+            for x in range(18,24):source.putpixel((x,y),(38,32,28,255))
+            for x in range(24,30):source.putpixel((x,y),(210,210,205,255))
+        result=clean_top(source,trim=False)
+        self.assertTrue(all(result.getpixel((x,24))==(0,0,0,0) for x in range(8)))
+        self.assertEqual(result.getpixel((12,24)),(30,80,38,255))
+        self.assertEqual(result.getpixel((20,24)),(38,32,28,255))
+        self.assertEqual(result.getpixel((26,24)),(210,210,205,255))
+        self.assertTrue(all(p[3] in (0,255) and (p[3] or p==(0,0,0,0)) for p in result.getdata()))
+
     def test_sahara_and_top_atlas_cutouts_and_gutters(self):
         directory=ASSETS/'pass5'
         raw=(directory/'pack.rgba').read_bytes()

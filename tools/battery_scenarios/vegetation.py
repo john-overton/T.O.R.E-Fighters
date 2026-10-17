@@ -29,6 +29,13 @@ def check_pass5_cameras(work, _output):
 
 def scenarios():
     return [Scenario(
+        name='vegetation-stream-convergence', lane='menus',
+        args=['--vegetation-preview', '{work}/stream', 'stream-check'],
+        env={'TORE_VEGETATION': '1', 'TORE_VEG_LOWPASS_THEATERS': 'UKR',
+             'TORE_VEG_LOWPASS_DENSITIES': 'high'}, timeout=240,
+        outputs=['stream/stream-check.txt', 'stream/UKR-High-stream.csv'],
+        expect=['UKR High: converged=', 'idle=120 frames'],
+    ), Scenario(
         name='vegetation-cpu-cameras', lane='menus',
         args=['--vegetation-preview', '{work}/cameras', 'cameras'],
         env={'TORE_VEGETATION': '1'}, timeout=120,

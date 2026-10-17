@@ -146,17 +146,27 @@ def clean_sahara(image, trim=True):
     return out.crop(bounds) if trim else out
 
 
-def clean_top(image):
+def clean_top(image, trim=True):
     rgba=np.array(image.convert('RGBA'))
     rgb=rgba[:,:,:3].astype(int)
     mask=(rgba[:,:,3]>=128) & (rgb.max(axis=2)>=24)
-    # The top sheet has a white/grey outline unrelated to the sprite artwork.
-    mask &= ~((rgb.min(axis=2)>155) & (rgb.max(axis=2)-rgb.min(axis=2)<38))
+    # The outline includes dim grey/black and antialiased pixels, not just white.
+    # Limit colour rejection to a four-pixel edge band so bright stone faces and
+    # dark interior bark survive. One more pixel removes mixed matte colours.
+    alpha=Image.fromarray(mask.astype(np.uint8)*255)
+    edge=~(np.array(alpha.filter(ImageFilter.MinFilter(9)))>0)
+    chroma=rgb.max(axis=2)-rgb.min(axis=2)
+    outline=((rgb.min(axis=2)>155) & (chroma<38)) | ((rgb.max(axis=2)<100) & (chroma<16))
+    mask &= ~(edge & outline)
+    mask=np.array(Image.fromarray(mask.astype(np.uint8)*255).filter(ImageFilter.MinFilter(3)))>0
     mask=components(mask,max(12,int(mask.sum()*.02)))
     rgba[~mask]=0
     rgba[mask,3]=255
     out=Image.fromarray(rgba)
-    return out.crop(out.getbbox())
+    bounds=out.getbbox()
+    if bounds is None:
+        raise ValueError('empty top sprite')
+    return out.crop(bounds) if trim else out
 
 
 def build(sahara, top, output):

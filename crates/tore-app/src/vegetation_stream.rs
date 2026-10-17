@@ -17,7 +17,7 @@ pub const UPLOAD_WRITES: usize = 16;
 pub type Key = (i64, i64);
 pub type Chunks = Vec<(Key, Arc<Vec<u8>>)>;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Request {
     pub epoch: u64,
     pub eye: [f64; 2],
@@ -45,6 +45,8 @@ pub struct Worker {
     send: mpsc::SyncSender<Request>,
     receive: mpsc::Receiver<Ready>,
     pub busy: bool,
+    last_request: Option<Request>,
+    done: bool,
 }
 impl Worker {
     pub fn new(atlas: Arc<Atlas>, library: Arc<Library>, world: &Terrain) -> Self {
@@ -87,10 +89,14 @@ impl Worker {
                 let mut selected_generation = u64::MAX;
                 let mut chunks = Vec::new();
                 let mut previous: BTreeMap<Key, (Vec<Inst>, Arc<Vec<u8>>)> = BTreeMap::new();
+                let mut coverage = (1., 0., 0., [0.; 2]);
+                let trace = std::env::var_os("TORE_VEG_STREAM_TRACE").is_some();
                 while let Ok(request) = requests.recv() {
                     if request.epoch != epoch {
                         placement.reset_cache();
                         previous.clear();
+                        chunks.clear();
+                        coverage = (1., 0., 0., request.eye);
                         selected_generation = u64::MAX;
                         epoch = request.epoch;
                     }
@@ -110,7 +116,13 @@ impl Worker {
                         request.grass_radius,
                         if request.settle { None } else { Some(2) },
                     );
-                    if selected_generation != placement.generation {
+                    let mut packed = 0;
+                    // A partial ring changes the global rank cutoff every few
+                    // chunks. Publishing each partial selection reuploads the
+                    // same resident chunks hundreds of times. Finish placement
+                    // and density fitting before packing one coherent selection.
+                    // Keep the previous selection's coverage while work continues.
+                    if done && selected_generation != placement.generation {
                         let selected = placement.object_chunks(request.eye);
                         let mut next = BTreeMap::new();
                         chunks.clear();
@@ -118,6 +130,10 @@ impl Worker {
                             let bytes = match previous.remove(&key) {
                                 Some((old, bytes)) if old == objects => bytes,
                                 _ => {
+                                    packed += 1;
+                                    if trace {
+                                        eprintln!("vegetation pack epoch={epoch} chunk={key:?} objects={}", objects.len());
+                                    }
                                     let mut bytes =
                                         Vec::with_capacity(objects.len() * INST_STRIDE as usize);
                                     for i in &objects {
@@ -137,21 +153,29 @@ impl Worker {
                         previous = next;
                         selected_generation = placement.generation;
                     }
+                    if done {
+                        coverage = (placement.squeezed(1.), placement.kept_reach(request.eye), placement.available(request.eye), request.eye);
+                    }
+                    if trace {
+                        eprintln!("vegetation worker epoch={epoch} eye={:?} objects_done={done} grass_done={grass_done} builds={} grass_builds={} packed={packed} squeeze={} available={}", request.eye, placement.builds-before.0, placement.grass_builds-before.1, coverage.0, coverage.2);
+                    }
                     let ready = Ready {
                         epoch,
                         chunks: chunks.clone(),
                         grass,
-                        squeeze: placement.squeezed(1.),
-                        reach: placement.kept_reach(request.eye),
-                        available: placement.available(request.eye),
-                        eye: request.eye,
+                        squeeze: coverage.0,
+                        reach: coverage.1,
+                        available: coverage.2,
+                        eye: coverage.3,
                         done: done && grass_done,
                         cache: CacheFrame {
                             object_chunks: placement.builds - before.0,
                             grass_chunks: placement.grass_builds - before.1,
                             build_ms: (placement.build_ns - before.2) as f64 / 1_000_000.,
                             pending: !done || !grass_done,
+                            packed_chunks: packed,
                             submit_ms: 0.,
+                            ..Default::default()
                         },
                     };
                     if results.send(ready).is_err() {
@@ -164,11 +188,18 @@ impl Worker {
             send,
             receive,
             busy: false,
+            last_request: None,
+            done: false,
         }
     }
     pub fn request(&mut self, request: Request) {
-        if !self.busy && self.send.try_send(request).is_ok() {
+        if self.busy || self.done && self.last_request == Some(request) {
+            return;
+        }
+        if self.send.try_send(request).is_ok() {
             self.busy = true;
+            self.last_request = Some(request);
+            self.done = false;
         }
     }
     pub fn poll(&mut self, wait: bool) -> Option<Ready> {
@@ -180,8 +211,9 @@ impl Worker {
         } else {
             self.receive.try_recv().ok()
         };
-        if ready.is_some() {
+        if let Some(ready) = &ready {
             self.busy = false;
+            self.done = ready.done;
         }
         ready
     }
@@ -284,6 +316,15 @@ impl Slots {
     pub fn pending(&self) -> bool {
         self.staged.is_some()
     }
+    /// Unpublished chunks with bytes still to upload, and their total bytes.
+    pub fn remaining(&self) -> (usize, usize) {
+        self.staged.as_ref().map_or((0, 0), |(next, _)| {
+            next.values().fold((0, 0), |(chunks, bytes), r| {
+                let left = r.bytes.len() - r.uploaded;
+                (chunks + usize::from(left > 0), bytes + left)
+            })
+        })
+    }
     pub fn table(&self) -> (Vec<u32>, u32) {
         let mut table = Vec::new();
         let mut total = 0;
@@ -305,9 +346,144 @@ impl Slots {
     }
 }
 
+#[derive(Debug)]
+pub struct ProbeStats {
+    pub frames: usize,
+    pub builds: u64,
+    pub packed: u64,
+    pub uploaded: usize,
+    pub selected: u32,
+}
+
+/// CPU-only production worker/page-budget regression. Each simulated 60 Hz
+/// frame waits for its bounded worker job, so this measures convergence and
+/// upload churn, not scheduling speed or GPU performance.
+pub fn probe(
+    atlas: Arc<Atlas>,
+    library: Arc<Library>,
+    world: &Terrain,
+    request: Request,
+    out: &mut impl std::io::Write,
+) -> crate::AppResult<ProbeStats> {
+    let mut worker = Worker::new(atlas, library, world);
+    let mut slots = Slots::new(request.capacity);
+    let mut ready = None;
+    let mut incoming = None;
+    let mut visible = 0.;
+    let mut idle = 0;
+    let mut stats = ProbeStats {
+        frames: 0,
+        builds: 0,
+        packed: 0,
+        uploaded: 0,
+        selected: 0,
+    };
+    write!(out, "{}", CacheFrame::CSV_HEADER)?;
+    for frame in 0..1000 {
+        let mut cache = CacheFrame::default();
+        if !slots.pending() {
+            worker.request(request);
+            if let Some(result) = worker.poll(true) {
+                cache = result.cache;
+                slots.sync(&result.chunks);
+                incoming = Some(result);
+            }
+        }
+        slots.upload(UPLOAD_BYTES, |_, bytes| cache.uploaded_bytes += bytes.len());
+        if !slots.pending() && incoming.is_some() {
+            ready = incoming.take();
+        }
+        cache.worker_pending = worker.busy || ready.as_ref().is_none_or(|r| !r.done);
+        (cache.upload_chunks, cache.upload_bytes) = slots.remaining();
+        cache.available = ready.as_ref().map_or(0., |r| r.available).min(request.draw);
+        (visible, cache.range_pending) =
+            super::advance_visible_range(visible, cache.available, request.draw, 1. / 60., false);
+        cache.visible = visible;
+        cache.pending = cache.worker_pending || slots.pending() || cache.range_pending;
+        cache.write_csv(out, frame)?;
+        stats.builds += cache.object_chunks;
+        stats.packed += cache.packed_chunks;
+        stats.uploaded += cache.uploaded_bytes;
+        if !cache.pending && cache.object_chunks == 0 && cache.grass_chunks == 0 {
+            if idle == 0 {
+                stats.frames = frame + 1;
+            }
+            idle += 1;
+        } else if idle > 0 {
+            return Err(
+                format!("stationary vegetation resumed work at frame {frame}: {cache:?}").into(),
+            );
+        }
+        if idle > 0 && (cache.packed_chunks > 0 || cache.uploaded_bytes > 0) {
+            return Err(
+                format!("stationary vegetation reuploaded at frame {frame}: {cache:?}").into(),
+            );
+        }
+        if idle == 120 {
+            stats.selected = slots.table().1;
+            if stats.uploaded != stats.selected as usize * INST_STRIDE as usize {
+                return Err(format!(
+                    "stationary vegetation repacked intermediate selections: {stats:?}"
+                )
+                .into());
+            }
+            return Ok(stats);
+        }
+    }
+    Err("CPU vegetation did not converge and stay idle for 120 frames within 1000 frames".into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn library() -> Arc<Library> {
+        Arc::new(Library {
+            vertices: Vec::new(),
+            meshes: vec![crate::vegetation_shapes::Mesh {
+                range: 0..6,
+                radius: 0.5,
+                look: crate::vegetation_shapes::Look::Foliage,
+                recolour: None,
+                source: "synthetic".into(),
+                sprite_layer: 0,
+                sprite_tile: None,
+                top: [0., 0.8],
+                mean_color: [0.; 3],
+            }],
+            variants: vec![vec![0]; crate::vegetation::Species::ALL.len()],
+        })
+    }
+
+    #[test]
+    fn stationary_stream_converges_without_reuploads_and_stays_idle() {
+        let mut world = tore_world::test_support::terrain();
+        for cell in &mut world.theater.cells {
+            cell.elevation = 0;
+        }
+        let atlas = Arc::new(Atlas::synthetic(vec![10; 256 * 256], 0));
+        // Deliberately oversubscribed, so publishing partial rank selections
+        // would repack and reupload resident chunks while this camera is still.
+        let request = Request {
+            epoch: 0,
+            eye: [4000., 4000.],
+            full: 3000.,
+            draw: 6000.,
+            density: 0.7,
+            capacity: 2048,
+            grass_radius: 950.,
+            settle: false,
+        };
+        let mut trace = Vec::new();
+        let stats = probe(atlas, library(), &world, request, &mut trace).unwrap();
+        assert!(stats.frames < 200, "{stats:?}");
+        assert!(stats.builds > 3 && stats.packed > 0 && stats.selected > 0);
+        assert_eq!(
+            stats.uploaded,
+            stats.selected as usize * INST_STRIDE as usize
+        );
+        assert!(stats.selected as usize <= request.capacity);
+    }
+
     fn chunk(n: usize, value: u8) -> Arc<Vec<u8>> {
         Arc::new(vec![value; n * INST_STRIDE as usize])
     }

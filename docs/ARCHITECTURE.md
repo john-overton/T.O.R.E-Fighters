@@ -10982,7 +10982,11 @@ canopy map stores expected crown area and mean sprite colour from the same site
 classifier. It shares the terrain texture array and stays in runtime memory.
 
 `Placement` caches candidates independently of view distance. A bounded worker
-builds object/grass chunks and packs changed selections. The renderer owns
+builds object/grass chunks, then packs a selection only after the complete ring's
+density has settled. Partial rings never change the published rank cutoff.
+Unchanged completed requests do no worker work. Movement builds candidates only
+for entering chunks; changed distance/rank selections can still replace packed
+pages. The renderer owns
 persistent 256-instance pages. Uploads are capped at 256 KiB and 16 writes per
 normal frame. Old selections remain until replacements are completely uploaded.
 The prefetch ring extends two chunks beyond draw range. Whole-chunk budget
@@ -10999,7 +11003,10 @@ partial-page slots. The latter bound covers both maximum 8 nm guarded rings.
 At Ultra the corresponding allocations are 24 MiB and 112 MiB.
 
 Matching alpha-tested depth and colour draws share vertices and sample coverage,
-with reversed-depth GreaterEqual and no colour-pass depth writes. Depth skips
+including the top card's view-angle fade. Top cards remain inside the side
+silhouettes at their grounded canopy height. Supplied top-sheet alpha removes
+both bright and dark perimeter matte while retaining interior shading.
+The draws use reversed-depth GreaterEqual and no colour-pass depth writes. Depth skips
 palette/lighting work. Colour skips the second daylight-palette sample outside thermal views when no
 flare light is burning. Grass is separate and its forest floor density is halved.
 Crosses/top cards may cost more overdraw, so all modes require GPU comparison.

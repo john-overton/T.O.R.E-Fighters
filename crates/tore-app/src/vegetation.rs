@@ -1848,6 +1848,7 @@ impl Placement {
         if self.settled == Some(key) {
             return true;
         }
+        self.settled = None;
         // A stable ring for the entire camera cell, with a guard patch.
         let eye = [
             (cx as f64 + 0.5) * CHUNK as f64,
@@ -1930,6 +1931,9 @@ impl Placement {
                     u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX),
                 );
                 self.chunks.insert(*key, Chunk { objects });
+                if std::env::var_os("TORE_VEG_STREAM_TRACE").is_some() {
+                    eprintln!("vegetation build chunk={key:?}");
+                }
                 self.builds += 1;
                 built += 1;
                 changed = true;
@@ -2928,6 +2932,49 @@ mod tests {
         }
         let delta = Atlas::synthetic(pixels, 1);
         assert!(delta.water.dist.contains(&0));
+    }
+
+    #[test]
+    fn moving_camera_builds_only_chunks_entering_the_ring() {
+        let world = flat();
+        let mut cache = Placement::new(Arc::new(Atlas::synthetic(solid(10), 0)));
+        cache.set_budget(2048);
+        let full = 3000.;
+        let draw = 6000.;
+        let mut eye = [4000., 4000.];
+        let settle = |cache: &mut Placement, eye| {
+            for _ in 0..200 {
+                if cache.update(&world, eye, full, draw, Some(3)) {
+                    return;
+                }
+            }
+            panic!("stationary placement did not converge");
+        };
+        settle(&mut cache, eye);
+        for dx in [20., 2048., 2048., -2048.] {
+            let before: std::collections::BTreeSet<_> = cache.chunks.keys().copied().collect();
+            let builds = cache.builds;
+            eye[0] += dx;
+            settle(&mut cache, eye);
+            let after: std::collections::BTreeSet<_> = cache.chunks.keys().copied().collect();
+            assert_eq!(
+                cache.builds - builds,
+                after.difference(&before).count() as u64
+            );
+            let builds = cache.builds;
+            let generation = cache.generation;
+            for _ in 0..120 {
+                assert!(cache.update(&world, eye, full, draw, Some(3)));
+                assert_eq!((cache.builds, cache.generation), (builds, generation));
+            }
+        }
+        // Reversing before a ring finishes must refill evicted chunks, not
+        // reuse the stale settled key from the previous camera cell.
+        assert!(!cache.update(&world, [eye[0] + CHUNK as f64, eye[1]], full, draw, Some(3)));
+        let builds = cache.builds;
+        settle(&mut cache, eye);
+        assert!(cache.builds > builds);
+        assert!(cache.available(eye) >= draw);
     }
 
     #[test]

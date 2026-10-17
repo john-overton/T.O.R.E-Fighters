@@ -255,186 +255,186 @@
     "name": "top_saguaro",
     "page": 10,
     "tile": 2,
-    "radius": 0.4421768707482993
+    "radius": 0.45390070921985815
   },
   {
     "name": "top_small_cactus",
     "page": 10,
     "tile": 3,
-    "radius": 0.5049019607843137
+    "radius": 0.51010101010101
   },
   {
     "name": "top_prickly_pear",
     "page": 11,
     "tile": 0,
-    "radius": 0.46938775510204084
+    "radius": 0.46551724137931033
   },
   {
     "name": "top_dry_shrub",
     "page": 11,
     "tile": 1,
-    "radius": 0.535
+    "radius": 0.5154639175257731
   },
   {
     "name": "top_yucca",
     "page": 11,
     "tile": 2,
-    "radius": 0.4968553459119497
+    "radius": 0.4968152866242038
   },
   {
     "name": "top_dry_scrub",
     "page": 11,
     "tile": 3,
-    "radius": 0.5186915887850467
+    "radius": 0.5142857142857142
   },
   {
     "name": "top_desert_rocks",
     "page": 12,
     "tile": 0,
-    "radius": 0.5248618784530387
+    "radius": 0.5280898876404494
   },
   {
     "name": "top_desert_boulder",
     "page": 12,
     "tile": 1,
-    "radius": 0.4463087248322148
+    "radius": 0.445578231292517
   },
   {
     "name": "top_desert_stones",
     "page": 12,
     "tile": 2,
-    "radius": 0.592741935483871
+    "radius": 0.5950413223140496
   },
   {
     "name": "top_broadleaf",
     "page": 12,
     "tile": 3,
-    "radius": 0.47959183673469385
+    "radius": 0.4793388429752066
   },
   {
     "name": "top_autumn",
     "page": 13,
     "tile": 0,
-    "radius": 0.49780701754385964
+    "radius": 0.5022522522522522
   },
   {
     "name": "top_birch",
     "page": 13,
     "tile": 1,
-    "radius": 0.49318181818181817
+    "radius": 0.49311926605504586
   },
   {
     "name": "top_green_bush",
     "page": 13,
     "tile": 2,
-    "radius": 0.47435897435897434
+    "radius": 0.474025974025974
   },
   {
     "name": "top_red_bush",
     "page": 13,
     "tile": 3,
-    "radius": 0.4967741935483871
+    "radius": 0.5170068027210885
   },
   {
     "name": "top_sparse_bush",
     "page": 14,
     "tile": 0,
-    "radius": 0.49363057324840764
+    "radius": 0.49032258064516127
   },
   {
     "name": "top_conifer",
     "page": 14,
     "tile": 1,
-    "radius": 0.4406779661016949
+    "radius": 0.4375
   },
   {
     "name": "top_mossy_boulder",
     "page": 14,
     "tile": 2,
-    "radius": 0.5528169014084507
+    "radius": 0.5535714285714286
   },
   {
     "name": "top_mossy_rock",
     "page": 14,
     "tile": 3,
-    "radius": 0.5213675213675214
+    "radius": 0.5217391304347826
   },
   {
     "name": "top_flat_rock",
     "page": 15,
     "tile": 0,
-    "radius": 0.48026315789473684
+    "radius": 0.4797297297297297
   },
   {
     "name": "top_palm_a",
     "page": 15,
     "tile": 1,
-    "radius": 0.5481171548117155
+    "radius": 0.5506329113924051
   },
   {
     "name": "top_palm_b",
     "page": 15,
     "tile": 2,
-    "radius": 0.41504854368932037
+    "radius": 0.4166666666666667
   },
   {
     "name": "top_jungle_tree",
     "page": 15,
     "tile": 3,
-    "radius": 0.46530612244897956
+    "radius": 0.46502057613168724
   },
   {
     "name": "top_banana",
     "page": 16,
     "tile": 0,
-    "radius": 0.5454545454545454
+    "radius": 0.5460122699386503
   },
   {
     "name": "top_fern",
     "page": 16,
     "tile": 1,
-    "radius": 0.46987951807228917
+    "radius": 0.4666666666666667
   },
   {
     "name": "top_jungle_bush",
     "page": 16,
     "tile": 2,
-    "radius": 0.4612903225806452
+    "radius": 0.46405228758169936
   },
   {
     "name": "top_tropical_shrub",
     "page": 16,
     "tile": 3,
-    "radius": 0.4902597402597403
+    "radius": 0.4966887417218543
   },
   {
     "name": "top_jungle_boulder",
     "page": 17,
     "tile": 0,
-    "radius": 0.574468085106383
+    "radius": 0.5755395683453237
   },
   {
     "name": "top_jungle_rock",
     "page": 17,
     "tile": 1,
-    "radius": 0.5619047619047619
+    "radius": 0.5631067961165048
   },
   {
     "name": "top_fallen_log",
     "page": 17,
     "tile": 2,
-    "radius": 0.907258064516129
+    "radius": 0.9139344262295082
   },
   {
     "name": "top_grey_shrub",
     "page": 17,
     "tile": 3,
-    "radius": 0.5163934426229508
+    "radius": 0.5166666666666667
   },
   {
     "name": "top_small_rock",
     "page": 18,
     "tile": 0,
-    "radius": 0.4785714285714286
+    "radius": 0.47794117647058826
   }
 ]

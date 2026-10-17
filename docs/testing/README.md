@@ -352,6 +352,16 @@ The CPU-only `vegetation-pass5-cameras` case selects coast, forest hand-off and
 top-view situations. `--vegetation-preview OUT pass5-cameras` writes that list.
 These reproduce the requested situations; player screenshot coordinates are unknown.
 
+`vegetation-stream-convergence` runs `--vegetation-preview OUT stream-check`
+without a GPU. It exercises the production worker, bounded page uploads and
+visibility-radius growth at the lowpass start camera. It must converge within
+1,000 simulated 60 Hz frames, remain idle for 120 frames, and upload each selected
+instance only once. This waits for each bounded worker job and does not measure
+real-time scheduling or GPU cost. It honors `TORE_VEG_LOWPASS_THEATERS`,
+`TORE_VEG_LOWPASS_DENSITIES` and the baseline camera file described below.
+Synthetic unit tests also check that moving the camera builds only entering
+chunks, including reversing direction before a ring finishes.
+
 On `exp/vegetation`, `tore-app --vegetation-preview OUT cost` renders open
 country and woods at 1440p and 4K, at Medium, High and Ultra. This is an
 offscreen GPU job, not a GPU-free test. Use an isolated profile and the machine's
@@ -373,6 +383,10 @@ its exact dense coordinates and heading. Run each
 `TORE_VEGETATION_CARDS=billboard|cross|cross-top|billboard-top` at High and both
 resolutions. Old and new High differ intentionally by one density step; their
 cost difference includes that reduction. This is an offscreen GPU job.
+Each case writes `*-warmup.csv` even if warmup fails. It records builds, packing,
+uploaded and pending bytes/chunks, worker/range pending flags and available/visible
+radii for every frame. `TORE_VEG_STREAM_TRACE=1` additionally logs each built and
+packed chunk key and worker completion state. Use it for diagnosis, not timings.
 
 Set `TORE_VEG_GPU_TIMING=1` to also emit `GPU` lines using timestamp queries.
 These measure the GPU commands without CPU placement/submission or readback.

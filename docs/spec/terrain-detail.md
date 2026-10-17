@@ -154,6 +154,13 @@ available in Graphics and through `TORE_VEGETATION_CARDS`: `billboard` (default)
 fixed seeded cross has four. Top modes add two triangles for a horizontal card
 at 80% of tree height or 65% of shrub/rock height, spanning the side silhouette's
 width in both horizontal axes. These heights are **fitted agent choices**.
+Top coverage is zero through 35 degrees down from the horizon, increases by
+smoothstep of the view ray's vertical component, and reaches full coverage at
+80 degrees down. The ray runs from the grounded instance's canopy centre to the
+eye. This applies only to the top card in both top modes and both depth/colour
+passes. The angle gate was requested by John on 2026-10-17; the 80-degree endpoint
+and smoothstep curve are **fitted agent choices**. The top remains inside the
+side cards at the heights above. Facing and cross side cards are unchanged.
 Crosses retain their orientation as the camera moves. They may expose their X
 at oblique angles and cost more covered pixels; no speed advantage is claimed.
 Every side card starts at the base supplied through `tore_world::grounding`.
@@ -179,6 +186,10 @@ Rocks retain visible-pixel mean normalization and slope lighting.
 
 Each 2,048 ft patch caches candidates. The worker builds a ring with two extra
 chunks beyond draw distance and uploads it through bounded persistent pages.
+The worker finishes the ring and fits its density before packing a replacement.
+It keeps the previous uploaded selection and its coverage while the next ring
+builds, and stops requesting work once a stationary view is complete. Resident
+candidates are built once; movement builds only chunks entering the ring.
 A budget can thin ranks across the ring but never truncate a prefix of whole
 patches. The visible radius is bounded by the completely built and uploaded
 circle, reduced by camera movement since that result. During loading or a
