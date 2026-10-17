@@ -147,8 +147,12 @@ const FLARE_UNIT:f32=4000.0;
 const FLARE_NIGHT_GAIN:f32=4.0;
 const FLARE_SOFTENING:f32=25.0;
 const FLARE_COLOR:vec3<f32>=vec3<f32>(1.0,0.75,0.45);
-fn flare_light(relative:vec3<f32>,normal:vec3<f32>)->vec3<f32> {
- var total=0.0;
+// Point sources (countermeasure flares, afterburners, muzzle flashes) in x,
+// area sources (fires, fireballs, impact flashes: extent.x is the radius) in y.
+// Same point law and night gain for both. The split is only the reflectance.
+fn flare_parts(relative:vec3<f32>,normal:vec3<f32>)->vec2<f32> {
+ var point=0.0;
+ var area=0.0;
  for(var i=0;i<i32(surface.reserved.w);i++) {
   let flare=surface.flares[i].source;
   let to=flare.xyz-relative;
@@ -157,10 +161,23 @@ fn flare_light(relative:vec3<f32>,normal:vec3<f32>)->vec3<f32> {
   let edge=clamp(1.0-d2*d2/(range2*range2),0.0,1.0);
   var facing=1.0;
   if dot(normal,normal)>0.0 {facing=max(dot(normal,to)*inverseSqrt(max(d2,0.000001)),0.0);}
-  total+=flare.w*facing*edge*edge/(d2+FLARE_SOFTENING);
+  let add=flare.w*facing*edge*edge/(d2+FLARE_SOFTENING);
+  if surface.flares[i].extent.x>0.0 {area+=add;} else {point+=add;}
  }
  let night=1.0-smoothstep(-0.104528,0.0348995,surface.reserved.y);
- return FLARE_COLOR*total*mix(1.0,FLARE_NIGHT_GAIN,night);
+ return vec2<f32>(point,area)*mix(1.0,FLARE_NIGHT_GAIN,night);
+}
+fn flare_light(relative:vec3<f32>,normal:vec3<f32>)->vec3<f32> {
+ let parts=flare_parts(relative,normal);
+ return FLARE_COLOR*(parts.x+parts.y);
+}
+// A fire returns the orange flare colour off the surface brightness, with a
+// little of the surface hue. Full albedo made green grass a green glow
+// (John, 2026-10-16). This is not the removed nr-nightfx warm term: strength
+// and reach stay on the flare point law. Mirrored by surface_lighting.rs.
+fn fire_reflectance(albedo:vec3<f32>)->vec3<f32> {
+ let l=dot(albedo,vec3<f32>(0.2126,0.7152,0.0722));
+ return max(mix(vec3<f32>(l),albedo,0.3),vec3<f32>(0.04));
 }
 // Derivatives recover triangle geometry, independent of original face flags.
 fn surface_normal(relative:vec3<f32>)->vec3<f32> {
@@ -189,7 +206,9 @@ fn surface_color(color:vec3<f32>,relative:vec3<f32>,normal:vec3<f32>,panels:bool
  }
  let night=vec3<f32>(mix(0.20,0.32,skyward)+0.30*max(dot(normal,surface.moon.xyz),0.0));
  let illumination=mix(night,ambient,day)+0.90*facing*visibility*tint;
- var lit=color*illumination+albedo*flare_light(relative,normal);
+ let parts=flare_parts(relative,normal);
+ // A point shows the art. A fire stays warm on green ground.
+ var lit=color*illumination+albedo*FLARE_COLOR*parts.x+fire_reflectance(albedo)*FLARE_COLOR*parts.y;
  if panels {
   let view=normalize(-relative);
   let grazing=pow(1.0-clamp(dot(normal,view),0.0,1.0),3.0);

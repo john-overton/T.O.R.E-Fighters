@@ -537,4 +537,29 @@ mod tests {
             }
         }
     }
+
+    /// Shader `fire_reflectance`: mostly brightness, 30 percent of the hue.
+    fn fire_reflectance(albedo: [f32; 3]) -> [f32; 3] {
+        let l = 0.2126 * albedo[0] + 0.7152 * albedo[1] + 0.0722 * albedo[2];
+        std::array::from_fn(|i| (l + (albedo[i] - l) * 0.3).max(0.04))
+    }
+
+    #[test]
+    fn a_fire_on_green_ground_stays_warm() {
+        // The orange flare colour. Area lights (a wreck fire, a fireball)
+        // multiply this by fire_reflectance, not by the grass itself.
+        let flare = [1.0_f32, 0.75, 0.45];
+        let grass = [0.25, 0.72, 0.22];
+        let raw: [f32; 3] = std::array::from_fn(|i| grass[i] * flare[i]);
+        assert!(
+            raw[1] > raw[0] + 0.1,
+            "raw green albedo times the flare colour is a green glow: {raw:?}"
+        );
+        let warm: [f32; 3] = {
+            let reflected = fire_reflectance(grass);
+            std::array::from_fn(|i| reflected[i] * flare[i])
+        };
+        assert!(warm[0] > warm[1], "the fire pool is warm: {warm:?}");
+        assert!(warm[1] > warm[2], "the fire pool is not blue: {warm:?}");
+    }
 }
