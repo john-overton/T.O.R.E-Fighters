@@ -1,11 +1,6 @@
-//! Instanced vegetation and grass. [`crate::vegetation::Placement`] keeps
-//! world-anchored chunks of objects around the camera; their meshes come
-//! from [`crate::vegetation_shapes::Library`] (retail shapes from the
-//! import, drawn fallbacks otherwise). A compute pass culls the objects,
-//! thins them with distance by each object's rank, and lists the near ones
-//! again as shadow casters. Grass is one instanced quad per tuft, its
-//! blades drawn by the fragment shader, in distance rings that carry fewer,
-//! wider tufts farther out. Not collidable.
+//! Cached vegetation impostors and the unchanged grass layer. Source shapes
+//! are rasterized once into indexed atlas pages. GPU culling compacts all
+//! visible species into one instance stream and one indirect draw. Not collidable.
 
 use crate::vegetation::{self, Inst, Patch, Placement, Species};
 use crate::vegetation_shapes::{FLOATS, Library, Look};
@@ -40,7 +35,6 @@ pub struct Renderer {
     finish: wgpu::ComputePipeline,
     pipeline: wgpu::RenderPipeline,
     grass_pipeline: wgpu::RenderPipeline,
-    shadow: [wgpu::RenderPipeline; 3],
     /// Per mesh: first slot and slot count in the instance list.
     slots: Vec<(u32, u32)>,
     count: u32,
@@ -170,7 +164,6 @@ impl Renderer {
         let finish = compute("finish");
         let (pipeline, grass_pipeline) =
             render_pipelines(device, shader, format, samples, material, &lighting.layout);
-        let shadow = shadow_pipelines(device, shader, lighting);
         Self {
             placement: Placement::new(atlas),
             library,
@@ -190,7 +183,6 @@ impl Renderer {
             finish,
             pipeline,
             grass_pipeline,
-            shadow,
             slots: vec![(0, 0); mesh_count],
             count: 0,
             uploaded: u64::MAX,
@@ -292,7 +284,6 @@ impl Renderer {
     ) {
         (self.pipeline, self.grass_pipeline) =
             render_pipelines(device, shader, format, samples, material, &lighting.layout);
-        self.shadow = shadow_pipelines(device, shader, lighting);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -358,7 +349,7 @@ impl Renderer {
             height * f * 0.5,
             camera.position[1] as f32,
         ]);
-        params.extend([full, draw, full.min(3_500.), 1.0]);
+        params.extend([full, draw, 0., 1.5]);
         params.extend(u32s(&[self.count, mesh_count as u32, 0, 0]));
         queue.write_buffer(&self.params, 0, &bytes_of_f32(&params));
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -407,7 +398,7 @@ impl Renderer {
             queue.write_buffer(&self.instances, 0, &bytes);
         }
         let mut table = Vec::with_capacity(mesh_count * 8);
-        for (m, mesh) in lib.meshes.iter().enumerate() {
+        for mesh in &lib.meshes {
             let look = match (mesh.look, mesh.recolour.is_some()) {
                 (Look::Foliage, _) => 0.,
                 (Look::Solid, false) => 1.,
@@ -415,12 +406,12 @@ impl Renderer {
             };
             let mean = mesh.recolour.unwrap_or([1.; 3]);
             table.extend([
-                f32::from_bits(self.slots[m].0),
+                f32::from_bits(0),
                 look,
                 mesh.radius,
-                f32::from_bits(self.slots[m].1),
+                f32::from_bits(list.len() as u32),
             ]);
-            table.extend([mean[0], mean[1], mean[2], 0.]);
+            table.extend([mean[0], mean[1], mean[2], mesh.sprite_layer as f32]);
         }
         if !table.is_empty() {
             queue.write_buffer(&self.meshes, 0, &bytes_of_f32(&table));
@@ -515,32 +506,6 @@ impl Renderer {
         }
     }
 
-    /// Casts the near objects into the shadow maps.
-    pub fn draw_shadows(
-        &self,
-        lighting: &crate::surface_lighting::SurfaceLighting,
-        encoder: &mut wgpu::CommandEncoder,
-        bind: &wgpu::BindGroup,
-    ) {
-        if !self.prepared || self.count == 0 {
-            return;
-        }
-        let mesh_count = self.library.meshes.len() as u64;
-        lighting.draw_more(encoder, |pass, cascade| {
-            pass.set_pipeline(&self.shadow[cascade]);
-            pass.set_bind_group(0, bind, &[]);
-            pass.set_vertex_buffer(0, self.vertices.slice(..));
-            for (m, (start, n)) in self.slots.iter().enumerate() {
-                if *n == 0 {
-                    continue;
-                }
-                let at = u64::from(*start) * DRAWN_STRIDE;
-                pass.set_vertex_buffer(1, self.shadow_drawn.slice(at..));
-                pass.draw_indirect(&self.args, (mesh_count + m as u64) * 16);
-            }
-        });
-    }
-
     pub fn draw<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, bind: &'a wgpu::BindGroup) {
         if !self.prepared {
             return;
@@ -549,14 +514,8 @@ impl Renderer {
         if self.count > 0 {
             pass.set_pipeline(&self.pipeline);
             pass.set_vertex_buffer(0, self.vertices.slice(..));
-            for (m, (start, n)) in self.slots.iter().enumerate() {
-                if *n == 0 {
-                    continue;
-                }
-                let at = u64::from(*start) * DRAWN_STRIDE;
-                pass.set_vertex_buffer(1, self.drawn.slice(at..));
-                pass.draw_indirect(&self.args, m as u64 * 16);
-            }
+            pass.set_vertex_buffer(1, self.drawn.slice(..));
+            pass.draw_indirect(&self.args, 0);
         }
         if !self.rings.is_empty() {
             pass.set_pipeline(&self.grass_pipeline);
@@ -600,7 +559,12 @@ fn object_buffers(
             wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         ),
         buffer("Vegetation drawn", DRAWN_STRIDE, listed),
-        buffer("Vegetation shadow casters", DRAWN_STRIDE, listed),
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Unused vegetation caster binding"),
+            size: DRAWN_STRIDE,
+            usage: listed,
+            mapped_at_creation: false,
+        }),
     )
 }
 
@@ -754,62 +718,6 @@ fn render_pipelines(
 
 /// The object shadow casters, one pipeline per cascade (the cascade is the
 /// vertex entry, since the instance index is the object).
-fn shadow_pipelines(
-    device: &wgpu::Device,
-    shader: &wgpu::ShaderModule,
-    lighting: &crate::surface_lighting::SurfaceLighting,
-) -> [wgpu::RenderPipeline; 3] {
-    let buffers = [
-        wgpu::VertexBufferLayout {
-            array_stride: (FLOATS * 4) as u64,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32],
-        },
-        wgpu::VertexBufferLayout {
-            array_stride: DRAWN_STRIDE,
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![5 => Float32x4, 6 => Float32x4, 7 => Float32x4],
-        },
-    ];
-    std::array::from_fn(|cascade| {
-        let entry = format!("veg_shadow_vertex{cascade}");
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Vegetation shadow casters"),
-            layout: Some(&lighting.caster_layout),
-            vertex: wgpu::VertexState {
-                module: shader,
-                entry_point: Some(&entry),
-                compilation_options: Default::default(),
-                buffers: &buffers,
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: shader,
-                entry_point: Some("terrain_shadow_fragment"),
-                compilation_options: Default::default(),
-                targets: &[],
-            }),
-            primitive: wgpu::PrimitiveState {
-                cull_mode: None,
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
-                stencil: Default::default(),
-                bias: wgpu::DepthBiasState {
-                    constant: 1,
-                    slope_scale: 1.,
-                    clamp: 0.,
-                },
-            }),
-            multisample: Default::default(),
-            multiview: None,
-            cache: None,
-        })
-    })
-}
-
 fn storage_entry(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,

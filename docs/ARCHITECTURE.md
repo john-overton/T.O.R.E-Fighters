@@ -10972,3 +10972,13 @@ a background mission builder while virtual-time headless clients retain the
 synchronous default. Transport updates continue, and session events retain their
 order behind the pending build. See the [loading specification](spec/loading-screen.md)
 and [CPU measurement](baselines/loading-screen.md).
+
+## Exploratory vegetation rendering
+
+On `exp/vegetation`, vegetation is app presentation data. `Scenery` builds the
+retail-art/fallback impostor atlas once; `Placement` caches terrain patch
+candidates independently of camera distance. `vegetation_renderer` uploads
+changed batches and GPU-culls them into one indirect sprite draw. The grass
+layer remains separate. No vegetation shadow geometry or vegetation state
+enters simulation, replays, checkpoints or networking. See the
+[placement and sprite specification](spec/terrain-detail.md#sprites-and-cached-placement).

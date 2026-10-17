@@ -1836,9 +1836,6 @@ impl SimRenderer {
             if let Some(fill) = &self.fill {
                 fill.draw_shadows(&self.lighting, encoder, &self.bind);
             }
-            if let Some(vegetation) = &self.vegetation {
-                vegetation.draw_shadows(&self.lighting, encoder, &self.bind);
-            }
         }
         // The spotting aid covers other aircraft in the main view and the
         // mirrors, not the instrument camera panels. The ownship batch is

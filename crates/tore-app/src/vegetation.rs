@@ -1,5 +1,4 @@
-//! Theater vegetation (exploratory, 2026-10-16; placement reworked in the
-//! second pass). Presentation only: nothing here is collidable, and nothing
+//! Theater vegetation (exploratory, 2026-10-16; sparse cached sprite placement). Presentation only: nothing here is collidable, and nothing
 //! is written to the simulation, the wire, a replay or a checkpoint.
 //! `TORE_VEGETATION=0` builds none of it. Unset or `1` builds it. Placement
 //! is a function of the theater, the tile and the world position, so every
@@ -11,18 +10,17 @@
 //!
 //! - each theater's own greens are split by their tone: its darker greens
 //!   are woodland, its lighter yellow-greens are fields, the rest meadow;
-//! - woodland is dense, meadow carries copses, fields stay clear except for
+//! - woodland has tree patches, meadow carries copses, fields stay clear except for
 //!   hedgerows along plot edges;
 //! - hills and mountains gain trees up to a climate tree line, then thin;
 //! - river banks and shores are denser; roads, towns, airfields and water
 //!   stay clear;
-//! - deserts grow only along water and in wadis, with rock on stony ground
+//! - deserts have sparse dry scrub, green belts near water, and rock on stony ground
 //!   and slopes; the dunes themselves are terrain shading
 //!   (`terrain.wgsl`), which keeps them in the ground's own light.
 //!
-//! Objects are cached per world-anchored chunk. A chunk keeps a subset of
-//! its candidates by distance, and each object carries a rank, so a farther
-//! view's objects are always a subset of a nearer view's and nothing pops.
+//! Full candidates are cached per world-anchored chunk, independent of distance.
+//! Each object carries a rank for distance selection and fading on the GPU.
 
 use std::{collections::BTreeMap, sync::Arc};
 use tore_formats::theater::Environment;
@@ -818,22 +816,25 @@ impl Atlas {
         let region = self.region;
         if region.climate == 1 {
             let green = matches!(s.kind, Kind::Scrub | Kind::Forest | Kind::Grass);
-            let belt = if green { 0.45 + 0.4 * s.near_water } else { 0. };
-            let oasis =
-                0.35 * s.near_water * s.near_water * if s.kind == Kind::Sand { 1. } else { 0. };
-            let wadi = 0.07 * s.bank + 0.03 * s.bed;
-            return (belt + oasis + wadi + 0.0015 * s.gravel).min(1.) * region.cover;
+            let belt = if green {
+                0.12 * s.near_water.powi(6)
+            } else {
+                0.
+            };
+            let oasis = 0.15 * s.near_water.powi(6) * if s.kind == Kind::Sand { 1. } else { 0. };
+            let wadi = 0.015 * s.bank + 0.005 * s.bed;
+            return (belt + oasis + wadi).min(1.) * region.cover;
         }
         let (full, none) = tree_line(region);
         let line = 1. - smoothstep(full, none, s.height);
         let hill = smoothstep(3., 13., s.slope);
         let relief = smoothstep(400., 2_500., s.height - self.median_height);
         let mut p = match s.kind {
-            Kind::Forest => 0.55 + 0.45 * s.wood,
+            Kind::Forest => 0.08 + 0.12 * s.wood,
             Kind::Grass => {
-                0.25 * s.wood.powf(0.7)
-                    + 0.02
-                    + 0.22
+                0.004 * s.wood.powf(0.7)
+                    + 0.001
+                    + 0.055
                         * smoothstep(
                             0.66,
                             0.8,
@@ -849,10 +850,10 @@ impl Atlas {
         if s.kind == Kind::Field {
             // Fields stay clear; hedgerows are placed along plot edges, and
             // trees gather along a river through the fields.
-            p = 0.25 * s.near_water;
+            p = 0.03 * s.near_water;
         } else {
-            p += (0.6 * hill + 0.35 * relief) * (1. - p);
-            p += 0.5 * s.near_water * (1. - p);
+            p += (0.015 * hill + 0.008 * relief) * (1. - p);
+            p += 0.08 * s.near_water * (1. - p);
         }
         // Tropical forest is closer and taller; arctic trees are scattered.
         let climate = match region.climate {
@@ -870,10 +871,15 @@ impl Atlas {
         }
         if self.region.climate == 1 {
             let green = matches!(s.kind, Kind::Scrub | Kind::Forest | Kind::Grass);
-            return (0.32 * s.bank
-                + 0.16 * s.bed
+            return (0.012
+                + 0.10 * s.bank
+                + 0.04 * s.bed
                 + 0.025 * s.gravel
-                + if green { 0.18 } else { 0.3 * s.near_water })
+                + if green {
+                    0.08 * s.near_water
+                } else {
+                    0.1 * s.near_water
+                })
             .min(1.);
         }
         let edge = 4. * s.wood * (1. - s.wood);
@@ -959,21 +965,50 @@ impl Atlas {
                     }
                 }
             };
-        scatter(grid(30.), 100, &mut out, &|s, roll| {
+        scatter(grid(60.), 100, &mut out, &|s, roll| {
             let p = self.tree_density(s);
             (p > 0.).then(|| Plant {
                 p,
                 ..self.tree(s, roll)
             })
         });
-        scatter(grid(22.), 200, &mut out, &|s, roll| {
+        scatter(grid(44.), 200, &mut out, &|s, roll| {
             let p = self.bush_density(s);
             (p > 0.).then(|| self.bush(s, roll, p))
         });
-        scatter(grid(26.), 300, &mut out, &|s, roll| {
+        scatter(grid(52.), 300, &mut out, &|s, roll| {
             let p = self.rock_density(s);
             (p > 0.).then(|| self.rock(s, roll, p))
         });
+        if climate == 0 {
+            scatter(grid(64.), 350, &mut out, &|s, roll| {
+                if s.blocked || !matches!(s.kind, Kind::Field | Kind::Grass) {
+                    return None;
+                }
+                let roadside = [(-96, 0), (96, 0), (0, -96), (0, 96)]
+                    .iter()
+                    .any(|&(dx, dz)| self.kind_at(s.x as i64 + dx, s.z as i64 + dz) == Kind::Road);
+                let village = world.city_fill.as_ref().is_some_and(|fill| {
+                    fill.layout.map.districts.iter().any(|d| {
+                        let r = d.half[0].max(d.half[1]).max(1) as f64;
+                        let distance = (s.x - d.center[0] as f64).hypot(s.z - d.center[1] as f64);
+                        distance > r && distance < r + 350.
+                    })
+                });
+                if !roadside && !village {
+                    return None;
+                }
+                let mut plant = self.tree(s, roll);
+                plant.p = if roadside { 0.35 } else { 0.22 };
+                plant.height = if village {
+                    18. + 12. * unit(roll >> 11)
+                } else {
+                    40. + 20. * unit(roll >> 11)
+                };
+                plant.width = if village { 0.8 } else { 0.45 };
+                Some(plant)
+            });
+        }
         // Groves: one object for a clump of trees, deep in woodland, drawn
         // where single trees have thinned with distance.
         if climate != 1 {
@@ -1001,8 +1036,8 @@ impl Atlas {
         scatter(220., 450, &mut out, &|s, roll| {
             let green = matches!(s.kind, Kind::Scrub | Kind::Forest | Kind::Grass);
             let p = match climate {
-                1 if green => 0.3 * (0.3 + 0.7 * s.near_water),
-                1 if s.kind == Kind::Sand => 0.25 * s.near_water * s.near_water,
+                1 if green => 0.1 * s.near_water.powi(6),
+                1 if s.kind == Kind::Sand => 0.08 * s.near_water.powi(6),
                 3 if self.region.trees == 2 && s.kind == Kind::Forest => 0.1 + 0.3 * s.near_water,
                 _ => 0.,
             };
@@ -1093,7 +1128,7 @@ impl Atlas {
                 if id % 100 >= 55 {
                     continue;
                 }
-                let step = 15.;
+                let step = 48.;
                 let mut t = 0.;
                 let mut i = 0u32;
                 while t < plot as f64 {
@@ -1124,7 +1159,7 @@ impl Atlas {
                     if a.kind != Kind::Field || b.kind != Kind::Field || site.blocked {
                         continue;
                     }
-                    let tree = roll.is_multiple_of(9);
+                    let tree = !roll.is_multiple_of(4);
                     let plant = if tree {
                         Plant {
                             p,
@@ -1172,7 +1207,7 @@ impl Atlas {
         };
         if self.region.climate == 1 {
             let green = matches!(s.kind, Kind::Scrub | Kind::Forest | Kind::Grass);
-            if green || s.near_water > 0.4 {
+            if (green && s.near_water > 0.2) || s.near_water > 0.6 {
                 return if pick < 0.8 {
                     plant(Species::Palm, 34. + 26. * size, 1.)
                 } else if pick < 0.9 {
@@ -1220,8 +1255,9 @@ impl Atlas {
 
     fn bush(&self, s: &Site, roll: u32, p: f32) -> Plant {
         let size = unit(roll >> 11);
-        let dry = (self.region.climate == 1
-            && !matches!(s.kind, Kind::Scrub | Kind::Forest | Kind::Grass))
+        let dry = (self.region.climate == 1 && s.near_water < 0.8 && s.bank < 0.5)
+            || (self.region.climate == 1
+                && !matches!(s.kind, Kind::Scrub | Kind::Forest | Kind::Grass))
             || matches!(s.kind, Kind::Rock | Kind::Sand)
             || (self.region.climate != 1 && s.kind == Kind::Scrub)
             || (self.region.code == "GRE" && unit(roll >> 5) < 0.5);
@@ -1229,9 +1265,9 @@ impl Atlas {
             Plant {
                 p,
                 species: Species::DryBush,
-                height: 4. + 5. * size,
+                height: 1.5 + 2.5 * size,
                 width: 1.2,
-                tint: [1.; 3],
+                tint: [0.55, 0.43, 0.28],
             }
         } else {
             Plant {
@@ -1267,7 +1303,11 @@ impl Atlas {
 
     fn instance(&self, s: &Site, plant: Plant, rank: f32, roll: u32) -> Inst {
         Inst {
-            pos: [s.x as f32, s.height, s.z as f32],
+            pos: [
+                s.x as f32,
+                sprite_ground(s.height, plant.height),
+                s.z as f32,
+            ],
             yaw: unit(roll >> 6) * std::f32::consts::TAU,
             height: plant.height,
             width: plant.width,
@@ -1294,7 +1334,7 @@ impl Atlas {
                     continue;
                 }
                 out.push(Patch {
-                    pos: [x as f32, site.height, z as f32],
+                    pos: [x as f32, sprite_ground(site.height, height), z as f32],
                     density,
                     grad: site.grad,
                     kind,
@@ -1600,13 +1640,14 @@ pub struct Placement {
     capped: bool,
     /// Bumped whenever the drawn set changes.
     pub generation: u64,
+    full: f32,
+    eye_cell: Option<(i64, i64)>,
+    settled: Option<(i64, i64, u32, u32)>,
+    /// Number of patch builds, for cache diagnostics.
+    pub builds: u64,
 }
 
 struct Chunk {
-    /// The distance its objects were kept for: right from there outwards.
-    near: f32,
-    /// The full density distance they were kept for.
-    full: f32,
     objects: Vec<Inst>,
 }
 
@@ -1627,6 +1668,10 @@ impl Placement {
             total: 0,
             capped: false,
             generation: 0,
+            full: 0.,
+            eye_cell: None,
+            settled: None,
+            builds: 0,
         }
     }
 
@@ -1634,6 +1679,7 @@ impl Placement {
         if (density - self.density).abs() > 1e-4 {
             self.density = density;
             self.chunks.clear();
+            self.settled = None;
             self.generation += 1;
         }
     }
@@ -1641,6 +1687,7 @@ impl Placement {
     pub fn set_budget(&mut self, budget: usize) {
         if budget != self.budget {
             self.budget = budget;
+            self.settled = None;
             self.squeeze = 1.;
             self.generation += 1;
         }
@@ -1663,10 +1710,25 @@ impl Placement {
         draw: f32,
         budget: Option<usize>,
     ) -> bool {
+        let cx = (eye[0] / CHUNK as f64).floor() as i64;
+        let cz = (eye[1] / CHUNK as f64).floor() as i64;
+        let key = (cx, cz, full.to_bits(), draw.to_bits());
+        if self.settled == Some(key) {
+            return true;
+        }
+        // A stable ring for the entire camera cell, with a guard patch.
+        let eye = [
+            (cx as f64 + 0.5) * CHUNK as f64,
+            (cz as f64 + 0.5) * CHUNK as f64,
+        ];
+        let draw = draw + CHUNK as f32;
         for _ in 0..12 {
             let done = self.pass(world, eye, full, draw, budget);
             let rescaled = done && self.rescale();
             if !rescaled {
+                if done {
+                    self.settled = Some(key);
+                }
                 return done;
             }
             if budget.is_some() {
@@ -1684,7 +1746,19 @@ impl Placement {
         draw: f32,
         budget: Option<usize>,
     ) -> bool {
+        let cell = (
+            (eye[0] / CHUNK as f64).floor() as i64,
+            (eye[1] / CHUNK as f64).floor() as i64,
+        );
+        if self.eye_cell != Some(cell) {
+            self.eye_cell = Some(cell);
+            self.generation += 1;
+        }
         let full = self.squeezed(full);
+        if self.full != full {
+            self.full = full;
+            self.generation += 1;
+        }
         let c0x = ((eye[0] - f64::from(draw)) / CHUNK as f64).floor() as i64;
         let c1x = ((eye[0] + f64::from(draw)) / CHUNK as f64).floor() as i64;
         let c0z = ((eye[1] - f64::from(draw)) / CHUNK as f64).floor() as i64;
@@ -1708,41 +1782,26 @@ impl Placement {
         let mut total = 0usize;
         let mut capped = false;
         for (d, key) in &wanted {
-            let stale = match self.chunks.get(key) {
-                None => true,
-                // Rebuild when the camera is nearer than the chunk was kept
-                // for, or so much farther that it holds about three times
-                // what it needs, or when the full density distance moved.
-                Some(c) => {
-                    *d < c.near
-                        || c.near < d * 0.5 - CHUNK as f32
-                        || c.full < full * 0.95
-                        || c.full > full * 1.1
-                }
-            };
+            let stale = !self.chunks.contains_key(key);
             if stale {
                 if budget.is_some_and(|b| built >= b) {
                     done = false;
                     continue;
                 }
-                // A quarter nearer, so a closing camera does not rebuild it
-                // straight away.
-                let near = d * 0.75;
-                let objects = self
-                    .atlas
-                    .chunk(world, key.0, key.1, near, full, self.density);
-                self.chunks.insert(
-                    *key,
-                    Chunk {
-                        near,
-                        full,
-                        objects,
-                    },
-                );
+                // Full candidates are cached independently of camera distance.
+                // Distance thinning belongs to selection and the GPU, never a rebuild.
+                let objects = self.atlas.chunk(world, key.0, key.1, 0., 1., self.density);
+                self.chunks.insert(*key, Chunk { objects });
+                self.builds += 1;
                 built += 1;
                 changed = true;
             }
-            total += self.chunks.get(key).map_or(0, |c| c.objects.len());
+            total += self.chunks.get(key).map_or(0, |c| {
+                c.objects
+                    .iter()
+                    .filter(|i| i.rank < i.species.share((*d - 2. * CHUNK as f32).max(0.), full))
+                    .count()
+            });
             if total > self.budget {
                 capped = true;
                 break;
@@ -1809,12 +1868,17 @@ impl Placement {
             .collect();
         keys.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
         let mut out = Vec::new();
-        for (_, key) in keys {
-            let objects = &self.chunks[&key].objects;
+        for (d, key) in keys {
+            let objects: Vec<_> = self.chunks[&key]
+                .objects
+                .iter()
+                .copied()
+                .filter(|i| i.rank < i.species.share((d - 2. * CHUNK as f32).max(0.), self.full))
+                .collect();
             if out.len() + objects.len() > self.budget {
                 break;
             }
-            out.extend_from_slice(objects);
+            out.extend_from_slice(&objects);
         }
         out
     }
@@ -1897,6 +1961,23 @@ fn median_height(world: &Terrain) -> f32 {
     }
     h.sort_by(f32::total_cmp);
     h[h.len() / 2]
+}
+
+/// Both sprite layers have a normalized upright quad from zero to one.
+/// Keep footing in the shared grounding path even when its correction is zero.
+fn sprite_ground(terrain: f32, height: f32) -> f32 {
+    static BOTTOM: std::sync::LazyLock<f64> = std::sync::LazyLock::new(|| {
+        tore_world::grounding::sprites_bottom(&[tore_formats::shape::Billboard {
+            center: [0., 0., 0.5],
+            size: [1., 1.],
+            texture: String::new(),
+            uv: None,
+            fog: Default::default(),
+            address: 0,
+        }])
+        .expect("vegetation quad has a bottom")
+    });
+    terrain - (*BOTTOM as f32) * height
 }
 
 fn leaf_tint(ground: [u8; 3], roll: u32) -> [f32; 3] {
@@ -2411,6 +2492,54 @@ mod tests {
     }
 
     #[test]
+    fn resident_patches_are_built_once_across_camera_and_lod_changes() {
+        let world = flat();
+        let mut cache = Placement::new(Arc::new(Atlas::synthetic(solid(10), 0)));
+        assert!(cache.update(&world, [4000., 4000.], 3000., 6000., None));
+        let builds = cache.builds;
+        let original = cache.chunks[&(1, 1)].objects.clone();
+        assert!(cache.update(&world, [4000., 4000.], 3000., 6000., None));
+        assert_eq!(builds, cache.builds);
+        assert!(cache.update(&world, [4100., 4000.], 5000., 6000., None));
+        assert_eq!(original, cache.chunks[&(1, 1)].objects);
+        let retained = cache.chunks.len();
+        let builds = cache.builds;
+        assert!(cache.update(&world, [4100., 4000.], 1000., 6000., None));
+        assert_eq!(builds, cache.builds);
+        assert_eq!(retained, cache.chunks.len());
+    }
+
+    #[test]
+    fn sparse_desert_scrub_is_small_and_dry_and_fields_stay_open() {
+        let world = flat();
+        let desert = Atlas::synthetic(solid(20), 1);
+        let mut site = desert.site(&world, 4000., 4000.);
+        site.near_water = 0.;
+        site.bank = 0.;
+        site.bed = 0.;
+        site.gravel = 0.;
+        assert_eq!(desert.tree_density(&site), 0.);
+        assert!((0.01..0.02).contains(&desert.bush_density(&site)));
+        let bush = desert.bush(&site, 123456, 1.);
+        assert_eq!(bush.species, Species::DryBush);
+        assert!(bush.height <= 4. && bush.tint[0] > bush.tint[1]);
+        let temperate = Atlas::synthetic(solid(20), 0);
+        site.kind = Kind::Field;
+        assert_eq!(temperate.tree_density(&site), 0.);
+        assert_eq!(temperate.bush_density(&site), 0.);
+        site.kind = Kind::Forest;
+        site.wood = 1.;
+        assert!(temperate.tree_density(&site) <= 0.21);
+        site.height = 0.;
+        site.slope = 0.;
+        let tropical = Atlas::synthetic(solid(10), 3);
+        let arctic = Atlas::synthetic(solid(10), 2);
+        assert!((temperate.tree_density(&site) - 0.20).abs() < 0.001);
+        assert!((tropical.tree_density(&site) - 0.23).abs() < 0.001);
+        assert!((arctic.tree_density(&site) - 0.09).abs() < 0.001);
+    }
+
+    #[test]
     fn colours_sort_into_the_kinds_a_player_would_name() {
         assert_eq!(kind_of([0, 0, 0], 255, 0), Kind::Water);
         assert_eq!(kind_of([30, 40, 140], 40, 0), Kind::River);
@@ -2473,7 +2602,7 @@ mod tests {
         let field = placed(Atlas::synthetic(solid(20), 0), eye, 1.);
         let meadow = placed(Atlas::synthetic(solid(12), 0), eye, 1.);
         assert!(
-            trees(&wood) > 20 * trees(&field).max(1),
+            trees(&wood) > 2 * trees(&field).max(1),
             "{} vs {}",
             trees(&wood),
             trees(&field)

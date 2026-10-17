@@ -333,8 +333,10 @@ fn cost(resources: &std::collections::BTreeMap<String, Vec<u8>>, out: &Path) -> 
                 let mut gpu = pollster::block_on(View::new(&scenery, size, options(density)))?;
                 gpu.set_shown(false);
                 let off = gpu.time(&camera, &world, &scenery)?;
+                let gpu_off = gpu.gpu_time(&camera, &world, &scenery)?;
                 gpu.set_shown(true);
                 let on = gpu.time(&camera, &world, &scenery)?;
+                let gpu_on = gpu.gpu_time(&camera, &world, &scenery)?;
                 let eye = [camera.position[0], camera.position[2]];
                 let (placed, tufts, reach, squeeze) = gpu
                     .sim
@@ -352,6 +354,17 @@ fn cost(resources: &std::collections::BTreeMap<String, Vec<u8>>, out: &Path) -> 
                 );
                 print!("  {line}");
                 report += &line;
+                if let (Some(off), Some(on)) = (gpu_off, gpu_on) {
+                    let line = format!(
+                        "GPU {spot_name} {}x{} {}: off {off:.3} ms, on {on:.3} ms, cost {:.3} ms\n",
+                        size[0],
+                        size[1],
+                        density.label(),
+                        on - off
+                    );
+                    print!("  {line}");
+                    report += &line;
+                }
             }
         }
     }
@@ -616,8 +629,20 @@ impl View {
             })
             .await?;
         println!("vegetation preview adapter: {}", adapter.get_info().name);
+        let timing = std::env::var("TORE_VEG_GPU_TIMING").as_deref() == Ok("1");
+        let features = if timing {
+            wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS
+        } else {
+            wgpu::Features::empty()
+        };
+        if !adapter.features().contains(features) {
+            return Err("vegetation GPU timestamps unsupported by this adapter".into());
+        }
         let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor::default())
+            .request_device(&wgpu::DeviceDescriptor {
+                required_features: features,
+                ..Default::default()
+            })
             .await?;
         let format = wgpu::TextureFormat::Rgba8UnormSrgb;
         let mut sim =
@@ -690,6 +715,87 @@ impl View {
             timeout: None,
         })?;
         Ok(())
+    }
+
+    /// Actual GPU command time, excluding CPU placement/submission and readback.
+    /// Optional so the ordinary preview remains portable to adapters without queries.
+    fn gpu_time(
+        &mut self,
+        camera: &Camera,
+        world: &Terrain,
+        scenery: &Scenery,
+    ) -> AppResult<Option<f64>> {
+        if !self
+            .device
+            .features()
+            .contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS)
+        {
+            return Ok(None);
+        }
+        const FRAMES: u32 = 8;
+        self.draw(camera, world, scenery);
+        self.draw(camera, world, scenery);
+        self.wait()?;
+        let queries = self.device.create_query_set(&wgpu::QuerySetDescriptor {
+            label: Some("Vegetation frame timestamps"),
+            ty: wgpu::QueryType::Timestamp,
+            count: FRAMES * 2,
+        });
+        let bytes = u64::from(FRAMES) * 16;
+        let resolved = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Vegetation timestamps resolved"),
+            size: bytes,
+            usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Vegetation timestamps readback"),
+            size: bytes,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        for frame in 0..FRAMES {
+            let view = self.texture.create_view(&Default::default());
+            let mut encoder = self.device.create_command_encoder(&Default::default());
+            encoder.write_timestamp(&queries, frame * 2);
+            self.sim.draw(
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                &view,
+                self.size,
+                camera,
+                world,
+                scenery,
+            );
+            encoder.write_timestamp(&queries, frame * 2 + 1);
+            if frame + 1 == FRAMES {
+                encoder.resolve_query_set(&queries, 0..FRAMES * 2, &resolved, 0);
+                encoder.copy_buffer_to_buffer(&resolved, 0, &readback, 0, bytes);
+            }
+            self.queue.submit([encoder.finish()]);
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        readback.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        self.wait()?;
+        rx.recv()??;
+        let mapped = readback.slice(..).get_mapped_range();
+        let ticks: u64 = mapped
+            .chunks_exact(16)
+            .map(|pair| {
+                let start = u64::from_le_bytes(pair[..8].try_into().expect("timestamp"));
+                let end = u64::from_le_bytes(pair[8..].try_into().expect("timestamp"));
+                end.saturating_sub(start)
+            })
+            .sum();
+        let milliseconds = ticks as f64 * f64::from(self.queue.get_timestamp_period())
+            / 1_000_000.
+            / f64::from(FRAMES);
+        drop(mapped);
+        readback.unmap();
+        Ok(Some(milliseconds))
     }
 
     /// Mean of eight frames after a warmup, from submit through the wait.

@@ -337,3 +337,18 @@ above). The ordinary CPU checks cover 10, 15 and 20 degree planes, both
 terrain triangle halves at distant map coordinates, and standing effects
 that must not sample ground. `TORE_DECAL_RENDERS` also writes `hill15-*`
 reference, before, after and coverage PPMs.
+
+## Exploratory vegetation benchmark
+
+On `exp/vegetation`, `tore-app --vegetation-preview OUT cost` renders open
+country and woods at 1440p and 4K, at Medium, High and Ultra. This is an
+offscreen GPU job, not a GPU-free test. Use an isolated profile and the machine's
+current throttle. `frame-cost.txt` keeps the mean of eight frames after warmup,
+from CPU submission until GPU idle, with vegetation off/on and their difference.
+
+Set `TORE_VEG_GPU_TIMING=1` to also emit `GPU` lines using timestamp queries.
+These measure the GPU commands without CPU placement/submission or readback.
+An adapter without the required timestamp features returns an explicit error.
+Use repeated runs and compare medians, with the same camera and settings.
+The placement rules and presentation scope are in the
+[vegetation specification](../spec/terrain-detail.md#sprites-and-cached-placement).

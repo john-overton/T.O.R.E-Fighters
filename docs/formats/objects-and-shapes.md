@@ -1319,6 +1319,8 @@ All new hinge and material choices follow the linked fitted/opinionated contract
 Local FA media review, 2026-09-17. `FA_1.LIB` SHA-256:
 `657254c5bb3bcf3609b3e84ee6499bf80395a2daffc60c12363e534cf408245f`;
 `FA_2.LIB`: `fb8b30216e739292489d4872cc440debec334e14f8b9a3d0e340092445246198`.
+The associated import report identifies FA.EXE 1.02F, SHA-256
+`e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c`.
 The bounded SH parser reads A/B/C/D variants for all twelve supported aircraft.
 A/C are body variants; B/D contain separated pieces. Example: F18_A is 296 faces,
 shortened from intact longitudinal bounds -66..102 to -63..44; F18_B is 206 faces
@@ -1409,3 +1411,43 @@ Every ship has a `_A` damaged shape; no ground vehicle or SAM has one, and
 bunker variants `~BNK5`, `~BNK6`, `~BNK8` use `DBK*.SH`. The reader stays a
 bounded data grammar; each new opcode or envelope is reviewed and documented in
 this guide before it is accepted.
+
+## Vegetation card assets
+
+Research, 2026-10-16. Source: user-owned `FA_2.LIB`, SHA-256
+`fb8b30216e739292489d4872cc440debec334e14f8b9a3d0e340092445246198`.
+The associated import report identifies FA.EXE 1.02F, SHA-256
+`e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c`.
+The bounded `shape_inspect --scenery` reader finds fixed `fc` textured faces,
+not `ea` billboards, in these assets:
+
+| Records | Faces including painted ground | Texture records |
+| --- | --- | --- |
+| TREEA, TREEB | 11 each | _TREEA.PIC, _TREEB.PIC |
+| TREEC, TREED | 7 each | _TREEC.PIC, _TREED.PIC |
+| BUSH1, BUSH2, BUSH3, BUSH4 | 7 each | _BUSH1.PIC through _BUSH4.PIC |
+| GROVA, GROVB, GROVC, GROVD | 77, 66, 79, 79 | corresponding _GROV*.PIC |
+| GROVPA, GROVPB, GROVPC | 42, 42, 37 | corresponding _GROVP*.PIC |
+| PLMGA, PLMGB, PLMGC | 105, 122, 75 | corresponding _PLMG*.PIC |
+
+Names in the first column have `.SH` suffixes. Every listed shape has zero
+billboard records in the decoded scenery pose. Trees span z 0 to 124 source
+units. BUSH1/2 span -6 to 12, BUSH3 -1 to 16, BUSH4 -3 to 7. These are asset
+coordinates, not established in-game feet or apparent-size rules. The vertical
+cards cross in fixed planes, with opposite-facing faces and separate painted
+ground shadows. PIC UV rows count upward, as documented above.
+
+An archive-wide scan of successfully decoded `.SH` scenery poses found `ea`
+billboards in CATGUY, CLOUDS and SOLDIER, not in these vegetation shapes.
+This does not prove the executable never synthesizes vegetation sprites.
+`TREE1.OT` and `TREE2.OT` refer to absent TREE1/2 shapes in this media selection;
+no original placement path for the pictured tree field has been established.
+The supplied retail screenshots establish appearance only. Original vegetation
+camera rotation, world scale, draw distance and size transitions remain
+**unknown**. Next research step: identify the executable's terrain clutter
+resource references and decode its distance/size tables. Do not infer those
+rules from these filenames or screenshots.
+
+The exploratory renderer uses this artwork in newly baked impostors. Its
+camera-facing, distance and density rules are agent choices in the
+[vegetation specification](../spec/terrain-detail.md#sprites-and-cached-placement).

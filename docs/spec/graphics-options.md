@@ -34,8 +34,8 @@ shown below the options.
 | Terrain filtering | Off, On | On |
 | Building distance (city fill) | 10 nm, 20 nm, 30 nm | 30 nm |
 | Building detail (city fill) | 1 nm, 2 nm, 5 nm, 10 nm, 20 nm | 5 nm |
-| Vegetation texture | Off, On, Fine | On |
-| Vegetation texture distance | 1 nm, 2 nm, 4 nm | 2 nm |
+| Ground detail | Off, On, Fine | On |
+| Ground detail distance | 1 nm, 2 nm, 4 nm | 2 nm |
 | Vegetation distance | 2 nm, 4 nm, 6 nm, 8 nm | 4 nm |
 | Vegetation detail | 1 nm, 2 nm, 3 nm, 4 nm | 2 nm |
 | Vegetation density | Low, Med, High, Ultra | High |
@@ -170,12 +170,12 @@ and it is not part of the simulation, the network session, replays or
 checkpoints. What was drawn is seeded from the theater and the tile, so
 every machine that uses the same settings shows the same scene.
 
-**Vegetation texture** is the close-range ground detail: furrows on
+**Ground detail** is the close-range ground detail: furrows on
 fields, grass, a mottled forest floor, sand grain, ripples and dunes,
 pebbles on gravel, and scree on rock. It is described in
 [terrain detail](terrain-detail.md#exploratory-vegetation-and-ground-detail).
 Off leaves the retail tile. On is the ordinary grain. Fine is a
-tighter grain. **Vegetation texture distance** is how far that grain
+tighter grain. **Ground detail distance** is how far that grain
 reaches. It also fades with height, full below about 2,200 ft and gone
 by about 7,500 ft, so a cruise view stays the retail tile; the desert's
 broad colour fields and dune shading reach farther and fade out by
@@ -192,8 +192,8 @@ third of that, single stones at about an eighth), and the grass carpet
 reaches half the detail distance at most. Tree clumps (retail grove
 shapes) stand in for single trees from about a third of the full
 density distance outwards. The trees, bushes, palms and rocks are the
-retail shapes, which are already crossed cards, so there is no
-separate card level. **Vegetation density** is Low, Med, High or Ultra
+four-view camera-facing impostors baked from retail art or low-poly fallbacks
+at startup, with a 1.5 pixel size floor. **Vegetation density** is Low, Med, High or Ultra
 (about 0.4, 0.7, 1.0 and 1.65 times the High placement), and also sets
 the grass carpet:
 

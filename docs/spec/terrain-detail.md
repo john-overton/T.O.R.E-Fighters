@@ -135,50 +135,69 @@ It is not part of the terrain-detail behaviour above.
 John asked for vegetation on 2026-10-16 and for the second pass the
 same day (retail trees, placement from the tile art, denser grass, a
 better desert); the rules and numbers are agent choices, fitted by eye
-on offscreen renders. The original game has none of it. Nothing is
+on offscreen renders for passes 1 and 2. Pass 3 is not visually validated.
+The new placement is not a claim about retail placement. Nothing is
 collidable or part of the simulation, the network session, replays or
 checkpoints.
 
-### Shapes
+### Sprites and cached placement
 
-Trees, bushes, tree clumps and palms are the retail shapes and
-textures from `FA_2.LIB`, which no mission or layout places: `TREEA`
-(broadleaf), `TREEB` (autumn), `TREEC` (dead), `TREED` (conifer),
-`BUSH1` to `BUSH3` (dry bushes), `BUSH4` (green bush), `GROVA` to
-`GROVD` and `GROVPA` to `GROVPC` (broadleaf and pine clumps), and
-`PLMGA` to `PLMGC` (palm groves; single palms are cut out of them). The
-import keeps them as `VEGETATION_ART`, apart from the theater
-resources. Rocks are the retail `ROCK` and `ROCKA` to `ROCKE` shapes,
-sunk a little into the ground and tinted toward the tile under them.
-Acacias and loose boulders have no retail shape and are drawn
-fallbacks, as is anything an older import lacks.
+John requested sprites, lower density and caching on 2026-10-16. The following
+numbers are **opinionated agent decisions**, pending offscreen visual review.
+The retail asset evidence and unresolved original distance rules are in
+[objects and shapes](../formats/objects-and-shapes.md#vegetation-card-assets).
+
+All trees, bushes, clumps, palms and rocks draw as upright camera-facing
+impostors at all ranges, two triangles each. At scene startup a CPU rasterizer
+bakes four horizontal views, 90 degrees apart, into indexed 256 by 256 pages.
+This retains the imported PIC transparency and live weather palette. Runtime
+art stays in memory. Nothing retail is embedded or written into the repository.
+The source meshes are not drawn each frame, including at close range. This
+agent choice avoids a second geometry path; close views need visual review.
+
+The source art is `TREEA` through `TREED`, `BUSH1` through `BUSH4`, `GROVA`
+through `GROVD`, `GROVPA` through `GROVPC`, `PLMGA` through `PLMGC`, `ROCK`,
+`ROCKA`, `ROCKB`, `ROCKC` and `ROCKE`, with the textures they name. Single palms
+are cut from palm groves. Missing art, acacias and loose boulders use generated
+low-poly sources, baked in the same startup pass. Individual fallback plants
+use a few dozen triangles; fallback groves combine several plants. There are
+no vegetation shadow passes. Grass remains its separate existing layer.
+
+A 2,048 ft terrain patch caches full candidates independent of camera distance.
+Only newly entering patches build; departing patches are evicted. Density changes
+invalidate candidates. Detail distance changes select from the cache without
+rebuilding it. GPU culling selects view, distance, density rank and pixel size.
+One indirect instanced draw covers the indexed atlas. Sprites fade from three
+pixels down to the 1.5 pixel rejection floor, and over the outer 12% of the
+configured distance. Existing altitude fades and grass rings remain.
 
 ### Where things grow
 
-Placement reads the tile art under each spot through the theater's
-reference palette, with the ground's slope and height. A theater's
-own greens are split by tone, so the split follows that theater's
-palette rather than fixed colours:
+Placement still reads the theater's own palette, ground slope and water map.
+The following High settings scale candidate count with density:
 
-- **Woodland** (its darker greens): dense trees, broadleaf or conifer
-  by climate, with tree clumps standing in at distance.
-- **Meadow** (the middle greens): grass with copses where a slow noise
-  field says so.
-- **Fields** (the lighter yellow-greens): clear, with hedgerows and
-  the odd tree along the edges of 1,024 ft plots.
-- **Hills**: more trees with slope (from about 3 to 13 degrees) and
-  with height above the theater's median, up to a climate tree line.
-- **Water**: river banks and shores are denser. A 512 ft block counts
-  as water only when at least half its texels are water, so a blue
-  roof is not a river.
-- **Clear ground**: cities, streets, runways (plus about 220 ft) and
-  water.
-- **Deserts**: sand stays bare. Palm groves and green belts follow
-  rivers and oases; dry bushes and a few trees line wadi banks;
-  outcrops ringed by boulders stand on slopes and stony ground.
+- Trees use a 60 ft candidate grid, bushes 44 ft, small rocks 52 ft. Within
+  woodland, tree probability is 0.08 to 0.20, instead of 0.55 to 1 on a 30 ft
+  grid. Meadow has a 0.001 background plus sparse 1,400 ft copses. Hills add
+  at most 0.023 probability, rather than turning whole slopes into forest.
+- Field interiors remain clear. Existing 1,024 ft plot boundaries carry rows
+  at 48 ft spacing, with three quarters trees and one quarter bushes.
+  Roadside candidates lie within a 96 ft probe of mapped roads. Outside village
+  exclusion circles, a 350 ft band carries smaller tree clumps on a jittered
+  64 ft grid. These are fitted orchard-like clumps, not recovered orchard maps.
+- Water, streets, town centers and runway exclusions remain clear. Grounding
+  continues through `tore_world::grounding`.
+- Desert open sand has dry scrub probability 0.012 on the 44 ft grid, roughly
+  one candidate accepted per 161,000 square feet. Bushes are 1.5 to 4 ft tall,
+  tinted brown-olive. Open sand has no trees. Woody green water belts use the
+  sixth power of the existing water proximity, concentrating them near banks.
+  Wadis have sparse acacias and dry bushes. Rock patches retain the existing
+  slope, gravel and outcrop rules with fewer small rocks.
+- Tropical and arctic keep their climate multipliers (1.15 and 0.45), their
+  species and tree lines, on the same reduced candidate grids.
 
-`--vegetation-preview OUT overlay` writes top-down classification
-pictures for Ukraine and Egypt.
+`--vegetation-preview OUT overlay` writes classification pictures. These are
+placement heuristics, not claims of original scenery or geographic river data.
 
 ### Grass
 
@@ -204,7 +223,7 @@ one repeating ripple:
   ft apart in three directions, only on sand sheets and windward
   flanks, soft enough that the dune's own light still shows. Slip
   faces stay smooth. Soft grit, and pebbles about a foot across on
-  gravel. Open sand grows nothing; dry tufts and bushes stay on wadi
+  gravel. Open sand carries sparse dry scrub; dry grass stays on wadi
   banks, gravel and water.
 
 Each pattern fades out before it is smaller than a pixel. The fine

@@ -630,8 +630,8 @@ fn ground_detail(color:vec3<f32>,direction:vec3<f32>,normal:vec3<f32>)->Detail {
   // Coarse colour, miles across: ochre, red and pale sands, grey serir.
   let n1=detail_noise(w/11000.0,0,30u);let n2=detail_noise(w/4200.0,0,31u);let n3=detail_noise(w/26000.0,0,32u);
   var coarse=vec3<f32>(1.0);
-  coarse*=mix(vec3<f32>(1.0),vec3<f32>(1.08,0.97,0.82),smoothstep(0.42,0.75,n3));
-  coarse*=mix(vec3<f32>(1.0),vec3<f32>(1.10,0.90,0.78),smoothstep(0.50,0.80,n1));
+  coarse*=mix(vec3<f32>(1.0),vec3<f32>(1.16,0.94,0.74),smoothstep(0.42,0.75,n3));
+  coarse*=mix(vec3<f32>(1.0),vec3<f32>(1.22,0.86,0.68),smoothstep(0.50,0.80,n1));
   coarse*=mix(vec3<f32>(1.0),vec3<f32>(1.12,1.10,1.06),smoothstep(0.52,0.82,n2)*(1.0-gravel));
   coarse=mix(coarse,coarse*vec3<f32>(0.80,0.77,0.74),gravel*0.85);
   // Desert varnish: dark brown patina on stony ground.
@@ -927,11 +927,18 @@ fn veg_place(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,shape:vec4<f32>)-
 }
 @vertex fn veg_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) normal:vec3<f32>,@location(4) part:f32,@location(5) place:vec4<f32>,@location(6) spin:vec4<f32>,@location(7) shape:vec4<f32>,@location(8) tint:vec4<f32>,@location(9) mean:vec4<f32>)->VegOut {
  let turn=veg_turn(spin,shape);
- let p=veg_place(position,place,turn,shape);
+ // Upright camera-facing impostor, grounded at the original shape base.
+ let facing=scene.local_eye.xz-place.xz;
+ let right=normalize(vec2<f32>(facing.y,-facing.x)+vec2<f32>(0.00001,0.0));
+ let offset=right*position.x*turn.z*shape.x*tint.w;
+ let p=place.xyz+vec3<f32>(offset.x,position.y*turn.z,offset.y);
+ let azimuth=atan2(facing.x,facing.y)-atan2(spin.y,spin.x);
+ let view=u32(floor(azimuth/1.570796327+0.5)+8.0)%4u;
+ let sprite=mean.w+f32(view);
  let rel=p-scene.local_eye.xyz;
- let base=placed_vertex(p+scene.origin.xyz,rel,uv,layer,vec3<f32>(1.0),select(-1.0,part,part>=0.0));
+ let base=placed_vertex(p+scene.origin.xyz,rel,uv,sprite,vec3<f32>(1.0),select(-1.0,part,part>=0.0));
  var out:VegOut;
- out.clip=base.clip;out.uv=uv;out.layer=layer;out.direction=rel;out.altitude=base.altitude;
+ out.clip=base.clip;out.uv=uv;out.layer=sprite;out.direction=rel;out.altitude=base.altitude;
  out.fog_enabled=base.fog_enabled;
  let n=vec3<f32>(normal.x*turn.x+normal.z*turn.y,normal.y,normal.z*turn.x-normal.x*turn.y);
  out.normal=normalize(vec3<f32>(n.x,n.y*max(shape.x,0.2),n.z));

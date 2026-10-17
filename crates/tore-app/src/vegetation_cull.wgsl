@@ -1,5 +1,4 @@
-// Vegetation objects: thin by distance, cull against the view, and list
-// the near ones again as shadow casters. See vegetation_renderer.rs.
+// Vegetation impostors: distance and view culling into one atlas draw.
 
 struct Inst {
   // Position, yaw.
@@ -88,18 +87,13 @@ fn share(dist: f32, full: f32) -> f32 {
   out.place = vec4<f32>(rel, inst.d.w);
   out.turn = vec4<f32>(cos(inst.a.w), sin(inst.a.w), height, fade);
   out.shape = vec4<f32>(inst.b.y, inst.b.z, inst.b.w, m.info.y);
-  out.tint = vec4<f32>(inst.c.xyz, 1.0);
+  out.tint = vec4<f32>(inst.c.xyz, m.info.z * 1.02);
   out.mean = m.mean;
-  // Shadow casters: near ones, in view or not (their shadows may be).
-  if dist < params.tiers.z && fade > 0.5 {
-    let k = atomicAdd(&counts[params.counts.y + mesh], 1u);
-    if k < capacity { casters[first + k] = out; }
-  }
   let z = dot(d, params.forward.xyz);
   if z < -r { return; }
   if abs(dot(d, params.right.xyz)) > z * params.view.x + r * 1.6 { return; }
   if abs(dot(d, params.up.xyz)) > z * params.view.y + r * 1.6 { return; }
-  let k = atomicAdd(&counts[mesh], 1u);
+  let k = atomicAdd(&counts[0], 1u);
   if k < capacity { drawn[first + k] = out; }
 }
 

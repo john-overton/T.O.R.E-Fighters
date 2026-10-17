@@ -254,3 +254,13 @@ this presentation repair.
 The imported T2 and MM bytes remain unchanged. Ground-picture water queries
 retain that same source mask, so neutralization does not fill coastal sea.
 See [merged airports](redrawn-airports.md#merged-pairs-airfield-scene-3).
+
+## Exploratory vegetation classification
+
+The `exp/vegetation` renderer samples this theater data and its reference
+palette to place presentation-only sprites. It does not add terrain records
+or establish original vegetation placement. Cached patch, field, road, village
+edge and desert rules are specified in
+[terrain detail](../spec/terrain-detail.md#where-things-grow); retail card
+records and unresolved original distance rules are in
+[objects and shapes](objects-and-shapes.md#vegetation-card-assets).

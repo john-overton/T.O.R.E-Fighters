@@ -1,4 +1,4 @@
-//! Vegetation meshes: the retail tree, bush, grove, palm and rock shapes
+//! Startup impostor sources: retail tree, bush, grove, palm and rock shapes
 //! from the player's import where it has them, drawn fallbacks where it
 //! does not. Retail textures are appended to the scenery's static art
 //! pages at runtime; nothing retail is compiled in.
@@ -6,7 +6,7 @@
 //! Every mesh is normalised to a height of 1 standing on y = 0 (x east,
 //! z north before the instance turns it), so an instance sets its height
 //! in feet and keeps the mesh's proportions. The retail trees' flat ground
-//! shadow quads are dropped: the objects cast real shadows.
+//! shadow quads are dropped. Vegetation does not cast dynamic shadows.
 //!
 //! Vertices are ten floats, the static art layout: position, page uv,
 //! page (-1 untextured), normal, then the colour: a palette index for an
@@ -45,6 +45,8 @@ pub struct Mesh {
     pub recolour: Option<[f32; 3]>,
     /// Where it came from: a retail shape name, or "drawn".
     pub source: String,
+    /// First of four indexed impostor pages, generated once at scene startup.
+    pub sprite_layer: usize,
 }
 
 pub struct Library {
@@ -185,7 +187,44 @@ impl Library {
                 lib.push(species, verts, radius, look, None, "drawn");
             }
         }
+        lib.bake(pages, &first_layer, palette);
         lib
+    }
+
+    /// CPU orthographic rasterization at startup. The indexed pages share the
+    /// scenery texture array, including its weather palette and transparency.
+    fn bake(
+        &mut self,
+        pages: &mut Vec<u8>,
+        first: &impl Fn(&Vec<u8>) -> usize,
+        palette: &[[u8; 3]; 256],
+    ) {
+        for mesh in &mut self.meshes {
+            mesh.sprite_layer = first(pages);
+            let vertices = &self.vertices
+                [mesh.range.start as usize * FLOATS..mesh.range.end as usize * FLOATS];
+            for angle in 0..4 {
+                let page = bake_view(vertices, mesh.radius, angle, pages, first(pages), palette);
+                pages.extend(page);
+            }
+        }
+        // All species use the same two triangles. Dimensions and page selection
+        // travel with each instance, allowing a single indirect draw.
+        self.vertices.clear();
+        for [x, y] in [
+            [-1., 0.],
+            [-1., 1.],
+            [1., 1.],
+            [-1., 0.],
+            [1., 1.],
+            [1., 0.],
+        ] {
+            self.vertices
+                .extend([x, y, 0., (x + 1.) * 0.5, 1. - y, 0., 0., 0., 1., 0.]);
+        }
+        for mesh in &mut self.meshes {
+            mesh.range = 0..6;
+        }
     }
 
     fn push(
@@ -207,6 +246,7 @@ impl Library {
             look,
             recolour,
             source: source.to_string(),
+            sprite_layer: 0,
         });
     }
 
@@ -235,6 +275,110 @@ impl Library {
             })
             .collect()
     }
+}
+
+/// Four horizontal views retain the shape's silhouette without runtime mesh work.
+fn bake_view(
+    vertices: &[f32],
+    radius: f32,
+    angle: usize,
+    pages: &[u8],
+    layers: usize,
+    palette: &[[u8; 3]; 256],
+) -> Vec<u8> {
+    let mut out = vec![255u8; 256 * 256];
+    let mut depth = vec![f32::NEG_INFINITY; 256 * 256];
+    let (sn, cs) = (angle as f32 * std::f32::consts::FRAC_PI_2).sin_cos();
+    let radius = radius.max(0.05) * 1.02;
+    // Pages may follow other scene textures; locate their logical layer zero.
+    let offset = layers * 65536 - pages.len();
+    let nearest = |rgb: [u8; 3]| -> u8 {
+        (0..255)
+            .min_by_key(|&i| {
+                (0..3)
+                    .map(|k| {
+                        let d = i32::from(palette[i][k]) - i32::from(rgb[k]);
+                        d * d
+                    })
+                    .sum::<i32>()
+            })
+            .unwrap_or(0) as u8
+    };
+    let parts = [
+        nearest([53, 89, 43]),
+        nearest([78, 61, 45]),
+        nearest([111, 91, 72]),
+    ];
+    for tri in vertices.chunks_exact(FLOATS * 3) {
+        let v: Vec<&[f32]> = tri.chunks_exact(FLOATS).collect();
+        let p: Vec<[f32; 3]> = v
+            .iter()
+            .map(|v| {
+                [
+                    ((v[0] * cs - v[2] * sn) / radius * 0.5 + 0.5) * 254. + 1.,
+                    (1. - v[1]) * 254. + 1.,
+                    v[0] * sn + v[2] * cs,
+                ]
+            })
+            .collect();
+        let edge = |a: [f32; 3], b: [f32; 3], x: f32, y: f32| {
+            (b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0])
+        };
+        let area = edge(p[0], p[1], p[2][0], p[2][1]);
+        if area.abs() < 0.0001 {
+            continue;
+        }
+        let bounds = |axis: usize| {
+            let lo = p
+                .iter()
+                .map(|v| v[axis])
+                .fold(f32::INFINITY, f32::min)
+                .floor()
+                .clamp(0., 255.) as usize;
+            let hi = p
+                .iter()
+                .map(|v| v[axis])
+                .fold(f32::NEG_INFINITY, f32::max)
+                .ceil()
+                .clamp(0., 255.) as usize;
+            lo..=hi
+        };
+        for y in bounds(1) {
+            for x in bounds(0) {
+                let a = edge(p[1], p[2], x as f32 + 0.5, y as f32 + 0.5) / area;
+                let b = edge(p[2], p[0], x as f32 + 0.5, y as f32 + 0.5) / area;
+                let c = 1. - a - b;
+                if a < -0.0001 || b < -0.0001 || c < -0.0001 {
+                    continue;
+                }
+                let blend = |k: usize| a * v[0][k] + b * v[1][k] + c * v[2][k];
+                let z = a * p[0][2] + b * p[1][2] + c * p[2][2];
+                let at = y * 256 + x;
+                if z <= depth[at] {
+                    continue;
+                }
+                let index = if v[0][5] >= 0. {
+                    let u = (blend(3) * 256.).floor().clamp(0., 255.) as usize;
+                    let w = (blend(4) * 256.).floor().clamp(0., 255.) as usize;
+                    let address = v[0][5] as usize * 65536 + w * 256 + u;
+                    address
+                        .checked_sub(offset)
+                        .and_then(|i| pages.get(i))
+                        .copied()
+                        .unwrap_or(255)
+                } else if v[0][9] < 0. {
+                    parts[(-v[0][9] - 1.) as usize % 3]
+                } else {
+                    v[0][9] as u8
+                };
+                if index != 255 {
+                    out[at] = index;
+                    depth[at] = z;
+                }
+            }
+        }
+    }
+    out
 }
 
 type Images = BTreeMap<String, Option<(crate::static_art::Image, [f32; 3])>>;
@@ -550,7 +694,7 @@ fn blob(out: &mut Vec<f32>, center: [f32; 3], radius: [f32; 3], seed: u32, part:
     }
 }
 
-/// Unit sphere triangles (an octahedron subdivided twice), each vertex
+/// Eight source triangles from an octahedron, each vertex
 /// pushed in or out by up to `rough`, deterministic by `seed`.
 fn sphere(seed: u32, rough: f32) -> Vec<[f32; 3]> {
     let v = [
@@ -571,22 +715,7 @@ fn sphere(seed: u32, rough: f32) -> Vec<[f32; 3]> {
         (5, 3, 1),
         (0, 3, 5),
     ];
-    let mut tris: Vec<[[f32; 3]; 3]> = faces.iter().map(|&(a, b, c)| [v[a], v[b], v[c]]).collect();
-    for _ in 0..2 {
-        let mut next = Vec::with_capacity(tris.len() * 4);
-        for [a, b, c] in tris {
-            let m = |p: [f32; 3], q: [f32; 3]| {
-                normalize([
-                    (p[0] + q[0]) * 0.5,
-                    (p[1] + q[1]) * 0.5,
-                    (p[2] + q[2]) * 0.5,
-                ])
-            };
-            let (ab, bc, ca) = (m(a, b), m(b, c), m(c, a));
-            next.extend([[a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]]);
-        }
-        tris = next;
-    }
+    let tris: Vec<[[f32; 3]; 3]> = faces.iter().map(|&(a, b, c)| [v[a], v[b], v[c]]).collect();
     // Displace by a hash of the rounded direction, so shared vertices move together.
     let push = |p: [f32; 3]| {
         let key = |x: f32| ((x * 1000.).round() as i32) as u32;
@@ -717,6 +846,7 @@ fn bush() -> Vec<f32> {
     let mut o = Vec::new();
     blob(&mut o, [0., 0.42, 0.], [0.7, 0.45, 0.7], 41, PART_LEAF);
     blob(&mut o, [0.35, 0.3, 0.2], [0.45, 0.32, 0.45], 42, PART_LEAF);
+    fit(&mut o, 0.);
     o
 }
 
@@ -849,6 +979,76 @@ mod tests {
     use super::*;
 
     #[test]
+    fn side_views_select_the_surface_toward_the_camera() {
+        let mut vertices = Vec::new();
+        for (x, color) in [(-0.25, 21.), (0.25, 42.)] {
+            for [z, y] in [
+                [-0.4, 0.],
+                [-0.4, 1.],
+                [0.4, 1.],
+                [-0.4, 0.],
+                [0.4, 1.],
+                [0.4, 0.],
+            ] {
+                vertices.extend([x, y, z, 0., 0., -1., 1., 0., 0., color]);
+            }
+        }
+        let palette = [[0; 3]; 256];
+        let east = bake_view(&vertices, 0.5, 1, &[], 0, &palette);
+        let west = bake_view(&vertices, 0.5, 3, &[], 0, &palette);
+        assert_eq!(east[128 * 256 + 128], 42);
+        assert_eq!(west[128 * 256 + 128], 21);
+    }
+
+    #[test]
+    fn impostor_preserves_indexed_cutouts_and_does_not_embed_source_pages() {
+        let mut vertices = Vec::new();
+        for [x, y] in [
+            [-0.5, 0.],
+            [-0.5, 1.],
+            [0.5, 1.],
+            [-0.5, 0.],
+            [0.5, 1.],
+            [0.5, 0.],
+        ] {
+            vertices.extend([x, y, 0., x + 0.5, 1. - y, 3., 0., 0., 1., 0.]);
+        }
+        let mut source = vec![255; 65536];
+        for y in 64..192 {
+            for x in 64..192 {
+                source[y * 256 + x] = 17;
+            }
+        }
+        let baked = bake_view(&vertices, 0.5, 0, &source, 4, &[[0; 3]; 256]);
+        assert_eq!(baked[128 * 256 + 128], 17);
+        assert_eq!(baked[10 * 256 + 10], 255);
+        assert!(baked.iter().filter(|&&x| x == 17).count() > 14000);
+    }
+
+    #[test]
+    fn sprite_species_selects_stable_views_and_shared_quad() {
+        let mut pages = Vec::new();
+        let lib = Library::build(
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[[80; 3]; 256],
+            &mut pages,
+            |p| p.len() / 65536,
+        );
+        assert_eq!(lib.vertices.len(), 6 * FLOATS);
+        for species in Species::ALL {
+            let id = lib.mesh_for(species, 7);
+            assert!(lib.variants[species as usize].contains(&id));
+            let mesh = &lib.meshes[usize::from(id)];
+            assert_eq!(mesh.range, 0..6);
+            for angle in 0..4 {
+                let page = &pages[(mesh.sprite_layer + angle) * 65536..][..65536];
+                assert!(page.iter().any(|&p| p != 255), "{species:?}, view {angle}");
+            }
+        }
+    }
+
+    #[test]
     fn without_an_import_every_species_has_a_drawn_mesh() {
         let mut pages = Vec::new();
         let lib = Library::build(
@@ -856,9 +1056,9 @@ mod tests {
             &BTreeMap::new(),
             &[[0; 3]; 256],
             &mut pages,
-            |_| 0,
+            |p| p.len() / 65536,
         );
-        assert!(pages.is_empty());
+        assert_eq!(pages.len(), lib.meshes.len() * 4 * 65536);
         for s in Species::ALL {
             let m = lib.mesh_for(s, 7);
             let mesh = &lib.meshes[usize::from(m)];
