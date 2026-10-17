@@ -39,7 +39,7 @@ shown below the options.
 | Vegetation distance | 2 nm, 4 nm, 6 nm, 8 nm | 4 nm |
 | Vegetation detail | 1 nm, 2 nm, 3 nm, 4 nm | 2 nm |
 | Vegetation density | Low, Med, High, Ultra | High |
-| Vegetation cards | Facing, Cross, Cross+top, Face+top | Facing |
+| Vegetation cards | Facing, Cross, Cross+top, Face+top | Face+top |
 | Frame rate counter | Off, On | Off |
 
 Choices are saved in `graphics-v1.conf` in the application data directory,
@@ -199,6 +199,10 @@ cutout sprites from retail art and John's supplied v2/Sahara packs. The develope
 switch `TORE_VEGETATION_SPRITES=retail|pack|mixed` selects art at scene startup,
 with `mixed` the branch default. Missing retail species use supplied art.
 **Vegetation cards** switches live between Facing, Cross, Cross+top and Face+top.
+Face+top (camera-facing sides with angle-gated tops) is the default, requested by
+John on 2026-10-17. Missing saved card settings take that default; explicit saved
+choices remain selectable and round-trip. The original-presentation pixel-test
+preset retains Facing.
 `TORE_VEGETATION_CARDS=billboard|cross|cross-top|billboard-top` overrides that row
 for a run and is not saved. Sprites have a 1.5 pixel floor and a smooth fade over
 the outer 30% of draw range. Distant forest coverage continues on the terrain.

@@ -796,6 +796,12 @@ mod tests {
     #[test]
     fn apply_cancel_and_defaults() {
         let mut e = editor();
+        let cards = rows()
+            .iter()
+            .position(|r| *r == Row::VegetationCards)
+            .unwrap();
+        assert_eq!(e.choice(cards), VegCards::BillboardTop as usize);
+        e.set_choice(cards, VegCards::CrossTop as usize);
         press(&mut e, "ArrowLeft");
         assert!(e.dirty());
         // Escape and Cancel close; the host drops the draft with the screen.
@@ -810,6 +816,7 @@ mod tests {
         // Defaults only change the draft.
         assert_eq!(click(&mut e, Editor::footer_rect(1)), ResultAction::Changed);
         assert_eq!(e.draft, Options::default());
+        assert_eq!(e.choice(cards), VegCards::BillboardTop as usize);
         assert!(e.dirty());
         assert_eq!(e.applied.anti_aliasing, AntiAliasing::X2);
         // Apply with a path saves; a failed save reports the error.

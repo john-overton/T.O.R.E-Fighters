@@ -560,7 +560,7 @@ impl Renderer {
                 -((mesh.sprite_layer * 4 + usize::from(tile) + 1) as f32)
             });
             table.extend([mean[0], mean[1], mean[2], page]);
-            table.extend([mesh.top[0], mesh.top[1], 0., 0.]);
+            table.extend(mesh.top);
         }
         if !table.is_empty() {
             queue.write_buffer(&self.meshes, 0, &bytes_of_f32(&table));

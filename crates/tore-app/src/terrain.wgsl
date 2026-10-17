@@ -970,9 +970,12 @@ fn veg_turn(turn:vec4<f32>,shape:vec4<f32>)->vec4<f32> {
  // All kinds use the same per-instance coverage fade, including rocks.
  return turn;
 }
+fn veg_rotate(local:vec2<f32>,turn:vec2<f32>)->vec2<f32> {
+ return vec2<f32>(local.x*turn.x+local.y*turn.y,local.y*turn.x-local.x*turn.y);
+}
 fn veg_place(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,shape:vec4<f32>)->vec3<f32> {
  let local=vec3<f32>(position.x*turn.z*shape.x,position.y*turn.z,position.z*turn.z*shape.x);
- let flat=vec2<f32>(local.x*turn.x+local.z*turn.y,local.z*turn.x-local.x*turn.y);
+ let flat=veg_rotate(local.xz,turn.xy);
  let lean=select(0.0,1.0,shape.w>0.5);
  return place.xyz+vec3<f32>(flat.x,local.y+lean*dot(flat,shape.yz),flat.y);
 }
@@ -985,8 +988,8 @@ fn veg_place(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,shape:vec4<f32>)-
  let facing=scene.local_eye.xz-place.xz;
  var right=normalize(vec2<f32>(facing.y,-facing.x)+vec2<f32>(0.00001,0.0));
  if mode==1u || mode==2u {
-  right=spin.xy;
-  if card==1u {right=vec2<f32>(-spin.y,spin.x);}
+  right=veg_rotate(vec2<f32>(1.0,0.0),spin.xy);
+  if card==1u {right=veg_rotate(vec2<f32>(0.0,-1.0),spin.xy);}
  }
  var offset=right*position.x*turn.z*shape.x*tint.w;
  var p=place.xyz+vec3<f32>(offset.x,position.y*turn.z,offset.y);
@@ -1003,8 +1006,10 @@ fn veg_place(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,shape:vec4<f32>)-
   // Fitted: hidden through 35 degrees down, fully visible at 80 degrees.
   // One value for the whole card and both depth/colour passes avoids seams.
   coverage*=smoothstep(0.57357644,0.98480775,ray.y/max(length(ray),0.0001));
-  let local=vec2<f32>(position.x,position.y*2.0-1.0)*turn.z*shape.x*tint.w;
-  offset=vec2<f32>(local.x*spin.x-local.y*spin.y,local.x*spin.y+local.y*spin.x);
+  // Opaque side-crown extents, with the same seeded height/width as the side.
+  // Coverage and canopy height do not change this world size.
+  let local=vec2<f32>(position.x,position.y*2.0-1.0)*turn.z*shape.x*top.zw;
+  offset=veg_rotate(local,spin.xy);
   p=crown+vec3<f32>(offset.x,0.0,offset.y);
  }
  var sprite=code+f32(view);

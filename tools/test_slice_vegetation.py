@@ -58,6 +58,39 @@ if __name__ == '__main__':
     unittest.main()
 
 class Pass5AtlasTests(unittest.TestCase):
+    def test_top_opaque_bounds_fill_cells_after_cleanup_and_resampling(self):
+        directory=ASSETS/'pass5'
+        raw=(directory/'pack.rgba').read_bytes()
+        records=json.loads((directory/'sprites.json').read_text())
+        for record in records:
+            if not (record['name'].startswith('top_') or record['name'].startswith('sahara_top_')):
+                continue
+            page=record['page']*65536*4
+            x=record['tile']%2*128; y=record['tile']//2*128
+            opaque=[(dx,dy) for dy in range(128) for dx in range(128)
+                    if raw[page+((y+dy)*256+x+dx)*4+3]]
+            self.assertTrue(opaque,record['name'])
+            self.assertEqual((min(p[0] for p in opaque),min(p[1] for p in opaque),
+                              max(p[0] for p in opaque)+1,max(p[1] for p in opaque)+1),
+                             (2,2,126,126),record['name'])
+
+    @unittest.skipIf(Image is None,'Pillow needed for authoring tests')
+    def test_top_cell_retrims_tips_lost_during_nearest_downsampling(self):
+        try:
+            from slice_vegetation_pass5 import clean_top, top_cell
+        except ImportError:
+            self.skipTest('numpy needed for authoring tests')
+        source=Image.new('RGBA',(256,256),(0,0,0,255))
+        for y in range(40,216):
+            for x in range(30,226):source.putpixel((x,y),(35,90,30,255))
+        cleaned=clean_top(source)
+        self.assertEqual(cleaned.getchannel('A').getbbox(),(0,0,cleaned.width,cleaned.height))
+        padded=Image.new('RGBA',(256,256))
+        padded.paste(cleaned,(30,40))
+        tile=top_cell(padded)
+        self.assertEqual(tile.getchannel('A').getbbox(),(0,0,124,124))
+        self.assertEqual(tile.getpixel((0,0)),(35,90,30,255))
+
     @unittest.skipIf(Image is None,'Pillow needed for authoring tests')
     def test_top_outline_cleanup_preserves_crown_bark_and_stone_interior(self):
         try:

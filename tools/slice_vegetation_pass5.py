@@ -169,6 +169,19 @@ def clean_top(image, trim=True):
     return out.crop(bounds) if trim else out
 
 
+def top_cell(sprite):
+    """Trim again after downsampling: nearest sampling can miss a thin tip."""
+    tile = sprite.resize((124,124),Image.Resampling.NEAREST)
+    for _ in range(124):
+        bounds = tile.getchannel('A').getbbox()
+        if bounds == (0,0,124,124):
+            return tile
+        if bounds is None:
+            raise ValueError('empty top cell')
+        tile = tile.crop(bounds).resize((124,124),Image.Resampling.NEAREST)
+    raise ValueError('top cell bounds did not converge')
+
+
 def build(sahara, top, output):
     source=Image.open(sahara).convert('RGBA')
     overhead=Image.open(top).convert('RGBA')
@@ -191,7 +204,8 @@ def build(sahara, top, output):
     review=Image.new('RGB',(8*160,((len(sprites)+7)//8)*160),(85,95,110))
     for i,(name,sprite) in enumerate(sprites):
         sprite.save(output/(name+'.png'))
-        tile=sprite.resize((124,124),Image.Resampling.NEAREST)
+        tile=(top_cell(sprite) if name.startswith('top_') or name.startswith('sahara_top_')
+              else sprite.resize((124,124),Image.Resampling.NEAREST))
         pages[i//4].paste(tile,((i%2)*128+2,(i%4//2)*128+2))
         records.append(dict(name=name,page=i//4,tile=i%4,radius=sprite.width/sprite.height/2))
         thumb=sprite.copy();thumb.thumbnail((148,148),Image.Resampling.NEAREST)

@@ -29,6 +29,10 @@ def check_pass5_cameras(work, _output):
 
 def scenarios():
     return [Scenario(
+        name='vegetation-top-crowns', lane='menus',
+        args=['--vegetation-art', '{work}/art'], timeout=120,
+        outputs=['art/top-crowns.tsv'], check_work=check_top_crowns,
+    ), Scenario(
         name='vegetation-stream-convergence', lane='menus',
         args=['--vegetation-preview', '{work}/stream', 'stream-check'],
         env={'TORE_VEGETATION': '1', 'TORE_VEG_LOWPASS_THEATERS': 'UKR',
@@ -46,3 +50,17 @@ def scenarios():
         env={'TORE_VEGETATION': '1'}, timeout=240,
         outputs=['cameras/pass5-cameras.txt'], check_work=check_pass5_cameras,
     )]
+
+
+def check_top_crowns(work, _output):
+    rows=(work/'art'/'top-crowns.tsv').read_text().splitlines()[1:]
+    if not rows:
+        return ['no retail grove crown audit']
+    errors=[]
+    for row in rows:
+        source,count,grove,crown,transparent=row.split('\t')
+        if int(count)<2 or not 0<float(crown)<float(grove):
+            errors.append(f'{source}: a single crown still spans the grove')
+        if not 0<int(transparent)<65536:
+            errors.append(f'{source}: missing crown cutouts or forest-floor gaps')
+    return errors

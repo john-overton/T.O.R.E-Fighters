@@ -1385,7 +1385,7 @@ pub fn art() -> AppResult<()> {
         }
     }
     let mut pages = Vec::new();
-    let lib =
+    let mut lib =
         crate::vegetation_shapes::Library::build(&art, resources, &palette, &mut pages, |p| {
             p.len() / 65536
         });
@@ -1409,8 +1409,11 @@ pub fn art() -> AppResult<()> {
             &rgba,
         )?;
         println!(
-            "baked {i} {} mean {:?} visible {} black {}",
+            "baked {i} {} radius {:.4} opaque half {:?} crowns {} mean {:?} visible {} black {}",
             mesh.source,
+            mesh.radius,
+            &mesh.top[2..],
+            mesh.crowns.len(),
             mesh.recolour,
             page.iter().filter(|&&p| p != 255).count(),
             page.iter()
@@ -1418,6 +1421,59 @@ pub fn art() -> AppResult<()> {
                 .count()
         );
     }
+    let first = pages.len() / 65536;
+    lib.add_pack(
+        "mixed",
+        crate::vegetation::region("UKR"),
+        &palette,
+        &mut pages,
+        first,
+    );
+    let mut crown_report =
+        String::from("source\tcrowns\tgrove_width\tmax_crown_width\ttransparent_pixels\n");
+    for species in [
+        crate::vegetation::Species::Grove,
+        crate::vegetation::Species::PineGrove,
+        crate::vegetation::Species::PalmGrove,
+    ] {
+        for &id in &lib.variants[species as usize] {
+            let mesh = &lib.meshes[usize::from(id)];
+            if mesh.top[0] < 0. {
+                continue;
+            }
+            let page = &pages[mesh.top[0] as usize * 65536..][..65536];
+            let rgba: Vec<_> = page
+                .iter()
+                .flat_map(|&p| {
+                    if p == 255 {
+                        [0, 0, 0, 0]
+                    } else {
+                        let c = palette[usize::from(p)];
+                        [c[0], c[1], c[2], 255]
+                    }
+                })
+                .collect();
+            write_png(out, &format!("top-{id}-{}", mesh.source), [256, 256], &rgba)?;
+            println!(
+                "grove-top {} crowns {:?} transparent {}",
+                mesh.source,
+                mesh.crowns,
+                page.iter().filter(|&&p| p == 255).count()
+            );
+            crown_report.push_str(&format!(
+                "{}\t{}\t{:.5}\t{:.5}\t{}\n",
+                mesh.source,
+                mesh.crowns.len(),
+                2. * mesh.top[2].max(mesh.top[3]),
+                mesh.crowns
+                    .iter()
+                    .map(|c| 2. * c.half[0].max(c.half[1]))
+                    .fold(0., f32::max),
+                page.iter().filter(|&&p| p == 255).count()
+            ));
+        }
+    }
+    std::fs::write(out.join("top-crowns.tsv"), crown_report)?;
     Ok(())
 }
 

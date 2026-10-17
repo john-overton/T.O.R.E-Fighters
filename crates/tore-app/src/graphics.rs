@@ -196,10 +196,10 @@ impl VegDensity {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(u8)]
 pub enum VegCards {
-    #[default]
     Billboard,
     Cross,
     CrossTop,
+    #[default]
     BillboardTop,
 }
 impl VegCards {
@@ -304,7 +304,7 @@ impl Default for Options {
             vegetation_distance_nm: DEFAULT_VEGETATION_DISTANCE,
             vegetation_detail_nm: DEFAULT_VEGETATION_DETAIL,
             vegetation_density: DEFAULT_VEGETATION_DENSITY,
-            vegetation_cards: VegCards::Billboard,
+            vegetation_cards: VegCards::default(),
             show_frame_rate: false,
         }
     }
@@ -367,7 +367,7 @@ impl Options {
         if self.vegetation_density != DEFAULT_VEGETATION_DENSITY {
             text += &format!("vegetation-density {}\n", self.vegetation_density.key());
         }
-        if self.vegetation_cards != VegCards::Billboard {
+        if self.vegetation_cards != VegCards::default() {
             text += &format!("vegetation-cards {}\n", self.vegetation_cards.key());
         }
         if self.show_frame_rate {
@@ -462,7 +462,7 @@ impl Options {
                 Some(v) => VegDensity::parse(v).ok_or("invalid vegetation-density")?,
             },
             vegetation_cards: match values.get("vegetation-cards") {
-                None => VegCards::Billboard,
+                None => VegCards::default(),
                 Some(v) => VegCards::parse(v).ok_or("invalid vegetation-cards")?,
             },
             show_frame_rate: match values.get("frame-rate") {
@@ -592,7 +592,24 @@ mod tests {
     fn all_card_modes_roundtrip_and_have_the_expected_card_count() {
         for mode in VegCards::ALL {
             assert_eq!(VegCards::parse(mode.key()), Some(mode));
+            let options = Options {
+                vegetation_cards: mode,
+                ..Options::default()
+            };
+            assert_eq!(
+                Options::parse(&options.text()).unwrap().vegetation_cards,
+                mode
+            );
         }
+        assert_eq!(VegCards::default(), VegCards::BillboardTop);
+        assert_eq!(Options::default().vegetation_cards, VegCards::BillboardTop);
+        assert_eq!(
+            Options::parse(&Options::default().text())
+                .unwrap()
+                .vegetation_cards,
+            VegCards::BillboardTop
+        );
+        assert_eq!(Options::original().vegetation_cards, VegCards::Billboard);
         assert_eq!(VegCards::ALL.map(VegCards::vertices), [6, 12, 18, 12]);
         assert_eq!(VegCards::parse("triangle"), None);
     }

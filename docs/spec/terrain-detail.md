@@ -149,18 +149,24 @@ The retail asset evidence and unresolved original distance rules are in
 [objects and shapes](../formats/objects-and-shapes.md#vegetation-card-assets).
 
 Trees, bushes, clumps, palms and rocks use indexed cutout cards. Four modes are
-available in Graphics and through `TORE_VEGETATION_CARDS`: `billboard` (default),
-`cross`, `cross-top`, and `billboard-top`. A facing card has two triangles; a
+available in Graphics and through `TORE_VEGETATION_CARDS`: `billboard`,
+`cross`, `cross-top`, and `billboard-top` (default, requested by John on
+2026-10-17). A facing card has two triangles; a
 fixed seeded cross has four. Top modes add two triangles for a horizontal card
 at 80% of tree height or 65% of shrub/rock height, spanning the side silhouette's
-width in both horizontal axes. These heights are **fitted agent choices**.
+opaque crown width, excluding transparent source margins. Both side and top
+use the same instance height in feet and seeded width multiplier. Supplied
+tops are trimmed after halo cleanup and again after downsampling, filling the
+124 by 124 usable cell inside its two-pixel gutter. Retail tops use the opaque
+widths of the two orthogonal baked side views. These heights are **fitted agent choices**.
 Top coverage is zero through 35 degrees down from the horizon, increases by
 smoothstep of the view ray's vertical component, and reaches full coverage at
 80 degrees down. The ray runs from the grounded instance's canopy centre to the
 eye. This applies only to the top card in both top modes and both depth/colour
 passes. The angle gate was requested by John on 2026-10-17; the 80-degree endpoint
 and smoothstep curve are **fitted agent choices**. The top remains inside the
-side cards at the heights above. Facing and cross side cards are unchanged.
+side cards at the heights above. Angle gating affects only the top coverage;
+upright side cards retain their coverage.
 Crosses retain their orientation as the camera moves. They may expose their X
 at oblique angles and cost more covered pixels; no speed advantage is claimed.
 Every side card starts at the base supplied through `tore_world::grounding`.
@@ -181,7 +187,15 @@ species in every mode use supplied cutouts. Sahara supplies acacias and bare
 trees, and desert palms, shrubs and rocks. No code-drawn tree, shrub or rock
 fallback remains. No current theater selects saguaro, cactus or prickly pear.
 Top cards use the corresponding supplied top view, including for a retail side
-silhouette. A retail grove's overhead image is therefore a fitted single crown.
+silhouette. A retail grove receives a runtime composite of separate crowns at
+its constituent plants' centres, each sized from that plant's opaque side views.
+It never stretches one crown across the whole grove. The existing fitted plant
+grouping joins face centres within 18 source units; the whole grove retains all
+groups. The composite stays in memory and uses one horizontal card, with
+transparent gaps exposing the same lit forest floor and distant-canopy layer
+as billboard mode. Tops and crossed sides use the same seeded yaw convention
+as the baked side-view selection. The common canopy plane remains a **fitted agent choice**;
+it does not reproduce individual plant heights within a grove.
 Rocks retain visible-pixel mean normalization and slope lighting.
 
 Each 2,048 ft patch caches candidates. The worker builds a ring with two extra

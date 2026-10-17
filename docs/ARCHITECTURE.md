@@ -10996,7 +10996,7 @@ that circle; newly available radius expands continuously. Settled captures wait
 for all placement and uploads. See the [numerical specification](spec/terrain-detail.md#sprites-and-cached-placement).
 
 The 64-byte candidate record is unchanged. The culled record is 96 bytes and the
-mesh table is 48 bytes, adding top-card page/height metadata. Facing/cross/top
+mesh table is 48 bytes, with top-card page, height and opaque half extents. Facing/cross/top
 modes use 6/12/18 vertices in the same indirect draw. At new High the output is
 12 MiB; persistent input reserves 96 MiB including old/new selections and 5,120
 partial-page slots. The latter bound covers both maximum 8 nm guarded rings.
@@ -11004,8 +11004,13 @@ At Ultra the corresponding allocations are 24 MiB and 112 MiB.
 
 Matching alpha-tested depth and colour draws share vertices and sample coverage,
 including the top card's view-angle fade. Top cards remain inside the side
-silhouettes at their grounded canopy height. Supplied top-sheet alpha removes
-both bright and dark perimeter matte while retaining interior shading.
+silhouettes at their grounded canopy height. Facing/top is the default. Single
+tops use opaque side widths and the instance's seeded scale. Retail grove tops
+are runtime indexed composites of individual crown cutouts; their transparent
+gaps preserve the terrain underneath. No extra instances or draw calls are added.
+Supplied top-sheet alpha removes
+both bright and dark perimeter matte while retaining interior shading. Trimming
+is repeated after downsampling so every top fills its usable atlas cell.
 The draws use reversed-depth GreaterEqual and no colour-pass depth writes. Depth skips
 palette/lighting work. Colour skips the second daylight-palette sample outside thermal views when no
 flare light is burning. Grass is separate and its forest floor density is halved.

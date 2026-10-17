@@ -41,9 +41,17 @@ pub struct Mesh {
     pub sprite_layer: usize,
     /// Packed generated art uses one of four 128 px cells, with a 2 px gutter.
     pub sprite_tile: Option<u8>,
-    /// Encoded top-view atlas cell and its height relative to the grounded base.
-    pub top: [f32; 2],
+    /// Top page, grounded height fraction, and opaque half extents over height.
+    pub top: [f32; 4],
+    /// Individual crowns in a retail grove, before the instance's seeded scale.
+    pub crowns: Vec<Crown>,
     pub mean_color: [f32; 3],
+}
+
+#[derive(Clone, Debug)]
+pub struct Crown {
+    pub center: [f32; 2],
+    pub half: [f32; 2],
 }
 
 pub struct Library {
@@ -129,6 +137,10 @@ impl Library {
                 match retail(
                     bytes,
                     *cut,
+                    matches!(
+                        species,
+                        Species::Grove | Species::PineGrove | Species::PalmGrove
+                    ),
                     art,
                     resources,
                     palette,
@@ -137,9 +149,10 @@ impl Library {
                     &mut images,
                 ) {
                     Ok(meshes) => {
-                        for (verts, radius, mean) in meshes {
+                        for ((verts, radius, mean), crowns) in meshes {
                             let recolour = rock.then_some(mean);
                             lib.push(*species, verts, radius, look, recolour, name);
+                            lib.meshes.last_mut().unwrap().crowns = crowns;
                         }
                     }
                     Err(e) => eprintln!("vegetation: {name} unusable: {e}"),
@@ -217,8 +230,19 @@ impl Library {
             if retain {
                 let top_id = 42 + ids[0];
                 for &id in &self.variants[species as usize] {
-                    self.meshes[usize::from(id)].top =
-                        [packed_page(extra_first, top_id), canopy_height(species)];
+                    let mesh = &mut self.meshes[usize::from(id)];
+                    mesh.top[0] = packed_page(extra_first, top_id);
+                    mesh.top[1] = canopy_height(species);
+                    if !mesh.crowns.is_empty() {
+                        // A grove is several trees, not one enormous crown. Bake
+                        // separate supplied cutouts at the retail plants' centres
+                        // and measured side widths. Gaps remain index-255 cutouts.
+                        let start = base_start + (8 + top_id / 4) * 65536;
+                        let page = grove_top(&pages[start..start + 65536], top_id % 4, mesh);
+                        mesh.top[0] = (first + (pages.len() - base_start) / 65536) as f32;
+                        mesh.top[2..].fill(mesh.radius * 1.02);
+                        pages.extend(page);
+                    }
                 }
                 continue;
             }
@@ -251,7 +275,10 @@ impl Library {
                     top: [
                         packed_page(extra_first, if extra { id + 21 } else { id + 42 }),
                         canopy_height(species),
+                        radius * 1.02 * opaque_width(&cell, 128) / 124.,
+                        radius * 1.02 * opaque_width(&cell, 128) / 124.,
                     ],
+                    crowns: Vec::new(),
                 });
             }
         }
@@ -271,6 +298,8 @@ impl Library {
                 [mesh.range.start as usize * FLOATS..mesh.range.end as usize * FLOATS];
             for angle in 0..4 {
                 let page = bake_view(vertices, mesh.radius, angle, pages, first(pages), palette);
+                let half = mesh.radius * 1.02 * opaque_width(&page, 256) / 256.;
+                mesh.top[2 + angle % 2] = mesh.top[2 + angle % 2].max(half);
                 pages.extend(page);
             }
             mesh.mean_color =
@@ -326,7 +355,8 @@ impl Library {
             source: source.to_string(),
             sprite_layer: 0,
             sprite_tile: None,
-            top: [0., 0.75],
+            top: [0., 0.75, 0., 0.],
+            crowns: Vec::new(),
             mean_color: [0.; 3],
         });
     }
@@ -486,6 +516,7 @@ fn indexed_mean(pixels: &[u8], palette: &[[u8; 3]; 256]) -> Option<[f32; 3]> {
 type Images = BTreeMap<String, Option<(crate::static_art::Image, [f32; 3])>>;
 
 type Built = (Vec<f32>, f32, [f32; 3]);
+type CrownSource = (Built, Vec<Crown>);
 
 /// A retail shape as normalised meshes: vertices, radius over height, and
 /// the mean linear colour of its textures.
@@ -493,13 +524,14 @@ type Built = (Vec<f32>, f32, [f32; 3]);
 fn retail(
     bytes: &[u8],
     cut: Cut,
+    grove: bool,
     art: &BTreeMap<String, Vec<u8>>,
     resources: &BTreeMap<String, Vec<u8>>,
     palette: &[[u8; 3]; 256],
     pages: &mut Vec<u8>,
     first_layer: &impl Fn(&Vec<u8>) -> usize,
     images: &mut Images,
-) -> crate::AppResult<Vec<Built>> {
+) -> crate::AppResult<Vec<CrownSource>> {
     let shape = tore_formats::shape::Shape::scenery(bytes)?;
     if shape.faces.is_empty() {
         return Ok(Vec::new());
@@ -541,18 +573,55 @@ fn retail(
             first_layer,
             images,
         )? {
-            out.push(mesh);
+            let mut crowns = Vec::new();
+            if grove {
+                let (center, height) = plant_frame(&group);
+                for plant in plant_groups(&group) {
+                    if let Some((vertices, radius, _)) = normalise(
+                        &plant,
+                        Cut::Whole,
+                        art,
+                        resources,
+                        palette,
+                        pages,
+                        first_layer,
+                        images,
+                    )? {
+                        let (at, h) = plant_frame(&plant);
+                        let mut half = [0.; 2];
+                        for (angle, half) in half.iter_mut().enumerate() {
+                            let page = bake_view(
+                                &vertices,
+                                radius,
+                                angle,
+                                pages,
+                                first_layer(pages),
+                                palette,
+                            );
+                            *half = radius * 1.02 * opaque_width(&page, 256) / 256. * h / height;
+                        }
+                        if half.iter().all(|&v| v > 0.) {
+                            crowns.push(Crown {
+                                center: [
+                                    (at[0] - center[0]) / height,
+                                    (at[1] - center[1]) / height,
+                                ],
+                                half,
+                            });
+                        }
+                    }
+                }
+            }
+            out.push((mesh, crowns));
         }
     }
     Ok(out)
 }
 
-/// Splits a grove into plants: faces whose centres stand within 18 units
-/// of each other belong together. Keeps the three largest plants that
-/// reach at least 60 percent of the grove's height.
-fn plants<'a>(
+/// Splits a grove into plants: faces whose centres stand within 18 source units
+/// of each other belong together. The existing fitted palm grouping rule.
+fn plant_groups<'a>(
     faces: &[&'a tore_formats::shape::Face],
-    top: f32,
 ) -> Vec<Vec<&'a tore_formats::shape::Face>> {
     let centre = |f: &tore_formats::shape::Face| {
         let n = f.positions.len() as f32;
@@ -585,8 +654,16 @@ fn plants<'a>(
         let r = root(&mut parent, i);
         groups.entry(r).or_default().push(f);
     }
-    let mut list: Vec<Vec<&tore_formats::shape::Face>> = groups
-        .into_values()
+    groups.into_values().collect()
+}
+
+/// Single-palm variants keep the three largest groups above 60% of grove height.
+fn plants<'a>(
+    faces: &[&'a tore_formats::shape::Face],
+    top: f32,
+) -> Vec<Vec<&'a tore_formats::shape::Face>> {
+    let mut list: Vec<_> = plant_groups(faces)
+        .into_iter()
         .filter(|g| {
             let t = g
                 .iter()
@@ -599,6 +676,62 @@ fn plants<'a>(
     list.sort_by_key(|g| std::cmp::Reverse(g.len()));
     list.truncate(3);
     list
+}
+
+fn plant_frame(faces: &[&tore_formats::shape::Face]) -> ([f32; 2], f32) {
+    let mut lo = [f32::INFINITY; 3];
+    let mut hi = [f32::NEG_INFINITY; 3];
+    for p in faces.iter().flat_map(|f| &f.positions) {
+        for k in 0..3 {
+            lo[k] = lo[k].min(p[k]);
+            hi[k] = hi[k].max(p[k]);
+        }
+    }
+    (
+        [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5],
+        (hi[2] - lo[2]).max(1e-3),
+    )
+}
+
+/// Alpha bounds, not the padded source quad, define the visible crown width.
+fn opaque_width(pixels: &[u8], stride: usize) -> f32 {
+    let mut lo = stride;
+    let mut hi = 0;
+    for (i, &pixel) in pixels.iter().enumerate() {
+        if pixel != 255 {
+            lo = lo.min(i % stride);
+            hi = hi.max(i % stride + 1);
+        }
+    }
+    hi.saturating_sub(lo) as f32
+}
+
+fn grove_top(source: &[u8], tile: usize, mesh: &Mesh) -> Vec<u8> {
+    let mut out = vec![255; 65536];
+    let radius = mesh.radius * 1.02;
+    for crown in &mesh.crowns {
+        for y in 0..256 {
+            let z = (0.5 - (y as f32 + 0.5) / 256.) * 2. * radius;
+            let v = 0.5 - (z - crown.center[1]) / (2. * crown.half[1]);
+            if !(0. ..1.).contains(&v) {
+                continue;
+            }
+            for x in 0..256 {
+                let at = ((x as f32 + 0.5) / 256. - 0.5) * 2. * radius;
+                let u = 0.5 + (at - crown.center[0]) / (2. * crown.half[0]);
+                if !(0. ..1.).contains(&u) {
+                    continue;
+                }
+                let sx = tile % 2 * 128 + 2 + (u * 124.) as usize;
+                let sy = tile / 2 * 128 + 2 + (v * 124.) as usize;
+                let pixel = source[sy * 256 + sx];
+                if pixel != 255 {
+                    out[y * 256 + x] = pixel;
+                }
+            }
+        }
+    }
+    out
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -779,6 +912,129 @@ include!("../assets/vegetation/pack_layout.rs");
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sliced_top_opaque_bounds_fill_the_usable_cells() {
+        let rgba = include_bytes!("../assets/vegetation/pass5/pack.rgba");
+        for (id, &(name, _)) in EXTRA.iter().enumerate().skip(21) {
+            let mut lo = [128; 2];
+            let mut hi = [0; 2];
+            for y in 0..128 {
+                for x in 0..128 {
+                    let at = id / 4 * 65536 + (id % 4 / 2 * 128 + y) * 256 + id % 2 * 128 + x;
+                    if rgba[at * 4 + 3] >= 128 {
+                        lo = [lo[0].min(x), lo[1].min(y)];
+                        hi = [hi[0].max(x + 1), hi[1].max(y + 1)];
+                    }
+                }
+            }
+            assert_eq!((lo, hi), ([2, 2], [126, 126]), "{name}");
+        }
+    }
+
+    #[test]
+    fn top_card_world_size_matches_opaque_side_crown_with_instance_scale() {
+        let mut lib = Library {
+            vertices: Vec::new(),
+            meshes: Vec::new(),
+            variants: vec![Vec::new(); Species::ALL.len()],
+        };
+        // A synthetic padded side texture: only its middle half is a crown.
+        let mut pages = vec![255; 65536];
+        for y in 32..224 {
+            for x in 64..192 {
+                pages[y * 256 + x] = 17;
+            }
+        }
+        let mut vertices = Vec::new();
+        for [x, y] in [
+            [-0.5, 0.],
+            [-0.5, 1.],
+            [0.5, 1.],
+            [-0.5, 0.],
+            [0.5, 1.],
+            [0.5, 0.],
+        ] {
+            vertices.extend([x, y, 0., x + 0.5, 1. - y, 0., 0., 0., 1., 0.]);
+        }
+        lib.push(
+            Species::Broadleaf,
+            vertices,
+            0.5,
+            Look::Foliage,
+            None,
+            "synthetic",
+        );
+        lib.bake(&mut pages, &|p| p.len() / 65536, &[[80; 3]; 256]);
+        let mesh = &lib.meshes[0];
+        let side = &pages[mesh.sprite_layer * 65536..][..65536];
+        assert!(mesh.top[2] < 0.3, "transparent margins cannot size the top");
+        for (height, width) in [(20., 0.7), (48., 1.0), (73., 1.3)] {
+            let side_world =
+                2. * mesh.radius * 1.02 * height * width * opaque_width(side, 256) / 256.;
+            let top_world = 2. * mesh.top[2] * height * width;
+            assert!((top_world - side_world).abs() < 0.0001);
+        }
+    }
+
+    #[test]
+    fn grove_top_keeps_tree_sized_crowns_and_transparent_forest_floor_gaps() {
+        let mut lib = Library {
+            vertices: Vec::new(),
+            meshes: Vec::new(),
+            variants: vec![Vec::new(); Species::ALL.len()],
+        };
+        lib.push(
+            Species::Grove,
+            Vec::new(),
+            5.,
+            Look::Foliage,
+            None,
+            "synthetic grove",
+        );
+        let mesh = &mut lib.meshes[0];
+        mesh.crowns = vec![
+            Crown {
+                center: [-2., 0.],
+                half: [0.5, 0.5],
+            },
+            Crown {
+                center: [2., 0.],
+                half: [0.5, 0.5],
+            },
+        ];
+        let mut source = vec![255; 65536];
+        for y in 2..126 {
+            for x in 2..126 {
+                source[y * 256 + x] = 17;
+            }
+        }
+        let page = grove_top(&source, 0, mesh);
+        let row = &page[128 * 256..129 * 256];
+        let runs: Vec<_> = row
+            .split(|&p| p == 255)
+            .filter(|p| !p.is_empty())
+            .map(<[u8]>::len)
+            .collect();
+        assert_eq!(
+            runs.len(),
+            2,
+            "never stretch a single crown across the grove"
+        );
+        for pixels in runs {
+            let world_width = pixels as f32 / 256. * 2. * mesh.radius * 1.02;
+            assert!((world_width - 1.).abs() <= 2. * mesh.radius * 1.02 / 256.);
+        }
+        assert_eq!(
+            page[128 * 256 + 128],
+            255,
+            "the floor between crowns is transparent in depth and colour"
+        );
+        assert!(
+            page.iter().all(|&p| p == 255 || p == 17),
+            "no black matte is introduced"
+        );
+    }
 
     #[test]
     fn rock_brightness_reference_ignores_cutouts_and_keeps_ground_tint() {

@@ -66,10 +66,15 @@ transparent RGB is zero. Conservative edge cleanup can lose faint leaf tips.
 
 There are 21 Sahara side sprites, their 21 matching top views, and 31 v2 top
 views. `pass5/pack.rgba` contains 19 RGBA pages, with the same 124 px cells and
-2 px gutters as v2. Individual PNGs, page PNGs, `review.png`, JSON metadata and
+2 px gutters as v2. Top cells are retrimmed after nearest-neighbour downsampling
+until opaque bounds fill the 124 px usable area, since thin tips can disappear
+during the resize. This does not alter side cells. Individual PNGs, page PNGs, `review.png`, JSON metadata and
 `layout.rs` are review/rebuild artifacts. The Sahara palms, acacias, bare trees,
 shrubs and rocks are selected for desert equivalents. Saguaro remains excluded.
 Top modes use the corresponding supplied top cell; retail side silhouettes use
-a fitted equivalent from that sheet. Local scale/width variation is unchanged.
+a fitted equivalent from that sheet. Runtime grove composites stamp separate
+crowns at the imported plants' centres and opaque side widths, leaving gaps
+transparent. Those retail-derived composites remain in memory only. Local
+scale/width variation is unchanged.
 The whole contact sheet was reviewed against a contrasting background and the
 synthetic glow test passed. In-game GPU appearance still requires lead review.
