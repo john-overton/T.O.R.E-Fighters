@@ -32,12 +32,14 @@ NORMAL_STATES = [
     "lobby-relay", "lobby-away",
     # Stage L (slice L4, L5): Messages saying how a player's game differs from the host's.
     "lobby-gaps",
-    # Lobby pass (slice L2): the red scroll bars and the ready hint for the King, a joiner, PvP and co-op.
+    # Lobby pass (slice L2): the map's arrow bars and the ready hint for the King, a joiner, PvP and co-op.
     "lobby-scroll", "lobby-scroll-top", "lobby-king-hint", "lobby-joiner-noslot-hint", "lobby-joiner-hint",
     "lobby-joiner-ready-hint", "lobby-pvp-hint", "lobby-coop-hint",
     # Lobby pass (slice L3): PvP slot colours, the side boxes in each state, the Players tint.
     "lobby-pvp-colours", "lobby-pvp-colours-red", "lobby-pvp-bluefor", "lobby-pvp-redfor", "lobby-pvp-open",
     "lobby-pvp-full", "lobby-pvp-locked", "lobby-balanced", "lobby-pvp-balanced-wait", "lobby-pvp-unable",
+    # Force Start (nr-lobbyui): the King's button, and the countdown.
+    "lobby-force", "lobby-force-count",
 ]
 # Quick Mission mode states, the loadout page states and the debrief pages.
 QUICK_STATES = [

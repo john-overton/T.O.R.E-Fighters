@@ -1,9 +1,7 @@
 //! The scrolling message box: wrapped, coloured lines, newest at the bottom,
 //! with a way back through what scrolled off.
 use super::{
-    Kit, Outcome, Point, Rect, Widget,
-    draw::focus_mark,
-    scroll_bar::{self, Press, ScrollBar, View},
+    ArrowBar, ArrowRows, Kit, Outcome, Point, Rect, RowPress, Widget, arrow_bar, draw::focus_mark,
 };
 use crate::menu::{Canvas, text_width};
 use crate::ui_text;
@@ -32,8 +30,8 @@ pub const DEFAULT_CAP: usize = 200;
 const LINE: i32 = 10;
 /// Inner margin.
 const PAD: i32 = 4;
-/// The scroll bar's art sits flush right inside the box's one pixel frame; the
-/// text stops 3 pixels short of it (the plan's 549 wide box has 507 for text).
+/// The scroll bar sits flush right inside the box's one pixel frame; the
+/// text stops 3 pixels short of it.
 const BAR_GAP: i32 = 3;
 /// Lines the wheel moves per notch.
 const WHEEL_LINES: i32 = 3;
@@ -54,14 +52,14 @@ struct Line {
 /// Scrolling back (*agent decision*): the wheel moves three lines a notch,
 /// PageUp and PageDown a page less a line, Up and Down a line, Home and End
 /// to the oldest and newest, while the box has the focus (or under the
-/// pointer for the wheel). The retail scroll bar ([`ScrollBar`], the Sound
-/// Prefs slider's red knob in its grey track, 34 wide) runs down the right
-/// edge inside the frame and shows the place in the kept lines when they do
-/// not all fit; a click above or below its knob pages back or forward (a page
-/// less a line) and the knob can be dragged ([`MessageBox::drag`], with
-/// [`MessageBox::release`] to let go). The track is always drawn, so the text
-/// does not move when the bar is needed. A view scrolled back stays on the
-/// same words as new lines arrive; at the bottom it follows them.
+/// pointer for the wheel). The map's arrow bar ([`ArrowBar`], 16 wide) runs
+/// down the right edge inside the frame and shows the place in the kept
+/// lines when they do not all fit; an arrow moves one line, a click above or
+/// below the thumb pages (a page less a line) and the thumb can be dragged
+/// ([`MessageBox::drag`], with [`MessageBox::release`] to let go). The track
+/// is always drawn, so the text does not move when the bar is needed. A view
+/// scrolled back stays on the same words as new lines arrive; at the bottom
+/// it follows them.
 #[derive(Clone, Debug)]
 pub struct MessageBox {
     rect: Rect,
@@ -69,7 +67,7 @@ pub struct MessageBox {
     cap: usize,
     /// How many lines the view is scrolled back from the newest.
     back: usize,
-    bar: ScrollBar,
+    bar: ArrowBar,
     enabled: bool,
 }
 
@@ -81,7 +79,7 @@ impl MessageBox {
             lines: VecDeque::new(),
             cap: DEFAULT_CAP,
             back: 0,
-            bar: ScrollBar::new((x + w - 1 - scroll_bar::WIDTH, y + 1), h - 2),
+            bar: ArrowBar::vertical((x + w - 1 - arrow_bar::THICK, y + 1), h - 2),
             enabled: true,
         }
     }
@@ -131,12 +129,12 @@ impl MessageBox {
         self.lines.len().saturating_sub(self.visible())
     }
     fn text_room(&self) -> i32 {
-        self.rect.2 - PAD - 1 - scroll_bar::WIDTH - BAR_GAP
+        self.rect.2 - PAD - 1 - arrow_bar::THICK - BAR_GAP
     }
-    /// What the scroll bar is asked about. The knob's line is the first one on
-    /// view, so at the newest the knob is at the bottom.
-    fn view_of_bar(&self) -> View {
-        View {
+    /// What the scroll bar is asked about. The thumb's line is the first one
+    /// on view, so at the newest the thumb is at the bottom.
+    fn rows_of_bar(&self) -> ArrowRows {
+        ArrowRows {
             total: self.lines.len(),
             visible: self.visible(),
             first: self.max_back() - self.back,
@@ -203,18 +201,20 @@ impl MessageBox {
             return Outcome::None;
         }
         let page = self.visible().saturating_sub(1).max(1) as i32;
-        let view = self.view_of_bar();
-        match self.bar.press(point, view) {
-            Press::Up => self.scroll(page),
-            Press::Down => self.scroll(-page),
-            Press::Grab | Press::Miss => Outcome::None,
+        let view = self.rows_of_bar();
+        match self.bar.press_rows(point, view) {
+            RowPress::Less => self.scroll(1),
+            RowPress::PageLess => self.scroll(page),
+            RowPress::More => self.scroll(-1),
+            RowPress::PageMore => self.scroll(-page),
+            RowPress::Grab | RowPress::Miss => Outcome::None,
         }
     }
     /// The pointer moved to `point`: a held knob scrolls the view. Call it on
     /// every pointer move; it does nothing when no knob is held.
     pub fn drag(&mut self, point: Point) -> Outcome {
-        let view = self.view_of_bar();
-        match self.bar.drag(point, view) {
+        let view = self.rows_of_bar();
+        match self.bar.drag_rows(point, view) {
             Some(first) => {
                 let to = self.max_back() - first;
                 if std::mem::replace(&mut self.back, to) == to {
@@ -260,7 +260,7 @@ impl MessageBox {
                 Some(colour),
             );
         }
-        self.bar.draw(canvas, kit, self.view_of_bar());
+        self.bar.draw_rows(canvas, self.rows_of_bar());
         if focused && self.enabled {
             focus_mark(canvas, (x - 3, y - 3, w + 6, h + 6));
         }
@@ -332,7 +332,7 @@ fn wrap(kit: &Kit, text: &str, room: i32) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_kit::{at, blank, kit, tone_of};
+    use super::super::test_kit::{at, blank, kit};
     use super::*;
 
     /// A box 100 wide (86 pixels of text: 17 five pixel characters) with four
@@ -502,20 +502,23 @@ mod tests {
         for i in 0..20 {
             b.push(&kit, &format!("l{i}"), tone::SYSTEM);
         }
-        // The bar is inside the frame, flush right: x 85 to 119, y 21 to 67.
-        assert_eq!(b.bar.bounds(), (85, 21, 34, 46));
-        let knob = b.bar.knob(b.view_of_bar()).unwrap();
-        assert_eq!(knob.1 + knob.3, 21 + 46 - 5, "the knob rests at the bottom");
-        assert_eq!(b.press((86, 22)), Outcome::Changed);
+        // The bar is inside the frame, flush right, 16 wide.
+        assert_eq!(b.bar.bounds(), (103, 21, 16, 46));
+        let rows = b.rows_of_bar();
+        let (thumb, _) = b
+            .bar
+            .thumb(rows.total as f64, rows.visible as f64, rows.first as f64);
+        assert!(thumb > 21 + 16, "the thumb rests toward the bottom");
+        // The track above the thumb pages back.
+        assert_eq!(b.press((110, 34)), Outcome::Changed);
         assert_eq!(b.scrolled_back(), 3, "a page less a line");
         assert!(!b.dragging());
-        let knob = b.bar.knob(b.view_of_bar()).unwrap();
-        assert!(knob.1 < 32, "the knob moved up");
-        assert_eq!(b.press((86, 66)), Outcome::Changed);
+        // The track below the thumb returns toward the newest, a page.
+        assert_eq!(b.press((110, 55)), Outcome::Changed);
         assert_eq!(b.scrolled_back(), 0);
-        assert_eq!(b.press((84, 40)), Outcome::None, "off the bar");
-        assert_eq!(b.press((90, 10)), Outcome::None, "off the bar");
-        assert!(b.on_bar((100, 40)) && !b.on_bar((84, 40)));
+        assert_eq!(b.press((100, 40)), Outcome::None, "off the bar");
+        assert_eq!(b.press((110, 10)), Outcome::None, "off the bar");
+        assert!(b.on_bar((110, 40)) && !b.on_bar((100, 40)));
     }
 
     #[test]
@@ -525,26 +528,28 @@ mod tests {
         for i in 0..20 {
             b.push(&kit, &format!("l{i}"), tone::SYSTEM);
         }
-        assert_eq!(b.drag((100, 0)), Outcome::None, "nothing is held");
-        // Grab the knob at the bottom, 8 pixels below its top.
-        assert_eq!(b.press((100, 40)), Outcome::None);
+        assert_eq!(b.drag((110, 0)), Outcome::None, "nothing is held");
+        let rows = b.rows_of_bar();
+        let (thumb, _) = b
+            .bar
+            .thumb(rows.total as f64, rows.visible as f64, rows.first as f64);
+        assert_eq!(b.press((110, thumb + 4)), Outcome::None);
         assert!(b.dragging());
-        assert_eq!(b.drag((100, 40)), Outcome::None, "not moved yet");
+        assert_eq!(b.drag((110, thumb + 4)), Outcome::None, "not moved yet");
         // Up past the top: the oldest lines.
         assert_eq!(b.drag((300, 0)), Outcome::Changed);
         assert_eq!(b.scrolled_back(), 16);
         assert_eq!(texts(&b), ["l0", "l1", "l2", "l3"]);
-        // Part of the way down: the view follows the knob, not the pointer's
-        // distance from the knob's first place.
-        assert_eq!(b.drag((100, 40 - 5 + 2)), Outcome::Changed);
+        // Part of the way down: the view follows the thumb.
+        assert_eq!(b.drag((110, thumb)), Outcome::Changed);
         assert!(b.scrolled_back() < 16 && b.scrolled_back() > 0);
         b.release();
         assert!(!b.dragging());
         let held = b.scrolled_back();
-        assert_eq!(b.drag((100, 70)), Outcome::None);
+        assert_eq!(b.drag((110, 70)), Outcome::None);
         assert_eq!(b.scrolled_back(), held);
-        // A press on the track holds nothing.
-        b.press((86, 22));
+        // A press on an arrow holds nothing.
+        b.press((110, 22));
         assert!(!b.dragging());
     }
 
@@ -552,28 +557,27 @@ mod tests {
     fn the_bar_does_not_move_the_text_and_nothing_to_scroll_has_no_knob() {
         let kit = kit();
         let mut b = MessageBox::newnet();
-        // 549 wide: the bar's 34 pixels, the margin and the gap leave 507.
-        assert_eq!(b.text_room(), 507);
-        assert_eq!(b.bar.bounds(), (45 + 549 - 35, 320, 34, 86));
+        // 549 wide: the bar's 16 pixels, the margin and the gap leave 525.
+        assert_eq!(b.text_room(), 525);
+        assert_eq!(b.bar.bounds(), (45 + 549 - 1 - 16, 320, 16, 86));
         b.push(&kit, "one", tone::SYSTEM);
-        assert_eq!(b.bar.knob(b.view_of_bar()), None);
+        let rows = b.rows_of_bar();
+        assert!(rows.total <= rows.visible);
         let mut pixels = blank();
         b.draw(&mut Canvas(&mut pixels), &kit, false);
-        // The empty track is there, with no knob.
-        assert_eq!(at(&pixels, 45 + 549 - 34, 330), tone_of(&kit, "SLIDEMID"));
-        assert_ne!(at(&pixels, 45 + 549 - 30, 330), tone_of(&kit, "SLIDERV"));
+        // The track between the arrows, with no thumb.
+        assert_eq!(at(&pixels, 45 + 549 - 10, 360), [20, 23, 24]);
+        assert_eq!(at(&pixels, 45 + 549 - 10, 324), [81, 83, 83]);
         for i in 0..30 {
             b.push(&kit, &format!("l{i}"), tone::SYSTEM);
         }
         let mut pixels = blank();
         b.draw(&mut Canvas(&mut pixels), &kit, false);
-        // The knob, 6 in, at the bottom of its travel (86 - 41 = 45).
-        let knob = b.bar.knob(b.view_of_bar()).unwrap();
-        assert_eq!(knob, (45 + 549 - 35 + 6, 320 + 6 + 45, 26, 30));
-        assert_eq!(
-            at(&pixels, knob.0 + 1, knob.1 + 1),
-            tone_of(&kit, "SLIDERV")
-        );
+        let rows = b.rows_of_bar();
+        let (thumb, _) = b
+            .bar
+            .thumb(rows.total as f64, rows.visible as f64, rows.first as f64);
+        assert_eq!(at(&pixels, 45 + 549 - 10, thumb + 2), [81, 83, 83]);
     }
 
     #[test]
@@ -583,13 +587,22 @@ mod tests {
         for i in 0..20 {
             b.push(&kit, &format!("l{i}"), tone::SYSTEM);
         }
-        let low = b.bar.knob_top(b.view_of_bar()).unwrap();
+        let rows = b.rows_of_bar();
+        let (low, _) = b
+            .bar
+            .thumb(rows.total as f64, rows.visible as f64, rows.first as f64);
         b.key("Home");
-        let high = b.bar.knob_top(b.view_of_bar()).unwrap();
+        let rows = b.rows_of_bar();
+        let (high, _) = b
+            .bar
+            .thumb(rows.total as f64, rows.visible as f64, rows.first as f64);
         assert!(high < low);
-        assert_eq!(high, 21 + 6, "the oldest lines: the knob at the top");
         b.key("End");
-        assert_eq!(b.bar.knob_top(b.view_of_bar()), Some(low));
+        let rows = b.rows_of_bar();
+        let (back, _) = b
+            .bar
+            .thumb(rows.total as f64, rows.visible as f64, rows.first as f64);
+        assert_eq!(back, low);
     }
 
     #[test]

@@ -49,6 +49,9 @@ pub mod number {
     pub const AI_RESPAWN: u8 = 23;
     /// Whether unheld aircraft may be flown by AI.
     pub const AI: u8 = 24;
+    /// The most players that must hold a slot and be ready before the
+    /// mission starts: a dedicated server's file sets it (John, 2026-10-16).
+    pub const MIN_PLAYERS: u8 = 25;
 }
 
 /// Setting 21's value for the calculated host; a pinned player is 1 plus
@@ -248,7 +251,7 @@ const OFF_ON: &[(u32, &str)] = &[(0, "off"), (1, "on")];
 const OFF_ON_VALUES: &[u32] = &[0, 1];
 
 /// Every setting, in number order: the registry.
-pub const REGISTRY: [Setting; 24] = [
+pub const REGISTRY: [Setting; 25] = [
     Setting {
         number: number::MODE,
         name: "mode",
@@ -536,7 +539,49 @@ pub const REGISTRY: [Setting; 24] = [
         change: Change::InLobby,
         pvp_only: false,
     },
+    // John, 2026-10-16: the mission does not start until this many players
+    // hold slots and are ready (0 for no minimum). A dedicated server's file
+    // and rotation entries set it; the King's change is refused, since the
+    // lobby screen does not offer it (agent decision), and a mode change
+    // keeps it, as it keeps the snapshot rate.
+    Setting {
+        number: number::MIN_PLAYERS,
+        name: "min-players",
+        allowed: Allowed::Range(0, 30, &[]),
+        unit: Unit::Count,
+        words: &[(0, "none")],
+        coop: 0,
+        pvp: 0,
+        change: Change::InLobby,
+        pvp_only: false,
+    },
 ];
+
+/// Why a mission in the lobby is not starting yet, in words: `ai_missing`
+/// open slots still lack a ready player while AI is off, and `min_missing`
+/// more ready players are needed to reach the minimum `min`. Both waits are
+/// the same kind of fact, so the stricter (the one needing more players) is
+/// the one said. `None` when neither waits. The host's log and the lobby
+/// screen both say it this way.
+pub fn start_wait_text(ai_missing: usize, min_missing: usize, min: usize) -> Option<String> {
+    let players = |n: usize| {
+        if n == 1 {
+            "1 more ready player".to_owned()
+        } else {
+            format!("{n} more ready players")
+        }
+    };
+    if ai_missing == 0 && min_missing == 0 {
+        None
+    } else if ai_missing >= min_missing {
+        Some(format!("Waiting for {}: AI is off.", players(ai_missing)))
+    } else {
+        Some(format!(
+            "Waiting for {} (minimum {min}).",
+            players(min_missing)
+        ))
+    }
+}
 
 /// The setting with `number`.
 pub fn setting(number: u8) -> Option<&'static Setting> {
@@ -777,10 +822,11 @@ impl Store {
             // The snapshot rate belongs to the game, not the mode (and a
             // dedicated server's file sets it): kept, as the ones changed
             // any time are (slice R1, agent decision).
-            for setting in REGISTRY
-                .iter()
-                .filter(|s| s.change == Change::InLobby && s.number != number::SNAPSHOT_RATE)
-            {
+            for setting in REGISTRY.iter().filter(|s| {
+                s.change == Change::InLobby
+                    && s.number != number::SNAPSHOT_RATE
+                    && s.number != number::MIN_PLAYERS
+            }) {
                 self.put(setting.number, setting.default_in(mode));
             }
         }
@@ -857,6 +903,12 @@ impl Store {
     /// `respawn` is not `none` (slice W0; the respawn itself is slice R1's).
     pub fn ai(&self) -> bool {
         self.value(number::AI) != 0
+    }
+
+    /// The players that must hold slots and be ready before the mission
+    /// starts; 0 for no minimum.
+    pub fn min_players(&self) -> usize {
+        self.value(number::MIN_PLAYERS) as usize
     }
 
     pub fn ai_respawn(&self) -> bool {

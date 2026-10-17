@@ -19,6 +19,7 @@ use crate::hud::Paint;
 use crate::menu::{Canvas, Sprite};
 use crate::rocker::Rocker;
 use crate::terrain::Terrain;
+use crate::widgets::{ArrowBar, ArrowPart};
 use std::time::Instant;
 use tore_formats::font::Font;
 use tore_formats::theater::CELL_FEET;
@@ -30,8 +31,6 @@ type Rect = (i32, i32, i32, i32);
 pub const PLOT: Rect = (12, 30, 458, 390);
 /// The scroll bars' thickness, and the arrow buttons at their ends.
 const BAR: i32 = 16;
-/// The shortest a thumb is drawn, so it can be grabbed.
-const MIN_THUMB: i32 = 14;
 /// The horizontal bar under the plot, the vertical one beside it and the
 /// square where they meet.
 const HORIZONTAL: Rect = (PLOT.0, PLOT.1 + PLOT.3 + 2, PLOT.2, BAR);
@@ -53,180 +52,8 @@ const OPENING_NARROWEST_NMI: f64 = 50.;
 /// than them can zoom to (25 to 800 nm).
 const STEPS_NMI: [f64; 6] = [800., 400., 200., 100., 50., 25.];
 
-/// The part of a scroll bar a press landed on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Part {
-    /// The arrow button at the start (left or top).
-    Less,
-    /// The arrow button at the end (right or bottom).
-    More,
-    /// The track before the thumb: a page back.
-    PageLess,
-    /// The track after the thumb: a page on.
-    PageMore,
-    Thumb,
-}
-
-/// One scroll bar: a rectangle, an arrow button at each end, a track between
-/// and a thumb on it. It holds no state: the view says how much there is
-/// (`total`), how much shows (`visible`) and where the shown part starts
-/// (`first`), all in feet.
-#[derive(Clone, Copy, Debug)]
-struct Bar {
-    rect: Rect,
-    vertical: bool,
-}
-
-impl Bar {
-    /// The bar's start and length along its own axis, in pixels.
-    fn axis(&self) -> (i32, i32) {
-        if self.vertical {
-            (self.rect.1, self.rect.3)
-        } else {
-            (self.rect.0, self.rect.2)
-        }
-    }
-    fn along(&self, (x, y): (i32, i32)) -> i32 {
-        if self.vertical { y } else { x }
-    }
-    /// The thumb's start and length along the axis for a view.
-    fn thumb(&self, total: f64, visible: f64, first: f64) -> (i32, i32) {
-        let (start, length) = self.axis();
-        let track = (length - 2 * BAR).max(0);
-        let ratio = if total > 0. {
-            (visible / total).clamp(0., 1.)
-        } else {
-            1.
-        };
-        let size = ((f64::from(track) * ratio).round() as i32)
-            .max(MIN_THUMB)
-            .min(track);
-        let travel = f64::from(track - size);
-        let span = (total - visible).max(0.);
-        let at = if span > 0. {
-            (first / span).clamp(0., 1.) * travel
-        } else {
-            0.
-        };
-        (start + BAR + at.round() as i32, size)
-    }
-    /// The `first` a thumb that starts at `thumb_start` pixels stands for.
-    fn first_at(&self, thumb_start: i32, total: f64, visible: f64) -> f64 {
-        let (start, length) = self.axis();
-        let track = (length - 2 * BAR).max(0);
-        let (_, size) = self.thumb(total, visible, 0.);
-        let travel = f64::from((track - size).max(1));
-        let span = (total - visible).max(0.);
-        (f64::from(thumb_start - start - BAR) / travel).clamp(0., 1.) * span
-    }
-    /// What a point is on, if the bar is under it and has anything to scroll.
-    fn part(&self, point: (i32, i32), total: f64, visible: f64, first: f64) -> Option<Part> {
-        let (x, y, w, h) = self.rect;
-        if point.0 < x || point.1 < y || point.0 >= x + w || point.1 >= y + h {
-            return None;
-        }
-        let (start, length) = self.axis();
-        let a = self.along(point);
-        if a < start + BAR {
-            return Some(Part::Less);
-        }
-        if a >= start + length - BAR {
-            return Some(Part::More);
-        }
-        if total <= visible {
-            return None;
-        }
-        let (thumb, size) = self.thumb(total, visible, first);
-        Some(if a < thumb {
-            Part::PageLess
-        } else if a >= thumb + size {
-            Part::PageMore
-        } else {
-            Part::Thumb
-        })
-    }
-    /// The bar drawn: a dark track, raised arrow buttons and a raised thumb
-    /// (sunk while pressed), in the menus' greys.
-    fn draw(&self, pixels: &mut [u8], total: f64, visible: f64, first: f64, pressed: Option<Part>) {
-        let (x, y, w, h) = self.rect;
-        let mut c = Canvas(pixels);
-        c.rect((x, y, w, h), [20, 23, 24, 255]);
-        bevel(&mut c, self.rect, true);
-        let (start, length) = self.axis();
-        let button = |less: bool| -> Rect {
-            let at = if less { start } else { start + length - BAR };
-            if self.vertical {
-                (x, at, BAR, BAR)
-            } else {
-                (at, y, BAR, BAR)
-            }
-        };
-        for (less, part) in [(true, Part::Less), (false, Part::More)] {
-            let rect = button(less);
-            raised(&mut c, rect, pressed == Some(part));
-            arrow(&mut c, rect, self.vertical, less, pressed == Some(part));
-        }
-        if total > visible {
-            let (thumb, size) = self.thumb(total, visible, first);
-            let rect = if self.vertical {
-                (x, thumb, BAR, size)
-            } else {
-                (thumb, y, size, BAR)
-            };
-            raised(&mut c, rect, pressed == Some(Part::Thumb));
-            // Three grip lines across the middle of the thumb.
-            let (cx, cy) = (rect.0 + rect.2 / 2, rect.1 + rect.3 / 2);
-            for d in [-3, 0, 3] {
-                if size >= 20 {
-                    if self.vertical {
-                        c.rect((rect.0 + 4, cy + d, rect.2 - 8, 1), [40, 43, 44, 255]);
-                    } else {
-                        c.rect((cx + d, rect.1 + 4, 1, rect.3 - 8), [40, 43, 44, 255]);
-                    }
-                }
-            }
-        }
-    }
-}
-
-const LIGHT: [u8; 4] = [115, 120, 119, 255];
-const DARK: [u8; 4] = [24, 27, 27, 255];
-const FACE: [u8; 4] = [81, 83, 83, 255];
-
-fn bevel(c: &mut Canvas, (x, y, w, h): Rect, inset: bool) {
-    let (top, bottom) = if inset { (DARK, LIGHT) } else { (LIGHT, DARK) };
-    c.rect((x, y, w, 1), top);
-    c.rect((x, y, 1, h), top);
-    c.rect((x, y + h - 1, w, 1), bottom);
-    c.rect((x + w - 1, y, 1, h), bottom);
-}
-/// A raised face (a button or a thumb), sunk while pressed.
-fn raised(c: &mut Canvas, rect: Rect, pressed: bool) {
-    let (x, y, w, h) = rect;
-    c.rect((x, y, w, h), if pressed { [70, 72, 72, 255] } else { FACE });
-    bevel(c, rect, pressed);
-    if !pressed {
-        c.rect((x + 1, y + 1, w - 2, 1), LIGHT);
-        c.rect((x + 1, y + 1, 1, h - 2), LIGHT);
-    }
-}
-/// A small solid triangle in a button, pointing to the bar's start or end.
-fn arrow(c: &mut Canvas, (x, y, w, h): Rect, vertical: bool, less: bool, pressed: bool) {
-    let shift = i32::from(pressed);
-    let (cx, cy) = (x + w / 2 + shift, y + h / 2 + shift);
-    for i in 0..4 {
-        // Row i of a 4-high triangle is 2i+1 wide.
-        let half = i;
-        let line = if less { i } else { 3 - i } - 2;
-        if vertical {
-            c.rect((cx - half, cy + line, 2 * half + 1, 1), INK);
-        } else {
-            c.rect((cx + line, cy - half, 1, 2 * half + 1), INK);
-        }
-    }
-}
-
-/// A press that is held: the thumb being dragged.
+/// A press that is held: the thumb being dragged. The map's bars are the
+/// shared arrow bar (`widgets::arrow_bar`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Grab {
     vertical: bool,
@@ -252,7 +79,7 @@ pub struct PlanView {
     pointer: Option<(f64, f64)>,
     grab: Option<Grab>,
     /// The scroll bar part held down, for its look.
-    pressed: Option<(bool, Part)>,
+    pressed: Option<(bool, ArrowPart)>,
     rocker: Rocker,
     /// Which rocker half is held down.
     rocker_held: bool,
@@ -471,16 +298,10 @@ impl PlanView {
             self.let_go();
         }
     }
-    fn bars(&self) -> [Bar; 2] {
+    fn bars(&self) -> [ArrowBar; 2] {
         [
-            Bar {
-                rect: HORIZONTAL,
-                vertical: false,
-            },
-            Bar {
-                rect: VERTICAL,
-                vertical: true,
-            },
+            ArrowBar::new(HORIZONTAL, false),
+            ArrowBar::new(VERTICAL, true),
         ]
     }
 
@@ -534,7 +355,7 @@ impl PlanView {
         let (total, visible, _) = scrolls[usize::from(grab.vertical)];
         let along = bar.along((x as i32, y as i32));
         let first = bar.first_at(along - grab.offset, total, visible);
-        self.set_first(grab.vertical, first);
+        self.set_first(bar.is_vertical(), first);
     }
 
     /// The mouse went down at the pointer: true when the scroll bars or the
@@ -559,19 +380,19 @@ impl PlanView {
             };
             let step = |fraction: f64| visible * fraction;
             match part {
-                Part::Less => self.set_first(bar.vertical, first - step(ARROW_STEP)),
-                Part::More => self.set_first(bar.vertical, first + step(ARROW_STEP)),
-                Part::PageLess => self.set_first(bar.vertical, first - step(PAGE_STEP)),
-                Part::PageMore => self.set_first(bar.vertical, first + step(PAGE_STEP)),
-                Part::Thumb => {
+                ArrowPart::Less => self.set_first(bar.is_vertical(), first - step(ARROW_STEP)),
+                ArrowPart::More => self.set_first(bar.is_vertical(), first + step(ARROW_STEP)),
+                ArrowPart::PageLess => self.set_first(bar.is_vertical(), first - step(PAGE_STEP)),
+                ArrowPart::PageMore => self.set_first(bar.is_vertical(), first + step(PAGE_STEP)),
+                ArrowPart::Thumb => {
                     let (thumb, _) = bar.thumb(total, visible, first);
                     self.grab = Some(Grab {
-                        vertical: bar.vertical,
+                        vertical: bar.is_vertical(),
                         offset: bar.along(point) - thumb,
                     });
                 }
             }
-            self.pressed = Some((bar.vertical, part));
+            self.pressed = Some((bar.is_vertical(), part));
             return true;
         }
         false
@@ -772,10 +593,12 @@ impl PlanView {
             let (total, visible, first) = scrolls[axis];
             let held = self
                 .pressed
-                .filter(|(vertical, _)| *vertical == bar.vertical)
+                .filter(|(vertical, _)| *vertical == bar.is_vertical())
                 .map(|(_, part)| part)
-                .filter(|part| matches!(part, Part::Thumb | Part::Less | Part::More));
-            bar.draw(pixels, total, visible, first, held);
+                .filter(|part| {
+                    matches!(part, ArrowPart::Thumb | ArrowPart::Less | ArrowPart::More)
+                });
+            bar.draw(&mut Canvas(pixels), total, visible, first, held);
         }
     }
 
@@ -815,7 +638,11 @@ impl PlanView {
                 // An import without the rocker's art gets two plain halves.
                 let mut c = Canvas(pixels);
                 for half in 0..2 {
-                    raised(&mut c, (x, y + half * HALF.1, HALF.0, HALF.1), false);
+                    crate::widgets::arrow_bar::raised(
+                        &mut c,
+                        (x, y + half * HALF.1, HALF.0, HALF.1),
+                        false,
+                    );
                 }
             }
         }
@@ -1112,16 +939,13 @@ mod tests {
 
     #[test]
     fn the_thumb_follows_the_view_and_is_never_smaller_than_it_can_be_grabbed() {
-        let bar = Bar {
-            rect: HORIZONTAL,
-            vertical: false,
-        };
+        let bar = ArrowBar::new(HORIZONTAL, false);
         let (start, size) = bar.thumb(1000., 100., 0.);
         assert_eq!(start, HORIZONTAL.0 + BAR);
         let (end, _) = bar.thumb(1000., 100., 900.);
         assert_eq!(end + size, HORIZONTAL.0 + HORIZONTAL.2 - BAR);
         let (_, tiny) = bar.thumb(1_000_000., 1., 0.);
-        assert_eq!(tiny, MIN_THUMB);
+        assert_eq!(tiny, 14);
         // The thumb's place reads back as the same offset.
         for first in [0., 123., 450., 900.] {
             let (at, _) = bar.thumb(1000., 100., first);

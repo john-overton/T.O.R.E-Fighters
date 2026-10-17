@@ -133,6 +133,7 @@ builds a mission as usual, then opens its slots to humans.
 | Respawn rules | None, into an open AI slot, or back at a base |
 | Revival | Retail's settings apply to every respawn: lives (0 to 10, or unlimited), delay (0 to 5 minutes), distance from the battle (1 to 40 miles as retail, up to 150 since the lobby pass) and weapons (with missiles, without missiles, guns only, half guns) |
 | AI respawn | On or off: whether a lost AI aircraft comes back under the revival rules; greyed while the respawn rule is None ([AI respawn](#ai-respawn)) |
+| Players, at least | A dedicated server's minimum players to start (John, 2026-10-16; 0 for none). Shown on the Revival page, always greyed: the server operator sets it in `server.conf` or per rotation entry, and until enough players holding slots are ready the lobby says "Waiting for 2 more ready players (minimum 4)." ([guide](DEDICATED-SERVER.md#minimum-players)) |
 | Scoring | PvP: retail's fight type (sides or free for all), kill tally (total kills, total damage or kill ratio), time limit (1 to 30 minutes), kill limit (1 to 10) and kill owner (total, one side or one player) |
 | Difficulty and realism | Inherits the Quick Mission settings, locked for all humans |
 
@@ -181,7 +182,9 @@ for the player's own aircraft, with Accept and Cancel, the mission's Guns only
 applied and Cheat loading refused on the page; **Ready** toggles (a player who
 readies without choosing a loadout flies the standard stores, and Messages says
 so); **Fly** (the King, blue when everyone holding a slot is ready) starts the
-mission, and says "Not ready: Hawk." otherwise; **Kick** (the King, on a
+mission, and says "Not ready: Hawk." otherwise. When Fly would be refused
+only because someone holding a slot is not ready, and at least one slot
+holder is ready, the button reads **Force Start** instead (below); **Kick** (the King, on a
 selected player; since F2-L inside **Players...**) asks for the reason the player will see; **Leave** returns to
 Direct Connection, and asks "Leaving ends the game for everyone. Leave?" of the
 King. While a mission flies the lobby stays open to a late joiner or to a
@@ -274,18 +277,50 @@ From the top of the screen:
 | Ready hint | One dim line above the buttons that says what this player does next so the King can start (below) |
 | Buttons | The King: Mission..., Settings..., Players..., Loadout, Ready, Fly, Leave. Everyone else: Mission..., Settings..., Loadout, Ready, Leave, filling the row from the right so Leave is always last |
 
-**Scroll bars.** Slots, Players and Messages scroll with retail's red slider
-knob (the Sound Prefs slider) in a grey slotted track, in place of the
-PREV, NEXT and PAGE buttons the Slots list had; Players, which had no way to
-show that more rows exist, gains one. Drag the knob, click the track above or
-below it to move a page, or turn the wheel (two rows a notch in a list, three
-lines in Messages). The arrow keys still move the selection and the list
-follows it. When everything fits the track is drawn empty, so nothing shifts.
-Direct Connection's and the Internet Lobby's Messages boxes use the same bar;
-their games lists keep the PREV and NEXT rocker. The track's three pieces
-(`SLIDETOP`, `SLIDEMID`, `SLIDEBOT`) are new to the import. A player whose
-import predates them sees a flat grey track under the red knob, and the log
-suggests a re-import; nothing is forced.
+**Scroll bars.** Slots, Players and Messages use the flight map's arrow bar:
+a flat grey track, a darker thumb, and an arrow button at each end (the same
+bar the plan view draws, 16 pixels wide, from the map's colours). Drag the
+thumb, click the track to move a page, press an arrow to move one row, or
+turn the wheel (a list slides its window and leaves the selection where it
+is; Messages moves three lines a notch). The arrow keys and the controller
+still move the selection, and the list follows it. When everything fits, the
+arrows and the track are still drawn and the thumb is absent, so a click
+does nothing and nothing shifts. The Settings panel's pages use the same bar
+on the right of the rows. Direct Connection and the Internet Lobby use it
+on their games lists, in place of the PREV and NEXT rocker, and on Messages.
+The bar is drawn by the game, not from slider pieces in the import.
+
+#### Force Start
+
+*Requested by John on 2026-10-16.* When the King's **Fly** would be refused
+because not everyone holding a slot is ready, and at least one slot holder
+is ready, the button reads **Force Start**. Pressing it starts a 10 second
+countdown. The button's place then reads **Starting in 7** (the seconds the
+host still has left, the same number for every player). Messages says "The
+King is force starting in 10 seconds." Pressing the button again cancels it,
+and Messages says "The King cancelled the force start." If everyone holding
+a slot becomes ready during the countdown, the mission starts at once.
+
+At zero the mission starts. *Agent decision:* a slot holder who is still not
+ready flies in that slot with the loadout they have, the one they chose or
+the aircraft's standard stores when they chose none, the same as a player
+who readies without opening Loadout. A player with no slot stays in the
+lobby and can join in progress as usual. A player whose game cannot play
+the mission stays in the lobby too; the host's log names them separately
+from the players who were not ready.
+
+**Force Start** is not offered when nobody is ready, when everyone is ready
+(the button is **Fly**), when `min-players` is not met, or, with `ai off`,
+when an open slot is held by nobody. Those waits are not overridden. A
+dedicated server has no King unless `king first-player`; the crowned player
+then force starts under the same rules, and `min-players` still gates the
+start. The host owns the countdown. A takeover drops it: it is not written
+in the journal. The host logs the start, the cancel, and, at the forced
+start, who was not ready ("Force start: Hawk was not ready.").
+
+While the countdown shows, a joiner's buttons shift left so the countdown
+sits in the King's Fly place and Leave stays last. Only the King can press
+it. Enter on an empty chat line presses it for the King, as it does for Fly.
 
 #### Mission... for everyone
 
@@ -312,8 +347,11 @@ The line above the buttons, in the dim face, says what this player does next:
 | Lobby, holds no slot | "Take a slot and press Ready so the King can start the mission." |
 | Lobby, holds a slot, not ready | "Press Ready so the King can start the mission." |
 | Lobby, ready, not the King | "You are ready. The King starts the mission with Fly." |
-| The King, not everyone ready | "Press Fly when everyone holding a slot is ready." |
+| The King, not everyone ready, and a force start is allowed | "Someone is not ready: press Force Start to begin in 10 seconds." |
+| The King, a force start counting | "The force start is counting down. Press it again to cancel." |
+| The King, not everyone ready, and a force start is not allowed | "Press Fly when everyone holding a slot is ready." |
 | The King, everyone ready | "Everyone is ready: press Fly to start the mission." |
+| A joiner while a force start counts | "The King is force starting. The mission begins when the count ends." |
 | A server with no King named | "The mission starts when the King presses Fly and everyone holding a slot is ready." |
 | A server that starts at the first ready player | "The mission starts as soon as the first player holding a slot is ready." |
 | A server whose mission is always flying | "This server's mission is always flying: take a slot and press Ready to join it." |

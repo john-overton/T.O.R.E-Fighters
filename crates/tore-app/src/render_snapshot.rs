@@ -1099,6 +1099,30 @@ mod tests {
     }
 
     #[test]
+    fn fires_and_other_effects_never_carry_the_green_tracer_flag() {
+        let camera = Camera::new();
+        // Emissive effect colour, the path a flame uses. Fire sprites are a
+        // different buffer and never reach this tag.
+        let mut fire = Vec::new();
+        vertex(&mut fire, [0., 4., 0.], [1., 0.45, 0.12]);
+        assert!(fire.chunks_exact(10).all(|v| v[5] == -6. && v[9] == -1.));
+        let mut sparks = Vec::new();
+        tracer(&mut sparks, [0.; 3], [8., 1., 0.], &camera, 2.2, 0.4);
+        assert!(sparks.chunks_exact(10).all(|v| v[5] == -8. && v[9] > -22.));
+        for weapon in ["ZSU23.JT", "BMP2.JT"] {
+            let mut ribbon = Vec::new();
+            gun_tracer(&mut ribbon, [0.; 3], [30., 0., 0.], &camera, weapon);
+            assert!(
+                ribbon.chunks_exact(10).all(|v| v[9] < -22.),
+                "{weapon} is a green tracer"
+            );
+        }
+        let mut red = Vec::new();
+        gun_tracer(&mut red, [0.; 3], [30., 0., 0.], &camera, "M163.JT");
+        assert!(red.chunks_exact(10).all(|v| (-22. ..-2.).contains(&v[9])));
+    }
+
+    #[test]
     fn live_and_recorded_rounds_share_geometry_in_every_view() {
         use crate::replay::convert;
         use crate::snapshot::ProjectilePose;

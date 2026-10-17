@@ -1480,6 +1480,12 @@ impl Client {
         self.request(now, Message::Start);
     }
 
+    /// The King starts a 10 second force start, or cancels one running.
+    pub fn force_start(&mut self) {
+        let now = self.now;
+        self.request(now, Message::ForceStart);
+    }
+
     /// The King removes the player with lobby id `player`, who is told
     /// `reason`.
     pub fn kick(&mut self, player: u8, reason: &str) {

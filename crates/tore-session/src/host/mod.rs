@@ -268,6 +268,10 @@ pub enum HostLog {
     Overloaded { tick: u64, ticks_behind: u64 },
     /// The mission could not go on (a step or a rebuild failed).
     Fault { tick: u64, text: String },
+    /// Something the host did on purpose that is neither a fault nor a
+    /// player's doing: why the mission waits to start, a departed player's
+    /// aircraft removed because AI is off.
+    Note { tick: u64, text: String },
     /// The host stopped.
     Stopped { tick: u64 },
     /// Something a player did in the lobby, or that happened to it there.
@@ -325,6 +329,7 @@ impl HostLog {
             | Self::MissionRestarted { tick }
             | Self::Overloaded { tick, .. }
             | Self::Fault { tick, .. }
+            | Self::Note { tick, .. }
             | Self::Stopped { tick }
             | Self::Lobby { tick, .. }
             | Self::Chat { tick, .. }
@@ -548,6 +553,14 @@ struct Peer {
     gaps_sent: bool,
 }
 
+/// What stops the lobby's mission starting now.
+enum StartBlock {
+    /// Players are still to come: not an error, the lobby waits.
+    Wait(String),
+    /// The mission cannot be flown as it is (a gap in the content).
+    Refused(String),
+}
+
 /// The lifecycle's own state.
 #[derive(Clone, Copy, Debug)]
 enum Life {
@@ -650,6 +663,14 @@ pub struct Host {
     compat: content::Compat,
     /// The loading thread's socket and timing (protocol 28, `loading`).
     loader: loading::Loader,
+    /// The last wait-to-start line logged, so a line is logged when the
+    /// reason changes and not on every attempt.
+    wait_logged: Option<String>,
+    /// When a King's force-start countdown reaches zero. The host's clock
+    /// owns it, so every player is sent the same seconds left.
+    force_deadline: Option<Duration>,
+    /// The seconds last written into the lobby state.
+    force_shown: Option<u8>,
     /// What each seat's game could not foresee, by tick (tests only).
     #[cfg(test)]
     unforeseen_log: Vec<(u64, SeatId, Unforeseen)>,
@@ -959,12 +980,17 @@ impl Host {
             listing: None,
             compat,
             loader: loading::Loader::default(),
+            wait_logged: None,
+            force_deadline: None,
+            force_shown: None,
             court,
             settings,
             config,
         };
-        if host.config.start == StartMode::Now && host.settings.ai() {
+        if host.start_rule() == StartMode::Now {
             host.start_flying().map_err(HostError::Mission)?;
+        } else {
+            host.note_start_wait(true);
         }
         Ok(host)
     }
@@ -1040,6 +1066,7 @@ impl Host {
         }
         // Stage K: the journal's records out to the standbys (slice K3).
         self.standby_update();
+        self.tick_force();
         self.send_lobby();
     }
 
@@ -1077,7 +1104,10 @@ impl Host {
     /// ready player holding a slot in it.
     pub fn start_now(&mut self) {
         if matches!(self.life, Life::Lobby) {
-            // A failure is logged as a fault; the lobby stays.
+            // A failure is logged (a wait as a note, a build failure as a
+            // fault); the lobby stays. The operator asked, so a wait is
+            // said again even when it is the same as the last.
+            self.wait_logged = None;
             let _ = self.start_flying();
             self.send_lobby();
         }
@@ -1726,6 +1756,7 @@ impl Host {
             message,
             Message::ChangeMission(_)
                 | Message::Start
+                | Message::ForceStart
                 | Message::Kick(_)
                 | Message::EndMission
                 | Message::PassCrown(_)
@@ -1770,6 +1801,10 @@ impl Host {
             Message::Start => {
                 let result = self.king_start();
                 self.answer(connection, kind::START, "the start", result);
+            }
+            Message::ForceStart => {
+                let result = self.king_force();
+                self.answer(connection, kind::FORCE_START, "the force start", result);
             }
             Message::Kick(kick) => {
                 let result = if self.peers.get(&connection).map(|p| p.lobby.id) == Some(kick.player)
@@ -2342,7 +2377,13 @@ impl Host {
         if ready {
             match self.life {
                 Life::Lobby if self.start_rule() == StartMode::FirstPlayer => {
-                    self.start_flying()?;
+                    match self.start_block() {
+                        // Not an error: the player is ready, and the
+                        // mission starts when the others are.
+                        Some(StartBlock::Wait(_)) => self.note_start_wait(false),
+                        Some(StartBlock::Refused(why)) => return Err(why),
+                        None => self.start_flying()?,
+                    }
                 }
                 Life::Flying => {
                     if let Some(plane) = slot {
@@ -2743,6 +2784,199 @@ impl Host {
         self.start_flying()
     }
 
+    /// How long a force start counts down (John, 2026-10-16).
+    const FORCE_FOR: Duration = Duration::from_secs(10);
+
+    /// The King starts a 10 second force start, or cancels one that is
+    /// already running. The host's clock owns the deadline.
+    fn king_force(&mut self) -> Result<(), String> {
+        if !matches!(self.life, Life::Lobby) {
+            return Err("The mission is not in the lobby.".into());
+        }
+        if self.force_deadline.is_some() {
+            self.force_deadline = None;
+            self.note_force_second();
+            self.announce("The King cancelled the force start.");
+            self.note("Force start cancelled.");
+            return Ok(());
+        }
+        if let Some(why) = self.force_block() {
+            return Err(why);
+        }
+        self.force_deadline = Some(self.now.saturating_add(Self::FORCE_FOR));
+        self.note_force_second();
+        self.announce("The King is force starting in 10 seconds.");
+        self.note("Force start: the King is starting in 10 seconds.");
+        Ok(())
+    }
+
+    /// Advances the countdown. Everyone ready starts at once. At zero the
+    /// mission starts and slot holders who are still not ready fly with the
+    /// loadout they have. A gate that fails (the minimum, an unheld plane
+    /// with the AI off, nobody left ready) cancels it.
+    fn tick_force(&mut self) {
+        if self.force_deadline.is_none() {
+            return;
+        }
+        if !matches!(self.life, Life::Lobby) {
+            self.force_deadline = None;
+            self.note_force_second();
+            return;
+        }
+        if let Some(why) = self.force_block() {
+            self.force_deadline = None;
+            self.note_force_second();
+            self.announce("The force start was cancelled.");
+            self.note(format!("Force start cancelled: {why}"));
+            return;
+        }
+        let due = self.now >= self.force_deadline.unwrap_or(Duration::MAX);
+        if !self.pending_unready() && self.start_block().is_none() {
+            match self.start_flying() {
+                Ok(()) => {
+                    self.note("Force start: everyone was ready, so the mission started.");
+                }
+                Err(why) => {
+                    // A build failure is already a fault. Drop the countdown
+                    // so the next update does not log it again.
+                    self.force_deadline = None;
+                    self.note_force_second();
+                    self.announce("The force start was cancelled.");
+                    self.note(format!("Force start cancelled: {why}"));
+                }
+            }
+            return;
+        }
+        if due {
+            if let Err(why) = self.start_flying_in(true) {
+                self.force_deadline = None;
+                self.note_force_second();
+                self.announce("The force start was cancelled.");
+                self.note(format!("Force start cancelled: {why}"));
+            }
+            return;
+        }
+        self.note_force_second();
+    }
+
+    /// Why a force start cannot begin, or cannot keep counting.
+    fn force_block(&self) -> Option<String> {
+        if !matches!(self.life, Life::Lobby) {
+            return Some("The mission is not in the lobby.".into());
+        }
+        if self.min_missing() > 0 || (!self.settings.ai() && self.unheld_open() > 0) {
+            return self
+                .start_wait_reason()
+                .or_else(|| Some("The lobby is still waiting for players.".into()));
+        }
+        let ready = self
+            .peers
+            .values()
+            .filter(|peer| Self::ready_holder(peer))
+            .count();
+        if ready == 0 {
+            return Some("Nobody is ready.".into());
+        }
+        if !self.pending_unready() && self.force_deadline.is_none() {
+            // Fly, not Force Start: everyone who can fly is ready.
+            return Some("Everyone is ready.".into());
+        }
+        None
+    }
+
+    /// A slot holder who is not ready and whose game can play.
+    fn pending_unready(&self) -> bool {
+        self.peers.values().any(|peer| {
+            peer.lobby.slot.is_some()
+                && !peer.lobby.ready
+                && peer.lobby.unable.is_none()
+                && !matches!(peer.stage, Stage::Closing { .. })
+        })
+    }
+
+    /// Open slots nobody holds. With the AI off a force start waits for
+    /// these; a player who holds one and is not ready still counts as
+    /// holding it.
+    fn unheld_open(&self) -> usize {
+        self.slots()
+            .iter()
+            .filter(|slot| {
+                !self.closed_slot(slot.id)
+                    && !self.peers.values().any(|peer| {
+                        peer.lobby.slot == Some(PlaneId(slot.id))
+                            && !matches!(peer.stage, Stage::Closing { .. })
+                    })
+            })
+            .count()
+    }
+
+    /// The seconds left, 1 to 10, while a countdown runs.
+    fn force_seconds(&self) -> Option<u8> {
+        let deadline = self.force_deadline?;
+        let left = deadline.saturating_sub(self.now);
+        if left.is_zero() {
+            return Some(1);
+        }
+        let secs = left.as_secs() + u64::from(left.subsec_nanos() != 0);
+        Some(secs.clamp(1, 10) as u8)
+    }
+
+    /// Marks the lobby stale when the seconds the players are shown change.
+    fn note_force_second(&mut self) {
+        let shown = self.force_seconds();
+        if shown != self.force_shown {
+            self.force_shown = shown;
+            self.lobby_dirty = true;
+        }
+    }
+
+    fn note(&mut self, text: impl Into<String>) {
+        let tick = self.world.tick();
+        self.log(HostLog::Note {
+            tick,
+            text: text.into(),
+        });
+    }
+
+    /// Names the slot holders a force start did not find ready, and anyone
+    /// whose game cannot play (they stay in the lobby).
+    fn note_forced(&mut self) {
+        let mut unready = Vec::new();
+        let mut stayed = Vec::new();
+        for peer in self.peers.values() {
+            if peer.lobby.slot.is_none() || matches!(peer.stage, Stage::Closing { .. }) {
+                continue;
+            }
+            if peer.lobby.unable.is_some() {
+                stayed.push(peer.callsign.clone());
+            } else if !peer.lobby.ready {
+                unready.push(peer.callsign.clone());
+            }
+        }
+        let names = |list: &[String]| match list {
+            [one] => one.clone(),
+            [a, b] => format!("{a} and {b}"),
+            many => {
+                let last = many.last().map(String::as_str).unwrap_or("");
+                let rest = many[..many.len() - 1].join(", ");
+                format!("{rest}, and {last}")
+            }
+        };
+        if !unready.is_empty() {
+            let verb = if unready.len() == 1 { "was" } else { "were" };
+            self.note(format!(
+                "Force start: {} {verb} not ready.",
+                names(&unready)
+            ));
+        }
+        if !stayed.is_empty() {
+            self.note(format!(
+                "Force start: {} stayed in the lobby.",
+                names(&stayed)
+            ));
+        }
+    }
+
     /// The player ends its flight: its debrief now, its plane back to the
     /// AI at the next tick, then it is back in the lobby, still connected,
     /// its slot and loadout kept and its ready mark cleared.
@@ -2945,6 +3179,7 @@ impl Host {
             // A dedicated server's `king-mission locked` (a hosted game's
             // config never sets it): the King's Mission... reads only.
             mission_locked: self.config.mission_locked,
+            force_seconds: self.force_seconds(),
         }
     }
 
@@ -3005,42 +3240,138 @@ impl Host {
 
     // ----- The clock and the tick ----------------------------------------
 
-    /// The mission starts flying: built again with the loadouts of the held
-    /// slots, which every player is sent to build its copy again with, and
-    /// every ready player holding a slot takes its plane at the first tick.
-    /// AI-off games cannot bypass the ready requirement, even from the console.
+    /// Why an AI-off lobby is not starting: open slots not yet held by a
+    /// ready player (the console's `start now` cannot bypass it).
     pub fn ai_wait_reason(&self) -> Option<String> {
+        let missing = self.ai_missing();
+        crate::settings::start_wait_text(missing, 0, 0).filter(|_| missing > 0)
+    }
+
+    /// Whether `peer` counts as a ready player: it holds a slot, is ready,
+    /// can play the mission and is not leaving. The AI-off rule and the
+    /// minimum players both count this way (and so does the start rule).
+    fn ready_holder(peer: &Peer) -> bool {
+        peer.lobby.slot.is_some()
+            && peer.lobby.ready
+            && peer.lobby.unable.is_none()
+            && !matches!(peer.stage, Stage::Closing { .. })
+    }
+
+    /// With AI off, the open slots that no ready player holds yet; 0 with
+    /// AI on.
+    fn ai_missing(&self) -> usize {
         if self.settings.ai() {
-            return None;
+            return 0;
         }
-        let missing = self
-            .slots()
+        self.slots()
             .iter()
             .filter(|slot| {
                 !self.closed_slot(slot.id)
                     && !self.peers.values().any(|peer| {
-                        peer.lobby.slot == Some(PlaneId(slot.id))
-                            && peer.lobby.ready
-                            && peer.lobby.unable.is_none()
-                            && !matches!(peer.stage, Stage::Closing { .. })
+                        peer.lobby.slot == Some(PlaneId(slot.id)) && Self::ready_holder(peer)
                     })
             })
-            .count();
-        (missing > 0).then(|| format!("Waiting for {missing} more ready players: AI is off."))
+            .count()
     }
 
-    fn start_flying(&mut self) -> Result<(), String> {
+    /// The minimum players the lobby waits for: the `min-players` setting,
+    /// never more than the host can seat (a player limit the King lowered
+    /// or closed slots cannot make the mission wait for ever).
+    pub fn min_players_needed(&self) -> usize {
+        self.settings.min_players().min(self.capacity())
+    }
+
+    /// How many more ready players the minimum needs; 0 when met.
+    fn min_missing(&self) -> usize {
+        let ready = self
+            .peers
+            .values()
+            .filter(|p| Self::ready_holder(p))
+            .count();
+        self.min_players_needed().saturating_sub(ready)
+    }
+
+    /// Why the mission is not starting yet, in words: AI off with a slot
+    /// not yet held by a ready player, or fewer ready players than
+    /// `min-players`; whichever needs more players. `None` when neither
+    /// waits.
+    pub fn start_wait_reason(&self) -> Option<String> {
+        crate::settings::start_wait_text(
+            self.ai_missing(),
+            self.min_missing(),
+            self.min_players_needed(),
+        )
+    }
+
+    /// What stops the mission starting now, if anything.
+    fn start_block(&self) -> Option<StartBlock> {
         if !self.spec.plane_aircraft.is_empty()
             && let Some(why) = self.mission_gap_refusal(&self.spec)
         {
-            return Err(why);
+            return Some(StartBlock::Refused(why));
         }
-        if let Some(why) = self.ai_wait_reason() {
-            self.log(HostLog::Fault {
-                tick: self.world.tick(),
-                text: why.clone(),
-            });
-            return Err(why);
+        self.start_wait_reason().map(StartBlock::Wait)
+    }
+
+    /// Logs why the lobby waits to start, once for each reason (`fresh`
+    /// for a lobby just opened). A wait is not a fault: nothing went
+    /// wrong, the server is waiting for players.
+    fn note_start_wait(&mut self, fresh: bool) {
+        if fresh {
+            self.wait_logged = None;
+        }
+        let Some(text) = self.start_wait_reason() else {
+            self.wait_logged = None;
+            return;
+        };
+        // A fresh lobby that only waits for its first player says nothing
+        // more than the start rule's own line.
+        if fresh && self.settings.ai() && self.min_players_needed() <= 1 {
+            return;
+        }
+        if self.wait_logged.as_deref() != Some(text.as_str()) {
+            self.wait_logged = Some(text.clone());
+            let tick = self.world.tick();
+            self.log(HostLog::Note { tick, text });
+        }
+    }
+
+    /// The mission starts flying: built again with the loadouts of the held
+    /// slots, which every player is sent to build its copy again with, and
+    /// every ready player holding a slot takes its plane at the first tick.
+    /// The AI-off rule and the minimum players cannot be bypassed, even from
+    /// the console: the lobby waits.
+    fn start_flying(&mut self) -> Result<(), String> {
+        self.start_flying_in(false)
+    }
+
+    /// Starts the mission. `force` seats every slot holder whose game can
+    /// play, ready or not, and still refuses a minimum that is not met or
+    /// an unheld plane while the AI is off.
+    fn start_flying_in(&mut self, force: bool) -> Result<(), String> {
+        if !force {
+            match self.start_block() {
+                Some(StartBlock::Refused(why)) => return Err(why),
+                Some(StartBlock::Wait(why)) => {
+                    self.note_start_wait(false);
+                    return Err(why);
+                }
+                None => {}
+            }
+        } else {
+            if !self.spec.plane_aircraft.is_empty()
+                && let Some(why) = self.mission_gap_refusal(&self.spec)
+            {
+                return Err(why);
+            }
+            if self.min_missing() > 0 || (!self.settings.ai() && self.unheld_open() > 0) {
+                let why = self
+                    .start_wait_reason()
+                    .unwrap_or_else(|| "The lobby is still waiting for players.".into());
+                self.note_start_wait(false);
+                return Err(why);
+            }
+            self.note_forced();
         }
         let lobby_manifest = self.manifest.clone();
         let mut spec = self.spec.clone();
@@ -3110,6 +3441,8 @@ impl Host {
         self.ever_seated = false;
         self.empty_since = None;
         self.life = Life::Flying;
+        self.force_deadline = None;
+        self.force_shown = None;
         self.origin = None;
         self.ticks_run = 0;
         // Stage F phase 2: fresh scores, and the world records score facts;
@@ -3150,8 +3483,8 @@ impl Host {
             self.send(id, &loadouts);
             let peer = &self.peers[&id];
             if peer.stage == Stage::Lobby
-                && peer.lobby.ready
                 && peer.lobby.unable.is_none()
+                && (peer.lobby.ready || force)
                 && let Some(plane) = peer.lobby.slot
             {
                 match self.free_seat() {
@@ -3216,7 +3549,7 @@ impl Host {
         // pilot gone) is held for its player while it stays connected, and
         // abandoned to the mission when it goes (stage F phase 2).
         let mut given = Vec::new();
-        for (seat, _callsign) in std::mem::take(&mut self.gives) {
+        for (seat, callsign) in std::mem::take(&mut self.gives) {
             if self
                 .world
                 .roster
@@ -3242,6 +3575,12 @@ impl Host {
                 });
             if (!self.settings.ai() || choice_departure) && self.world.can_give_back(seat).is_ok() {
                 if let Some(plane) = self.world.roster.seat(seat).and_then(|s| s.plane) {
+                    if !self.settings.ai() {
+                        self.log(HostLog::Note {
+                            tick,
+                            text: format!("{callsign} left: plane {} removed (AI is off)", plane.0),
+                        });
+                    }
                     commands.push(MissionCommand::Despawn { plane });
                 }
                 given.push(seat);
@@ -3898,6 +4237,8 @@ impl Host {
                 if self.start_rule() == StartMode::Now {
                     // A failure is logged as a fault; the lobby stays.
                     let _ = self.start_flying();
+                } else {
+                    self.note_start_wait(true);
                 }
             }
             Err(error) => {

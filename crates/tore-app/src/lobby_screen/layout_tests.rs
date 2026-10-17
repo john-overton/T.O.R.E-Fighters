@@ -59,21 +59,21 @@ fn the_lists_and_their_bars_fit_inside_their_frames_and_the_screen() {
             && inner.0 + inner.2 <= outer.0 + outer.2
             && inner.1 + inner.3 <= outer.1 + outer.3
     };
-    // A scroll bar is 34 wide and as high as five rows (89).
+    // A scroll bar is 16 wide and as high as five rows (89).
     let slots_list = (
         layout::SLOTS_LIST.0,
         layout::SLOTS_LIST.1,
         layout::SLOTS_WIDTH,
         89,
     );
-    let slots_bar = (layout::SLOTS_BAR.0, layout::SLOTS_BAR.1, 34, 89);
+    let slots_bar = (layout::SLOTS_BAR.0, layout::SLOTS_BAR.1, 16, 89);
     let players_list = (
         layout::PLAYERS_LIST.0,
         layout::PLAYERS_LIST.1,
         layout::PLAYERS_WIDTH,
         89,
     );
-    let players_bar = (layout::PLAYERS_BAR.0, layout::PLAYERS_BAR.1, 34, 89);
+    let players_bar = (layout::PLAYERS_BAR.0, layout::PLAYERS_BAR.1, 16, 89);
     for (list, bar, frame) in [
         (slots_list, slots_bar, layout::SLOTS_FRAME),
         (players_list, players_bar, layout::PLAYERS_FRAME),
@@ -211,24 +211,23 @@ fn slots_scroll_with_the_wheel_the_track_and_the_knob() {
     screen.wheel(1);
     assert_eq!(screen.slots.first_row(), 0);
     // The wheel over the bar's art works too.
-    move_to(&mut screen, (350, 200));
+    move_to(&mut screen, (360, 200));
     screen.wheel(-2);
     assert_eq!(screen.slots.first_row(), 2 * layout::WHEEL_ROWS);
-    // A press on the track below the knob pages down: to the end, 7 rows
+    // A press on the track below the thumb pages down: to the end, 7 rows
     // (12 rows, 5 shown).
-    click(&mut screen, (350, 250));
+    click(&mut screen, (360, 230));
     assert_eq!(screen.slots.first_row(), 7);
     // And on the track above it pages back up.
-    click(&mut screen, (350, 176));
+    click(&mut screen, (360, 190));
     assert_eq!(screen.slots.first_row(), 2);
-    // The knob's drag: grab it (the window is at row 2; the knob's top is
-    // 6 + 48 * 2 / 7 below the bar's top) and take it to the bottom.
-    let grab = (355, 168 + 6 + 14 + 5);
+    // The thumb's drag: grab it and take it to the bottom.
+    let grab = (360, 200);
     move_to(&mut screen, grab);
     screen.button(true);
-    move_to(&mut screen, (355, 168 + 89));
+    move_to(&mut screen, (360, 168 + 89));
     assert_eq!(screen.slots.first_row(), 7, "the knob dragged to the end");
-    move_to(&mut screen, (500, 100));
+    move_to(&mut screen, (360, 100));
     assert_eq!(
         screen.slots.first_row(),
         0,
@@ -236,7 +235,7 @@ fn slots_scroll_with_the_wheel_the_track_and_the_knob() {
     );
     // Letting go ends the drag.
     screen.button(false);
-    move_to(&mut screen, (355, 168 + 89));
+    move_to(&mut screen, (360, 168 + 89));
     assert_eq!(screen.slots.first_row(), 0, "released: the knob stays put");
 }
 
@@ -245,7 +244,7 @@ fn a_press_on_the_slots_bar_does_not_take_a_slot() {
     let state = crowd_of(12, 3);
     let mut screen = screen_of(&state, true);
     // Plane 5 is below the window; the bar's track is not a row.
-    assert_eq!(click(&mut screen, (350, 250)), None);
+    assert_eq!(click(&mut screen, (360, 230)), None);
     assert_eq!(screen.slots.selected(), None);
     // The track paged the window five rows, so the third row is plane 7.
     assert_eq!(screen.slots.first_row(), 5);
@@ -257,7 +256,7 @@ fn a_press_on_the_slots_bar_does_not_take_a_slot() {
 fn a_cancelled_press_lets_go_of_a_held_knob() {
     let state = crowd_of(12, 3);
     let mut screen = screen_of(&state, true);
-    move_to(&mut screen, (355, 168 + 6 + 5));
+    move_to(&mut screen, (360, 168 + 20));
     screen.button(true);
     assert!(screen.slots.dragging());
     screen.cancel_press();
@@ -275,12 +274,12 @@ fn players_scroll_past_their_five_rows() {
     assert_eq!(screen.players.first_row(), layout::WHEEL_ROWS);
     // The track below the knob pages to the end: 9 rows, 4 past the first
     // window.
-    click(&mut screen, (580, 250));
+    click(&mut screen, (590, 235));
     assert_eq!(screen.players.first_row(), 4);
-    // The knob drags too.
-    move_to(&mut screen, (585, 168 + 6 + 48 + 5));
+    // The thumb drags too.
+    move_to(&mut screen, (590, 220));
     screen.button(true);
-    move_to(&mut screen, (585, 100));
+    move_to(&mut screen, (590, 100));
     assert_eq!(screen.players.first_row(), 0);
     screen.button(false);
     // A click on a row selects the player: row 2 of the window is Pilot3.
@@ -295,7 +294,7 @@ fn the_bars_are_drawn_even_when_everything_fits() {
     let few = drawn(&screen_of(&crowd_of(5, 1), true));
     let many = drawn(&screen_of(&crowd_of(12, 9), true));
     // Beside the slot rows, and beside the player rows.
-    for rect in [(340, 170, 26, 85), (574, 170, 26, 85)] {
+    for rect in [(355, 170, 16, 80), (585, 170, 16, 80)] {
         assert!(
             differing(&few, &many, rect) > 0,
             "the knob shows when the list scrolls ({rect:?})"
@@ -306,7 +305,7 @@ fn the_bars_are_drawn_even_when_everything_fits() {
     let none = drawn(&screen_of(&crowd_of(1, 1), true));
     let more = drawn(&screen_of(&crowd_of(5, 1), true));
     assert_eq!(
-        differing(&none, &more, (336, 168, 40, 94)),
+        differing(&none, &more, (355, 168, 16, 89)),
         0,
         "a list that fits draws no knob and no page box"
     );
@@ -318,10 +317,10 @@ fn messages_have_a_scroll_bar_that_takes_the_pointer() {
     for n in 0..30 {
         screen.say(&format!("Line {n}"));
     }
-    let bar_x = layout::MESSAGES.0 + layout::MESSAGES.2 - 20;
-    // Grab the knob (at the bottom, for the newest lines) and drag it up.
-    let (top, bottom) = (layout::MESSAGES.1, layout::MESSAGES.1 + layout::MESSAGES.3);
-    move_to(&mut screen, (bar_x, bottom - 10));
+    let bar_x = layout::MESSAGES.0 + layout::MESSAGES.2 - 9;
+    // Grab the thumb (toward the bottom, for the newest lines) and drag it up.
+    let top = layout::MESSAGES.1;
+    move_to(&mut screen, (bar_x, top + 50));
     screen.button(true);
     assert!(screen.chat.messages.dragging());
     move_to(&mut screen, (bar_x, top));
@@ -373,7 +372,7 @@ fn the_king_is_told_to_press_fly_when_everyone_is_ready() {
     let mut state = sample(1);
     assert_eq!(
         hint_of(&state, None),
-        Some("Press Fly when everyone holding a slot is ready.")
+        Some("Someone is not ready: press Force Start to begin in 10 seconds.")
     );
     state.players[0].ready = true;
     assert_eq!(

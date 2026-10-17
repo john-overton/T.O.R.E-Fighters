@@ -56,8 +56,12 @@ fn the_kinds_are_39_to_54_and_go_their_ways() {
         );
         round_trip(message);
     }
-    // Kind 55 is the first free one.
-    assert!(Message::decode(55, &[]).is_err());
+    // Kind 55 is Force start (nr-lobbyui). 56 is the first free one.
+    let force = Message::ForceStart;
+    assert_eq!(force.kind(), kind::FORCE_START);
+    assert!(force.from_player());
+    round_trip(&force);
+    assert!(Message::decode(56, &[]).is_err());
 }
 
 #[test]

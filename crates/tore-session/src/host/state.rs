@@ -561,6 +561,8 @@ impl Host {
             overloads: _,
             roster_dirty: _,
             lobby_dirty: _,
+            // The last wait-to-start line logged: log bookkeeping only.
+            wait_logged: _,
             // Tests only.
             #[cfg(test)]
                 unforeseen_log: _,
@@ -580,6 +582,8 @@ impl Host {
             joins,
             next_id,
             gives,
+            force_deadline: _,
+            force_shown: _,
         } = self;
         session_id.save(s, None)?;
         save_settings(s, settings)?;

@@ -537,4 +537,59 @@ mod tests {
             }
         }
     }
+
+    /// Shader `fire_reflectance`: mostly brightness, 30 percent of the hue.
+    fn fire_reflectance(albedo: [f32; 3]) -> [f32; 3] {
+        let l = 0.2126 * albedo[0] + 0.7152 * albedo[1] + 0.0722 * albedo[2];
+        std::array::from_fn(|i| (l + (albedo[i] - l) * 0.3).max(0.04))
+    }
+
+    #[test]
+    fn a_fire_on_green_ground_stays_warm() {
+        // The orange flare colour. Area lights (a wreck fire, a fireball)
+        // multiply this by fire_reflectance, not by the grass itself.
+        let flare = [1.0_f32, 0.75, 0.45];
+        let grass = [0.25, 0.72, 0.22];
+        let raw: [f32; 3] = std::array::from_fn(|i| grass[i] * flare[i]);
+        assert!(
+            raw[1] > raw[0] + 0.1,
+            "raw green albedo times the flare colour is a green glow: {raw:?}"
+        );
+        let warm: [f32; 3] = {
+            let reflected = fire_reflectance(grass);
+            std::array::from_fn(|i| reflected[i] * flare[i])
+        };
+        assert!(warm[0] > warm[1], "the fire pool is warm: {warm:?}");
+        assert!(warm[1] > warm[2], "the fire pool is not blue: {warm:?}");
+    }
+
+    #[test]
+    fn a_fire_on_snow_sand_and_blue_stays_warm() {
+        // Same mix as green grass. Pale snow, tan sand and a blue water-like
+        // albedo all come back orange, not a tinted pool of their own hue.
+        let flare = [1.0_f32, 0.75, 0.45];
+        for (name, albedo) in [
+            ("snow", [0.90, 0.92, 0.95]),
+            ("sand", [0.72, 0.55, 0.32]),
+            ("blue water", [0.05, 0.12, 0.35]),
+        ] {
+            let warm: [f32; 3] = {
+                let reflected = fire_reflectance(albedo);
+                std::array::from_fn(|i| reflected[i] * flare[i])
+            };
+            assert!(
+                warm[0] > warm[1] && warm[1] > warm[2],
+                "{name} stays warm: {warm:?}"
+            );
+        }
+        let shader = include_str!("surface_lighting.wgsl");
+        assert!(shader.contains("mix(vec3<f32>(l),albedo,0.3)"));
+        assert!(shader.contains("albedo*FLARE_COLOR*parts.x"));
+        // Water, clouds and smoke do not take this mix. Water keeps its
+        // fitted sea tint; clouds and smoke keep their own art.
+        let terrain = include_str!("terrain.wgsl");
+        assert!(terrain.contains("vec3<f32>(0.06,0.09,0.11)*flare_light(relative,up)"));
+        assert!(terrain.contains("flares=bare*flare_light(in.direction,vec3<f32>(0.0));"));
+        assert!(!terrain.contains("fire_reflectance"));
+    }
 }

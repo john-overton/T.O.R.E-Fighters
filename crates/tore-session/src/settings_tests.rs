@@ -4,14 +4,14 @@ use super::*;
 use std::time::Duration;
 
 #[test]
-fn the_registry_is_numbered_one_to_twenty_four_in_order_with_unique_names() {
+fn the_registry_is_numbered_one_to_twenty_five_in_order_with_unique_names() {
     for (index, setting) in REGISTRY.iter().enumerate() {
         assert_eq!(usize::from(setting.number), index + 1, "{}", setting.name);
         assert_eq!(super::setting(setting.number), Some(setting));
         assert_eq!(by_name(setting.name), Some(setting));
     }
     assert_eq!(super::setting(0), None);
-    assert_eq!(super::setting(25), None);
+    assert_eq!(super::setting(26), None);
     assert_eq!(by_name("cheats"), None);
 }
 
@@ -121,7 +121,7 @@ fn the_registry_refuses_with_the_setting_and_its_values() {
         Some("max-players is 1 to 30.")
     );
     assert_eq!(refusal(0, 0).as_deref(), Some("There is no setting 0."));
-    assert_eq!(refusal(25, 0).as_deref(), Some("There is no setting 25."));
+    assert_eq!(refusal(26, 0).as_deref(), Some("There is no setting 26."));
     assert!(refusal(number::PASSWORD, 1).is_some());
     // Public is the registry's since stage I lists games; whether a host can
     // list is the host's question (slice F2-1).
@@ -412,7 +412,7 @@ fn setting_23_ai_respawn_is_on_by_default_and_needs_a_respawn_rule() {
     assert_eq!(ai.values_text(), "off or on");
     assert_eq!(
         REGISTRY.last().map(|s| s.number),
-        Some(number::AI),
+        Some(number::MIN_PLAYERS),
         "last by number"
     );
 
@@ -458,4 +458,50 @@ fn ai_off_disables_idle_handoffs_and_ai_respawns_without_erasing_preferences() {
     settings.apply(&[(number::AI, 1)]).unwrap();
     assert!(settings.ai_respawn());
     assert_eq!(settings.idle_ai_seconds(), Some(300));
+}
+
+#[test]
+fn setting_25_min_players_is_zero_to_thirty_and_a_mode_change_keeps_it() {
+    let min = super::setting(number::MIN_PLAYERS).unwrap();
+    assert_eq!((min.number, min.name), (25, "min-players"));
+    assert_eq!((min.coop, min.pvp), (0, 0));
+    assert_eq!(min.text(0), "none");
+    assert_eq!(min.text(4), "4");
+    assert_eq!(refusal(number::MIN_PLAYERS, 30), None);
+    assert!(refusal(number::MIN_PLAYERS, 31).is_some());
+    let mut settings = Store::defaults(Mode::Coop);
+    assert_eq!(settings.min_players(), 0);
+    settings.apply(&[(number::MIN_PLAYERS, 4)]).unwrap();
+    assert_eq!(settings.min_players(), 4);
+    // A new mode resets the King's settings to its defaults, but not the
+    // operator's minimum.
+    settings.apply(&[(number::MODE, 1)]).unwrap();
+    assert_eq!(settings.min_players(), 4);
+}
+
+#[test]
+fn the_start_wait_is_said_in_one_style_and_the_stricter_wait_wins() {
+    assert_eq!(start_wait_text(0, 0, 4), None);
+    assert_eq!(
+        start_wait_text(0, 2, 4).as_deref(),
+        Some("Waiting for 2 more ready players (minimum 4).")
+    );
+    assert_eq!(
+        start_wait_text(0, 1, 2).as_deref(),
+        Some("Waiting for 1 more ready player (minimum 2).")
+    );
+    assert_eq!(
+        start_wait_text(3, 0, 0).as_deref(),
+        Some("Waiting for 3 more ready players: AI is off.")
+    );
+    // AI off needs more than the minimum: AI off is said.
+    assert_eq!(
+        start_wait_text(3, 2, 4).as_deref(),
+        Some("Waiting for 3 more ready players: AI is off.")
+    );
+    // The minimum needs more: the minimum is said.
+    assert_eq!(
+        start_wait_text(1, 2, 4).as_deref(),
+        Some("Waiting for 2 more ready players (minimum 4).")
+    );
 }

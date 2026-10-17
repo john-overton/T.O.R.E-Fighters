@@ -182,7 +182,7 @@ fn the_kings_seven_buttons_and_the_joiners_four_have_their_places() {
             "Players...",
             "Loadout",
             "Ready",
-            "Fly",
+            "Force Start",
             "Leave"
         ]
     );
@@ -1185,4 +1185,26 @@ fn the_rate_is_a_lobby_row_greyed_in_flight_and_for_a_joiner() {
         row_state(rate, &ctx(&sample(2))),
         Err("Only the King may change the settings.".to_owned())
     );
+}
+
+// ---- the minimum players row (John, 2026-10-16) ----
+
+#[test]
+fn the_minimum_players_row_shows_the_operators_value_and_nobody_turns_it() {
+    let row = Kind::Setting(number::MIN_PLAYERS);
+    assert!(page_rows(Page::Revival).contains(&row));
+    assert_eq!(sp::row_label(row), "Players, at least");
+    let mut lobby = king();
+    lobby.settings.retain(|s| s.0 != number::MIN_PLAYERS);
+    lobby.settings.push((number::MIN_PLAYERS, 4));
+    let king = ctx(&lobby);
+    assert_eq!(row_value(row, &king), "4");
+    assert_eq!(
+        row_state(row, &king),
+        Err("The server operator sets the minimum players.".to_owned())
+    );
+    assert_eq!(sp::click(row, &king, true), None);
+    lobby.settings.retain(|s| s.0 != number::MIN_PLAYERS);
+    lobby.settings.push((number::MIN_PLAYERS, 0));
+    assert_eq!(row_value(row, &ctx(&lobby)), "none");
 }

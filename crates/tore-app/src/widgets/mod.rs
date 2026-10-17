@@ -54,6 +54,7 @@
 //! mock NETWORK CONNECTION screen made only of kit widgets, and the sheets
 //! of every widget in each state, are ignored tests in `mock_screen.rs` that
 //! render from the imported pieces.
+pub(crate) mod arrow_bar;
 mod button;
 mod check_box;
 mod draw;
@@ -65,6 +66,7 @@ mod list;
 mod message_box;
 mod panel;
 mod png_read;
+#[cfg(test)]
 mod scroll_bar;
 mod text_field;
 
@@ -73,13 +75,16 @@ mod mock_screen;
 #[cfg(test)]
 pub(crate) mod test_kit;
 
+pub use arrow_bar::{ArrowBar, Part as ArrowPart, RowPress, Rows as ArrowRows};
 pub use button::Button;
 pub use check_box::CheckBox;
 pub use draw::{fit, text_clipped};
 pub use focus::{Focus, Route};
 pub use icons::Icon;
 pub use kit::{Kit, KitSource};
-pub use list::{Align, Cell, Column, List, Pager, Row};
+#[cfg(test)]
+pub use list::Pager;
+pub use list::{Align, Cell, Column, List, Row};
 pub use message_box::{MessageBox, tone};
 pub use panel::{Backdrop, Background, draw_panel};
 pub use text_field::{Filter, TextField, parse_address};

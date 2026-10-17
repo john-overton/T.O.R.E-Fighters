@@ -290,6 +290,17 @@ impl HostConfig {
                 return Err(PUBLIC_IS_BROADCAST.trim_end_matches('.').to_owned());
             }
         }
+        if let Some(&(_, min)) = self
+            .settings
+            .iter()
+            .find(|(n, _)| *n == settings::number::MIN_PLAYERS)
+            && min as usize > self.max_players
+        {
+            return Err(format!(
+                "min-players is {min}, but max-players is {}",
+                self.max_players
+            ));
+        }
         let pvp = self
             .settings
             .iter()
@@ -316,6 +327,11 @@ pub const PUBLIC_IS_BROADCAST: &str =
 /// its operator's file sets it (slice R1).
 pub const RATE_IS_THE_FILES: &str =
     "A dedicated server's snapshot rate is set by its operator's `snapshot-rate`.";
+
+/// Why the King's change of the minimum players is refused: a dedicated
+/// server's operator sets it (John, 2026-10-16).
+pub const MIN_IS_THE_FILES: &str =
+    "The minimum players is set by the server operator's `min-players`.";
 
 /// Why a host could not start.
 #[derive(Debug)]

@@ -872,6 +872,7 @@ fn log_line(entry: &HostLog) -> Option<String> {
             format!("overloaded: {ticks_behind} ticks behind real time")
         }
         HostLog::Fault { text, .. } => format!("fault: {text}"),
+        HostLog::Note { text, .. } => text.clone(),
         HostLog::Stopped { .. } => "stopped".to_owned(),
         _ => return None,
     })
