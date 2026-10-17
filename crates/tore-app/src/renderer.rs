@@ -82,6 +82,9 @@ pub struct Renderer {
     /// screen up wants it drawn.
     ui_text: crate::ui_text_renderer::UiTextRenderer,
     menu_text_visible: bool,
+    /// Frame times for the optional corner readout. Drawn only in this
+    /// window pass, never into a capture.
+    frame_rate: crate::frame_rate::Meter,
     sim: crate::sim_renderer::SimRenderer,
     cockpit: crate::cockpit_renderer::CockpitRenderer,
     mirror_camera: crate::camera::Camera,
@@ -527,6 +530,7 @@ impl Renderer {
             cockpit,
             ui_text,
             menu_text_visible: false,
+            frame_rate: crate::frame_rate::Meter::default(),
             previews: Default::default(),
             sim,
             window,
@@ -885,6 +889,7 @@ impl Renderer {
             &crate::scenery::Scenery,
         )>,
         flight_size: Option<[u32; 2]>,
+        readout: crate::frame_rate::Surface,
     ) -> AppResult<bool> {
         let frame_started = std::time::Instant::now();
         self.first_frame.begin("game first frame presentation");
@@ -1009,6 +1014,23 @@ impl Renderer {
             if flight_size.is_none() && self.menu_text_visible {
                 self.ui_text.draw(&mut pass);
             }
+        }
+        // After every other layer, and only on the window. Captures read the
+        // scene or the CPU canvas and never this pass.
+        self.frame_rate.tick();
+        if crate::frame_rate::shown(self.graphics.show_frame_rate)
+            && let Some(line) = self.frame_rate.line()
+        {
+            let place = crate::frame_rate::anchor([s.width, s.height], readout);
+            let glyphs = crate::frame_rate::quads(&line, place, self.ui_text.linear());
+            self.ui_text.draw_window(
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                &view,
+                &glyphs,
+                [s.width as f32, s.height as f32],
+            );
         }
         if frame_started.elapsed() > std::time::Duration::from_millis(100) {
             log::info!(

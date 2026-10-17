@@ -68,6 +68,7 @@ mod flight_ui;
 mod flight_views;
 mod flight_watch;
 mod formation_trace;
+mod frame_rate;
 mod graphics;
 mod graphics_screen;
 mod gun_flash;
@@ -3863,7 +3864,12 @@ impl ApplicationHandler for App {
                             [window.width, window.height],
                             [name, &players],
                         );
-                        if let Err(error) = renderer.draw(&self.loading_pixels, None, Some(size)) {
+                        if let Err(error) = renderer.draw(
+                            &self.loading_pixels,
+                            None,
+                            Some(size),
+                            frame_rate::Surface::Loading,
+                        ) {
                             self.error = Some(error);
                             event_loop.exit();
                         }
@@ -3968,7 +3974,12 @@ impl ApplicationHandler for App {
                         started.elapsed().as_secs_f64(),
                         [name, &players],
                     );
-                    if let Err(error) = renderer.draw(&self.loading_pixels, None, Some(size)) {
+                    if let Err(error) = renderer.draw(
+                        &self.loading_pixels,
+                        None,
+                        Some(size),
+                        frame_rate::Surface::Loading,
+                    ) {
                         self.error = Some(error);
                         event_loop.exit();
                     }
@@ -6069,6 +6080,13 @@ impl ApplicationHandler for App {
                 let present_start = Instant::now();
                 renderer.set_menu_text(menu_text.as_ref());
                 renderer.show_menu_text(menu_text.is_some());
+                let readout = if self.screen == Screen::Flight {
+                    frame_rate::Surface::Flight {
+                        right_panel: self.live_debug.panels.right_open(),
+                    }
+                } else {
+                    frame_rate::Surface::Menu
+                };
                 match renderer.draw(
                     if self.screen == Screen::Flight {
                         &self.flight_canvas.pixels
@@ -6081,6 +6099,7 @@ impl ApplicationHandler for App {
                         &self.scenery,
                     )),
                     (self.screen == Screen::Flight).then_some(self.flight_canvas.size),
+                    readout,
                 ) {
                     Ok(true) if self.smoke_test => {
                         if let Some(path) = &self.capture_terrain

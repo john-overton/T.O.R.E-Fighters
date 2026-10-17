@@ -1,9 +1,10 @@
 //! Player graphics choices for the 3D view: anti-aliasing, render scale, the
-//! spotting aid, terrain distance filtering, city fill distances and the
-//! exploratory vegetation distances. These are opinionated host additions
-//! requested by John on 2026-09-22; the original game had none of them. The
-//! vegetation rows were added on 2026-10-16. The values and defaults are
-//! agent choices. They are saved in their own small file, `graphics-v1.conf`,
+//! spotting aid, terrain distance filtering, city fill distances, the
+//! exploratory vegetation distances and the frame-rate counter. These are
+//! opinionated host additions requested by John on 2026-09-22; the original
+//! game had none of them. The vegetation rows were added on 2026-10-16, and
+//! the frame-rate counter on 2026-10-17. The values and defaults are agent
+//! choices. They are saved in their own small file, `graphics-v1.conf`,
 //! beside the preferences.
 use std::path::Path;
 
@@ -215,6 +216,10 @@ pub struct Options {
     pub vegetation_detail_nm: u32,
     /// How thick the vegetation is. One of `VegDensity::ALL`.
     pub vegetation_density: VegDensity,
+    /// The frames-per-second readout in the window's top right. Off by
+    /// default (John, 2026-10-17). `TORE_SHOW_FPS=1` shows it for one run
+    /// without saving.
+    pub show_frame_rate: bool,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -230,6 +235,7 @@ impl Default for Options {
             vegetation_distance_nm: DEFAULT_VEGETATION_DISTANCE,
             vegetation_detail_nm: DEFAULT_VEGETATION_DETAIL,
             vegetation_density: DEFAULT_VEGETATION_DENSITY,
+            show_frame_rate: false,
         }
     }
 }
@@ -250,6 +256,7 @@ impl Options {
             vegetation_distance_nm: DEFAULT_VEGETATION_DISTANCE,
             vegetation_detail_nm: DEFAULT_VEGETATION_DETAIL,
             vegetation_density: DEFAULT_VEGETATION_DENSITY,
+            show_frame_rate: false,
         }
     }
     pub fn scale(&self) -> f32 {
@@ -289,6 +296,9 @@ impl Options {
         if self.vegetation_density != DEFAULT_VEGETATION_DENSITY {
             text += &format!("vegetation-density {}\n", self.vegetation_density.key());
         }
+        if self.show_frame_rate {
+            text += "frame-rate true\n";
+        }
         text
     }
     pub fn parse(text: &str) -> Result<Self, String> {
@@ -314,6 +324,7 @@ impl Options {
             "vegetation-distance",
             "vegetation-detail",
             "vegetation-density",
+            "frame-rate",
         ]
         .iter()
         .filter(|k| values.contains_key(*k))
@@ -374,6 +385,10 @@ impl Options {
             vegetation_density: match values.get("vegetation-density") {
                 None => DEFAULT_VEGETATION_DENSITY,
                 Some(v) => VegDensity::parse(v).ok_or("invalid vegetation-density")?,
+            },
+            show_frame_rate: match values.get("frame-rate") {
+                None => false,
+                Some(_) => boolean("frame-rate")?,
             },
         })
     }
@@ -495,6 +510,7 @@ mod tests {
             vegetation_distance_nm: 6,
             vegetation_detail_nm: 1,
             vegetation_density: VegDensity::Low,
+            show_frame_rate: true,
         };
         assert_eq!(Options::parse(&options.text()).unwrap(), options);
         // The default building and vegetation distances are not written, and
@@ -503,6 +519,8 @@ mod tests {
         assert!(!defaults.contains("building"));
         assert!(!defaults.contains("vegetation"));
         assert!(!defaults.contains("vegetation-texture"));
+        assert!(!defaults.contains("frame-rate"));
+        assert!(options.text().contains("frame-rate true"));
         assert!(
             Options::parse(
                 &options

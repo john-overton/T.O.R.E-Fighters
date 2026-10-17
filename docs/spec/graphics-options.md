@@ -39,11 +39,13 @@ shown below the options.
 | Vegetation distance | 2 nm, 4 nm, 6 nm, 8 nm | 4 nm |
 | Vegetation detail | 1 nm, 2 nm, 3 nm, 4 nm | 2 nm |
 | Vegetation density | Low, Med, High, Ultra | High |
+| Frame rate counter | Off, On | Off |
 
 Choices are saved in `graphics-v1.conf` in the application data directory,
 beside `preferences-v1.conf`. A missing file uses the defaults quietly; an unreadable or malformed one uses them and logs a warning saying why.
 Smoke tests and captures ignore the saved file, like the other display
-preferences.
+preferences. The frame-rate line is written only when the counter is on
+(`frame-rate true`), so a default file is unchanged.
 
 ## Anti-aliasing
 
@@ -225,6 +227,32 @@ into effect at once, the same way as the building settings. Original
 graphics turns the texture off and leaves the object distances at the
 defaults, as it does for buildings.
 
+## Frame rate counter
+
+Requested by John on 2026-10-17. Off by default. On draws a single line in
+the top right of the window, over the picture, in the bundled Noto face:
+`62 fps  16.1 ms   low 48`. The rate and the milliseconds are the mean
+frame over about the last half second. `low` is the slowest frame in the
+last second, written as a rate. A gap longer than half a second is treated
+as a pause and is not counted.
+
+The line is drawn only when the window is presented. Offscreen renders,
+previews, recordings and `P` screenshots copy the picture before that pass,
+so they stay the same with the counter off or on. `TORE_SHOW_FPS=1` forces
+the line on for one run, and `TORE_SHOW_FPS=0` forces it off. Neither value
+is saved. Any other value is ignored.
+
+Where it sits (agent decision, 2026-10-17), so it stays clear of the title
+strip, the large instrument window, the HUD camera's tape counter and an
+open right-hand debug panel:
+
+| Screen | Place |
+| --- | --- |
+| Menus, lobby, Escape and pause screens | On a wide window, in the black bar to the right of the 4:3 canvas, 10 pixels from the top. On a 4:3 window, just under the title strip. |
+| Loading screen | 10 pixels from the top and the right. The loading words are centred. |
+| Flight | In the corner above the large instrument window when that margin holds the line (1080p and above). Otherwise just under that window, still on the right. If a right-hand debug panel covers that spot, the line moves to the left of the panel. |
+| Replay viewer | In the corner. The mission timer is on the left, and the HUD camera counter starts 7% down, so the corner is above it. A right-hand panel starts lower and leaves the corner free. On a short window the line drops under the tape counter. |
+
 ## Command line
 
 For one run, without saving: `--anti-aliasing off|2x|4x|8x`,
@@ -234,7 +262,8 @@ For one run, without saving: `--anti-aliasing off|2x|4x|8x`,
 `--vegetation-texture-distance 1|2|4`, `--vegetation-distance 2|4|6|8`,
 `--vegetation-detail 1|2|3|4`, `--vegetation-density low|medium|high|ultra`,
 and `--original-graphics` for everything off
-at 100%. Flags apply in order, so `--original-graphics --spotting-aid strong`
+at 100%. `TORE_SHOW_FPS=1` shows the frame-rate counter for that run without
+writing it into the file. Flags apply in order, so `--original-graphics --spotting-aid strong`
 turns on only the outline. Pressing Apply on the Graphics screen saves whatever
 the screen shows, including a flag's value.
 

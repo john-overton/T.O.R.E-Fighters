@@ -23,6 +23,7 @@ enum Row {
     RenderScale,
     SpottingAid,
     TerrainFiltering,
+    FrameRate,
     BuildingDistance,
     BuildingDetail,
     GroundTexture,
@@ -31,11 +32,12 @@ enum Row {
     VegetationDetail,
     VegetationDensity,
 }
-const BASE_ROWS: [Row; 4] = [
+const BASE_ROWS: [Row; 5] = [
     Row::AntiAliasing,
     Row::RenderScale,
     Row::SpottingAid,
     Row::TerrainFiltering,
+    Row::FrameRate,
 ];
 /// The rows shown. The city building rows hide when `TORE_CITY_FILL=0`, and
 /// the vegetation rows hide when `TORE_VEGETATION=0`. Both are developer
@@ -50,11 +52,12 @@ fn rows() -> &'static [Row] {
         (false, false) => &BASE_ROWS,
     }
 }
-const ALL_ROWS: [Row; 11] = [
+const ALL_ROWS: [Row; 12] = [
     Row::AntiAliasing,
     Row::RenderScale,
     Row::SpottingAid,
     Row::TerrainFiltering,
+    Row::FrameRate,
     Row::BuildingDistance,
     Row::BuildingDetail,
     Row::GroundTexture,
@@ -63,19 +66,21 @@ const ALL_ROWS: [Row; 11] = [
     Row::VegetationDetail,
     Row::VegetationDensity,
 ];
-const CITY_ONLY: [Row; 6] = [
+const CITY_ONLY: [Row; 7] = [
     Row::AntiAliasing,
     Row::RenderScale,
     Row::SpottingAid,
     Row::TerrainFiltering,
+    Row::FrameRate,
     Row::BuildingDistance,
     Row::BuildingDetail,
 ];
-const VEG_ONLY: [Row; 9] = [
+const VEG_ONLY: [Row; 10] = [
     Row::AntiAliasing,
     Row::RenderScale,
     Row::SpottingAid,
     Row::TerrainFiltering,
+    Row::FrameRate,
     Row::GroundTexture,
     Row::GroundTextureDistance,
     Row::VegetationDistance,
@@ -89,6 +94,7 @@ impl Row {
             Row::RenderScale => "Render scale",
             Row::SpottingAid => "Spotting aid",
             Row::TerrainFiltering => "Terrain filtering",
+            Row::FrameRate => "Frame rate counter",
             Row::BuildingDistance => "Building distance",
             Row::BuildingDetail => "Building detail",
             Row::GroundTexture => "Ground detail",
@@ -110,6 +116,9 @@ impl Row {
                 "Outlines distant aircraft so they are easier to see against the sky and ground."
             }
             Row::TerrainFiltering => "Reduces shimmer and crawling patterns on distant ground.",
+            Row::FrameRate => {
+                "Shows frames per second, the average frame time and the slowest recent frame in the corner of the window."
+            }
             Row::BuildingDistance => "How far away city buildings are drawn.",
             Row::BuildingDetail => {
                 "City buildings inside this distance are drawn with full texture and detail, farther ones as plain blocks."
@@ -135,6 +144,7 @@ impl Row {
             Row::RenderScale => RENDER_SCALES.map(|s| format!("{s}%")).to_vec(),
             Row::SpottingAid => SpottingAid::ALL.map(|a| a.label().to_owned()).to_vec(),
             Row::TerrainFiltering => vec!["Off".into(), "On".into()],
+            Row::FrameRate => vec!["Off".into(), "On".into()],
             Row::BuildingDistance => BUILDING_DISTANCES.map(|n| format!("{n} nm")).to_vec(),
             Row::BuildingDetail => BUILDING_DETAILS.map(|n| format!("{n} nm")).to_vec(),
             Row::GroundTexture => GroundTexture::ALL.map(|a| a.label().to_owned()).to_vec(),
@@ -168,9 +178,9 @@ const CHOICE_W: i32 = 62;
 const CHOICE_GAP: i32 = 4;
 const OUTLINE: [u8; 4] = [110, 130, 156, 255];
 
-/// Row step, settings panel and about panel. Eleven rows (city fill and
-/// vegetation both on) use a tighter step so the about panel still sits
-/// above the status bar.
+/// Row step, settings panel and about panel. Twelve rows (city fill and
+/// vegetation both on, plus the frame-rate counter) use a tighter step so
+/// the about panel still sits above the status bar.
 fn layout() -> (i32, Rect, Rect) {
     let n = rows().len() as i32;
     let step = if n > 8 {
@@ -244,6 +254,7 @@ impl Editor {
                 .position(|a| *a == d.spotting_aid)
                 .unwrap_or(0),
             Row::TerrainFiltering => usize::from(d.terrain_filtering),
+            Row::FrameRate => usize::from(d.show_frame_rate),
             Row::BuildingDistance => BUILDING_DISTANCES
                 .iter()
                 .position(|n| *n == d.building_distance_nm)
@@ -281,6 +292,7 @@ impl Editor {
             Row::RenderScale => d.render_scale = RENDER_SCALES[i],
             Row::SpottingAid => d.spotting_aid = SpottingAid::ALL[i],
             Row::TerrainFiltering => d.terrain_filtering = i == 1,
+            Row::FrameRate => d.show_frame_rate = i == 1,
             Row::BuildingDistance => d.building_distance_nm = BUILDING_DISTANCES[i],
             Row::BuildingDetail => d.building_detail_nm = BUILDING_DETAILS[i],
             Row::GroundTexture => d.ground_texture = GroundTexture::ALL[i],
@@ -819,5 +831,30 @@ mod tests {
         // The header strip is the panel colour, the body the paper colour.
         assert_eq!(pixels[..4], PANEL);
         assert_eq!(pixels[(300 * 640 + 2) * 4..][..4], chrome::PAPER);
+    }
+    #[test]
+    fn the_frame_rate_row_saves_and_comes_back() {
+        let mut e = editor();
+        let row = rows().iter().position(|r| *r == Row::FrameRate).unwrap();
+        for _ in 0..row {
+            press(&mut e, "ArrowDown");
+        }
+        assert!(!e.draft.show_frame_rate);
+        press(&mut e, "ArrowRight");
+        assert!(e.draft.show_frame_rate);
+        assert!(e.dirty());
+        let dir = std::env::temp_dir().join(format!("tore-graphics-fps-{}", std::process::id()));
+        let path = dir.join("graphics-v1.conf");
+        let applied = e.apply(Some(&path));
+        assert!(applied.show_frame_rate);
+        assert!(applied.text().contains("frame-rate true"));
+        assert!(Options::load(&path).show_frame_rate);
+        // Off again is the default, so the file omits the line.
+        press(&mut e, "ArrowLeft");
+        e.apply(Some(&path));
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("frame-rate"));
+        assert!(!Options::load(&path).show_frame_rate);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
