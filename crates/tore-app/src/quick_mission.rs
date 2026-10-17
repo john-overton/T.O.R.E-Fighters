@@ -750,6 +750,14 @@ impl QuickMission {
             .position(|code| Some(*code) == base)
             .unwrap_or(0)
     }
+    /// The theater code the creator has selected, from its own catalog. A
+    /// flight's world lists only its own theater, so the code never comes
+    /// from there.
+    pub fn theater_code(&self) -> Option<&str> {
+        self.theater_catalog
+            .get(self.theater_index())
+            .map(String::as_str)
+    }
     pub fn theater_index(&self) -> usize {
         self.theater_codes
             .get(self.draft.values[13])
@@ -3067,6 +3075,18 @@ mod tests {
         assert_eq!(q.close_debrief(), Action::Back);
         // Once only: the next debrief is a single-player one again.
         assert_eq!(q.close_debrief(), Action::Click);
+    }
+    #[test]
+    fn the_selected_theater_code_comes_from_the_creator_not_the_flight_world() {
+        let mut q = setup();
+        for index in [0, 5, 13] {
+            q.theater(index);
+            assert_eq!(
+                q.theater_code(),
+                Some(q.theater_catalog[q.theater_index()].as_str()),
+                "theater {index}"
+            );
+        }
     }
     #[test]
     fn variant_selection_retains_layout_and_uses_base_country_and_target_lists() {
