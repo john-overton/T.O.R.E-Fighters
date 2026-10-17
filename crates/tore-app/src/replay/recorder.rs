@@ -37,6 +37,7 @@
 //! and the shots, resupply, radar and wreck events of surface units.
 mod datalink;
 mod devices;
+mod display;
 mod ground;
 mod journal;
 mod surface;
@@ -381,6 +382,8 @@ pub struct Recorder {
     /// The sensor console's orbit as last written: the tick and the point
     /// (nr-orbit), `None` while it is closed.
     orbit: Option<(u64, [f64; 3])>,
+    /// Each aircraft's HUD and sight, written when they change (nr-replayhud).
+    display: tore_session::client::convert::display::Seen,
 }
 
 /// Comms and audio entries kept for live flight between its looks.
@@ -462,6 +465,7 @@ impl Recorder {
             ground: ground::Watch::default(),
             state_clock: None,
             orbit: None,
+            display: tore_session::client::convert::display::Seen::default(),
         };
         for info in roster {
             recorder.register(info.clone());
@@ -976,6 +980,7 @@ impl Recorder {
         self.aircraft_events(&tick, &frame, &mut events);
         self.cue_events(&tick, player_ground, &mut events);
         self.orbit_event(&tick, number, &mut events);
+        events.extend(self.display_events(&tick, number));
         self.ground.events(
             &ground::Context {
                 tick: &tick,
@@ -3012,11 +3017,13 @@ mod tests {
             .map(|e| e.kind.as_str())
             .filter(|kind| !kind.starts_with("audio."))
             .collect();
-        // The first frame opens with the starting view target.
+        // The first frame opens with the starting view target, then the HUD
+        // sample (nr-replayhud). The notes taken between ticks follow.
         assert_eq!(
             kinds,
             [
                 kind::PLAYER_VIEW_TARGET,
+                kind::AIRCRAFT_HUD,
                 kind::PLAYER_BOOKMARK,
                 kind::SYSTEM_PAUSE,
                 kind::COMMS_HUD,

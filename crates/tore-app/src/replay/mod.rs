@@ -18,6 +18,7 @@ pub mod drone;
 pub(crate) mod fixture;
 pub mod ground_marks;
 pub mod host;
+pub(crate) mod hud_play;
 pub mod identity;
 pub mod library;
 pub mod live;

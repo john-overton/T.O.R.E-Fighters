@@ -165,6 +165,7 @@ player's ownship, and the first aircraft is the one watched.
 | AI | `ai.activity` (with how long the old activity lasted), `ai.target` (with priority and score), `ai.weapon_phase` (with the store and the weapon service's words), `ai.airfield_phase`, each with its reason ([below](#reasons-for-ai-decisions)); `ai.defense` when missile defense starts, changes maneuver, releases chaff or flares, or ends; also when anonymous gun/hit evidence starts, changes kind or clears, identifying which threat has motion priority, and when a launch warning arrives or is dropped; `ai.fallback` the first time each aircraft uses each fitted stand-in rule; `ai.strike` when a striker with laser stores and no laser support decides what to do with them ([below](#strike-decisions)); `ai.ejection` when the ejection check finds a hazard, the pilot ejects, a go-around replaces an ejection, or the hazard passes |
 | Communication | Every entry of the [communication journal](#communication-journal) and of the AI message journal, with trigger, rolls, outcome and reason ([below](#communication-events)); and `comms.hud` for every cockpit message line: shown, a repeat that moved the line on screen to the bottom with a fresh timer, or pushed off the screen by newer lines |
 | Data link | `datalink.member`, `datalink.lock`, `datalink.unlock`, `datalink.assign`, `datalink.clear`, `datalink.acknowledge` and `datalink.sort_warning`: what changed in each flight's shared picture, from the data link's journal ([below](#data-link-events)) |
+| Display (nr-replayhud, 2026-10-16) | `aircraft.hud` and `aircraft.sight`, written when the HUD or the targeting sight a player would see changes ([HUD and sight events](#hud-and-sight-events)). No format change. An older recording has neither, and the views keep the picture they worked out before |
 | Air to ground | The bombs, rockets and guided weapons of the [air-to-ground round](spec/air-to-ground.md), in [their own section](#air-to-ground-events): `weapon.release` for each trigger call that lets go of bombs or rockets (a pack is one entry listing its rounds in order), `weapon.dud`, `weapon.cluster`, `weapon.guided` for a laser or GPS weapon's release and each change of guidance, `player.laser` and `player.designate`, and, so the viewer can [draw them](#laser-and-bomb-marks), `player.laser_spot` and `weapon.aim` (where a spot or a weapon's aim point is, at most ten times a second) and `weapon.impact` (where a bomb landed and how far from its aim). A bomb's fall is the projectile's ordinary track, one pose a tick |
 | Surface units (format 3) | The surface world of a [ground target mission](spec/surface-defenses.md): `surface.burst` for each gun burst or missile salvo of a unit, `surface.phase` for the engagement it is in (both name the target as the object, and carry `surface` true when it is a ground unit or ship of the other side: surface units fight each other since 2026-10-11, and the unit fired at joins the registry), `surface.rearm` and `surface.refill` when a supply truck rearms a launcher or gives a gun a magazine (with what it holds after), `surface.radar` when a radar comes on, goes off or is shut down by an anti-radiation missile, and `surface.wreck` with the unit's fire (its width, sized by its hit points). The rounds and missiles are ordinary `weapon.launch` and `weapon.outcome` events owned by the unit's id, and an aircraft's loss to one says `it was shot down by an SA-6` |
 | Audio | `audio.effect` (impacts, explosions, and each chaff cartridge's and flare's release sound, marked `own` when the player's own aircraft released it), `audio.release` (weapon release sounds), `audio.tone` (the seeker tone, its loudness and whether its weapon aims at the surface), `audio.stall_warning`, `audio.ejection` (warnings, seat, parachute, a wingman ejecting), `audio.device` (gear, flaps, hook, brake) and `audio.music` (every input of the situation music, the score they ask for, and why) |
@@ -495,6 +496,35 @@ of the event categories. The battery scenario `replay-a2g` records a bomb
 pack, a dud, a rocket salvo, a cluster bomb, a laser bomb on its own spot, one
 that loses its laser, a JDAM and two HARM launches, replays each tick for
 tick against the picture the run drew, and checks the events.
+
+### HUD and sight events
+
+Requested by John on 2026-10-16 (nr-replayhud): the [HUD camera](#hud-camera)
+and the [Sensor View](#sensor-view) should show the weapon, the lock and the
+sight the aircraft had, not a guessed picture. The format stays 3 (2 without
+surface content). The two kinds are new names, which an older reader skips,
+and a recording from before them opens and plays as it did. Recording reads
+state the tick already computed and draws no random number, so it changes
+nothing the mission does. The names are in `tore_replay::vocab`; the layout
+and the steps below are agent decisions.
+
+| Event | Who | What |
+| --- | --- | --- |
+| `aircraft.hud` | the aircraft, then the target the HUD is on | Written on the first sample and again when the HUD a player would notice changes. `nav` (the NAV bank scale), `armed`, `station`, `weapon` (the selected store's source name), `rounds`, `launch` (`cued` or `bore`), `seeker` (the status word: `ACTIVE SEARCH`, `ACQUIRING`, `LOCK`, `PITBULL` and the rest), `delivery` (empty, `CCIP` or `LVL`), `readiness`, `guidance`, `in_range`, `hit` (percent), `max_ft` (0 when none was estimated), `band_min` and `band_max` (0 when there is no band), `radar`. `mount_x`, `mount_y` and `mount_z` (feet right, up and forward) only when the station's mount is off the reference point. Hit percent is written again when it moves by 5 points, and a range or a band edge when it moves by 100 ft. Range, closure and aspect are not stored: the viewer works them out from the target's recorded pose. |
+| `aircraft.sight` | the aircraft, then the object the sight tracks | Written when a targeting sight or the AC-130 gunsight holds something, or for the gunship even while it searches. A fighter whose sight is free writes nothing, so its Sensor View keeps the derived line and the `LOS FROM` note. `gunship`, `az` and `el` (radians), `zoom` (the sight's step), `mode` (`free`, `point`, `track` or `return`), and `x_ft`, `y_ft`, `z_ft` when a point is held. A gunship also carries `r0`, `r1`, `r2` (rounds left in the 25 mm, 40 mm and 105 mm), `link`, `lead` (255 when none), `s0`, `s1`, `s2` (each gun's readiness word), `radar`, `range` (the A-G radar's range step), `h0` `e0` through `h2` `e2` (each gun's train, radians) when the trains are known, and `lock_x`, `lock_y`, `lock_z` when the gun holds a point. Angles are written again when they move by 0.004 rad and an aim point when it moves by 50 ft, as a slew: at most every 12 ticks unless the mode, the lock, the pinned point, the rounds or the radar changed. A free sight's ground point is not stored. |
+
+The player's own aircraft, another flown aircraft and every AI aircraft are
+sampled. An ownship is read from the cockpit readout the live HUD draws. An
+AI aircraft has no ownship, so its sample comes from its strike cockpit and
+its weapon phase (the phase words are mapped onto the seeker's labels; its
+hit percent and band stay 0, and an AI AC-130 has no gun trains, so the
+replay does not invent pippers). A recording converted from a network
+capture samples the local seat from the readout the client already received.
+The weapon's source name is not on the wire, so the conversion fills it from
+the mission loadout, and the radar range step is the game's default. Other
+players' HUDs are not in that readout. Recording them would be a protocol
+change, which this slice does not make. The host's own recording has every
+ownship.
 
 ### Stores
 
@@ -991,6 +1021,11 @@ beyond them.
   entries inside format 3 (2 without surface content). A recording from
   before them opens as it did and draws the marks its other air-to-ground
   events allow.
+- The HUD and the targeting sight (nr-replayhud, John 2026-10-16) came this
+  way too: `aircraft.hud` and `aircraft.sight` are new kinds inside the same
+  format. A recording from before them opens as it did, and the HUD camera
+  and Sensor View keep the picture they derived. A build from before them
+  skips the unknown kinds.
 - The stores on pylons (2026-10-12, slice BP3) came this way:
   `stores.layout`, `stores.station` and `stores.items` are new entries
   inside formats 2 and 3 ([stores](#stores)). A recording from before them
@@ -1593,15 +1628,19 @@ are agent choices (2026-09-28).
   HUD ... chromatic aberration, colour graded", then "zoomed in a bit ...
   a nice VHS texture smoothing"); everything below is an agent decision,
   tuned on offscreen renders so the HUD's numbers stay readable.
-  - **The HUD** is the one the promo director already rebuilt from the
-    recording: the flight data (heading, pitch ladder, flight path marker,
-    speed, altitude, G, throttle), the target box on the aircraft's recorded
-    target (an air target, its designation, or the ground object its
-    recorded target names) with the gun pipper on an air target, and the
-    laser rows (`LSR 2.4`, `LSR RDY`, `MASK`, `BUD`) with the time to
-    impact (`TTI 0:17`, counted from the recorded landing, so exact) from the
-    [laser and bomb events](#air-to-ground-events). Weapon readiness and a
-    bomb's CCIP pipper are not recorded and do not show.
+  - **The HUD** is the live weapon HUD, drawn by the same code flight uses,
+    from the aircraft's [`aircraft.hud`](#hud-and-sight-events) sample at
+    that tick (nr-replayhud, John 2026-10-16). Armed, it shows the mode the
+    pilot had (air to air, the gun, or air to ground), the selected weapon
+    and its count, the seeker word, the target box on the recorded target,
+    the range, closure and aspect worked out from that target's pose, the
+    missile's seeker circle and launch zone, the gun funnel, and a bomb's
+    CCIP or level T with the time to impact counted from the recorded
+    landing. The laser rows (`LSR 2.4`, `LSR RDY`, `MASK`, `BUD`) still come
+    from the [laser and bomb events](#air-to-ground-events). `nav` true draws
+    the NAV bank scale, as flight does. A recording with no `aircraft.hud`,
+    or a weapon the import does not have, keeps the earlier picture: the
+    flight data, the derived target box and gun pipper, and the laser rows.
   - **Framing.** The HUD's drawn area (the same 640 x 480 raster on every
     aircraft) fills 86% of the picture's height: zoom 1.6, a 39 degree
     field instead of the front view's 60. + and - still zoom.
@@ -1636,23 +1675,30 @@ are agent choices (2026-09-28).
   stays. Opinionated (John, 2026-10-16); the layout and rules are agent
   decisions, spelled out in [the target window
   spec](spec/target-window.md#sensor-view-in-a-replay).
-  - **What the recording holds and what is worked out.** A recording holds
-    no sight pointing, zoom or picture mode. The line of sight comes, in
-    this order, from the aircraft's own laser spot, its designation (the
-    object where it is now, or the pinned point), its guided weapon's aim,
-    the ground object its recorded target names, the AC-130's orbit centre
-    (`player.orbit`), where its rounds burst on the ground from 2 s before
-    to 3 s after the tick (`combat.ground_impact`: an AI gunship's or a
-    strafer's aim), its latest bomb landing, else the sight's default look;
-    the picture says which (`LOS FROM LASER SPOT`, ... `NO LOS RECORDED`).
-    The zoom is the sight's default step (7.5 degrees); + and - zoom it. The
-    picture starts in white hot and 1 to 4, Backslash or Shift+F5 to
-    Shift+F8 change it; the choice stays for the session.
-  - **The AC-130** shows its console exactly as in flight, from the
-    recorded state: the same symbology, gimbal graphic and modes. What the
-    recording lacks shows empty: the gun rounds (`----`), the readiness and
-    the pipper (the status line gives the sight line's source instead), the
-    A-G radar (`A-G OFF`).
+  - **What the recording holds and what is worked out.** When the recording
+    holds an [`aircraft.sight`](#hud-and-sight-events) sample and the sight
+    is a gunship, a pin, a track or a return, the camera uses that azimuth,
+    elevation and zoom. A free fighter sight, and a recording with no sight
+    event, keep the derived line, in this order: the aircraft's own laser
+    spot, its designation (the object where it is now, or the pinned point),
+    its guided weapon's aim, the ground object its recorded target names,
+    the AC-130's orbit centre (`player.orbit`), where its rounds burst on
+    the ground from 2 s before to 3 s after the tick
+    (`combat.ground_impact`), its latest bomb landing, else the sight's
+    default look. That derived picture says which (`LOS FROM LASER SPOT`,
+    ... `NO LOS RECORDED`). + and - still zoom. The picture mode (white hot,
+    black hot, TV, night vision) is the viewer's own choice, not recorded:
+    it starts in white hot and 1 to 4, Backslash or Shift+F5 to Shift+F8
+    change it; the choice stays for the session.
+  - **The AC-130** shows its console exactly as in flight. With a recorded
+    sight the rounds, the selected gun, the readiness, the A-G radar (on or
+    off, and the range step) and the target lines come from the sample, and
+    the pipper is worked out again from the recorded gun trains and the
+    terrain. The status line then names the gun, not the derived line. An
+    older recording, or an AI gunship with no trains, still shows the rounds
+    as `----` (or the rounds without a pipper) and says where the line of
+    sight came from. Radar contact dots are not recorded, so the sweep is
+    empty.
   - **Other aircraft** show their own symbology on the same console: the
     aircraft and its type (not the pod or sensor's name: John, 2026-10-16),
     `LASE` (boxed and
@@ -2006,9 +2052,15 @@ about 1,200 ticks a frame, frames take about 2 ms more.
 - No cockpit or instruments and no music yet (the HUD only in the HUD
   camera), and the keys cannot be rebound. Replay sound has not been checked
   by ear.
-- The Sensor View's line of sight, zoom and picture are worked out, not
-  recorded (see [the Sensor View](#sensor-view)); recording the sight's look
-  would be a new event.
+- A recording from before `aircraft.hud` and `aircraft.sight` (nr-replayhud)
+  still plays. Its HUD camera keeps the derived box and pipper, and its
+  Sensor View keeps the derived line of sight and the `LOS FROM` note.
+  The picture mode is the viewer's choice either way. Radar contact dots
+  are not recorded. Another player's HUD is not in a client capture (the
+  wire carries the local seat's readout only); the host's recording has
+  every ownship. An AI aircraft's hit percent and firing band are not
+  estimated, and an AI AC-130's gun trains are not recorded, so its pippers
+  stay empty.
 - An aircraft recorded without its PT name (the air-to-ground driver's
   `--buddy` runs and its A-10 runs record the player's type by name only)
   is known by its exact type name since nr-replayviews (agent fix,

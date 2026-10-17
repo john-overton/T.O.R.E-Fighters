@@ -34,7 +34,7 @@ NET_BAD = (
 
 def guide_mission(separation_nm: int | None = None) -> str:
     """The example mission of the dedicated server guide, optionally with the enemy closer."""
-    text = GUIDE.read_text()
+    text = GUIDE.read_text(encoding="utf-8")
     m = re.search(r"```text\n(tore-mission 1\n.*?)```", text, re.S)
     if not m:
         raise DriveError("the guide's example mission is missing from docs/DEDICATED-SERVER.md")

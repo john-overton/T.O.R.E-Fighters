@@ -112,6 +112,102 @@ impl Viewer {
                     .push((kind, sight_record(&loaded.profile, resources)));
             }
         }
+        for name in gunship::GUNS {
+            self.store_weapon(name, resources);
+        }
+        let names: Vec<String> = self
+            .recording
+            .events()
+            .iter()
+            .filter(|event| event.event.kind == tore_replay::vocab::kind::AIRCRAFT_HUD)
+            .filter_map(|event| event.event.string(tore_replay::vocab::field::WEAPON))
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+            .collect();
+        for name in names {
+            self.store_weapon(&name, resources);
+        }
+        for model in std::iter::once(&self.ownship).chain(&self.models) {
+            if self
+                .hud_configs
+                .iter()
+                .any(|(id, _)| *id == model.profile.id)
+            {
+                continue;
+            }
+            let Ok(config) =
+                tore_sim::combat::live::Configuration::from_source(&model.profile, |name| {
+                    resources
+                        .get(name)
+                        .cloned()
+                        .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
+                })
+            else {
+                continue;
+            };
+            self.hud_configs.push((model.profile.id, config));
+        }
+    }
+
+    fn store_weapon(&mut self, name: &str, resources: &BTreeMap<String, Vec<u8>>) {
+        if self.hud_weapons.contains_key(name) {
+            return;
+        }
+        let Some(bytes) = resources
+            .get(name)
+            .or_else(|| resources.get(&name.to_ascii_uppercase()))
+            .or_else(|| resources.get(&name.to_ascii_lowercase()))
+        else {
+            return;
+        };
+        if let Ok(weapon) = tore_formats::weapons::Weapon::parse(name, bytes) {
+            self.hud_weapons.insert(weapon.source.clone(), weapon);
+        }
+    }
+
+    /// The aircraft's configuration with the recorded weapon on its station.
+    /// `None` when the recorded weapon cannot be loaded, so the HUD camera
+    /// keeps the derived picture rather than naming another store.
+    fn hud_config(
+        &self,
+        id: u32,
+        sample: &tore_replay::display::HudSample,
+    ) -> Option<tore_sim::combat::live::Configuration> {
+        let kind = self.type_of(id).unwrap_or(self.ownship.profile.id);
+        let mut config = self
+            .hud_configs
+            .iter()
+            .find(|(stored, _)| *stored == kind)?
+            .1
+            .clone();
+        let index = usize::from(sample.station);
+        let weapon = match self.hud_weapons.get(&sample.weapon) {
+            Some(weapon) => Some(weapon),
+            None if sample.weapon.is_empty() => None,
+            None => {
+                let carried = config.stations.get(index)?;
+                if !carried.weapon.source.eq_ignore_ascii_case(&sample.weapon) {
+                    return None;
+                }
+                None
+            }
+        };
+        if let Some(weapon) = weapon {
+            if config.stations.len() <= index
+                && let Some(first) = config.stations.first().cloned()
+            {
+                while config.stations.len() <= index {
+                    config.stations.push(first.clone());
+                }
+            }
+            if let Some(station) = config.stations.get_mut(index) {
+                station.weapon = weapon.clone();
+                if sample.mount != [0.; 3] {
+                    station.mount = sample.mount;
+                }
+            }
+        }
+        config.stations.get(index).is_some().then_some(config)
     }
 
     /// The airframe drawn for aircraft type `id`.
@@ -122,6 +218,58 @@ impl Viewer {
                 .find(|m| m.profile.id == id)
         })
         .unwrap_or(&self.ownship)
+    }
+
+    /// The right-hand target block for a recorded sight.
+    fn sight_target(
+        &self,
+        picture: &RenderSnapshot,
+        state: &flight::State,
+        tick: u64,
+        sample: &tore_replay::display::SightSample,
+    ) -> Option<sensor_console::TargetLine> {
+        let (name, at) = if let Some(id) = sample.tracked {
+            let at = self
+                .target_view(picture, id)
+                .map(|target| target.position)
+                .or_else(|| self.object_at(picture, tick, id))?;
+            let name = self
+                .info
+                .get(&id)
+                .map(|info| info.label.clone())
+                .unwrap_or_else(|| self.object_name(Target::Ground(id)));
+            (name, at)
+        } else {
+            ("POINT".into(), sample.point?)
+        };
+        Some(sensor_console::TargetLine {
+            name: tore_formats::text::upper(&name),
+            range_ft: feet(state.position, at),
+            clock: String::new(),
+            bearing_deg: (at[0] - state.position[0])
+                .atan2(at[2] - state.position[2])
+                .to_degrees()
+                .rem_euclid(360.),
+        })
+    }
+
+    /// A recorded target's pose, for the HUD box and the range line.
+    fn target_view(
+        &self,
+        picture: &RenderSnapshot,
+        id: u32,
+    ) -> Option<crate::replay::hud_play::TargetView> {
+        let pose = if picture.player.id == id {
+            &picture.player
+        } else {
+            picture.target(id)?
+        };
+        Some(crate::replay::hud_play::TargetView {
+            id,
+            position: pose.position,
+            velocity: pose.velocity,
+            aircraft: pose.aircraft,
+        })
     }
 
     /// The type of aircraft `id`, as the recording names it.
@@ -277,6 +425,7 @@ impl Viewer {
         let hud_zoom =
             (1. / crate::flight_canvas::HUD_SCALE) * (h / (480. * (w / 640.).min(h / 480.)));
         let mut raster = vec![0u8; 640 * 480 * 4];
+        let sample = self.display.hud(id, tick).cloned();
         crate::hud::draw(
             &mut raster,
             state,
@@ -287,59 +436,96 @@ impl Viewer {
             ),
             self.world.air_data(state).ok().as_ref(),
             true,
-            false,
+            sample.as_ref().is_some_and(|sample| !sample.nav),
             color,
             hud_zoom as f32,
             None,
             None,
             (state.bank, 1.),
         );
-        if let Some(target) = self
-            .target_of(id, tick)
-            .flatten()
-            .and_then(|t| picture.target(t))
-        {
-            crate::weapon_hud::replay_target(
-                &mut raster,
-                state,
-                target.position,
-                color,
-                hud_zoom,
-                false,
-            );
-            if let Some((_, gun, mount)) = self.guns.iter().find(|(k, ..)| *k == model.profile.id) {
-                crate::weapon_hud::replay_gunsight(
-                    &mut raster,
-                    state,
-                    color,
-                    hud_zoom,
-                    gun,
-                    *mount,
-                    tore_sim::combat::gunsight::TargetObservation {
-                        position: target.position,
-                        velocity: target.velocity,
-                    },
-                );
-            }
-        } else if let Some(at) = self.ground_target(picture, tick, id) {
-            // A ground target: its box, as the HUD squares a designated
-            // ground object.
-            crate::weapon_hud::replay_target(&mut raster, state, at, color, hud_zoom, false);
-        }
         let scene = self.marks.scene(tick);
         let laser = self.laser_readout(&scene, tick, id, state.position);
         let tti = tape_views::tti(&self.marks.timeline_of(id), tick);
-        if laser.is_some() || tti.is_some() {
-            crate::weapon_hud::laser::draw_rows(
+        if let Some(sample) = sample.as_ref()
+            && let Some(config) = self.hud_config(id, sample)
+        {
+            let target = sample
+                .target
+                .and_then(|target| self.target_view(picture, target));
+            let aim = self
+                .display
+                .sight(id, tick)
+                .filter(|sight| sight.gunship)
+                .and_then(|sight| sight.point.or(sight.gun_lock));
+            let falling = self.marks.timeline_of(id).iter().find_map(|weapon| {
+                weapon
+                    .landed
+                    .filter(|landed| weapon.released <= tick && *landed > tick)
+                    .map(|landed| (landed - tick) as f64 / 120.)
+            });
+            let terrain = |x: f64, z: f64| f64::from(self.world.height(x as f32, z as f32));
+            crate::replay::hud_play::draw(
                 &mut raster,
                 state,
-                laser.as_ref(),
-                tick,
-                tti.as_deref(),
+                &config,
+                sample,
+                target,
+                aim,
                 &model.hud_font,
                 color,
                 hud_zoom,
+                tick,
+                falling,
+                laser,
+                &terrain,
             );
+        } else {
+            // An older recording, or a weapon the import does not have: the
+            // derived box, the gun pipper and the laser rows.
+            if let Some(target) = self
+                .target_of(id, tick)
+                .flatten()
+                .and_then(|t| picture.target(t))
+            {
+                crate::weapon_hud::replay_target(
+                    &mut raster,
+                    state,
+                    target.position,
+                    color,
+                    hud_zoom,
+                    false,
+                );
+                if let Some((_, gun, mount)) =
+                    self.guns.iter().find(|(k, ..)| *k == model.profile.id)
+                {
+                    crate::weapon_hud::replay_gunsight(
+                        &mut raster,
+                        state,
+                        color,
+                        hud_zoom,
+                        gun,
+                        *mount,
+                        tore_sim::combat::gunsight::TargetObservation {
+                            position: target.position,
+                            velocity: target.velocity,
+                        },
+                    );
+                }
+            } else if let Some(at) = self.ground_target(picture, tick, id) {
+                crate::weapon_hud::replay_target(&mut raster, state, at, color, hud_zoom, false);
+            }
+            if laser.is_some() || tti.is_some() {
+                crate::weapon_hud::laser::draw_rows(
+                    &mut raster,
+                    state,
+                    laser.as_ref(),
+                    tick,
+                    tti.as_deref(),
+                    &model.hud_font,
+                    color,
+                    hud_zoom,
+                );
+            }
         }
         let overlay_size = tape_views::overlay_size(size);
         let mut overlay = tape_views::hud_tape_layer(&raster, overlay_size, camera.zoom);
@@ -517,27 +703,49 @@ impl Viewer {
                 Some(sensor.gimbal),
             ),
         };
-        let wanted = line.point.map_or(default_look, |p| {
-            tore_sim::combat::sight::body_angles(launcher, std::array::from_fn(|i| p[i] - eye[i]))
-        });
+        // A recorded sight (nr-replayhud) points the camera. Without one, the
+        // line of sight stays the derived one, and the console says so.
+        let recorded = self
+            .display
+            .sight(id, tick)
+            .cloned()
+            .filter(crate::replay::hud_play::use_look);
+        let wanted = if let Some(sample) = &recorded {
+            [sample.az, sample.el]
+        } else {
+            line.point.map_or(default_look, |p| {
+                tore_sim::combat::sight::body_angles(
+                    launcher,
+                    std::array::from_fn(|i| p[i] - eye[i]),
+                )
+            })
+        };
         let (look, gimbal_limit) = match gimbal {
             None => (gunship::clamp_look(wanted), gunship::beyond_gimbal(wanted)),
             Some(g) => (g.clamp(wanted), g.beyond(wanted)),
         };
         // Where the line meets the ground when nothing gives a point: the
         // range and the gimbal graphic read from it.
-        let ground = |x: f64, z: f64| f64::from(self.world.height(x as f32, z as f32));
-        let aim = line.point.or_else(|| {
-            let direction = match sight {
-                Sight::Console => gunship::direction(launcher, look[0], look[1]),
-                Sight::Pod { .. } => tore_sim::combat::sight::direction(launcher, look[0], look[1]),
-            };
-            tore_sim::combat::sight::sight_ground(eye, direction, &ground)
-        });
+        let terrain = |x: f64, z: f64| f64::from(self.world.height(x as f32, z as f32));
+        let aim = recorded
+            .as_ref()
+            .and_then(|sample| sample.point.or(sample.gun_lock))
+            .or(line.point)
+            .or_else(|| {
+                let direction = match sight {
+                    Sight::Console => gunship::direction(launcher, look[0], look[1]),
+                    Sight::Pod { .. } => {
+                        tore_sim::combat::sight::direction(launcher, look[0], look[1])
+                    }
+                };
+                tore_sim::combat::sight::sight_ground(eye, direction, &terrain)
+            });
         let slant = aim.map(|p| feet(eye, p));
-        // The recording holds no zoom: the sight's default step, as the
-        // console and the targeting page open (7.5 degrees).
-        let step = tore_sim::combat::sight::DEFAULT_ZOOM;
+        // No recorded zoom: the sight's default step, 7.5 degrees.
+        let step = recorded
+            .as_ref()
+            .map(|sample| sample.zoom.max(1))
+            .unwrap_or(tore_sim::combat::sight::DEFAULT_ZOOM);
         let view = match sight {
             Sight::Console => crate::gunsight_view::free_view(&launcher, look, step),
             Sight::Pod { sensor, .. } => {
@@ -603,19 +811,55 @@ impl Viewer {
         let overlay_size = tape_views::overlay_size(size);
         let overlay = match sight {
             Sight::Console => {
-                let mode = match line.source {
-                    Source::Designated => sensor_console::Mode::Track,
-                    Source::Default => sensor_console::Mode::Manual,
-                    _ => sensor_console::Mode::Point,
+                let recorded_guns = recorded.as_ref().filter(|sample| sample.gunship);
+                let mode = recorded_guns
+                    .map(crate::replay::hud_play::console_mode)
+                    .unwrap_or(match line.source {
+                        Source::Designated => sensor_console::Mode::Track,
+                        Source::Default => sensor_console::Mode::Manual,
+                        _ => sensor_console::Mode::Point,
+                    });
+                let (guns, lead) = recorded_guns
+                    .map(crate::replay::hud_play::gun_lines)
+                    .unwrap_or_else(|| {
+                        let gun = |slot: usize| sensor_console::GunLine {
+                            label: gunship::NAMES[slot],
+                            fitted: true,
+                            linked: true,
+                            candidate: false,
+                            rounds: None,
+                            status: Readiness::Ready,
+                        };
+                        (std::array::from_fn(gun), None)
+                    });
+                let weapons = std::array::from_fn(|slot| self.hud_weapons.get(gunship::GUNS[slot]));
+                let pipper = recorded_guns.and_then(|sample| {
+                    crate::replay::hud_play::pipper(sample, &weapons, &launcher, tick, &terrain)
+                });
+                let trains = recorded_guns
+                    .and_then(|sample| sample.train)
+                    .unwrap_or([look; 3]);
+                let gun_lock = recorded_guns.and_then(|sample| sample.gun_lock);
+                let notice = if recorded_guns.is_some() {
+                    None
+                } else {
+                    Some(line.source.notice())
                 };
-                let gun = |slot: usize| sensor_console::GunLine {
-                    label: gunship::NAMES[slot],
-                    fitted: true,
-                    linked: true,
-                    candidate: false,
-                    rounds: None,
-                    status: Readiness::Ready,
-                };
+                let radar = recorded_guns.map_or(
+                    sensor_console::Radar {
+                        on: false,
+                        range_nm: sensor_console::radar_range_nm(0),
+                        dots: Vec::new(),
+                    },
+                    |sample| sensor_console::Radar {
+                        on: sample.radar,
+                        range_nm: sensor_console::radar_range_nm(usize::from(sample.range)),
+                        dots: Vec::new(),
+                    },
+                );
+                let target = recorded_guns
+                    .and_then(|sample| self.sight_target(picture, state, tick, sample))
+                    .or(target);
                 let orbit_status = orbit.map(|(centre, radius_ft, height_ft)| {
                     let across =
                         (state.position[0] - centre[0]).hypot(state.position[2] - centre[2]);
@@ -638,26 +882,31 @@ impl Viewer {
                     los_deg,
                     slant_ft: slant,
                     target,
-                    guns: std::array::from_fn(gun),
-                    lead: None,
-                    trains: [look; 3],
+                    guns,
+                    lead,
+                    trains,
                     gimbal_limit,
-                    pipper: None,
+                    pipper,
                     others: Vec::new(),
-                    mark: line.point.map(|p| (p, line.source == Source::Designated)),
-                    // The recording holds no gun states: the status line
-                    // says where the sight line came from instead.
-                    notice: Some(line.source.notice()),
+                    mark: recorded_guns
+                        .and_then(|sample| sample.point.or(sample.gun_lock))
+                        .or(line.point)
+                        .map(|p| {
+                            (
+                                p,
+                                recorded_guns.is_some_and(|sample| sample.mode == "track")
+                                    || line.source == Source::Designated,
+                            )
+                        }),
+                    // No recorded sight: the status line says where the line
+                    // of sight was derived from. A recorded sight shows the gun.
+                    notice,
                     orbit: orbit_status,
                     designated,
-                    radar: sensor_console::Radar {
-                        on: false,
-                        range_nm: sensor_console::radar_range_nm(0),
-                        dots: Vec::new(),
-                    },
-                    plan: sensor_console::Plan::new(launcher, agl_ft, look, [look; 3], aim, None),
+                    radar,
+                    plan: sensor_console::Plan::new(launcher, agl_ft, look, trains, aim, None),
                     autopilot: None,
-                    gun_lock: None,
+                    gun_lock,
                     blink,
                 };
                 sensor_console::draw(&sym, &camera, overlay_size)
@@ -728,7 +977,10 @@ impl Viewer {
                     .label();
                 let sym = sensor_console::PodSymbology {
                     sensor: self.sensor_mode,
-                    mode: line.source.mode(),
+                    mode: recorded
+                        .as_ref()
+                        .map(crate::replay::hud_play::pod_mode)
+                        .unwrap_or_else(|| line.source.mode()),
                     zoom: step,
                     fov_deg,
                     aircraft: tore_formats::text::upper(&format!("{}  {kind}", self.label(id))),
@@ -741,11 +993,18 @@ impl Viewer {
                     gimbal_limit,
                     laser,
                     buddy,
-                    target,
+                    target: recorded
+                        .as_ref()
+                        .and_then(|sample| self.sight_target(picture, state, tick, sample))
+                        .or(target),
                     weapon,
                     tti: tape_views::tti(&self.marks.timeline_of(id), tick),
                     impact,
-                    notice: Some(line.source.notice().into()),
+                    notice: if recorded.is_some() {
+                        None
+                    } else {
+                        Some(line.source.notice().into())
+                    },
                     marks,
                     blink,
                 };

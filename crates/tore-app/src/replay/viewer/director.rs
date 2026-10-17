@@ -501,9 +501,6 @@ impl Viewer {
                         .vertices(&player, &camera, &self.world, &self.scenery),
                 );
             }
-            if frame.anchor == self.player {
-                gpu.sim.hide_aircraft();
-            }
         } else {
             gpu.cockpit.update(
                 queue,
@@ -514,6 +511,11 @@ impl Viewer {
                 false,
                 &[],
             );
+        }
+        // A cockpit view, the HUD camera and the Sensor View put the eye
+        // inside the watched aircraft, so the player's airframe is not drawn.
+        if camera.hidden_target == Some(self.player) {
+            gpu.sim.hide_aircraft();
         }
         let mut pixels = match &taped {
             Some(t) => gpu.console_pixels_sized(

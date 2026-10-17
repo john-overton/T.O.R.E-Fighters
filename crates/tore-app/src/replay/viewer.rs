@@ -877,6 +877,15 @@ pub struct Viewer {
     /// Each aircraft's weapon bursts on the ground (`combat.ground_impact`)
     /// in tick order: where an AC-130's or a strafer's rounds went.
     ground_impacts: BTreeMap<u32, Vec<(u64, [f64; 3])>>,
+    /// Recorded HUD and sight samples (nr-replayhud). Empty on an older file.
+    display: tore_replay::display::Track,
+    /// Weapons named by `aircraft.hud`, plus the AC-130's three guns.
+    hud_weapons: BTreeMap<String, tore_formats::weapons::Weapon>,
+    /// One combat configuration per drawn aircraft type, for the HUD.
+    hud_configs: Vec<(
+        tore_formats::aircraft::AircraftId,
+        tore_sim::combat::live::Configuration,
+    )>,
 }
 
 /// How much of a growing recording can be scrubbed: the last ten minutes
@@ -1141,6 +1150,9 @@ impl Viewer {
             guns: Vec::new(),
             sensor_mode: Default::default(),
             ground_impacts: BTreeMap::new(),
+            display: tore_replay::display::Track::default(),
+            hud_weapons: BTreeMap::new(),
+            hud_configs: Vec::new(),
         };
         viewer.read_events();
         if options.drone {
@@ -1191,6 +1203,7 @@ impl Viewer {
                     .push((e.tick, [x, y, z]));
             }
         }
+        self.display = tore_replay::display::Track::from_events(events);
         if let Some(growth) = &mut self.growth {
             growth.events = events.len();
         }

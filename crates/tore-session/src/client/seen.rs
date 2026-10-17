@@ -103,6 +103,8 @@ pub struct FlightSeen {
     pub events: Vec<SeenEvent>,
     /// Small cockpit facts in host-tick order; conversion emits changes only.
     pub banner: BTreeMap<u32, super::convert::banner::Facts>,
+    /// The local seat's HUD and sight, reduced to changes (nr-replayhud).
+    pub display: super::convert::display::Seen,
     /// The connection's name table at the end of the flight.
     pub names: ReceivedNames,
 }
@@ -202,6 +204,23 @@ impl Observed {
             });
         if let Some(facts) = facts {
             flight.banner.insert(received.tick, facts);
+        }
+        // The local seat's HUD. A missing readout means it has not changed.
+        // Other players' cockpits are not in the snapshot.
+        if let Some(q) = &received.readout
+            && let Ok(readout) = q.readout(received.tick, None, None)
+        {
+            let plane = readout.plane;
+            let nav = readout.airport.nav_mode;
+            flight.display.observe(
+                plane,
+                u64::from(received.tick),
+                &readout,
+                nav,
+                super::convert::display::default_range_index(),
+                |_| None,
+                |_| None,
+            );
         }
         for entity in &received.updated {
             let states = flight.states.entry(entity.key()).or_default();

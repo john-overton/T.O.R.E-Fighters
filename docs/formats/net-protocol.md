@@ -2804,11 +2804,13 @@ flowchart LR
 
 - **Stores** (event 22, everyone): the aircraft (varint), a count (varint, at
   most 64), then for each drawn station, in ascending station order, its
-  index in the loadout (6 bits) and the whole stores still on it (varint).
-  A drawn station is an external one (centreline, fuselage, wing, wingtip)
-  that is not a gun and was loaded at the start; a rocket pod counts as one
-  store while it has a rocket left. Fuel tanks are not listed: the loadout
-  alone draws them. A decoder refuses stations out of order or past 63.
+  index (7 bits since protocol 51, 6 before) and the whole stores still on
+  it (varint). A drawn station is an external one (centreline, fuselage,
+  wing, wingtip) that is not a gun and was loaded at the start; a rocket
+  pod counts as one store while it has a rocket left. Tank rows are codes
+  55 + hardpoint: hardpoints 0 to 8 are 55 to 63, and hardpoint 9 (the F-16C
+  inner wet pair and the Rafale centreline) is 64, which is why the index
+  grew to 7 bits. A decoder refuses stations out of order or past 127.
 - **When.** The host compares every aircraft's drawn stations each tick with
   what it last told, and with the loadout as built for an aircraft it never
   told, and sends a Stores event for each that differs, at the tick it
@@ -2832,10 +2834,11 @@ flowchart LR
   for a fighter's six drawn stations with fewer than 128 stores each, plus
   the events section's 2 to 4 bytes of number and tick. One is sent for each
   whole store that leaves; nothing is sent while nothing changes. The worst
-  case, a 64-station loadout with 65,535 on each, is 243 bytes; a real
+  case, a 64-station loadout with 65,535 on each, is 251 bytes since the
+  station index is 7 bits (protocol 51; it was 243 at 6 bits). A real
   loadout has at most a dozen drawn stations and under 128 on each, at most
-  about 25 bytes. The oldest event may use the packet's message room, so a
-  long one is never starved.
+  about 25 bytes. The six-station example is still 14 bytes. The oldest
+  event may use the packet's message room, so a long one is never starved.
 - **Why a bump.** A 26 game reads event code 22 as invalid and drops the
   packet's events. The wire golden changes in the version line, the events
   sample (one Stores event added) and the transport packets sealed with the
@@ -3138,7 +3141,10 @@ again with an observer; the capture format did not change for it.
   kill credit and the combat checkpoint, so an older game must not join;
   50 since the F-4B gun pod option (slice nr-f4gun): the F-4B's centreline
   row takes one SUU-16, which an older game refuses, and the `Stores` event
-  lists a hung gun pod as one store, so an older game must not join.
+  lists a hung gun pod as one store, so an older game must not join;
+  51 since the Stores station index (slice nr-basefix): a Stores event's
+  station index is 7 bits and can name tank hardpoint 9 (code 64), so an
+  older game must not join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
@@ -3212,7 +3218,7 @@ watch the network can read it. What the protocol does guard against:
 
 The next protocol must include extended combat command 5, `JettisonTanks`,
 and interpret Stores IDs 55 through 63 as tank quantities at hardpoints 0
-through 8. Sound-only blast ID 39 plays `&BOMB.11K`. Projectile identities
+through 8. Protocol 51 extends that to hardpoint 9 at ID 64. Sound-only blast ID 39 plays `&BOMB.11K`. Projectile identities
 prefixed `JETTISON-` are inert; `TORE-BODY:length:diameter` shape identifiers
 request fitted bodies with length and diameter in feet, each finite, positive
 and at most 100. The combat checkpoint layout also changes.
