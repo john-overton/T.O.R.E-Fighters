@@ -8,6 +8,9 @@ use crate::{camera::Camera, terrain::Terrain};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
+#[path = "vegetation_stream.rs"]
+mod stream;
+
 const INST_STRIDE: u64 = 64;
 const DRAWN_STRIDE: u64 = 80;
 const PATCH_STRIDE: u64 = 64;
@@ -16,7 +19,15 @@ const PATCH_STRIDE: u64 = 64;
 const RINGS: [(f32, f32); 4] = [(0.14, 1.), (0.32, 0.5), (0.6, 0.25), (1.0, 0.125)];
 
 pub struct Renderer {
-    placement: Placement,
+    atlas: Arc<vegetation::Atlas>,
+    worker: Option<stream::Worker>,
+    epoch: u64,
+    ready: Option<stream::Ready>,
+    incoming: Option<stream::Ready>,
+    chunks: wgpu::Buffer,
+    pages: stream::Slots,
+    page_count: u32,
+    depth_pipeline: wgpu::RenderPipeline,
     library: Arc<Library>,
     vertices: wgpu::Buffer,
     instances: wgpu::Buffer,
@@ -35,11 +46,7 @@ pub struct Renderer {
     finish: wgpu::ComputePipeline,
     pipeline: wgpu::RenderPipeline,
     grass_pipeline: wgpu::RenderPipeline,
-    /// Per mesh: first slot and slot count in the instance list.
-    slots: Vec<(u32, u32)>,
     count: u32,
-    uploaded: u64,
-    since_upload: u32,
     /// Per ring: patch range and tufts per patch.
     rings: Vec<(std::ops::Range<u32>, u32)>,
     prepared: bool,
@@ -60,6 +67,8 @@ pub struct CacheFrame {
     pub object_chunks: u64,
     pub grass_chunks: u64,
     pub build_ms: f64,
+    pub pending: bool,
+    pub submit_ms: f64,
 }
 
 impl Renderer {
@@ -125,6 +134,11 @@ impl Renderer {
             vegetation::MAX_PATCHES as u64 * PATCH_STRIDE,
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
+        let chunks = buffer(
+            "Vegetation chunk pages",
+            (stream::SPARE_PAGES + 524_288 / stream::PAGE) as u64 * 8,
+            storage,
+        );
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Vegetation cull layout"),
             entries: &[
@@ -135,6 +149,7 @@ impl Renderer {
                 storage_entry(4, false),
                 storage_entry(5, false),
                 storage_entry(6, true),
+                storage_entry(7, true),
             ],
         });
         let (instances, drawn, shadow_drawn) = object_buffers(device, capacity);
@@ -149,6 +164,7 @@ impl Renderer {
                 &shadow_drawn,
                 &args,
                 &meshes,
+                &chunks,
             ],
         );
         let cull_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -172,10 +188,18 @@ impl Renderer {
         };
         let cull = compute("cull");
         let finish = compute("finish");
-        let (pipeline, grass_pipeline) =
+        let (pipeline, grass_pipeline, depth_pipeline) =
             render_pipelines(device, shader, format, samples, material, &lighting.layout);
         Self {
-            placement: Placement::new(atlas),
+            atlas,
+            worker: None,
+            epoch: 0,
+            ready: None,
+            incoming: None,
+            chunks,
+            pages: stream::Slots::new(capacity),
+            page_count: 0,
+            depth_pipeline,
             library,
             vertices,
             instances,
@@ -193,10 +217,7 @@ impl Renderer {
             finish,
             pipeline,
             grass_pipeline,
-            slots: vec![(0, 0); mesh_count],
             count: 0,
-            uploaded: u64::MAX,
-            since_upload: 0,
             rings: Vec::new(),
             prepared: false,
             suppressed: false,
@@ -214,8 +235,10 @@ impl Renderer {
         self.draw_nm = options.vegetation_distance_nm as f32;
         self.detail_nm = (options.vegetation_detail_nm as f32).min(self.draw_nm);
         let density = options.vegetation_density;
+        if self.density != density.scale() {
+            self.reset_cache();
+        }
         self.density = density.scale();
-        self.placement.set_density(self.density);
         let capacity = object_budget(density);
         if capacity != self.capacity {
             self.capacity = capacity;
@@ -231,12 +254,13 @@ impl Renderer {
                     &self.shadow_drawn,
                     &self.args,
                     &self.meshes,
+                    &self.chunks,
                 ],
             );
             self.count = 0;
-            self.uploaded = u64::MAX;
+            self.pages = stream::Slots::new(capacity);
+            self.page_count = 0;
         }
-        self.placement.set_budget(capacity);
         use crate::graphics::VegDensity;
         (self.grass_radius, self.tufts) = match density {
             VegDensity::Low => (700., 48),
@@ -263,9 +287,11 @@ impl Renderer {
 
     /// Drops the patch cache so the next frames fill it at the current budget.
     pub fn reset_cache(&mut self) {
-        self.placement.reset_cache();
-        self.uploaded = u64::MAX;
-        self.since_upload = 0;
+        self.epoch = self.epoch.wrapping_add(1);
+        self.ready = None;
+        self.incoming = None;
+        self.pages = stream::Slots::new(self.capacity);
+        self.page_count = 0;
         self.count = 0;
         self.rings.clear();
         self.prepared = false;
@@ -283,13 +309,13 @@ impl Renderer {
     }
 
     /// Feet to the farthest chunk of objects within the instance budget.
-    pub fn kept_reach(&self, eye: [f64; 2]) -> f32 {
-        self.placement.kept_reach(eye)
+    pub fn kept_reach(&self, _eye: [f64; 2]) -> f32 {
+        self.ready.as_ref().map_or(0., |r| r.reach)
     }
 
     /// How far full density reaches, as a share of the setting's distance.
     pub fn squeeze(&self) -> f32 {
-        self.placement.squeezed(1.)
+        self.ready.as_ref().map_or(1., |r| r.squeeze)
     }
 
     /// Grass tufts drawn last frame, before the shader drops any.
@@ -309,7 +335,7 @@ impl Renderer {
         material: &wgpu::BindGroupLayout,
         lighting: &crate::surface_lighting::SurfaceLighting,
     ) {
-        (self.pipeline, self.grass_pipeline) =
+        (self.pipeline, self.grass_pipeline, self.depth_pipeline) =
             render_pipelines(device, shader, format, samples, material, &lighting.layout);
     }
 
@@ -323,27 +349,78 @@ impl Renderer {
         origin: [f64; 3],
         size: [u32; 2],
     ) {
+        let started = std::time::Instant::now();
         self.prepared = false;
         self.rings.clear();
         if self.suppressed || self.draw_nm <= 0. || camera.position[1] > 16_000. {
             self.last_cache = CacheFrame::default();
             return;
         }
-        let objects_before = self.placement.builds;
-        let grass_before = self.placement.grass_builds;
-        let build_before = self.placement.build_ns;
+        self.last_cache = CacheFrame::default();
         let eye2 = [camera.position[0], camera.position[2]];
         let full = self.detail_nm * vegetation::NM as f32 * 0.4;
         let draw = self.draw_nm * vegetation::NM as f32;
-        let budget = if self.settle { None } else { Some(3) };
-        let done = self.placement.update(world, eye2, full, draw, budget);
-        // Full density reaches less far where the view would hold more
-        // objects than the budget.
-        let full = self.placement.squeezed(full);
-        self.since_upload += 1;
-        if self.placement.generation != self.uploaded && (done || self.since_upload >= 20) {
-            self.upload(queue, eye2);
+        let request = stream::Request {
+            epoch: self.epoch,
+            eye: eye2,
+            full,
+            draw,
+            density: self.density,
+            capacity: self.capacity,
+            grass_radius: self.grass_radius,
+            settle: self.settle,
+        };
+        if self.settle {
+            self.pages.upload(usize::MAX, |offset, bytes| {
+                queue.write_buffer(&self.instances, offset, bytes)
+            });
+            if self.incoming.is_some() {
+                self.ready = self.incoming.take();
+            }
         }
+        let worker = self.worker.get_or_insert_with(|| {
+            stream::Worker::new(self.atlas.clone(), self.library.clone(), world)
+        });
+        // Normal frames never wait. Captures explicitly request a settled view.
+        if self.settle && worker.busy {
+            let _ = worker.poll(true);
+        }
+        if self.settle {
+            worker.request(request);
+        }
+        if let Some(ready) = worker.poll(self.settle)
+            && ready.epoch == self.epoch
+        {
+            self.last_cache = ready.cache;
+            self.pages.sync(&ready.chunks);
+            self.incoming = Some(ready);
+        }
+        self.pages.upload(
+            if self.settle {
+                usize::MAX
+            } else {
+                stream::UPLOAD_BYTES
+            },
+            |offset, bytes| {
+                queue.write_buffer(&self.instances, offset, bytes);
+            },
+        );
+        if !self.pages.pending() && self.incoming.is_some() {
+            self.ready = self.incoming.take();
+        }
+        let (table, count) = self.pages.table();
+        self.count = count;
+        self.page_count = (table.len() / 2) as u32;
+        if !table.is_empty() {
+            queue.write_buffer(&self.chunks, 0, &bytes_of_u32(&table));
+        }
+        if !self.pages.pending() && !self.settle {
+            worker.request(request);
+        }
+        self.last_cache.pending =
+            self.pages.pending() || self.ready.as_ref().is_none_or(|r| !r.done);
+        let full = full * self.squeeze();
+        self.upload_meshes(queue);
         let (fx, rx, ux) = basis(camera);
         let height = (size[1] as f32 * camera.view_fraction).max(1.);
         let aspect = size[0] as f32 / height;
@@ -362,13 +439,9 @@ impl Renderer {
             [fx, rx, ux],
             [aspect / f, 1. / f],
         );
-        self.last_cache = CacheFrame {
-            object_chunks: self.placement.builds.saturating_sub(objects_before),
-            grass_chunks: self.placement.grass_builds.saturating_sub(grass_before),
-            build_ms: self.placement.build_ns.saturating_sub(build_before) as f64 / 1_000_000.,
-        };
         if self.count == 0 {
             self.prepared = !self.rings.is_empty();
+            self.last_cache.submit_ms = started.elapsed().as_secs_f64() * 1000.;
             return;
         }
         let mesh_count = self.library.meshes.len();
@@ -386,7 +459,7 @@ impl Renderer {
             camera.position[1] as f32,
         ]);
         params.extend([full, draw, 0., 1.5]);
-        params.extend(u32s(&[self.count, mesh_count as u32, 0, 0]));
+        params.extend(u32s(&[self.count, mesh_count as u32, self.page_count, 0]));
         queue.write_buffer(&self.params, 0, &bytes_of_f32(&params));
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Vegetation cull"),
@@ -394,45 +467,17 @@ impl Renderer {
         });
         pass.set_pipeline(&self.cull);
         pass.set_bind_group(0, &self.bind, &[]);
-        pass.dispatch_workgroups(self.count.div_ceil(256), 1, 1);
+        pass.dispatch_workgroups(self.page_count, 1, 1);
         pass.set_pipeline(&self.finish);
         pass.dispatch_workgroups((mesh_count as u32).div_ceil(64), 1, 1);
         drop(pass);
         self.prepared = true;
+        self.last_cache.submit_ms = started.elapsed().as_secs_f64() * 1000.;
     }
 
-    /// Sorts the placed objects by mesh and uploads them with each mesh's
-    /// slot range.
-    fn upload(&mut self, queue: &wgpu::Queue, eye: [f64; 2]) {
-        let list = self.placement.objects(eye);
+    fn upload_meshes(&self, queue: &wgpu::Queue) {
         let lib = &self.library;
         let mesh_count = lib.meshes.len();
-        let mesh_of: Vec<u16> = list
-            .iter()
-            .map(|i| lib.mesh_for(i.species, i.variant))
-            .collect();
-        let mut per = vec![0u32; mesh_count];
-        for &m in &mesh_of {
-            per[usize::from(m)] += 1;
-        }
-        let mut start = 0u32;
-        for (m, n) in per.iter().enumerate() {
-            self.slots[m] = (start, *n);
-            start += n;
-        }
-        let mut fill: Vec<u32> = self.slots.iter().map(|s| s.0).collect();
-        let mut bytes = vec![0u8; list.len() * INST_STRIDE as usize];
-        for (i, &m) in list.iter().zip(&mesh_of) {
-            let slot = fill[usize::from(m)] as usize;
-            fill[usize::from(m)] += 1;
-            let mesh = &lib.meshes[usize::from(m)];
-            let record = pack(i, m, mesh.radius);
-            bytes[slot * INST_STRIDE as usize..][..INST_STRIDE as usize]
-                .copy_from_slice(&bytes_of_f32(&record));
-        }
-        if !bytes.is_empty() {
-            queue.write_buffer(&self.instances, 0, &bytes);
-        }
         let mut table = Vec::with_capacity(mesh_count * 8);
         for mesh in &lib.meshes {
             let look = match (mesh.look, mesh.recolour.is_some()) {
@@ -445,7 +490,7 @@ impl Renderer {
                 f32::from_bits(0),
                 look,
                 mesh.radius,
-                f32::from_bits(list.len() as u32),
+                f32::from_bits(self.capacity as u32),
             ]);
             // Negative page codes carry a generated atlas cell without enlarging
             // the instance or mesh record. Retail still selects four views.
@@ -457,9 +502,6 @@ impl Renderer {
         if !table.is_empty() {
             queue.write_buffer(&self.meshes, 0, &bytes_of_f32(&table));
         }
-        self.count = list.len() as u32;
-        self.uploaded = self.placement.generation;
-        self.since_upload = 0;
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -478,17 +520,14 @@ impl Renderer {
         if self.tufts == 0 || self.grass_radius <= 0. || agl > 2_500. {
             return;
         }
-        let budget = if self.settle { None } else { Some(2) };
         let radius = self.grass_radius;
-        let (patches, _) = self.placement.grass(
-            world,
-            [camera.position[0], camera.position[2]],
-            radius,
-            budget,
-        );
+        let Some(ready) = &self.ready else {
+            return;
+        };
+        let patches = &ready.grass;
         let [fx, rx, ux] = basis;
         let mut rings: Vec<Vec<&Patch>> = vec![Vec::new(); RINGS.len()];
-        for p in &patches {
+        for p in patches {
             let rel = [
                 p.pos[0] - origin[0] as f32 - eye[0],
                 p.pos[1] - origin[1] as f32 - eye[1],
@@ -553,9 +592,11 @@ impl Renderer {
         }
         pass.set_bind_group(0, bind, &[]);
         if self.count > 0 {
-            pass.set_pipeline(&self.pipeline);
+            pass.set_pipeline(&self.depth_pipeline);
             pass.set_vertex_buffer(0, self.vertices.slice(..));
             pass.set_vertex_buffer(1, self.drawn.slice(..));
+            pass.draw_indirect(&self.args, 0);
+            pass.set_pipeline(&self.pipeline);
             pass.draw_indirect(&self.args, 0);
         }
         if !self.rings.is_empty() {
@@ -584,10 +625,10 @@ fn object_buffers(
     device: &wgpu::Device,
     capacity: usize,
 ) -> (wgpu::Buffer, wgpu::Buffer, wgpu::Buffer) {
-    let buffer = |label, stride: u64, usage| {
+    let buffer = |label, count: usize, stride: u64, usage| {
         device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
-            size: capacity as u64 * stride,
+            size: count as u64 * stride,
             usage,
             mapped_at_creation: false,
         })
@@ -596,10 +637,11 @@ fn object_buffers(
     (
         buffer(
             "Vegetation instances",
+            (2 * capacity.div_ceil(stream::PAGE) + stream::SPARE_PAGES) * stream::PAGE,
             INST_STRIDE,
             wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         ),
-        buffer("Vegetation drawn", DRAWN_STRIDE, listed),
+        buffer("Vegetation drawn", capacity, DRAWN_STRIDE, listed),
         device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Unused vegetation caster binding"),
             size: DRAWN_STRIDE,
@@ -612,7 +654,7 @@ fn object_buffers(
 fn cull_bind(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
-    buffers: [&wgpu::Buffer; 7],
+    buffers: [&wgpu::Buffer; 8],
 ) -> wgpu::BindGroup {
     let entries: Vec<wgpu::BindGroupEntry<'_>> = buffers
         .iter()
@@ -674,7 +716,11 @@ fn render_pipelines(
     samples: u32,
     material: &wgpu::BindGroupLayout,
     lighting: &wgpu::BindGroupLayout,
-) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
+) -> (
+    wgpu::RenderPipeline,
+    wgpu::RenderPipeline,
+    wgpu::RenderPipeline,
+) {
     let constants = [("FILL_SAMPLES", f64::from(samples))];
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Vegetation layout"),
@@ -709,7 +755,12 @@ fn render_pipelines(
             8 => Float32x4
         ],
     }];
-    let make = |label, vertex: &str, fragment: &str, buffers: &[wgpu::VertexBufferLayout]| {
+    let make = |label,
+                vertex: &str,
+                fragment: &str,
+                buffers: &[wgpu::VertexBufferLayout],
+                depth: bool,
+                writes: bool| {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(label),
             layout: Some(&layout),
@@ -729,7 +780,11 @@ fn render_pipelines(
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
+                    write_mask: if depth {
+                        wgpu::ColorWrites::empty()
+                    } else {
+                        wgpu::ColorWrites::ALL
+                    },
                 })],
             }),
             primitive: wgpu::PrimitiveState {
@@ -738,7 +793,7 @@ fn render_pipelines(
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: true,
+                depth_write_enabled: writes,
                 depth_compare: wgpu::CompareFunction::GreaterEqual,
                 stencil: Default::default(),
                 bias: Default::default(),
@@ -752,8 +807,30 @@ fn render_pipelines(
         })
     };
     (
-        make("Vegetation", "veg_vertex", "veg_fragment", &object_buffers),
-        make("Grass", "grass_vertex", "grass_fragment", &grass_buffers),
+        make(
+            "Vegetation",
+            "veg_vertex",
+            "veg_fragment",
+            &object_buffers,
+            false,
+            false,
+        ),
+        make(
+            "Grass",
+            "grass_vertex",
+            "grass_fragment",
+            &grass_buffers,
+            false,
+            true,
+        ),
+        make(
+            "Vegetation depth",
+            "veg_vertex",
+            "veg_depth",
+            &object_buffers,
+            true,
+            true,
+        ),
     )
 }
 

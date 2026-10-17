@@ -986,6 +986,7 @@ mod shader_tests {
                 2,
             ),
             ("vegetation", &["veg_vertex", "veg_fragment"], 2),
+            ("vegetation depth", &["veg_vertex", "veg_depth"], 2),
             ("grass", &["grass_vertex", "grass_fragment"], 2),
             (
                 "vegetation shadow 0",
@@ -1063,6 +1064,7 @@ mod shader_tests {
     #[test]
     fn the_crt_pass_and_the_thermal_world_shaders_validate() {
         validate("crt.wgsl", include_str!("crt.wgsl"));
+        validate("vegetation cull", include_str!("vegetation_cull.wgsl"));
         // The world module as `SimRenderer::new` concatenates it.
         let world = [
             include_str!("surface_lighting.wgsl"),

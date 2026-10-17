@@ -1956,6 +1956,7 @@ impl Placement {
     }
 
     /// The current objects, nearest chunks first, capped.
+    #[cfg(test)]
     pub fn objects(&self, eye: [f64; 2]) -> Vec<Inst> {
         let mut keys: Vec<(f32, (i64, i64))> = self
             .chunks
@@ -1975,6 +1976,34 @@ impl Placement {
                 break;
             }
             out.extend_from_slice(&objects);
+        }
+        out
+    }
+
+    /// Same nearest-first selection, retaining chunk identity for streaming.
+    pub(super) fn object_chunks(&self, eye: [f64; 2]) -> Vec<((i64, i64), Vec<Inst>)> {
+        let mut keys: Vec<_> = self
+            .chunks
+            .keys()
+            .map(|&(x, z)| (chunk_distance(eye, x, z), (x, z)))
+            .collect();
+        keys.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        let mut out = Vec::new();
+        let mut total = 0;
+        for (d, key) in keys {
+            let objects: Vec<_> = self.chunks[&key]
+                .objects
+                .iter()
+                .copied()
+                .filter(|i| i.rank < i.species.share((d - 2. * CHUNK as f32).max(0.), self.full))
+                .collect();
+            if total + objects.len() > self.budget {
+                break;
+            }
+            total += objects.len();
+            if !objects.is_empty() {
+                out.push((key, objects));
+            }
         }
         out
     }
@@ -2939,6 +2968,27 @@ mod tests {
                 .iter()
                 .all(|i| !on_tile(i))
         );
+    }
+
+    #[test]
+    fn chunk_selection_matches_original_flat_cull_input() {
+        let world = flat();
+        let mut placement = Placement::new(Arc::new(Atlas::synthetic(solid(10), 0)));
+        for density in [0.4, 1., 1.65] {
+            placement.set_density(density);
+            placement.set_budget(12_000);
+            for eye in [[4_000., 4_000.], [6_100., 4_900.], [9_000., 4_900.]] {
+                placement.update(&world, eye, 3_000., 6_000., None);
+                let legacy = placement.objects(eye);
+                let streamed: Vec<_> = placement
+                    .object_chunks(eye)
+                    .into_iter()
+                    .flat_map(|(_, v)| v)
+                    .collect();
+                assert!(!legacy.is_empty());
+                assert_eq!(streamed, legacy);
+            }
+        }
     }
 
     #[test]

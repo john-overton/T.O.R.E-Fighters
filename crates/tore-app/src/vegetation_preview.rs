@@ -429,6 +429,8 @@ struct Sample {
     grass_chunks: u64,
     build_ms: f64,
     submit_ms: f64,
+    vegetation_submit_ms: f64,
+    pending: bool,
 }
 
 impl Sample {
@@ -459,6 +461,7 @@ struct RunStats {
     rebuild_max: f64,
     rebuild_frame: usize,
     submit_max: f64,
+    vegetation_submit: [f64; 3],
 }
 
 /// A 100 ft, 480 kt, 3 nm pass through each theater's densest vegetation.
@@ -487,9 +490,11 @@ fn lowpass(resources: &std::collections::BTreeMap<String, Vec<u8>>, out: &Path) 
          Off suppresses vegetation objects and grass only. Density is High or Ultra.\n\
          Draw distance and detail stay at the Graphics defaults (4 nm and 2 nm).\n\
          GPU times are timestamp queries around the frame. Rebuild cost is CPU time\n\
-         spent building object chunks and grass chunks. The in-flight budget is 3 object\n\
-         chunks and 2 grass chunks per frame. Warmup repeats the start pose until a frame\n\
-         builds nothing, and is not included in the pass statistics.",
+         spent building object chunks and grass chunks on the worker. Each worker job\n\
+         builds up to 3 object chunks and 2 grass chunks. Normal frames upload at most\n\
+         256 KiB of instances. Vegetation CPU submit measures preparation, uploads and\n\
+         cull encoding; whole-frame submit remains separate. Warmup waits for a complete\n\
+         selection and drained uploads, and is excluded from pass statistics.",
         indices.len()
     )?;
     let mut rows = Vec::new();
@@ -557,6 +562,29 @@ fn lowpass(resources: &std::collections::BTreeMap<String, Vec<u8>>, out: &Path) 
                     .map(|(frame, camera)| (*frame, camera))
                     .collect();
                 let timed = gpu.measure(&refs, &world, &scenery)?;
+                let mut csv = String::from(
+                    "frame,gpu_off_ms,gpu_on_ms,vegetation_submit_ms,frame_submit_ms,pending\n",
+                );
+                for sample in &timed {
+                    csv += &format!(
+                        "{},{:.6},{:.6},{:.6},{:.6},{}\n",
+                        sample.frame,
+                        sample.gpu_off,
+                        sample.gpu_on,
+                        sample.vegetation_submit_ms,
+                        sample.submit_ms,
+                        sample.pending
+                    );
+                }
+                std::fs::write(
+                    out.join(format!(
+                        "{code}-{}x{}-{}-frames.csv",
+                        size[0],
+                        size[1],
+                        density.label()
+                    )),
+                    csv,
+                )?;
                 let stats = run_stats(&timed);
                 let warm_stats = run_stats(&warm);
                 let detail = format_run(
@@ -783,7 +811,14 @@ fn run_stats(samples: &[Sample]) -> RunStats {
     let rebuild = samples
         .iter()
         .max_by(|a, b| a.build_ms.total_cmp(&b.build_ms));
+    let mut submit: Vec<f64> = samples.iter().map(|s| s.vegetation_submit_ms).collect();
+    let vegetation_submit = [
+        mean(&submit),
+        percentile(&mut submit, 0.95),
+        maximum(&submit),
+    ];
     RunStats {
+        vegetation_submit,
         samples: samples.len(),
         added_mean,
         added_p95,
@@ -893,6 +928,10 @@ fn format_run(
         stats.rebuild_frame,
         stats.submit_max
     );
+    text += &format!(
+        "vegetation CPU submit mean {:.3} ms, p95 {:.3} ms, max {:.3} ms\n",
+        stats.vegetation_submit[0], stats.vegetation_submit[1], stats.vegetation_submit[2]
+    );
     let mut spikes: Vec<&Sample> = timed.iter().filter(|sample| sample.added() > 10.).collect();
     spikes.sort_by(|a, b| b.added().total_cmp(&a.added()));
     spikes.truncate(8);
@@ -923,7 +962,7 @@ fn summary_row(
     warmup: usize,
 ) -> String {
     format!(
-        "| {code} | {climate} | {} ({}) | {}x{} | {density} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} | {:.0} / {} | {:.0} / {} | {:.2} / {} | {:.2} | {warmup} |",
+        "| {code} | {climate} | {} ({}) | {}x{} | {density} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} | {:.0} / {} | {:.0} / {} | {:.2} / {} | {:.2} | {warmup} | {:.3} / {:.3} / {:.3} |",
         spot.label,
         spot.instances,
         size[0],
@@ -940,6 +979,9 @@ fn summary_row(
         stats.builds_mean,
         stats.builds_max,
         stats.rebuild_max,
+        stats.vegetation_submit[0],
+        stats.vegetation_submit[1],
+        stats.vegetation_submit[2],
     )
 }
 
@@ -989,9 +1031,11 @@ fn write_summary(out: &Path, rows: &[String], notes: &[String]) -> AppResult<()>
          detail stays on in both. High and Ultra change density only. Distances stay at the \
          Graphics defaults, 4 nm draw and 2 nm detail. Instances are the objects submitted \
          to the cull. Grass tufts are the blades submitted, before the shader drops any. \
-         Rebuilds are object and grass chunks built during the pass, after warmup.\n\n\
-         | Theater | Climate | Spot (instances in 1 nm) | Size | Density | Added mean | Added p95 | Added max | On mean | On max | Instances mean / max | Tufts mean / max | Builds per frame mean / max | Worst rebuild ms | Warmup frames |\n\
-         | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n",
+         Rebuilds are worker object and grass chunks delivered during the pass. CPU\n\
+         vegetation submit includes preparation, uploads and cull encoding, excluding\n\
+         the worker and GPU wait. All summary numbers exclude warmup.\n\n\
+         | Theater | Climate | Spot (instances in 1 nm) | Size | Density | Added mean | Added p95 | Added max | On mean | On max | Instances mean / max | Tufts mean / max | Builds per frame mean / max | Worst rebuild ms | Warmup frames | CPU vegetation submit mean / p95 / max ms |\n\
+         | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n",
     );
     for row in rows {
         text.push_str(row);
@@ -1447,20 +1491,20 @@ impl View {
             let batch = (8).min(4_000 - start);
             let jobs: Vec<(usize, &Camera)> = (0..batch).map(|i| (start + i, camera)).collect();
             let samples = self.measure(&jobs, world, scenery)?;
-            if let Some(idle) = samples
-                .iter()
-                .position(|sample| sample.object_chunks == 0 && sample.grass_chunks == 0)
-            {
+            if let Some(idle) = samples.iter().position(|sample| {
+                !sample.pending && sample.object_chunks == 0 && sample.grass_chunks == 0
+            }) {
                 frames.extend(samples.into_iter().take(idle + 1));
-                break;
+                return Ok(frames);
             }
             frames.extend(samples);
         }
-        Ok(frames)
+        Err("vegetation warmup did not converge within 4000 frames".into())
     }
 
     /// One off frame and one on frame per camera. GPU timestamps exclude the
-    /// CPU patch build, which is recorded separately from the on frame.
+    /// worker patch build. Vegetation preparation and whole-frame CPU submit
+    /// are recorded separately from GPU time.
     fn measure(
         &mut self,
         frames: &[(usize, &Camera)],
@@ -1551,6 +1595,8 @@ impl View {
                     grass_chunks: cache.grass_chunks,
                     build_ms: cache.build_ms,
                     submit_ms,
+                    vegetation_submit_ms: cache.submit_ms,
+                    pending: cache.pending,
                 });
             }
             if out.len() % 120 < 8 || out.len() == frames.len() {

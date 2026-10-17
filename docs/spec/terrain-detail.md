@@ -182,7 +182,14 @@ A 2,048 ft terrain patch caches full candidates independent of camera distance.
 Only newly entering patches build; departing patches are evicted. Density changes
 invalidate candidates. Detail distance changes select from the cache without
 rebuilding it. GPU culling selects view, distance, density rank and pixel size.
-One indirect instanced draw covers the indexed atlas. Sprites fade from three
+One indirect instance stream covers the indexed atlas. A depth-only sprite pass
+precedes colour, with matching alpha-tested edges and sample coverage. No size,
+placement, fade or distance rule changes in the performance pass requested by
+John on 2026-10-17. Worker scheduling and bounded uploads may delay publication
+of a changed selection; moving-view equivalence and the CPU/GPU timing targets
+await the lead's comparison. The streaming design is an agent decision described
+in [architecture](../ARCHITECTURE.md#exploratory-vegetation-rendering).
+Sprites fade from three
 pixels down to the 1.5 pixel rejection floor, and over the outer 12% of the
 configured distance. Existing altitude fades and grass rings remain.
 

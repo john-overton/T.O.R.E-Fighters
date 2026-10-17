@@ -48,15 +48,19 @@ struct Drawn {
 @group(0) @binding(5) var<storage, read_write> args: array<u32>;
 @group(0) @binding(6) var<storage, read> meshes: array<Mesh>;
 
+@group(0) @binding(7) var<storage, read> chunks: array<vec2<u32>>;
+
 // The share of full density kept at `dist` (vegetation.rs `share`).
 fn share(dist: f32, full: f32) -> f32 {
   if dist <= full { return 1.0; }
   return pow(full / dist, 1.6);
 }
 
-@compute @workgroup_size(256) fn cull(@builtin(global_invocation_id) id: vec3<u32>) {
-  let i = id.x;
-  if i >= params.counts.x { return; }
+@compute @workgroup_size(256) fn cull(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_index) local: u32) {
+  if group.x >= params.counts.z { return; }
+  let chunk = chunks[group.x];
+  if local >= chunk.y { return; }
+  let i = chunk.x + local;
   let inst = instances[i];
   let mesh = u32(inst.d.x);
   let m = meshes[mesh];

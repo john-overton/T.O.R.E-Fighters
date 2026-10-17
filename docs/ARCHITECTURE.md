@@ -10980,8 +10980,19 @@ retail-art/fallback impostor atlas and optional generated v2 atlas cells once;
 `TORE_VEGETATION_SPRITES` selects retail, pack or mixed at construction. Packed
 cells use negative page codes in the existing instance record, so there is no
 extra draw or instance stride. `Placement` caches terrain patch
-candidates independently of camera distance. `vegetation_renderer` uploads
-changed batches and GPU-culls them into one indirect sprite draw. The grass
-layer remains separate. No vegetation shadow geometry or vegetation state
+candidates independently of camera distance. A bounded `vegetation_stream`
+worker builds object and grass chunks, selects candidates and packs only changed
+selections. `vegetation_renderer` owns persistent 256-instance pages and a free
+list. The cull reads a page table, so inserting a chunk never moves its neighbours.
+Uploads are capped at 256 KiB and 16 instance-buffer writes per normal frame. A staged selection replaces the
+old table only when all its pages are uploaded. Departed pages then return to the
+free list. The old selection remains visible during this bounded upload queue.
+Explicit settled captures wait for the worker and drain uploads.
+
+Two indirect sprite draws use the same culled instances: alpha-tested depth with
+colour writes disabled, then colour with reversed-depth GreaterEqual and depth
+writes disabled. Both use identical edge and sample coverage. The depth fragment
+reads only source transparency, avoiding palette resolution and lighting. The
+grass layer remains separate. No vegetation shadow geometry or vegetation state
 enters simulation, replays, checkpoints or networking. See the
 [placement and sprite specification](spec/terrain-detail.md#sprites-and-cached-placement).

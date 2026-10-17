@@ -919,7 +919,7 @@ fn tracer_night()->f32 {
 // look (0 foliage, 1 solid, 3 recoloured retail rock). Solid objects lean
 // with the ground; trees stand upright.
 struct VegOut {
- @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, @location(1) @interpolate(flat) layer:f32,
+ @builtin(position) @invariant clip:vec4<f32>, @location(0) uv:vec2<f32>, @location(1) @interpolate(flat) layer:f32,
  @location(2) color:vec3<f32>, @location(3) albedo:vec3<f32>, @location(4) direction:vec3<f32>,
  @location(5) normal:vec3<f32>, @location(6) @interpolate(flat) fade:vec2<f32>, @location(7) @interpolate(flat) look:f32,
  @location(8) @interpolate(flat) mean:vec3<f32>, @location(9) height:f32, @location(10) altitude:f32,
@@ -1017,6 +1017,34 @@ fn veg_light(color:vec3<f32>,albedo:vec3<f32>,relative:vec3<f32>,normal:vec3<f32
  let illumination=mix(night,ambient,day)*occlusion+0.90*facing*visibility*tint*mix(1.0,occlusion,0.5);
  let lit=color*illumination+albedo*flare_light(relative,n);
  return mix(color,lit,1.0-clamp(haze(length(relative)),0.0,1.0));
+}
+// Match colour-pass coverage exactly, including multisample cutouts and fade.
+// Palette shading cannot alter alpha, so this skips both palette and lighting.
+fn veg_alpha(uv:vec2<f32>,layer:i32)->f32 {
+ let size=vec2<i32>(tile_size());
+ let p=uv*vec2<f32>(size)-vec2<f32>(0.5);
+ let base=floor(p);
+ let f=p-base;
+ var alpha=0.0;
+ for(var j=0;j<2;j++){
+  for(var i=0;i<2;i++){
+   let at=clamp(vec2<i32>(base)+vec2<i32>(i,j),vec2<i32>(0),size-vec2<i32>(1));
+   let a=select(1.0,0.0,read_tile(at,layer)==255u);
+   let w=select(1.0-f.x,f.x,i==1)*select(1.0-f.y,f.y,j==1);
+   alpha+=a*w;
+  }
+ }
+ return alpha;
+}
+@fragment fn veg_depth(in:VegOut)->FillOut {
+ var alpha=in.fade.x;
+ if in.layer>=0.0 {
+  let a=veg_alpha(in.uv,i32(in.layer));
+  alpha*=clamp((a-0.5)/max(fwidth(a),0.0001)+0.5,0.0,1.0);
+ }
+ let mask=fill_coverage(in.clip.xy,alpha,in.fade.y);
+ if mask==0u {discard;}
+ return FillOut(vec4<f32>(0.0),mask);
 }
 @fragment fn veg_fragment(in:VegOut)->FillOut {
  var color=in.color;
