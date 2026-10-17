@@ -29,6 +29,12 @@ def check_pass5_cameras(work, _output):
 
 def scenarios():
     return [Scenario(
+        name='vegetation-cache-roundtrip', lane='menus',
+        args=['--vegetation-preview', '{work}/cache', 'cache-check'],
+        env={'TORE_VEGETATION': '1', 'TORE_WORKERS': '4'}, timeout=180,
+        outputs=['cache/cache-check.txt'],
+        expect=['vegetation cache: PASS', 'menu without vegetation'],
+    ), Scenario(
         name='vegetation-top-crowns', lane='menus',
         args=['--vegetation-art', '{work}/art'], timeout=120,
         outputs=['art/top-crowns.tsv'], check_work=check_top_crowns,

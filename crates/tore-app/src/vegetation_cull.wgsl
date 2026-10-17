@@ -71,24 +71,18 @@ fn share(dist: f32, full: f32) -> f32 {
   let height = inst.b.x;
   let rel = inst.a.xyz - params.origin.xyz;
   let d = rel + vec3<f32>(0.0, height * 0.5, 0.0) - params.eye.xyz;
-  let dist = length(d);
+  let dist = length(d.xz);
   if dist >= params.tiers.y { return; }
-  // Thin by distance: an object stays while its rank is under the share,
-  // fading over the last part, so a farther view keeps a subset.
-  var s = share(dist, params.tiers.x * abs(inst.d.y));
-  if inst.d.y < 0.0 { s *= smoothstep(0.3, 0.8, dist / params.tiers.x); }
-  let rank = inst.c.w;
-  if rank >= s { return; }
-  let thin = clamp((s - rank) / (0.2 * s + 0.0001), 0.0, 1.0);
-  // Gone once the camera is high: the retail tile is the view from altitude.
-  let alt = 1.0 - smoothstep(7000.0, 15000.0, params.view.w);
-  let edge = 1.0 - smoothstep(params.tiers.y * 0.70, params.tiers.y, dist);
+  // Full population and full coverage throughout the detail circle. No
+  // rank, projected-pixel, altitude or species fade can leave a near ghost.
+  let edge = 1.0 - smoothstep(params.tiers.x, max(params.tiers.x + 1.0, params.tiers.y), dist);
+  let fade = select(edge, 1.0, dist <= params.tiers.x);
+  if fade <= 0.0 { return; }
   let r = max(inst.d.z, height * 0.5);
-  let px = max(height, r * 2.0) * params.view.z / max(dist, 1.0);
-  if px < params.tiers.w { return; }
-  let small = clamp((px - params.tiers.w) / max(params.tiers.w, 1.0), 0.0, 1.0);
-  let fade = thin * alt * edge * small;
-  if fade <= 0.002 { return; }
+  let z = dot(d, params.forward.xyz);
+  if z < -r { return; }
+  if abs(dot(d, params.right.xyz)) > z * params.view.x + r * 1.6 { return; }
+  if abs(dot(d, params.up.xyz)) > z * params.view.y + r * 1.6 { return; }
   var out: Drawn;
   out.place = vec4<f32>(rel, inst.d.w);
   out.turn = vec4<f32>(cos(inst.a.w), sin(inst.a.w), height, fade);
@@ -96,10 +90,6 @@ fn share(dist: f32, full: f32) -> f32 {
   out.tint = vec4<f32>(inst.c.xyz, m.info.z * 1.02);
   out.mean = m.mean;
   out.top = m.top;
-  let z = dot(d, params.forward.xyz);
-  if z < -r { return; }
-  if abs(dot(d, params.right.xyz)) > z * params.view.x + r * 1.6 { return; }
-  if abs(dot(d, params.up.xyz)) > z * params.view.y + r * 1.6 { return; }
   let k = atomicAdd(&counts[0], 1u);
   if k < capacity { drawn[first + k] = out; }
 }

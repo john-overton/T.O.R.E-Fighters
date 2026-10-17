@@ -98,6 +98,35 @@ pub fn run() -> AppResult<()> {
     }
     let assets = crate::reel::load_assets()?;
     let resources = &assets.theater_resources;
+    if jobs.iter().any(|job| job == "cache-check") {
+        let start = Instant::now();
+        let world = crate::scenery::launch_terrain(resources, "UKR", None)?;
+        let menu = Scenery::build_for(resources, &world, false)?;
+        assert!(
+            menu.vegetation.is_none()
+                && menu.vegetation_meshes.is_none()
+                && menu.canopy.pages_x == 0
+        );
+        let menu_ms = start.elapsed().as_secs_f64() * 1000.;
+        let start = Instant::now();
+        let first = Scenery::build(resources, &world)?;
+        let cold_ms = start.elapsed().as_secs_f64() * 1000.;
+        let start = Instant::now();
+        let again = Scenery::build(resources, &world)?;
+        let warm_ms = start.elapsed().as_secs_f64() * 1000.;
+        if !again.vegetation_cache_hit
+            || first.sky_indices != again.sky_indices
+            || first.canopy != again.canopy
+        {
+            return Err("vegetation cache did not restore identical pages and map".into());
+        }
+        let report = format!(
+            "vegetation cache: PASS identical atlas/cards/canopy cache hit; menu without vegetation\nmenu_terrain_ms={menu_ms:.3} first_scenery_ms={cold_ms:.3} cached_scenery_ms={warm_ms:.3}\n"
+        );
+        print!("{report}");
+        std::fs::write(out.join("cache-check.txt"), report)?;
+        return Ok(());
+    }
     if jobs.iter().any(|job| job == "stream-check") {
         return stream_check(resources, out);
     }
@@ -467,6 +496,7 @@ struct Sample {
     vegetation_submit_ms: f64,
     pending: bool,
     stream: crate::vegetation_renderer::CacheFrame,
+    popin: crate::vegetation_renderer::popin::Counts,
 }
 
 impl Sample {
@@ -605,17 +635,21 @@ fn lowpass(resources: &std::collections::BTreeMap<String, Vec<u8>>, out: &Path) 
                     .collect();
                 let timed = gpu.measure(&refs, &world, &scenery)?;
                 let mut csv = String::from(
-                    "frame,gpu_off_ms,gpu_on_ms,vegetation_submit_ms,frame_submit_ms,pending\n",
+                    "frame,gpu_off_ms,gpu_on_ms,vegetation_submit_ms,frame_submit_ms,pending,near_instances,appeared_inside_detail,near_fading,estimated_fps\n",
                 );
                 for sample in &timed {
                     csv += &format!(
-                        "{},{:.6},{:.6},{:.6},{:.6},{}\n",
+                        "{},{:.6},{:.6},{:.6},{:.6},{},{},{},{},{:.3}\n",
                         sample.frame,
                         sample.gpu_off,
                         sample.gpu_on,
                         sample.vegetation_submit_ms,
                         sample.submit_ms,
-                        sample.pending
+                        sample.pending,
+                        sample.popin.near,
+                        sample.popin.appeared,
+                        sample.popin.faded,
+                        1000. / sample.gpu_on.max(sample.submit_ms).max(0.001)
                     );
                 }
                 std::fs::write(
@@ -709,9 +743,10 @@ fn stream_check(
         let camera = lowpass_camera(&world, &spot, -1.5 * crate::vegetation::NM);
         for density in lowpass_densities()? {
             let options = lowpass_options(density);
-            let full = options.vegetation_detail_nm as f32 * crate::vegetation::NM as f32 * 0.4;
+            let full = options.vegetation_detail_nm as f32 * crate::vegetation::NM as f32;
             let request = Request {
                 epoch: 0,
+                ahead: [0.; 2],
                 eye: [camera.position[0], camera.position[2]],
                 full,
                 draw: options.vegetation_distance_nm as f32 * crate::vegetation::NM as f32,
@@ -1713,6 +1748,7 @@ impl View {
         if period <= 0. {
             return Err("GPU timestamp period is zero".into());
         }
+        let mut observer = crate::vegetation_renderer::popin::Monitor::default();
         let mut out = Vec::with_capacity(frames.len());
         for chunk in frames.chunks(8) {
             let count = (chunk.len() * 4) as u32;
@@ -1753,13 +1789,19 @@ impl View {
                     .as_ref()
                     .map(|vegetation| (vegetation.placed(), vegetation.tufts_drawn()))
                     .unwrap_or_default();
-                cpu.push((
-                    *frame,
-                    placed,
-                    tufts,
-                    cache,
-                    started.elapsed().as_secs_f64() * 1_000.,
-                ));
+                let submit_ms = started.elapsed().as_secs_f64() * 1_000.;
+                let popin = self
+                    .sim
+                    .vegetation
+                    .as_ref()
+                    .map_or(Default::default(), |v| {
+                        observer.sample(
+                            v.near_population(camera, self.size),
+                            [camera.position[0], camera.position[2]],
+                            v.detail_reach(),
+                        )
+                    });
+                cpu.push((*frame, placed, tufts, cache, submit_ms, popin));
             }
             let mut encoder = self.device.create_command_encoder(&Default::default());
             encoder.resolve_query_set(&queries, 0..count, &resolved, 0);
@@ -1780,7 +1822,8 @@ impl View {
                 .collect();
             drop(mapped);
             readback.unmap();
-            for (i, (frame, placed, tufts, cache, submit_ms)) in cpu.into_iter().enumerate() {
+            for (i, (frame, placed, tufts, cache, submit_ms, popin)) in cpu.into_iter().enumerate()
+            {
                 out.push(Sample {
                     frame,
                     gpu_off: ticks[i * 4 + 1].saturating_sub(ticks[i * 4]) as f64 * period
@@ -1796,6 +1839,7 @@ impl View {
                     vegetation_submit_ms: cache.submit_ms,
                     pending: cache.pending,
                     stream: cache,
+                    popin,
                 });
             }
             if frames.len() > 8 && (out.len() % 120 < 8 || out.len() == frames.len()) {

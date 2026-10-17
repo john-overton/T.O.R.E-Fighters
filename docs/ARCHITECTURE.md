@@ -10964,7 +10964,8 @@ scope and provenance.
 
 ## Flight loading ownership
 
-The app lends its world to a loader during restart and Quick Mission setup.
+The app lends its world to a loader during restart. Quick Mission selection
+loads aircraft only; its final mission builds terrain and scenery once.
 Only loading-screen event handling runs until ownership returns. Mission, scenery,
 recording initialization and thread-safe wgpu preparation run on workers; the
 window and surface remain on the event thread. The multiplayer client opts into
@@ -10975,25 +10976,32 @@ and [CPU measurement](baselines/loading-screen.md).
 
 ## Exploratory vegetation rendering
 
-On `exp/vegetation`, vegetation is app presentation data. `Scenery` builds retail
-impostors and supplied v2/Sahara/top-view cells once. Missing retail species use
-supplied cutouts; there are no code-drawn vegetation fallbacks. A palette-indexed
-canopy map stores expected crown area and mean sprite colour from the same site
-classifier. It shares the terrain texture array and stays in runtime memory.
+On `exp/vegetation`, vegetation is app presentation data. The menu scene omits
+its atlas, baked cards and canopy pages. The mission worker builds them for its
+actual theater, using `tore-workers` for independent canopy pages, coast rows,
+retail sprite bakes and placement chunks. Publication remains ordered.
 
-`Placement` caches candidates independently of view distance. A bounded worker
-builds object/grass chunks, then packs a selection only after the complete ring's
-density has settled. Partial rings never change the published rank cutoff.
-Unchanged completed requests do no worker work. Movement builds candidates only
-for entering chunks; changed distance/rank selections can still replace packed
-pages. The renderer owns
-persistent 256-instance pages. Uploads are capped at 256 KiB and 16 writes per
-normal frame. Old selections remain until replacements are completely uploaded.
-The prefetch ring extends two chunks beyond draw range. Whole-chunk budget
-truncation is replaced by global rank thinning, and an uploaded coverage circle
-bounds the smooth per-instance distance fade. A temporarily late worker shortens
-that circle; newly available radius expands continuously. Settled captures wait
-for all placement and uploads. See the [numerical specification](spec/terrain-detail.md#sprites-and-cached-placement).
+`vegetation_cache` stores bounded, checksummed files under the imported profile's
+`vegetation-cache/`. Keys include theater, import generation and decoded resource
+contents, effective terrain/runway/city exclusions, palette, sprite mode, page
+base and an automatically computed code/data version. The build hashes app,
+world, simulation geometry, formats and workers sources plus supplied vegetation assets. Any change
+invalidates previous results. Missing, incompatible, truncated or corrupt entries
+are rebuilt. Atomic temporary-file renames publish complete entries; cache write
+failure leaves the load working. Runtime retail derivatives stay local. The
+coast mask uses one bit per cell. Canopy pages store 128 by 256 samples in each
+256-square index page, using every row and halving their former padded storage. `TORE_VEG_CACHE=0` bypasses caching for timings.
+
+`Placement` retains fixed geographic selections within configured quotas, with
+no distance-dependent repacking or budget squeeze. The bounded worker completes
+a guarded ring before publishing it. Near chunks precede velocity-prefetched
+outer chunks. The loading graphics factory builds and uploads the initial ring
+before releasing flight. Persistent 256-instance pages retain unchanged bytes.
+Normal uploads are capped at 256 KiB and 16 writes per frame. Mesh tables upload
+only after settings changes; chunk tables upload only on publication. Hidden
+angle cards degenerate before rasterization. Canopy shading exits before its
+texture reads inside the protected detail radius. See the
+[numerical specification](spec/terrain-detail.md#sprites-and-cached-placement).
 
 The 64-byte candidate record is unchanged. The culled record is 96 bytes and the
 mesh table is 48 bytes, with top-card page, height and opaque half extents. Facing/cross/top
@@ -11003,7 +11011,8 @@ partial-page slots. The latter bound covers both maximum 8 nm guarded rings.
 At Ultra the corresponding allocations are 24 MiB and 112 MiB.
 
 Matching alpha-tested depth and colour draws share vertices and sample coverage,
-including the top card's view-angle fade. Top cards remain inside the side
+including the top card's view-angle fade. Side and top use complementary sample
+masks so their overlapping interiors keep full combined coverage. Top cards remain inside the side
 silhouettes at their grounded canopy height. Facing/top is the default. Single
 tops use opaque side widths and the instance's seeded scale. Retail grove tops
 are runtime indexed composites of individual crown cutouts; their transparent

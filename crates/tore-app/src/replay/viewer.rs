@@ -905,6 +905,18 @@ struct Growth {
 }
 
 impl Viewer {
+    pub(crate) fn loading_eye(&mut self) -> [f64; 3] {
+        self.playback
+            .frame(self.clock.tick())
+            .and_then(|(frames, at)| {
+                frames[at]
+                    .aircraft
+                    .iter()
+                    .find(|a| a.id == self.selected)
+                    .map(|a| a.position)
+            })
+            .unwrap_or(self.template.position)
+    }
     pub(crate) fn loading_art(&self) -> &CombatArt {
         &self.art
     }

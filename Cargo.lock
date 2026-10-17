@@ -1980,6 +1980,7 @@ dependencies = [
  "cpal",
  "log",
  "pollster",
+ "tore-codec",
  "tore-diagnostics-native",
  "tore-formats",
  "tore-import",

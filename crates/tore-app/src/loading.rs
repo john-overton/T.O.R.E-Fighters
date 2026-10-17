@@ -11,10 +11,11 @@ use std::{
 
 // CPU weights measured on the private UKR/F18 profile probe (2026-10-16).
 // Graphics is a fitted 500 ms reservation until measured on a GPU host.
-const WEIGHTS: [u32; 4] = [2442, 11, 164, 500];
+const WEIGHTS: [u32; 5] = [25, 2442, 11, 164, 500];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Stage {
+    Selection,
     Content,
     Connecting,
     Waiting,
@@ -28,6 +29,7 @@ pub(crate) enum Stage {
 impl Stage {
     pub fn words(self) -> &'static str {
         match self {
+            Self::Selection => "Preparing loadout",
             Self::Content => "Checking game content",
             Self::Connecting => "Connecting to the host",
             Self::Waiting => "Waiting for the host",
@@ -48,11 +50,12 @@ impl Stage {
     }
     fn index(self) -> usize {
         match self {
-            Self::Content | Self::Connecting | Self::Waiting | Self::Replay | Self::Mission => 0,
-            Self::Aircraft => 1,
-            Self::Scenery => 2,
-            Self::Graphics => 3,
-            Self::Ready => 4,
+            Self::Selection | Self::Content | Self::Connecting | Self::Waiting => 0,
+            Self::Replay | Self::Mission => 1,
+            Self::Aircraft => 2,
+            Self::Scenery => 3,
+            Self::Graphics => 4,
+            Self::Ready => 5,
         }
     }
     fn estimate(self, elapsed: f64) -> f64 {
@@ -69,13 +72,45 @@ impl Stage {
     }
 }
 #[derive(Clone)]
-pub(crate) struct Progress(Arc<Mutex<(Stage, Instant)>>);
+pub(crate) struct Progress(Arc<Mutex<(Stage, Instant)>>, usize);
+fn random_photo() -> usize {
+    // Presentation only. Independent of all simulation seeds and worker order.
+    use std::hash::{BuildHasher, Hasher};
+    (std::collections::hash_map::RandomState::new()
+        .build_hasher()
+        .finish()
+        & 1) as usize
+}
 impl Progress {
     fn new() -> Self {
-        Self(Arc::new(Mutex::new((Stage::Mission, Instant::now()))))
+        Self(
+            Arc::new(Mutex::new((Stage::Selection, Instant::now()))),
+            random_photo(),
+        )
+    }
+    pub fn network() -> Self {
+        Self(
+            Arc::new(Mutex::new((Stage::Content, Instant::now()))),
+            random_photo(),
+        )
+    }
+    pub fn draw(&self, pixels: &mut Vec<u8>, size: [u32; 2], details: [&str; 2]) -> [u32; 2] {
+        let (stage, elapsed) = self.current();
+        draw_window(pixels, size, self.1, stage, elapsed, details)
     }
     pub fn stage(&self, stage: Stage) {
         let mut current = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if stage.index() == 0 && current.0.index() == 0 && current.0 != Stage::Selection {
+            current.0 = stage;
+            return;
+        }
+        if stage == Stage::Replay && current.0 == Stage::Mission {
+            current.0 = stage;
+            return;
+        }
+        if stage.index() <= current.0.index() {
+            return;
+        }
         log::info!(
             "loading: {:?} {:.3} ms",
             current.0,
@@ -104,9 +139,18 @@ impl<T: Send + 'static> Job<T> {
     pub fn spawn(
         work: impl FnOnce(Progress) -> Result<T, String> + Send + 'static,
     ) -> Result<Self, String> {
-        static PHOTO: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let (send, receive) = mpsc::channel();
         let progress = Progress::new();
+        progress.stage(Stage::Mission);
+        Self::continue_load(Some(progress), true, work)
+    }
+    pub fn continue_load(
+        progress: Option<Progress>,
+        complete: bool,
+        work: impl FnOnce(Progress) -> Result<T, String> + Send + 'static,
+    ) -> Result<Self, String> {
+        let (send, receive) = mpsc::channel();
+        let progress = progress.unwrap_or_else(Progress::new);
+        let photo = progress.1;
         let status = progress.clone();
         let thread = std::thread::Builder::new()
             .name("flight-loader".into())
@@ -115,7 +159,7 @@ impl<T: Send + 'static> Job<T> {
                 prepare_photos();
                 let result = work(status.clone());
                 // A failed load is not completion: leave the last real stage up.
-                if result.is_ok() {
+                if complete && result.is_ok() {
                     status.stage(Stage::Ready);
                 }
                 let _ = send.send(result);
@@ -124,7 +168,7 @@ impl<T: Send + 'static> Job<T> {
         Ok(Self {
             receive,
             progress,
-            photo: PHOTO.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 2,
+            photo,
             thread: Some(thread),
         })
     }
@@ -368,11 +412,8 @@ fn draw_sized(
         (80, 370, (4.8 * stage.estimate(elapsed)) as i32, 16),
         [180, 200, 220, 255],
     );
-    // The moving highlight continues even when estimates round to the same value.
-    let x = 80 + ((elapsed * 100.) as i32 % 460);
-    canvas.rect((x, 390, 20, 2), [220, 230, 240, 255]);
+
     if matches!(stage, Stage::Content | Stage::Connecting | Stage::Waiting) {
-        canvas.rect((x, 370, 20, 16), [180, 200, 220, 255]);
         canvas.centered_text(&font, &format!("{elapsed:.0}s"), (80, 405, 480, 24));
     } else {
         canvas.centered_text(
@@ -407,6 +448,7 @@ pub(crate) fn prepare_mission(
     ),
     String,
 > {
+    progress.stage(Stage::Mission);
     let mut models = Vec::new();
     let mut load = |id| -> tore_world::WorldResult<Arc<tore_world::aircraft_type::AircraftType>> {
         let model = crate::aircraft::Airframe::load(resources, id)?;
@@ -452,14 +494,6 @@ pub(crate) type NetParts = (
     Option<crate::renderer::LoadingGraphics>,
 );
 
-pub(crate) type SelectionParts = (
-    crate::world::World,
-    crate::aircraft::Airframe,
-    crate::combat_view::CombatView,
-    crate::scenery::Scenery,
-    Option<crate::renderer::LoadingGraphics>,
-);
-
 pub(crate) type MissionParts = (
     crate::world::Built,
     crate::combat_view::CombatView,
@@ -470,7 +504,7 @@ pub(crate) type MissionParts = (
 
 pub(crate) enum Prepared {
     NetRebuilt(Box<crate::net::session::Built>),
-    Selection(Box<SelectionParts>),
+    Selection(Box<crate::aircraft::Airframe>),
     Restart(
         Box<(
             crate::world::World,
@@ -489,6 +523,38 @@ pub(crate) enum Prepared {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn one_photo_and_monotonic_progress_across_selection_and_mission() {
+        let progress = Progress::new();
+        let photo = progress.1;
+        let stages = [
+            Stage::Selection,
+            Stage::Mission,
+            Stage::Aircraft,
+            Stage::Scenery,
+            Stage::Graphics,
+            Stage::Ready,
+        ];
+        let mut previous = 0.;
+        for stage in stages {
+            progress.stage(stage);
+            let (current, elapsed) = progress.current();
+            assert_eq!(current, stage);
+            let value = current.estimate(elapsed);
+            assert!(value >= previous);
+            previous = value;
+            // Duplicate and late producer notifications cannot reset a clock
+            // or replay an earlier visible stage.
+            progress.stage(stage);
+            progress.stage(Stage::Selection);
+            let (current, elapsed) = progress.current();
+            assert!(current.estimate(elapsed) >= previous);
+            assert_eq!(progress.1, photo);
+        }
+        let job = Job::continue_load(Some(progress.clone()), true, |_| Ok(())).unwrap();
+        assert_eq!(job.photo, photo);
+        assert_eq!(job.progress.current().0.estimate(0.), 100.);
+    }
     #[test]
     fn creator_smoke_restart_keeps_the_accepted_start() {
         let resources = tore_world::test_support::resources::resources();
@@ -511,7 +577,7 @@ mod tests {
             Stage::Graphics,
             Stage::Ready,
         ];
-        assert_eq!(stages[0].percent(), 0);
+        assert_eq!(Stage::Selection.percent(), 0);
         assert_eq!(stages[4].percent(), 100);
         assert!(
             stages
@@ -521,7 +587,7 @@ mod tests {
     }
     #[test]
     fn estimated_progress_uses_weights_without_claiming_completion() {
-        assert_eq!(WEIGHTS.iter().sum::<u32>(), 3117);
+        assert_eq!(WEIGHTS.iter().sum::<u32>(), 3142);
         for stage in [
             Stage::Mission,
             Stage::Aircraft,
@@ -721,12 +787,20 @@ pub(crate) fn timing(name: &'static str) -> Timing {
 }
 impl Drop for Timing {
     fn drop(&mut self) {
-        log::info!(
-            "loading timing: {} {:.3} ms",
-            self.0,
-            self.1.elapsed().as_secs_f64() * 1000.
-        );
+        measured(self.0, self.1.elapsed());
     }
+}
+
+pub(crate) fn measured(name: &str, elapsed: std::time::Duration) {
+    log::info!(
+        "loading timing: {name} {:.3} ms",
+        elapsed.as_secs_f64() * 1000.
+    );
+    #[cfg(test)]
+    eprintln!(
+        "loading timing: {name} {:.3} ms",
+        elapsed.as_secs_f64() * 1000.
+    );
 }
 
 /// Command-line view options restored only after the creator's worker completes.

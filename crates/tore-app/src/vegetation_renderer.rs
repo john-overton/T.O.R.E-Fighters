@@ -11,6 +11,9 @@ use wgpu::util::DeviceExt;
 #[path = "vegetation_stream.rs"]
 pub(crate) mod stream;
 
+#[path = "vegetation_popin.rs"]
+pub(crate) mod popin;
+
 const INST_STRIDE: u64 = 64;
 const DRAWN_STRIDE: u64 = 96;
 const PATCH_STRIDE: u64 = 64;
@@ -37,6 +40,7 @@ pub struct Renderer {
     args: wgpu::Buffer,
     params: wgpu::Buffer,
     meshes: wgpu::Buffer,
+    mesh_dirty: bool,
     patches: wgpu::Buffer,
     bind: wgpu::BindGroup,
     layout: wgpu::BindGroupLayout,
@@ -55,6 +59,7 @@ pub struct Renderer {
     draw_nm: f32,
     visible_reach: f32,
     last_prepare: std::time::Instant,
+    last_eye: Option<[f64; 2]>,
     detail_nm: f32,
     density: f32,
     grass_radius: f32,
@@ -242,6 +247,7 @@ impl Renderer {
             args,
             params,
             meshes,
+            mesh_dirty: true,
             patches,
             bind,
             layout,
@@ -258,6 +264,7 @@ impl Renderer {
             draw_nm: 0.,
             visible_reach: 0.,
             last_prepare: std::time::Instant::now(),
+            last_eye: None,
             detail_nm: 0.,
             density: 1.,
             grass_radius: 0.,
@@ -268,6 +275,7 @@ impl Renderer {
     }
 
     pub fn set_options(&mut self, device: &wgpu::Device, options: &crate::graphics::Options) {
+        self.mesh_dirty = true;
         self.cards = options.vegetation_cards.effective();
         self.draw_nm = options.vegetation_distance_nm as f32;
         self.detail_nm = (options.vegetation_detail_nm as f32).min(self.draw_nm);
@@ -338,6 +346,43 @@ impl Renderer {
         self.last_cache
     }
 
+    // PASS6_POPIN_OBSERVER_BEGIN
+    /// Observe the uploaded population without GPU readback or frustum-entry
+    /// false positives. Called only by the explicit low-pass benchmark.
+    pub fn near_population(&self, camera: &Camera, _size: [u32; 2]) -> popin::Population {
+        let full = self.detail_nm * vegetation::NM as f32;
+        let mut out = popin::Population::new();
+        if let Some(ready) = &self.ready {
+            for (_, bytes) in &ready.chunks {
+                for bytes in bytes.chunks_exact(INST_STRIDE as usize) {
+                    let words: [f32; 16] = std::array::from_fn(|i| {
+                        f32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap())
+                    });
+                    let distance = (words[0] - camera.position[0] as f32)
+                        .hypot(words[2] - camera.position[2] as f32);
+                    if distance > full || distance >= self.visible_reach {
+                        continue;
+                    }
+                    let fade = 1.;
+                    out.insert(
+                        [
+                            words[0].to_bits(),
+                            words[1].to_bits(),
+                            words[2].to_bits(),
+                            words[12].to_bits(),
+                        ],
+                        fade,
+                    );
+                }
+            }
+        }
+        out
+    }
+    pub fn detail_reach(&self) -> f32 {
+        self.detail_nm * vegetation::NM as f32
+    }
+    // PASS6_POPIN_OBSERVER_END
+
     /// Objects placed around the camera.
     pub fn placed(&self) -> u32 {
         self.count
@@ -391,17 +436,29 @@ impl Renderer {
         let started = std::time::Instant::now();
         self.prepared = false;
         self.rings.clear();
-        if self.suppressed || self.draw_nm <= 0. || camera.position[1] > 16_000. {
+        if self.suppressed || self.draw_nm <= 0. {
             self.last_cache = CacheFrame::default();
             return;
         }
         self.last_cache = CacheFrame::default();
         let eye2 = [camera.position[0], camera.position[2]];
-        let full = self.detail_nm * vegetation::NM as f32 * 0.4;
+        let dt = self.last_prepare.elapsed().as_secs_f64().max(0.001);
+        let ahead = self.last_eye.map_or([0.; 2], |last| {
+            let delta = [eye2[0] - last[0], eye2[1] - last[1]];
+            let distance = delta[0].hypot(delta[1]);
+            // Five seconds at 480 kt is about 4,050 ft, within the guard ring.
+            let scale = (5. / dt).min(4096. / distance.max(1.));
+            let ahead = delta.map(|v| (v * scale / 512.).round() * 512.);
+            let scale = 4096. / ahead[0].hypot(ahead[1]).max(4096.);
+            ahead.map(|v| v * scale)
+        });
+        self.last_eye = Some(eye2);
+        let full = self.detail_nm * vegetation::NM as f32;
         let draw = self.draw_nm * vegetation::NM as f32;
         let request = stream::Request {
             epoch: self.epoch,
             eye: eye2,
+            ahead,
             full,
             draw,
             density: self.density,
@@ -445,14 +502,16 @@ impl Renderer {
                 self.last_cache.uploaded_bytes += bytes.len();
             },
         );
-        if !self.pages.pending() && self.incoming.is_some() {
-            self.ready = self.incoming.take();
-        }
-        let (table, count) = self.pages.table();
-        self.count = count;
-        self.page_count = (table.len() / 2) as u32;
-        if !table.is_empty() {
-            queue.write_buffer(&self.chunks, 0, &bytes_of_u32(&table));
+        if !self.pages.pending() && (self.incoming.is_some() || self.settle) {
+            if self.incoming.is_some() {
+                self.ready = self.incoming.take();
+            }
+            let (table, count) = self.pages.table();
+            self.count = count;
+            self.page_count = (table.len() / 2) as u32;
+            if !table.is_empty() {
+                queue.write_buffer(&self.chunks, 0, &bytes_of_u32(&table));
+            }
         }
         if !self.pages.pending() && !self.settle {
             worker.request(request);
@@ -474,15 +533,22 @@ impl Renderer {
         self.last_prepare = std::time::Instant::now();
         let (reach, range_pending) =
             advance_visible_range(self.visible_reach, available, draw, dt, self.settle);
+        let reach = if available >= full {
+            reach.max(full)
+        } else {
+            0.
+        };
         self.visible_reach = reach;
         self.last_cache.available = available;
         self.last_cache.visible = reach;
         self.last_cache.range_pending = range_pending;
         self.last_cache.pending |= range_pending;
         let draw = self.visible_reach;
-        let full = full * self.squeeze();
-        self.upload_meshes(queue);
-        queue.write_buffer(&self.args, 0, &self.cards.vertices().to_le_bytes());
+        if self.mesh_dirty {
+            self.upload_meshes(queue);
+            queue.write_buffer(&self.args, 0, &self.cards.vertices().to_le_bytes());
+            self.mesh_dirty = false;
+        }
         let (fx, rx, ux) = basis(camera);
         let height = (size[1] as f32 * camera.view_fraction).max(1.);
         let aspect = size[0] as f32 / height;
@@ -507,7 +573,7 @@ impl Renderer {
             return;
         }
         let mesh_count = self.library.meshes.len();
-        queue.write_buffer(&self.counts, 0, &vec![0u8; mesh_count * 8]);
+        encoder.clear_buffer(&self.counts, 0, None);
         let mut params = Vec::with_capacity(32);
         params.extend([origin[0] as f32, origin[1] as f32, origin[2] as f32, 0.]);
         params.extend([eye[0], eye[1], eye[2], 0.]);

@@ -188,13 +188,10 @@ same with and without one.
 
 **Vegetation distance** is how far trees, bushes, palms and rocks are
 drawn, the same idea as building distance. **Vegetation detail** sets
-how far they stay at full density: trees are at full density out to
-0.4 times the detail distance (about 4,900 ft at the default 2 nm) and
-thin beyond it, smaller things sooner (bushes and boulders at about a
-third of that, single stones at about an eighth), and the grass carpet
-reaches half the detail distance at most. Tree clumps (retail grove
-shapes) stand in for single trees from about a third of the full
-density distance outwards. The trees, bushes, palms and rocks are the
+how far every configured instance stays at full distance opacity and density.
+The setting is used directly for all species, including small stones and clumps.
+Only the band from detail to draw distance fades, with matching distant-canopy
+coverage. The trees, bushes, palms and rocks are the
 cutout sprites from retail art and John's supplied v2/Sahara packs. The developer
 switch `TORE_VEGETATION_SPRITES=retail|pack|mixed` selects art at scene startup,
 with `mixed` the branch default. Missing retail species use supplied art.
@@ -204,8 +201,9 @@ John on 2026-10-17. Missing saved card settings take that default; explicit save
 choices remain selectable and round-trip. The original-presentation pixel-test
 preset retains Facing.
 `TORE_VEGETATION_CARDS=billboard|cross|cross-top|billboard-top` overrides that row
-for a run and is not saved. Sprites have a 1.5 pixel floor and a smooth fade over
-the outer 30% of draw range. Distant forest coverage continues on the terrain.
+for a run and is not saved. Sprites have full distance opacity inside detail range. Distant forest coverage
+continues on the terrain. Top modes use complementary side/top coverage from
+35 to 65 degrees down, at the measured visual crown centre.
 
 **Vegetation density** is Low, Med, High or Ultra. John requested a one-step
 reduction on 2026-10-17: new Ultra equals previous High, High equals previous
@@ -221,15 +219,13 @@ previous High grid, the multipliers are 0.2, 0.4, 0.7 and 1.0.
 | Ultra | 1,500 ft | 160 | 262,144 |
 
 Each tuft has five blades. Grass thins in four rings: full within 14%
-of its radius, then half, a quarter and an eighth. Where a view would
-hold more objects than the density keeps (a deep forest at High would
-hold several times as many), full density reaches less far, for every kind
-of object alike, so the view thins sooner instead of stopping short of
-the vegetation distance. With the larger budget Ultra keeps about the
-same thinning distance as High in such places, so it is denser at
-every distance and reaches farther. Objects also fade out with height,
-full below about 7,000 ft and gone by about 15,000 ft, and nothing is
-placed above 16,000 ft.
+of its radius, then half, a quarter and an eighth. Object budgets are divided into fixed geographic patch quotas, independent
+of the camera. Saturated patches retain the same seeded population throughout
+an approach. This is a fitted agent choice; a saturated forest can be sparser
+than its unconstrained candidate grid. Detail distance is never silently
+shortened to meet the budget. Object opacity has no separate altitude or
+projected-pixel fade inside detail range. Grass retains its separate distance
+rings and habitat rules.
 
 The six values are saved in `graphics-v1.conf` only when they differ
 from the defaults (`vegetation-texture`, `vegetation-texture-distance`,

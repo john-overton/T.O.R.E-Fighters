@@ -21,6 +21,7 @@ pub type Chunks = Vec<(Key, Arc<Vec<u8>>)>;
 pub struct Request {
     pub epoch: u64,
     pub eye: [f64; 2],
+    pub ahead: [f64; 2],
     pub full: f32,
     pub draw: f32,
     pub density: f32,
@@ -103,6 +104,7 @@ impl Worker {
                     placement.set_density(request.density);
                     placement.set_budget(request.capacity);
                     let before = (placement.builds, placement.grass_builds, placement.build_ns);
+                    placement.prefetch(request.ahead);
                     let done = placement.update(
                         &world,
                         request.eye,
@@ -466,6 +468,7 @@ mod tests {
         // would repack and reupload resident chunks while this camera is still.
         let request = Request {
             epoch: 0,
+            ahead: [0.; 2],
             eye: [4000., 4000.],
             full: 3000.,
             draw: 6000.,

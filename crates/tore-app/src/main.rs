@@ -304,7 +304,7 @@ fn sync_stability(
 }
 struct App {
     creator_loading_view: Option<loading::CreatorView>,
-    network_loading_stage: Option<(loading::Stage, Instant)>,
+    network_loading_stage: Option<loading::Progress>,
     loading_heartbeat: Option<Instant>,
     loading_max_gap: Duration,
     background_finishes: Vec<std::thread::JoinHandle<()>>,
@@ -313,6 +313,7 @@ struct App {
     pending_join: Option<(net::session::Join, String)>,
     loading: Option<loading::Job<loading::Prepared>>,
     mission_selection_ready: bool,
+    mission_loading_progress: Option<loading::Progress>,
     restart_recorded: bool,
     prepared_recording: Option<Option<replay::recorder::Recorder>>,
     prepared_restart: Option<world::Restarted>,
@@ -2653,34 +2654,43 @@ impl App {
             .map(renderer::Renderer::loading_factory);
         let check_restart = self.smoke_test && self.creator_loading_view.is_some();
         let start_recording = self.recording_starter();
-        self.loading = Some(loading::Job::spawn(move |progress| {
-            let (mut built, view, mut scenery) =
-                loading::prepare_mission(&spec, &resources, Arc::clone(&player), &progress)?;
-            if check_restart {
-                built.restarted = loading::verify_restart(&mut built.world, &player, &resources)?;
-            }
-            let graphics = if let Some(build) = graphics {
-                let aircraft = aircraft::Airframe::load(&resources, spec.player())
-                    .map_err(|e| e.to_string())?;
-                let geometry = Arc::clone(scenery.static_geometry(
-                    &built.world.combat.state.targets,
-                    &built.world.combat.surface,
-                ));
-                Some(build(
-                    &scenery,
-                    &aircraft,
-                    &view.models,
-                    &view.art,
-                    Some(&geometry),
-                ))
-            } else {
-                None
-            };
-            let recording = start_recording(&mut built.world);
-            Ok(loading::Prepared::Mission(Box::new((
-                built, view, scenery, graphics, recording,
-            ))))
-        })?);
+        self.loading = Some(loading::Job::continue_load(
+            self.mission_loading_progress.take(),
+            true,
+            move |progress| {
+                let (mut built, view, mut scenery) =
+                    loading::prepare_mission(&spec, &resources, Arc::clone(&player), &progress)?;
+                if check_restart {
+                    built.restarted =
+                        loading::verify_restart(&mut built.world, &player, &resources)?;
+                }
+                let graphics = if let Some(build) = graphics {
+                    let aircraft = aircraft::Airframe::load(&resources, spec.player())
+                        .map_err(|e| e.to_string())?;
+                    let geometry = Arc::clone(scenery.static_geometry(
+                        &built.world.combat.state.targets,
+                        &built.world.combat.surface,
+                    ));
+                    Some(build(
+                        renderer::LoadingScene {
+                            scenery: &scenery,
+                            world: &built.world.terrain,
+                            eye: built.world.cockpits[OWN].flight.position,
+                        },
+                        &aircraft,
+                        &view.models,
+                        &view.art,
+                        Some(&geometry),
+                    ))
+                } else {
+                    None
+                };
+                let recording = start_recording(&mut built.world);
+                Ok(loading::Prepared::Mission(Box::new((
+                    built, view, scenery, graphics, recording,
+                ))))
+            },
+        )?);
         Ok(())
     }
 
@@ -2938,70 +2948,27 @@ impl App {
                 let Some(id) = self.quick.player() else {
                     return;
                 };
+                if self.quick.theater_code().is_none() {
+                    return;
+                }
                 if !std::mem::take(&mut self.mission_selection_ready) {
                     if let Err(error) = self.finish_combat_tape() {
                         self.error = Some(error);
                         event_loop.exit();
                         return;
                     }
-                    let Some(code) = self.quick.theater_code().map(str::to_owned) else {
-                        return;
-                    };
-                    let mut world = self.world.0.take().expect("active world");
                     let resources = Arc::clone(&self.theater_resources);
-                    let graphics = self
-                        .renderer
-                        .as_ref()
-                        .map(renderer::Renderer::loading_factory);
-                    let job = loading::Job::spawn(move |progress| {
-                        let result = (|| -> AppResult<_> {
-                            let terrain = scenery::launch_terrain(&resources, &code, None)?;
-                            world.setup.ground_start = None;
-                            world.cockpits[OWN].airport_service =
-                                tore_sim::airport::Service::new(&terrain.airport_scene)
-                                    .map_err(std::io::Error::other)?;
-                            world.terrain = terrain;
-                            progress.stage(loading::Stage::Aircraft);
-                            let aircraft = aircraft::Airframe::load(&resources, id)?;
-                            world.reset_weather();
-                            world.cockpits[OWN].flight = aircraft.start(&world.terrain);
-                            let mut combat =
-                                combat::Combat::new(&aircraft, &*resources, world.combat.range)?;
-                            let view =
-                                combat_view::CombatView::new(&combat, combat.own_id(), &resources)?;
-                            combat.reset(&mut world.cockpits[OWN].flight)?;
-                            if combat.uses_normal_startup_defaults() {
-                                combat.apply_startup_weapons();
-                            }
-                            combat.add_scene_targets(&world.terrain)?;
-                            world.combat = combat;
-                            world.cockpits[OWN].airport_nav_mode = false;
-                            world.cockpits[OWN].previous_flight =
-                                world.cockpits[OWN].flight.clone();
-                            progress.stage(loading::Stage::Scenery);
-                            let mut scenery = scenery::Scenery::build(&resources, &world.terrain)?;
-                            progress.stage(loading::Stage::Graphics);
-                            let geometry = Arc::clone(scenery.static_geometry(
-                                &world.combat.state.targets,
-                                &world.combat.surface,
-                            ));
-                            let graphics = graphics.map(|build| {
-                                build(
-                                    &scenery,
-                                    &aircraft,
-                                    &view.models,
-                                    &view.art,
-                                    Some(&geometry),
-                                )
-                            });
-                            Ok(loading::Prepared::Selection(Box::new((
-                                world, aircraft, view, scenery, graphics,
-                            ))))
-                        })();
-                        result.map_err(|e| e.to_string())
+                    let automatic = self.quick.draft.values[18] == 0;
+                    let job = loading::Job::continue_load(None, !automatic, move |_| {
+                        aircraft::Airframe::load(&resources, id)
+                            .map(|aircraft| loading::Prepared::Selection(Box::new(aircraft)))
+                            .map_err(|e| e.to_string())
                     });
                     match job {
-                        Ok(job) => self.loading = Some(job),
+                        Ok(job) => {
+                            self.mission_loading_progress = automatic.then(|| job.progress.clone());
+                            self.loading = Some(job);
+                        }
                         Err(error) => {
                             self.error = Some(error.into());
                             event_loop.exit();
@@ -3965,19 +3932,13 @@ impl ApplicationHandler for App {
                     } else {
                         loading::Stage::Connecting
                     };
-                    let (previous, started) = self
+                    let progress = self
                         .network_loading_stage
-                        .get_or_insert((stage, Instant::now()));
-                    if *previous != stage {
-                        *previous = stage;
-                        *started = Instant::now();
-                    }
-                    let size = loading::draw_window(
+                        .get_or_insert_with(loading::Progress::network);
+                    progress.stage(stage);
+                    let size = progress.draw(
                         &mut self.loading_pixels,
                         [window.width, window.height],
-                        0,
-                        stage,
-                        started.elapsed().as_secs_f64(),
                         [name, &players],
                     );
                     if let Err(error) = renderer.draw(
@@ -6120,6 +6081,7 @@ impl ApplicationHandler for App {
                             self.error = Some(error);
                         }
 
+                        log::info!("Smoke test: requested screen presented successfully");
                         println!("Smoke test: requested screen presented successfully");
                         self.finished = true;
                         event_loop.exit();
@@ -6196,6 +6158,7 @@ impl ApplicationHandler for App {
         // Measure event-loop service, not the arrival of window events: a
         // minimized or untouched window can legitimately receive none.
         let preparing = self.loading.is_some()
+            || (self.net_built.is_some() && self.network_loading_stage.is_some())
             || self.pending_join.is_some()
             || self.pending_host.is_some()
             || self.net.as_ref().is_some_and(|s| {
@@ -6264,6 +6227,7 @@ impl ApplicationHandler for App {
 
         if let Some(job) = &self.loading {
             if let Some(result) = job.poll() {
+                let continuation = job.progress.clone();
                 self.loading = None;
                 match result {
                     Ok(loading::Prepared::Mission(parts)) => {
@@ -6284,27 +6248,14 @@ impl ApplicationHandler for App {
                         self.finish_creator_launch(event_loop);
                     }
                     Ok(loading::Prepared::Selection(parts)) => {
-                        let (world, aircraft, view, scenery, graphics) = *parts;
-                        self.world.0 = Some(world);
-                        self.hornet = aircraft;
-                        self.combat_view = view;
-                        self.scenery = scenery;
-                        self.camera = camera::Camera::for_world(&self.world.terrain);
-                        let retired = if let (Some(renderer), Some(graphics)) =
-                            (&mut self.renderer, graphics)
+                        self.hornet = *parts;
+                        // The loadout preview needs only aircraft art. Terrain,
+                        // combat and scenery are built once for the final mission.
+                        if self.quick.draft.values[18] != 0
+                            && let Some(renderer) = &mut self.renderer
                         {
-                            renderer.install_loading(graphics)
-                        } else {
-                            None
-                        };
-                        if let Some(handle) = retired {
-                            self.shelve_background(handle);
+                            renderer.prepare_aircraft(&self.hornet);
                         }
-                        self.reset_vapor();
-                        self.instruments.navigation = navigation::Navigation::default();
-                        self.instruments.cameras.clear();
-                        self.instruments.cancel_press();
-                        self.flight_canvas = flight_canvas::FlightCanvas::default();
                         self.mission_selection_ready = true;
                         self.action(event_loop, Action::Mission);
                         if self.loading.is_none() && self.creator_loading_view.is_some() {
@@ -6319,6 +6270,7 @@ impl ApplicationHandler for App {
                         self.begin_flight(event_loop, None);
                     }
                     Ok(loading::Prepared::NetRebuilt(built)) => {
+                        self.network_loading_stage = Some(continuation);
                         if self.net.is_some() {
                             self.net_built = Some(*built);
                         }
@@ -13572,7 +13524,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     diagnostics::stage("terrain construction");
     let mut world =
         scenery::launch_terrain(&assets.theater_resources, &theater_code, weather_condition)?;
-    let mut scenery = scenery::Scenery::build(&assets.theater_resources, &world)?;
+    let mut scenery = scenery::Scenery::build_for(
+        &assets.theater_resources,
+        &world,
+        !launch_creator && matches!(initial_screen, Screen::Flight | Screen::Viewer),
+    )?;
     diagnostics::stage_done();
     let ground_start = ground_object(&world)?;
     if std::env::var_os("TORE_AIRPORT_PROBE").is_some() {
@@ -14994,6 +14950,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         },
         loading: None,
         mission_selection_ready: false,
+        mission_loading_progress: None,
         restart_recorded: false,
         prepared_recording: None,
         prepared_restart: None,

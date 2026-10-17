@@ -474,8 +474,8 @@ fn field_margin(color:vec3<f32>,ground:vec3<f32>,uv:vec2<f32>)->vec3<f32> {
 // World-anchored texture replaces the missing crown share as objects thin/fade.
 fn canopy_cell(at:vec2<i32>,row:i32,remaps:vec2<f32>)->vec4<f32> {
  if any(at<vec2<i32>(0)) || any(at>=vec2<i32>(scene.canopy_area.zw)) {return vec4<f32>(0.0);}
- let page=i32(scene.canopy.x)+(at.y/128)*i32(scene.canopy.y)+at.x/128;
- let pixel=(at%vec2<i32>(128))*2;
+ let page=i32(scene.canopy.x)+(at.y/256)*i32(scene.canopy.y)+at.x/128;
+ let pixel=vec2<i32>((at.x%128)*2,at.y%256);
  let density=f32(read_tile(pixel,page))/63.75;
  let index=read_tile(pixel+vec2<i32>(1,0),page);
  var color=shade(index,row).rgb;
@@ -484,6 +484,9 @@ fn canopy_cell(at:vec2<i32>,row:i32,remaps:vec2<f32>)->vec4<f32> {
 }
 fn forest_canopy(color:vec3<f32>,direction:vec3<f32>,row:i32)->vec3<f32> {
  if scene.canopy.w<=0.0 || scene.canopy.y<1.0 {return color;}
+ let full=max(scene.canopy_detail.x,1.0);
+ let missing=select(smoothstep(full,max(full+1.0,scene.canopy.z),length(direction.xz)),1.0,scene.canopy.z<full);
+ if missing<=0.0 {return color;}
  let dist=length(direction);
  let world=scene.origin.xz+scene.local_eye.xz+direction.xz;
  let cell=(world-scene.canopy_area.xy)/512.0-vec2<f32>(0.5);
@@ -493,17 +496,12 @@ fn forest_canopy(color:vec3<f32>,direction:vec3<f32>,row:i32)->vec3<f32> {
  let c=mix(mix(canopy_cell(at,row,remaps),canopy_cell(at+vec2<i32>(1,0),row,remaps),f.x),
            mix(canopy_cell(at+vec2<i32>(0,1),row,remaps),canopy_cell(at+vec2<i32>(1,1),row,remaps),f.x),f.y);
  if c.a<0.001 {return color;}
- let full=max(scene.canopy_detail.x,1.0);
- let retained=min(1.0,pow(full/max(dist,full),1.6));
- let fade=1.0-smoothstep(scene.canopy.z*0.70,scene.canopy.z,dist);
- let missing=1.0-retained*fade;
+
  let footprint=detail_footprint(direction,dist);
  let grain=detail_noise(world/76.0,0,74u)-0.5;
  let crowns=1.0+grain*0.38*detail_band(100.0,footprint);
  let coverage=(1.0-exp(-c.a*scene.canopy.w))*missing;
- // Fade with the same altitude rule as object crowns, not the near ground grain.
- let altitude=1.0-smoothstep(7000.0,15000.0,scene.eye.y);
- return mix(color,c.rgb/c.a*crowns,coverage*altitude);
+ return mix(color,c.rgb/c.a*crowns,coverage);
 }
 @fragment fn terrain_fragment(in:VertexOut)->@location(0) vec4<f32>{
  // Derivatives must be taken before the untextured early return.
@@ -962,10 +960,10 @@ struct VegOut {
  @location(2) color:vec3<f32>, @location(3) albedo:vec3<f32>, @location(4) direction:vec3<f32>,
  @location(5) normal:vec3<f32>, @location(6) @interpolate(flat) fade:vec2<f32>, @location(7) @interpolate(flat) look:f32,
  @location(8) @interpolate(flat) mean:vec3<f32>, @location(9) height:f32, @location(10) altitude:f32,
- @location(11) @interpolate(flat) fog_enabled:u32
+ @location(11) @interpolate(flat) fog_enabled:u32,
+ @location(12) @interpolate(flat) overhead:u32
 }
-// Solid objects fade by shrinking into the ground: a dithered rock shows
-// as a hatched ghost, a shrinking one only as a smaller rock.
+// Foliage and rock share distance coverage without changing their size.
 fn veg_turn(turn:vec4<f32>,shape:vec4<f32>)->vec4<f32> {
  // All kinds use the same per-instance coverage fade, including rocks.
  return turn;
@@ -998,14 +996,13 @@ fn veg_place(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,shape:vec4<f32>)-
  if mode==1u || mode==2u {view=card%2u;}
  var code=mean.w;
  var coverage=turn.w;
+ let crown=place.xyz+vec3<f32>(0.0,turn.z*top.y,0.0);
+ let ray=scene.local_eye.xyz-crown;
+ let top_share=smoothstep(0.57357644,0.90630779,ray.y/max(length(ray),0.0001));
+ if mode==2u || mode==3u { coverage*=select(1.0-top_share,top_share,overhead); }
  if overhead {
   code=top.x; view=0u;
   // The crown sits inside the upright silhouette, relative to its grounded base.
-  let crown=place.xyz+vec3<f32>(0.0,turn.z*top.y,0.0);
-  let ray=scene.local_eye.xyz-crown;
-  // Fitted: hidden through 35 degrees down, fully visible at 80 degrees.
-  // One value for the whole card and both depth/colour passes avoids seams.
-  coverage*=smoothstep(0.57357644,0.98480775,ray.y/max(length(ray),0.0001));
   // Opaque side-crown extents, with the same seeded height/width as the side.
   // Coverage and canopy height do not change this world size.
   let local=vec2<f32>(position.x,position.y*2.0-1.0)*turn.z*shape.x*top.zw;
@@ -1023,8 +1020,12 @@ fn veg_place(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,shape:vec4<f32>)-
  let rel=p-scene.local_eye.xyz;
  let base=placed_vertex(p+scene.origin.xyz,rel,sprite_uv,sprite,vec3<f32>(1.0),select(-1.0,part,part>=0.0));
  var out:VegOut;
- out.clip=base.clip;out.uv=sprite_uv;out.layer=sprite;out.direction=rel;out.altitude=base.altitude;
- out.fog_enabled=base.fog_enabled;
+ out.clip=base.clip;
+ // A fully hidden card is degenerate in both passes, avoiding all cutout
+ // texture and lighting work during the side/top angular hand-off.
+ if coverage<=0.0 {out.clip=vec4<f32>(0.0,0.0,0.0,1.0);}
+ out.uv=sprite_uv;out.layer=sprite;out.direction=rel;out.altitude=base.altitude;
+ out.fog_enabled=base.fog_enabled;out.overhead=select(0u,1u,overhead);
  let n=vec3<f32>(normal.x*turn.x+normal.z*turn.y,normal.y,normal.z*turn.x-normal.x*turn.y);
  out.normal=normalize(vec3<f32>(n.x,n.y*max(shape.x,0.2),n.z));
  // A baked rock card has no useful face normal. Light it with its ground
@@ -1103,13 +1104,20 @@ fn veg_alpha(uv:vec2<f32>,layer:i32)->f32 {
  }
  return alpha;
 }
+// Side and top occupy complementary samples, not just complementary alpha
+// fractions. At full distance opacity their overlapping interiors cover every
+// sample exactly once, including halfway through the angular hand-off.
+fn veg_coverage(in:VegOut,alpha:f32)->u32 {
+ if in.overhead!=0u {return ~fill_coverage(in.clip.xy,1.0-alpha,in.fade.y);}
+ return fill_coverage(in.clip.xy,alpha,in.fade.y);
+}
 @fragment fn veg_depth(in:VegOut)->FillOut {
  var alpha=in.fade.x;
  if in.layer>=0.0 {
   let a=veg_alpha(in.uv,i32(in.layer));
   alpha*=clamp((a-0.5)/max(fwidth(a),0.0001)+0.5,0.0,1.0);
  }
- let mask=fill_coverage(in.clip.xy,alpha,in.fade.y);
+ let mask=veg_coverage(in,alpha);
  if mask==0u {discard;}
  return FillOut(vec4<f32>(0.0),mask);
 }
@@ -1136,7 +1144,7 @@ fn veg_alpha(uv:vec2<f32>,layer:i32)->f32 {
   }
   color=base;albedo=bare;
  }
- let mask=fill_coverage(in.clip.xy,alpha,in.fade.y);
+ let mask=veg_coverage(in,alpha);
  if mask==0u {discard;}
  let foliage=in.look<0.5;
  let occlusion=select(1.0,mix(0.55,1.0,clamp(in.height*1.2,0.0,1.0)),foliage);

@@ -136,7 +136,7 @@ vegetation on 2026-10-16 and a second pass the same day (retail trees, placement
 from tile art, denser grass and a better desert). The placement and shading
 constants are **fitted agent choices**, initially fitted by eye in passes 1 and
 2. Runtime retail resources retain their source provenance; the code implements
-this behaviour specification rather than original control flow. John reviewed passes 3 and 4. Pass 5, requested on 2026-10-17, awaits GPU visual and timing validation.
+this behaviour specification rather than original control flow. John reviewed passes 3 and 4. Pass 6, requested on 2026-10-17, awaits GPU visual and timing validation.
 The new placement is not a claim about retail placement. Nothing is
 collidable or part of the simulation, the network session, replays or
 checkpoints.
@@ -153,28 +153,33 @@ available in Graphics and through `TORE_VEGETATION_CARDS`: `billboard`,
 `cross`, `cross-top`, and `billboard-top` (default, requested by John on
 2026-10-17). A facing card has two triangles; a
 fixed seeded cross has four. Top modes add two triangles for a horizontal card
-at 80% of tree height or 65% of shrub/rock height, spanning the side silhouette's
-opaque crown width, excluding transparent source margins. Both side and top
-use the same instance height in feet and seeded width multiplier. Supplied
-tops are trimmed after halo cleanup and again after downsampling, filling the
-124 by 124 usable cell inside its two-pixel gutter. Retail tops use the opaque
-widths of the two orthogonal baked side views. These heights are **fitted agent choices**.
-Top coverage is zero through 35 degrees down from the horizon, increases by
-smoothstep of the view ray's vertical component, and reaches full coverage at
-80 degrees down. The ray runs from the grounded instance's canopy centre to the
-eye. This applies only to the top card in both top modes and both depth/colour
-passes. The angle gate was requested by John on 2026-10-17; the 80-degree endpoint
-and smoothstep curve are **fitted agent choices**. The top remains inside the
-side cards at the heights above. Angle gating affects only the top coverage;
-upright side cards retain their coverage.
+at the visual crown centre, spanning the side silhouette's opaque crown width.
+The centre is the opaque-pixel-weighted height of rows at least 45% as wide as
+the broadest opaque row, excluding narrow trunks. Retail cards average their
+four side views. Heights clamp to 5% through 95% of the grounded instance.
+These are **fitted agent choices** for John's 2026-10-17 request.
+Side and top use the same instance height and seeded width multiplier.
+Supplied tops fill the 124 by 124 usable cell inside a two-pixel gutter;
+retail top widths come from the two orthogonal opaque side views.
+
+Top coverage is zero through 35 degrees down from the horizon. Smoothstep of
+the crown-to-eye ray's vertical component reaches full coverage at 65 degrees.
+In top modes the side coverage is one minus the top coverage, so they never
+both have full coverage. Their sample masks are complementary too: overlapping
+opaque interiors cover every sample once, without holes at the midpoint. The 65-degree endpoint is a **fitted agent decision**,
+pending the 30/35/40/45/55/70/89-degree GPU series. This angular representation
+change is separate from distance opacity and identical in depth and colour.
 Crosses retain their orientation as the camera moves. They may expose their X
 at oblique angles and cost more covered pixels; no speed advantage is claimed.
 Every side card starts at the base supplied through `tore_world::grounding`.
 Top cards are part of that grounded instance, never separately terrain-snapped.
 
-At scene startup a CPU rasterizer bakes four horizontal retail views, 90 degrees
-apart, into indexed 256 by 256 pages. Imported PIC transparency and live weather
-palettes remain. Runtime retail art stays in memory. John's v2, Sahara and
+On the mission loading worker a CPU rasterizer bakes four horizontal retail
+views, 90 degrees apart, into indexed 256 by 256 pages. Imported PIC transparency
+and live weather palettes remain. The menu omits vegetation. Bakes, placement
+classification, coast masks and canopy maps have a disposable local disk cache;
+[architecture](../ARCHITECTURE.md#exploratory-vegetation-rendering) defines its
+invalidation. Nothing derived from retail media is committed. John's v2, Sahara and
 matching top-view sheets supply tightly cropped cutouts in 128 px cells with
 transparent gutters, sharing the same indexed texture array. Source RGB is
 reduced to 78% before matching the theater palette. The supplied-art provenance,
@@ -191,47 +196,56 @@ silhouette. A retail grove receives a runtime composite of separate crowns at
 its constituent plants' centres, each sized from that plant's opaque side views.
 It never stretches one crown across the whole grove. The existing fitted plant
 grouping joins face centres within 18 source units; the whole grove retains all
-groups. The composite stays in memory and uses one horizontal card, with
+groups. The composite uses one horizontal card, with
 transparent gaps exposing the same lit forest floor and distant-canopy layer
 as billboard mode. Tops and crossed sides use the same seeded yaw convention
 as the baked side-view selection. The common canopy plane remains a **fitted agent choice**;
 it does not reproduce individual plant heights within a grove.
 Rocks retain visible-pixel mean normalization and slope lighting.
 
-Each 2,048 ft patch caches candidates. The worker builds a ring with two extra
-chunks beyond draw distance and uploads it through bounded persistent pages.
-The worker finishes the ring and fits its density before packing a replacement.
-It keeps the previous uploaded selection and its coverage while the next ring
-builds, and stops requesting work once a stationary view is complete. Resident
-candidates are built once; movement builds only chunks entering the ring.
-A budget can thin ranks across the ring but never truncate a prefix of whole
-patches. The visible radius is bounded by the completely built and uploaded
-circle, reduced by camera movement since that result. During loading or a
-teleport it expands at up to 6,000 ft/s. These are **agent choices** to prevent
-partial patches becoming visible. A late worker can temporarily shorten range;
-CPU tests do not establish that streaming keeps up on every host.
+Each 2,048 ft patch has a fixed candidate set for its density and draw-distance
+settings. A patch's quota is the object budget divided by the number of patches
+in the guarded draw circle, rounded down. Where needed the lowest seeded ranks
+fill that quota. The cap never changes with camera distance or local load.
+This **fitted agent decision** can reduce the overall population of saturated
+groves, but approaching cannot add instances inside the detail distance.
+All species, including clumps and stones, retain that complete population at
+full distance opacity throughout the selected detail distance. The former 0.4
+multiplier, species-specific reaches, budget squeeze, rank ghosting and near
+pixel/altitude fades are removed.
 
-Every instance, including rocks, fades by smoothstep over the outer 30% of that
-radius, with full coverage at 70%, half at 85% and zero at 100%. The existing
-seeded sample coverage and 3 to 1.5 pixel fade apply in both depth and colour
-passes. Altitude coverage is full below 7,000 ft and zero at 15,000 ft. There
-are no vegetation shadow passes. See the
+Only the band from detail to draw distance uses smoothstep distance coverage.
+Horizontal ground distance controls it in both the object and distant-canopy
+shaders. Canopy supplies the complementary coverage. The canopy's expected
+crown-area estimate remains fitted and does not reproduce each capped patch.
+Side/top angle coverage and silhouette edge antialiasing still apply.
+
+The worker builds near patches first and prioritizes forward patches using a
+five-second velocity projection, rounded on a 512 ft grid and capped at
+4,096 ft. The ring extends two chunks
+beyond draw distance, enough for about five seconds at 480 kt. Mission loading
+builds and uploads the initial ring before starting flight. A replacement ring
+publishes only when complete; unchanged patches keep their bytes. Normal uploads
+remain capped at 256 KiB and 16 writes per frame. No incomplete detail ring is
+made visible. Available outer range expands at 6,000 ft/s after a teleport;
+a slow worker may shorten it. CPU checks do not prove every host keeps up.
+There are no vegetation shadow passes. See the
 [streaming design](../ARCHITECTURE.md#exploratory-vegetation-rendering).
 
 ### Distant forest canopy
 
 The terrain carries a world-anchored forest representation beyond sprite reach,
-and fills the missing share inside it as trees thin. At startup each 512 ft map
+and fills the missing share in the outer fade band. On the loading worker each 512 ft map
 cell samples four of the same placement sites, including slopes, tree lines,
 fields, water and coast exclusions. Expected crown area comes from tree density,
 selected species height/width and the sprite radius. Colour comes from the actual
 selected sprites' visible-pixel means and local foliage tint, quantized into the
-live theater palette. Nothing retail-derived is saved to disk.
+live theater palette. Derived pages use the local cache described above.
 
 The shader blends those samples, adds band-limited 76 ft crown mottling, and uses
 `1 - exp(-expected_area * density)` for coverage. It fills the complement of
-`distance_density_share * instance_distance_fade`, using the actual streaming
-radius and density squeeze. It receives surface lighting, flare lighting and
+`instance_distance_fade`, using the actual streaming radius and selected detail
+distance. Its analytic crown density remains an approximation to capped patches. It receives surface lighting, flare lighting and
 atmosphere on the terrain path. Ground-detail Off does not turn off the canopy;
 `TORE_VEGETATION=0` and benchmark object suppression do. Desert ground shaders
 and their dune/colour rules are unchanged and receive no forest canopy layer.

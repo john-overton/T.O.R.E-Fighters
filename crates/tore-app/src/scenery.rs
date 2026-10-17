@@ -93,6 +93,7 @@ pub struct Scenery {
     /// The vegetation meshes, their retail textures in the static art pages.
     pub vegetation_meshes: Option<Arc<crate::vegetation_shapes::Library>>,
     pub canopy: crate::vegetation::canopy::Map,
+    pub vegetation_cache_hit: bool,
 }
 
 /// The launch overrides the environment asks for: `TORE_WEATHER_TIME` as
@@ -333,6 +334,15 @@ impl Scenery {
     /// resources: ground and sky textures, the terrain mesh and the static
     /// airport geometry.
     pub fn build(resources: &BTreeMap<String, Vec<u8>>, terrain: &Terrain) -> AppResult<Self> {
+        Self::build_for(resources, terrain, true)
+    }
+
+    /// The menu has no flight vegetation and never bakes or uploads its pages.
+    pub fn build_for(
+        resources: &BTreeMap<String, Vec<u8>>,
+        terrain: &Terrain,
+        flight: bool,
+    ) -> AppResult<Self> {
         let required = |n: &str| {
             resources
                 .get(n)
@@ -448,6 +458,7 @@ impl Scenery {
             vegetation: None,
             vegetation_meshes: None,
             canopy: Default::default(),
+            vegetation_cache_hit: false,
             climate: crate::blast_climate::Climate {
                 humidity: terrain.humidity(),
             },
@@ -464,33 +475,87 @@ impl Scenery {
             land_texture,
         );
         out.build_static_geometry(resources, terrain, code)?;
-        out.vegetation = crate::vegetation::Atlas::build(resources, terrain)?.map(Arc::new);
-        if out.vegetation.is_some() {
-            let terrain_bytes = out.texture_indices.len();
-            let mut library = crate::vegetation_shapes::Library::build(
-                &crate::vegetation::art(),
+        let first = (out.texture_indices.len() + out.sky_indices.len()) / 65536;
+        let mode = std::env::var("TORE_VEGETATION_SPRITES").unwrap_or_else(|_| "mixed".into());
+        let cache = if flight && crate::vegetation::enabled()? {
+            let _timing = crate::loading::timing("vegetation cache key");
+            crate::vegetation::cache::Cache::for_scene(
                 resources,
-                &out.palette,
-                &mut out.sky_indices,
-                |pages| (terrain_bytes + pages.len()) / 65536,
-            );
-            let first = (terrain_bytes + out.sky_indices.len()) / 65536;
-            library.add_pack(
-                &std::env::var("TORE_VEGETATION_SPRITES").unwrap_or_else(|_| "mixed".into()),
-                crate::vegetation::region(code),
-                &out.palette,
-                &mut out.sky_indices,
-                first,
-            );
-            let first = (terrain_bytes + out.sky_indices.len()) / 65536;
-            out.canopy = crate::vegetation::canopy::Map::build(
-                out.vegetation.as_ref().unwrap(),
                 terrain,
-                &library,
                 &out.palette,
-                &mut out.sky_indices,
                 first,
-            );
+                &mode,
+            )
+        } else {
+            None
+        };
+        if flight && crate::vegetation::enabled()? {
+            let _timing = crate::loading::timing("vegetation atlas");
+            out.vegetation = if let Some(atlas) = cache.as_ref().and_then(|c| c.read_atlas()) {
+                out.vegetation_cache_hit = true;
+                log::info!("vegetation atlas cache: hit theater={code}");
+                Some(Arc::new(atlas))
+            } else {
+                let atlas = crate::vegetation::Atlas::build(resources, terrain)?;
+                if let (Some(cache), Some(atlas)) = (&cache, &atlas) {
+                    cache.write_atlas(atlas);
+                }
+                atlas.map(Arc::new)
+            };
+        }
+        if let Some(atlas) = &out.vegetation {
+            let started = std::time::Instant::now();
+            let terrain_bytes = out.texture_indices.len();
+            let start = out.sky_indices.len();
+            let cached = cache.as_ref().and_then(|cache| cache.read());
+            crate::loading::measured("vegetation cache lookup", started.elapsed());
+            let library = if let Some((library, canopy, pages)) = cached {
+                log::info!("vegetation cache: hit theater={code} bytes={}", pages.len());
+                #[cfg(test)]
+                eprintln!("vegetation cache: hit theater={code} bytes={}", pages.len());
+                out.sky_indices.extend(pages);
+                out.canopy = canopy;
+                library
+            } else {
+                out.vegetation_cache_hit = false;
+                log::info!("vegetation cache: miss theater={code}");
+                #[cfg(test)]
+                eprintln!("vegetation cache: miss theater={code}");
+                let started = std::time::Instant::now();
+                let mut library = crate::vegetation_shapes::Library::build(
+                    &crate::vegetation::art(),
+                    resources,
+                    &out.palette,
+                    &mut out.sky_indices,
+                    |pages| (terrain_bytes + pages.len()) / 65536,
+                );
+                let first = (terrain_bytes + out.sky_indices.len()) / 65536;
+                library.add_pack(
+                    &mode,
+                    crate::vegetation::region(code),
+                    &out.palette,
+                    &mut out.sky_indices,
+                    first,
+                );
+                crate::loading::measured("vegetation card bake", started.elapsed());
+                let started = std::time::Instant::now();
+                let first = (terrain_bytes + out.sky_indices.len()) / 65536;
+                out.canopy = crate::vegetation::canopy::Map::build(
+                    atlas,
+                    terrain,
+                    &library,
+                    &out.palette,
+                    &mut out.sky_indices,
+                    first,
+                );
+                crate::loading::measured("vegetation canopy", started.elapsed());
+                let started = std::time::Instant::now();
+                if let Some(cache) = cache {
+                    cache.write(&library, out.canopy, &out.sky_indices[start..]);
+                }
+                crate::loading::measured("vegetation cache write", started.elapsed());
+                library
+            };
             out.vegetation_meshes = Some(Arc::new(library));
         }
         if let Some(fill) = &terrain.city_fill {
@@ -1111,6 +1176,7 @@ pub(crate) mod tests {
             vegetation: None,
             vegetation_meshes: None,
             canopy: Default::default(),
+            vegetation_cache_hit: false,
             fire_widths: Arc::new(BTreeMap::new()),
             climate: crate::blast_climate::Climate::default(),
         }

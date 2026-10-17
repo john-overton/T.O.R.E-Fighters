@@ -42,7 +42,7 @@ from typing import Iterable, Optional, Sequence
 # --------------------------------------------------------------------------
 
 FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
-    "vegetation": ("CPU vegetation camera, crown and streaming coverage", ("vegetation-cpu-cameras", "vegetation-pass5-cameras", "vegetation-stream-convergence", "vegetation-top-crowns")),
+    "vegetation": ("CPU vegetation camera, crown and streaming coverage", ("vegetation-cpu-cameras", "vegetation-pass5-cameras", "vegetation-stream-convergence", "vegetation-top-crowns", "vegetation-cache-roundtrip")),
     "render-night-light-slots": (
         "headless persistent fire reservation through effect and scene light budgets",
         ("render-night-light-slots",),

@@ -106,6 +106,11 @@ pub struct Renderer {
     // Fields drop in declaration order; keep the window alive through GPU cleanup.
     pub window: Arc<Window>,
 }
+pub(crate) struct LoadingScene<'a> {
+    pub scenery: &'a crate::scenery::Scenery,
+    pub world: &'a crate::terrain::Terrain,
+    pub eye: [f64; 3],
+}
 pub(crate) struct LoadingGraphics {
     sim: crate::sim_renderer::SimRenderer,
     cockpit: crate::cockpit_renderer::CockpitRenderer,
@@ -115,7 +120,7 @@ impl Renderer {
     pub fn loading_factory(
         &self,
     ) -> impl FnOnce(
-        &crate::scenery::Scenery,
+        LoadingScene<'_>,
         &crate::aircraft::Airframe,
         &[crate::aircraft::Airframe],
         &crate::render_snapshot::CombatArt,
@@ -128,10 +133,25 @@ impl Renderer {
         let format = self.config.format;
         let options = self.graphics;
         let samples = self.samples(options.anti_aliasing);
-        move |scenery, aircraft, models, art, static_geometry| {
+        move |scene, aircraft, models, art, static_geometry| {
+            let LoadingScene {
+                scenery,
+                world,
+                eye,
+            } = scene;
             let mut sim = crate::sim_renderer::SimRenderer::new(
                 &device, &queue, format, scenery, options, samples,
             );
+            if let Some(vegetation) = &mut sim.vegetation {
+                let _timing = crate::loading::timing("vegetation initial ring and upload");
+                let mut camera = crate::camera::Camera::for_world(world);
+                camera.position = eye;
+                let mut encoder = device.create_command_encoder(&Default::default());
+                vegetation.set_settle(true);
+                vegetation.prepare(&queue, &mut encoder, &camera, world, [0.; 3], [640, 480]);
+                vegetation.set_settle(false);
+                queue.submit([encoder.finish()]);
+            }
             sim.aircraft(&device, &queue, aircraft, &[]);
             sim.dummies(
                 &device,

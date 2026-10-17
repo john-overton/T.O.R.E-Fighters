@@ -1812,11 +1812,16 @@ impl NetSession {
             .unwrap_or_else(|e| e.into_inner())
             .clone()?;
         let resources = Arc::clone(&self.resources);
-        Some(crate::loading::Job::spawn(move |_| {
-            build_mission(&spec, &resources)
-                .map(|built| crate::loading::Prepared::NetRebuilt(Box::new(built)))
-                .map_err(|e| e.to_string())
-        }))
+        Some(crate::loading::Job::continue_load(
+            None,
+            false,
+            move |progress| {
+                progress.stage(crate::loading::Stage::Mission);
+                build_mission(&spec, &resources)
+                    .map(|built| crate::loading::Prepared::NetRebuilt(Box::new(built)))
+                    .map_err(|e| e.to_string())
+            },
+        ))
     }
     #[cfg(test)]
     pub fn rebuild(&mut self) -> Option<WorldResult<Built>> {

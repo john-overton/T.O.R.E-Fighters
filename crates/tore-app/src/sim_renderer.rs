@@ -1716,10 +1716,7 @@ impl SimRenderer {
             },
         ]);
         uniform.extend([
-            self.options.vegetation_detail_nm as f32
-                * 6_076.115_5
-                * 0.4
-                * self.vegetation.as_ref().map_or(1., |v| v.squeeze()),
+            self.vegetation.as_ref().map_or(0., |v| v.detail_reach()),
             0.,
             0.,
             0.,
@@ -1834,8 +1831,7 @@ impl SimRenderer {
             // Use this frame's uploaded circle for the terrain hand-off too.
             let end = uniform.len();
             uniform[end - 6] = vegetation.draw_reach().max(1.);
-            uniform[end - 4] =
-                self.options.vegetation_detail_nm as f32 * 6_076.115_5 * 0.4 * vegetation.squeeze();
+            uniform[end - 4] = vegetation.detail_reach();
         }
         queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
         if self

@@ -49,6 +49,9 @@ pub const PATCH: i64 = 32;
 /// Water distance grid cell, feet.
 const WATER_CELL: i64 = 512;
 
+#[path = "vegetation_cache.rs"]
+pub(crate) mod cache;
+
 type Art = Arc<BTreeMap<String, Vec<u8>>>;
 
 static ART: std::sync::RwLock<Option<Art>> = std::sync::RwLock::new(None);
@@ -1660,27 +1663,13 @@ impl Species {
         Self::Boulder,
         Self::Outcrop,
     ];
-    /// Full density out to this share of the detail distance; beyond it
-    /// the object thins. Small things go first. Negative: a grove, which
-    /// stands in for single trees only where they have thinned, so it
-    /// fades in from about a third of the detail distance.
+    /// All species have the same protected detail radius.
     pub fn reach(self) -> f32 {
-        match self {
-            Self::Stone => 0.12,
-            Self::DryBush | Self::GreenBush | Self::Boulder => 0.35,
-            Self::Grove | Self::PineGrove => -1.,
-            Self::PalmGrove => 1.6,
-            Self::Outcrop => Self::MAX_REACH,
-            _ => 1.,
-        }
+        1.
     }
-    /// The largest [`Self::reach`].
-    pub const MAX_REACH: f32 = 2.;
-    /// The share kept at `dist` feet, full density reaching `full` feet:
-    /// the cull shader's thinning without a grove's fade-in, so objects
-    /// kept for one distance cover every distance beyond it.
+    pub const MAX_REACH: f32 = 1.;
     pub fn share(self, dist: f32, full: f32) -> f32 {
-        share(dist, full * self.reach().abs())
+        share(dist, full)
     }
 }
 
@@ -1730,8 +1719,7 @@ pub fn share(dist: f32, full: f32) -> f32 {
     }
 }
 
-/// Object chunks around the camera, regenerated as their distance share
-/// changes, at most a budget per call.
+/// Fixed geographic object selections, built in bounded batches around the camera.
 pub struct Placement {
     atlas: Arc<Atlas>,
     chunks: BTreeMap<(i64, i64), Chunk>,
@@ -1739,15 +1727,8 @@ pub struct Placement {
     density: f32,
     /// Objects kept at most.
     budget: usize,
-    /// How far full density reaches, as a share of what was asked: below
-    /// 1 where the view would otherwise hold more than the budget, so
-    /// everything thins sooner instead of stopping short of the draw
-    /// distance.
-    squeeze: f32,
-    /// Objects in the chunks after the last pass, and whether the budget
-    /// ran out before the draw distance.
-    total: usize,
-    capped: bool,
+    chunk_budget: usize,
+    ahead: [f64; 2],
     available: f32,
     /// Bumped whenever the drawn set changes.
     pub generation: u64,
@@ -1779,9 +1760,8 @@ impl Placement {
             grass: BTreeMap::new(),
             density: 1.,
             budget: DEFAULT_BUDGET,
-            squeeze: 1.,
-            total: 0,
-            capped: false,
+            chunk_budget: usize::MAX,
+            ahead: [0.; 2],
             available: 0.,
             generation: 0,
             full: 0.,
@@ -1800,9 +1780,6 @@ impl Placement {
         self.settled = None;
         self.eye_cell = None;
         self.full = 0.;
-        self.squeeze = 1.;
-        self.total = 0;
-        self.capped = false;
         self.available = 0.;
         self.generation = self.generation.wrapping_add(1);
     }
@@ -1820,19 +1797,18 @@ impl Placement {
         if budget != self.budget {
             self.budget = budget;
             self.settled = None;
-            self.squeeze = 1.;
             self.generation += 1;
         }
     }
 
-    /// The full density distance actually used for `full` asked.
+    /// Compatibility diagnostic: detail distance is never squeezed.
     pub fn squeezed(&self, full: f32) -> f32 {
-        full * self.squeeze
+        full
     }
 
     /// Brings the chunks within `draw` feet up to date for an eye at
-    /// `eye`, full density within `full` feet (less, see
-    /// [`Self::squeezed`]). Builds at most `budget` chunks (all when
+    /// `eye`, prioritizing full detail within `full` feet.
+    /// Builds at most `budget` chunks (all when
     /// `None`). Returns whether everything is current.
     pub fn update(
         &mut self,
@@ -1855,20 +1831,27 @@ impl Placement {
             (cz as f64 + 0.5) * CHUNK as f64,
         ];
         let draw = draw + 2. * CHUNK as f32;
-        for _ in 0..12 {
-            let done = self.pass(world, eye, full, draw, budget);
-            let rescaled = done && self.rescale();
-            if !rescaled {
-                if done {
-                    self.settled = Some(key);
-                }
-                return done;
-            }
-            if budget.is_some() {
-                return false;
-            }
+        // Fixed geographic quotas reserve room for the entire guarded ring.
+        // They depend only on settings, never on camera distance or local load.
+        let radius = (draw / CHUNK as f32).ceil() as i64 + 1;
+        let count = (-radius..=radius)
+            .flat_map(|z| (-radius..=radius).map(move |x| (x, z)))
+            .filter(|&(x, z)| chunk_distance([CHUNK as f64 * 0.5; 2], x, z) <= draw)
+            .count();
+        let quota = self.budget / count.max(1);
+        if quota != self.chunk_budget {
+            self.reset_cache();
+            self.chunk_budget = quota;
         }
-        true
+        let done = self.pass(world, eye, full, draw, budget);
+        if done {
+            self.settled = Some(key);
+        }
+        done
+    }
+
+    pub(super) fn prefetch(&mut self, ahead: [f64; 2]) {
+        self.ahead = ahead;
     }
 
     fn pass(
@@ -1887,7 +1870,6 @@ impl Placement {
             self.eye_cell = Some(cell);
             self.generation += 1;
         }
-        let full = self.squeezed(full);
         if self.full != full {
             self.full = full;
             self.generation += 1;
@@ -1905,80 +1887,70 @@ impl Placement {
                 }
             }
         }
-        wanted.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        let ahead = [eye[0] + self.ahead[0], eye[1] + self.ahead[1]];
+        wanted.sort_by(|a, b| {
+            let score = |v: &(f32, (i64, i64))| {
+                if v.0 <= full {
+                    v.0
+                } else {
+                    full + chunk_distance(ahead, v.1.0, v.1.1)
+                }
+            };
+            (a.0 > full)
+                .cmp(&(b.0 > full))
+                .then_with(|| score(a).total_cmp(&score(b)))
+                .then(a.1.cmp(&b.1))
+        });
         let keep: std::collections::BTreeSet<(i64, i64)> = wanted.iter().map(|w| w.1).collect();
         let before = self.chunks.len();
         self.chunks.retain(|k, _| keep.contains(k));
         let mut changed = self.chunks.len() != before;
-        let mut built = 0;
+        let missing: Vec<_> = wanted
+            .iter()
+            .filter(|(_, key)| !self.chunks.contains_key(key))
+            .take(budget.unwrap_or(usize::MAX))
+            .map(|(_, key)| *key)
+            .collect();
+        let started = std::time::Instant::now();
+        let chunks = tore_workers::shared().ordered_map(&missing, 2, |_, key| {
+            let mut objects = self.atlas.chunk(world, key.0, key.1, 0., 1., self.density);
+            if objects.len() > self.chunk_budget {
+                objects.sort_by(|a, b| {
+                    a.rank
+                        .total_cmp(&b.rank)
+                        .then(a.pos[0].total_cmp(&b.pos[0]))
+                        .then(a.pos[2].total_cmp(&b.pos[2]))
+                });
+                objects.truncate(self.chunk_budget);
+            }
+            (*key, Chunk { objects })
+        });
+        if !chunks.is_empty() {
+            self.build_ns = self
+                .build_ns
+                .saturating_add(started.elapsed().as_nanos() as u64);
+        }
+        for (key, chunk) in chunks {
+            if std::env::var_os("TORE_VEG_STREAM_TRACE").is_some() {
+                eprintln!("vegetation build chunk={key:?}");
+            }
+            self.chunks.insert(key, chunk);
+            self.builds += 1;
+            changed = true;
+        }
         let mut done = true;
-        let mut total = 0usize;
-        let mut capped = false;
         let mut available = draw;
         for (d, key) in &wanted {
-            let stale = !self.chunks.contains_key(key);
-            if stale {
-                if budget.is_some_and(|b| built >= b) {
-                    done = false;
-                    available = available.min(*d);
-                    continue;
-                }
-                // Full candidates are cached independently of camera distance.
-                // Distance thinning belongs to selection and the GPU, never a rebuild.
-                let started = std::time::Instant::now();
-                let objects = self.atlas.chunk(world, key.0, key.1, 0., 1., self.density);
-                self.build_ns = self.build_ns.saturating_add(
-                    u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX),
-                );
-                self.chunks.insert(*key, Chunk { objects });
-                if std::env::var_os("TORE_VEG_STREAM_TRACE").is_some() {
-                    eprintln!("vegetation build chunk={key:?}");
-                }
-                self.builds += 1;
-                built += 1;
-                changed = true;
-            }
-            total += self.chunks.get(key).map_or(0, |c| {
-                c.objects
-                    .iter()
-                    .filter(|i| i.rank < i.species.share((*d - 2. * CHUNK as f32).max(0.), full))
-                    .count()
-            });
-            if total > self.budget {
-                capped = true;
+            if !self.chunks.contains_key(key) {
+                done = false;
+                available = available.min(*d);
             }
         }
-        self.total = total;
-        self.capped = capped;
         self.available = available;
         if changed {
             self.generation += 1;
         }
         done
-    }
-
-    /// After a complete pass: draws full density in sooner when the
-    /// budget ran out or nearly did, and lets it back out when the view
-    /// holds well under the budget. Returns whether it changed.
-    fn rescale(&mut self) -> bool {
-        let budget = self.budget as f32;
-        let total = self.total as f32;
-        let squeeze = if self.capped {
-            self.squeeze * 0.75
-        } else if total > budget * 0.9 {
-            self.squeeze * 0.88
-        } else if total < budget * 0.45 && self.squeeze < 1. {
-            (self.squeeze * 1.2).min(1.)
-        } else {
-            return false;
-        };
-        let squeeze = squeeze.clamp(0.05, 1.);
-        if (squeeze - self.squeeze).abs() < 1e-4 {
-            return false;
-        }
-        self.squeeze = squeeze;
-        self.generation += 1;
-        true
     }
 
     /// Complete cached circle around this eye, before publication/upload.
@@ -2025,30 +1997,10 @@ impl Placement {
             .collect();
         keys.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
         let mut out = Vec::new();
-        let mut total = 0;
-        for (d, key) in keys {
-            let objects: Vec<_> = self.chunks[&key]
-                .objects
-                .iter()
-                .copied()
-                .filter(|i| i.rank < i.species.share((d - 2. * CHUNK as f32).max(0.), self.full))
-                .collect();
-            total += objects.len();
+        for (_, key) in keys {
+            let objects = self.chunks[&key].objects.clone();
             if !objects.is_empty() {
                 out.push((key, objects));
-            }
-        }
-        if total > self.budget {
-            // Uniform seeded ranks retain every part of the ring. Never truncate
-            // a nearest-first chunk prefix, which creates a square pop-in front.
-            let mut ranks: Vec<_> = out
-                .iter()
-                .flat_map(|(_, v)| v.iter().map(|i| i.rank.to_bits()))
-                .collect();
-            ranks.select_nth_unstable(self.budget);
-            let limit = ranks[self.budget];
-            for (_, objects) in &mut out {
-                objects.retain(|i| i.rank.to_bits() < limit);
             }
         }
         out
@@ -2117,8 +2069,12 @@ impl Placement {
 
 /// Feet from `eye` to the nearest point of chunk `(cx, cz)`.
 #[cfg(test)]
-fn distance_fade(distance: f32, draw: f32) -> f32 {
-    1. - smoothstep(draw * 0.70, draw, distance)
+fn distance_fade(distance: f32, full: f32, draw: f32) -> f32 {
+    if distance <= full {
+        1.
+    } else {
+        1. - smoothstep(full, draw.max(full + 1.), distance)
+    }
 }
 
 fn chunk_distance(eye: [f64; 2], cx: i64, cz: i64) -> f32 {
@@ -2805,11 +2761,11 @@ mod tests {
     #[test]
     fn fade_is_a_smooth_per_instance_distance_gradient() {
         let draw = 10000.;
-        assert_eq!(distance_fade(7000., draw), 1.);
-        assert!((distance_fade(8500., draw) - 0.5).abs() < 1e-6);
-        assert_eq!(distance_fade(10000., draw), 0.);
+        assert_eq!(distance_fade(7000., 7000., draw), 1.);
+        assert!((distance_fade(8500., 7000., draw) - 0.5).abs() < 1e-6);
+        assert_eq!(distance_fade(10000., 7000., draw), 0.);
         let values: Vec<_> = (0..=100)
-            .map(|n| distance_fade(7000. + n as f32 * 30., draw))
+            .map(|n| distance_fade(7000. + n as f32 * 30., 7000., draw))
             .collect();
         assert!(
             values
@@ -2817,19 +2773,84 @@ mod tests {
                 .all(|w| w[0] >= w[1] && w[0] - w[1] < 0.016)
         );
         // Two neighbours across a 2,048 ft patch boundary have nearly equal fade.
-        assert!((distance_fade(8191.9, draw) - distance_fade(8192.1, draw)).abs() < 0.001);
         assert!(
-            include_str!("vegetation_cull.wgsl")
-                .contains("smoothstep(params.tiers.y * 0.70, params.tiers.y, dist)")
+            (distance_fade(8191.9, 7000., draw) - distance_fade(8192.1, 7000., draw)).abs() < 0.001
         );
+        assert!(include_str!("vegetation_cull.wgsl").contains(
+            "smoothstep(params.tiers.x, max(params.tiers.x + 1.0, params.tiers.y), dist)"
+        ));
+    }
+    #[test]
+    fn detail_population_is_distance_independent_and_fully_opaque() {
+        let world = flat();
+        let mut placement = Placement::new(Arc::new(Atlas::synthetic(solid(10), 0)));
+        placement.set_budget(4096);
+        let eye = [16384., 16384.];
+        assert!(placement.update(&world, eye, 4000., 8000., None));
+        let original: BTreeMap<_, _> = placement.object_chunks(eye).into_iter().collect();
+        for moved in [[18440., 16384.], [14000., 17000.], eye] {
+            assert!(placement.update(&world, moved, 4000., 8000., None));
+            for (key, objects) in placement.object_chunks(moved) {
+                if let Some(before) = original.get(&key) {
+                    assert_eq!(&objects, before);
+                }
+                for inst in objects {
+                    let distance =
+                        (inst.pos[0] - moved[0] as f32).hypot(inst.pos[2] - moved[1] as f32);
+                    if distance <= 4000. {
+                        assert_eq!(distance_fade(distance, 4000., 8000.), 1.);
+                    }
+                }
+            }
+        }
+        for species in Species::ALL {
+            for distance in [0., 1., 1000., 3999., 4000.] {
+                assert_eq!(species.share(distance, 4000.), 1.);
+                assert_eq!(distance_fade(distance, 4000., 8000.), 1.);
+            }
+        }
+    }
+    #[test]
+    fn near_chunks_precede_forward_prefetch_and_cover_every_visible_point() {
+        let world = flat();
+        let eye = [16384., 16384.];
+        let mut placement = Placement::new(Arc::new(Atlas::synthetic(solid(10), 0)));
+        placement.prefetch([4096., 0.]);
+        let full = 4000.;
+        while !placement.update(&world, eye, full, 8000., Some(3)) {
+            let available = placement.available(eye);
+            for z in 4..12 {
+                for x in 4..12 {
+                    if chunk_distance(eye, x, z) < available {
+                        assert!(placement.chunks.contains_key(&(x, z)));
+                    }
+                }
+            }
+            // Outer work cannot jump ahead of missing detail chunks.
+            let center = [17408.; 2];
+            if placement
+                .chunks
+                .keys()
+                .any(|&(x, z)| chunk_distance(center, x, z) > full)
+            {
+                for z in 4..12 {
+                    for x in 4..12 {
+                        if chunk_distance(center, x, z) <= full {
+                            assert!(placement.chunks.contains_key(&(x, z)));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(placement.available(eye) >= 8000.);
     }
     #[test]
     fn a_small_budget_keeps_a_whole_ring_instead_of_a_chunk_prefix() {
         let mut placement = Placement::new(Arc::new(Atlas::synthetic(solid(10), 0)));
-        placement.set_budget(64);
+        placement.set_budget(4096);
         placement.update(&flat(), [16384., 16384.], 2000., 4000., None);
         let chunks = placement.object_chunks([16384., 16384.]);
-        assert!(chunks.iter().map(|(_, v)| v.len()).sum::<usize>() <= 64);
+        assert!(chunks.iter().map(|(_, v)| v.len()).sum::<usize>() <= 4096);
         assert!(chunks.iter().any(|((x, _), _)| *x < 8));
         assert!(chunks.iter().any(|((x, _), _)| *x > 8));
         assert!(placement.available([16384., 16384.]) > 4000.);
@@ -3148,10 +3169,17 @@ mod tests {
 
     #[test]
     fn ultra_places_more_than_high_and_high_more_than_low() {
-        let eye = [4_000., 4_000.];
-        let low = placed(Atlas::synthetic(solid(10), 0), eye, 0.4).len();
-        let high = placed(Atlas::synthetic(solid(10), 0), eye, 1.).len();
-        let ultra = placed(Atlas::synthetic(solid(10), 0), eye, 1.65).len();
+        let count = |density: crate::graphics::VegDensity| {
+            let mut placement = Placement::new(Arc::new(Atlas::synthetic(solid(10), 0)));
+            placement.set_density(density.scale());
+            placement.set_budget(density.object_budget());
+            let eye = [4000., 4000.];
+            assert!(placement.update(&flat(), eye, 3000., 6000., None));
+            placement.objects(eye).len()
+        };
+        let low = count(crate::graphics::VegDensity::Low);
+        let high = count(crate::graphics::VegDensity::High);
+        let ultra = count(crate::graphics::VegDensity::Ultra);
         assert!(ultra as f32 > high as f32 * 1.3, "{ultra} vs {high}");
         assert!(high as f32 > low as f32 * 1.5, "{high} vs {low}");
     }
@@ -3171,7 +3199,7 @@ mod tests {
     }
 
     #[test]
-    fn a_far_chunk_keeps_only_what_each_species_draws_there() {
+    fn species_share_the_same_outer_distance_rule() {
         let atlas = Atlas::synthetic(solid(10), 0);
         let world = flat();
         let full = 4_000.;
@@ -3193,7 +3221,7 @@ mod tests {
         let tree_kept = trees_far as f32 / trees_near as f32;
         let small_kept = small_far as f32 / small_near.max(1) as f32;
         assert!(
-            small_kept < tree_kept * 0.5,
+            (small_kept - tree_kept).abs() < 0.1,
             "small {small_kept} vs trees {tree_kept}"
         );
     }

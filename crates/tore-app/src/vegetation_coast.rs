@@ -4,11 +4,11 @@ use super::{Atlas, TEXEL, WATER_CELL};
 
 #[derive(Default)]
 pub(super) struct Coast {
-    x0: i64,
-    z0: i64,
-    cols: usize,
-    rows: usize,
-    blocked: Vec<bool>,
+    pub(super) x0: i64,
+    pub(super) z0: i64,
+    pub(super) cols: usize,
+    pub(super) rows: usize,
+    pub(super) blocked: Vec<u8>,
 }
 impl Coast {
     pub(super) fn build(atlas: &Atlas) -> Self {
@@ -20,8 +20,9 @@ impl Coast {
         let cols = w.cols * per;
         let rows = w.rows * per;
         let mut wet = vec![false; w.cols * w.rows];
-        for z in 0..w.rows {
-            for x in 0..w.cols {
+        let mut wet_rows: Vec<_> = wet.chunks_mut(w.cols).collect();
+        tore_workers::shared().for_each_mut(&mut wet_rows, 2, |z, row| {
+            for (x, cell) in row.iter_mut().enumerate() {
                 // Only actual water cutouts, never a blue/green palette guess.
                 let mut n = 0;
                 for dz in 0..per {
@@ -35,9 +36,9 @@ impl Coast {
                         }
                     }
                 }
-                wet[z * w.cols + x] = n * 4 >= per * per * 3;
+                *cell = n * 4 >= per * per * 3;
             }
-        }
+        });
         // A water interior at least 2,560 ft wide seeds large water. Narrow
         // rivers retain their green belts. This is a fitted width, not geography.
         let mut sea = vec![false; wet.len()];
@@ -51,22 +52,28 @@ impl Coast {
         }
         let mut dist = vec![255u8; cols * rows];
         let mut sand = vec![false; cols * rows];
-        for z in 0..rows {
+        let mut rows_mut: Vec<_> = dist.chunks_mut(cols).zip(sand.chunks_mut(cols)).collect();
+        tore_workers::shared().for_each_mut(&mut rows_mut, 2, |z, (distance, beach)| {
             for x in 0..cols {
-                let at = z * cols + x;
                 if sea[(z / per) * w.cols + x / per] {
-                    dist[at] = 0;
+                    distance[x] = 0;
                 }
                 if let Some(i) = atlas.index_at(
                     w.x0 + x as i64 * TEXEL + TEXEL / 2,
                     w.z0 + z as i64 * TEXEL + TEXEL / 2,
                 ) {
-                    sand[at] = i != 255 && light_sand(atlas.palette[usize::from(i)]);
+                    beach[x] = i != 255 && light_sand(atlas.palette[usize::from(i)]);
                 }
             }
-        }
+        });
         distance(&mut dist, cols, rows);
-        let blocked = seaward(&sand, &dist, cols, rows);
+        let flags = seaward(&sand, &dist, cols, rows);
+        let mut blocked = vec![0; flags.len().div_ceil(8)];
+        for (i, flag) in flags.into_iter().enumerate() {
+            if flag {
+                blocked[i / 8] |= 1 << (i % 8);
+            }
+        }
         Self {
             x0: w.x0,
             z0: w.z0,
@@ -78,11 +85,10 @@ impl Coast {
     pub(super) fn contains(&self, x: i64, z: i64) -> bool {
         let c = (x - self.x0).div_euclid(TEXEL);
         let r = (z - self.z0).div_euclid(TEXEL);
-        c >= 0
-            && r >= 0
-            && (c as usize) < self.cols
-            && (r as usize) < self.rows
-            && self.blocked[r as usize * self.cols + c as usize]
+        c >= 0 && r >= 0 && (c as usize) < self.cols && (r as usize) < self.rows && {
+            let i = r as usize * self.cols + c as usize;
+            self.blocked[i / 8] & (1 << (i % 8)) != 0
+        }
     }
 }
 /// Clear reference-palette sand, including white. Dark bands are not seeds.
@@ -123,7 +129,7 @@ fn seaward(sand: &[bool], dist: &[u8], cols: usize, rows: usize) -> Vec<bool> {
     let mut out: Vec<bool> = sand.iter().zip(dist).map(|(&s, &d)| s && d <= 64).collect();
     let mut bands = vec![Vec::new(); 65];
     for (at, &d) in dist.iter().enumerate() {
-        if d <= 64 {
+        if (1..=64).contains(&d) {
             bands[usize::from(d)].push(at);
         }
     }
