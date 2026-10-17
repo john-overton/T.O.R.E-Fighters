@@ -200,9 +200,12 @@ one repeating ripple:
   windward slope, a sharp crest and a shaded slip face. Barchan
   crescents, a few hundred feet across, sit on the sea's edges. They
   are shading on the lighting, not geometry.
-- **Close range**: wind streaks along the wind, ripples 24 to 40 ft
-  apart in three directions that come and go in patches, soft grit,
-  and pebbles about a foot across on gravel.
+- **Close range**: wind streaks along the wind, and ripples 24 to 40
+  ft apart in three directions, only on sand sheets and windward
+  flanks, soft enough that the dune's own light still shows. Slip
+  faces stay smooth. Soft grit, and pebbles about a foot across on
+  gravel. Open sand grows nothing; dry tufts and bushes stay on wadi
+  banks, gravel and water.
 
 Each pattern fades out before it is smaller than a pixel. The fine
 grain is full below about 2,200 ft and gone by about 7,500 ft; the

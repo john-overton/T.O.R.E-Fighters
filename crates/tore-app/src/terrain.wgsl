@@ -687,12 +687,13 @@ fn ground_detail(color:vec3<f32>,direction:vec3<f32>,normal:vec3<f32>)->Detail {
   tint*=mix(vec3<f32>(1.0),form,max(sea,fringe)*dune_w);
   tint*=mix(vec3<f32>(1.0),vec3<f32>(1.03,0.96,0.88),slip*dune_w*0.8);
   if near>0.01 {
-   // Ripples on sand sheets and windward flanks, three wind directions
-   // blended across the ground, spacing 20 to 40 ft. Crests are paler
-   // than the troughs, where darker grains collect, so they show under
-   // any sun.
-   let sheet=smoothstep(0.3,0.65,detail_noise(w/2600.0,0,24u))*sand*(1.0-gravel)*(1.0-stony);
-   let strength=max(sheet,max(sea,fringe*0.8))*(1.0-slip*0.9);
+   // Ripples on sand sheets and windward flanks, never a carpet over a
+   // whole dune field, and never on a slip face. Three wind directions,
+   // spacing 20 to 40 ft, soft enough that the dune's own light still
+   // reads. Crests are slightly paler than the troughs.
+   let sheet=smoothstep(0.5,0.85,detail_noise(w/2600.0,0,24u))*sand*(1.0-gravel)*(1.0-stony);
+   let flank=max(sea,fringe)*(1.0-slip)*smoothstep(0.2,0.6,detail_noise(w/2200.0,0,29u));
+   let strength=max(sheet,flank)*0.45;
    if strength>0.01 {
     let shift=vec2<f32>(detail_noise(w/700.0,0,25u),detail_noise(w/700.0,0,26u))*40.0;
     let wa=detail_noise(w/5000.0,0,27u);let wb=detail_noise(w/5000.0,0,28u);
@@ -704,7 +705,7 @@ fn ground_detail(color:vec3<f32>,direction:vec3<f32>,normal:vec3<f32>)->Detail {
      let k=detail_lattice(angles[i],lengths[i]);
      let p=ripple_profile(fract(dot(q+shift,k)));
      let band=detail_band(lengths[i],foot);
-     rg+=k*p.y*0.07*lengths[i]*weights[i]*band;
+     rg+=k*p.y*0.035*lengths[i]*weights[i]*band;
      shade+=(p.x-0.5)*weights[i]*band;
      total+=weights[i];
     }
@@ -715,11 +716,9 @@ fn ground_detail(color:vec3<f32>,direction:vec3<f32>,normal:vec3<f32>)->Detail {
      rg+=k*p.y*0.06*9.0*band*0.6;
      shade+=(p.x-0.5)*0.4*band;
     }
-    // Patchy: ripples come and go across the sheet.
-    let patchy=0.55+0.45*smoothstep(0.25,0.7,detail_noise(w/420.0,0,29u));
-    let s=strength*near*patchy/max(total,0.5);
+    let s=strength*near/max(total,0.5);
     bend-=rg*s;
-    tint*=vec3<f32>(1.0+shade*0.14*s);
+    tint*=vec3<f32>(1.0+shade*0.06*s);
    }
    // Grit: soft grains, never blocks, and pebbles on gravel and stony ground.
    var grain=(fine_noise(q,4.0,40u)-0.5)*0.14*detail_band(4.0,foot)

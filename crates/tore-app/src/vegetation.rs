@@ -873,7 +873,6 @@ impl Atlas {
             return (0.32 * s.bank
                 + 0.16 * s.bed
                 + 0.025 * s.gravel
-                + 0.006 * (1. - s.sea) * if s.kind == Kind::Sand { 1. } else { 0. }
                 + if green { 0.18 } else { 0.3 * s.near_water })
             .min(1.);
         }
@@ -1320,8 +1319,10 @@ impl Atlas {
             1 => match s.kind {
                 Kind::Scrub | Kind::Forest | Kind::Grass => (0.9, 1., 2.0 * vary),
                 Kind::Sand => {
-                    let d = 0.04 + 0.5 * s.bank + 0.3 * s.bed + 0.2 * s.gravel + 0.4 * s.near_water;
-                    ((d * (1. - 0.9 * s.sea)).min(0.8), 3., 1.2 * vary)
+                    // Open sand stays bare. Tufts gather on wadi banks and
+                    // beds, on gravel, and beside water.
+                    let d = 0.55 * s.bank + 0.4 * s.bed + 0.3 * s.gravel + 0.5 * s.near_water;
+                    ((d * (1. - 0.85 * s.sea)).min(0.7), 3., 1.2 * vary)
                 }
                 Kind::Rock => (0.25, 3., 0.9 * vary),
                 _ => (0., 0., 0.),
