@@ -444,7 +444,9 @@ BAD_OPTIONS = {
     "monitor-word": (["--monitor-inputs", "abc"], "--monitor-inputs needs a number"),
     "monitor-range": (["--monitor-inputs", "100000"], "must be 1..300 seconds"),
     "rumble-none": (["--test-rumble", "nosuchdevice"], "rumble device was not found"),
-    "probe-ticks-zero": (["--ai-probe-ticks", "0"], "needs 1 to 216000 ticks"),
+    # 288000 since ca59477f: 40 minutes, so a four-ship landing on a merged
+    # 12,000 ft field can finish its taxi. 216000 was the old 30 minute cap.
+    "probe-ticks-zero": (["--ai-probe-ticks", "0"], "needs 1 to 288000 ticks"),
     "probe-ticks-word": (["--ai-probe-ticks", "many"], "--ai-probe-ticks needs a number"),
     "ground-start-word": (["--ai-probe-ticks", "60", "--ground-start", "x"], "--ground-start needs a number"),
     "ground-start-none": (["--ai-probe-ticks", "60", "--ground-start", "99"], "airport is unavailable"),
