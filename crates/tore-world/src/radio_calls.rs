@@ -693,6 +693,24 @@ impl Radio {
         words: Option<&SeatWords>,
         battle: bool,
     ) {
+        // A destroyed aircraft does not speak. The death call is the
+        // exception: it is sent on the tick the aircraft is already lost.
+        if scene.member(speaker).is_some_and(|member| !member.alive)
+            && !matches!(origin.cause, Cause::Death { .. })
+        {
+            comms.record(
+                Entry::note(
+                    scene.now,
+                    scene.name(speaker),
+                    origin.by(speaker).to(audience.into()),
+                    Outcome::Dropped(Reason::SpeakerDown),
+                )
+                .with_text(phrase.text)
+                .with_stems(phrase.stems)
+                .with_kind(Route::Radio, kind),
+            );
+            return;
+        }
         self.made += 1;
         let origin = origin.by(speaker).to(audience.into());
         let mut hearers = scene.hearers(speaker, audience);
@@ -2665,6 +2683,106 @@ mod tests {
         );
         assert_eq!(battle_label(&member(2, false, 1, 0)), "Net Blue one");
         assert_eq!(battle_label(&member(2, false, 8, 3)), "Net Flight 9 four");
+    }
+
+    #[test]
+    fn a_downed_speaker_does_not_call_a_hit_and_a_queued_line_is_dropped() {
+        let mut w = World::new();
+        w.members[1].alive = false;
+        let mut comms = Comms::new(1);
+        let mut radio = Radio::default();
+        radio.strike(&mut comms, &w.scene(0.), &strike(1, 3, 1, false));
+        assert!(
+            lines(&mut comms, 1.).is_empty(),
+            "a destroyed shooter does not call the hit"
+        );
+        let journal = comms.take_journal();
+        assert!(
+            journal.iter().any(|entry| {
+                entry.origin.speaker == Some(1)
+                    && matches!(entry.outcome, Outcome::Dropped(Reason::SpeakerDown))
+            }),
+            "the hit is journaled as dropped: {journal:?}"
+        );
+
+        // Queued while the shooter is alive, then lost before the half-second delay.
+        let w = World::new();
+        let mut comms = Comms::new(1);
+        let mut radio = Radio::default();
+        radio.strike(&mut comms, &w.scene(0.), &strike(1, 3, 1, false));
+        comms.drop_downed_speakers(0.2, |id| id == 1);
+        assert!(
+            lines(&mut comms, 1.).is_empty(),
+            "the waiting hit call is dropped when the speaker is lost"
+        );
+        let journal = comms.take_journal();
+        assert!(
+            journal
+                .iter()
+                .any(|entry| matches!(entry.outcome, Outcome::Cancelled(Reason::SpeakerDown))),
+            "the waiting line is cancelled: {journal:?}"
+        );
+
+        // The death call is the last words, on the tick the speaker is already down.
+        let mut w = World::new();
+        w.members[1].alive = false;
+        let mut comms = Comms::new(1);
+        let mut radio = Radio::default();
+        radio.chatter(
+            &mut comms,
+            &w.scene(0.),
+            &Chatter::Death {
+                speaker: 1,
+                ejection_seat: true,
+            },
+        );
+        comms.drop_downed_speakers(0., |id| id == 1);
+        let due = lines(&mut comms, 0.);
+        assert_eq!(due.len(), 1, "the death call is still said: {due:?}");
+
+        // Nobody is left to say it, so the voiceless wingleader line still arrives.
+        let mut comms = Comms::new(1);
+        comms.send(
+            0.,
+            Call::new(
+                "Flight",
+                Phrase::default().raw("You're the Wingleader now", None),
+                Kind::Important,
+            )
+            .after(5.)
+            .because(
+                Origin::of(
+                    Source::Radio,
+                    Cause::Leadership {
+                        new: 1,
+                        previous: 0,
+                        previous_pilot_alive: false,
+                    },
+                )
+                .by(0),
+            ),
+            &[Hearer::named(SeatId(0), "Flight")],
+        );
+        comms.drop_downed_speakers(1., |id| id == 0);
+        let due = lines(&mut comms, 5.);
+        assert_eq!(
+            due.len(),
+            1,
+            "the voiceless wingleader line still arrives: {due:?}"
+        );
+
+        // The crew scream is not radio. The cockpit queues it after dropping
+        // its own waiting lines, and this rule must not take it away.
+        let mut comms = Comms::new(1);
+        comms.send(
+            0.,
+            Call::new("", Phrase::stem(&w.phrases, "^SCREAM"), Kind::Important)
+                .direct()
+                .because(Origin::of(Source::Crew, Cause::Destroyed).by(0)),
+            &[Hearer::seat(SeatId(0))],
+        );
+        comms.drop_downed_speakers(0., |id| id == 0);
+        assert_eq!(comms.due(0.).len(), 1, "the death scream is still heard");
     }
 }
 

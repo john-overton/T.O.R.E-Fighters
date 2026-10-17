@@ -68,6 +68,17 @@ hit" as `RIO` or `CO-PILOT`.
 seconds or five seconds, listed per event. The player's own calls play at send
 time.
 
+**A destroyed aircraft does not speak** (opinionated, John, 2026-10-16). A
+radio call is made only while its speaker is alive, except the death call,
+which is that aircraft's last words on the tick it is lost. A radio line
+already waiting is dropped when the speaker is destroyed or its pilot leaves
+the aircraft, so a hit or kill call does not arrive afterwards. "You're the
+Wingleader now" still waits out its five seconds: it is voiced when the
+previous pilot ejected alive, and printed with no voice when that pilot is
+dead. The crew's death scream is not a radio call and still plays. Live play,
+a dedicated server and a recording all use this delivery, so a dead wingman
+is silent on the radio in all three.
+
 **Speaker label.**
 
 - A member of a flight is named by the flight's colour and the member's
@@ -363,7 +374,9 @@ previous leader's pilot is alive. The event is journaled. *Agent decisions,
 to that seat alone, five seconds after the change, as an important call. It is
 voiced by the previous leader (labelled like any wingmate) when that pilot is
 alive. When the pilot is not, the words print as a HUD line labelled `Flight`
-with no recording (the HUD-only case is an agent proposal, not retail's). When
+with no recording (the HUD-only case is an agent proposal, not retail's). Either
+line still arrives after the speaker's aircraft is lost: it was decided when
+the lead passed, and it is not a call the wreck makes. When
 the AI takes the lead nothing is said and only the journal's "now leads the
 wing" note is written, so single player, where a human never becomes the new
 leader, does not change.

@@ -1110,6 +1110,9 @@ pub enum Reason {
     /// The player's wing order voice cancels wing speech still queued or
     /// playing.
     OrderVoice,
+    /// The speaker was destroyed, or its pilot left the aircraft, before the
+    /// line was said. A death call and a voiceless wingleader line are kept.
+    SpeakerDown,
     /// A reason given by the host.
     Text(String),
 }
@@ -1196,6 +1199,7 @@ impl fmt::Display for Reason {
             Reason::NoDesignators => write!(f, "no designator aboard"),
             Reason::NoAirportSelected => write!(f, "no airport selected (Shift-A)"),
             Reason::OrderVoice => write!(f, "cut off by your wing order voice"),
+            Reason::SpeakerDown => write!(f, "the speaker is down"),
             Reason::Text(text) => f.write_str(text),
         }
     }

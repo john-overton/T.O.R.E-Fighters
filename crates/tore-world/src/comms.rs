@@ -796,6 +796,37 @@ impl Comms {
         }
         channel.pending = kept;
     }
+    /// Drop every radio line still waiting for a speaker `downed` says is gone.
+    /// A death call stays: it is that aircraft's last words, sent on the tick
+    /// it is lost. A wingleader line stays too, voiced when the previous pilot
+    /// ejected alive and printed with no voice when that pilot is dead. Crew
+    /// lines are left to the cockpit's own rules, which already drop what was
+    /// waiting and then queue the death scream.
+    pub fn drop_downed_speakers(&mut self, now: f64, downed: impl Fn(u32) -> bool) {
+        self.clock = now;
+        for index in 0..self.channels.len() {
+            let seat = self.channels[index].seat;
+            let pending = std::mem::take(&mut self.channels[index].pending);
+            let mut kept = Vec::with_capacity(pending.len());
+            for p in pending {
+                let gone = p.call.origin.speaker.is_some_and(&downed);
+                if gone && !call_survives_speaker_loss(&p.call) {
+                    self.journal.push(
+                        Entry::call(
+                            now,
+                            Some(p.serial),
+                            &p.call,
+                            Outcome::Cancelled(Reason::SpeakerDown),
+                        )
+                        .heard_by([seat]),
+                    );
+                } else {
+                    kept.push(p);
+                }
+            }
+            self.channels[index].pending = kept;
+        }
+    }
     /// Alt-S for `seat`. Returns the HUD confirmation.
     pub fn toggle_silence(&mut self, seat: SeatId) -> &'static str {
         let Some(channel) = self.channel_mut(seat) else {
@@ -820,6 +851,20 @@ impl Comms {
     /// See [`Journal::first_in_window`].
     pub fn first_in_window(&mut self, rule: &'static str, id: u32, now: f64, until: f64) -> bool {
         self.journal.first_in_window(rule, id, now, until)
+    }
+}
+
+/// A line that is still said after its speaker is down.
+fn call_survives_speaker_loss(call: &Call) -> bool {
+    match call.origin.source {
+        // The cockpit drops its own waiting lines, then queues the scream.
+        Source::Crew | Source::Tower | Source::Hud | Source::Order | Source::Music => true,
+        Source::Radio | Source::Reply | Source::Chatter => {
+            matches!(
+                call.origin.cause,
+                Cause::Death { .. } | Cause::Leadership { .. }
+            )
+        }
     }
 }
 

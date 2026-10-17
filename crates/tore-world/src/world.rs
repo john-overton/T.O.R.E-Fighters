@@ -1480,6 +1480,13 @@ impl World {
             &mut self.combat.state,
             self.ai_wings.as_mut(),
         );
+        // A radio line queued while the speaker lived is not said after the
+        // aircraft is lost. Death calls, wingleader lines and crew speech stay.
+        self.comms.drop_downed_speakers(now, |id| {
+            members
+                .iter()
+                .any(|member| member.id == id && !member.alive)
+        });
         for delivery in self.comms.due(now) {
             out.cues.push(Cue::Radio {
                 seat: delivery.seat,
