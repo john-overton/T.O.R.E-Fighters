@@ -1718,7 +1718,10 @@ fn replay_cameras(
                 Some(cam.condition),
                 &overrides(cam.time)?,
             )?;
-            let scenery = Scenery::build(resources, &world)?;
+            let mut scenery = Scenery::build(resources, &world)?;
+            if std::env::var("TORE_SEAM_MASK_ONLY").as_deref() == Ok("1") {
+                scenery.seams[0] = 2.;
+            }
             let mut view =
                 pollster::block_on(View::new(&scenery, size, options(density()?), false))?;
             view.set_shown(std::env::var("TORE_SEAM_SURFACE_ONLY").as_deref() != Ok("1"));

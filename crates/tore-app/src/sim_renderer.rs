@@ -152,6 +152,8 @@ pub struct SimRenderer {
     palette: wgpu::Texture,
     weather_tiles: wgpu::TextureView,
     seam_records: wgpu::TextureView,
+    seam_tints: wgpu::TextureView,
+    seam_sampler: wgpu::Sampler,
     canopy_visible: bool,
     aircraft: Option<(wgpu::BindGroup, wgpu::Buffer, u32)>,
     bind: wgpu::BindGroup,
@@ -707,6 +709,22 @@ impl SimRenderer {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
         let lighting =
@@ -825,13 +843,21 @@ impl SimRenderer {
             view_formats: &[],
         });
         let palette_view = palette.create_view(&wgpu::TextureViewDescriptor::default());
-        let packed = scenery.vegetation.as_ref().map_or_else(
-            || crate::terrain_seams::Map::default().pack(),
-            |atlas| atlas.seams.pack(),
-        );
+        let empty_seams = crate::terrain_seams::Map::default();
+        let seams = scenery
+            .vegetation
+            .as_ref()
+            .filter(|a| a.seams.has_blend())
+            .map_or(&empty_seams, |a| &a.seams);
+        let record_size = seams.gpu_size();
+        let records = if seams.baked.records.is_empty() {
+            &[0_u8; 8][..]
+        } else {
+            &seams.baked.records
+        };
         let seam_size = wgpu::Extent3d {
-            width: packed.size[0],
-            height: packed.size[1],
+            width: record_size[0],
+            height: record_size[1],
             depth_or_array_layers: 1,
         };
         let seam_texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -846,15 +872,59 @@ impl SimRenderer {
         });
         queue.write_texture(
             seam_texture.as_image_copy(),
-            &packed.bytes,
+            records,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(packed.size[0] * 8),
+                bytes_per_row: Some(record_size[0] * 8),
                 rows_per_image: None,
             },
             seam_size,
         );
         let seam_records = seam_texture.create_view(&Default::default());
+        let neutral = crate::terrain_seams::baked::Baked::build(
+            &crate::terrain_seams::Map::default(),
+            &[],
+            &[[0; 3]; 256],
+        );
+        let baked = scenery
+            .vegetation
+            .as_ref()
+            .filter(|a| !a.seams.baked.pixels.is_empty())
+            .map_or(&neutral, |a| &a.seams.baked);
+        let seam_tints_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Cached seam tints"),
+            size: wgpu::Extent3d {
+                width: baked.size[0],
+                height: baked.size[1],
+                depth_or_array_layers: baked.size[2],
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            seam_tints_texture.as_image_copy(),
+            &baked.pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(baked.size[0] * 8),
+                rows_per_image: Some(baked.size[1]),
+            },
+            seam_tints_texture.size(),
+        );
+        let seam_tints = seam_tints_texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
+        let seam_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Seam tint interpolation"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
         let material_storage = tile_layout(device, true);
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Simulation scene bindings"),
@@ -887,6 +957,14 @@ impl SimRenderer {
                 wgpu::BindGroupEntry {
                     binding: 6,
                     resource: wgpu::BindingResource::TextureView(&seam_records),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::TextureView(&seam_tints),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: wgpu::BindingResource::Sampler(&seam_sampler),
                 },
             ],
         });
@@ -942,6 +1020,8 @@ impl SimRenderer {
             palette,
             weather_tiles: view,
             seam_records,
+            seam_tints,
+            seam_sampler,
             canopy_visible: false,
             aircraft: None,
             dummies: Vec::new(),
@@ -1342,6 +1422,14 @@ impl SimRenderer {
                     wgpu::BindGroupEntry {
                         binding: 6,
                         resource: wgpu::BindingResource::TextureView(&self.seam_records),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::TextureView(&self.seam_tints),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: wgpu::BindingResource::Sampler(&self.seam_sampler),
                     },
                 ],
             });

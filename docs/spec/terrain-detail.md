@@ -340,26 +340,30 @@ for John's texture-blend request of 2026-10-18. Texture coverage and terrain
 heights are unchanged. The same palette remaps and footprint filtering apply
 to each texture. Adjacent accepted edge means interpolate along the edge.
 
-Generic green LAND gets a synthetic mottled page, derived once from the natural
-source pictures adjoining accepted LAND seams. Only the colour histogram and
-luminance statistics are used, never the source pixels' spatial arrangement.
-The statistics include mean, light/dark colours, luminance standard deviation
-and RMS luminance differences at 256, 512, 1,024, 2,048, 4,096 and 8,192 ft.
-Periodic smooth noise has a primary cell size selected from 512 through 16,384
-ft in powers of two, plus a quarter-size octave with weight 0, 0.25, 0.5 or
-0.75. Ranking the noise against the measured green histogram preserves patch
-colours. The candidate with the least summed squared log error in the six
-spatial statistics wins. It is a fitted statistical resemblance, not recovery
-of original LAND behavior. Its 32,768 ft repetition is a known approximation.
+Source pictures, including LAND, remain unchanged. The reviewed UKR camera
+has mottled LAND.PIC south of the seam and a mostly uniform UKR23.PIC north of
+it. Replacing LAND with a fit to the flatter named tiles removed existing
+contrast. That global replacement is removed. Preserving all source interiors
+is the current rule; enriching flat regions of named pictures needs a separate
+scope decision because it changes their rendered interiors.
 
-The generated 256-square indexed page replaces only the presentation's generic
-green LAND page. Equal opposite borders make the world-aligned repetition
-continuous. Normal palette and texture filtering remain active, with no added
-LAND shader fetch or per-frame synthesis. The source fill's classification and
-vegetation population inputs remain unchanged. Sand, snow and other non-green
-fallback pages are not synthesized. Local seam means are refitted to the new
-page, so the 500 ft colour ramp remains valid. The runtime cache holds the
-statistics and synthetic page; no retail-derived image is committed.
+The texture/colour response is precomputed into a sparse half-float atlas.
+It stores a linear RGB correction and the source luminance at 128 ft positions
+along accepted runs and nine depths from 0 to 250 ft on each side. Source pages
+and rotations feed the same noisy 500 ft reference blend. A shader mask lookup
+rejects excluded segments; one hardware-filtered response sample supplies the
+correction. A hard distance test returns zero at and beyond 250 ft. Run endpoints
+also fade inside their accepted segment, preventing filtered spill into a
+protected feature. Original source colours remain pixel-identical outside the
+band. The compact cache trades extra atlas memory for fewer shader fetches.
+
+The atlas uses the theater's reference palette. Its correction scales with the
+live material's luminance before surface lighting. Uniform brightness changes
+are preserved; nonuniform weather palette remaps are a fitted approximation
+requiring visual review. The atlas, mask and metadata are cached. There are no
+per-frame uploads or new ordinary draw calls. A diagnostic mask view and fixed
+interior cameras are included in the lead's offscreen harness. No GPU timing
+claim is made by the CPU audit; the 4K High target is about 0.5 ms at 100 ft.
 
 The source is the actual uploaded ground page, including LAND fallback and
 neutral airfield ground. A maximum linear RGB local mean difference of at least
@@ -390,11 +394,11 @@ outer edges. Existing tree-line, slope, grounding, exclusion and fixed-budget
 rules remain. Field interiors and procedural rectangular field rows remain.
 The distant canopy samples the same belt through ordinary placement queries.
 
-Blades use the same synthesized page and texture/colour blend as ground, before their existing species/root
+Blades use the same source page and cached texture/colour response as ground, before their existing species/root
 and tip tints. Fallback land now uses the same LAND page as the terrain; water
 without a placed picture still has no blades. The seam metadata and masks are
 cached with the placement/canopy/habitat inputs. `TORE_TERRAIN_SEAMS=0` disables
-the synthetic LAND page, texture/colour blend and belt for comparisons. Ground-detail Off leaves
+the texture/colour response and belt for comparisons. Ground-detail Off leaves
 the correction active; `TORE_VEGETATION=0` disables this exploratory feature.
 No simulation, wire, replay or checkpoint data changes.
 

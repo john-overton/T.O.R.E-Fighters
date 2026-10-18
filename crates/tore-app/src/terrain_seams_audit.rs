@@ -159,6 +159,8 @@ pub fn run(resources: &BTreeMap<String, Vec<u8>>, out: &Path) -> AppResult<()> {
         "camera\tpitch_radians\tagl_ft\ttarget_pixel_x\ttarget_pixel_y\tterrain_ray"
     )?;
     let mut report = std::fs::File::create(out.join("seam-metrics.tsv"))?;
+    let mut mask_projection = std::fs::File::create(out.join("mask-projection.tsv"))?;
+    writeln!(mask_projection, "camera\tx\tfirst_y\tlast_y\twidth_pixels")?;
     writeln!(
         report,
         "theater\tcols\trows\tbytes\tblend_segments\thedge_segments\tcold_scene_ms\tcached_scene_ms\tmean_fit_max_linear\tlocal_mean_fit_max_linear"
@@ -188,6 +190,7 @@ pub fn run(resources: &BTreeMap<String, Vec<u8>>, out: &Path) -> AppResult<()> {
             return Err("seam/card/canopy cache differs".into());
         }
         crate::vegetation_limits::validate(&scene, &wgpu::Limits::downlevel_defaults())?;
+        interiors_probe(resources, out, code, &world, &scene)?;
         if code == "UKR" {
             line_probe(out, &world, &scene)?;
         }
@@ -273,6 +276,28 @@ pub fn run(resources: &BTreeMap<String, Vec<u8>>, out: &Path) -> AppResult<()> {
         }
         let spot = *selected.first().ok_or("no seam or hedge control camera")?;
         texture_probe(out, code, &scene, &spot)?;
+        for (side, label) in [(-1., "south"), (1., "north")] {
+            let mut p = [spot.x, spot.z];
+            p[spot.axis] += 8192. * side;
+            let mut cam = crate::camera::Camera::new();
+            let target = [
+                p[0],
+                f64::from(world.height(p[0] as f32, p[1] as f32)),
+                p[1],
+            ];
+            cam.position = [p[0], target[1] + 5000., p[1]];
+            cam.pitch = -std::f32::consts::FRAC_PI_2;
+            cam.yaw = 0.;
+            write_camera(
+                &mut cameras,
+                &mut checks,
+                &format!("{code}-interior-{label}"),
+                code,
+                &cam,
+                target,
+                &world,
+            )?;
+        }
         let target = [
             spot.x,
             f64::from(world.height(spot.x as f32, spot.z as f32)),
@@ -302,6 +327,30 @@ pub fn run(resources: &BTreeMap<String, Vec<u8>>, out: &Path) -> AppResult<()> {
                     &overview,
                     target,
                     &world,
+                )?;
+                let bounds: Vec<_> = [-250., 250.]
+                    .into_iter()
+                    .map(|d| {
+                        let mut p = [spot.x, spot.z];
+                        p[spot.axis] += d;
+                        overview
+                            .project(
+                                [3840, 2160],
+                                [
+                                    p[0],
+                                    f64::from(world.height(p[0] as f32, p[1] as f32)),
+                                    p[1],
+                                ],
+                            )
+                            .unwrap()
+                    })
+                    .collect();
+                let lo = bounds[0][1].min(bounds[1][1]);
+                let hi = bounds[0][1].max(bounds[1][1]);
+                writeln!(
+                    mask_projection,
+                    "UKR-LAND-edge-overhead-{height:.0}ft\t1920\t{lo:.6}\t{hi:.6}\t{:.6}",
+                    hi - lo
                 )?;
             }
         }
@@ -371,9 +420,7 @@ fn strip(
                 .sample(map, p.map(|v| v as f32), &scene.texture_indices, &palette)
                 .unwrap_or(palette[usize::from(index)]);
             if y >= H / 2 {
-                color = packed
-                    .surface(map, p.map(|v| v as f32), &scene.texture_indices, &palette)
-                    .unwrap_or(color);
+                color = map.baked.surface(map, p.map(|v| v as f32), color);
             }
             let rgb = color.map(|v| {
                 let v = if v <= 0.0031308 {
@@ -533,7 +580,8 @@ fn line_probe(out: &Path, world: &Terrain, scene: &Scenery) -> AppResult<()> {
     let point = |d: f32| [x, 32768. + d];
     let surface = |d: f32| {
         packed
-            .surface(map, point(d), &scene.texture_indices, &palette)
+            .sample(map, point(d), &scene.texture_indices, &palette)
+            .map(|own| map.baked.surface(map, point(d), own))
             .ok_or("no material")
     };
     if map.record(0, 1, 128)[0] & (BLEND | super::FALLBACK) != (BLEND | super::FALLBACK) {
@@ -593,87 +641,82 @@ fn line_probe(out: &Path, world: &Terrain, scene: &Scenery) -> AppResult<()> {
     Ok(())
 }
 
-fn texture_probe(out: &Path, code: &str, scene: &Scenery, spot: &Spot) -> AppResult<()> {
+fn interiors_probe(
+    resources: &BTreeMap<String, Vec<u8>>,
+    out: &Path,
+    code: &str,
+    world: &Terrain,
+    scene: &Scenery,
+) -> AppResult<()> {
+    let baseline = Scenery::build_for(resources, world, false)?;
+    let ground_bytes = baseline
+        .land_texture
+        .map_or(baseline.texture_indices.len(), |p| (p + 1) * 65536);
+    if scene.texture_indices[..ground_bytes] != baseline.texture_indices[..ground_bytes]
+        || scene.ground_layers != baseline.ground_layers
+        || scene.vertices != baseline.vertices
+    {
+        return Err(format!("{code}: original ground pages, UVs or mesh changed").into());
+    }
     let map = &scene.vegetation.as_ref().ok_or("no atlas")?.seams;
-    let m = &map.mottle;
-    if m.pixels.is_empty() || m.source_pages == 0 {
-        return Err(format!("{code}: green LAND synthesis is missing").into());
-    }
-    for k in 0..16 {
-        let limit = if (4..10).contains(&k) { 0.25 } else { 0.01 };
-        let a = m.statistics[0][k];
-        let b = m.statistics[1][k];
-        if (a - b).abs() > a.max(1e-6) * limit {
-            return Err(format!(
-                "{code}: LAND statistic {k} exceeds {}% tolerance ({a} -> {b})",
-                limit * 100.
-            )
-            .into());
-        }
-    }
-    if !m.pixels.is_empty() {
-        let mut p = [spot.x as f32, spot.z as f32];
-        p[spot.axis] += 128.;
-        let tile = (p[1] / TILE) as usize * map.cols + (p[0] / TILE) as usize;
-        let mut page = map.material(tile)[0] as usize - 1;
-        if scene.land_texture == Some(page) {
-            page = map.material(tile - if spot.axis == 0 { 1 } else { map.cols })[0] as usize - 1;
-        }
-        let source = &scene.texture_indices[page * 65536..(page + 1) * 65536];
-        let panels = [&m.source[..], source, &m.pixels[..]];
-        let mut rgba = vec![255; 768 * 256 * 4];
-        for (panel, pixels) in panels.into_iter().enumerate() {
-            for y in 0..256 {
-                for x in 0..256 {
-                    let at = (y * 768 + panel * 256 + x) * 4;
-                    rgba[at..at + 3]
-                        .copy_from_slice(&scene.palette[usize::from(pixels[y * 256 + x])]);
+    let mut probes = 0;
+    for tile in 0..map.cols * map.rows {
+        for v in 0..16 {
+            for u in 0..16 {
+                let p = [
+                    (tile % map.cols) as f32 * TILE + 512. + u as f32 * 2048.,
+                    (tile / map.cols) as f32 * TILE + 512. + v as f32 * 2048.,
+                ];
+                if map.baked.response(map, p)[..3] != [0.; 3] {
+                    return Err(format!("{code}: changed tile interior at {p:?}").into());
                 }
+                probes += 1;
             }
         }
-        std::fs::write(
-            out.join(format!("{code}-LAND-source-synthetic.png")),
-            crate::replay::png::encode_rgba(768, 256, &rgba)?,
-        )?;
     }
-    let mut stats = std::fs::File::create(out.join(format!("{code}-mottle-statistics.csv")))?;
-    writeln!(stats, "metric,source,LAND,relative_error_percent")?;
-    for (k, name) in [
-        "mean_r",
-        "mean_g",
-        "mean_b",
-        "luminance_sd",
-        "rms_256ft",
-        "rms_512ft",
-        "rms_1024ft",
-        "rms_2048ft",
-        "rms_4096ft",
-        "rms_8192ft",
-        "dark_r",
-        "dark_g",
-        "dark_b",
-        "light_r",
-        "light_g",
-        "light_b",
-    ]
-    .into_iter()
-    .enumerate()
+    let mut stats = std::fs::File::create(out.join(format!("{code}-source-statistics.csv")))?;
+    writeln!(
+        stats,
+        "page,kind,mean_r,mean_g,mean_b,luminance_sd,rms_256ft,rms_512ft,rms_1024ft,rms_2048ft,rms_4096ft,rms_8192ft"
+    )?;
+    for (page, pixels) in scene.texture_indices[..ground_bytes]
+        .chunks_exact(65536)
+        .enumerate()
     {
-        let a = m.statistics[0][k];
-        let b = m.statistics[1][k];
-        writeln!(
+        let values = super::texture::statistics(&[pixels], &scene.palette);
+        write!(
             stats,
-            "{name},{a:.9},{b:.9},{:.3}",
-            100. * (b - a).abs() / a.max(1e-6)
+            "{page},{}",
+            if Some(page) == scene.land_texture {
+                "LAND"
+            } else {
+                "placed"
+            }
         )?;
+        for v in &values[..10] {
+            write!(stats, ",{v:.9}")?;
+        }
+        writeln!(stats)?;
     }
+    let text = format!(
+        "{code}: {ground_bytes} original page bytes and every terrain vertex identical; {probes} interior correction probes exactly zero. PASS\n"
+    );
     std::fs::write(
-        out.join(format!("{code}-mottle-fit.txt")),
+        out.join(format!("{code}-bake-size.txt")),
         format!(
-            "{} distinct neighbouring source pages; noise scale {} ft, small-octave share {}.\n",
-            m.source_pages, m.parameters[0], m.parameters[1]
+            "Tint atlas {:?}, {} bytes; record bytes {}. One mask load plus one filtered tint sample within accepted bands.\n",
+            map.baked.size,
+            map.baked.pixels.len(),
+            map.baked.records.len()
         ),
     )?;
+    std::fs::write(out.join(format!("{code}-interior-check.txt")), &text)?;
+    print!("{text}");
+    Ok(())
+}
+
+fn texture_probe(out: &Path, code: &str, scene: &Scenery, spot: &Spot) -> AppResult<()> {
+    let map = &scene.vegetation.as_ref().ok_or("no atlas")?.seams;
     let packed = map.pack();
     let palette = scene.palette.map(|p| p.map(super::linear));
     let mut csv = std::fs::File::create(out.join(format!("{code}-texture-band.csv")))?;
@@ -708,9 +751,7 @@ fn texture_probe(out: &Path, code: &str, scene: &Scenery, spot: &Spot) -> AppRes
             let Some(a) = packed.sample(map, p, &scene.texture_indices, &palette) else {
                 continue;
             };
-            let b = packed
-                .surface(map, p, &scene.texture_indices, &palette)
-                .ok_or("texture sample missing")?;
+            let b = map.baked.surface(map, p, a);
             let correction = packed.correction(map, p, &palette);
             let c = f64::from(lum(std::array::from_fn(|k| (a[k] + correction[k]).max(0.))));
             let a = f64::from(lum(a));

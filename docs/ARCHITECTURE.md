@@ -11030,27 +11030,27 @@ those records. A generic LAND fill boundary can join green authored ground
 when T2 colour/class values agree; authored fields and protected features stay
 excluded. The mask also supplies tree-belt probabilities.
 
-For drawing, each segment becomes one RG32Uint texel containing both indexed
-mean mixtures, precomputed run-end flags and an eight-bit boundary-noise value.
-The noise uses the formerly spare byte, with no added fetch or per-pixel hash.
-Eight more bytes per tile record
-the real page and quarter rotation. The dedicated texture packs at most 2,048
-records across; the largest reviewed grid fits 2,048 by 1,026. Material binding
-6 remains shared by terrain and blades. No new binding or draw call is added.
+For drawing, each segment becomes one RG32Uint texel containing accepted-run
+flags and a column address into a sparse RGBA16Float response atlas. Material
+bindings 6, 7 and 8 provide the records, response array and linear sampler.
+World/scenery and aircraft material groups bind the same resources. The CPU
+reference retains source page/quarter-rotation metadata for audits and baking.
 
-Outside 250 ft of an edge there are no seam-record reads. Inside it, one record
-rejects excluded segments. Accepted segments use up to one adjacent mean record,
-one neighbour page/rotation record and one filtered neighbour texture sample.
-The already sampled own texture is reused. Residual detail has a world-noise
-blend weight; mean colour keeps the exact 500 ft ramp. Blades sample bilinearly
-near seams and retain their cheaper lookup elsewhere.
+The response stores a linear RGB correction and the reference source luminance.
+Each accepted run has a padding column at either end, nine samples across each
+250 ft half-band and 128 ft spacing along the edge. There are 56 strip rows per
+1,024 by 1,008 array layer. The draw shader performs one mask load and one
+hardware-filtered response sample, scaling the correction by live/reference
+luminance. It performs no neighbour-art or extra palette lookup. Nonuniform
+weather remaps remain a fitted approximation. The noisy boundary is baked;
+there is no fragment noise hash. Grass reuses its normal source lookup.
 
-LAND synthesis runs once on the CPU, fitting a synthetic indexed page to the
-colour histogram and six spatial luminance statistics of adjoining source art.
-It uses no spatial source pixels and overwrites only the runtime LAND upload
-page, so ordinary LAND needs no additional shader work or texture memory.
-The cache also stores statistics and the original fill for local audit evidence.
-Source classifications, habitat and population never read the synthesized art.
+At or beyond 250 ft from an edge the response is exactly zero before any seam
+texture access. Segment flags and an additional run-end fade protect excluded
+features. Source art, mesh pages/UVs and all interior samples remain unchanged.
+LAND's original mottling is retained. No source page is overwritten and no
+runtime histogram-fit image replaces it. The response uploads once, adds no
+ordinary draw call and is cached beside the canopy/habitat data.
 The `.seams` cache retains bounded/checksummed atomic writes; code, art,
 layout, palette, airport/city exclusions, neutralized ground and enable state
 invalidate it. [Rules and limits](spec/terrain-detail.md#tile-seams).

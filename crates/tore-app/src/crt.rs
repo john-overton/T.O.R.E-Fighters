@@ -1030,9 +1030,9 @@ mod shader_tests {
                 assert!(
                     binding
                         < if *label == "opaque blades" {
-                            [7, 3, 3][group as usize]
+                            [9, 3, 3][group as usize]
                         } else {
-                            [7, 3, 2][group as usize]
+                            [9, 3, 2][group as usize]
                         },
                     "{label}: unavailable binding {binding}"
                 );

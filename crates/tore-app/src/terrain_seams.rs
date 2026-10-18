@@ -2,6 +2,8 @@
 //! Shared edge masks and low-frequency colours, cached beside habitat/canopy.
 #[path = "terrain_seams_audit.rs"]
 pub mod audit;
+#[path = "terrain_seams_baked.rs"]
+pub mod baked;
 #[path = "terrain_seams_texture.rs"]
 pub mod texture;
 
@@ -41,7 +43,7 @@ pub struct Map {
     pub mean_error: f32,
     /// RG32Uint metadata after edge records: page + 1, quarter rotation.
     pub materials: Vec<u8>,
-    pub mottle: texture::Mottle,
+    pub baked: baked::Baked,
 }
 
 fn linear(v: u8) -> f32 {
@@ -387,53 +389,7 @@ impl Map {
                 }
             }
         }
-        out.mottle = texture::Mottle::build(&out, land, pixels, &atlas.palette);
-        // Keep the established colour ramp, now around the synthetic fill's
-        // actual edge means. Source masks and population never read its art.
-        if !out.mottle.pixels.is_empty() {
-            let whole = mean_linear(&out.mottle.pixels, &linear_palette).1;
-            for (tile, page) in pages.iter().enumerate() {
-                if *page == land {
-                    out.bytes[tile * STRIDE..tile * STRIDE + 3].copy_from_slice(&whole);
-                }
-            }
-            for tile in 0..cols * rows {
-                for axis in 0..2 {
-                    for segment in 0..256 {
-                        if out.record(tile, axis, segment)[0] & FALLBACK == 0 {
-                            continue;
-                        }
-                        let next = tile + if axis == 0 { 1 } else { cols };
-                        for (side, t) in [tile, next].into_iter().enumerate() {
-                            if pages[t] != land {
-                                continue;
-                            }
-                            let edge: Vec<_> = [-1, 0, 1]
-                                .map(|offset| {
-                                    let mut uv = [0; 2];
-                                    uv[axis] = if side == 0 { 255 } else { 0 };
-                                    uv[1 - axis] = (segment as i32 + offset) as usize;
-                                    let (u, v) = crate::vegetation::rotate(
-                                        uv[0],
-                                        uv[1],
-                                        out.material(t)[1] as u8,
-                                    );
-                                    out.mottle.pixels[v * 256 + u]
-                                })
-                                .into();
-                            let m = mean_linear(&edge, &linear_palette);
-                            let at = tile * STRIDE
-                                + 4
-                                + (axis * SEGMENTS + segment) * RECORD
-                                + 1
-                                + side * 3;
-                            out.bytes[at..at + 3].copy_from_slice(&m.1);
-                            out.mean_error = out.mean_error.max(m.2);
-                        }
-                    }
-                }
-            }
-        }
+        out.baked = baked::Baked::build(&out, pixels, &atlas.palette);
         out
     }
 
@@ -532,7 +488,7 @@ impl Map {
         }
         let offset = self.cols * self.rows * 2 * SEGMENTS * 8;
         bytes[offset..offset + self.materials.len()].copy_from_slice(&self.materials);
-        Packed { size, bytes }
+        Packed { bytes }
     }
 
     /// Same smooth segment endpoints as the shader. An excluded segment is
@@ -589,7 +545,6 @@ impl Map {
 /// CPU evaluation of the actual upload bytes. Unlit live-palette colour;
 /// source weather remaps stay on the shared shader path.
 pub struct Packed {
-    pub size: [u32; 2],
     pub bytes: Vec<u8>,
 }
 impl Packed {
@@ -601,7 +556,7 @@ impl Packed {
     }
 
     /// Bilinear indexed source sampling with the real uploaded page/rotation.
-    /// Used by the CPU material audit, including synthesized LAND pages.
+    /// Used by the CPU material audit, without modifying any source page.
     pub fn sample(
         &self,
         map: &Map,
@@ -798,6 +753,41 @@ impl Packed {
 mod tests {
     use super::*;
     #[test]
+    fn baked_correction_cannot_change_interiors_or_escape_500_feet() {
+        let (world, atlas, layers, pixels) = two_tiles();
+        let map = Map::build(&world, &atlas, &layers, None, &pixels);
+        let packed = map.pack();
+        let palette = atlas.palette.map(|p| p.map(linear));
+        for tile in 0..2 {
+            for y in 2..254 {
+                for x in 2..254 {
+                    let p = [
+                        tile as f32 * TILE + x as f32 * 128. + 64.,
+                        y as f32 * 128. + 64.,
+                    ];
+                    assert_eq!(map.baked.response(&map, p)[..3], [0.; 3]);
+                }
+            }
+        }
+        for d in [-300., -250., -200., -125., -1., 1., 125., 200., 250., 300.] {
+            let p = [TILE + d, 12864.];
+            let own = packed.sample(&map, p, &pixels, &palette).unwrap();
+            let expected = packed.surface(&map, p, &pixels, &palette).unwrap();
+            let after = map.baked.surface(&map, p, own);
+            for k in 0..3 {
+                assert!((after[k] - expected[k]).abs() < 0.001);
+            }
+            if d.abs() >= 250. {
+                assert_eq!(own, after);
+            }
+        }
+        // A source feature exclusion cannot be turned on by atlas filtering.
+        let mut blocked = pixels.clone();
+        blocked[65536..].fill(255);
+        let map = Map::build(&world, &atlas, &layers, None, &blocked);
+        assert_eq!(map.baked.response(&map, [TILE - 1., 12864.])[..3], [0.; 3]);
+    }
+    #[test]
     fn textured_edges_converge_with_every_neighbour_rotation_and_page_order() {
         let (mut world, atlas, mut layers, mut pixels) = two_tiles();
         // Reverse the page order and give both pages different spatial detail.
@@ -827,6 +817,7 @@ mod tests {
             let palette = atlas.palette.map(|p| p.map(linear));
             let mut jump = 0_f32;
             let mut blended = 0_f32;
+            let mut baked_jump = 0_f32;
             for z in (8192..16384).step_by(32) {
                 // Mixed-class/run-end exclusions intentionally remain sharp.
                 if map.edge_strength(0, 0, z as f32, BLEND) < 0.999 {
@@ -838,8 +829,11 @@ mod tests {
                 let b = packed.sample(&map, right, &pixels, &palette).unwrap();
                 let aa = packed.surface(&map, left, &pixels, &palette).unwrap();
                 let bb = packed.surface(&map, right, &pixels, &palette).unwrap();
+                let ba = map.baked.surface(&map, left, a);
+                let bbb = map.baked.surface(&map, right, b);
                 jump += (a[1] - b[1]).powi(2);
                 blended += (aa[1] - bb[1]).powi(2);
+                baked_jump += (ba[1] - bbb[1]).powi(2);
                 for d in [-300., -250., 250., 300.] {
                     let p = [32768. + d, z as f32];
                     assert_eq!(
@@ -849,6 +843,10 @@ mod tests {
                 }
             }
             assert!(jump > 0.001);
+            assert!(
+                baked_jump < jump * 0.0001,
+                "baked rotation {rotation}: {jump} -> {baked_jump}"
+            );
             assert!(
                 blended < jump * 0.0001,
                 "rotation {rotation}: {jump} -> {blended}"
@@ -900,7 +898,7 @@ mod tests {
         let packed = map.pack();
         assert_eq!(
             packed.bytes.len(),
-            packed.size[0] as usize * packed.size[1] as usize * 8
+            map.gpu_size()[0] as usize * map.gpu_size()[1] as usize * 8
         );
         for palette in [atlas.palette, atlas.palette.map(|rgb| rgb.map(|v| v / 2))] {
             let palette = palette.map(|rgb| rgb.map(linear));

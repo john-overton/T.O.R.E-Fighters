@@ -456,19 +456,25 @@ The fixed UKR LAND/PIC boundary at (16384,32768) must qualify, independently of
 what the mask's generic camera search accepts. `UKR-LAND-line.csv` samples
 unlit bilinear source colour and the actual packed GPU input at 5 ft intervals.
 `line-check.txt` checks the 500 ft analytic colour component and unchanged outer
-texture endpoints. `*-mottle-statistics.csv` compares LAND's mean, contrast,
-light/dark colours and RMS luminance increments with adjoining imported tiles.
-`*-texture-band.csv` measures mean and variance along both sides of the band;
-`*-texture-check.txt` requires their centre discontinuity to converge and
-also records the colour-only control.
-The audit requires spatial statistics within 25% and mean/contrast/patch
-colours within 1% for UKR/FRA/BAL. Missing synthesis fails. Cached synthetic pages
-and page/rotation metadata must roundtrip exactly. Dedicated overhead views at
-5,000 and 10,000 ft cover the reviewed UKR LAND rectangle edge.
+texture endpoints. `*-source-statistics.csv` records actual source-page
+contrast. `*-interior-check.txt` requires unchanged original page bytes and
+terrain vertices, and exact zero correction at interior samples across every
+tile. The source picture names establish which side is LAND; image appearance
+alone must not establish that label. `*-texture-band.csv` compares the actual
+baked response with a colour-only control. Cached response bytes and metadata
+must roundtrip exactly and fit portable limits.
+
+Dedicated interior cameras and the local `seams-gpu-check.py` compare GPU pixels,
+luminance standard deviation and spatial increments against the original and
+rejected builds. `TORE_SEAM_MASK_ONLY=1` draws accepted coverage for diagnosis;
+`mask-projection.tsv` gives the 500 ft width projected through the real camera
+and terrain. The lead script checks that coverage has the expected pixel width
+and that 100/2,000 ft 4K High median correction cost is at most 0.5 ms. This is
+an acceptance target, not a CPU timing claim.
 The standalone `seam-review` job also writes per-texel class/page diagnostics.
 All source-derived outputs stay local. Synthetic tests cover the fallback
 exception, protected authored fields, packed GPU data, palette changes,
-camera roundtrips, all neighbour rotations, statistical synthesis, the noisy
+camera roundtrips, all neighbour rotations, half-float response precision, zero interior correction, the noisy
 texture weight, 500 ft width and exclusions.
 
 The lead-only `seam-cost` job requires GPU timestamps. It alternates correction

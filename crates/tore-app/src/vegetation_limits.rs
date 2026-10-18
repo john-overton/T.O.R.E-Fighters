@@ -111,6 +111,16 @@ pub fn validate(scene: &Scenery, limits: &wgpu::Limits) -> Result<(), String> {
             },
             limits,
         )?;
+        let b = &atlas.seams.baked;
+        texture(
+            "Cached seam tints",
+            wgpu::Extent3d {
+                width: b.size[0].max(1),
+                height: b.size[1].max(1),
+                depth_or_array_layers: b.size[2].max(1),
+            },
+            limits,
+        )?;
     }
     let grass = &scene.grass;
     Pages::new(grass.mask.len() / (256 * 256 * 4), limits)?;

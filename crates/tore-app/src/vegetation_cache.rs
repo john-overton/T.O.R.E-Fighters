@@ -141,16 +141,17 @@ impl Cache {
         let mean_error = r.floats::<1>()?[0];
         let bytes = r.blob(MAX_BYTES)?.to_vec();
         let materials = r.blob(1024 * 1024 * 8)?.to_vec();
-        let statistics = [r.floats::<16>()?, r.floats::<16>()?];
-        let parameters = r.floats::<2>()?;
-        let source_pages = r.count(65536)?;
-        let source = r.blob(65536)?.to_vec();
-        let pixels = r.blob(65536)?.to_vec();
+        let size = [
+            r.count(1024)? as u32,
+            r.count(1024)? as u32,
+            r.count(256)? as u32,
+        ];
+        let records = r.blob(MAX_BYTES)?.to_vec();
+        let baked_pixels = r.blob(MAX_BYTES)?.to_vec();
         if !r.0.is_empty()
             || bytes.len() != cols * rows * crate::terrain_seams::STRIDE
             || materials.len() != cols * rows * 8
-            || source.len() != pixels.len()
-            || (!pixels.is_empty() && pixels.len() != 65536)
+            || baked_pixels.len() != size.iter().map(|&v| v as usize).product::<usize>() * 8
         {
             return None;
         }
@@ -160,12 +161,10 @@ impl Cache {
             bytes,
             mean_error,
             materials,
-            mottle: crate::terrain_seams::texture::Mottle {
-                statistics,
-                parameters,
-                source_pages,
-                source,
-                pixels,
+            baked: crate::terrain_seams::baked::Baked {
+                size,
+                records,
+                pixels: baked_pixels,
             },
         })
     }
@@ -176,13 +175,11 @@ impl Cache {
         floats(&mut data, &[map.mean_error]);
         blob(&mut data, &map.bytes);
         blob(&mut data, &map.materials);
-        for statistics in &map.mottle.statistics {
-            floats(&mut data, statistics);
+        for v in map.baked.size {
+            put(&mut data, v as usize);
         }
-        floats(&mut data, &map.mottle.parameters);
-        put(&mut data, map.mottle.source_pages);
-        blob(&mut data, &map.mottle.source);
-        blob(&mut data, &map.mottle.pixels);
+        blob(&mut data, &map.baked.records);
+        blob(&mut data, &map.baked.pixels);
         Self {
             path: self.path.with_extension("seams"),
             key: self.key,
