@@ -28,9 +28,13 @@ threshold. There was no display, GPU, socket binding or retail comparison.
 
 CPU progress weights round the first three timings to milliseconds. The GPU
 reservation is **fitted**, 500 ms, an agent decision pending a display-host
-measurement. Percentage is labeled Estimated: elapsed time advances within the
-current stage asymptotically, and completion of a stage advances to its next
-measured boundary. This does not claim that elapsed time is completed work.
+measurement. A loadout stage of **fitted** 25 ms was added on 2026-10-17 so
+aircraft selection can sit on the same bar as the mission build. The measured
+mission, aircraft and scenery weights are unchanged. Percentage is labeled
+Estimated: elapsed time advances within the current stage asymptotically, and
+completion of a stage advances to its next measured boundary. This does not
+claim that elapsed time is completed work. The moving activity strip that used
+to sit under the bar was removed the same day, at John's request.
 
 The in-memory join test held its mission worker for seven seconds of transport
 time while the caller continued servicing the link, then reached flight. The later flight-loadout build also passes a seven-second virtual hold. Its

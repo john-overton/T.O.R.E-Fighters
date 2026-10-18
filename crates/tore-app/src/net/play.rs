@@ -614,36 +614,41 @@ impl App {
             .renderer
             .as_ref()
             .map(crate::renderer::Renderer::loading_factory);
-        let job = crate::loading::Job::spawn(move |progress| {
-            let result = (|| -> crate::AppResult<_> {
-                world
-                    .take_plane(SEAT, crate::seats::PlaneId(plane))
-                    .map_err(|error| error.to_string())?;
-                progress.stage(crate::loading::Stage::Aircraft);
-                let hornet = Airframe::load(&resources, aircraft)?;
-                let mut view = CombatView::with_models(&world.combat, plane, &resources, models)
-                    .map_err(|error| error.to_string())?;
-                {
-                    for spawned in &spawned {
-                        view.prepare_spawn(&world, spawned, &resources)?;
+        let job = crate::loading::Job::continue_load(
+            self.network_loading_stage.take(),
+            true,
+            move |progress| {
+                let result = (|| -> crate::AppResult<_> {
+                    world
+                        .take_plane(SEAT, crate::seats::PlaneId(plane))
+                        .map_err(|error| error.to_string())?;
+                    progress.stage(crate::loading::Stage::Aircraft);
+                    let hornet = Airframe::load(&resources, aircraft)?;
+                    let mut view =
+                        CombatView::with_models(&world.combat, plane, &resources, models)
+                            .map_err(|error| error.to_string())?;
+                    {
+                        for spawned in &spawned {
+                            view.prepare_spawn(&world, spawned, &resources)?;
+                        }
                     }
-                }
-                progress.stage(crate::loading::Stage::Scenery);
-                let mut scenery = scenery::Scenery::build(&resources, &world.terrain)?;
+                    progress.stage(crate::loading::Stage::Scenery);
+                    let mut scenery = scenery::Scenery::build(&resources, &world.terrain)?;
 
-                progress.stage(crate::loading::Stage::Graphics);
-                let geometry = std::sync::Arc::clone(
-                    scenery.static_geometry(&world.combat.state.targets, &world.combat.surface),
-                );
-                let graphics = graphics.map(|build| {
-                    build(&scenery, &hornet, &view.models, &view.art, Some(&geometry))
-                });
-                Ok(crate::loading::Prepared::Net(Box::new((
-                    world, markup, hornet, view, scenery, graphics,
-                ))))
-            })();
-            result.map_err(|e| e.to_string())
-        });
+                    progress.stage(crate::loading::Stage::Graphics);
+                    let geometry = std::sync::Arc::clone(
+                        scenery.static_geometry(&world.combat.state.targets, &world.combat.surface),
+                    );
+                    let graphics = graphics.map(|build| {
+                        build(&scenery, &hornet, &view.models, &view.art, Some(&geometry))
+                    });
+                    Ok(crate::loading::Prepared::Net(Box::new((
+                        world, markup, hornet, view, scenery, graphics,
+                    ))))
+                })();
+                result.map_err(|e| e.to_string())
+            },
+        );
         match job {
             Ok(job) => self.loading = Some(job),
             Err(error) => {

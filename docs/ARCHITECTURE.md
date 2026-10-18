@@ -10964,8 +10964,11 @@ scope and provenance.
 
 ## Flight loading ownership
 
-The app lends its world to a loader during restart and Quick Mission setup.
-Only loading-screen event handling runs until ownership returns. Mission, scenery,
+The app lends its world to a loader during a free-flight restart.
+Quick Mission selection loads only the aircraft for the loadout page. The
+mission, terrain and scenery are built once, on the flight loader, and that
+load keeps one progress bar and one photograph. Only loading-screen event
+handling runs until ownership returns. Mission, scenery,
 recording initialization and thread-safe wgpu preparation run on workers; the
 window and surface remain on the event thread. The multiplayer client opts into
 a background mission builder while virtual-time headless clients retain the

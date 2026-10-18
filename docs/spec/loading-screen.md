@@ -17,7 +17,9 @@ This is host behaviour, not a claim about the retail game's loading screens.
 
 The two backgrounds are John's Harrier sunset and Thunderbirds canopy-to-canopy
 photos. He supplied the full-size originals on 2026-10-16. The build bundles
-them as 2560 by 1707 baseline JPEGs. They alternate for preparation jobs.
+them as 2560 by 1707 baseline JPEGs. One random photo is chosen per load and
+retained across its worker stages, including automatic Quick Mission launch
+and the multiplayer connection screen that continues into mission preparation.
 The loading worker decodes a JPEG with `zune-jpeg` before the window samples
 it. The window thread never decodes. Photos cover the whole window, with a
 dark gradient for readable text. The CPU cover-fit samples the decoded photo
@@ -31,23 +33,37 @@ pixels. Text uses the bundled Noto Sans menu font. Image provenance is in
 [website images](../WEBSITE.md#images); asset format and sizes are in the
 [bundled asset notes](../../crates/tore-app/assets/README.md).
 
-The stage names are Building the mission, Loading aircraft, Loading terrain
+The stage names are Preparing loadout, Building the mission, Loading aircraft, Loading terrain
 and scenery, Preparing graphics, and Starting flight. Replay preparation is
-labeled Loading the replay. CPU stage weights are measured milliseconds: mission 2442, aircraft art 11,
+labeled Loading the replay. Loadout selection has a fitted 25 ms allowance. CPU stage reference weights
+are measured milliseconds from the multiplayer base: mission 2442, aircraft art 11,
 scenery 164. Graphics reserves **fitted** 500 ms, an agent decision until GPU
 measurement is available. Other loading modes reuse these reference weights
-as fitted estimates pending separate measurements. The resulting boundaries are approximately 0, 78.3,
-78.7, 84.0 and 100 percent. The label explicitly says Estimated. Elapsed time
+as fitted estimates pending separate measurements. The resulting boundaries are approximately 0, 0.8, 78.5,
+78.9, 84.1 and 100 percent. The label explicitly says Estimated. Elapsed time
 advances within a stage asymptotically toward its next boundary; only worker
-completion reaches 100 percent. An animated highlight and elapsed seconds
-continue even when rounding leaves the displayed estimate unchanged.
+completion reaches 100 percent. Progress never resets within a load; duplicate or late stage notifications
+cannot move it backward. Elapsed seconds remain visible. There is no moving
+activity strip or moving bar highlight, requested by John on 2026-10-17.
 [Measurement and limits](../baselines/loading-screen.md) give the source of the
 weights. Checking game content, Connecting to the host and Waiting for the host use a
-moving bar without a percentage, rather than pretending their externally determined durations are known.
+stationary bar and elapsed time without a percentage because their durations
+are externally determined. The same photo continues into mission preparation.
 
 ## Scheduling and cancellation
 
-Quick Mission setup and preparation, restarts, replay Watch opening, multiplayer client mission
+Quick Mission selection loads only the aircraft needed for the loadout page.
+It does not build a throwaway terrain, combat world, scenery or graphics set.
+Automatic launch continues the same progress and photograph into the single
+mission build. Custom loadout editing finishes selection before user editing;
+Fly then starts its own load. Selection no longer builds terrain, scenery or
+graphics, so those stages run only in the mission build.
+A multiplayer join keeps one progress from content check through mission
+preparation. A player who leaves a flight and takes a plane again continues
+that rebuild's progress into the presentation that follows. Waiting after the
+mission stage has started does not rewind the bar.
+
+Quick Mission preparation, restarts, replay Watch opening, multiplayer client mission
 builds, and multiplayer presentation preparation run on workers. GPU scenery
 creation, aircraft textures and cockpit uploads use cloned thread-safe wgpu handles; the window and surface stay on
 the event thread. The existing network keepalive mechanism remains enabled.
