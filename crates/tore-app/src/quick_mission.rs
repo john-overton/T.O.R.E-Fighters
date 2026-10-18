@@ -3088,6 +3088,49 @@ mod tests {
             );
         }
     }
+    /// Three Quick Missions in a row, each in a different theater. After the
+    /// first, the flight world's catalog lists only that theater. The next
+    /// mission still comes from the creator's catalog, which is the crash of
+    /// 2026-10-17 (index 13 into a list of 1).
+    #[test]
+    fn three_quick_missions_in_a_row_build_different_theaters() {
+        let mut resources = tore_world::test_support::resources::resources();
+        for code in ["KURILE", "NSK"] {
+            let grid = resources["UKR.T2"].clone();
+            resources.insert(format!("{code}.T2"), grid);
+            resources.insert(
+                format!("{code}.MM"),
+                format!("textFormat\nmap {code}.T2\nlayer CLEAR.LAY 0\ntime 12 0\n").into_bytes(),
+            );
+        }
+        let mut quick = setup();
+        // One aircraft. The extra wings are not what this test is about.
+        for field in [7, 10, 21, 24, 27] {
+            quick.draft.values[field] = 0;
+        }
+        for code in ["UKR", "KURILE", "NSK"] {
+            quick.choose_theater_code(code, &resources);
+            assert_eq!(quick.theater_code(), Some(code));
+            let index = quick.theater_index();
+            // A built world's catalog has length 1. These later theaters sit
+            // past that, which is the index the old selection used.
+            if code != "UKR" {
+                assert!(index >= 1, "{code} index {index}");
+            }
+            let spec = quick
+                .mission_spec()
+                .unwrap_or_else(|error| panic!("{code}: {error}"));
+            assert_eq!(spec.theater, code);
+            let world = tore_world::world::World::new(
+                &spec,
+                &resources,
+                tore_world::world::Seating::SinglePlayer,
+            )
+            .unwrap_or_else(|error| panic!("{code}: {error}"));
+            assert_eq!(world.terrain.catalog.len(), 1, "{code}");
+            assert_eq!(world.terrain.catalog[0].0, code);
+        }
+    }
     #[test]
     fn variant_selection_retains_layout_and_uses_base_country_and_target_lists() {
         let mut q = setup();

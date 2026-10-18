@@ -2650,8 +2650,14 @@ impl App {
             .map(renderer::Renderer::loading_factory);
         let check_restart = self.smoke_test && self.creator_loading_view.is_some();
         let start_recording = self.recording_starter();
+        // Automatic launch keeps the selection bar. A load of its own, such
+        // as Fly after a custom loadout, opens on Building the mission.
+        let progress = self
+            .mission_loading_progress
+            .take()
+            .unwrap_or_else(loading::Progress::mission);
         self.loading = Some(loading::Job::continue_load(
-            self.mission_loading_progress.take(),
+            Some(progress),
             true,
             move |progress| {
                 let (mut built, view, mut scenery) =
@@ -2954,7 +2960,9 @@ impl App {
                     // photo for that single mission build. A custom loadout
                     // ends here; Fly starts its own load.
                     let automatic = self.quick.draft.values[18] == 0;
-                    let job = loading::Job::continue_load(None, !automatic, move |_| {
+                    // Ready would say Starting flight. This load only prepares
+                    // the loadout page, or hands the same bar to the mission.
+                    let job = loading::Job::continue_load(None, false, move |_| {
                         aircraft::Airframe::load(&resources, id)
                             .map(|aircraft| loading::Prepared::Selection(Box::new(aircraft)))
                             .map_err(|e| e.to_string())

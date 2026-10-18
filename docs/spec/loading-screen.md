@@ -55,12 +55,14 @@ are externally determined. The same photo continues into mission preparation.
 Quick Mission selection loads only the aircraft needed for the loadout page.
 It does not build a throwaway terrain, combat world, scenery or graphics set.
 Automatic launch continues the same progress and photograph into the single
-mission build. Custom loadout editing finishes selection before user editing;
-Fly then starts its own load. Selection no longer builds terrain, scenery or
-graphics, so those stages run only in the mission build.
+mission build. Custom loadout editing finishes selection on Preparing loadout,
+before user editing. Fly then starts its own load, which opens on Building
+the mission. Selection no longer builds terrain, scenery or graphics, so those
+stages run only in the mission build.
 A multiplayer join keeps one progress from content check through mission
 preparation. A player who leaves a flight and takes a plane again continues
-that rebuild's progress into the presentation that follows. Waiting after the
+that rebuild's progress into the presentation that follows. The rebuild opens
+on Building the mission and does not mark the bar finished. Waiting after the
 mission stage has started does not rewind the bar.
 
 Quick Mission preparation, restarts, replay Watch opening, multiplayer client mission

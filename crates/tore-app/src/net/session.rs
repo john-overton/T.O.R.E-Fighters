@@ -1812,8 +1812,9 @@ impl NetSession {
             .unwrap_or_else(|e| e.into_inner())
             .clone()?;
         let resources = Arc::clone(&self.resources);
+        let progress = crate::loading::Progress::mission();
         Some(crate::loading::Job::continue_load(
-            None,
+            Some(progress),
             false,
             move |progress| {
                 progress.stage(crate::loading::Stage::Mission);

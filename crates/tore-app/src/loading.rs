@@ -95,6 +95,13 @@ impl Progress {
             random_photo(),
         )
     }
+    /// A mission build, restart or replay, already on Building the mission
+    /// so the first frame is not Preparing loadout.
+    pub(crate) fn mission() -> Self {
+        let progress = Self::new();
+        progress.stage(Stage::Mission);
+        progress
+    }
     pub fn draw(&self, pixels: &mut Vec<u8>, size: [u32; 2], details: [&str; 2]) -> [u32; 2] {
         let (stage, elapsed) = self.current();
         draw_window(pixels, size, self.1, stage, elapsed, details)
@@ -143,9 +150,7 @@ impl<T: Send + 'static> Job<T> {
     pub fn spawn(
         work: impl FnOnce(Progress) -> Result<T, String> + Send + 'static,
     ) -> Result<Self, String> {
-        let progress = Progress::new();
-        progress.stage(Stage::Mission);
-        Self::continue_load(Some(progress), true, work)
+        Self::continue_load(Some(Progress::mission()), true, work)
     }
     /// `progress` is the load already on screen. `complete` marks Ready when
     /// the worker succeeds. A selection that continues into the mission build
@@ -605,6 +610,42 @@ mod tests {
         assert_eq!(still, Stage::Mission);
         assert!(later >= started);
         assert_eq!(held.1, held_photo);
+    }
+    #[test]
+    fn a_fresh_mission_load_opens_on_building_the_mission_and_a_rebuild_does_not_finish() {
+        let progress = Progress::mission();
+        let photo = progress.1;
+        assert_eq!(progress.current().0, Stage::Mission);
+        let job = Job::continue_load(Some(progress.clone()), false, move |status| {
+            assert_eq!(status.current().0, Stage::Mission);
+            assert_eq!(status.1, photo);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(job.photo, photo);
+        let finished = loop {
+            if let Some(result) = job.poll() {
+                break result;
+            }
+        };
+        finished.expect("rebuild");
+        assert_eq!(job.progress.current().0, Stage::Mission);
+        assert_eq!(job.progress.1, photo);
+    }
+    #[test]
+    fn the_bar_has_no_moving_highlight() {
+        prepare_photos();
+        let mut early = Vec::new();
+        let mut later = Vec::new();
+        draw_window(&mut early, [640, 480], 0, Stage::Scenery, 0.2, ["", ""]);
+        draw_window(&mut later, [640, 480], 0, Stage::Scenery, 3.4, ["", ""]);
+        // The old activity strip was a 20 by 2 highlight just under the bar,
+        // and it moved with the clock. Those rows stay put.
+        for row in 390..392 {
+            let start = row * 640 * 4;
+            let end = start + 640 * 4;
+            assert_eq!(early[start..end], later[start..end], "row {row}");
+        }
     }
     #[test]
     fn creator_smoke_restart_keeps_the_accepted_start() {
