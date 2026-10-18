@@ -151,6 +151,7 @@ pub struct SimRenderer {
     vapor_bind: wgpu::BindGroup,
     palette: wgpu::Texture,
     weather_tiles: wgpu::TextureView,
+    seam_records: wgpu::TextureView,
     canopy_visible: bool,
     aircraft: Option<(wgpu::BindGroup, wgpu::Buffer, u32)>,
     bind: wgpu::BindGroup,
@@ -696,6 +697,16 @@ impl SimRenderer {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Uint,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let lighting =
@@ -814,6 +825,36 @@ impl SimRenderer {
             view_formats: &[],
         });
         let palette_view = palette.create_view(&wgpu::TextureViewDescriptor::default());
+        let packed = scenery.vegetation.as_ref().map_or_else(
+            || crate::terrain_seams::Map::default().pack(),
+            |atlas| atlas.seams.pack(),
+        );
+        let seam_size = wgpu::Extent3d {
+            width: packed.size[0],
+            height: packed.size[1],
+            depth_or_array_layers: 1,
+        };
+        let seam_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Packed terrain seam records"),
+            size: seam_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rg32Uint,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            seam_texture.as_image_copy(),
+            &packed.bytes,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(packed.size[0] * 8),
+                rows_per_image: None,
+            },
+            seam_size,
+        );
+        let seam_records = seam_texture.create_view(&Default::default());
         let material_storage = tile_layout(device, true);
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Simulation scene bindings"),
@@ -842,6 +883,10 @@ impl SimRenderer {
                 wgpu::BindGroupEntry {
                     binding: 5,
                     resource: material_storage.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(&seam_records),
                 },
             ],
         });
@@ -896,6 +941,7 @@ impl SimRenderer {
             vapor_bind,
             palette,
             weather_tiles: view,
+            seam_records,
             canopy_visible: false,
             aircraft: None,
             dummies: Vec::new(),
@@ -1292,6 +1338,10 @@ impl SimRenderer {
                     wgpu::BindGroupEntry {
                         binding: 5,
                         resource: material_storage.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::TextureView(&self.seam_records),
                     },
                 ],
             });

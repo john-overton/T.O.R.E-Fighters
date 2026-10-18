@@ -56,6 +56,69 @@ struct Cam {
     pitch: f64,
 }
 
+impl Cam {
+    fn parse(line: &str) -> AppResult<Self> {
+        let f: Vec<_> = line.split_whitespace().collect();
+        if f.len() != 10 {
+            return Err(format!("bad camera line: {line}").into());
+        }
+        let cam = Self {
+            name: f[0].into(),
+            code: f[1].into(),
+            condition: f[2].parse()?,
+            time: [f[3].parse()?, f[4].parse()?],
+            x: f[5].parse()?,
+            y: f[6].parse()?,
+            z: f[7].parse()?,
+            yaw: f[8].parse()?,
+            pitch: f[9].parse()?,
+        };
+        if ![cam.x, cam.y, cam.z, cam.yaw, cam.pitch]
+            .iter()
+            .all(|v| v.is_finite())
+            || cam.pitch.abs() > std::f64::consts::FRAC_PI_2 + 1e-6
+        {
+            return Err(
+                "preview camera angles must be finite radians, pitch within +/- pi/2".into(),
+            );
+        }
+        Ok(cam)
+    }
+    fn camera(&self) -> Camera {
+        let mut camera = Camera::new();
+        camera.position = [self.x, self.y, self.z];
+        camera.yaw = self.yaw as f32;
+        camera.pitch = self.pitch as f32;
+        camera
+    }
+}
+/// The same decoder as the GPU preview, also used by the CPU frame check.
+pub(crate) fn preview_camera(line: &str) -> AppResult<Camera> {
+    Ok(Cam::parse(line)?.camera())
+}
+
+/// Observer-only fixed-camera hook, also applied to the lead's baseline build.
+fn seam_cost_camera(code: &str, height: f64, fallback: Camera) -> AppResult<Camera> {
+    let Ok(path) = std::env::var("TORE_SEAM_COST_CAMERAS") else {
+        return Ok(fallback);
+    };
+    let text = std::fs::read_to_string(path)?;
+    let name = format!("{code}-seam-cost-{height:.0}ft");
+    let line = text
+        .lines()
+        .find(|l| l.split_whitespace().next() == Some(name.as_str()))
+        .ok_or("missing fixed seam cost camera")?;
+    let f: Vec<_> = line.split_whitespace().collect();
+    if f.len() != 10 {
+        return Err("bad fixed seam cost camera".into());
+    }
+    let mut camera = Camera::new();
+    camera.position = [f[5].parse()?, f[6].parse()?, f[7].parse()?];
+    camera.yaw = f[8].parse()?;
+    camera.pitch = f[9].parse()?;
+    Ok(camera)
+}
+
 fn size() -> AppResult<[u32; 2]> {
     match std::env::var("TORE_VEG_PREVIEW_SIZE") {
         Ok(v) => {
@@ -130,6 +193,9 @@ pub fn run() -> AppResult<()> {
         print!("{report}");
         std::fs::write(out.join("cache-check.txt"), report)?;
         return Ok(());
+    }
+    if jobs.iter().any(|job| job == "seam-review") {
+        return crate::terrain_seams::audit::review(resources, out);
     }
     if jobs.iter().any(|job| job == "seam-check") {
         return crate::terrain_seams::audit::run(resources, out);
@@ -440,7 +506,11 @@ fn seam_cost(resources: &std::collections::BTreeMap<String, Vec<u8>>, out: &Path
         .ok_or("no blend seam")?;
         let selected = scenery.seams;
         for height in [100., 500., 2000., 10000.] {
-            let camera = crate::terrain_seams::audit::camera(&world, &spot, height);
+            let camera = seam_cost_camera(
+                code,
+                height,
+                crate::terrain_seams::audit::camera(&world, &spot, height),
+            )?;
             scenery.resolve_palette(&world, camera.position[1]);
             scenery.set_origin(camera.position);
             let mut gpu = pollster::block_on(View::new(
@@ -1635,21 +1705,7 @@ fn replay_cameras(
 ) -> AppResult<()> {
     let mut list = Vec::new();
     for line in text.lines().filter(|l| !l.trim().is_empty()) {
-        let f: Vec<&str> = line.split_whitespace().collect();
-        if f.len() < 10 {
-            return Err(format!("bad camera line: {line}").into());
-        }
-        list.push(Cam {
-            name: f[0].into(),
-            code: f[1].into(),
-            condition: f[2].parse()?,
-            time: [f[3].parse()?, f[4].parse()?],
-            x: f[5].parse()?,
-            y: f[6].parse()?,
-            z: f[7].parse()?,
-            yaw: f[8].parse()?,
-            pitch: f[9].parse()?,
-        });
+        list.push(Cam::parse(line)?);
     }
     let size = size()?;
     let mut current: Option<(String, Terrain, Scenery, View)> = None;
@@ -1665,14 +1721,11 @@ fn replay_cameras(
             let scenery = Scenery::build(resources, &world)?;
             let mut view =
                 pollster::block_on(View::new(&scenery, size, options(density()?), false))?;
-            view.set_shown(true);
+            view.set_shown(std::env::var("TORE_SEAM_SURFACE_ONLY").as_deref() != Ok("1"));
             current = Some((cam.code.clone(), world, scenery, view));
         }
         let (_, world, scenery, view) = current.as_mut().expect("built above");
-        let mut camera = Camera::new();
-        camera.position = [cam.x, cam.y, cam.z];
-        camera.yaw = cam.yaw as f32;
-        camera.pitch = cam.pitch as f32;
+        let camera = cam.camera();
         let ms = view.time(&camera, world, scenery)?;
         let pixels = view.pixels(&camera, world, scenery)?;
         write_png(out, &format!("{}.png", cam.name), size, &pixels)?;

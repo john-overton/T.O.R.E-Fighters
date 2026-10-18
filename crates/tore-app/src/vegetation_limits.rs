@@ -100,6 +100,18 @@ pub fn validate(scene: &Scenery, limits: &wgpu::Limits) -> Result<(), String> {
     let Some(lib) = scene.vegetation_meshes.as_ref() else {
         return Ok(());
     };
+    if let Some(atlas) = &scene.vegetation {
+        let size = atlas.seams.gpu_size();
+        texture(
+            "Terrain seam records",
+            wgpu::Extent3d {
+                width: size[0],
+                height: size[1],
+                depth_or_array_layers: 1,
+            },
+            limits,
+        )?;
+    }
     let grass = &scene.grass;
     Pages::new(grass.mask.len() / (256 * 256 * 4), limits)?;
     texture(

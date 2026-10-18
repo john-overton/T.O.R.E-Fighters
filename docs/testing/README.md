@@ -448,11 +448,26 @@ The maps exclude GPU lighting, fog, filtering, canopy and object overlays.
 `vegetation-tile-seams` runs `--vegetation-preview OUT seam-check`. It checks
 real UKR/FRA/BAL mask/cache reconstruction and portable resource limits, writes
 accepted edge segments and unlit correction strips, and selects exact cameras.
-Synthetic `terrain_seams` tests cover the 500 ft band, texture residual, colour
-threshold, class boundaries and water/road/city/rotated-airport exclusions.
+`camera-check.tsv` verifies serialized radians through the actual preview
+reader and camera projection, with a terrain-clear ray and the seam centred
+at pixel (1920,1080) in 4K. Degree-valued pitch is rejected by the reader.
 
-The lead-only `seam-cost` preview job requires GPU timestamps. It alternates
-correction off/on in the same scene at 4K High and 100/500/2,000/10,000 ft over
-UKR and FRA. It preserves trees, canopy and habitat within each pair. The
-100 ft view also measures blade colour work. It reports signed deltas without
-claiming that small or negative results exceed timing noise.
+The fixed UKR LAND/PIC boundary at (16384,32768) must qualify, independently of
+what the mask's generic camera search accepts. `UKR-LAND-line.csv` samples
+unlit bilinear source colour and the actual packed GPU input at 5 ft intervals.
+`line-check.txt` checks a 500 ft analytic ramp and unchanged outer endpoints.
+The standalone `seam-review` job also writes per-texel class/page diagnostics.
+All source-derived outputs stay local. Synthetic tests cover the fallback
+exception, protected authored fields, packed GPU data, palette changes,
+camera roundtrips, 500 ft width and exclusions.
+
+The lead-only `seam-cost` job requires GPU timestamps. It alternates correction
+off/on in one scene at 4K High and 100/500/2,000/10,000 ft over UKR and FRA.
+`TORE_SEAM_COST_CAMERAS` supplies the fixed radian camera file emitted by the
+CPU audit. The lead script adds only that camera hook to its baseline, then
+uses identical viewpoints in both builds with separate fresh Cargo targets.
+The preview-only `TORE_SEAM_SURFACE_ONLY=1` observer suppresses vegetation
+and procedural detail while retaining the seam correction for isolated
+ground captures. Tree, canopy and habitat populations stay fixed within each
+timing off/on pair.
+The reported signed deltas remain subject to timing noise and GPU review.

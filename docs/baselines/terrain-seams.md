@@ -75,33 +75,45 @@ canopy handoff and measured millisecond cost require the lead's script. Retail
 runtime comparison remains unavailable. No window, GPU run, commit or push is
 part of this sandbox pass.
 
-## Final CPU results
+## Lead review and revised CPU results
 
-The final boundary-mean mask accepts 6,248 Ukraine and 31,999 France colour
-segments, each 128 ft long. Baltic has no qualifying same-class colour segment;
-its different-class field/forest edges stay crisp. Tree-belt segments number
-89,862, 3,633 and 43,288 respectively. UKR/FRA use 9,328,800 map bytes each,
-Baltic 14,696,448. Maximum local mean fit error in linear RGB is 0.0006128 for
-UKR and 0.0022073 for FRA. The cache reconstructs pages exactly and all three
-maps pass portable resource checks.
+The first GPU review, retained in
+`.local/next-round/renders/exp-vegetation/seams-20261018-075956-525988/`, rejected
+the initial result. Camera files wrote degrees into a radian reader. The
+20,000 ft overview retained a LAND/PIC colour edge. The existing mask called
+LAND's green fill Field and the authored tile Forest, so it selected only a
+tree belt. The earlier CPU camera search examined accepted segments and missed
+this excluded boundary. The GPU timing job used in-memory radians and its
+cost was real: about 1 ms at 100 ft and 0.3 to 0.4 ms in several higher views.
+Those are measurements of the initial shader, not the revised one.
 
-In six unlit source/correction strips, sampled edge RGB RMS drops from 6.93 to
-3.26 in Ukraine, 11.94 to 1.72 in two France strips, and 6.11 to 0.95 in the
-third. Every pixel outside the 500 ft band is byte-identical. Source grain,
-exclusion gaps and run-end fades remain. These are CPU material measurements,
-not GPU visual acceptance or timing.
+Implementation-mode review fixes start at `3207123815bbf11d729531ae71f607bc66329852`.
+The revised camera writer uses radians and checks the exact serialized camera
+through the actual reader, projection and a terrain ray. All 51 capture/cost
+cameras pass; maximum target-centre error is below 0.0001 pixel at 4K.
 
-Final formatting, all-target workspace clippy with warnings denied, locked
-workspace binaries, nine seam tests, both shader suites and asset/doc checks
-pass. The final full app run has 1,988 passes, 69 failures identical to earlier
-sandbox socket failures, 40 ignored tests and two excluded indefinite socket
-waits. Python runs 481 tests with its two known socket errors and four skips.
-Three targeted CPU battery scenarios pass. The final real-map check passes
-again after the boundary-colour refinement.
+The pinned UKR boundary at x=16,384, z=32,768 joins LAND palette index 193,
+sRGB (45,105,77), to UKR23 index 194, (40,97,65). Both base T2 cells have colour
+212 and class 2. Treating the generic fallback shade as a crop field was the
+wrong exclusion. Green fallback can now blend into natural authored ground
+when those T2 values agree, while authored fields and all protected features
+retain their exclusions.
 
-The requested guard completes 32 cases, including 144 roster combinations, in
-795 seconds: SAME 52, DIFFERENT 0, MISSING 0 against `guard-base-36ab5211` on
-`profile-guard36`. Timing is disabled. The last colour-sampling refinement
-follows this guard and affects presentation precomputation only; the final
-app/shader/build/map checks cover it. No simulation, terrain data, wire or
-recording path changes afterward. GPU smoke/cost checks remain for the lead.
+The new numeric probe uses unlit bilinear source colour and the actual RG32Uint
+upload bytes. Across -1/+1 ft the largest channel step falls from 12 to
+0.071686 RGB levels. Samples every 5 ft match the 500 ft analytic smoothstep
+within 0.000000015 in linear RGB; endpoints and samples outside +/-250 ft
+remain unchanged. Source-derived CSV, strips and camera checks are in
+`.local/tmp-exp-vegetation/seams-review-maps/`.
+
+The packed shader reads one or two edge records instead of individual bytes,
+and skips redundant palette resolutions. Constant edges resolve two palette
+indices; interpolated varying mixtures can still require eight. The GPU input
+uses 10,649,600 bytes for UKR/FRA and 16,777,216 for BAL, replacing the old
+shared-art seam pages. It uploads once and adds no draw call. Revised GPU
+appearance and milliseconds remain unmeasured in this sandbox. The updated
+lead script measures both implementations from the same verified cameras.
+
+Validation and current guard context are recorded in the session report's
+Tile seams / Review fixes section. No simulation, imported terrain, wire or
+recording format changes accompany these presentation fixes.

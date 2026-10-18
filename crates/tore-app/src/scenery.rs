@@ -95,7 +95,7 @@ pub struct Scenery {
     /// The vegetation meshes, their retail textures in the static art pages.
     pub vegetation_meshes: Option<Arc<crate::vegetation_shapes::Library>>,
     pub canopy: crate::vegetation::canopy::Map,
-    /// First shared-art page and tile-grid dimensions for the seam shader.
+    /// Enabled marker and tile-grid dimensions for the seam shader.
     pub seams: [f32; 3],
     pub grass: crate::vegetation::grass::Map,
     pub vegetation_cache_hit: bool,
@@ -531,12 +531,11 @@ impl Scenery {
                     }
                     map
                 };
-                out.seams = [
-                    (out.texture_indices.len() + out.sky_indices.len()) as f32 / 65536.,
-                    map.cols as f32,
-                    map.rows as f32,
-                ];
-                map.append(&mut out.sky_indices);
+                out.seams = if map.has_blend() {
+                    [1., map.cols as f32, map.rows as f32]
+                } else {
+                    [0.; 3]
+                };
                 atlas.seams = Arc::new(map);
             }
             out.vegetation = atlas.map(Arc::new);

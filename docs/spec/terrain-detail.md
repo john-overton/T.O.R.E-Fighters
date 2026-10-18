@@ -348,8 +348,13 @@ segment, at depths 64, 192 and 320 ft and at three positions along the edge.
 Water, river, beach, road, rock, snow, sand, city tiles/sites/streets and airport
 footprints reject the segment. Airport bounds expand by 348 ft; town circles
 expand by 128 ft. Same-class grass, woodland or scrub can blend. Fields and
-different land classes stay crisp. These are the existing fitted art classes,
-not recovered land-use data. Narrower-than-texel features remain unresolved.
+different authored land classes stay crisp. At a boundary with generic LAND
+fill, matching T2 colour/class values and a green fallback palette ramp permit
+blending into authored grass, forest or scrub. The fallback's light green can
+classify as Field by shade alone; it is not an authored crop boundary. Authored
+Field samples remain excluded. This is a fitted continuity safeguard for
+John's 2026-10-18 review, not a new interpretation of T2 classes. These are
+colour heuristics, not recovered land-use data. Narrower-than-texel features remain unresolved.
 
 Accepted runs fade inside their first and last 128 ft segments. A 384 ft guard
 at tile corners preserves junctions and prevents overlapping corrections.

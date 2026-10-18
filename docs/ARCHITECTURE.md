@@ -11024,18 +11024,28 @@ The draws use reversed-depth GreaterEqual and no colour-pass depth writes. Depth
 palette/lighting work. Colour skips the second daylight-palette sample outside thermal views when no
 flare light is burning. Grass is a separate selectable blade/tuft pass.
 Crosses/top cards may cost more overdraw, so all modes require GPU comparison.
-`terrain_seams` derives a 3,588-byte record per 32,768 ft tile from the actual
-uploaded terrain pages. Four bytes hold its two-index mean mixture. Each of 256 segments on
-the east and north edges uses seven bytes: flags and two local mean mixtures. Neighbours share those records. The
-bytes occupy ordinary shared-art pages, with no extra GPU binding or per-frame
-upload. Three previously unused scene-uniform words locate the map. Outside
-250 ft of an edge the shader performs no seam texture reads. Active pixels
-interpolate the two neighbouring edge records, resolve eight palette endpoints
-and retain their own texture residual. Blade
-vertices use the same function. CPU tree placement reads the same cached belt.
-The `.seams` cache uses the existing bounded, checksummed atomic cache format;
-code, art, layout, palette, airport/city exclusions and the enable switch are
-part of its key. [Rules and limits](spec/terrain-detail.md#tile-seams).
+`terrain_seams` caches a 3,588-byte CPU record per 32,768 ft tile: a whole-tile
+mean and 256 segment records for each east/north edge. Opposite sides share
+those records. A generic LAND fill boundary can join green authored ground
+when T2 colour/class values agree; authored fields and protected features stay
+excluded. The mask also supplies tree-belt probabilities.
+
+For drawing, each segment becomes one RG32Uint texel containing both indexed
+mean mixtures and precomputed run-end flags. The dedicated 2D texture packs at
+most 1,024 records across; the largest reviewed grid fits 1,024 by 2,048. It
+uses material binding 6 for terrain and blades. World/scenery and aircraft
+material groups bind the same view; auto-layout effects do not need it. Scene
+uniform tile dimensions disable the shader entirely on maps with no blends.
+
+Outside 250 ft of an edge there are no seam texture reads. Within it, one
+record rejects masked segments; accepted segments read at most one neighbour.
+Identical means skip duplicate palette evaluation, and single-index mixtures
+resolve only one endpoint. A constant edge resolves two palette indices total,
+with the original weather remaps. Varying interpolated mixtures can need eight.
+The packed records upload once, with no extra draw call or per-frame upload.
+The `.seams` cache retains bounded/checksummed atomic writes; code, art,
+layout, palette, airport/city exclusions, neutralized ground and enable state
+invalidate it. [Rules and limits](spec/terrain-detail.md#tile-seams).
 
 `vegetation_grass` builds a compact classification texture on the mission loader
 and caches it alongside canopy as a checksummed `.grass` entry. Four bytes per

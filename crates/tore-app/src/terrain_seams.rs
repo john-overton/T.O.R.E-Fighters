@@ -16,6 +16,9 @@ pub const RECORD: usize = 7;
 pub const STRIDE: usize = 4 + 2 * SEGMENTS * RECORD;
 pub const BLEND: u8 = 1;
 pub const HEDGE: u8 = 2;
+pub const FALLBACK: u8 = 4;
+const PREVIOUS: u8 = 8;
+const NEXT: u8 = 16;
 const NOTICEABLE: f32 = 0.015;
 
 pub fn enabled() -> crate::AppResult<bool> {
@@ -252,12 +255,23 @@ impl Map {
                     continue;
                 }
                 let origin = [(tile % cols) as i64 * 32768, (tile / cols) as i64 * 32768];
+                let keys = [
+                    ((tile % cols * 4) as i32, (tile / cols * 4) as i32),
+                    ((next % cols * 4) as i32, (next / cols * 4) as i32),
+                ];
+                let fallback = match (layers.contains_key(&keys[0]), layers.contains_key(&keys[1]))
+                {
+                    (false, true) if land.is_some() => Some(0),
+                    (true, false) if land.is_some() => Some(1),
+                    _ => None,
+                };
                 // Corners/junctions stay crisp. The 384 ft guard also keeps
                 // orthogonal corrections from overlapping.
                 for segment in 3..SEGMENTS - 3 {
                     let mut modes = [Kind::Water; 2];
                     let mut blocked = false;
                     let mut sampled = [[255u8; 9]; 2];
+                    let mut mixed_field = [false; 2];
                     for (side, mode) in modes.iter_mut().enumerate() {
                         let mut counts = [0u8; 12];
                         for (ai, along) in [-128, 0, 128].into_iter().enumerate() {
@@ -281,30 +295,66 @@ impl Map {
                         // Field colour boundaries are intentional, including
                         // a narrow field stripe inside otherwise natural art.
                         if counts[Kind::Field as usize] > 0 && *mode != Kind::Field {
-                            blocked = true;
+                            mixed_field[side] = true;
                         }
                     }
-                    let candidate = pair_flags(modes[0], modes[1], blocked, 1.);
-                    if candidate == 0 {
+                    let candidate = pair_flags(
+                        modes[0],
+                        modes[1],
+                        blocked || mixed_field.iter().any(|v| *v),
+                        1.,
+                    );
+                    // LAND is a generic fill, not an authored crop boundary.
+                    // A matching T2 base and green fallback ramp establish a
+                    // continuous background even when shade alone says Field.
+                    let continuous = !blocked
+                        && [-128, 0, 128].into_iter().all(|along| {
+                            let mut a = origin;
+                            let mut b = origin;
+                            a[axis] += 32768 - 64;
+                            b[axis] += 32768 + 64;
+                            a[1 - axis] += segment as i64 * 128 + 64 + along;
+                            b[1 - axis] = a[1 - axis];
+                            let a = world
+                                .theater
+                                .cell(a[0] as usize / 8192, a[1] as usize / 8192);
+                            let b = world
+                                .theater
+                                .cell(b[0] as usize / 8192, b[1] as usize / 8192);
+                            a.color == b.color && a.class == b.class
+                        });
+                    let filler = fallback.is_some_and(|f| {
+                        continuous
+                            && !mixed_field[1 - f]
+                            && matches!(modes[1 - f], Kind::Grass | Kind::Forest | Kind::Scrub)
+                            && sampled[f].iter().all(|i| matches!(i,192..=197|208..=215))
+                    });
+                    if candidate == 0 && !filler {
                         continue;
                     }
-                    // Correct the colour jump at the boundary itself. Interior
-                    // samples can differ even on an artist-matched border.
-                    // Keep the wider samples for exclusions and the tree belt.
-                    let edge = sampled.map(|p| [p[0], p[3], p[6]]);
-                    let (pa, pb) = if candidate == BLEND {
-                        (&edge[0][..], &edge[1][..])
-                    } else {
-                        (&sampled[0][..], &sampled[1][..])
+                    let difference = |a: [f32; 3], b: [f32; 3]| {
+                        (0..3).map(|k| (a[k] - b[k]).abs()).fold(0., f32::max)
                     };
-                    let a = mean_linear(pa, &linear_palette);
-                    let b = mean_linear(pb, &linear_palette);
-                    let difference = (0..3).map(|k| (a.0[k] - b.0[k]).abs()).fold(0., f32::max);
-                    let at = tile * STRIDE + 4 + (axis * SEGMENTS + segment) * RECORD;
-                    out.bytes[at] = pair_flags(modes[0], modes[1], false, difference);
-                    if out.bytes[at] & BLEND != 0 {
+                    let mut flags = 0;
+                    if candidate & HEDGE != 0 {
+                        let a = mean_linear(&sampled[0], &linear_palette);
+                        let b = mean_linear(&sampled[1], &linear_palette);
+                        if difference(a.0, b.0) >= NOTICEABLE {
+                            flags |= HEDGE;
+                        }
+                    }
+                    let edge = sampled.map(|p| [p[0], p[3], p[6]]);
+                    let a = mean_linear(&edge[0], &linear_palette);
+                    let b = mean_linear(&edge[1], &linear_palette);
+                    if (candidate & BLEND != 0 || filler) && difference(a.0, b.0) >= NOTICEABLE {
+                        flags |= BLEND;
+                        if filler {
+                            flags |= FALLBACK;
+                        }
                         out.mean_error = out.mean_error.max(a.2).max(b.2);
                     }
+                    let at = tile * STRIDE + 4 + (axis * SEGMENTS + segment) * RECORD;
+                    out.bytes[at] = flags;
                     out.bytes[at + 1..at + 4].copy_from_slice(&a.1);
                     out.bytes[at + 4..at + 7].copy_from_slice(&b.1);
                 }
@@ -317,6 +367,7 @@ impl Map {
         let at = tile * STRIDE + 4 + (axis * SEGMENTS + segment) * RECORD;
         &self.bytes[at..at + RECORD]
     }
+    #[cfg(test)]
     pub fn edge_delta(
         &self,
         tile: usize,
@@ -349,9 +400,46 @@ impl Map {
         std::array::from_fn(|k| a[k] + (b[k] - a[k]) * (q - q.floor()))
     }
 
-    pub fn append(&self, pages: &mut Vec<u8>) {
-        pages.extend(&self.bytes);
-        pages.resize(pages.len().next_multiple_of(65536), 0);
+    pub fn has_blend(&self) -> bool {
+        self.bytes
+            .chunks_exact(STRIDE)
+            .any(|tile| tile[4..].chunks_exact(RECORD).any(|r| r[0] & BLEND != 0))
+    }
+
+    pub fn gpu_size(&self) -> [u32; 2] {
+        let count = (self.cols * self.rows * 2 * SEGMENTS).max(1) as u32;
+        let width = count.min(1024);
+        [width, count.div_ceil(width)]
+    }
+
+    /// One RG32Uint texel per edge segment. The shader needs at most two
+    /// coherent loads, including precomputed run-end flags, not byte gathers.
+    pub fn pack(&self) -> Packed {
+        let size = self.gpu_size();
+        let mut bytes = vec![0; size[0] as usize * size[1] as usize * 8];
+        for tile in 0..self.cols * self.rows {
+            for axis in 0..2 {
+                for segment in 0..SEGMENTS {
+                    let r = self.record(tile, axis, segment);
+                    if r[0] & BLEND == 0 {
+                        continue;
+                    }
+                    let mut flags = r[0];
+                    if segment > 0 && self.record(tile, axis, segment - 1)[0] & BLEND != 0 {
+                        flags |= PREVIOUS;
+                    }
+                    if segment + 1 < SEGMENTS
+                        && self.record(tile, axis, segment + 1)[0] & BLEND != 0
+                    {
+                        flags |= NEXT;
+                    }
+                    let at = ((tile * 2 + axis) * SEGMENTS + segment) * 8;
+                    bytes[at..at + 8]
+                        .copy_from_slice(&[r[1], r[2], r[3], flags, r[4], r[5], r[6], 0]);
+                }
+            }
+        }
+        Packed { size, bytes }
     }
 
     /// Same smooth segment endpoints as the shader. An excluded segment is
@@ -405,9 +493,155 @@ impl Map {
     }
 }
 
+/// CPU evaluation of the actual upload bytes. Unlit live-palette colour;
+/// source weather remaps stay on the shared shader path.
+pub struct Packed {
+    pub size: [u32; 2],
+    pub bytes: Vec<u8>,
+}
+impl Packed {
+    fn record(&self, tile: usize, axis: usize, segment: usize) -> &[u8] {
+        let at = ((tile * 2 + axis) * SEGMENTS + segment) * 8;
+        &self.bytes[at..at + 8]
+    }
+    pub fn correction(&self, map: &Map, world: [f32; 2], palette: &[[f32; 3]; 256]) -> [f32; 3] {
+        if map.cols == 0 || world.iter().any(|v| *v < 0.) {
+            return [0.; 3];
+        }
+        let cell = world.map(|v| (v / TILE).floor() as usize);
+        if cell[0] >= map.cols || cell[1] >= map.rows {
+            return [0.; 3];
+        }
+        let local = world.map(|v| v % TILE);
+        let near = local.map(|v| v.min(TILE - v));
+        let axis = usize::from(near[1] < near[0]);
+        if near[axis] >= HALF_WIDTH {
+            return [0.; 3];
+        }
+        let negative = local[axis] < TILE / 2.;
+        if (negative && cell[axis] == 0)
+            || (!negative && cell[axis] + 1 == [map.cols, map.rows][axis])
+        {
+            return [0.; 3];
+        }
+        let owner = cell[1] * map.cols + cell[0] - if negative { [1, map.cols][axis] } else { 0 };
+        let along = local[1 - axis] / 128.;
+        let segment = along.floor() as usize;
+        let t = along.fract();
+        let current = self.record(owner, axis, segment);
+        let flags = current[3];
+        if flags & BLEND == 0 {
+            return [0.; 3];
+        }
+        let smooth = |v: f32| v * v * (3. - 2. * v);
+        let strength =
+            (if flags & PREVIOUS != 0 { 1. } else { smooth(t) }).min(if flags & NEXT != 0 {
+                1.
+            } else {
+                smooth(1. - t)
+            });
+        let delta = |r: &[u8]| {
+            let mean = |off: usize| {
+                let a = palette[usize::from(r[off])];
+                let b = palette[usize::from(r[off + 1])];
+                let t = f32::from(r[off + 2]) / 255.;
+                std::array::from_fn::<_, 3, _>(|k| a[k] + (b[k] - a[k]) * t)
+            };
+            let a = mean(0);
+            let b = mean(4);
+            std::array::from_fn::<_, 3, _>(|k| b[k] - a[k])
+        };
+        let mut d = delta(current);
+        let (neighbour, w) = if t < 0.5 && flags & PREVIOUS != 0 {
+            (segment - 1, 0.5 - t)
+        } else if t >= 0.5 && flags & NEXT != 0 {
+            (segment + 1, t - 0.5)
+        } else {
+            (segment, 0.)
+        };
+        if w > 0. {
+            let other = delta(self.record(owner, axis, neighbour));
+            d = std::array::from_fn(|k| d[k] + (other[k] - d[k]) * w);
+        }
+        let w = weight(near[axis]) * strength * if negative { -1. } else { 1. };
+        d.map(|v| v * w)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn land_fill_shade_does_not_make_an_authored_field_boundary() {
+        let (mut world, mut atlas, mut layers, mut pixels) = two_tiles();
+        layers.remove(&(0, 0));
+        atlas.palette[192] = [90, 160, 80];
+        atlas.palette[194] = [20, 70, 24];
+        atlas.tone = crate::vegetation::Tone {
+            dark: 85,
+            light: 110,
+            yellow: 0.4,
+        };
+        pixels[..65536].fill(192);
+        pixels[65536..].fill(194);
+        let map = Map::build(&world, &atlas, &layers, Some(0), &pixels);
+        assert_eq!(
+            map.record(0, 0, 100)[0] & (BLEND | HEDGE | FALLBACK),
+            BLEND | HEDGE | FALLBACK
+        );
+        // A deliberate change of the base class is not a fill-colour seam.
+        for row in 0..5 {
+            world.theater.cells[row * 9 + 4].class = 3;
+        }
+        assert_eq!(
+            Map::build(&world, &atlas, &layers, Some(0), &pixels).record(0, 0, 100)[0] & BLEND,
+            0
+        );
+        for row in 0..5 {
+            world.theater.cells[row * 9 + 4].class = 2;
+        }
+        // Fields painted into authored art keep their rectangular boundary.
+        pixels[..65536].fill(194);
+        pixels[65536..].fill(192);
+        assert_eq!(
+            Map::build(&world, &atlas, &layers, Some(0), &pixels).record(0, 0, 100)[0] & BLEND,
+            0
+        );
+    }
+
+    #[test]
+    fn packed_gpu_records_reproduce_the_500_ft_live_palette_ramp() {
+        let (world, atlas, layers, pixels) = two_tiles();
+        let map = Map::build(&world, &atlas, &layers, None, &pixels);
+        let packed = map.pack();
+        assert_eq!(
+            packed.bytes.len(),
+            packed.size[0] as usize * packed.size[1] as usize * 8
+        );
+        for palette in [atlas.palette, atlas.palette.map(|rgb| rgb.map(|v| v / 2))] {
+            let palette = palette.map(|rgb| rgb.map(linear));
+            for d in [-300., -250., -125., -1., 0., 1., 125., 250., 300.] {
+                let p = [32768. + d, 12864.];
+                let correction = packed.correction(&map, p, &palette);
+                let delta = map.edge_delta(0, 0, p[1], &palette);
+                for k in 0..3 {
+                    assert!(
+                        (correction[k] - delta[k] * weight(d) * if d < 0. { 1. } else { -1. })
+                            .abs()
+                            < 1e-7
+                    );
+                }
+            }
+        }
+        // Largest reviewed grid fits the portable 2048-square texture limit.
+        let large = Map {
+            cols: 64,
+            rows: 64,
+            ..Default::default()
+        };
+        assert_eq!(large.gpu_size(), [1024, 2048]);
+        assert_eq!(Map::default().pack().bytes, [0; 8]);
+    }
     type Fixture = (Terrain, Atlas, BTreeMap<(i32, i32), usize>, Vec<u8>);
     fn two_tiles() -> Fixture {
         let mut world = tore_world::test_support::terrain();

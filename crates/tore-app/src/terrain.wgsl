@@ -22,6 +22,7 @@ fn scenery(color:vec3<f32>)->vec4<f32> {
 @group(0) @binding(3) var weather_tiles:texture_2d_array<u32>;
 @group(0) @binding(4) var engine_art:texture_2d<f32>;
 @group(0) @binding(5) var<uniform> tile_storage:vec4<u32>;
+@group(0) @binding(6) var seam_records:texture_2d<u32>;
 fn tile_size()->vec2<u32> {
  if tile_storage.x!=0u {return vec2<u32>(256u);}
  return textureDimensions(tiles);
@@ -461,42 +462,25 @@ fn fill_shadow(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,size:vec4<f32>,
 }
 // Terrain cutouts expose the already rendered ocean/horizon, never the T2
 // land color. Keep this separate from aircraft's base-color texture blending.
-// Tile means are compact mixtures of original palette indices. Resolve them
-// through the same live weather/remaps as the art, including flare albedo.
-// canopy_detail.yzw: first byte-data page, tile columns, tile rows.
-fn seam_byte(address:i32)->u32 {
- let page=i32(scene.canopy_detail.y)+address/65536;
- let at=address%65536;
- return read_tile(vec2<i32>(at%256,at/256),page);
+// One RG32Uint record holds both palette mixtures and run-end flags.
+// Masks include LAND fallback edges. All coordinates remain world feet.
+fn seam_record(tile:i32,axis:i32,segment:i32)->vec2<u32> {
+ let address=(tile*2+axis)*256+segment;
+ let width=i32(textureDimensions(seam_records).x);
+ return textureLoad(seam_records,vec2<i32>(address%width,address/width),0).rg;
 }
-fn seam_mean(at:i32,row:i32,remaps:vec2<f32>)->vec3<f32> {
- let a=seam_byte(at);let b=seam_byte(at+1);let t=f32(seam_byte(at+2))/255.0;
- var ca=shade(a,row).rgb;var cb=shade(b,row).rgb;
- if remaps.x>=0.0 {ca=remap_color(a,remaps);cb=remap_color(b,remaps);}
- return mix(ca,cb,t);
+fn seam_palette(index:u32,row:i32,remaps:vec2<f32>)->vec3<f32> {
+ if remaps.x>=0.0 {return remap_color(index,remaps);}
+ return shade(index,row).rgb;
 }
-fn seam_segment(tile:i32,axis:i32,segment:i32)->bool {
- if segment<0 || segment>=256 {return false;}
- return (seam_byte(tile*3588+4+(axis*256+segment)*7)&1u)!=0u;
+fn seam_mean(word:u32,row:i32,remaps:vec2<f32>)->vec3<f32> {
+ let a=word&255u;let b=(word>>8u)&255u;let weight=(word>>16u)&255u;
+ if a==b || weight==0u {return seam_palette(a,row,remaps);}
+ if weight==255u {return seam_palette(b,row,remaps);}
+ return mix(seam_palette(a,row,remaps),seam_palette(b,row,remaps),f32(weight)/255.0);
 }
-fn seam_delta_at(tile:i32,axis:i32,segment:i32,current:i32,row:i32,remaps:vec2<f32>)->vec3<f32> {
- var s=clamp(segment,0,255);
- if !seam_segment(tile,axis,s) {s=current;}
- let at=tile*3588+4+(axis*256+s)*7;
- return seam_mean(at+4,row,remaps)-seam_mean(at+1,row,remaps);
-}
-fn seam_delta(tile:i32,axis:i32,along:f32,row:i32,remaps:vec2<f32>)->vec3<f32> {
- let q=along/128.0-0.5;let s=i32(floor(q));let current=i32(floor(along/128.0));
- return mix(seam_delta_at(tile,axis,s,current,row,remaps),seam_delta_at(tile,axis,s+1,current,row,remaps),fract(q));
-}
-fn seam_strength(tile:i32,axis:i32,along:f32)->f32 {
- let segment=i32(floor(along/128.0));
- if !seam_segment(tile,axis,segment) {return 0.0;}
- let t=fract(along/128.0);
- var a=1.0;var b=1.0;
- if !seam_segment(tile,axis,segment-1) {a=smoothstep(0.0,1.0,t);}
- if !seam_segment(tile,axis,segment+1) {b=smoothstep(0.0,1.0,1.0-t);}
- return min(a,b);
+fn seam_delta(record:vec2<u32>,row:i32,remaps:vec2<f32>)->vec3<f32> {
+ return seam_mean(record.y,row,remaps)-seam_mean(record.x,row,remaps);
 }
 fn terrain_seam_color(color:vec3<f32>,world:vec2<f32>,row:i32,remaps:vec2<f32>)->vec3<f32> {
  let size=vec2<i32>(scene.canopy_detail.zw);
@@ -505,26 +489,32 @@ fn terrain_seam_color(color:vec3<f32>,world:vec2<f32>,row:i32,remaps:vec2<f32>)-
  if any(cell<vec2<i32>(0)) || any(cell>=size) {return color;}
  let local=world-vec2<f32>(cell)*32768.0;
  let near=min(local,vec2<f32>(32768.0)-local);
- // No texture reads outside the 500 ft band. Junctions are excluded by the
- // CPU mask, so two orthogonal corrections can never overlap.
- if min(near.x,near.y)>=250.0 {return color;}
- let own=cell.y*size.x+cell.x;
- var result=color;
- for(var axis=0;axis<2;axis++) {
-  if near[axis]>=250.0 {continue;}
-  let step=select(1,size.x,axis==1);
-  let negative=local[axis]<16384.0;
-  let adjacent=cell[axis]+select(1,-1,negative);
-  if adjacent<0 || adjacent>=size[axis] {continue;}
-  let neighbour=own+select(step,-step,negative);
-  let owner=select(own,neighbour,negative);
-  let strength=seam_strength(owner,axis,local[1-axis]);
-  if strength<=0.0 {continue;}
-  let weight=smoothstep(0.0,500.0,250.0-near[axis])*strength;
-  result+=seam_delta(owner,axis,local[1-axis],row,remaps)*select(1.0,-1.0,negative)*weight;
+ let axis=select(0,1,near.y<near.x);
+ // The CPU excludes junctions. At most one axis can contribute.
+ if near[axis]>=250.0 {return color;}
+ let negative=local[axis]<16384.0;
+ let adjacent=cell[axis]+select(1,-1,negative);
+ if adjacent<0 || adjacent>=size[axis] {return color;}
+ let owner=cell.y*size.x+cell.x-select(0,select(1,size.x,axis==1),negative);
+ let along=local[1-axis]/128.0;let segment=i32(floor(along));let t=fract(along);
+ let current=seam_record(owner,axis,segment);let flags=current.x>>24u;
+ if (flags&1u)==0u {return color;}
+ var strength=1.0;
+ if (flags&8u)==0u {strength=smoothstep(0.0,1.0,t);}
+ if (flags&16u)==0u {strength=min(strength,smoothstep(0.0,1.0,1.0-t));}
+ var delta=seam_delta(current,row,remaps);
+ var next=segment;var blend=0.0;
+ if t<0.5 && (flags&8u)!=0u {next=segment-1;blend=0.5-t;}
+ if t>=0.5 && (flags&16u)!=0u {next=segment+1;blend=t-0.5;}
+ if blend>0.0 {
+  let other=seam_record(owner,axis,next);
+  // Long constant-colour edges need only two palette resolutions total.
+  if any((current&vec2<u32>(0xffffffu))!=(other&vec2<u32>(0xffffffu))) {
+   delta=mix(delta,seam_delta(other,row,remaps),blend);
+  }
  }
- // Keep each tile's high-frequency residual. No UV or alpha blending.
- return max(result,vec3<f32>(0.0));
+ let weight=smoothstep(0.0,500.0,250.0-near[axis])*strength*select(1.0,-1.0,negative);
+ return max(color+delta*weight,vec3<f32>(0.0));
 }
 // Forest horizon: expected crown coverage and mean art colour from CPU placement.
 // World-anchored texture replaces the missing crown share as objects thin/fade.
