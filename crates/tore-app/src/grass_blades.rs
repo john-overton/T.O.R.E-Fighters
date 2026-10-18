@@ -1,5 +1,5 @@
 //! Static texture upload plus a vertex-buffer-free grass draw.
-use super::{Map, PAGE, VERTICES, candidates, root_lift, side};
+use super::{Map, PAGE, VERTICES, candidates, root_lift, side, spacing};
 use crate::{graphics::VegDensity, terrain::Terrain};
 
 pub struct Blades {
@@ -23,6 +23,7 @@ impl Blades {
         lighting: &wgpu::BindGroupLayout,
         map: &Map,
     ) -> Self {
+        let limits = device.limits();
         let texture_entry = |binding, dimension, sample_type| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::VERTEX,
@@ -65,6 +66,7 @@ impl Blades {
             mapped_at_creation: false,
         });
         let upload = |label, size: wgpu::Extent3d, format, bytes: &[u8], stride| {
+            crate::vegetation_limits::texture(label, size, &limits).expect("grass texture limits");
             let texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
                 size,
@@ -98,30 +100,58 @@ impl Blades {
         } else {
             &map.mask
         };
-        let habitat = upload(
-            "Grass habitat, cached 128 ft classifications",
-            wgpu::Extent3d {
-                width: PAGE as u32,
-                height: PAGE as u32,
-                depth_or_array_layers: (mask.len() / (PAGE * PAGE * 4)) as u32,
-            },
-            wgpu::TextureFormat::Rgba8Uint,
-            mask,
-            4,
-        )
-        .create_view(&wgpu::TextureViewDescriptor {
+        let packing = crate::vegetation_limits::Pages::new(mask.len() / (PAGE * PAGE * 4), &limits)
+            .expect("grass habitat layout");
+        let habitat = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Grass habitat, packed 128 ft classifications"),
+            size: packing.size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Uint,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        // Upload logical pages directly into their atlas slots. No second
+        // theater-sized CPU allocation, and the cached bytes stay unchanged.
+        for (page, bytes) in mask.chunks_exact(PAGE * PAGE * 4).enumerate() {
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &habitat,
+                    mip_level: 0,
+                    origin: packing.origin(page as u32),
+                    aspect: wgpu::TextureAspect::All,
+                },
+                bytes,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(PAGE as u32 * 4),
+                    rows_per_image: Some(PAGE as u32),
+                },
+                wgpu::Extent3d {
+                    width: PAGE as u32,
+                    height: PAGE as u32,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+        let habitat = habitat.create_view(&wgpu::TextureViewDescriptor {
             dimension: Some(wgpu::TextureViewDimension::D2Array),
             ..Default::default()
         });
         let ground = upload(
             "Grass terrain vertices and picture lookup",
             wgpu::Extent3d {
-                width: map.terrain_size[0],
-                height: map.terrain_size[1],
+                width: map.terrain_size[0].max(1),
+                height: map.terrain_size[1].max(1),
                 depth_or_array_layers: 1,
             },
             wgpu::TextureFormat::Rgba32Float,
-            &crate::vegetation_renderer::bytes_of_f32(&map.terrain),
+            &crate::vegetation_renderer::bytes_of_f32(if map.terrain.is_empty() {
+                &[0.; 4]
+            } else {
+                &map.terrain
+            }),
             16,
         )
         .create_view(&Default::default());
@@ -189,14 +219,14 @@ impl Blades {
             self.area[1],
             self.area[2],
             self.area[3],
-            side(density) as f32,
+            side(density, radius) as f32,
             radius,
             self.pages_x as f32,
             root_lift(),
             (world.weather.ticks() as f64 / 120.) as f32,
             wind[0] as f32,
             wind[2] as f32,
-            0.,
+            spacing(density),
             0.,
             0.,
             0.,
@@ -208,7 +238,7 @@ impl Blades {
         }
         queue.write_buffer(&self.uniform, 0, &bytes);
         self.count = if self.pages_x > 0 && radius > 0. {
-            candidates(density)
+            candidates(density, radius)
         } else {
             0
         };

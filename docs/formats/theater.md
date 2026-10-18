@@ -269,3 +269,8 @@ GPU blade grass additionally caches a two-bit habitat per 128 ft source-art
 texel and a terrain-vertex lookup grid. This is disposable presentation data,
 not a new retail format. See [grass habitat](../spec/terrain-detail.md#grass) and
 [renderer storage](../ARCHITECTURE.md#exploratory-vegetation-rendering).
+
+The exploratory vegetation habitat uses a device-sized atlas of 256-square
+logical pages, independent of theater rows. The shared canopy/card atlas and
+all vegetation buffers are checked by the CPU-only
+[theater limits audit](../testing/README.md#vegetation-theater-limits).

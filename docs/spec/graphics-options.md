@@ -203,7 +203,8 @@ preset retains Facing.
 `TORE_VEGETATION_CARDS=billboard|cross|cross-top|billboard-top` overrides that row
 for a run and is not saved. Sprites have full distance opacity inside detail range. Distant forest coverage
 continues on the terrain. Top modes use complementary side/top coverage from
-35 to 65 degrees down, at the measured visual crown centre.
+35 to 65 degrees down, at the measured visual crown centre. Conifers and pine
+groves retain upright cards at all angles, with no horizontal top disk.
 
 **Vegetation density** is Low, Med, High or Ultra. John requested a one-step
 reduction on 2026-10-17: new Ultra equals previous High, High equals previous
@@ -211,21 +212,37 @@ Medium, and Medium equals previous Low. The new Low is an **agent choice** at
 half the previous Low candidate density. Default remains High. Relative to the
 previous High grid, the multipliers are 0.2, 0.4, 0.7 and 1.0.
 
-| Density | Grass radius | Blade grid side, per level | Maximum blade vertices | Legacy tufts per near 32 ft patch | Objects kept at most |
-| --- | --- | --- | --- | --- | --- |
-| Low | 450 ft | 48 | 34,560 | 24 | 32,768 |
-| Med | 700 ft | 64 | 61,440 | 48 | 65,536 |
-| High | 1,100 ft | 96 | 138,240 | 96 | 131,072 |
-| Ultra | 1,500 ft | 128 | 245,760 | 160 | 262,144 |
+| Tree density | Objects kept at most |
+| --- | ---: |
+| Low | 32,768 |
+| Med | 65,536 |
+| High | 131,072 |
+| Ultra | 262,144 |
 
 **Grass** selects Blades (branch default), Tufts or Off, live on Apply.
-`TORE_GRASS=blades|tufts|off` overrides it for the run. Blades use three nested
-world-snapped grids and opaque geometry, with no CPU placement or uploads.
-The hard vertex limits include rejected candidates in every direction. Visible
-counts are lower after grid ownership, habitat, frustum and distance rejection.
-Off retains the ground-detail texture. See [grass rules](terrain-detail.md#grass).
-This option was requested by John on 2026-10-17; budgets are agent choices.
+`TORE_GRASS=blades|tufts|off` overrides it for the run. **Grass density** is
+Off, Low, Med, High or Ultra, independent of trees, default High. **Grass
+distance** is 250, 500, 750 or 1,000 ft, default 500 ft. John requested these
+controls and denser grass reaching about 500 ft on 2026-10-17. Off in either
+grass row removes grass geometry while retaining ground detail, trees and canopy.
 
+Blades use four world-snapped grids, doubling the base spacing at each level.
+The following budgets are agent choices at the 500 ft default:
+
+| Grass density | Base spacing | Grid side per level | Submitted blade slots | Maximum vertices | Legacy tufts per near patch |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Low | 2 ft | 128 | 65,536 | 327,680 | 24 |
+| Med | 1.5 ft | 192 | 147,456 | 737,280 | 48 |
+| High | 1 ft | 256 | 262,144 | 1,310,720 | 96 |
+| Ultra | 0.75 ft | 320 | 409,600 | 2,048,000 | 160 |
+
+Ultra grows to a 344-square grid at 1,000 ft, with a hard maximum of 2,366,720
+vertices. Low grows to 136 at 1,000 ft; Medium and High retain their grid side. These limits include rejected
+candidates in every direction; actual visible counts are lower. Geometry stays
+opaque, with no blade buffers or CPU placement. See [grass rules](terrain-detail.md#grass).
+Grass-only GPU cost and final appearance require measurement on a GPU host.
+
+Tufts retain their legacy horizontal footprint; Blades use distance from the eye.
 In Tufts mode each tuft has five blades. Legacy grass thins in four rings: full within 14%
 of its radius, then half, a quarter and an eighth. Object budgets are divided into fixed geographic patch quotas, independent
 of the camera. Saturated patches retain the same seeded population throughout
@@ -235,9 +252,9 @@ shortened to meet the budget. Object opacity has no separate altitude or
 projected-pixel fade inside detail range. Grass uses the selected mode's separate distance
 and habitat rules.
 
-The seven values are saved in `graphics-v1.conf` only when they differ
+The nine values are saved in `graphics-v1.conf` only when they differ
 from the defaults (`vegetation-texture`, `vegetation-texture-distance`,
-`vegetation-distance`, `vegetation-detail`, `vegetation-density`, `vegetation-cards`, `grass`). An
+`vegetation-distance`, `vegetation-detail`, `vegetation-density`, `vegetation-cards`, `grass`, `grass-density`, `grass-distance`). An
 older file that has none of them reads as the defaults. Apply puts them
 into effect at once, the same way as the building settings. Original
 graphics turns the texture off and leaves the object distances at the

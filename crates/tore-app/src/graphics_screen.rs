@@ -10,9 +10,9 @@ use crate::controls_editor::{
     ResultAction, TITLE, WHITE, fit, inside, text_width,
 };
 use crate::graphics::{
-    AntiAliasing, BUILDING_DETAILS, BUILDING_DISTANCES, GROUND_TEXTURE_DISTANCES, Grass,
-    GroundTexture, Options, RENDER_SCALES, SpottingAid, VEGETATION_DETAILS, VEGETATION_DISTANCES,
-    VegCards, VegDensity,
+    AntiAliasing, BUILDING_DETAILS, BUILDING_DISTANCES, GRASS_DISTANCES, GROUND_TEXTURE_DISTANCES,
+    Grass, GroundTexture, Options, RENDER_SCALES, SpottingAid, VEGETATION_DETAILS,
+    VEGETATION_DISTANCES, VegCards, VegDensity,
 };
 use crate::menu::Canvas;
 use std::path::Path;
@@ -34,6 +34,8 @@ enum Row {
     VegetationDensity,
     VegetationCards,
     Grass,
+    GrassDensity,
+    GrassDistance,
 }
 const BASE_ROWS: [Row; 5] = [
     Row::AntiAliasing,
@@ -55,7 +57,7 @@ fn rows() -> &'static [Row] {
         (false, false) => &BASE_ROWS,
     }
 }
-const ALL_ROWS: [Row; 14] = [
+const ALL_ROWS: [Row; 16] = [
     Row::AntiAliasing,
     Row::RenderScale,
     Row::SpottingAid,
@@ -70,6 +72,8 @@ const ALL_ROWS: [Row; 14] = [
     Row::VegetationDensity,
     Row::VegetationCards,
     Row::Grass,
+    Row::GrassDensity,
+    Row::GrassDistance,
 ];
 const CITY_ONLY: [Row; 7] = [
     Row::AntiAliasing,
@@ -80,7 +84,7 @@ const CITY_ONLY: [Row; 7] = [
     Row::BuildingDistance,
     Row::BuildingDetail,
 ];
-const VEG_ONLY: [Row; 12] = [
+const VEG_ONLY: [Row; 14] = [
     Row::AntiAliasing,
     Row::RenderScale,
     Row::SpottingAid,
@@ -93,6 +97,8 @@ const VEG_ONLY: [Row; 12] = [
     Row::VegetationDensity,
     Row::VegetationCards,
     Row::Grass,
+    Row::GrassDensity,
+    Row::GrassDistance,
 ];
 impl Row {
     fn label(self) -> &'static str {
@@ -111,6 +117,8 @@ impl Row {
             Row::VegetationDensity => "Vegetation density",
             Row::VegetationCards => "Vegetation cards",
             Row::Grass => "Grass",
+            Row::GrassDensity => "Grass density",
+            Row::GrassDistance => "Grass distance",
         }
     }
     fn description(self) -> &'static str {
@@ -142,6 +150,12 @@ impl Row {
             Row::VegetationDetail => {
                 "Vegetation stays denser inside this distance and thins gradually beyond it."
             }
+            Row::GrassDensity => {
+                "How thick the grass is, independent of trees. Off removes grass geometry."
+            }
+            Row::GrassDistance => {
+                "How far grass reaches before blending into ground detail. Default 500 ft."
+            }
             Row::Grass => {
                 "Opaque wind-blown blades, the earlier sprite tufts, or no grass geometry."
             }
@@ -170,6 +184,10 @@ impl Row {
             Row::VegetationDetail => VEGETATION_DETAILS.map(|n| format!("{n} nm")).to_vec(),
             Row::VegetationDensity => VegDensity::ALL.map(|a| a.label().to_owned()).to_vec(),
             Row::Grass => Grass::ALL.map(|a| a.label().to_owned()).to_vec(),
+            Row::GrassDensity => std::iter::once("Off".to_owned())
+                .chain(VegDensity::ALL.map(|a| a.label().to_owned()))
+                .collect(),
+            Row::GrassDistance => GRASS_DISTANCES.map(|n| format!("{n} ft")).to_vec(),
             Row::VegetationCards => VegCards::ALL.map(|a| a.label().to_owned()).to_vec(),
         }
     }
@@ -195,7 +213,7 @@ const CHOICE_W: i32 = 62;
 const CHOICE_GAP: i32 = 4;
 const OUTLINE: [u8; 4] = [110, 130, 156, 255];
 
-/// Row step, settings panel and about panel. Fourteen rows (city fill and
+/// Row step, settings panel and about panel. Sixteen rows (city fill and
 /// vegetation both on, plus the frame-rate counter) use a tighter step so
 /// the about panel still sits above the status bar.
 fn layout() -> (i32, Rect, Rect) {
@@ -298,6 +316,11 @@ impl Editor {
                 .unwrap_or(1),
             Row::VegetationCards => d.vegetation_cards as usize,
             Row::Grass => d.grass as usize,
+            Row::GrassDensity => d.grass_density.map_or(0, |v| v as usize + 1),
+            Row::GrassDistance => GRASS_DISTANCES
+                .iter()
+                .position(|&n| n == d.grass_distance_ft)
+                .unwrap_or(1),
             Row::VegetationDensity => VegDensity::ALL
                 .iter()
                 .position(|a| *a == d.vegetation_density)
@@ -323,6 +346,8 @@ impl Editor {
             Row::VegetationDensity => d.vegetation_density = VegDensity::ALL[i],
             Row::VegetationCards => d.vegetation_cards = VegCards::ALL[i],
             Row::Grass => d.grass = Grass::ALL[i],
+            Row::GrassDensity => d.grass_density = i.checked_sub(1).map(|n| VegDensity::ALL[n]),
+            Row::GrassDistance => d.grass_distance_ft = GRASS_DISTANCES[i],
         }
     }
     fn available(&self, row: usize, i: usize) -> bool {
@@ -708,6 +733,26 @@ mod tests {
         }
     }
 
+    #[test]
+    fn grass_rows_fit_and_edit_without_changing_tree_density() {
+        let mut editor = Editor::new(Options::default(), [true; 4], "test");
+        let tree = editor.draft.vegetation_density;
+        let density = rows().iter().position(|r| *r == Row::GrassDensity).unwrap();
+        let distance = rows()
+            .iter()
+            .position(|r| *r == Row::GrassDistance)
+            .unwrap();
+        editor.set_choice(density, 0);
+        editor.set_choice(distance, 3);
+        assert_eq!(editor.draft.grass_density, None);
+        assert_eq!(editor.draft.grass_distance_ft, 1000);
+        assert_eq!(editor.draft.vegetation_density, tree);
+        editor.set_choice(density, 4);
+        assert_eq!(editor.draft.grass_density, Some(VegDensity::Ultra));
+        let (_, settings, about) = layout();
+        assert!(settings.1 + settings.3 < about.1);
+        assert!(about.1 + about.3 <= 428);
+    }
     #[test]
     fn navigation_reaches_rows_and_footer() {
         let mut e = editor();

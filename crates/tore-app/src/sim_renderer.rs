@@ -614,6 +614,8 @@ impl SimRenderer {
         options: crate::graphics::Options,
         samples: u32,
     ) -> Self {
+        crate::vegetation_limits::validate(scenery, &device.limits())
+            .expect("scene resources must fit device limits before upload");
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Simulation terrain"),
             source: wgpu::ShaderSource::Wgsl(

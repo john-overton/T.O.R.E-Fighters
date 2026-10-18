@@ -9,22 +9,33 @@ use tore_world::city::mask::{GREEN, LightMap, SITE, STREET, WATER};
 pub mod gpu;
 
 pub const VERTICES: u32 = 5;
-pub const LEVELS: u32 = 3;
+pub const LEVELS: u32 = 4;
 pub const PAGE: usize = 256;
 
-/// Three overlapping grids contain disjoint sets of world cells. Coarser
-/// levels own every fourth cell in each axis, including inside the finer grid.
-/// Their blades therefore never change identity when a fine grid moves away.
-pub fn side(density: VegDensity) -> u32 {
+/// Each density has its own world lattice. Four grids own disjoint subsets,
+/// with every second cell in both axes assigned to the coarser grid.
+pub fn spacing(density: VegDensity) -> f32 {
     match density {
-        VegDensity::Low => 48,
-        VegDensity::Medium => 64,
-        VegDensity::High => 96,
-        VegDensity::Ultra => 128,
+        VegDensity::Low => 2.,
+        VegDensity::Medium => 1.5,
+        VegDensity::High => 1.,
+        VegDensity::Ultra => 0.75,
     }
 }
-pub fn candidates(density: VegDensity) -> u32 {
-    LEVELS * side(density).pow(2)
+pub fn side(density: VegDensity, radius: f32) -> u32 {
+    let minimum = match density {
+        VegDensity::Low => 128,
+        VegDensity::Medium => 192,
+        VegDensity::High => 256,
+        VegDensity::Ultra => 320,
+    };
+    // Two guard cells, rounded to eight. Even Ultra at 1,000 ft reaches its
+    // advertised endpoint without exceeding the fixed four-grid budget.
+    let required = (2. * radius / (spacing(density) * 8.)).ceil() as u32 + 4;
+    minimum.max(required.div_ceil(8) * 8)
+}
+pub fn candidates(density: VegDensity, radius: f32) -> u32 {
+    LEVELS * side(density, radius).pow(2)
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -277,23 +288,22 @@ mod tests {
         h ^ (h >> 16)
     }
     fn cell(eye: [f32; 2], level: u32, index: u32, side: u32) -> [i32; 2] {
-        let step = 1i32 << (2 * level);
+        let step = 1i32 << level;
         let offset = [index % side, index / side];
         std::array::from_fn(|k| {
-            ((eye[k] / (2 * step) as f32).floor() as i32 + offset[k] as i32 - side as i32 / 2)
-                * step
+            ((eye[k] / step as f32).floor() as i32 + offset[k] as i32 - side as i32 / 2) * step
         })
     }
     fn owned(c: [i32; 2], level: u32) -> bool {
         level == LEVELS - 1
-            || (c[0] & ((1 << (2 * level + 2)) - 1)) != 0
-            || (c[1] & ((1 << (2 * level + 2)) - 1)) != 0
+            || (c[0] & ((1 << (level + 1)) - 1)) != 0
+            || (c[1] & ((1 << (level + 1)) - 1)) != 0
     }
     #[test]
     fn grass_hash_and_world_cells_survive_camera_motion_and_lod() {
         assert_eq!(hash([0, 0], 0), 0);
         assert_eq!(hash([-71, 293], 17), 0xb0986c98); // pinned integer contract
-        let side = side(VegDensity::High);
+        let side = side(VegDensity::High, 500.);
         let field = |eye| {
             let mut cells = BTreeMap::new();
             for level in 0..LEVELS {
@@ -322,9 +332,9 @@ mod tests {
     }
     #[test]
     fn grass_ring_snapping_handles_negative_cells_and_only_exchanges_faded_edges() {
-        let n = side(VegDensity::High);
+        let n = side(VegDensity::High, 500.);
         for level in 0..LEVELS {
-            let step = (2u32 << (2 * level)) as f32;
+            let step = (1u32 << level) as f32;
             assert_eq!(
                 cell([0.1; 2], level, 0, n),
                 cell([step - 0.1; 2], level, 0, n)
@@ -333,7 +343,7 @@ mod tests {
                 cell([-0.1; 2], level, 0, n),
                 cell([-step + 0.1; 2], level, 0, n)
             );
-            let last = cell([step - 0.01, 0.], level, 0, n)[0] as f32 * 2.;
+            let last = cell([step - 0.01, 0.], level, 0, n)[0] as f32;
             let fade_radius = (n / 2 - 1) as f32 * step;
             assert!(step - last > fade_radius + step);
         }
@@ -341,11 +351,14 @@ mod tests {
     #[test]
     fn grass_density_has_a_hard_vertex_budget() {
         assert_eq!(
-            VegDensity::ALL.map(|d| candidates(d) * VERTICES),
-            [34560, 61440, 138240, 245760]
+            VegDensity::ALL.map(|d| candidates(d, 500.) * VERTICES),
+            [327_680, 737_280, 1_310_720, 2_048_000]
         );
         for d in VegDensity::ALL {
-            assert!((side(d) / 2 - 1) as f32 * 32. >= d.grass().0);
+            for radius in crate::graphics::GRASS_DISTANCES {
+                assert!((side(d, radius as f32) / 2 - 1) as f32 * spacing(d) * 8. > radius as f32);
+                assert!(candidates(d, radius as f32) * VERTICES <= 2_366_720);
+            }
         }
     }
     #[test]

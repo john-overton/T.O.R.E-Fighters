@@ -353,7 +353,8 @@ top-view situations. `--vegetation-preview OUT pass5-cameras` writes that list.
 These reproduce the requested situations; player screenshot coordinates are unknown.
 
 `vegetation-grass-cameras` runs `--vegetation-preview OUT grass-cameras` on the
-CPU. It freezes Ukraine meadow at 10/50/200 ft, an actual field boundary,
+CPU. It freezes Ukraine meadow at 10/50/100/200 ft, a retained pine at
+8/25/45/70 degrees, an actual field boundary,
 a riverbank, Vietnam meadow and an Egypt water belt candidate. Site classes are
 recorded too. Sand-classified Egypt banks intentionally have no blades. The job
 also writes `grass-lowpass-cameras.txt`, usable with `TORE_VEG_LOWPASS_CAMERAS`
@@ -414,3 +415,24 @@ target is added GPU cost below 2 ms in woods and 1 ms in open country at 4K High
 These are targets, not measurements for the current density and pack.
 The placement rules and presentation scope are in the
 [vegetation specification](../spec/terrain-detail.md#sprites-and-cached-placement).
+
+### Vegetation theater limits
+
+`vegetation-theater-limits` runs `--vegetation-preview OUT limits-check` on a
+private full import. It starts with PGU, then runs every base theater and every
+imported variant through the real mission loader, up to and including scenery
+and vegetation preparation. It creates no window or GPU adapter. Each prepared
+scene must fit default and downlevel texture dimensions, array layers, buffer
+allocation and binding sizes, and compute dispatch limits at every density.
+`theater-limits.tsv` records actual sizes; `limits-check.txt` is written only
+when all layouts pass. Allow up to an hour for a cold full-import run.
+
+The same audit is an explicitly ignored local-import Rust test:
+`TORE_DATA_DIR=PRIVATE_PROFILE TORE_VEG_LIMITS_OUT=OUT cargo test --locked -p tore-app every_imported_theater_and_variant_loads_and_fits_gpu_limits -- --ignored --nocapture`.
+Committed packing and resource-boundary tests use synthetic data only.
+Before and after grass captures must reuse the same camera file.
+
+The existing `vegetation-top-crowns` audit requires zero rendered top extents for
+pine groves, while checking individual crown bounds and floor cutouts for the
+remaining groves. Pine source art is retained even though its horizontal disk
+is no longer drawn.

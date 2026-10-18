@@ -11014,7 +11014,7 @@ Matching alpha-tested depth and colour draws share vertices and sample coverage,
 including the top card's view-angle fade. Side and top use complementary sample
 masks so their overlapping interiors keep full combined coverage. Top cards remain inside the side
 silhouettes at their grounded canopy height. Facing/top is the default. Single
-tops use opaque side widths and the instance's seeded scale. Retail grove tops
+tops, except omitted conifer/pine-grove disks, use opaque side widths and the instance's seeded scale. Retail grove tops
 are runtime indexed composites of individual crown cutouts; their transparent
 gaps preserve the terrain underneath. No extra instances or draw calls are added.
 Supplied top-sheet alpha removes
@@ -11026,7 +11026,16 @@ flare light is burning. Grass is a separate selectable blade/tuft pass.
 Crosses/top cards may cost more overdraw, so all modes require GPU comparison.
 `vegetation_grass` builds a compact classification texture on the mission loader
 and caches it alongside canopy as a checksummed `.grass` entry. Four bytes per
-512 ft block encode sixteen 128 ft habitats. Pages are 256-square RGBA8Uint.
+512 ft block encode sixteen 128 ft habitats. Logical pages are 256-square RGBA8Uint. `vegetation_limits::Pages` packs them
+into 1024-square atlas layers, growing within `device.limits()` if required.
+PGU's 272 logical pages use 17 physical layers. Pages upload directly into their
+slots without a second full-map CPU allocation. The shader derives its slot
+address from texture dimensions; the CPU cache remains device independent.
+`vegetation_limits::validate` checks the shared world art (including canopy and
+all sprite/card pages), habitat, terrain lookup and every vegetation buffer
+before GPU allocation. Both storage binding size and allocation size matter.
+The headless `limits-check` diagnostic runs the actual mission loading worker
+for every imported theater and variant against default and downlevel limits.
 A small RGBA32Float terrain grid supplies triangle elevations, terrain picture
 pages/rotations and fallback colours. Both textures upload once per scene.
 Cache identity includes source, palette, terrain and exclusion changes.

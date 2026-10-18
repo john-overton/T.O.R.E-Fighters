@@ -181,7 +181,7 @@ impl Renderer {
         );
         let chunks = buffer(
             "Vegetation chunk pages",
-            (stream::SPARE_PAGES + 524_288 / stream::PAGE) as u64 * 8,
+            crate::vegetation_limits::CHUNK_BYTES,
             storage,
         );
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -300,7 +300,9 @@ impl Renderer {
         self.mesh_dirty = true;
         let grass_mode = options.grass.effective();
         self.grass_mode = grass_mode;
-        self.grass_density = options.vegetation_density;
+        self.grass_density = options
+            .grass_density
+            .unwrap_or(crate::graphics::VegDensity::High);
         self.cards = options.vegetation_cards.effective();
         self.draw_nm = options.vegetation_distance_nm as f32;
         self.detail_nm = (options.vegetation_detail_nm as f32).min(self.draw_nm);
@@ -331,10 +333,12 @@ impl Renderer {
             self.pages = stream::Slots::new(capacity);
             self.page_count = 0;
         }
-        (self.grass_radius, self.tufts) = density.grass();
-        self.grass_radius = self
-            .grass_radius
-            .min(self.detail_nm * vegetation::NM as f32 * 0.5);
+        self.tufts = options.grass_density.map_or(0, |d| d.grass().1);
+        self.grass_radius = if options.grass_density.is_some() {
+            options.grass_distance_ft as f32
+        } else {
+            0.
+        };
     }
 
     /// The before picture: objects and grass are not drawn. Ground detail
@@ -843,6 +847,8 @@ fn object_buffers(
     capacity: usize,
 ) -> (wgpu::Buffer, wgpu::Buffer, wgpu::Buffer) {
     let buffer = |label, count: usize, stride: u64, usage| {
+        crate::vegetation_limits::buffer(label, count as u64 * stride, usage, &device.limits())
+            .expect("vegetation buffer limits");
         device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
             size: count as u64 * stride,

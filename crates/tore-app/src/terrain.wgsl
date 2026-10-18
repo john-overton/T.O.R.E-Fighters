@@ -998,7 +998,8 @@ fn veg_place(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,shape:vec4<f32>)-
  var coverage=turn.w;
  let crown=place.xyz+vec3<f32>(0.0,turn.z*top.y,0.0);
  let ray=scene.local_eye.xyz-crown;
- let top_share=smoothstep(0.57357644,0.90630779,ray.y/max(length(ray),0.0001));
+ let has_top=all(top.zw>vec2<f32>(0.0));
+ let top_share=select(0.0,smoothstep(0.57357644,0.90630779,ray.y/max(length(ray),0.0001)),has_top);
  if mode==2u || mode==3u { coverage*=select(1.0-top_share,top_share,overhead); }
  if overhead {
   code=top.x; view=0u;

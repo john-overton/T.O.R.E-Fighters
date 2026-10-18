@@ -315,6 +315,14 @@ These thresholds are colour/topology heuristics, not recovered coast geography.
 `--vegetation-preview OUT overlay` writes classification pictures. These are
 placement heuristics, not claims of original scenery or geographic river data.
 
+Conifer and pine-grove top disks are omitted in both top-card modes. Their
+upright sides retain full angular coverage, and all distance/population rules
+stay the same. The flat full-width disk through a tapered crown can appear
+separated from its tree during the side/top transition. Omitting that disk is
+an agent choice in response to John's 2026-10-17 green-cap report. Other species
+retain their existing tops. A directly overhead pine therefore has a thinner
+silhouette; this tradeoff needs GPU review.
+
 ### Grass
 
 John requested GPU-generated blades on 2026-10-17. This is an **opinionated**
@@ -330,19 +338,26 @@ placement, ring density and uploads for direct comparisons.
 Blades are opaque three-triangle strips with five generated vertices. There
 are no alpha tests, blade instance buffers, CPU blade placement or grass chunk
 uploads. A world-cell integer hash controls position jitter, height, width,
-heading, lean and colour. The field uses a 2 ft base grid. Three nested grids
-have 2, 8 and 32 ft spacing. Every fourth cell in both axes belongs to the next
-coarser grid, which also draws that cell inside the inner region. This gives
-each world cell one persistent owner, with no duplicate or relocated blades.
-Grids snap to their spacing. One-cell guards put new and retired rows beyond
-their visible disk. Counts and outer radii follow the
-[Graphics budget table](graphics-options.md#vegetation-texture-and-vegetation-objects).
+heading, lean and colour. At High, four grids have 1, 2, 4 and 8 ft spacing.
+Every second cell in both axes belongs to the coarser grid, including inside
+the fine region. Each world cell has one persistent owner, without duplicates
+or relocation as the camera moves. Grids snap to their spacing. Guard cells put
+entering and retiring rows beyond their visible disk. Density and distance are
+independent Graphics rows, with budgets in the
+[Graphics table](graphics-options.md#vegetation-texture-and-vegetation-objects).
+These denser grids, 500 ft default and controls implement John's request of
+2026-10-17. The particular lattice, size compensation and fade rules are agent
+choices, not claims about original grass.
 
-Each grid stays at full distance size to 70% of its radius, then smoothly
-shortens and thins to zero. A seeded rank staggers the shortening. There is no
-translucent fringe or patch publication. Ground detail keeps its grass texture
-under the transition. Thin, distant blades can still alias; MSAA and the actual
-appearance of this density transition require GPU review.
+Each grid stays at full distance size to 70% of its horizontal guard radius,
+then smoothly shortens and thins to zero. A separate distance from the eye to
+the grounded root stays full to 70% of the selected distance, then fades to zero
+at that distance. The smaller coverage wins. Thus 500 ft means 500 ft from the
+eye, including altitude, and the finest grids do not vanish simply because the
+eye climbed above their horizontal radius. Seeded ranks stagger shortening.
+Width increases smoothly by up to 80%, height by up to 35%, between 40 ft and
+the selected endpoint. This compensates slightly for small distant blades;
+the outer fade still reaches zero. Ground detail continues underneath.
 
 The loader caches two bits of habitat per 128 ft art texel: bare, meadow, crop,
 or short. Water, river, road, sand, beach, rock, snow, pavement and town exclusions
@@ -360,7 +375,7 @@ show this difference, not silently invent an oasis.
 Meadow/crop/short density is 1/0.9/0.35 of candidate cells. Existing canopy cover
 further reduces density continuously toward 25%. Slope above about 42 degrees
 is bare. Blade heights before seeded 0.75 to 1.25 variation are 2.1/1.6/1.2 ft;
-tropical height multiplies by 1.5, desert/arctic by 0.65. Width is 0.16 to 0.32 ft.
+tropical height multiplies by 1.5, desert/arctic by 0.65. Base width is 0.20 to 0.40 ft before distance compensation.
 Roots use the shared `tore_world::grounding` bottom correction and interpolate
 the same terrain triangles as `Terrain::height`. Both root corners follow that
 plane. The ground's indexed picture and live theater palette tint each blade,

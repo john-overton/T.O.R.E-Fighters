@@ -29,7 +29,8 @@ def check_pass5_cameras(work, _output):
 
 def check_grass_cameras(work, _output):
     lines = (work / 'cameras' / 'grass-cameras.txt').read_text().splitlines()
-    expected = {'UKR-meadow-10ft', 'UKR-meadow-50ft', 'UKR-meadow-200ft',
+    expected = {'UKR-meadow-10ft', 'UKR-meadow-50ft', 'UKR-meadow-100ft', 'UKR-meadow-200ft',
+                'UKR-pine-8deg', 'UKR-pine-25deg', 'UKR-pine-45deg', 'UKR-pine-70deg',
                 'UKR-field-edge-50ft', 'UKR-riverbank-50ft',
                 'TVIET-grassland-50ft', 'EGY-water-belt-50ft'}
     if {line.split()[0] for line in lines} != expected:
@@ -42,6 +43,12 @@ def check_grass_cameras(work, _output):
 
 def scenarios():
     return [Scenario(
+        name='vegetation-theater-limits', lane='menus',
+        args=['--vegetation-preview', '{work}/limits', 'limits-check'],
+        env={'TORE_VEGETATION': '1', 'TORE_WORKERS': '4'}, timeout=3600,
+        outputs=['limits/theater-limits.tsv', 'limits/limits-check.txt'],
+        expect=['vegetation limits: PASS PGU', 'all 16 base theaters and every imported variant'],
+    ), Scenario(
         name='vegetation-grass-cameras', lane='menus',
         args=['--vegetation-preview', '{work}/cameras', 'grass-cameras'],
         env={'TORE_VEGETATION': '1', 'TORE_WORKERS': '4'}, timeout=240,
@@ -84,7 +91,12 @@ def check_top_crowns(work, _output):
     errors=[]
     for row in rows:
         source,count,grove,crown,transparent=row.split('\t')
-        if int(count)<2 or not 0<float(crown)<float(grove):
+        if int(count) < 2 or float(crown) <= 0:
+            errors.append(f'{source}: missing individual crowns')
+        if source in {'GROVPA.SH', 'GROVPB.SH', 'GROVPC.SH'}:
+            if float(grove) != 0:
+                errors.append(f'{source}: detached pine top disk still enabled')
+        elif not 0 < float(crown) < float(grove):
             errors.append(f'{source}: a single crown still spans the grove')
         if not 0<int(transparent)<65536:
             errors.append(f'{source}: missing crown cutouts or forest-floor gaps')

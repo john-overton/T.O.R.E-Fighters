@@ -16,7 +16,10 @@ fn blade_class(world:vec2<f32>)->u32 {
  if any(sub<vec2<i32>(0)) || any(sub>=vec2<i32>(blades.area.zw)*4) {return 0u;}
  let block=sub/4;
  let page=block.y/256*i32(blades.grid.z)+block.x/256;
- let packed=textureLoad(blade_habitat,block%256,page,0);
+ let across=i32(textureDimensions(blade_habitat).x)/256;
+ let slot=page%(across*across);
+ let pixel=vec2<i32>(slot%across,slot/across)*256+block%256;
+ let packed=textureLoad(blade_habitat,pixel,page/(across*across),0);
  return (packed[sub.y%4]>>u32((sub.x%4)*2))&3u;
 }
 struct BladeOut {
@@ -30,25 +33,23 @@ struct BladeOut {
  let side=u32(blades.grid.x);
  let level=instance/(side*side);
  let slot=instance%(side*side);
- let step=1u<<(2u*level);
- let spacing=2.0*f32(step);
+ let step=1u<<level;
+ let spacing=blades.wind.w*f32(step);
  let center=vec2<i32>(floor(scene.eye.xz/spacing));
  let cell=(center+vec2<i32>(i32(slot%side),i32(slot/side))-vec2<i32>(i32(side/2u)))*i32(step);
- // Every fourth child in both axes belongs to the next coarser grid. The
+ // Every second child in both axes belongs to the next coarser grid. The
  // coarse owner renders it all the way to the centre, without a duplicate.
- let parent_mask=(step*4u)-1u;
- if level<2u && (bitcast<u32>(cell.x)&parent_mask)==0u && (bitcast<u32>(cell.y)&parent_mask)==0u {return out;}
+ let parent_mask=(step*2u)-1u;
+ if level<3u && (bitcast<u32>(cell.x)&parent_mask)==0u && (bitcast<u32>(cell.y)&parent_mask)==0u {return out;}
  let jitter=vec2<f32>(blade_random(cell,17u),blade_random(cell,31u));
- let world=vec2<f32>(cell)*2.0+vec2<f32>(0.15)+jitter*1.7;
+ let world=(vec2<f32>(cell)+vec2<f32>(0.075)+jitter*0.85)*blades.wind.w;
  let horizontal=world-scene.eye.xz;
  // One-cell guard leaves every entering/leaving snapped row outside the fade.
  let radius=min(blades.grid.y,f32(side/2u-1u)*spacing);
  let distance=length(horizontal);
  if distance>=radius {return out;}
- let coverage=1.0-smoothstep(radius*0.70,radius,distance);
- let rank=blade_random(cell,47u);
- let grow=smoothstep(rank*0.8,rank*0.8+0.2,coverage)*coverage;
- if grow<=0.0 {return out;}
+ let ring_coverage=1.0-smoothstep(radius*0.70,radius,distance);
+
  let habitat=blade_class(world);
  if habitat==0u {return out;}
  let at=vec2<i32>(floor(world/8192.0));
@@ -65,10 +66,21 @@ struct BladeOut {
  if length(grad)>0.9 {return out;}
  let base=vec3<f32>(world.x,y+blades.grid.w,world.y)-scene.origin.xyz;
  let rel=base-scene.local_eye.xyz;
+ let eye_distance=length(rel);
+ if eye_distance>=blades.grid.y {return out;}
+ let coverage=min(ring_coverage,1.0-smoothstep(blades.grid.y*0.70,blades.grid.y,eye_distance));
+ let rank=blade_random(cell,47u);
+ let grow=smoothstep(rank*0.8,rank*0.8+0.2,coverage)*coverage;
+ if grow<=0.0 {return out;}
+ // Mild size compensation keeps distant opaque geometry readable. Roots stay
+ // on the same terrain plane. No camera-dependent position or population hash.
+ let far=smoothstep(40.0,blades.grid.y,eye_distance);
  // GPU-only frustum rejection precedes colour and wind work.
  let forward=dot(rel,scene.forward.xyz);
- if forward < -4.0 || abs(dot(rel,scene.right.xyz))>max(forward,0.0)*scene.eye.w/(1.7320508*scene.up.w)+4.0
-    || abs(dot(rel,scene.up.xyz))>max(forward,0.0)/(1.7320508*scene.up.w)+4.0 {return out;}
+ // Include the compensated tropical tip, slope and wind lean in the bound.
+ let bound=8.0;
+ if forward < -bound || abs(dot(rel,scene.right.xyz))>max(forward,0.0)*scene.eye.w/(1.7320508*scene.up.w)+bound
+    || abs(dot(rel,scene.up.xyz))>max(forward,0.0)/(1.7320508*scene.up.w)+bound {return out;}
  var density=select(1.0,0.9,habitat==2u);
  if habitat==3u {density=0.35;}
  if scene.canopy.y>0.0 {
@@ -97,11 +109,11 @@ struct BladeOut {
  if habitat==2u {height=1.6;}
  if scene.veg.w==3.0 {height*=1.5;}
  if scene.veg.w==1.0 || scene.veg.w==2.0 {height*=0.65;}
- height*=(0.75+0.50*blade_random(cell,61u))*grow;
+ height*=(0.75+0.50*blade_random(cell,61u))*grow*(1.0+0.35*far);
  let yaw=6.2831853*blade_random(cell,67u);
  let across=vec2<f32>(cos(yaw),sin(yaw));
  let shape=array<vec2<f32>,5>(vec2<f32>(-0.5,0.0),vec2<f32>(0.5,0.0),vec2<f32>(-0.22,0.55),vec2<f32>(0.22,0.55),vec2<f32>(0.0,1.0))[vertex];
- let width=(0.16+0.16*blade_random(cell,71u))*grow;
+ let width=(0.20+0.20*blade_random(cell,71u))*grow*(1.0+0.8*far);
  let speed=length(blades.wind.yz);
  let wind=normalize(blades.wind.yz+vec2<f32>(0.001,0.0007));
  let gust=detail_noise(world/512.0+wind*blades.wind.x*0.01,0,149u);

@@ -98,6 +98,9 @@ pub fn run() -> AppResult<()> {
     }
     let assets = crate::reel::load_assets()?;
     let resources = &assets.theater_resources;
+    if jobs.iter().any(|job| job == "limits-check") {
+        return limits_check(resources, out);
+    }
     if jobs.iter().any(|job| job == "cache-check") {
         let start = Instant::now();
         let world = crate::scenery::launch_terrain(resources, "UKR", None)?;
@@ -848,12 +851,63 @@ fn grass_cameras(
     let mut notes = std::fs::File::create(out.join("grass-camera-sites.txt"))?;
     for code in ["UKR", "TVIET", "EGY"] {
         let world = Terrain::for_mission(resources, code, Some(0), &overrides([12, 0])?)?;
-        let atlas =
-            crate::vegetation::Atlas::build(resources, &world)?.ok_or("vegetation disabled")?;
+        let atlas = std::sync::Arc::new(
+            crate::vegetation::Atlas::build(resources, &world)?.ok_or("vegetation disabled")?,
+        );
         let spots = crate::vegetation::spots(&atlas, &world);
+        if code == "UKR" {
+            let wood = spots
+                .iter()
+                .find(|s| s.label == "wood")
+                .ok_or("no pine woodland candidate")?;
+            let mut placement = crate::vegetation::Placement::new(std::sync::Arc::clone(&atlas));
+            // Match the capture's actual fixed geographic quotas. A pine from
+            // an unthinned candidate pool might not exist at the chosen density.
+            let settings = options(density()?);
+            placement.set_density(settings.vegetation_density.scale());
+            placement.set_budget(settings.vegetation_density.object_budget());
+            placement.update(
+                &world,
+                [wood.x, wood.z],
+                settings.vegetation_detail_nm as f32 * crate::vegetation::NM as f32,
+                settings.vegetation_distance_nm as f32 * crate::vegetation::NM as f32,
+                None,
+            );
+            let pine = placement
+                .object_chunks([wood.x, wood.z])
+                .into_iter()
+                .flat_map(|(_, objects)| objects)
+                .filter(|p| p.species == crate::vegetation::Species::Conifer)
+                .min_by(|a, b| {
+                    let distance = |p: &crate::vegetation::Inst| {
+                        (f64::from(p.pos[0]) - wood.x).hypot(f64::from(p.pos[2]) - wood.z)
+                    };
+                    distance(a).total_cmp(&distance(b))
+                })
+                .ok_or("no retained pine at woodland camera")?;
+            writeln!(
+                notes,
+                "UKR pine actual placement: {:?}, height={}, variant={}",
+                pine.pos, pine.height, pine.variant
+            )?;
+            for angle in [8f64, 25., 45., 70.] {
+                let range = 160.;
+                let x = f64::from(pine.pos[0]);
+                let z = f64::from(pine.pos[2]) - range;
+                let y = f64::from(pine.pos[1])
+                    + f64::from(pine.height) * 0.45
+                    + range * angle.to_radians().tan();
+                writeln!(
+                    file,
+                    "UKR-pine-{}deg UKR 0 12 0 {x} {y} {z} 0 {}",
+                    angle as u32,
+                    -angle.to_radians()
+                )?;
+            }
+        }
         let kinds: &[(&str, &str, &[f64])] = match code {
             "UKR" => &[
-                ("meadow", "meadow", &[10., 50., 200.]),
+                ("meadow", "meadow", &[10., 50., 100., 200.]),
                 ("field-edge", "field", &[50.]),
                 ("riverbank", "river", &[50.]),
             ],
@@ -2323,6 +2377,99 @@ impl View {
         self.buffer.unmap();
         Ok(pixels)
     }
+}
+
+/// CPU-only, real mission loader through vegetation. Every imported layout,
+/// PGU first. No GPU instance, window, or simulation tick is created here.
+pub(crate) fn limits_check(
+    resources: &std::collections::BTreeMap<String, Vec<u8>>,
+    out: &Path,
+) -> AppResult<()> {
+    use crate::vegetation_limits as limits;
+    std::fs::create_dir_all(out)?;
+    let mut catalog = tore_formats::theater::map_catalog(resources)?;
+    if crate::vegetation::REGIONS
+        .iter()
+        .any(|r| !catalog.iter().any(|(code, _)| code == r.code))
+    {
+        return Err("limits audit requires all 16 imported theaters".into());
+    }
+    catalog.sort_by_key(|(code, _)| (code != "PGU", code.clone()));
+    let resources = std::sync::Arc::new(resources.clone());
+    let player =
+        crate::aircraft::Airframe::load(&resources, tore_formats::aircraft::AircraftId::F18)?.kind;
+    let mut report = std::fs::File::create(out.join("theater-limits.tsv"))?;
+    writeln!(
+        report,
+        "theater\tground_width\tground_height\thabitat_pages\thabitat_width\thabitat_height\thabitat_layers\tshared_art_pages\tshared_art_layers\tcanopy_pages\tmeshes\tmax_slot_bytes\tmax_drawn_bytes\tload_seconds"
+    )?;
+    for (code, _) in &catalog {
+        let start = Instant::now();
+        let data = std::sync::Arc::clone(&resources);
+        let player = std::sync::Arc::clone(&player);
+        let spec = crate::mission::MissionSpec::new(code, tore_formats::aircraft::AircraftId::F18);
+        let job = crate::loading::Job::spawn(move |progress| {
+            let (_, _, scene) = crate::loading::prepare_mission(&spec, &data, player, &progress)?;
+            for device in [wgpu::Limits::downlevel_defaults(), wgpu::Limits::default()] {
+                limits::validate(&scene, &device)?;
+            }
+            let lib = scene
+                .vegetation_meshes
+                .as_ref()
+                .ok_or("vegetation missing from loaded mission")?;
+            let habitat = scene.grass.mask.len() / (256 * 256 * 4);
+            let size = limits::Pages::new(habitat, &wgpu::Limits::downlevel_defaults())?.size;
+            let art = (scene.sky_indices.len() + scene.texture_indices.len()) / 65536;
+            let canopy = scene.canopy.pages_x * (scene.canopy.area[3] as usize).div_ceil(256);
+            Ok((
+                scene.grass.terrain_size,
+                habitat,
+                size,
+                art,
+                canopy,
+                lib.meshes.len(),
+            ))
+        })?;
+        let (ground, habitat, size, art, canopy, meshes) = loop {
+            if let Some(result) = job.poll() {
+                break result.map_err(|e| format!("{code}: {e}"))?;
+            }
+            if start.elapsed().as_secs() > 300 {
+                return Err(format!("{code}: loader timed out").into());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        let capacity = crate::graphics::VegDensity::Ultra.object_budget();
+        writeln!(
+            report,
+            "{code}\t{}\t{}\t{habitat}\t{}\t{}\t{}\t{art}\t{}\t{canopy}\t{meshes}\t{}\t{}\t{:.3}",
+            ground[0],
+            ground[1],
+            size.width,
+            size.height,
+            size.depth_or_array_layers,
+            art.div_ceil(16),
+            limits::instance_bytes(capacity),
+            capacity * 96,
+            start.elapsed().as_secs_f64()
+        )?;
+        report.flush()?;
+        println!(
+            "vegetation limits: PASS {code}, habitat {}x{}x{}, art 1024x1024x{}, loader {:.3}s",
+            size.width,
+            size.height,
+            size.depth_or_array_layers,
+            art.div_ceil(16),
+            start.elapsed().as_secs_f64()
+        );
+    }
+    let summary = format!(
+        "PASS: {} imported layouts, all 16 base theaters and every imported variant; real mission loader through vegetation; default and downlevel texture/buffer/compute limits. No GPU creation.\n",
+        catalog.len()
+    );
+    print!("{summary}");
+    std::fs::write(out.join("limits-check.txt"), summary)?;
+    Ok(())
 }
 
 #[cfg(test)]

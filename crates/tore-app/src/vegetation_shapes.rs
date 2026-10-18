@@ -282,6 +282,14 @@ impl Library {
                 });
             }
         }
+        // A horizontal disk through a conical crown becomes a detached cap
+        // as the side card fades. Keep pine silhouettes upright in top modes.
+        // Other species retain their existing angle hand-off and artwork.
+        for species in [Species::Conifer, Species::PineGrove] {
+            for &id in &self.variants[species as usize] {
+                self.meshes[usize::from(id)].top[2..].fill(0.);
+            }
+        }
     }
 
     /// CPU orthographic rasterization during scene preparation. The indexed pages share the
@@ -1138,6 +1146,16 @@ mod tests {
                     assert_eq!(mesh.range, 0..6);
                 }
                 assert!(!lib.variants[Species::Conifer as usize].is_empty());
+                for species in Species::ALL {
+                    for &id in &lib.variants[species as usize] {
+                        let mesh = &lib.meshes[usize::from(id)];
+                        if matches!(species, Species::Conifer | Species::PineGrove) {
+                            assert_eq!(mesh.top[2..], [0., 0.]);
+                        } else {
+                            assert!(mesh.top[2] > 0. && mesh.top[3] > 0.);
+                        }
+                    }
+                }
             }
         }
     }

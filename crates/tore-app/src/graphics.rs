@@ -298,6 +298,9 @@ pub const DEFAULT_GROUND_TEXTURE: GroundTexture = GroundTexture::On;
 pub const DEFAULT_GROUND_TEXTURE_DISTANCE: u32 = 2;
 pub const DEFAULT_VEGETATION_DISTANCE: u32 = 4;
 pub const DEFAULT_VEGETATION_DETAIL: u32 = 2;
+pub const GRASS_DISTANCES: [u32; 4] = [250, 500, 750, 1000];
+pub const DEFAULT_GRASS_DISTANCE: u32 = 500;
+pub const DEFAULT_GRASS_DENSITY: Option<VegDensity> = Some(VegDensity::High);
 pub const DEFAULT_VEGETATION_DENSITY: VegDensity = VegDensity::High;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -328,6 +331,8 @@ pub struct Options {
     pub vegetation_density: VegDensity,
     pub vegetation_cards: VegCards,
     pub grass: Grass,
+    pub grass_density: Option<VegDensity>,
+    pub grass_distance_ft: u32,
     /// The frames-per-second readout in the window's top right. Off by
     /// default (John, 2026-10-17). `TORE_SHOW_FPS=1` shows it for one run
     /// without saving.
@@ -349,6 +354,8 @@ impl Default for Options {
             vegetation_density: DEFAULT_VEGETATION_DENSITY,
             vegetation_cards: VegCards::default(),
             grass: Grass::default(),
+            grass_density: DEFAULT_GRASS_DENSITY,
+            grass_distance_ft: DEFAULT_GRASS_DISTANCE,
             show_frame_rate: false,
         }
     }
@@ -372,6 +379,8 @@ impl Options {
             vegetation_density: DEFAULT_VEGETATION_DENSITY,
             vegetation_cards: VegCards::Billboard,
             grass: Grass::Tufts,
+            grass_density: DEFAULT_GRASS_DENSITY,
+            grass_distance_ft: DEFAULT_GRASS_DISTANCE,
             show_frame_rate: false,
         }
     }
@@ -418,6 +427,15 @@ impl Options {
         if self.grass != Grass::default() {
             text += &format!("grass {}\n", self.grass.key());
         }
+        if self.grass_density != DEFAULT_GRASS_DENSITY {
+            text += &format!(
+                "grass-density {}\n",
+                self.grass_density.map_or("off", VegDensity::key)
+            );
+        }
+        if self.grass_distance_ft != DEFAULT_GRASS_DISTANCE {
+            text += &format!("grass-distance {}\n", self.grass_distance_ft);
+        }
         if self.show_frame_rate {
             text += "frame-rate true\n";
         }
@@ -448,6 +466,8 @@ impl Options {
             "vegetation-density",
             "vegetation-cards",
             "grass",
+            "grass-density",
+            "grass-distance",
             "frame-rate",
         ]
         .iter()
@@ -518,6 +538,12 @@ impl Options {
                 None => Grass::default(),
                 Some(v) => Grass::parse(v).ok_or("invalid grass")?,
             },
+            grass_density: match values.get("grass-density") {
+                None => DEFAULT_GRASS_DENSITY,
+                Some(&"off") => None,
+                Some(v) => Some(VegDensity::parse(v).ok_or("invalid grass-density")?),
+            },
+            grass_distance_ft: step("grass-distance", &GRASS_DISTANCES, DEFAULT_GRASS_DISTANCE)?,
             show_frame_rate: match values.get("frame-rate") {
                 None => false,
                 Some(_) => boolean("frame-rate")?,
@@ -667,6 +693,31 @@ mod tests {
         assert_eq!(VegCards::parse("triangle"), None);
     }
     #[test]
+    fn grass_density_and_distance_are_independent_and_backwards_compatible() {
+        let old = Options::default().text();
+        let parsed = Options::parse(&old).unwrap();
+        assert_eq!(parsed.grass_density, Some(VegDensity::High));
+        assert_eq!(parsed.grass_distance_ft, 500);
+        for density in std::iter::once(None).chain(VegDensity::ALL.map(Some)) {
+            for distance in GRASS_DISTANCES {
+                let options = Options {
+                    grass_density: density,
+                    grass_distance_ft: distance,
+                    ..parsed
+                };
+                assert_eq!(Options::parse(&options.text()).unwrap(), options);
+                assert_eq!(options.vegetation_density, parsed.vegetation_density);
+            }
+        }
+        for value in [
+            "grass-density invalid",
+            "grass-distance 0",
+            "grass-distance 501",
+        ] {
+            assert!(Options::parse(&format!("{old}{value}\n")).is_err());
+        }
+    }
+    #[test]
     fn grass_modes_default_and_roundtrip() {
         assert_eq!(Options::default().grass, Grass::Blades);
         for grass in Grass::ALL {
@@ -699,6 +750,8 @@ mod tests {
             vegetation_density: VegDensity::Low,
             vegetation_cards: VegCards::CrossTop,
             grass: Grass::Off,
+            grass_density: Some(VegDensity::Ultra),
+            grass_distance_ft: 1000,
             show_frame_rate: true,
         };
         assert_eq!(Options::parse(&options.text()).unwrap(), options);
