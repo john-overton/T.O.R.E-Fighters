@@ -436,3 +436,23 @@ The existing `vegetation-top-crowns` audit requires zero rendered top extents fo
 pine groves, while checking individual crown bounds and floor cutouts for the
 remaining groves. Pine source art is retained even though its horizontal disk
 is no longer drawn.
+
+## Terrain tile seam audit
+
+`--terrain-audit OUT RETAIL_INSTALL_DIR` is CPU-only. It compares the imported
+UKR, FRA and BAL families with the supplied archives, checks coverage tables
+and actual mesh UV/page selection, and writes per-cell/per-texture TSVs plus
+unlit source and mean PNGs. Keep all output local: it derives from retail art.
+The maps exclude GPU lighting, fog, filtering, canopy and object overlays.
+
+`vegetation-tile-seams` runs `--vegetation-preview OUT seam-check`. It checks
+real UKR/FRA/BAL mask/cache reconstruction and portable resource limits, writes
+accepted edge segments and unlit correction strips, and selects exact cameras.
+Synthetic `terrain_seams` tests cover the 500 ft band, texture residual, colour
+threshold, class boundaries and water/road/city/rotated-airport exclusions.
+
+The lead-only `seam-cost` preview job requires GPU timestamps. It alternates
+correction off/on in the same scene at 4K High and 100/500/2,000/10,000 ft over
+UKR and FRA. It preserves trees, canopy and habitat within each pair. The
+100 ft view also measures blade colour work. It reports signed deltas without
+claiming that small or negative results exceed timing noise.

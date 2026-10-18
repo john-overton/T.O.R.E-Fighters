@@ -1722,9 +1722,9 @@ impl SimRenderer {
         ]);
         uniform.extend([
             self.vegetation.as_ref().map_or(0., |v| v.detail_reach()),
-            0.,
-            0.,
-            0.,
+            scenery.seams[0],
+            scenery.seams[1],
+            scenery.seams[2],
         ]);
         debug_assert_eq!(uniform.len() * 4, UNIFORM_BYTES as usize);
         // The burning city fill buildings: the nearest fires and columns of

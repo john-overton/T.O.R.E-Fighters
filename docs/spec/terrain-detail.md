@@ -296,10 +296,7 @@ The following base grids scale candidate count with the [density table](graphics
   by 1.12. Width/height ratio varies independently from 0.88 to 1.12. Existing
   species base heights remain. These constants are agent choices implementing
   John's size-variation request of 2026-10-16.
-- Temperate brown tile margins blend up to 85% toward continuous terrain vertex
-  colour over 3.5% of a tile. Procedural plot colour and furrows fade across
-  3.5% of a plot edge. Both shaded colour and flare albedo receive the same
-  correction. This softens seams without changing terrain or simulation data.
+
 
 Coast exclusion, **fitted agent rule** for John's 2026-10-17 request: a 512 ft
 cell must be at least 75% actual water cutouts, and a 5 by 5 group of such cells
@@ -322,6 +319,57 @@ separated from its tree during the side/top transition. Omitting that disk is
 an agent choice in response to John's 2026-10-17 green-cap report. Other species
 retain their existing tops. A directly overhead pine therefore has a thinner
 silhouette; this tradeoff needs GPU review.
+
+### Tile seams
+
+John requested a 500 ft transition centred on colour seams on 2026-10-18.
+This is **opinionated presentation** on `exp/vegetation`, separate from the
+[source import audit](../baselines/terrain-seams.md). The following mask,
+colour threshold and tree-density choices are **fitted agent decisions**.
+
+At an accepted tile edge, the ground retains its original texture samples and
+adds the difference between the neighbour's and its own local linear-light mean,
+weighted by one smoothstep across 500 ft. The midpoint mixes the means equally;
+the correction is zero 250 ft from either side. Texture coordinates, coverage,
+heights and high-frequency grain are unchanged. Negative corrected RGB clamps
+to zero. Two palette indices and an eight-bit weight approximate each tile's
+exact opaque-pixel mean and each side's local three-texel boundary mean. Adjacent
+accepted edge means interpolate along the edge. Colour means sample the first
+source texel on either side, filtered over three positions along the boundary;
+matched borders receive no correction even when interior colours differ.
+The mean mixtures resolve through live weather remaps, and through the
+daylight row for flare albedo and blade tint. This approximation is measured
+by the CPU audit. It is not recovered retail colour blending.
+
+The source is the actual uploaded ground page, including LAND fallback and
+neutral airfield ground. A maximum linear RGB local mean difference of at least
+0.015 qualifies. One shared mask samples both sides of every 128 ft edge
+segment, at depths 64, 192 and 320 ft and at three positions along the edge.
+Water, river, beach, road, rock, snow, sand, city tiles/sites/streets and airport
+footprints reject the segment. Airport bounds expand by 348 ft; town circles
+expand by 128 ft. Same-class grass, woodland or scrub can blend. Fields and
+different land classes stay crisp. These are the existing fitted art classes,
+not recovered land-use data. Narrower-than-texel features remain unresolved.
+
+Accepted runs fade inside their first and last 128 ft segments. A 384 ft guard
+at tile corners preserves junctions and prevents overlapping corrections.
+Those short junctions intentionally retain their source colours. The old
+brown-only fade toward T2 colour over 1,147 ft per side is removed.
+
+A differing field/forest pair instead marks a tree belt, with no ground colour
+mix. Within 250 ft of the boundary, tree probability rises to at least
+`0.85 * belt`, where belt is one at the seam and smoothly reaches zero at the
+outer edges. Existing tree-line, slope, grounding, exclusion and fixed-budget
+rules remain. Field interiors and procedural rectangular field rows remain.
+The distant canopy samples the same belt through ordinary placement queries.
+
+Blades use the same correction as ground, before their existing species/root
+and tip tints. Fallback land now uses the same LAND page as the terrain; water
+without a placed picture still has no blades. The seam metadata and masks are
+cached with the placement/canopy/habitat inputs. `TORE_TERRAIN_SEAMS=0` disables
+both the colour correction and belt for comparisons. Ground-detail Off leaves
+the correction active; `TORE_VEGETATION=0` disables this exploratory feature.
+No simulation, wire, replay or checkpoint data changes.
 
 ### Grass
 

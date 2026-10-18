@@ -11024,6 +11024,19 @@ The draws use reversed-depth GreaterEqual and no colour-pass depth writes. Depth
 palette/lighting work. Colour skips the second daylight-palette sample outside thermal views when no
 flare light is burning. Grass is a separate selectable blade/tuft pass.
 Crosses/top cards may cost more overdraw, so all modes require GPU comparison.
+`terrain_seams` derives a 3,588-byte record per 32,768 ft tile from the actual
+uploaded terrain pages. Four bytes hold its two-index mean mixture. Each of 256 segments on
+the east and north edges uses seven bytes: flags and two local mean mixtures. Neighbours share those records. The
+bytes occupy ordinary shared-art pages, with no extra GPU binding or per-frame
+upload. Three previously unused scene-uniform words locate the map. Outside
+250 ft of an edge the shader performs no seam texture reads. Active pixels
+interpolate the two neighbouring edge records, resolve eight palette endpoints
+and retain their own texture residual. Blade
+vertices use the same function. CPU tree placement reads the same cached belt.
+The `.seams` cache uses the existing bounded, checksummed atomic cache format;
+code, art, layout, palette, airport/city exclusions and the enable switch are
+part of its key. [Rules and limits](spec/terrain-detail.md#tile-seams).
+
 `vegetation_grass` builds a compact classification texture on the mission loader
 and caches it alongside canopy as a checksummed `.grass` entry. Four bytes per
 512 ft block encode sixteen 128 ft habitats. Logical pages are 256-square RGBA8Uint. `vegetation_limits::Pages` packs them

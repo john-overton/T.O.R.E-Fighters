@@ -307,7 +307,7 @@ fn bare_kind(climate: u8) -> Kind {
     }
 }
 
-fn rotate(tu: usize, tv: usize, rotation: u8) -> (usize, usize) {
+pub(crate) fn rotate(tu: usize, tv: usize, rotation: u8) -> (usize, usize) {
     match rotation % 4 {
         0 => (tu, 255 - tv),
         1 => (255 - tv, 255 - tu),
@@ -363,12 +363,13 @@ impl WaterMap {
 pub struct Atlas {
     pub region: Region,
     pub tone: Tone,
-    palette: [[u8; 3]; 256],
+    pub(crate) palette: [[u8; 3]; 256],
     pictures: Vec<Picture>,
     /// Placement key to (picture, rotation).
     placements: BTreeMap<(i32, i32), (u16, u8)>,
     water: WaterMap,
     coast: coast::Coast,
+    pub seams: std::sync::Arc<crate::terrain_seams::Map>,
     /// The theater's median terrain height, feet: hills are measured from it.
     median_height: f32,
     /// Each terrain cell corner's palette index and the theater's columns:
@@ -457,6 +458,7 @@ impl Atlas {
             placements,
             water: WaterMap::empty(),
             coast: Default::default(),
+            seams: Default::default(),
             median_height: 0.,
             cells: Vec::new(),
             cols: 0,
@@ -646,13 +648,17 @@ impl Atlas {
         Some(self.cells[row * self.cols + col])
     }
 
-    fn kind_index(&self, index: u8) -> Kind {
+    pub(crate) fn kind_index(&self, index: u8) -> Kind {
         kind_toned(
             self.palette[usize::from(index)],
             index,
             self.region.climate,
             self.tone,
         )
+    }
+
+    pub(crate) fn coast_blocked(&self, x: i64, z: i64) -> bool {
+        self.coast.contains(x, z)
     }
 
     pub fn kind_at(&self, x: i64, z: i64) -> Kind {
@@ -904,6 +910,11 @@ impl Atlas {
             p += (0.48 * hill + 0.18 * relief) * (1. - p);
             p += 0.08 * s.near_water * (1. - p);
         }
+        // Field/forest tile boundaries get a 500 ft belt. Interior fields
+        // stay clear; the existing grounding, tree line and slope gates apply.
+        // The seam mask classifies the rendered LAND fallback too, whereas
+        // an unplaced site's existing ecology can still come from T2 colour.
+        p = p.max(0.85 * self.seams.hedge(s.x, s.z));
         // Tropical forest is closer and taller; arctic trees are scattered.
         let climate = match region.climate {
             3 => 1.15,

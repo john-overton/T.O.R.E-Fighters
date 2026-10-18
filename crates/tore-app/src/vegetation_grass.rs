@@ -65,7 +65,12 @@ fn habitat(kind: Kind, climate: u8, water_ft: f32) -> u8 {
     }
 }
 impl Map {
-    pub fn build(atlas: &Atlas, world: &Terrain, layers: &BTreeMap<(i32, i32), usize>) -> Self {
+    pub fn build(
+        atlas: &Atlas,
+        world: &Terrain,
+        layers: &BTreeMap<(i32, i32), usize>,
+        land: Option<usize>,
+    ) -> Self {
         let w = &atlas.water;
         let nx = w.cols.div_ceil(PAGE);
         let nz = w.rows.div_ceil(PAGE);
@@ -139,7 +144,11 @@ impl Map {
             for col in 0..world.theater.cols {
                 let cell = world.theater.cell(col, row);
                 let key = ((col as i32) & !3, (row as i32) & !3);
-                let layer = layers.get(&key).map_or(-1., |&v| v as f32);
+                let layer = layers
+                    .get(&key)
+                    .copied()
+                    .or(if cell.color != 255 { land } else { None })
+                    .map_or(-1., |v| v as f32);
                 let rotation = world
                     .environment
                     .textures
@@ -397,7 +406,7 @@ mod tests {
         }
         let atlas = Atlas::synthetic(pixels, 0);
         let world = tore_world::test_support::terrain();
-        let map = Map::build(&atlas, &world, &BTreeMap::new());
+        let map = Map::build(&atlas, &world, &BTreeMap::new(), None);
         for x in 0..96 {
             assert_eq!(map.at((x * 128 + 64) as f64, 3000.), 0);
         }
@@ -446,6 +455,7 @@ mod tests {
             &Atlas::synthetic(vec![12; 65536], 0),
             &world,
             &BTreeMap::new(),
+            None,
         );
         for x in (2000..6200).step_by(61) {
             for z in (2000..6200).step_by(61) {
@@ -463,6 +473,7 @@ mod tests {
             &Atlas::synthetic(vec![12; 65536], 0),
             &world,
             &BTreeMap::new(),
+            None,
         );
         map.exclude_circle([4096., 4096.], 1000.);
         for angle in 0..360 {
@@ -478,6 +489,7 @@ mod tests {
             &Atlas::synthetic(vec![12; 65536], 0),
             &world,
             &BTreeMap::new(),
+            None,
         );
         for (u, v) in [(0., 0.), (0.2, 0.3), (0.7, 0.6), (0.5, 0.5)] {
             let h = |x, y| map.terrain[(y * map.terrain_size[0] as usize + x) * 4];
@@ -490,5 +502,17 @@ mod tests {
                 (y + root_lift() - world.height(u * CELL as f32, v * CELL as f32)).abs() < 0.001
             );
         }
+    }
+    #[test]
+    fn grass_colour_uses_land_fallback_without_filling_water() {
+        let mut world = tore_world::test_support::terrain();
+        let atlas = Atlas::synthetic(vec![12; 65536], 0);
+        let build = |world: &Terrain, layers: &BTreeMap<(i32, i32), usize>| {
+            Map::build(&atlas, world, layers, Some(7))
+        };
+        assert_eq!(build(&world, &BTreeMap::new()).terrain[1], 7.);
+        world.theater.cells[0].color = 255;
+        assert_eq!(build(&world, &BTreeMap::new()).terrain[1], -1.);
+        assert_eq!(build(&world, &BTreeMap::from([((0, 0), 3)])).terrain[1], 3.);
     }
 }

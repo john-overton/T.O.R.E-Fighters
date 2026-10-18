@@ -59,7 +59,10 @@ impl Cache {
             world,
             palette,
             first,
-            mode,
+            &format!(
+                "{mode}:seams={}",
+                crate::terrain_seams::enabled().unwrap_or(false)
+            ),
             env!("TORE_VEGETATION_VERSION"),
         ))
     }
@@ -98,6 +101,7 @@ impl Cache {
         hash.update(
             format!("{:?}{:?}", world.theater.cells, world.airport_scene.runways).as_bytes(),
         );
+        hash.update(format!("{:?}", world.neutral_airfield_ground).as_bytes());
         if let Some(fill) = &world.city_fill {
             hash.update(format!("{:?}", fill.layout.map).as_bytes());
         }
@@ -124,6 +128,39 @@ impl Cache {
     }
     pub fn write_atlas(&self, atlas: &super::Atlas) {
         self.atlas_file().write_data(encode_atlas(atlas));
+    }
+    pub fn read_seams(&self) -> Option<crate::terrain_seams::Map> {
+        let bytes = Self {
+            path: self.path.with_extension("seams"),
+            key: self.key,
+        }
+        .read_payload()?;
+        let mut r = Read(&bytes);
+        let cols = r.count(1024)?;
+        let rows = r.count(1024)?;
+        let mean_error = r.floats::<1>()?[0];
+        let bytes = r.blob(MAX_BYTES)?.to_vec();
+        if !r.0.is_empty() || bytes.len() != cols * rows * crate::terrain_seams::STRIDE {
+            return None;
+        }
+        Some(crate::terrain_seams::Map {
+            cols,
+            rows,
+            bytes,
+            mean_error,
+        })
+    }
+    pub fn write_seams(&self, map: &crate::terrain_seams::Map) {
+        let mut data = Vec::new();
+        put(&mut data, map.cols);
+        put(&mut data, map.rows);
+        floats(&mut data, &[map.mean_error]);
+        blob(&mut data, &map.bytes);
+        Self {
+            path: self.path.with_extension("seams"),
+            key: self.key,
+        }
+        .write_data(data);
     }
     pub fn read_grass(&self) -> Option<super::grass::Map> {
         let bytes = Self {
@@ -537,6 +574,7 @@ fn decode_atlas(bytes: &[u8]) -> Option<super::Atlas> {
         placements,
         water,
         coast,
+        seams: Default::default(),
         median_height,
         cells,
         cols,
@@ -550,7 +588,7 @@ mod tests {
     fn grass_cache_roundtrip_is_bounded_and_rejects_truncation() {
         let atlas = super::super::Atlas::synthetic(vec![12; 65536], 0);
         let world = tore_world::test_support::terrain();
-        let map = super::super::grass::Map::build(&atlas, &world, &BTreeMap::new());
+        let map = super::super::grass::Map::build(&atlas, &world, &BTreeMap::new(), None);
         let bytes = encode_grass(&map);
         assert_eq!(decode_grass(&bytes), Some(map));
         for len in [0, 15, 20, bytes.len() - 1] {
@@ -610,6 +648,15 @@ mod tests {
         };
         pages.extend(vec![17; 65536]);
         cache.write(&library, map, &pages);
+        let seams = crate::terrain_seams::Map {
+            cols: 2,
+            rows: 2,
+            bytes: vec![0; 4 * crate::terrain_seams::STRIDE],
+            mean_error: 0.001,
+        };
+        cache.write_seams(&seams);
+        assert_eq!(cache.read_seams(), Some(seams));
+
         let mut atlas = super::super::Atlas::synthetic(vec![10; 65536], 0);
         atlas.region = super::super::region("UKR");
         atlas.cols = 2;
@@ -634,6 +681,12 @@ mod tests {
             make(&world, &resources, b"generation-1", "code-data-1").key,
             cache.key
         );
+        let previous = make(&world, &resources, b"generation-1", "code-data-1").key;
+        world.neutral_airfield_ground.insert((4, 4));
+        assert_ne!(
+            make(&world, &resources, b"generation-1", "code-data-1").key,
+            previous
+        );
         world.layout = "TVIET.MM".into();
         assert_ne!(
             make(&world, &resources, b"generation-1", "code-data-1").key,
@@ -645,6 +698,7 @@ mod tests {
         assert!(cache.read().is_none());
         std::fs::remove_file(&cache.path).unwrap();
         std::fs::remove_file(&cache.atlas_file().path).unwrap();
+        std::fs::remove_file(cache.path.with_extension("seams")).unwrap();
         let _ = std::fs::remove_dir(root);
     }
 }

@@ -461,14 +461,70 @@ fn fill_shadow(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,size:vec4<f32>,
 }
 // Terrain cutouts expose the already rendered ocean/horizon, never the T2
 // land color. Keep this separate from aircraft's base-color texture blending.
-// Blend a narrow tile margin toward the continuous terrain vertex colour.
-// This removes the strongest ploughed-tile seam without blurring roads/water.
-fn field_margin(color:vec3<f32>,ground:vec3<f32>,uv:vec2<f32>)->vec3<f32> {
- if scene.veg.x<0.5 || scene.veg.w>0.5 {return color;}
- let brown=smoothstep(0.80,0.95,color.r/max(color.g,0.0001))*smoothstep(1.25,1.6,color.r/max(color.b,0.0001));
- let edge=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
- let blend=(1.0-smoothstep(0.0,0.035,edge))*brown*0.85;
- return mix(color,ground,blend);
+// Tile means are compact mixtures of original palette indices. Resolve them
+// through the same live weather/remaps as the art, including flare albedo.
+// canopy_detail.yzw: first byte-data page, tile columns, tile rows.
+fn seam_byte(address:i32)->u32 {
+ let page=i32(scene.canopy_detail.y)+address/65536;
+ let at=address%65536;
+ return read_tile(vec2<i32>(at%256,at/256),page);
+}
+fn seam_mean(at:i32,row:i32,remaps:vec2<f32>)->vec3<f32> {
+ let a=seam_byte(at);let b=seam_byte(at+1);let t=f32(seam_byte(at+2))/255.0;
+ var ca=shade(a,row).rgb;var cb=shade(b,row).rgb;
+ if remaps.x>=0.0 {ca=remap_color(a,remaps);cb=remap_color(b,remaps);}
+ return mix(ca,cb,t);
+}
+fn seam_segment(tile:i32,axis:i32,segment:i32)->bool {
+ if segment<0 || segment>=256 {return false;}
+ return (seam_byte(tile*3588+4+(axis*256+segment)*7)&1u)!=0u;
+}
+fn seam_delta_at(tile:i32,axis:i32,segment:i32,current:i32,row:i32,remaps:vec2<f32>)->vec3<f32> {
+ var s=clamp(segment,0,255);
+ if !seam_segment(tile,axis,s) {s=current;}
+ let at=tile*3588+4+(axis*256+s)*7;
+ return seam_mean(at+4,row,remaps)-seam_mean(at+1,row,remaps);
+}
+fn seam_delta(tile:i32,axis:i32,along:f32,row:i32,remaps:vec2<f32>)->vec3<f32> {
+ let q=along/128.0-0.5;let s=i32(floor(q));let current=i32(floor(along/128.0));
+ return mix(seam_delta_at(tile,axis,s,current,row,remaps),seam_delta_at(tile,axis,s+1,current,row,remaps),fract(q));
+}
+fn seam_strength(tile:i32,axis:i32,along:f32)->f32 {
+ let segment=i32(floor(along/128.0));
+ if !seam_segment(tile,axis,segment) {return 0.0;}
+ let t=fract(along/128.0);
+ var a=1.0;var b=1.0;
+ if !seam_segment(tile,axis,segment-1) {a=smoothstep(0.0,1.0,t);}
+ if !seam_segment(tile,axis,segment+1) {b=smoothstep(0.0,1.0,1.0-t);}
+ return min(a,b);
+}
+fn terrain_seam_color(color:vec3<f32>,world:vec2<f32>,row:i32,remaps:vec2<f32>)->vec3<f32> {
+ let size=vec2<i32>(scene.canopy_detail.zw);
+ if size.x<=0 || size.y<=0 {return color;}
+ let cell=vec2<i32>(floor(world/32768.0));
+ if any(cell<vec2<i32>(0)) || any(cell>=size) {return color;}
+ let local=world-vec2<f32>(cell)*32768.0;
+ let near=min(local,vec2<f32>(32768.0)-local);
+ // No texture reads outside the 500 ft band. Junctions are excluded by the
+ // CPU mask, so two orthogonal corrections can never overlap.
+ if min(near.x,near.y)>=250.0 {return color;}
+ let own=cell.y*size.x+cell.x;
+ var result=color;
+ for(var axis=0;axis<2;axis++) {
+  if near[axis]>=250.0 {continue;}
+  let step=select(1,size.x,axis==1);
+  let negative=local[axis]<16384.0;
+  let adjacent=cell[axis]+select(1,-1,negative);
+  if adjacent<0 || adjacent>=size[axis] {continue;}
+  let neighbour=own+select(step,-step,negative);
+  let owner=select(own,neighbour,negative);
+  let strength=seam_strength(owner,axis,local[1-axis]);
+  if strength<=0.0 {continue;}
+  let weight=smoothstep(0.0,500.0,250.0-near[axis])*strength;
+  result+=seam_delta(owner,axis,local[1-axis],row,remaps)*select(1.0,-1.0,negative)*weight;
+ }
+ // Keep each tile's high-frequency residual. No UV or alpha blending.
+ return max(result,vec3<f32>(0.0));
 }
 // Forest horizon: expected crown coverage and mean art colour from CPU placement.
 // World-anchored texture replaces the missing crown share as objects thin/fade.
@@ -526,10 +582,11 @@ fn forest_canopy(color:vec3<f32>,direction:vec3<f32>,row:i32)->vec3<f32> {
  }
  // One detail term for the shaded colour and the flare-lit albedo, so a
  // dynamic light (flare, afterburner, fire, gun flash) only adds light.
- let field_color=field_margin(tex.rgb,in.color,in.uv);
+ let world=scene.origin.xz+scene.local_eye.xz+in.direction.xz;
+ let field_color=terrain_seam_color(tex.rgb,world,0,remaps);
  let detail=ground_detail(field_color,in.direction,normal);
  var albedo=field_color;
- if flares_burning() {albedo=field_margin(sample_tile(in.uv,i32(in.layer),base_row(),-1,in.light_row,vec2<f32>(-1.0)).rgb,in.albedo,in.uv);}
+ if flares_burning() {albedo=terrain_seam_color(sample_tile(in.uv,i32(in.layer),base_row(),-1,in.light_row,vec2<f32>(-1.0)).rgb,world,base_row(),vec2<f32>(-1.0));}
  let forest=forest_canopy(field_color,in.direction,0);
  albedo=forest_canopy(albedo,in.direction,base_row());
  return scenery(aerial_perspective(surface_color(forest*detail.tint,in.direction,detail.normal,false,receiver,albedo*detail.tint),in.direction,in.altitude));

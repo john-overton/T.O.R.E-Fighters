@@ -131,6 +131,12 @@ pub fn run() -> AppResult<()> {
         std::fs::write(out.join("cache-check.txt"), report)?;
         return Ok(());
     }
+    if jobs.iter().any(|job| job == "seam-check") {
+        return crate::terrain_seams::audit::run(resources, out);
+    }
+    if jobs.iter().any(|job| job == "seam-cost") {
+        return seam_cost(resources, out);
+    }
     if jobs.iter().any(|job| job == "grass-cameras") {
         return grass_cameras(resources, out);
     }
@@ -415,6 +421,57 @@ pub fn detail_energy(rgba: &[u8], size: [u32; 2]) -> f64 {
         }
     }
     sum / n.max(1) as f64
+}
+
+/// Same scene, population and view. Only the terrain/grass colour correction
+/// switches, with alternating measurement order and mandatory GPU timestamps.
+fn seam_cost(resources: &std::collections::BTreeMap<String, Vec<u8>>, out: &Path) -> AppResult<()> {
+    let mut report = std::fs::File::create(out.join("seam-cost.csv"))?;
+    writeln!(report, "theater,altitude_ft,repeat,off_ms,on_ms,seam_ms")?;
+    for code in ["UKR", "FRA"] {
+        let world = Terrain::for_mission(resources, code, Some(0), &overrides([12, 0])?)?;
+        let mut scenery = Scenery::build(resources, &world)?;
+        let spot = crate::terrain_seams::audit::spots(
+            &scenery.vegetation.as_ref().ok_or("no vegetation")?.seams,
+            crate::terrain_seams::BLEND,
+        )
+        .into_iter()
+        .next()
+        .ok_or("no blend seam")?;
+        let selected = scenery.seams;
+        for height in [100., 500., 2000., 10000.] {
+            let camera = crate::terrain_seams::audit::camera(&world, &spot, height);
+            scenery.resolve_palette(&world, camera.position[1]);
+            scenery.set_origin(camera.position);
+            let mut gpu = pollster::block_on(View::new(
+                &scenery,
+                [3840, 2160],
+                options(crate::graphics::VegDensity::High),
+                false,
+            ))?;
+            gpu.set_shown(true);
+            gpu.time(&camera, &world, &scenery)?;
+            for repeat in 0..8 {
+                let mut times = [0.; 2];
+                for state in if repeat % 2 == 0 { [0, 1] } else { [1, 0] } {
+                    scenery.seams = if state == 0 { [0.; 3] } else { selected };
+                    times[state] = gpu
+                        .gpu_time(&camera, &world, &scenery)?
+                        .ok_or("GPU timestamps required for seam cost")?;
+                }
+                writeln!(
+                    report,
+                    "{code},{height},{repeat},{:.6},{:.6},{:.6}",
+                    times[0],
+                    times[1],
+                    times[1] - times[0]
+                )?;
+            }
+            scenery.seams = selected;
+        }
+    }
+    println!("terrain seams: GPU cost recorded at 4K High, identical scene with correction off/on");
+    Ok(())
 }
 
 /// Frame cost of a low pass over Ukraine at 1440p and 4K, Medium, High and Ultra:

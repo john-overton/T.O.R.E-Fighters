@@ -100,7 +100,7 @@ struct BladeOut {
   index=read_tile(p,i32(a.y));
  }
  if index==255u {return out;}
- let ground=shade(index,base_row()).rgb;
+ let ground=terrain_seam_color(shade(index,base_row()).rgb,world,base_row(),vec2<f32>(-1.0));
  let dry=scene.veg.w==1.0 || scene.veg.w==2.0 || habitat==3u;
  var color=ground*select(vec3<f32>(0.92,1.10,0.83),vec3<f32>(1.12,1.02,0.75),dry);
  if habitat==2u {color*=vec3<f32>(1.12,1.04,0.79);}

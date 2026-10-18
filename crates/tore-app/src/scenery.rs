@@ -70,6 +70,8 @@ pub struct Scenery {
     /// The surface units' wrecks, rails, moving units, sprites and pieces.
     pub surface: surface_art::SurfaceArt,
     pub texture_indices: Vec<u8>,
+    pub(crate) ground_layers: BTreeMap<(i32, i32), usize>,
+    pub(crate) land_texture: Option<usize>,
     pub smooth_weather: bool,
     pub visual_bands: Vec<tore_formats::weather::Layer>,
     pub no_sun_whiteout: bool,
@@ -93,6 +95,8 @@ pub struct Scenery {
     /// The vegetation meshes, their retail textures in the static art pages.
     pub vegetation_meshes: Option<Arc<crate::vegetation_shapes::Library>>,
     pub canopy: crate::vegetation::canopy::Map,
+    /// First shared-art page and tile-grid dimensions for the seam shader.
+    pub seams: [f32; 3],
     pub grass: crate::vegetation::grass::Map,
     pub vegetation_cache_hit: bool,
 }
@@ -439,6 +443,8 @@ impl Scenery {
             standing_geometry: None,
             surface: surface_art::SurfaceArt::default(),
             texture_indices,
+            ground_layers: ground_layers.clone(),
+            land_texture,
             smooth_weather: match std::env::var("TORE_WEATHER_SMOOTH").as_deref() {
                 Err(std::env::VarError::NotPresent) | Ok("1") => true,
                 Ok("0") => false,
@@ -459,6 +465,7 @@ impl Scenery {
             vegetation: None,
             vegetation_meshes: None,
             canopy: Default::default(),
+            seams: [0.; 3],
             grass: Default::default(),
             vegetation_cache_hit: false,
             climate: crate::blast_climate::Climate {
@@ -493,17 +500,46 @@ impl Scenery {
         };
         if flight && crate::vegetation::enabled()? {
             let _timing = crate::loading::timing("vegetation atlas");
-            out.vegetation = if let Some(atlas) = cache.as_ref().and_then(|c| c.read_atlas()) {
+            let mut atlas = if let Some(atlas) = cache.as_ref().and_then(|c| c.read_atlas()) {
                 out.vegetation_cache_hit = true;
                 log::info!("vegetation atlas cache: hit theater={code}");
-                Some(Arc::new(atlas))
+                Some(atlas)
             } else {
                 let atlas = crate::vegetation::Atlas::build(resources, terrain)?;
                 if let (Some(cache), Some(atlas)) = (&cache, &atlas) {
                     cache.write_atlas(atlas);
                 }
-                atlas.map(Arc::new)
+                atlas
             };
+            let seam_enabled = crate::terrain_seams::enabled()?;
+            if let Some(atlas) = &mut atlas {
+                let _timing = crate::loading::timing("terrain seam map");
+                let map = if !seam_enabled {
+                    Default::default()
+                } else if let Some(map) = cache.as_ref().and_then(|c| c.read_seams()) {
+                    map
+                } else {
+                    let map = crate::terrain_seams::Map::build(
+                        terrain,
+                        atlas,
+                        &ground_layers,
+                        land_texture,
+                        &out.texture_indices,
+                    );
+                    if let Some(cache) = &cache {
+                        cache.write_seams(&map);
+                    }
+                    map
+                };
+                out.seams = [
+                    (out.texture_indices.len() + out.sky_indices.len()) as f32 / 65536.,
+                    map.cols as f32,
+                    map.rows as f32,
+                ];
+                map.append(&mut out.sky_indices);
+                atlas.seams = Arc::new(map);
+            }
+            out.vegetation = atlas.map(Arc::new);
         }
         if let Some(atlas) = &out.vegetation {
             crate::graphics::Grass::override_from_env()?;
@@ -511,7 +547,12 @@ impl Scenery {
             out.grass = if let Some(map) = cache.as_ref().and_then(|c| c.read_grass()) {
                 map
             } else {
-                let map = crate::vegetation::grass::Map::build(atlas, terrain, &ground_layers);
+                let map = crate::vegetation::grass::Map::build(
+                    atlas,
+                    terrain,
+                    &ground_layers,
+                    land_texture,
+                );
                 if let Some(cache) = &cache {
                     cache.write_grass(&map);
                 }
@@ -1173,6 +1214,8 @@ pub(crate) mod tests {
             static_lines: BTreeMap::new(),
             standing_geometry: None,
             surface: surface_art::SurfaceArt::default(),
+            ground_layers: BTreeMap::new(),
+            land_texture: None,
             texture_indices: vec![],
             smooth_weather: true,
             visual_bands: Vec::new(),
@@ -1190,6 +1233,7 @@ pub(crate) mod tests {
             vegetation: None,
             vegetation_meshes: None,
             canopy: Default::default(),
+            seams: [0.; 3],
             grass: Default::default(),
             vegetation_cache_hit: false,
             fire_widths: Arc::new(BTreeMap::new()),

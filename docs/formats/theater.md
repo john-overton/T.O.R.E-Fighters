@@ -274,3 +274,13 @@ The exploratory vegetation habitat uses a device-sized atlas of 256-square
 logical pages, independent of theater rows. The shared canopy/card atlas and
 all vegetation buffers are checked by the CPU-only
 [theater limits audit](../testing/README.md#vegetation-theater-limits).
+
+## Temperate tile colour audit
+
+The 2026-10-18 UKR/FRA/BAL audit compares imported layout, T2, picture and weather
+payloads with the source archives, recomputes `tdic` coverage, and checks the
+render mesh's texture pages and quarter-turn UVs. No new per-tile palette or
+shade mapping is established. The source pictures differ in colour, including
+the fitted LAND fallback. Retail runtime appearance and exact fallback-land
+projection remain unverified. [Measured evidence](../baselines/terrain-seams.md)
+and [exploratory seam presentation](../spec/terrain-detail.md#tile-seams).

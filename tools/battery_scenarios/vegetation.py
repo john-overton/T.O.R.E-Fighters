@@ -43,6 +43,13 @@ def check_grass_cameras(work, _output):
 
 def scenarios():
     return [Scenario(
+        name='vegetation-tile-seams', lane='menus',
+        args=['--vegetation-preview', '{work}/seams', 'seam-check'],
+        env={'TORE_VEGETATION': '1', 'TORE_TERRAIN_SEAMS': '1'}, timeout=600,
+        outputs=['seams/seam-metrics.tsv', 'seams/seam-cameras.txt'],
+        expect=['terrain seams: PASS UKR', 'terrain seams: PASS FRA',
+                'terrain seams: PASS BAL', 'exact cache and portable limits'],
+    ), Scenario(
         name='vegetation-theater-limits', lane='menus',
         args=['--vegetation-preview', '{work}/limits', 'limits-check'],
         env={'TORE_VEGETATION': '1', 'TORE_WORKERS': '4'}, timeout=3600,

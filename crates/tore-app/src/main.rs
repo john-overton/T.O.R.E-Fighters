@@ -152,7 +152,9 @@ mod surface_trace;
 mod tape_file;
 mod target_info;
 mod target_preview;
+mod terrain_audit;
 mod terrain_colors;
+mod terrain_seams;
 mod ui_text;
 mod ui_text_renderer;
 mod v22_animation;
@@ -10607,6 +10609,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     }
     if std::env::args().nth(1).as_deref() == Some("--terrain-colors") {
         terrain_colors::run()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--terrain-audit") {
+        terrain_audit::run()?;
         return Ok(Outcome::Done);
     }
     if std::env::args().nth(1).as_deref() == Some("--blast-preview") {
