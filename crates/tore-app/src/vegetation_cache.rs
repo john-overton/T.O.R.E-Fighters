@@ -141,6 +141,18 @@ impl Cache {
         let mean_error = r.floats::<1>()?[0];
         let bytes = r.blob(MAX_BYTES)?.to_vec();
         let materials = r.blob(1024 * 1024 * 8)?.to_vec();
+        let page_count = r.count(4096)?;
+        let pages = (0..page_count)
+            .map(|_| r.floats::<15>())
+            .collect::<Option<Vec<_>>>()?;
+        let targets = (0..page_count)
+            .map(|_| r.count(4096).map(|v| v as u32))
+            .collect::<Option<Vec<_>>>()?;
+        let cell_count = r.count(1024 * 1024)?;
+        let cells = (0..cell_count)
+            .map(|_| r.count(1024 * 1024).map(|v| v as u32))
+            .collect::<Option<Vec<_>>>()?;
+        let boundaries = r.blob(1024 * 1024)?.to_vec();
         let size = [
             r.count(1024)? as u32,
             r.count(1024)? as u32,
@@ -151,6 +163,8 @@ impl Cache {
         if !r.0.is_empty()
             || bytes.len() != cols * rows * crate::terrain_seams::STRIDE
             || materials.len() != cols * rows * 8
+            || cells.len() != boundaries.len()
+            || (!cells.is_empty() && cells.len() != cols * rows)
             || baked_pixels.len() != size.iter().map(|&v| v as usize).product::<usize>() * 8
         {
             return None;
@@ -161,6 +175,12 @@ impl Cache {
             bytes,
             mean_error,
             materials,
+            flat: crate::terrain_seams::flat::Flat {
+                pages,
+                targets,
+                cells,
+                boundaries,
+            },
             baked: crate::terrain_seams::baked::Baked {
                 size,
                 records,
@@ -175,6 +195,18 @@ impl Cache {
         floats(&mut data, &[map.mean_error]);
         blob(&mut data, &map.bytes);
         blob(&mut data, &map.materials);
+        put(&mut data, map.flat.pages.len());
+        for p in &map.flat.pages {
+            floats(&mut data, p);
+        }
+        for &v in &map.flat.targets {
+            put(&mut data, v as usize);
+        }
+        put(&mut data, map.flat.cells.len());
+        for &v in &map.flat.cells {
+            put(&mut data, v as usize);
+        }
+        blob(&mut data, &map.flat.boundaries);
         for v in map.baked.size {
             put(&mut data, v as usize);
         }

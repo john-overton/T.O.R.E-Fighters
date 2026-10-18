@@ -343,9 +343,38 @@ to each texture. Adjacent accepted edge means interpolate along the edge.
 Source pictures, including LAND, remain unchanged. The reviewed UKR camera
 has mottled LAND.PIC south of the seam and a mostly uniform UKR23.PIC north of
 it. Replacing LAND with a fit to the flatter named tiles removed existing
-contrast. That global replacement is removed. Preserving all source interiors
-is the current rule; enriching flat regions of named pictures needs a separate
-scope decision because it changes their rendered interiors.
+contrast. That global replacement is removed. Already mottled interiors stay
+pixel-identical. John approved adding mottling inside flat named tiles on
+2026-10-18, an **opinionated** extension. Original source pages remain intact.
+
+Flatness is measured per imported picture in linear light, using green ground
+blocks averaged at 256, 512, 1,024 and 2,048 ft. At least 60% of the picture must
+use the natural green palette ramps; city art is excluded. A picture qualifies
+only when its standard deviation at every scale is below half the reference's.
+The reference is mottled LAND when available, otherwise the most varied eligible
+picture. Each flat picture uses its most common adjacent mottled picture with
+at least 70% of that reference contrast, falling back to the reference. These
+thresholds and the following synthesis rules are **fitted agent decisions**.
+
+A stable world-space noise field supplies broad light/dark modulation, with
+no tile-local seed or tile-spacing repeat. Its scale and small-scale share are
+fitted to the reference's four measured deviations. Candidate primary scales
+are 512 to 8,192 ft; a second octave is four times smaller. The reference's
+linear mean and RGB/luminance covariance set the light/dark colours. A cached
+96-square correction patch per placement modulates the original fine texture;
+it never replaces the source pixels. Existing painted features retain their
+source colour. This is a statistical match, not a copy of neighbouring artwork.
+
+Flat modulation fades from zero at the edge to full strength 250 ft inward,
+alongside the existing 500 ft texture blend. Adjacent flat placements sharing
+the same reference use one continuous world field with no artificial edge fade.
+Water, roads, sand, rock, snow, brown fields and city art are protected. A green
+field must have a coherent 3 by 3 texel core to be protected: Baltic fine grain
+crosses the older shade-based Field threshold and is not a painted field.
+A 512 ft guard protects that core and other source features from filtered
+modulation. Coast checks extend 512 ft, airport bounds 860 ft and town circles
+640 ft. Active city-fill tiles receive no modulation. These guards include the
+345 ft interpolation support. Narrower-than-texel features remain unresolved.
 
 The texture/colour response is precomputed into a sparse half-float atlas.
 It stores a linear RGB correction and the source luminance at 128 ft positions
@@ -354,15 +383,19 @@ and rotations feed the same noisy 500 ft reference blend. A shader mask lookup
 rejects excluded segments; one hardware-filtered response sample supplies the
 correction. A hard distance test returns zero at and beyond 250 ft. Run endpoints
 also fade inside their accepted segment, preventing filtered spill into a
-protected feature. Original source colours remain pixel-identical outside the
-band. The compact cache trades extra atlas memory for fewer shader fetches.
+protected feature. This seam response remains exactly zero outside the band;
+only separately classified flat placements receive interior modulation. The
+cache trades extra atlas memory for fewer shader fetches.
 
 The atlas uses the theater's reference palette. Its correction scales with the
 live material's luminance before surface lighting. Uniform brightness changes
 are preserved; nonuniform weather palette remaps are a fitted approximation
 requiring visual review. The atlas, mask and metadata are cached. There are no
-per-frame uploads or new ordinary draw calls. A diagnostic mask view and fixed
-interior cameras are included in the lead's offscreen harness. No GPU timing
+per-frame uploads or new ordinary draw calls. A per-page vertex flag skips flat
+modulation on mottled pages. Active flat fragments use one tile-record load and
+one filtered response sample, without shader noise or neighbour-art sampling.
+A diagnostic mask view and fixed unlit interior cameras are included in the
+lead's offscreen harness. No GPU timing
 claim is made by the CPU audit; the 4K High target is about 0.5 ms at 100 ft.
 
 The source is the actual uploaded ground page, including LAND fallback and
@@ -394,11 +427,11 @@ outer edges. Existing tree-line, slope, grounding, exclusion and fixed-budget
 rules remain. Field interiors and procedural rectangular field rows remain.
 The distant canopy samples the same belt through ordinary placement queries.
 
-Blades use the same source page and cached texture/colour response as ground, before their existing species/root
-and tip tints. Fallback land now uses the same LAND page as the terrain; water
+Blades use the same source page, flat modulation and cached texture/colour
+response as ground, before their existing species/root and tip tints. Fallback land now uses the same LAND page as the terrain; water
 without a placed picture still has no blades. The seam metadata and masks are
 cached with the placement/canopy/habitat inputs. `TORE_TERRAIN_SEAMS=0` disables
-the texture/colour response and belt for comparisons. Ground-detail Off leaves
+flat modulation, the texture/colour response and belt for comparisons. Ground-detail Off leaves
 the correction active; `TORE_VEGETATION=0` disables this exploratory feature.
 No simulation, wire, replay or checkpoint data changes.
 

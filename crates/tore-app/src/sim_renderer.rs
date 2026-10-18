@@ -847,7 +847,7 @@ impl SimRenderer {
         let seams = scenery
             .vegetation
             .as_ref()
-            .filter(|a| a.seams.has_blend())
+            .filter(|a| a.seams.has_effects())
             .map_or(&empty_seams, |a| &a.seams);
         let record_size = seams.gpu_size();
         let records = if seams.baked.records.is_empty() {

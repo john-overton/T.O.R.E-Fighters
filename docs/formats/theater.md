@@ -283,7 +283,9 @@ render mesh's texture pages and quarter-turn UVs. No new per-tile palette or
 shade mapping is established. The source pictures differ in colour, including
 the fitted LAND fallback. The reviewed UKR seam has mottled LAND.PIC south of
 the edge and flat UKR23.PIC north of it. The renderer retains both source pages
-and applies a cached texture response only inside accepted 500 ft bands;
-imported resources and T2 cells stay unchanged. Retail runtime appearance and exact fallback-land
+and applies a cached texture response inside accepted 500 ft bands. Separately,
+statistically flat natural pictures receive fitted world-space modulation,
+approved by John on 2026-10-18. Mottled interiors and protected features retain
+their source colour. Imported resources and T2 cells stay unchanged. Retail runtime appearance and exact fallback-land
 projection remain unverified. [Measured evidence](../baselines/terrain-seams.md)
 and [exploratory seam presentation](../spec/terrain-detail.md#tile-seams).

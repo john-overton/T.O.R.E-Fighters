@@ -100,7 +100,9 @@ struct BladeOut {
   index=read_tile(p,i32(a.y));
  }
  if index==255u {return out;}
- let ground=seam_apply(shade(index,base_row()).rgb,terrain_seam_response(world));
+ var ground=shade(index,base_row()).rgb;
+ if flat_page(i32(a.y)) {ground=seam_apply(ground,terrain_flat_response(world));}
+ ground=seam_apply(ground,terrain_seam_response(world));
  let dry=scene.veg.w==1.0 || scene.veg.w==2.0 || habitat==3u;
  var color=ground*select(vec3<f32>(0.92,1.10,0.83),vec3<f32>(1.12,1.02,0.75),dry);
  if habitat==2u {color*=vec3<f32>(1.12,1.04,0.79);}

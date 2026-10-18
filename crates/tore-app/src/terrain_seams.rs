@@ -4,6 +4,8 @@
 pub mod audit;
 #[path = "terrain_seams_baked.rs"]
 pub mod baked;
+#[path = "terrain_seams_flat.rs"]
+pub mod flat;
 #[path = "terrain_seams_texture.rs"]
 pub mod texture;
 
@@ -44,6 +46,7 @@ pub struct Map {
     /// RG32Uint metadata after edge records: page + 1, quarter rotation.
     pub materials: Vec<u8>,
     pub baked: baked::Baked,
+    pub flat: flat::Flat,
 }
 
 fn linear(v: u8) -> f32 {
@@ -389,7 +392,9 @@ impl Map {
                 }
             }
         }
-        out.baked = baked::Baked::build(&out, pixels, &atlas.palette);
+        let (flat, fields) = flat::Flat::build(&out, world, atlas, land, pixels);
+        out.flat = flat;
+        out.baked = baked::Baked::build_layers(&out, pixels, &atlas.palette, &fields);
         out
     }
 
@@ -444,8 +449,13 @@ impl Map {
             .any(|tile| tile[4..].chunks_exact(RECORD).any(|r| r[0] & BLEND != 0))
     }
 
+    pub fn has_effects(&self) -> bool {
+        self.has_blend() || self.flat.cells.iter().any(|&v| v != 0)
+    }
+
     pub fn gpu_size(&self) -> [u32; 2] {
-        let count = (self.cols * self.rows * (2 * SEGMENTS + 1)).max(1) as u32;
+        let count =
+            (self.cols * self.rows * (2 * SEGMENTS + 1) + self.flat.targets.len()).max(1) as u32;
         let width = count.min(2048);
         [width, count.div_ceil(width)]
     }
@@ -612,6 +622,7 @@ impl Packed {
         (coverage >= 0.999).then(|| result.map(|v| v / coverage))
     }
 
+    #[cfg(test)]
     pub fn surface(
         &self,
         map: &Map,
@@ -619,9 +630,25 @@ impl Packed {
         pixels: &[u8],
         palette: &[[f32; 3]; 256],
     ) -> Option<[f32; 3]> {
+        self.surface_layers(map, world, pixels, palette, &[])
+    }
+    pub fn surface_layers(
+        &self,
+        map: &Map,
+        world: [f32; 2],
+        pixels: &[u8],
+        palette: &[[f32; 3]; 256],
+        fields: &[u8],
+    ) -> Option<[f32; 3]> {
         let own = self.sample(map, world, pixels, palette)?;
         let cell = world.map(|v| (v / TILE).floor() as usize);
         let local = world.map(|v| v % TILE);
+        let own = map.flat.apply_raw(
+            fields,
+            cell[1] * map.cols + cell[0],
+            local.map(|v| v / TILE),
+            own,
+        );
         let near = local.map(|v| v.min(TILE - v));
         let axis = usize::from(near[1] < near[0]);
         if near[axis] >= HALF_WIDTH {
@@ -660,6 +687,7 @@ impl Packed {
         else {
             return Some(own);
         };
+        let other = map.flat.apply_raw(fields, neighbour, uv, other);
         let correction = self.correction(map, world, palette);
         let w = weight(near[axis]) * strength;
         if w <= 0. {
@@ -752,6 +780,67 @@ impl Packed {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_flat_natural_ground_gains_mottling_and_fine_detail_survives() {
+        let (mut world, mut atlas, layers, mut pixels) = two_tiles();
+        atlas.palette[192] = [22, 64, 40];
+        atlas.palette[194] = [40, 97, 65];
+        atlas.palette[195] = [62, 144, 101];
+        pixels[..65536].fill(194);
+        for y in 0..256 {
+            for x in 0..256 {
+                pixels[65536 + y * 256 + x] = if (x / 12 + y / 19) % 3 == 0 { 192 } else { 195 };
+            }
+            pixels[y * 256 + 128] = 40;
+            pixels[y * 256 + 192] = 255;
+        }
+        let map = Map::build(&world, &atlas, &layers, Some(1), &pixels);
+        assert_ne!(map.flat.targets[0], 0);
+        assert_eq!(map.flat.targets[1], 0);
+        let source = atlas.palette[194].map(linear);
+        let point = [8192., 8192.];
+        let after = map.baked.flat_surface(&map, point, source);
+        assert_ne!(after, source);
+        assert_eq!(
+            map.baked.flat_surface(&map, [TILE + 8192., 8192.], source),
+            source
+        );
+        assert_eq!(
+            map.baked.flat_surface(&map, [16448., 8192.], source),
+            source
+        );
+        assert_eq!(
+            map.baked.flat_surface(&map, [24640., 8192.], source),
+            source
+        );
+        // A small source brightness detail retains its phase and relative
+        // amplitude under this low-frequency colour modulation.
+        let darker = map.baked.flat_surface(&map, point, source.map(|v| v * 0.9));
+        for k in 0..3 {
+            assert!((darker[k] - after[k] * 0.9).abs() < 1e-6);
+        }
+        world.airport_scene.runways.push(tore_sim::airport::Runway {
+            object: 1,
+            airport: 1,
+            name: "synthetic".into(),
+            surface: tore_sim::airport::OrientedBox {
+                center: [8192., 0., 8192.],
+                half: [500., 100., 500.],
+                heading: 0.7,
+                pitch: 0.,
+                bank: 0.,
+            },
+            approach_center: [8192., 0., 8192.],
+            elevation_ft: 0.,
+            heading: 0.7,
+            length_ft: 1000.,
+        });
+        let protected = Map::build(&world, &atlas, &layers, Some(1), &pixels);
+        assert_eq!(
+            protected.baked.flat_surface(&protected, point, source),
+            source
+        );
+    }
     #[test]
     fn baked_correction_cannot_change_interiors_or_escape_500_feet() {
         let (world, atlas, layers, pixels) = two_tiles();

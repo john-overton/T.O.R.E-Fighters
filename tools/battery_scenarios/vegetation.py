@@ -52,7 +52,10 @@ def scenarios():
                  'seams/UKR-interior-check.txt', 'seams/FRA-interior-check.txt',
                  'seams/BAL-interior-check.txt', 'seams/UKR-texture-band.csv',
                  'seams/UKR-texture-check.txt', 'seams/FRA-texture-check.txt',
-                 'seams/BAL-texture-check.txt'],
+                 'seams/BAL-texture-check.txt', 'seams/UKR-flat-check.txt',
+                 'seams/FRA-flat-check.txt', 'seams/BAL-flat-check.txt',
+                 'seams/UKR-flat-contrast.csv', 'seams/FRA-flat-contrast.csv',
+                 'seams/BAL-flat-contrast.csv'],
         expect=['terrain seams: PASS UKR', 'terrain seams: PASS FRA',
                 'terrain seams: PASS BAL', 'exact cache and portable limits'],
     ), Scenario(

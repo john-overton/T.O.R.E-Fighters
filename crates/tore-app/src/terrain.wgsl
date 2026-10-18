@@ -460,7 +460,8 @@ fn fill_shadow(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,size:vec4<f32>,
 @vertex fn fill_shadow_vertex2(@location(0) position:vec3<f32>,@location(5) place:vec4<f32>,@location(6) turn:vec4<f32>,@location(7) size:vec4<f32>)->ShadowOut {return fill_shadow(position,place,turn,size,2u);}
 @vertex fn terrain_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32,@location(5) normal:vec3<f32>)->VertexOut {
  var out=world_vertex(position,uv,layer,color,index);
- out.terrain_normal=normal;return out;
+ out.terrain_normal=normal;
+ out.own_color=select(0.0,1.0,flat_page(i32(layer)));return out;
 }
 // Terrain cutouts expose the already rendered ocean/horizon, never the T2
 // land color. Keep this separate from aircraft's base-color texture blending.
@@ -474,6 +475,28 @@ fn seam_record(tile:i32,axis:i32,segment:i32)->vec2<u32> {
 // Baked from the source material and the noisy 500 ft reference blend.
 // No source page is replaced. A neutral tint is returned outside the band.
 struct SeamResponse { delta:vec3<f32>, luminance:f32, mask:f32 }
+fn material_record(address:i32)->vec2<u32> {
+ let width=i32(textureDimensions(seam_records).x);
+ return textureLoad(seam_records,vec2<i32>(address%width,address/width),0).rg;
+}
+fn flat_page(layer:i32)->bool {
+ let size=vec2<i32>(scene.canopy_detail.zw);
+ if layer<0 || size.x<=0 || size.y<=0 {return false;}
+ return material_record(size.x*size.y*513+layer).x!=0u;
+}
+fn terrain_flat_response(world:vec2<f32>)->SeamResponse {
+ let size=vec2<i32>(scene.canopy_detail.zw);let cell=vec2<i32>(floor(world/32768.0));
+ if size.x<=0 || size.y<=0 || any(cell<vec2<i32>(0)) || any(cell>=size) {return SeamResponse(vec3<f32>(0.0),1.0,0.0);}
+ let record=material_record(size.x*size.y*512+cell.y*size.x+cell.x);
+ if record.x==0u {return SeamResponse(vec3<f32>(0.0),1.0,0.0);}
+ let slot=record.x-1u;let uv=world/32768.0-vec2<f32>(cell);
+ let pixel=vec2<f32>(f32(slot%10u),f32((slot%100u)/10u))*96.0+vec2<f32>(0.5)+uv*95.0;
+ let value=textureSampleLevel(seam_tints,seam_sampler,pixel/vec2<f32>(textureDimensions(seam_tints)),i32(slot/100u),0.0);
+ let distances=vec4<f32>(uv.x,1.0-uv.x,uv.y,1.0-uv.y)*32768.0;
+ var fade=1.0;
+ for(var i=0u;i<4u;i++) {if (record.y&(1u<<i))!=0u {fade=min(fade,smoothstep(0.0,250.0,distances[i]));}}
+ return SeamResponse(value.rgb*fade,value.a,1.0);
+}
 fn terrain_seam_response(world:vec2<f32>)->SeamResponse {
  let size=vec2<i32>(scene.canopy_detail.zw);
  if size.x<=0 || size.y<=0 {return SeamResponse(vec3<f32>(0.0),1.0,0.0);}
@@ -552,21 +575,28 @@ fn forest_canopy(color:vec3<f32>,direction:vec3<f32>,row:i32)->vec3<f32> {
  }
  var remaps=vec2<f32>(-1.0);
  if in.fog_enabled!=0u {remaps=ray_rows(in.distance,in.altitude);}
- let tex=filtered_tile(in.uv,grad,i32(in.layer),-1,in.light_row,remaps);
+ var tex=filtered_tile(in.uv,grad,i32(in.layer),-1,in.light_row,remaps);
+ if scene.canopy_detail.y>2.5 {tex=sample_tile(in.uv,i32(in.layer),base_row(),-1,-1,vec2<f32>(-1.0));}
  // Fitted bilinear coverage boundary; discarded water writes no depth.
  if tex.a<0.5 {discard;}
  if thermal_on() {
-  let bare=seam_apply(sample_tile(in.uv,i32(in.layer),base_row(),-1,-1,vec2<f32>(-1.0)).rgb,terrain_seam_response(world));
+  var bare=sample_tile(in.uv,i32(in.layer),base_row(),-1,-1,vec2<f32>(-1.0)).rgb;
+  if in.own_color>0.5 {bare=seam_apply(bare,terrain_flat_response(world));}
+  bare=seam_apply(bare,terrain_seam_response(world));
   return scenery(thermal_grey(thermal_ground(bare,normal,in.direction,in.distance)));
  }
  // One detail term for the shaded colour and the flare-lit albedo, so a
  // dynamic light (flare, afterburner, fire, gun flash) only adds light.
  let seam_response=terrain_seam_response(world);
- if scene.canopy_detail.y>1.5 {return vec4<f32>(vec3<f32>(seam_response.mask),1.0);}
- let field_color=seam_apply(tex.rgb,seam_response);
+ if scene.canopy_detail.y>1.5 && scene.canopy_detail.y<2.5 {return vec4<f32>(vec3<f32>(seam_response.mask),1.0);}
+ var flat_response=SeamResponse(vec3<f32>(0.0),1.0,0.0);
+ if in.own_color>0.5 {flat_response=terrain_flat_response(world);}
+ if scene.canopy_detail.y>3.5 {return vec4<f32>(vec3<f32>(select(0.0,1.0,any(abs(flat_response.delta)>vec3<f32>(0.0000001)))),1.0);}
+ let field_color=seam_apply(seam_apply(tex.rgb,flat_response),seam_response);
+ if scene.canopy_detail.y>2.5 {return scenery(field_color);}
  let detail=ground_detail(field_color,in.direction,normal);
  var albedo=field_color;
- if flares_burning() {albedo=seam_apply(sample_tile(in.uv,i32(in.layer),base_row(),-1,in.light_row,vec2<f32>(-1.0)).rgb,seam_response);}
+ if flares_burning() {albedo=seam_apply(seam_apply(sample_tile(in.uv,i32(in.layer),base_row(),-1,in.light_row,vec2<f32>(-1.0)).rgb,flat_response),seam_response);}
  let forest=forest_canopy(field_color,in.direction,0);
  albedo=forest_canopy(albedo,in.direction,base_row());
  return scenery(aerial_perspective(surface_color(forest*detail.tint,in.direction,detail.normal,false,receiver,albedo*detail.tint),in.direction,in.altitude));

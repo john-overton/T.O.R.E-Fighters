@@ -75,71 +75,99 @@ canopy handoff and measured millisecond cost require the lead's script. Retail
 runtime comparison remains unavailable. No window, GPU run, commit or push is
 part of this sandbox pass.
 
-## Current seam validation
+## Current seam and flat-tile validation
 
-The GPU review of `939cbcfa` rejected the global statistical LAND replacement.
-Evidence is retained in
-`.local/next-round/renders/exp-vegetation/seams-texture-20261018-104138-659993/`.
-Its images show existing mottling disappearing. The cause is replacement of
-the complete LAND upload page, not a shader mask extending outside 500 ft.
-The earlier contrast-gap measurement calibrated LAND toward the flatter named
-tiles and did not require either source interior to retain contrast.
+Implementation at `0cd9f492d3100d525d586c1de4fb7c7fc9f70bef`, 2026-10-18.
+John approved enriching flat named-tile interiors while keeping already mottled
+interiors unchanged. The reviewed UKR edge at x=16,384, z=32,768 has mottled
+LAND.PIC south of it, upload page 28, and flat UKR23.PIC north of it, page 0,
+rotation 2. These labels come from the actual mesh and source resources.
+The earlier whole-LAND replacement flattened the wrong side and is removed.
 
-The reviewed camera's labels were reversed in that interpretation. At UKR
-x=16,384, the south side (z<32,768, tile key 0,0) is fallback LAND.PIC, upload
-page 28, rotation 0. The north side (tile key 0,4) is UKR23.PIC, page 0,
-rotation 2. LAND contains the broad mottled art; UKR23 is predominantly flat
-at this location. The actual mesh/UV audit and the source images establish
-these labels independently of visual guesses.
+The supplied lead run is
+`.local/next-round/renders/exp-vegetation/seams-texture-review-20261018-113730-715135/`.
+Its comparison images retain LAND's original mottling but show the flat UKR23
+area clearly. Its median 100 ft 4K High seam increments are 0.128512 ms UKR and
+0.125248 ms FRA. Those numbers describe the base, not the new flat-tile work.
 
-Measurements from the supplied GPU surface-only 20,000 ft overview use fixed
-interior crops, all outside the seam band. Luminance is decoded from sRGB to
-linear RGB before measurement:
+Runtime detection compares green-ground low-pass luminance deviations at
+256, 512, 1,024 and 2,048 ft against mottled reference art. Statistical thresholds,
+world-space noise fitting, protected-feature rules and fades are specified in
+[terrain detail](../spec/terrain-detail.md#tile-seams). Source art, palette bytes,
+mesh vertices and tile rotations are never replaced. A separate correction
+adds broad modulation only to eligible flat placements. The existing noisy
+500 ft texture blend composes the enriched materials and remains bounded.
 
-| Region and crop (width x height + x + y) | Original SD | Rejected SD |
-| --- | --- | --- |
-| LAND, 1950x500+850+1400 | 0.02314076 | 0.00513565 |
-| UKR23, 1950x400+850+350 | 0.00465445 | 0.00465445 |
+CPU evidence is local, under `.local/tmp-exp-vegetation/flat-tiles-final/`.
+The audit checks one deterministic representative of each flat source page,
+including the reviewed UKR23 placement. It measures the actual half-float data
+and interpolation supplied to the GPU, not an idealized noise generator.
 
-The 780,000-pixel UKR23 crop is byte-identical in both GPU captures, SHA-256
-`7417be0e07020881b2377f9788cddd2ab39a5b942ba4a27648bab96a109dad21`.
-The rejected implementation removed about 78% of LAND's luminance contrast.
-Restoring the original page restores that lost artwork. Adding new mottling
-to the flat UKR23 interior would conflict with the request to keep named-tile
-interiors pixel-identical; that additional scope is awaiting clarification.
+| Theater | Flat source pages | Enriched placements | 512 ft SD after / reference |
+| --- | ---: | ---: | ---: |
+| UKR | 12 | 504 | 0.9654 to 1.1057 |
+| FRA | 17 | 1,318 | 0.9872 to 1.1652 |
+| BAL | 13 | 1,635 | 0.8947 to 1.0728 |
 
-The correction now retains every source page and terrain vertex. The headless
-UKR/FRA/BAL audit compares them against a scene built without this feature and
-checks 665,600 / 665,600 / 1,048,576 interior positions for exactly zero response.
-A dedicated synthetic case also scans all interior texel centres in two tiles.
-Exclusions and the hard +/-250 ft cutoff are retained. The 500 ft reference
-blend, actual baked GPU input and colour-only control are measured separately.
+These counts include neutralized ground pages. Examples are UKR23, FRA34 and
+BAL17. The UKR23 representative rises from 0.00033557 to 0.01869859 at 512 ft,
+against LAND's 0.01844048. All 42 representatives meet the 25% contrast target
+on eligible natural ground. Valid block counts accompany every scale; some
+Baltic 2,048 ft samples are insufficient after feature guards and cannot
+establish a large-scale match. Before/after/reference PNGs show the modulation
+and retained fine grain. Separate mask images make the measured area visible.
 
-Shader work inside accepted bands is one mask lookup and one filtered response
-sample. A sparse RGBA16Float atlas stores the linear RGB correction and source
-luminance, sampled at 128 ft intervals along accepted runs and nine depths on
-each side. The reference uses the original pages/rotations and the irregular
-boundary. Original source pixels are never overwritten. The response is scaled
-by live/reference luminance before lighting. This preserves uniform brightness
-changes; nonuniform weather remaps are a fitted approximation.
+Road, water and other protected source samples remain exact: 91,587 UKR,
+66,899 FRA and 90,993 BAL samples. Unclassified placements have zero flat
+modulation. Original source bytes and every terrain vertex match the disabled
+scene. Across all placements, 665,600 / 665,600 / 1,048,576 interior probes have
+zero seam response. Synthetic checks cover unchanged mottled interiors, fine
+texture scaling, runway/water/road protection, coherent fields and stable noise
+without a tile-spacing repeat. Cache reconstruction is exact and resource
+limits pass for all three theaters.
 
-The extra response storage is 16,515,072 bytes for UKR, 74,317,824 for FRA and
-33,030,144 for BAL. It replaces per-fragment neighbour-art and palette work
-with a single filtered read. It is uploaded once and cached. No per-frame
-upload or ordinary draw is added. Array sizes remain within portable limits.
-The supplied rejected GPU costs were 1.542 ms UKR and 2.293 ms FRA at 100 ft.
-New GPU milliseconds are not measured in this sandbox.
+The actual baked UKR edge changes the source step across -1/+1 ft from 12 RGB
+levels to 0.075768. The independent colour component retains its exact 500 ft
+ramp; texture endpoints equal their enriched source values at +/-250 ft.
+Original source colours outside the band stay unchanged on mottled tiles.
+Flat interior changes are separate and explicitly authorized.
 
-The local `seams-lead.sh` builds unchanged `bcffd680` and the candidate with
-separate fresh Cargo targets. It retains the existing views and adds dedicated
-source interiors plus a mask-only capture. `mask-projection.tsv` derives the
-500 ft width from the exact camera and terrain: at the UKR 5,000/10,000 ft
-overheads the expected widths are 186.481 / 93.385 pixels at 4K.
-`seams-gpu-check.py` measures contrast/spatial increments in GPU crops, rejects
-changed original interiors or a wrong mask width, and enforces the 0.5 ms
-100/2,000 ft median cost target. These are acceptance gates for the lead's run,
-not claims of a new GPU result.
+The cache holds one 96-square world-space modulation patch per active flat
+placement, appended to the seam response texture. Response storage totals
+64 MiB UKR, 184 MiB FRA and 168 MiB BAL, versus 15.75 / 70.875 / 31.5 MiB on the
+base. No shader noise, additional source-art fetch, ordinary draw call or
+per-frame upload is added. A page flag skips modulation on mottled pages;
+active flat fragments add one record load and one filtered response sample.
+This is a memory-for-bandwidth tradeoff. Nonuniform weather palette remaps
+remain a fitted approximation requiring visual review.
 
-Current evidence and validation are recorded in the report's Tile seams /
-Texture blend review section. No importer, simulation, terrain-height/class,
-wire or replay data changes accompany this correction.
+The local `seams-lead.sh` compares `0cd9f492` against a frozen candidate, with
+separate fresh Cargo targets and private profiles. It retains the 2,000 ft
+seam views, 5,000/10,000 ft UKR23/LAND overheads and 20,000 ft overview, plus
+FRA/BAL controls. A recorded observer-only patch adds unlit material captures
+to the baseline. Full-tile probes and a candidate eligibility mask let
+`flat-gpu-check.py` measure the same eligible natural ground before and after,
+require contrast gain within 25% of its mottled reference, and require exact
+mottled-control equality. Whole-crop contrast and eligible coverage are also
+reported, so protection margins cannot be hidden by the acceptance mask.
+The shader's seam mask still has the independently projected 500 ft width.
+
+The cost job alternates off/on with one scene, fixed populations and identical
+cameras, disabling both flat modulation and seams in the off state. It reports
+three batches of signed GPU timing pairs and full-frame times, including 100
+and 2,000 ft at 4K High. The acceptance target is at most 0.5 ms total increment.
+**New GPU contrast, ordinary appearance and cost are not measured here.**
+They require the lead's run. CPU statistics do not establish GPU acceptance.
+
+Validation: 19 seam tests and both shader/binding suites pass, as do workspace
+clippy with warnings denied, locked workspace bins, docs and asset checks.
+Full `tore-app` has 1,998 passes, the same 69 socket failures as the base review,
+40 ignored and two known indefinite socket waits excluded. Python has 481
+tests, the same two sandbox socket errors and four skips. Three targeted
+vegetation battery cases pass. The final diagnostic-mask addition also passed
+focused shader, seam, lint, build and real-map checks. Logs and full validation
+results stay in scratch and the report.
+
+No importer, simulation, terrain-height/class, AI, wire, replay or checkpoint
+change. No GPU/window run, new guard, commit or push. The historical SAME 52
+simulation guard result is not a new measurement for this presentation change.

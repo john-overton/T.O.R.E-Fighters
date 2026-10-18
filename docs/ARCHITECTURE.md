@@ -11047,10 +11047,22 @@ there is no fragment noise hash. Grass reuses its normal source lookup.
 
 At or beyond 250 ft from an edge the response is exactly zero before any seam
 texture access. Segment flags and an additional run-end fade protect excluded
-features. Source art, mesh pages/UVs and all interior samples remain unchanged.
-LAND's original mottling is retained. No source page is overwritten and no
-runtime histogram-fit image replaces it. The response uploads once, adds no
-ordinary draw call and is cached beside the canopy/habitat data.
+features. Source art and mesh pages/UVs remain unchanged. Already mottled
+interiors, including UKR LAND, retain the original pixels.
+
+Flat-tile enrichment adds a separate cached modulation layer after runtime
+classification. Four low-pass statistics and a selected mottled reference are
+stored per picture. Each eligible placement gets a world-space 96-square
+RGBA16Float correction patch, with source-feature and site guards baked in.
+Patches occupy 100 slots per 1,024-square array layer appended to the existing
+response texture; existing seam layers are padded from 1,008 to 1,024 rows.
+Tile records carry patch addresses and edge-fade flags. Extra per-page records
+let the terrain vertex shader skip modulation on unchanged pages. Flat ground
+fragments perform one tile-record load and one filtered response lookup; grass
+uses the same field. No fragment noise or additional source-art sample is used.
+The seam bake composes both enriched samples before caching its response.
+No source page is overwritten. Both responses upload once, add no ordinary
+draw call or material binding, and are cached beside canopy/habitat data.
 The `.seams` cache retains bounded/checksummed atomic writes; code, art,
 layout, palette, airport/city exclusions, neutralized ground and enable state
 invalidate it. [Rules and limits](spec/terrain-detail.md#tile-seams).

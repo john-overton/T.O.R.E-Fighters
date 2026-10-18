@@ -1722,6 +1722,12 @@ fn replay_cameras(
             if std::env::var("TORE_SEAM_MASK_ONLY").as_deref() == Ok("1") {
                 scenery.seams[0] = 2.;
             }
+            if std::env::var("TORE_TERRAIN_MATERIAL_ONLY").as_deref() == Ok("1") {
+                scenery.seams[0] = 3.;
+            }
+            if std::env::var("TORE_TERRAIN_MATERIAL_ONLY").as_deref() == Ok("mask") {
+                scenery.seams[0] = 4.;
+            }
             let mut view =
                 pollster::block_on(View::new(&scenery, size, options(density()?), false))?;
             view.set_shown(std::env::var("TORE_SEAM_SURFACE_ONLY").as_deref() != Ok("1"));

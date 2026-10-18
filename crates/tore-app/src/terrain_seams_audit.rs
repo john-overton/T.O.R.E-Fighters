@@ -1,5 +1,7 @@
 //! CPU-only mask audit and reproducible cameras for the lead's GPU review.
 use super::{BLEND, HEDGE, Map, TILE};
+#[path = "terrain_seams_flat_audit.rs"]
+mod flat_audit;
 use crate::{
     AppResult,
     scenery::Scenery,
@@ -191,6 +193,7 @@ pub fn run(resources: &BTreeMap<String, Vec<u8>>, out: &Path) -> AppResult<()> {
         }
         crate::vegetation_limits::validate(&scene, &wgpu::Limits::downlevel_defaults())?;
         interiors_probe(resources, out, code, &world, &scene)?;
+        flat_audit::run(out, code, &world, &scene)?;
         if code == "UKR" {
             line_probe(out, &world, &scene)?;
         }
@@ -420,7 +423,10 @@ fn strip(
                 .sample(map, p.map(|v| v as f32), &scene.texture_indices, &palette)
                 .unwrap_or(palette[usize::from(index)]);
             if y >= H / 2 {
-                color = map.baked.surface(map, p.map(|v| v as f32), color);
+                let point = p.map(|v| v as f32);
+                color = map
+                    .baked
+                    .surface(map, point, map.baked.flat_surface(map, point, color));
             }
             let rgb = color.map(|v| {
                 let v = if v <= 0.0031308 {
@@ -581,7 +587,10 @@ fn line_probe(out: &Path, world: &Terrain, scene: &Scenery) -> AppResult<()> {
     let surface = |d: f32| {
         packed
             .sample(map, point(d), &scene.texture_indices, &palette)
-            .map(|own| map.baked.surface(map, point(d), own))
+            .map(|own| {
+                map.baked
+                    .surface(map, point(d), map.baked.flat_surface(map, point(d), own))
+            })
             .ok_or("no material")
     };
     if map.record(0, 1, 128)[0] & (BLEND | super::FALLBACK) != (BLEND | super::FALLBACK) {
@@ -598,7 +607,11 @@ fn line_probe(out: &Path, world: &Terrain, scene: &Scenery) -> AppResult<()> {
         .map(|v| v / super::weight(1.));
     let mut max_error = 0_f32;
     for d in (-300_i32..=300).step_by(5) {
-        let before = ground_color(world, scene, point(d as f32).map(f64::from))?;
+        let before = map.baked.flat_surface(
+            map,
+            point(d as f32),
+            ground_color(world, scene, point(d as f32).map(f64::from))?,
+        );
         let after = surface(d as f32)?;
         let correction = packed.correction(map, point(d as f32), &palette);
         for k in 0..3 {
@@ -667,7 +680,10 @@ fn interiors_probe(
                     (tile % map.cols) as f32 * TILE + 512. + u as f32 * 2048.,
                     (tile / map.cols) as f32 * TILE + 512. + v as f32 * 2048.,
                 ];
-                if map.baked.response(map, p)[..3] != [0.; 3] {
+                if map.baked.response(map, p)[..3] != [0.; 3]
+                    || (map.flat.cells[tile] == 0
+                        && map.baked.flat_response(map, p)[..3] != [0.; 3])
+                {
                     return Err(format!("{code}: changed tile interior at {p:?}").into());
                 }
                 probes += 1;
@@ -699,7 +715,7 @@ fn interiors_probe(
         writeln!(stats)?;
     }
     let text = format!(
-        "{code}: {ground_bytes} original page bytes and every terrain vertex identical; {probes} interior correction probes exactly zero. PASS\n"
+        "{code}: {ground_bytes} original page bytes and every terrain vertex identical; {probes} seam-interior probes zero; unclassified placements have zero modulation. PASS\n"
     );
     std::fs::write(
         out.join(format!("{code}-bake-size.txt")),
@@ -751,6 +767,7 @@ fn texture_probe(out: &Path, code: &str, scene: &Scenery, spot: &Spot) -> AppRes
             let Some(a) = packed.sample(map, p, &scene.texture_indices, &palette) else {
                 continue;
             };
+            let a = map.baked.flat_surface(map, p, a);
             let b = map.baked.surface(map, p, a);
             let correction = packed.correction(map, p, &palette);
             let c = f64::from(lum(std::array::from_fn(|k| (a[k] + correction[k]).max(0.))));

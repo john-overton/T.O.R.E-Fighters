@@ -458,15 +458,31 @@ unlit bilinear source colour and the actual packed GPU input at 5 ft intervals.
 `line-check.txt` checks the 500 ft analytic colour component and unchanged outer
 texture endpoints. `*-source-statistics.csv` records actual source-page
 contrast. `*-interior-check.txt` requires unchanged original page bytes and
-terrain vertices, and exact zero correction at interior samples across every
-tile. The source picture names establish which side is LAND; image appearance
+terrain vertices, exact zero seam response at interior samples across every
+tile, and zero flat modulation on unclassified placements. The source picture names establish which side is LAND; image appearance
 alone must not establish that label. `*-texture-band.csv` compares the actual
 baked response with a colour-only control. Cached response bytes and metadata
 must roundtrip exactly and fit portable limits.
 
-Dedicated interior cameras and the local `seams-gpu-check.py` compare GPU pixels,
-luminance standard deviation and spatial increments against the original and
-rejected builds. `TORE_SEAM_MASK_ONLY=1` draws accepted coverage for diagnosis;
+`*-flat-pages.tsv` records runtime flatness classification, four low-pass
+standard deviations, reference pages and noise parameters. `*-flat-contrast.csv`
+checks a representative of every flat page, including the reviewed UKR23
+placement, before and after modulation against its reference. Selection is
+independent of the resulting contrast. It records valid block counts, requires
+512 ft contrast within 25% where enough blocks survive exclusions, and requires
+contrast gain. Protected feature samples remain exact. The generated three-panel
+PNGs show source, modulated source and reference, all unlit CPU data.
+
+Dedicated interior cameras and local `flat-gpu-check.py` compare GPU pixels,
+large-scale luminance standard deviation and light/dark colours. Preview-only
+`TORE_TERRAIN_MATERIAL_ONLY=1` isolates unlit base colour. The lead script adds
+that observer to baseline 0cd9f492 with a recorded patch, leaving ordinary
+captures intact. Fixed central crops must show increased flat-tile contrast
+within 25% of the mottled reference, and exact equality on mottled controls.
+UKR, FRA and BAL all receive flat/reference probes. Material mode `mask` renders
+flat-modulation eligibility. The same candidate mask selects fully eligible
+blocks in both captures; the report also retains whole-crop statistics and
+coverage. Guarded features are not forced to acquire mottled contrast. `TORE_SEAM_MASK_ONLY=1` draws accepted coverage for diagnosis;
 `mask-projection.tsv` gives the 500 ft width projected through the real camera
 and terrain. The lead script checks that coverage has the expected pixel width
 and that 100/2,000 ft 4K High median correction cost is at most 0.5 ms. This is
@@ -474,14 +490,17 @@ an acceptance target, not a CPU timing claim.
 The standalone `seam-review` job also writes per-texel class/page diagnostics.
 All source-derived outputs stay local. Synthetic tests cover the fallback
 exception, protected authored fields, packed GPU data, palette changes,
-camera roundtrips, all neighbour rotations, half-float response precision, zero interior correction, the noisy
-texture weight, 500 ft width and exclusions.
+camera roundtrips, all neighbour rotations, half-float response precision,
+zero seam correction outside its band, flat-only enrichment, painted-feature
+protection, retained fine texture, nonrepeating world noise, the noisy texture
+weight and the exact 500 ft width.
 
 The lead-only `seam-cost` job requires GPU timestamps. It alternates correction
 off/on in one scene at 4K High and 100/500/2,000/10,000 ft over UKR and FRA.
 `TORE_SEAM_COST_CAMERAS` supplies the fixed radian camera file emitted by the
-CPU audit. The lead script adds only that camera hook to its baseline, then
-uses identical viewpoints in both builds with separate fresh Cargo targets.
+CPU audit. Both builds use identical viewpoints and separate fresh Cargo
+targets. The candidate's off/on pair disables both the seam response and flat
+modulation, so the reported increment includes the entire material feature.
 The preview-only `TORE_SEAM_SURFACE_ONLY=1` observer suppresses vegetation
 and procedural detail while retaining the seam correction for isolated
 ground captures. Tree, canopy and habitat populations stay fixed within each

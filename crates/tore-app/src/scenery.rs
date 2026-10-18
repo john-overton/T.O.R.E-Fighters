@@ -531,7 +531,7 @@ impl Scenery {
                     }
                     map
                 };
-                out.seams = if map.has_blend() {
+                out.seams = if map.has_effects() {
                     [1., map.cols as f32, map.rows as f32]
                 } else {
                     [0.; 3]
