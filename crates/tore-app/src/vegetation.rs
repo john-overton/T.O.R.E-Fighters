@@ -35,6 +35,8 @@ pub mod canopy;
 /// Feet in a nautical mile, matching the city fill.
 #[path = "vegetation_coast.rs"]
 mod coast;
+#[path = "vegetation_grass.rs"]
+pub(crate) mod grass;
 
 pub const NM: f64 = 6_076.115_49;
 const CELL: i64 = mask::TILE_FT / 4;
@@ -2015,6 +2017,10 @@ impl Placement {
         radius: f32,
         budget: Option<usize>,
     ) -> (Vec<Patch>, bool) {
+        if radius <= 0. {
+            self.grass.clear();
+            return (Vec::new(), true);
+        }
         let r = f64::from(radius);
         let c0x = ((eye[0] - r) / CHUNK as f64).floor() as i64;
         let c1x = ((eye[0] + r) / CHUNK as f64).floor() as i64;

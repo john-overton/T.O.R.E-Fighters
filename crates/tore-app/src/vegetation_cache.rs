@@ -101,6 +101,9 @@ impl Cache {
         if let Some(fill) = &world.city_fill {
             hash.update(format!("{:?}", fill.layout.map).as_bytes());
         }
+        for object in world.airport_scene.objects.iter().filter(|o| o.runway) {
+            hash.update(format!("{:?}", object.bounds).as_bytes());
+        }
         let key = hash.finish();
         Self {
             path: profile.0.join(format!(
@@ -121,6 +124,21 @@ impl Cache {
     }
     pub fn write_atlas(&self, atlas: &super::Atlas) {
         self.atlas_file().write_data(encode_atlas(atlas));
+    }
+    pub fn read_grass(&self) -> Option<super::grass::Map> {
+        let bytes = Self {
+            path: self.path.with_extension("grass"),
+            key: self.key,
+        }
+        .read_payload()?;
+        decode_grass(&bytes)
+    }
+    pub fn write_grass(&self, map: &super::grass::Map) {
+        Self {
+            path: self.path.with_extension("grass"),
+            key: self.key,
+        }
+        .write_data(encode_grass(map));
     }
     pub fn read(&self) -> Option<(Library, Map, Vec<u8>)> {
         let bytes = self.read_payload()?;
@@ -196,6 +214,54 @@ fn floats(out: &mut Vec<u8>, values: &[f32]) {
 fn blob(out: &mut Vec<u8>, bytes: &[u8]) {
     put(out, bytes.len());
     out.extend(bytes);
+}
+fn encode_grass(map: &super::grass::Map) -> Vec<u8> {
+    let mut out = Vec::new();
+    floats(&mut out, &map.area);
+    put(&mut out, map.pages_x as usize);
+    blob(&mut out, &map.mask);
+    for n in map.terrain_size {
+        put(&mut out, n as usize);
+    }
+    floats(&mut out, &map.terrain);
+    out
+}
+fn decode_grass(bytes: &[u8]) -> Option<super::grass::Map> {
+    let mut r = Read(bytes);
+    let area = r.floats::<4>()?;
+    if area[2..]
+        .iter()
+        .any(|v| *v < 0. || *v > 4096. || v.fract() != 0.)
+    {
+        return None;
+    }
+    let pages_x = r.count(16)? as u32;
+    if pages_x != (area[2] as u32).div_ceil(256) {
+        return None;
+    }
+    let mask = r.blob(64 * 1024 * 1024)?.to_vec();
+    if mask.len() != pages_x as usize * (area[3] as usize).div_ceil(256) * 256 * 256 * 4 {
+        return None;
+    }
+    let terrain_size = [r.count(4096)? as u32, r.count(4096)? as u32];
+    if terrain_size.iter().any(|n| *n < 2) {
+        return None;
+    }
+    let len = terrain_size[0] as usize * terrain_size[1] as usize * 4;
+    if r.0.len() != len * 4 {
+        return None;
+    }
+    let mut terrain = Vec::with_capacity(len);
+    for _ in 0..len {
+        terrain.push(r.floats::<1>()?[0]);
+    }
+    Some(super::grass::Map {
+        area,
+        pages_x,
+        mask,
+        terrain_size,
+        terrain,
+    })
 }
 fn encode(lib: &Library, map: Map, pages: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
@@ -480,6 +546,23 @@ fn decode_atlas(bytes: &[u8]) -> Option<super::Atlas> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn grass_cache_roundtrip_is_bounded_and_rejects_truncation() {
+        let atlas = super::super::Atlas::synthetic(vec![12; 65536], 0);
+        let world = tore_world::test_support::terrain();
+        let map = super::super::grass::Map::build(&atlas, &world, &BTreeMap::new());
+        let bytes = encode_grass(&map);
+        assert_eq!(decode_grass(&bytes), Some(map));
+        for len in [0, 15, 20, bytes.len() - 1] {
+            assert!(decode_grass(&bytes[..len]).is_none());
+        }
+        let mut bad = bytes.clone();
+        bad[8..12].copy_from_slice(&f32::INFINITY.to_le_bytes());
+        assert!(decode_grass(&bad).is_none());
+        bad = bytes;
+        bad[16..20].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(decode_grass(&bad).is_none());
+    }
     #[test]
     fn canopy_and_cards_cache_hit_miss_invalidation_and_corruption() {
         let root =

@@ -1,4 +1,4 @@
-//! Cached vegetation impostors and the unchanged grass layer. Source shapes
+//! Cached vegetation impostors, legacy tufts and GPU-generated grass blades. Source shapes
 //! are rasterized once into indexed atlas pages. GPU culling compacts all
 //! visible species into one instance stream and one indirect draw. Not collidable.
 
@@ -50,6 +50,11 @@ pub struct Renderer {
     finish: wgpu::ComputePipeline,
     pipeline: wgpu::RenderPipeline,
     grass_pipeline: wgpu::RenderPipeline,
+    blades: vegetation::grass::gpu::Blades,
+    grass_mode: crate::graphics::Grass,
+    grass_density: crate::graphics::VegDensity,
+    grass_suppressed: bool,
+    repeat_frame: bool,
     count: u32,
     /// Per ring: patch range and tufts per patch.
     rings: Vec<(std::ops::Range<u32>, u32)>,
@@ -120,6 +125,8 @@ impl Renderer {
         lighting: &crate::surface_lighting::SurfaceLighting,
         atlas: Arc<vegetation::Atlas>,
         library: Arc<Library>,
+        queue: &wgpu::Queue,
+        grass_map: &vegetation::grass::Map,
     ) -> Self {
         let mesh_count = library.meshes.len();
         let vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -228,6 +235,16 @@ impl Renderer {
         let finish = compute("finish");
         let (pipeline, grass_pipeline, depth_pipeline) =
             render_pipelines(device, shader, format, samples, material, &lighting.layout);
+        let blades = vegetation::grass::gpu::Blades::new(
+            device,
+            queue,
+            shader,
+            format,
+            samples,
+            material,
+            &lighting.layout,
+            grass_map,
+        );
         Self {
             atlas,
             worker: None,
@@ -256,6 +273,11 @@ impl Renderer {
             finish,
             pipeline,
             grass_pipeline,
+            blades,
+            grass_mode: Default::default(),
+            grass_density: crate::graphics::VegDensity::High,
+            grass_suppressed: false,
+            repeat_frame: false,
             count: 0,
             rings: Vec::new(),
             prepared: false,
@@ -276,6 +298,9 @@ impl Renderer {
 
     pub fn set_options(&mut self, device: &wgpu::Device, options: &crate::graphics::Options) {
         self.mesh_dirty = true;
+        let grass_mode = options.grass.effective();
+        self.grass_mode = grass_mode;
+        self.grass_density = options.vegetation_density;
         self.cards = options.vegetation_cards.effective();
         self.draw_nm = options.vegetation_distance_nm as f32;
         self.detail_nm = (options.vegetation_detail_nm as f32).min(self.draw_nm);
@@ -316,6 +341,14 @@ impl Renderer {
     /// is the graphics option's own switch.
     pub fn suppressed(&self) -> bool {
         self.suppressed
+    }
+
+    pub fn set_repeat_frame(&mut self, repeat: bool) {
+        self.repeat_frame = repeat;
+    }
+
+    pub fn set_grass_suppressed(&mut self, suppressed: bool) {
+        self.grass_suppressed = suppressed;
     }
 
     pub fn set_suppressed(&mut self, suppressed: bool) {
@@ -403,6 +436,17 @@ impl Renderer {
     }
 
     /// Grass tufts drawn last frame, before the shader drops any.
+    pub fn blades_drawn(&self) -> u64 {
+        if self.grass_mode == crate::graphics::Grass::Blades
+            && !self.suppressed
+            && !self.grass_suppressed
+        {
+            self.blades.count()
+        } else {
+            0
+        }
+    }
+
     pub fn tufts_drawn(&self) -> u64 {
         self.rings
             .iter()
@@ -419,6 +463,8 @@ impl Renderer {
         material: &wgpu::BindGroupLayout,
         lighting: &crate::surface_lighting::SurfaceLighting,
     ) {
+        self.blades
+            .rebuild(device, shader, format, samples, material, &lighting.layout);
         (self.pipeline, self.grass_pipeline, self.depth_pipeline) =
             render_pipelines(device, shader, format, samples, material, &lighting.layout);
     }
@@ -433,6 +479,10 @@ impl Renderer {
         origin: [f64; 3],
         size: [u32; 2],
     ) {
+        if self.repeat_frame && !self.suppressed {
+            self.encode_cull(encoder);
+            return;
+        }
         let started = std::time::Instant::now();
         self.prepared = false;
         self.rings.clear();
@@ -463,7 +513,11 @@ impl Renderer {
             draw,
             density: self.density,
             capacity: self.capacity,
-            grass_radius: self.grass_radius,
+            grass_radius: if self.grass_mode == crate::graphics::Grass::Tufts {
+                self.grass_radius
+            } else {
+                0.
+            },
             settle: self.settle,
         };
         if self.settle {
@@ -558,22 +612,27 @@ impl Renderer {
             (camera.position[1] - origin[1]) as f32,
             (camera.position[2] - origin[2]) as f32,
         ];
-        self.prepare_grass(
-            queue,
-            world,
-            camera,
-            origin,
-            eye,
-            [fx, rx, ux],
-            [aspect / f, 1. / f],
-        );
+        if self.grass_mode == crate::graphics::Grass::Blades {
+            self.blades
+                .prepare(queue, world, self.grass_density, self.grass_radius);
+        } else if self.grass_mode == crate::graphics::Grass::Tufts {
+            self.prepare_grass(
+                queue,
+                world,
+                camera,
+                origin,
+                eye,
+                [fx, rx, ux],
+                [aspect / f, 1. / f],
+            );
+        }
         if self.count == 0 {
-            self.prepared = !self.rings.is_empty();
+            self.prepared =
+                self.grass_mode == crate::graphics::Grass::Blades || !self.rings.is_empty();
             self.last_cache.submit_ms = started.elapsed().as_secs_f64() * 1000.;
             return;
         }
         let mesh_count = self.library.meshes.len();
-        encoder.clear_buffer(&self.counts, 0, None);
         let mut params = Vec::with_capacity(32);
         params.extend([origin[0] as f32, origin[1] as f32, origin[2] as f32, 0.]);
         params.extend([eye[0], eye[1], eye[2], 0.]);
@@ -589,6 +648,19 @@ impl Renderer {
         params.extend([full, draw, 0., 1.5]);
         params.extend(u32s(&[self.count, mesh_count as u32, self.page_count, 0]));
         queue.write_buffer(&self.params, 0, &bytes_of_f32(&params));
+        self.encode_cull(encoder);
+        self.prepared = true;
+        self.last_cache.submit_ms = started.elapsed().as_secs_f64() * 1000.;
+    }
+
+    // The diagnostic grass-off repeat reuses the exact uploaded tree scene,
+    // but encodes the same culling workload so its GPU delta isolates grass.
+    fn encode_cull(&self, encoder: &mut wgpu::CommandEncoder) {
+        if self.count == 0 {
+            return;
+        }
+        encoder.clear_buffer(&self.counts, 0, None);
+        let mesh_count = self.library.meshes.len();
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Vegetation cull"),
             timestamp_writes: None,
@@ -599,8 +671,6 @@ impl Renderer {
         pass.set_pipeline(&self.finish);
         pass.dispatch_workgroups((mesh_count as u32).div_ceil(64), 1, 1);
         drop(pass);
-        self.prepared = true;
-        self.last_cache.submit_ms = started.elapsed().as_secs_f64() * 1000.;
     }
 
     fn upload_meshes(&self, queue: &wgpu::Queue) {
@@ -727,6 +797,12 @@ impl Renderer {
             pass.draw_indirect(&self.args, 0);
             pass.set_pipeline(&self.pipeline);
             pass.draw_indirect(&self.args, 0);
+        }
+        if self.grass_suppressed {
+            return;
+        }
+        if self.grass_mode == crate::graphics::Grass::Blades {
+            self.blades.draw(pass);
         }
         if !self.rings.is_empty() {
             pass.set_pipeline(&self.grass_pipeline);
@@ -1008,7 +1084,7 @@ fn u32s(v: &[u32]) -> [f32; 4] {
     std::array::from_fn(|i| f32::from_bits(v[i]))
 }
 
-fn bytes_of_f32(v: &[f32]) -> Vec<u8> {
+pub(crate) fn bytes_of_f32(v: &[f32]) -> Vec<u8> {
     let mut out = Vec::with_capacity(v.len() * 4);
     for n in v {
         out.extend(n.to_le_bytes());

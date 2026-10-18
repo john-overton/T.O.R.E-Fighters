@@ -244,6 +244,48 @@ impl VegCards {
     }
 }
 
+/// Presentation only. John requested procedural blades on 2026-10-17.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Grass {
+    #[default]
+    Blades,
+    Tufts,
+    Off,
+}
+impl Grass {
+    pub const ALL: [Self; 3] = [Self::Blades, Self::Tufts, Self::Off];
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Blades => "blades",
+            Self::Tufts => "tufts",
+            Self::Off => "off",
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Blades => "Blades",
+            Self::Tufts => "Tufts",
+            Self::Off => "Off",
+        }
+    }
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|v| v.key() == text)
+    }
+    pub fn override_from_env() -> crate::AppResult<Option<Self>> {
+        match std::env::var("TORE_GRASS") {
+            Err(std::env::VarError::NotPresent) => Ok(None),
+            Ok(s) => Self::parse(&s)
+                .map(Some)
+                .ok_or_else(|| "TORE_GRASS must be blades, tufts or off".into()),
+            Err(e) => Err(e.into()),
+        }
+    }
+    pub fn effective(self) -> Self {
+        Self::override_from_env().ok().flatten().unwrap_or(self)
+    }
+}
+
 /// How far the close-range ground detail reaches, nautical miles.
 pub const GROUND_TEXTURE_DISTANCES: [u32; 3] = [1, 2, 4];
 /// How far vegetation objects are drawn, nautical miles.
@@ -285,6 +327,7 @@ pub struct Options {
     /// How thick the vegetation is. One of `VegDensity::ALL`.
     pub vegetation_density: VegDensity,
     pub vegetation_cards: VegCards,
+    pub grass: Grass,
     /// The frames-per-second readout in the window's top right. Off by
     /// default (John, 2026-10-17). `TORE_SHOW_FPS=1` shows it for one run
     /// without saving.
@@ -305,6 +348,7 @@ impl Default for Options {
             vegetation_detail_nm: DEFAULT_VEGETATION_DETAIL,
             vegetation_density: DEFAULT_VEGETATION_DENSITY,
             vegetation_cards: VegCards::default(),
+            grass: Grass::default(),
             show_frame_rate: false,
         }
     }
@@ -327,6 +371,7 @@ impl Options {
             vegetation_detail_nm: DEFAULT_VEGETATION_DETAIL,
             vegetation_density: DEFAULT_VEGETATION_DENSITY,
             vegetation_cards: VegCards::Billboard,
+            grass: Grass::Tufts,
             show_frame_rate: false,
         }
     }
@@ -370,6 +415,9 @@ impl Options {
         if self.vegetation_cards != VegCards::default() {
             text += &format!("vegetation-cards {}\n", self.vegetation_cards.key());
         }
+        if self.grass != Grass::default() {
+            text += &format!("grass {}\n", self.grass.key());
+        }
         if self.show_frame_rate {
             text += "frame-rate true\n";
         }
@@ -399,6 +447,7 @@ impl Options {
             "vegetation-detail",
             "vegetation-density",
             "vegetation-cards",
+            "grass",
             "frame-rate",
         ]
         .iter()
@@ -464,6 +513,10 @@ impl Options {
             vegetation_cards: match values.get("vegetation-cards") {
                 None => VegCards::default(),
                 Some(v) => VegCards::parse(v).ok_or("invalid vegetation-cards")?,
+            },
+            grass: match values.get("grass") {
+                None => Grass::default(),
+                Some(v) => Grass::parse(v).ok_or("invalid grass")?,
             },
             show_frame_rate: match values.get("frame-rate") {
                 None => false,
@@ -614,6 +667,23 @@ mod tests {
         assert_eq!(VegCards::parse("triangle"), None);
     }
     #[test]
+    fn grass_modes_default_and_roundtrip() {
+        assert_eq!(Options::default().grass, Grass::Blades);
+        for grass in Grass::ALL {
+            let options = Options {
+                grass,
+                ..Default::default()
+            };
+            assert_eq!(Options::parse(&options.text()).unwrap().grass, grass);
+            assert_eq!(Grass::parse(grass.key()), Some(grass));
+        }
+        assert_eq!(Grass::parse("invalid"), None);
+        assert_eq!(
+            Options::parse(&Options::default().text()).unwrap().grass,
+            Grass::Blades
+        );
+    }
+    #[test]
     fn roundtrip_and_reject_malformed() {
         let options = Options {
             anti_aliasing: AntiAliasing::X8,
@@ -628,6 +698,7 @@ mod tests {
             vegetation_detail_nm: 1,
             vegetation_density: VegDensity::Low,
             vegetation_cards: VegCards::CrossTop,
+            grass: Grass::Off,
             show_frame_rate: true,
         };
         assert_eq!(Options::parse(&options.text()).unwrap(), options);

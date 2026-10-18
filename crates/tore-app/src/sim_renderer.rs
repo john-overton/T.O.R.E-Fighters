@@ -618,14 +618,15 @@ impl SimRenderer {
             label: Some("Simulation terrain"),
             source: wgpu::ShaderSource::Wgsl(
                 format!(
-                    "{}\n{}\n{}\n{}\n{}\n{}\n{}",
+                    "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
                     include_str!("surface_lighting.wgsl"),
                     include_str!("terrain.wgsl"),
                     include_str!("spotting.wgsl"),
                     include_str!("countermeasures.wgsl"),
                     include_str!("gun_flash.wgsl"),
                     include_str!("airfield_lights.wgsl"),
-                    include_str!("night_glow.wgsl")
+                    include_str!("night_glow.wgsl"),
+                    include_str!("grass_blades.wgsl")
                 )
                 .into(),
             ),
@@ -734,6 +735,8 @@ impl SimRenderer {
                     &lighting,
                     Arc::clone(atlas),
                     Arc::clone(library),
+                    queue,
+                    &scenery.grass,
                 );
                 vegetation.set_options(device, &options);
                 vegetation

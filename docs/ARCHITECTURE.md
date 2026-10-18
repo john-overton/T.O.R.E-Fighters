@@ -11022,6 +11022,22 @@ both bright and dark perimeter matte while retaining interior shading. Trimming
 is repeated after downsampling so every top fills its usable atlas cell.
 The draws use reversed-depth GreaterEqual and no colour-pass depth writes. Depth skips
 palette/lighting work. Colour skips the second daylight-palette sample outside thermal views when no
-flare light is burning. Grass is separate and its forest floor density is halved.
+flare light is burning. Grass is a separate selectable blade/tuft pass.
 Crosses/top cards may cost more overdraw, so all modes require GPU comparison.
+`vegetation_grass` builds a compact classification texture on the mission loader
+and caches it alongside canopy as a checksummed `.grass` entry. Four bytes per
+512 ft block encode sixteen 128 ft habitats. Pages are 256-square RGBA8Uint.
+A small RGBA32Float terrain grid supplies triangle elevations, terrain picture
+pages/rotations and fallback colours. Both textures upload once per scene.
+Cache identity includes source, palette, terrain and exclusion changes.
+
+`grass_blades.wgsl` generates five-vertex strips from vertex and instance indices.
+A single draw has no vertex/instance buffer and no alpha discard. Integer world
+cells keep the same hash as the camera moves. Coarse levels own disjoint subsets
+through the inner disk too, avoiding LOD identity changes. The default path sends
+zero radius to the legacy worker and bypasses grass patch selection/packing.
+Each frame writes one 64-byte stack uniform for grid budget, time and mission
+wind. Legacy tufts remain intact and selectable. Numerical rules and limits live
+in [the grass spec](spec/terrain-detail.md#grass).
+
 Nothing enters simulation, replays, checkpoints or networking.

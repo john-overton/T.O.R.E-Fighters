@@ -117,15 +117,19 @@ pub fn run() -> AppResult<()> {
         if !again.vegetation_cache_hit
             || first.sky_indices != again.sky_indices
             || first.canopy != again.canopy
+            || first.grass != again.grass
         {
             return Err("vegetation cache did not restore identical pages and map".into());
         }
         let report = format!(
-            "vegetation cache: PASS identical atlas/cards/canopy cache hit; menu without vegetation\nmenu_terrain_ms={menu_ms:.3} first_scenery_ms={cold_ms:.3} cached_scenery_ms={warm_ms:.3}\n"
+            "vegetation cache: PASS identical atlas/cards/canopy/grass cache hit; menu without vegetation\nmenu_terrain_ms={menu_ms:.3} first_scenery_ms={cold_ms:.3} cached_scenery_ms={warm_ms:.3}\n"
         );
         print!("{report}");
         std::fs::write(out.join("cache-check.txt"), report)?;
         return Ok(());
+    }
+    if jobs.iter().any(|job| job == "grass-cameras") {
+        return grass_cameras(resources, out);
     }
     if jobs.iter().any(|job| job == "stream-check") {
         return stream_check(resources, out);
@@ -142,7 +146,12 @@ pub fn run() -> AppResult<()> {
             ("UKR", "UKR-top-2000ft", "wood", 2000., 89.5),
             ("EGY", "EGY-top-2000ft", "wadi", 2000., 89.5),
         ] {
-            let world = Terrain::for_mission(resources, code, Some(0), &overrides([12, 0])?)?;
+            let world = Terrain::for_mission(
+                resources,
+                code.split('-').next().unwrap_or(code),
+                Some(0),
+                &overrides([12, 0])?,
+            )?;
             let atlas =
                 crate::vegetation::Atlas::build(resources, &world)?.ok_or("vegetation disabled")?;
             let spots = crate::vegetation::spots(&atlas, &world);
@@ -172,7 +181,12 @@ pub fn run() -> AppResult<()> {
             ("EGY", "EGY-delta-candidate-pass4", "river", 900., 22.),
             ("TVIET", "TVIET-jungle-pass4", "wood", 450., 12.),
         ] {
-            let world = Terrain::for_mission(resources, code, Some(0), &overrides([12, 0])?)?;
+            let world = Terrain::for_mission(
+                resources,
+                code.split('-').next().unwrap_or(code),
+                Some(0),
+                &overrides([12, 0])?,
+            )?;
             let atlas =
                 crate::vegetation::Atlas::build(resources, &world)?.ok_or("vegetation disabled")?;
             let spots = crate::vegetation::spots(&atlas, &world);
@@ -470,6 +484,7 @@ fn cost(resources: &std::collections::BTreeMap<String, Vec<u8>>, out: &Path) -> 
 /// Theaters the low pass flies, in the order John asked for on 2026-10-17.
 const LOWPASS_THEATERS: &[(&str, &str)] = &[
     ("UKR", "temperate"),
+    ("UKR-MEADOW", "temperate"),
     ("FRA", "temperate"),
     ("NSK", "temperate"),
     ("EGY", "desert"),
@@ -487,6 +502,8 @@ struct Sample {
     frame: usize,
     gpu_off: f64,
     gpu_on: f64,
+    gpu_no_grass: f64,
+    blades: u64,
     placed: u32,
     tufts: u64,
     object_chunks: u64,
@@ -502,6 +519,10 @@ struct Sample {
 impl Sample {
     fn added(self) -> f64 {
         self.gpu_on - self.gpu_off
+    }
+
+    fn grass_cost(self) -> f64 {
+        self.gpu_on - self.gpu_no_grass
     }
 
     fn builds(self) -> u64 {
@@ -568,7 +589,12 @@ fn lowpass(resources: &std::collections::BTreeMap<String, Vec<u8>>, out: &Path) 
     let mut images = Vec::new();
     for (code, climate) in theaters {
         println!("vegetation preview: low pass {code}");
-        let world = Terrain::for_mission(resources, code, Some(0), &overrides([12, 0])?)?;
+        let world = Terrain::for_mission(
+            resources,
+            code.split('-').next().unwrap_or(code),
+            Some(0),
+            &overrides([12, 0])?,
+        )?;
         let scenery = Scenery::build(resources, &world)?;
         let atlas = scenery
             .vegetation
@@ -634,12 +660,36 @@ fn lowpass(resources: &std::collections::BTreeMap<String, Vec<u8>>, out: &Path) 
                     .map(|(frame, camera)| (*frame, camera))
                     .collect();
                 let timed = gpu.measure(&refs, &world, &scenery)?;
+                let mut grass: Vec<_> = timed.iter().map(|s| s.grass_cost()).collect();
+                let line = format!(
+                    "{code} {}x{} {} grass={} on-minus-no-grass mean={:.6} p95={:.6} max={:.6} ms; blade candidates={} vertices={} grass chunk builds={}\n",
+                    size[0],
+                    size[1],
+                    density.label(),
+                    std::env::var("TORE_GRASS").unwrap_or_else(|_| "blades".into()),
+                    mean(&grass),
+                    percentile(&mut grass, 0.95),
+                    maximum(&grass),
+                    timed.iter().map(|s| s.blades).max().unwrap_or(0),
+                    timed
+                        .iter()
+                        .map(|s| s.blades * 5 + s.tufts * 6)
+                        .max()
+                        .unwrap_or(0),
+                    timed.iter().map(|s| s.grass_chunks).sum::<u64>()
+                );
+                print!("{line}");
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(out.join("grass-cost.txt"))?
+                    .write_all(line.as_bytes())?;
                 let mut csv = String::from(
-                    "frame,gpu_off_ms,gpu_on_ms,vegetation_submit_ms,frame_submit_ms,pending,near_instances,appeared_inside_detail,near_fading,estimated_fps\n",
+                    "frame,gpu_off_ms,gpu_on_ms,vegetation_submit_ms,frame_submit_ms,pending,near_instances,appeared_inside_detail,near_fading,estimated_fps,gpu_no_grass_ms,grass_only_ms,blade_candidates,grass_builds\n",
                 );
                 for sample in &timed {
                     csv += &format!(
-                        "{},{:.6},{:.6},{:.6},{:.6},{},{},{},{},{:.3}\n",
+                        "{},{:.6},{:.6},{:.6},{:.6},{},{},{},{},{:.3},{:.6},{:.6},{},{}\n",
                         sample.frame,
                         sample.gpu_off,
                         sample.gpu_on,
@@ -649,7 +699,11 @@ fn lowpass(resources: &std::collections::BTreeMap<String, Vec<u8>>, out: &Path) 
                         sample.popin.near,
                         sample.popin.appeared,
                         sample.popin.faded,
-                        1000. / sample.gpu_on.max(sample.submit_ms).max(0.001)
+                        1000. / sample.gpu_on.max(sample.submit_ms).max(0.001),
+                        sample.gpu_no_grass,
+                        sample.grass_cost(),
+                        sample.blades,
+                        sample.grass_chunks
                     );
                 }
                 std::fs::write(
@@ -729,7 +783,12 @@ fn stream_check(
     use crate::vegetation_renderer::stream::{self, Request};
     let mut summary = std::fs::File::create(out.join("stream-check.txt"))?;
     for (code, _) in lowpass_theaters()? {
-        let world = Terrain::for_mission(resources, code, Some(0), &overrides([12, 0])?)?;
+        let world = Terrain::for_mission(
+            resources,
+            code.split('-').next().unwrap_or(code),
+            Some(0),
+            &overrides([12, 0])?,
+        )?;
         let scenery = Scenery::build(resources, &world)?;
         let atlas = scenery
             .vegetation
@@ -752,7 +811,11 @@ fn stream_check(
                 draw: options.vegetation_distance_nm as f32 * crate::vegetation::NM as f32,
                 density: density.scale(),
                 capacity: density.object_budget(),
-                grass_radius: density.grass().0.min(full * 1.25),
+                grass_radius: if std::env::var("TORE_GRASS").as_deref() == Ok("tufts") {
+                    density.grass().0.min(full * 1.25)
+                } else {
+                    0.
+                },
                 settle: false,
             };
             let mut trace = std::io::BufWriter::new(std::fs::File::create(
@@ -775,6 +838,175 @@ fn stream_check(
     Ok(())
 }
 
+/// CPU-only camera fixture. Labels describe classified land, not surveyed geography.
+fn grass_cameras(
+    resources: &std::collections::BTreeMap<String, Vec<u8>>,
+    out: &Path,
+) -> AppResult<()> {
+    let mut file = std::fs::File::create(out.join("grass-cameras.txt"))?;
+    let mut low = std::fs::File::create(out.join("grass-lowpass-cameras.txt"))?;
+    let mut notes = std::fs::File::create(out.join("grass-camera-sites.txt"))?;
+    for code in ["UKR", "TVIET", "EGY"] {
+        let world = Terrain::for_mission(resources, code, Some(0), &overrides([12, 0])?)?;
+        let atlas =
+            crate::vegetation::Atlas::build(resources, &world)?.ok_or("vegetation disabled")?;
+        let spots = crate::vegetation::spots(&atlas, &world);
+        let kinds: &[(&str, &str, &[f64])] = match code {
+            "UKR" => &[
+                ("meadow", "meadow", &[10., 50., 200.]),
+                ("field-edge", "field", &[50.]),
+                ("riverbank", "river", &[50.]),
+            ],
+            "TVIET" => &[("grassland", "meadow", &[50.])],
+            _ => &[("water-belt", "river", &[50.])],
+        };
+        for &(label, kind, heights) in kinds {
+            let mut spot = *spots
+                .iter()
+                .find(|s| s.label == kind)
+                .ok_or_else(|| format!("no {code} {kind} spot"))?;
+            if kind == "meadow" {
+                spot = grass_meadow(&atlas, &world, spot)?;
+            }
+            if label == "field-edge" {
+                spot = grass_field_edge(&atlas, &world, spot)?;
+            }
+            let site = atlas.site(&world, spot.x, spot.z);
+            writeln!(
+                notes,
+                "{code} {label} x={} z={} class={:?} blocked={} water_proximity={:.4}",
+                spot.x, spot.z, site.kind, site.blocked, site.near_water
+            )?;
+            for &height in heights {
+                let pitch = if height <= 50. { 8. } else { 14. };
+                let camera = look_at(&world, &spot, &shot(label, kind, height, pitch, 0.));
+                writeln!(
+                    file,
+                    "{code}-{label}-{height:.0}ft {code} 0 12 0 {} {} {} {} {}",
+                    camera.position[0],
+                    camera.position[1],
+                    camera.position[2],
+                    camera.yaw,
+                    camera.pitch
+                )?;
+            }
+            if code == "UKR" && kind == "meadow" {
+                let meadow = (0..129)
+                    .filter(|i| {
+                        let along = (*i as f64 / 128. - 0.5) * 3. * crate::vegetation::NM;
+                        let x = spot.x + along * spot.heading.to_radians().sin();
+                        let z = spot.z + along * spot.heading.to_radians().cos();
+                        let s = atlas.site(&world, x, z);
+                        s.kind == crate::vegetation::Kind::Grass && !s.blocked
+                    })
+                    .count();
+                writeln!(
+                    notes,
+                    "UKR lowpass centreline: {meadow}/129 meadow samples, 3 nm, heading={}",
+                    spot.heading
+                )?;
+                let y = f64::from(world.height(spot.x as f32, spot.z as f32)) + 100.;
+                // Same world path is available to both the dense and meadow aliases.
+                for alias in ["UKR", "UKR-MEADOW"] {
+                    writeln!(
+                        low,
+                        "{alias}-high-dense {alias} 0 12 0 {} {y} {} {} {}",
+                        spot.x,
+                        spot.z,
+                        spot.heading.to_radians(),
+                        -4f64.to_radians()
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+// The older broad-area labels score neighbours, so their centre can have a
+// different class. Grass diagnostics require the actual centre to be meadow.
+fn grass_meadow(
+    atlas: &crate::vegetation::Atlas,
+    world: &Terrain,
+    mut spot: crate::vegetation::Spot,
+) -> AppResult<crate::vegetation::Spot> {
+    use crate::vegetation::Kind;
+    let mut best: Option<(f64, f64, f64, f64)> = None;
+    for dz in -32..=32 {
+        for dx in -32..=32 {
+            let x = (spot.x / 128.).floor() * 128. + f64::from(dx) * 128. + 64.;
+            let z = (spot.z / 128.).floor() * 128. + f64::from(dz) * 128. + 64.;
+            if world.edge_distance_nm(x, z) > 0. || atlas.kind_at(x as i64, z as i64) != Kind::Grass
+            {
+                continue;
+            }
+            let site = atlas.site(world, x, z);
+            if site.blocked || site.slope > 8. {
+                continue;
+            }
+            for heading in [0f64, 35., 90., 135.] {
+                let yaw = heading.to_radians();
+                let clear = (0..17)
+                    .filter(|i| {
+                        let along = (*i as f64 / 16. - 0.5) * 3. * crate::vegetation::NM;
+                        let (sx, sz) = (x + along * yaw.sin(), z + along * yaw.cos());
+                        world.edge_distance_nm(sx, sz) == 0.
+                            && atlas.kind_at(sx as i64, sz as i64) == Kind::Grass
+                    })
+                    .count();
+                let score = clear as f64 * 1000. - (x - spot.x).hypot(z - spot.z) / 10000.;
+                if best.is_none_or(|b| score > b.0) {
+                    best = Some((score, x, z, heading));
+                }
+            }
+        }
+    }
+    let (_, x, z, heading) =
+        best.ok_or("no actual unblocked meadow near the broad-area candidate")?;
+    spot.x = x;
+    spot.z = z;
+    spot.heading = heading;
+    Ok(spot)
+}
+fn grass_field_edge(
+    atlas: &crate::vegetation::Atlas,
+    world: &Terrain,
+    mut spot: crate::vegetation::Spot,
+) -> AppResult<crate::vegetation::Spot> {
+    use crate::vegetation::Kind;
+    let mut best: Option<(f64, f64, f64, f64)> = None;
+    for dz in -128..=128 {
+        for dx in -128..=128 {
+            let x = (spot.x / 128.).floor() * 128. + f64::from(dx) * 128. + 64.;
+            let z = (spot.z / 128.).floor() * 128. + f64::from(dz) * 128. + 64.;
+            if atlas.kind_at(x as i64, z as i64) != Kind::Field {
+                continue;
+            }
+            for (ox, oz, heading) in [(128., 0., 0.), (0., 128., 90.)] {
+                let other = atlas.kind_at((x + ox) as i64, (z + oz) as i64);
+                if !matches!(other, Kind::Grass | Kind::Forest | Kind::Scrub) {
+                    continue;
+                }
+                if atlas.site(world, x, z).blocked || atlas.site(world, x + ox, z + oz).blocked {
+                    continue;
+                }
+                // Prefer a meadow edge, then proximity. A field/wood edge is still
+                // a real field boundary, not a fabricated procedural plot line.
+                let rank = if other == Kind::Grass { 1_000_000. } else { 0. }
+                    - (x - spot.x).hypot(z - spot.z);
+                if best.is_none_or(|b| rank > b.0) {
+                    best = Some((rank, x + ox * 0.5, z + oz * 0.5, heading));
+                }
+            }
+        }
+    }
+    let (_, x, z, heading) = best.ok_or("no field boundary near the broad-area candidate")?;
+    spot.x = x;
+    spot.z = z;
+    spot.heading = heading;
+    Ok(spot)
+}
+
 fn dense_spot(
     atlas: &crate::vegetation::Atlas,
     world: &Terrain,
@@ -783,7 +1015,25 @@ fn dense_spot(
     crate::vegetation::DensityCandidate,
     Vec<crate::vegetation::DensityCandidate>,
 )> {
-    let (mut spot, candidates) = crate::vegetation::densest(atlas, world);
+    let (mut spot, candidates) = if code == "UKR-MEADOW" {
+        let spot = crate::vegetation::spots(atlas, world)
+            .into_iter()
+            .find(|s| s.label == "meadow")
+            .ok_or("no Ukraine meadow candidate")?;
+        let spot = grass_meadow(atlas, world, spot)?;
+        (
+            crate::vegetation::DensityCandidate {
+                x: spot.x,
+                z: spot.z,
+                heading: spot.heading,
+                label: "meadow".into(),
+                instances: crate::vegetation::count_high(atlas, world, spot.x, spot.z),
+            },
+            Vec::new(),
+        )
+    } else {
+        crate::vegetation::densest(atlas, world)
+    };
     if let Ok(path) = std::env::var("TORE_VEG_LOWPASS_CAMERAS") {
         // Freeze the baseline's exact dense camera, avoiding a changed
         // coast mask or density choosing a different benchmark location.
@@ -1234,7 +1484,12 @@ fn overlay(resources: &std::collections::BTreeMap<String, Vec<u8>>, out: &Path) 
         ("EGY", ["dunes", "rocky", "oasis"]),
     ] {
         println!("vegetation preview: overlay {code}");
-        let world = Terrain::for_mission(resources, code, Some(0), &overrides([12, 0])?)?;
+        let world = Terrain::for_mission(
+            resources,
+            code.split('-').next().unwrap_or(code),
+            Some(0),
+            &overrides([12, 0])?,
+        )?;
         let scenery = Scenery::build(resources, &world)?;
         let atlas = scenery
             .vegetation
@@ -1751,7 +2006,7 @@ impl View {
         let mut observer = crate::vegetation_renderer::popin::Monitor::default();
         let mut out = Vec::with_capacity(frames.len());
         for chunk in frames.chunks(8) {
-            let count = (chunk.len() * 4) as u32;
+            let count = (chunk.len() * 6) as u32;
             let queries = self.device.create_query_set(&wgpu::QuerySetDescriptor {
                 label: Some("Lowpass timestamps"),
                 ty: wgpu::QueryType::Timestamp,
@@ -1773,10 +2028,11 @@ impl View {
             let mut cpu = Vec::with_capacity(chunk.len());
             for (i, (frame, camera)) in chunk.iter().enumerate() {
                 self.set_vegetation(false);
-                self.stamp(&queries, (i * 4) as u32, camera, world, scenery);
+                self.stamp(&queries, (i * 6) as u32, camera, world, scenery);
                 self.set_vegetation(true);
                 let started = Instant::now();
-                self.stamp(&queries, (i * 4 + 2) as u32, camera, world, scenery);
+                // Prime and upload once, outside both grass comparison intervals.
+                self.draw(camera, world, scenery);
                 let cache = self
                     .sim
                     .vegetation
@@ -1801,7 +2057,32 @@ impl View {
                             v.detail_reach(),
                         )
                     });
-                cpu.push((*frame, placed, tufts, cache, submit_ms, popin));
+                let blades = self.sim.vegetation.as_ref().map_or(0, |v| v.blades_drawn());
+                self.sim.vegetation.as_mut().unwrap().set_repeat_frame(true);
+                // Alternate order to reduce systematic cache/clock bias. Both
+                // intervals use identical tree pages, cull commands and uniforms.
+                for grass_off in if frame % 2 == 0 {
+                    [false, true]
+                } else {
+                    [true, false]
+                } {
+                    self.sim
+                        .vegetation
+                        .as_mut()
+                        .unwrap()
+                        .set_grass_suppressed(grass_off);
+                    self.stamp(
+                        &queries,
+                        (i * 6 + if grass_off { 4 } else { 2 }) as u32,
+                        camera,
+                        world,
+                        scenery,
+                    );
+                }
+                let vegetation = self.sim.vegetation.as_mut().unwrap();
+                vegetation.set_grass_suppressed(false);
+                vegetation.set_repeat_frame(false);
+                cpu.push((*frame, placed, tufts, blades, cache, submit_ms, popin));
             }
             let mut encoder = self.device.create_command_encoder(&Default::default());
             encoder.resolve_query_set(&queries, 0..count, &resolved, 0);
@@ -1822,14 +2103,18 @@ impl View {
                 .collect();
             drop(mapped);
             readback.unmap();
-            for (i, (frame, placed, tufts, cache, submit_ms, popin)) in cpu.into_iter().enumerate()
+            for (i, (frame, placed, tufts, blades, cache, submit_ms, popin)) in
+                cpu.into_iter().enumerate()
             {
                 out.push(Sample {
                     frame,
-                    gpu_off: ticks[i * 4 + 1].saturating_sub(ticks[i * 4]) as f64 * period
+                    gpu_off: ticks[i * 6 + 1].saturating_sub(ticks[i * 6]) as f64 * period
                         / 1_000_000.,
-                    gpu_on: ticks[i * 4 + 3].saturating_sub(ticks[i * 4 + 2]) as f64 * period
+                    gpu_on: ticks[i * 6 + 3].saturating_sub(ticks[i * 6 + 2]) as f64 * period
                         / 1_000_000.,
+                    gpu_no_grass: ticks[i * 6 + 5].saturating_sub(ticks[i * 6 + 4]) as f64 * period
+                        / 1_000_000.,
+                    blades,
                     placed,
                     tufts,
                     object_chunks: cache.object_chunks,
@@ -2037,5 +2322,50 @@ impl View {
         drop(mapped);
         self.buffer.unmap();
         Ok(pixels)
+    }
+}
+
+#[cfg(test)]
+mod grass_camera_tests {
+    use super::*;
+    #[test]
+    fn vegetation_grass_cameras_require_actual_meadow_and_field_boundary() {
+        let mut pixels = vec![10; 65536];
+        for row in pixels.chunks_mut(256) {
+            row[100..].fill(12);
+            row[80..100].fill(20);
+        }
+        let atlas = crate::vegetation::Atlas::synthetic(pixels, 0);
+        let mut world = tore_world::test_support::terrain();
+        world.theater.cols = 5;
+        world.theater.rows = 5;
+        world.theater.cells = vec![
+            tore_formats::theater::TerrainCell {
+                color: 12,
+                class: 2,
+                elevation: 0
+            };
+            25
+        ];
+        let spot = crate::vegetation::Spot {
+            x: 12288.,
+            z: 4096.,
+            heading: 35.,
+            label: "meadow",
+        };
+        let meadow = grass_meadow(&atlas, &world, spot).unwrap();
+        assert_eq!(
+            atlas.site(&world, meadow.x, meadow.z).kind,
+            crate::vegetation::Kind::Grass
+        );
+        let edge = grass_field_edge(&atlas, &world, spot).unwrap();
+        assert_eq!(
+            atlas.kind_at(edge.x as i64 - 8, edge.z as i64),
+            crate::vegetation::Kind::Field
+        );
+        assert_eq!(
+            atlas.kind_at(edge.x as i64 + 8, edge.z as i64),
+            crate::vegetation::Kind::Grass
+        );
     }
 }

@@ -352,6 +352,18 @@ The CPU-only `vegetation-pass5-cameras` case selects coast, forest hand-off and
 top-view situations. `--vegetation-preview OUT pass5-cameras` writes that list.
 These reproduce the requested situations; player screenshot coordinates are unknown.
 
+`vegetation-grass-cameras` runs `--vegetation-preview OUT grass-cameras` on the
+CPU. It freezes Ukraine meadow at 10/50/200 ft, an actual field boundary,
+a riverbank, Vietnam meadow and an Egypt water belt candidate. Site classes are
+recorded too. Sand-classified Egypt banks intentionally have no blades. The job
+also writes `grass-lowpass-cameras.txt`, usable with `TORE_VEG_LOWPASS_CAMERAS`
+for both `UKR` and `UKR-MEADOW`. Run the same camera file with
+`TORE_GRASS=blades`, `tufts` and `off`, leaving trees and ground detail on.
+Grass unit tests cover integer hash identity, snapping and disjoint level
+ownership, hard vertex budgets, triangle grounding, packed habitat boundaries
+and cache decoding. Shader and binding tests validate the blade entry points
+without creating a GPU adapter. GPU cost and visual quality remain lead checks.
+
 `vegetation-stream-convergence` runs `--vegetation-preview OUT stream-check`
 without a GPU. It exercises the production worker, bounded page uploads and
 visibility-radius growth at the lowpass start camera. It must converge within
@@ -370,10 +382,15 @@ from CPU submission until GPU idle, with vegetation off/on and their difference.
 
 `tore-app --vegetation-preview OUT lowpass` flies a 100 ft, 480 kt, 3 nm
 straight pass through the densest vegetation in UKR, FRA, NSK, EGY, PGU, IRA,
-TVIET, APA, WTA and KURILE. It samples 1,350 frames (60 per second of the 22.5 s
+TVIET, APA, WTA and KURILE, plus `UKR-MEADOW` for open grass. It samples 1,350 frames (60 per second of the 22.5 s
 run) at 3840x2160 and 2560x1440, High and Ultra, and leaves the other Graphics
 vegetation settings at their defaults. GPU timestamps compare objects, canopy and grass
-on and off. Ground detail stays on in both. Warmup, while the patch cache fills
+on and off. A third timestamped frame suppresses only grass and reuses the exact
+uploaded tree scene with the same cull commands. An untimed priming frame
+prepares that scene, then grass on/off order alternates between samples. `grass-cost.txt` and the
+`gpu_no_grass_ms`/`grass_only_ms` CSV columns report the signed grass on-minus-off
+cost. CSVs also expose submitted blade candidates and legacy grass chunk builds.
+Ground detail stays on in all three frames. Warmup, while the patch cache fills
 at the in-flight budget, is reported separately. `TORE_VEG_LOWPASS_STRIDE=2`
 samples every second frame when a full run is too slow. Optional
 `TORE_VEG_LOWPASS_THEATERS`, `TORE_VEG_LOWPASS_SIZES`, `TORE_VEG_LOWPASS_DENSITIES`
@@ -381,8 +398,8 @@ and `TORE_VEG_LOWPASS_FRAMES` limit a partial run.
 `TORE_VEG_LOWPASS_CAMERAS` points at the baseline lowpass `cameras.txt` to reuse
 its exact dense coordinates and heading. Run each
 `TORE_VEGETATION_CARDS=billboard|cross|cross-top|billboard-top` at High and both
-resolutions. Old and new High differ intentionally by one density step; their
-cost difference includes that reduction. This is an offscreen GPU job.
+resolutions. Compare density tables when benchmarking older passes; pass 6 and pass 7 have
+the same tree density. This is an offscreen GPU job.
 Each case writes `*-warmup.csv` even if warmup fails. It records builds, packing,
 uploaded and pending bytes/chunks, worker/range pending flags and available/visible
 radii for every frame. `TORE_VEG_STREAM_TRACE=1` additionally logs each built and

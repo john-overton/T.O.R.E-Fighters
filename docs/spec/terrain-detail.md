@@ -136,7 +136,7 @@ vegetation on 2026-10-16 and a second pass the same day (retail trees, placement
 from tile art, denser grass and a better desert). The placement and shading
 constants are **fitted agent choices**, initially fitted by eye in passes 1 and
 2. Runtime retail resources retain their source provenance; the code implements
-this behaviour specification rather than original control flow. John reviewed passes 3 and 4. Pass 6, requested on 2026-10-17, awaits GPU visual and timing validation.
+this behaviour specification rather than original control flow. John reviewed passes 3 and 4. Passes 6 and 7, requested on 2026-10-17, await GPU visual and timing validation.
 The new placement is not a claim about retail placement. Nothing is
 collidable or part of the simulation, the network session, replays or
 checkpoints.
@@ -317,11 +317,62 @@ placement heuristics, not claims of original scenery or geographic river data.
 
 ### Grass
 
-A carpet of grass tufts, each five tapered blades, on meadow, field
-edges, woodland floor and desert gravel (dry straw there). Woodland floor uses
-25% of the full grass density, half the previous amount under dense crowns. Its radius
-and density follow the
-[density setting](graphics-options.md#vegetation-texture-and-vegetation-objects).
+John requested GPU-generated blades on 2026-10-17. This is an **opinionated**
+presentation addition. All geometry, density, habitat resolution and wind
+constants below are **agent choices**, pending GPU review. Original grass
+behaviour remains unknown. No third-party shader code is used.
+
+`TORE_GRASS=blades|tufts|off` overrides the saved Graphics Grass row. Blades is
+the branch default. Off removes grass geometry only, retaining ground detail,
+trees and canopy. Tufts retains the earlier five-blade cutout sprites, patch
+placement, ring density and uploads for direct comparisons.
+
+Blades are opaque three-triangle strips with five generated vertices. There
+are no alpha tests, blade instance buffers, CPU blade placement or grass chunk
+uploads. A world-cell integer hash controls position jitter, height, width,
+heading, lean and colour. The field uses a 2 ft base grid. Three nested grids
+have 2, 8 and 32 ft spacing. Every fourth cell in both axes belongs to the next
+coarser grid, which also draws that cell inside the inner region. This gives
+each world cell one persistent owner, with no duplicate or relocated blades.
+Grids snap to their spacing. One-cell guards put new and retired rows beyond
+their visible disk. Counts and outer radii follow the
+[Graphics budget table](graphics-options.md#vegetation-texture-and-vegetation-objects).
+
+Each grid stays at full distance size to 70% of its radius, then smoothly
+shortens and thins to zero. A seeded rank staggers the shortening. There is no
+translucent fringe or patch publication. Ground detail keeps its grass texture
+under the transition. Thin, distant blades can still alias; MSAA and the actual
+appearance of this density transition require GPU review.
+
+The loader caches two bits of habitat per 128 ft art texel: bare, meadow, crop,
+or short. Water, river, road, sand, beach, rock, snow, pavement and town exclusions
+remain bare. Art, coast and city masks are sampled at their aligned 128 ft texels.
+Town circles and whole airport/runway footprints are rasterized only within
+their bounds, with a 91 ft margin, the half-diagonal of a habitat texel. Airport
+footprints also retain a conservative 220 ft pavement buffer. These are fitted art classes and
+exclusions, not surveyed land use;
+sub-texel exclusion features remain limited by that resolution. Desert grass
+requires eligible green/crop/scrub land within 2,600 ft of mapped water. Sand stays
+bare even beside water. Egypt's mostly sand-classified riverbanks can therefore
+have no blades where the old tufts grew dry straw. The Egypt comparison must
+show this difference, not silently invent an oasis.
+
+Meadow/crop/short density is 1/0.9/0.35 of candidate cells. Existing canopy cover
+further reduces density continuously toward 25%. Slope above about 42 degrees
+is bare. Blade heights before seeded 0.75 to 1.25 variation are 2.1/1.6/1.2 ft;
+tropical height multiplies by 1.5, desert/arctic by 0.65. Width is 0.16 to 0.32 ft.
+Roots use the shared `tore_world::grounding` bottom correction and interpolate
+the same terrain triangles as `Terrain::height`. Both root corners follow that
+plane. The ground's indexed picture and live theater palette tint each blade,
+with straw tint for short/arid grass and upward-biased normals. Colour scales
+from 0.55 at the root to 1.15 at the tip, and lighting occlusion from 0.6 to 1.
+
+Wind uses simulation time, two world-space waves at roughly 570 to 700 ft
+wavelengths and mission wind direction. Smooth 512 ft value noise, moving at
+5.12 ft/s along that direction, modulates phase and scales amplitude by 0.65 to
+1. Calm sway is at most 6% of blade height at the tip; amplitude adds 0.4% per ft/s of wind, capped at 60 ft/s. Seeded static lean
+adds at most 22.5% per horizontal axis. Bending grows quadratically from the
+root. Paused simulation pauses sway. This has no gameplay or collision effect.
 
 ### Desert ground
 
@@ -340,8 +391,8 @@ one repeating ripple:
   ft apart in three directions, only on sand sheets and windward
   flanks, soft enough that the dune's own light still shows. Slip
   faces stay smooth. Soft grit, and pebbles about a foot across on
-  gravel. Open sand carries sparse dry scrub; dry grass stays on wadi
-  banks, gravel and water.
+  gravel. Open sand carries sparse dry scrub. Legacy tufts retain dry straw on wadi
+  banks, gravel and water belts; blade habitat follows the stricter rules above.
 
 Each pattern fades out before it is smaller than a pixel. The fine
 grain is full below about 2,200 ft and gone by about 7,500 ft; the

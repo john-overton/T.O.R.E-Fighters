@@ -27,8 +27,27 @@ def check_pass5_cameras(work, _output):
     return []
 
 
+def check_grass_cameras(work, _output):
+    lines = (work / 'cameras' / 'grass-cameras.txt').read_text().splitlines()
+    expected = {'UKR-meadow-10ft', 'UKR-meadow-50ft', 'UKR-meadow-200ft',
+                'UKR-field-edge-50ft', 'UKR-riverbank-50ft',
+                'TVIET-grassland-50ft', 'EGY-water-belt-50ft'}
+    if {line.split()[0] for line in lines} != expected:
+        return ['missing grass comparison camera']
+    if any(len(line.split()) != 10 or
+           not all(math.isfinite(float(v)) for v in line.split()[5:]) for line in lines):
+        return ['invalid grass comparison camera']
+    return []
+
+
 def scenarios():
     return [Scenario(
+        name='vegetation-grass-cameras', lane='menus',
+        args=['--vegetation-preview', '{work}/cameras', 'grass-cameras'],
+        env={'TORE_VEGETATION': '1', 'TORE_WORKERS': '4'}, timeout=240,
+        outputs=['cameras/grass-cameras.txt', 'cameras/grass-lowpass-cameras.txt',
+                 'cameras/grass-camera-sites.txt'], check_work=check_grass_cameras,
+    ), Scenario(
         name='vegetation-cache-roundtrip', lane='menus',
         args=['--vegetation-preview', '{work}/cache', 'cache-check'],
         env={'TORE_VEGETATION': '1', 'TORE_WORKERS': '4'}, timeout=180,

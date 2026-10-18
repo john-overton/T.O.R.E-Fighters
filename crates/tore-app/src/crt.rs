@@ -856,6 +856,7 @@ mod shader_tests {
             include_str!("gun_flash.wgsl"),
             include_str!("airfield_lights.wgsl"),
             include_str!("night_glow.wgsl"),
+            include_str!("grass_blades.wgsl"),
         ]
         .join("\n")
     }
@@ -988,6 +989,7 @@ mod shader_tests {
             ("vegetation", &["veg_vertex", "veg_fragment"], 2),
             ("vegetation depth", &["veg_vertex", "veg_depth"], 2),
             ("grass", &["grass_vertex", "grass_fragment"], 2),
+            ("opaque blades", &["blade_vertex", "blade_fragment"], 3),
             (
                 "vegetation shadow 0",
                 &["veg_shadow_vertex0", "terrain_shadow_fragment"],
@@ -1026,7 +1028,12 @@ mod shader_tests {
                     "{label}: unavailable group {group}, binding {binding}"
                 );
                 assert!(
-                    binding < [6, 3, 2][group as usize],
+                    binding
+                        < if *label == "opaque blades" {
+                            [6, 3, 3][group as usize]
+                        } else {
+                            [6, 3, 2][group as usize]
+                        },
                     "{label}: unavailable binding {binding}"
                 );
             }
@@ -1074,6 +1081,7 @@ mod shader_tests {
             include_str!("gun_flash.wgsl"),
             include_str!("airfield_lights.wgsl"),
             include_str!("night_glow.wgsl"),
+            include_str!("grass_blades.wgsl"),
         ]
         .join("\n");
         validate("world", &world);

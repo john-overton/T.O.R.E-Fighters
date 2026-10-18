@@ -211,25 +211,33 @@ Medium, and Medium equals previous Low. The new Low is an **agent choice** at
 half the previous Low candidate density. Default remains High. Relative to the
 previous High grid, the multipliers are 0.2, 0.4, 0.7 and 1.0.
 
-| Density | Grass radius | Tufts per 32 ft patch near the camera | Objects kept at most |
-| --- | --- | --- | --- |
-| Low | 450 ft | 24 | 32,768 |
-| Med | 700 ft | 48 | 65,536 |
-| High | 1,100 ft | 96 | 131,072 |
-| Ultra | 1,500 ft | 160 | 262,144 |
+| Density | Grass radius | Blade grid side, per level | Maximum blade vertices | Legacy tufts per near 32 ft patch | Objects kept at most |
+| --- | --- | --- | --- | --- | --- |
+| Low | 450 ft | 48 | 34,560 | 24 | 32,768 |
+| Med | 700 ft | 64 | 61,440 | 48 | 65,536 |
+| High | 1,100 ft | 96 | 138,240 | 96 | 131,072 |
+| Ultra | 1,500 ft | 128 | 245,760 | 160 | 262,144 |
 
-Each tuft has five blades. Grass thins in four rings: full within 14%
+**Grass** selects Blades (branch default), Tufts or Off, live on Apply.
+`TORE_GRASS=blades|tufts|off` overrides it for the run. Blades use three nested
+world-snapped grids and opaque geometry, with no CPU placement or uploads.
+The hard vertex limits include rejected candidates in every direction. Visible
+counts are lower after grid ownership, habitat, frustum and distance rejection.
+Off retains the ground-detail texture. See [grass rules](terrain-detail.md#grass).
+This option was requested by John on 2026-10-17; budgets are agent choices.
+
+In Tufts mode each tuft has five blades. Legacy grass thins in four rings: full within 14%
 of its radius, then half, a quarter and an eighth. Object budgets are divided into fixed geographic patch quotas, independent
 of the camera. Saturated patches retain the same seeded population throughout
 an approach. This is a fitted agent choice; a saturated forest can be sparser
 than its unconstrained candidate grid. Detail distance is never silently
 shortened to meet the budget. Object opacity has no separate altitude or
-projected-pixel fade inside detail range. Grass retains its separate distance
-rings and habitat rules.
+projected-pixel fade inside detail range. Grass uses the selected mode's separate distance
+and habitat rules.
 
-The six values are saved in `graphics-v1.conf` only when they differ
+The seven values are saved in `graphics-v1.conf` only when they differ
 from the defaults (`vegetation-texture`, `vegetation-texture-distance`,
-`vegetation-distance`, `vegetation-detail`, `vegetation-density`, `vegetation-cards`). An
+`vegetation-distance`, `vegetation-detail`, `vegetation-density`, `vegetation-cards`, `grass`). An
 older file that has none of them reads as the defaults. Apply puts them
 into effect at once, the same way as the building settings. Original
 graphics turns the texture off and leaves the object distances at the

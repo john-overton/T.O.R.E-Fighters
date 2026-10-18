@@ -258,9 +258,14 @@ See [merged airports](redrawn-airports.md#merged-pairs-airfield-scene-3).
 ## Exploratory vegetation classification
 
 The `exp/vegetation` renderer samples this theater data and its reference
-palette to place presentation-only sprites. It does not add terrain records
+palette to place presentation-only sprites and classify GPU grass habitat. It does not add terrain records
 or establish original vegetation placement. Cached patch, field, road, village
 edge, desert, broad-water beach exclusion and canopy sampling rules are specified in
 [terrain detail](../spec/terrain-detail.md#where-things-grow); retail card
 records and unresolved original distance rules are in
 [objects and shapes](objects-and-shapes.md#vegetation-card-assets).
+
+GPU blade grass additionally caches a two-bit habitat per 128 ft source-art
+texel and a terrain-vertex lookup grid. This is disposable presentation data,
+not a new retail format. See [grass habitat](../spec/terrain-detail.md#grass) and
+[renderer storage](../ARCHITECTURE.md#exploratory-vegetation-rendering).

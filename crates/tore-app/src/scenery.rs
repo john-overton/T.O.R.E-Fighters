@@ -93,6 +93,7 @@ pub struct Scenery {
     /// The vegetation meshes, their retail textures in the static art pages.
     pub vegetation_meshes: Option<Arc<crate::vegetation_shapes::Library>>,
     pub canopy: crate::vegetation::canopy::Map,
+    pub grass: crate::vegetation::grass::Map,
     pub vegetation_cache_hit: bool,
 }
 
@@ -458,6 +459,7 @@ impl Scenery {
             vegetation: None,
             vegetation_meshes: None,
             canopy: Default::default(),
+            grass: Default::default(),
             vegetation_cache_hit: false,
             climate: crate::blast_climate::Climate {
                 humidity: terrain.humidity(),
@@ -504,6 +506,18 @@ impl Scenery {
             };
         }
         if let Some(atlas) = &out.vegetation {
+            crate::graphics::Grass::override_from_env()?;
+            let started = std::time::Instant::now();
+            out.grass = if let Some(map) = cache.as_ref().and_then(|c| c.read_grass()) {
+                map
+            } else {
+                let map = crate::vegetation::grass::Map::build(atlas, terrain, &ground_layers);
+                if let Some(cache) = &cache {
+                    cache.write_grass(&map);
+                }
+                map
+            };
+            crate::loading::measured("grass habitat map", started.elapsed());
             let started = std::time::Instant::now();
             let terrain_bytes = out.texture_indices.len();
             let start = out.sky_indices.len();
@@ -1176,6 +1190,7 @@ pub(crate) mod tests {
             vegetation: None,
             vegetation_meshes: None,
             canopy: Default::default(),
+            grass: Default::default(),
             vegetation_cache_hit: false,
             fire_widths: Arc::new(BTreeMap::new()),
             climate: crate::blast_climate::Climate::default(),
