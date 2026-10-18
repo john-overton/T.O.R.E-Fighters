@@ -11031,18 +11031,26 @@ when T2 colour/class values agree; authored fields and protected features stay
 excluded. The mask also supplies tree-belt probabilities.
 
 For drawing, each segment becomes one RG32Uint texel containing both indexed
-mean mixtures and precomputed run-end flags. The dedicated 2D texture packs at
-most 1,024 records across; the largest reviewed grid fits 1,024 by 2,048. It
-uses material binding 6 for terrain and blades. World/scenery and aircraft
-material groups bind the same view; auto-layout effects do not need it. Scene
-uniform tile dimensions disable the shader entirely on maps with no blends.
+mean mixtures, precomputed run-end flags and an eight-bit boundary-noise value.
+The noise uses the formerly spare byte, with no added fetch or per-pixel hash.
+Eight more bytes per tile record
+the real page and quarter rotation. The dedicated texture packs at most 2,048
+records across; the largest reviewed grid fits 2,048 by 1,026. Material binding
+6 remains shared by terrain and blades. No new binding or draw call is added.
 
-Outside 250 ft of an edge there are no seam texture reads. Within it, one
-record rejects masked segments; accepted segments read at most one neighbour.
-Identical means skip duplicate palette evaluation, and single-index mixtures
-resolve only one endpoint. A constant edge resolves two palette indices total,
-with the original weather remaps. Varying interpolated mixtures can need eight.
-The packed records upload once, with no extra draw call or per-frame upload.
+Outside 250 ft of an edge there are no seam-record reads. Inside it, one record
+rejects excluded segments. Accepted segments use up to one adjacent mean record,
+one neighbour page/rotation record and one filtered neighbour texture sample.
+The already sampled own texture is reused. Residual detail has a world-noise
+blend weight; mean colour keeps the exact 500 ft ramp. Blades sample bilinearly
+near seams and retain their cheaper lookup elsewhere.
+
+LAND synthesis runs once on the CPU, fitting a synthetic indexed page to the
+colour histogram and six spatial luminance statistics of adjoining source art.
+It uses no spatial source pixels and overwrites only the runtime LAND upload
+page, so ordinary LAND needs no additional shader work or texture memory.
+The cache also stores statistics and the original fill for local audit evidence.
+Source classifications, habitat and population never read the synthesized art.
 The `.seams` cache retains bounded/checksummed atomic writes; code, art,
 layout, palette, airport/city exclusions, neutralized ground and enable state
 invalidate it. [Rules and limits](spec/terrain-detail.md#tile-seams).

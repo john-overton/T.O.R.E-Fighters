@@ -327,23 +327,45 @@ This is **opinionated presentation** on `exp/vegetation`, separate from the
 [source import audit](../baselines/terrain-seams.md). The following mask,
 colour threshold and tree-density choices are **fitted agent decisions**.
 
-At an accepted tile edge, the ground retains its original texture samples and
-adds the difference between the neighbour's and its own local linear-light mean,
-weighted by one smoothstep across 500 ft. The midpoint mixes the means equally;
-the correction is zero 250 ft from either side. Texture coordinates, coverage,
-heights and high-frequency grain are unchanged. Negative corrected RGB clamps
-to zero. Two palette indices and an eight-bit weight approximate each tile's
-exact opaque-pixel mean and each side's local three-texel boundary mean. Adjacent
-accepted edge means interpolate along the edge. Colour means sample the first
-source texel on either side, filtered over three positions along the boundary;
-matched borders receive no correction even when interior colours differ.
-The mean mixtures resolve through live weather remaps, and through the
-daylight row for flare albedo and blade tint. This approximation is measured
-by the CPU audit. It is not recovered retail colour blending.
+At an accepted tile edge the local linear-light means still follow a smoothstep
+across exactly 500 ft, zero correction at 250 ft on either side. Both ground
+textures also contribute inside that band. The neighbour is sampled at the
+reflected distance into its own tile, with its actual uploaded page and quarter
+rotation. Each sample's local mean is removed before mixing the texture detail;
+the unperturbed mean ramp is then retained. World-space noise shifts the detail
+boundary by at most 80 ft, tapering to zero at both outer endpoints. Its 512 ft
+noise cells are stable in the world, precomputed at segment centres and
+interpolated along the edge. These constants are fitted agent choices
+for John's texture-blend request of 2026-10-18. Texture coverage and terrain
+heights are unchanged. The same palette remaps and footprint filtering apply
+to each texture. Adjacent accepted edge means interpolate along the edge.
+
+Generic green LAND gets a synthetic mottled page, derived once from the natural
+source pictures adjoining accepted LAND seams. Only the colour histogram and
+luminance statistics are used, never the source pixels' spatial arrangement.
+The statistics include mean, light/dark colours, luminance standard deviation
+and RMS luminance differences at 256, 512, 1,024, 2,048, 4,096 and 8,192 ft.
+Periodic smooth noise has a primary cell size selected from 512 through 16,384
+ft in powers of two, plus a quarter-size octave with weight 0, 0.25, 0.5 or
+0.75. Ranking the noise against the measured green histogram preserves patch
+colours. The candidate with the least summed squared log error in the six
+spatial statistics wins. It is a fitted statistical resemblance, not recovery
+of original LAND behavior. Its 32,768 ft repetition is a known approximation.
+
+The generated 256-square indexed page replaces only the presentation's generic
+green LAND page. Equal opposite borders make the world-aligned repetition
+continuous. Normal palette and texture filtering remain active, with no added
+LAND shader fetch or per-frame synthesis. The source fill's classification and
+vegetation population inputs remain unchanged. Sand, snow and other non-green
+fallback pages are not synthesized. Local seam means are refitted to the new
+page, so the 500 ft colour ramp remains valid. The runtime cache holds the
+statistics and synthetic page; no retail-derived image is committed.
 
 The source is the actual uploaded ground page, including LAND fallback and
 neutral airfield ground. A maximum linear RGB local mean difference of at least
-0.015 qualifies. One shared mask samples both sides of every 128 ft edge
+0.015, differing sampled texture detail on a different page/rotation, or an
+accepted LAND boundary qualifies.
+Matching means therefore no longer hide texture-only discontinuities. One shared mask samples both sides of every 128 ft edge
 segment, at depths 64, 192 and 320 ft and at three positions along the edge.
 Water, river, beach, road, rock, snow, sand, city tiles/sites/streets and airport
 footprints reject the segment. Airport bounds expand by 348 ft; town circles
@@ -368,11 +390,11 @@ outer edges. Existing tree-line, slope, grounding, exclusion and fixed-budget
 rules remain. Field interiors and procedural rectangular field rows remain.
 The distant canopy samples the same belt through ordinary placement queries.
 
-Blades use the same correction as ground, before their existing species/root
+Blades use the same synthesized page and texture/colour blend as ground, before their existing species/root
 and tip tints. Fallback land now uses the same LAND page as the terrain; water
 without a placed picture still has no blades. The seam metadata and masks are
 cached with the placement/canopy/habitat inputs. `TORE_TERRAIN_SEAMS=0` disables
-both the colour correction and belt for comparisons. Ground-detail Off leaves
+the synthetic LAND page, texture/colour blend and belt for comparisons. Ground-detail Off leaves
 the correction active; `TORE_VEGETATION=0` disables this exploratory feature.
 No simulation, wire, replay or checkpoint data changes.
 

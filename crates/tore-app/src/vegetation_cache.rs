@@ -140,7 +140,18 @@ impl Cache {
         let rows = r.count(1024)?;
         let mean_error = r.floats::<1>()?[0];
         let bytes = r.blob(MAX_BYTES)?.to_vec();
-        if !r.0.is_empty() || bytes.len() != cols * rows * crate::terrain_seams::STRIDE {
+        let materials = r.blob(1024 * 1024 * 8)?.to_vec();
+        let statistics = [r.floats::<16>()?, r.floats::<16>()?];
+        let parameters = r.floats::<2>()?;
+        let source_pages = r.count(65536)?;
+        let source = r.blob(65536)?.to_vec();
+        let pixels = r.blob(65536)?.to_vec();
+        if !r.0.is_empty()
+            || bytes.len() != cols * rows * crate::terrain_seams::STRIDE
+            || materials.len() != cols * rows * 8
+            || source.len() != pixels.len()
+            || (!pixels.is_empty() && pixels.len() != 65536)
+        {
             return None;
         }
         Some(crate::terrain_seams::Map {
@@ -148,6 +159,14 @@ impl Cache {
             rows,
             bytes,
             mean_error,
+            materials,
+            mottle: crate::terrain_seams::texture::Mottle {
+                statistics,
+                parameters,
+                source_pages,
+                source,
+                pixels,
+            },
         })
     }
     pub fn write_seams(&self, map: &crate::terrain_seams::Map) {
@@ -156,6 +175,14 @@ impl Cache {
         put(&mut data, map.rows);
         floats(&mut data, &[map.mean_error]);
         blob(&mut data, &map.bytes);
+        blob(&mut data, &map.materials);
+        for statistics in &map.mottle.statistics {
+            floats(&mut data, statistics);
+        }
+        floats(&mut data, &map.mottle.parameters);
+        put(&mut data, map.mottle.source_pages);
+        blob(&mut data, &map.mottle.source);
+        blob(&mut data, &map.mottle.pixels);
         Self {
             path: self.path.with_extension("seams"),
             key: self.key,
@@ -653,6 +680,8 @@ mod tests {
             rows: 2,
             bytes: vec![0; 4 * crate::terrain_seams::STRIDE],
             mean_error: 0.001,
+            materials: vec![0; 32],
+            ..Default::default()
         };
         cache.write_seams(&seams);
         assert_eq!(cache.read_seams(), Some(seams));

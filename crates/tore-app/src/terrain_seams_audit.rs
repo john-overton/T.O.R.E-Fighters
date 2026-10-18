@@ -1,5 +1,5 @@
 //! CPU-only mask audit and reproducible cameras for the lead's GPU review.
-use super::{BLEND, HEDGE, Map};
+use super::{BLEND, HEDGE, Map, TILE};
 use crate::{
     AppResult,
     scenery::Scenery,
@@ -183,6 +183,7 @@ pub fn run(resources: &BTreeMap<String, Vec<u8>>, out: &Path) -> AppResult<()> {
                     .seams
                     .as_ref()
             || scene.sky_indices != cached.sky_indices
+            || scene.texture_indices != cached.texture_indices
         {
             return Err("seam/card/canopy cache differs".into());
         }
@@ -251,7 +252,7 @@ pub fn run(resources: &BTreeMap<String, Vec<u8>>, out: &Path) -> AppResult<()> {
         selected.extend(spots(map, HEDGE).into_iter().take(1));
         for (i, spot) in selected.iter().enumerate() {
             let label = if spot.flag == HEDGE { "hedge" } else { "blend" };
-            for height in [500_f64, 2000., 10000.] {
+            for height in [500_f64, 2000., 5000., 10000.] {
                 let cam = camera(&world, spot, height);
                 let target = [
                     spot.x,
@@ -271,6 +272,7 @@ pub fn run(resources: &BTreeMap<String, Vec<u8>>, out: &Path) -> AppResult<()> {
             strip(out, code, i, spot, &world, &scene, map)?;
         }
         let spot = *selected.first().ok_or("no seam or hedge control camera")?;
+        texture_probe(out, code, &scene, &spot)?;
         let target = [
             spot.x,
             f64::from(world.height(spot.x as f32, spot.z as f32)),
@@ -289,6 +291,20 @@ pub fn run(resources: &BTreeMap<String, Vec<u8>>, out: &Path) -> AppResult<()> {
             target,
             &world,
         )?;
+        if code == "UKR" {
+            for height in [5000., 10000.] {
+                overview.position[1] = target[1] + height;
+                write_camera(
+                    &mut cameras,
+                    &mut checks,
+                    &format!("UKR-LAND-edge-overhead-{height:.0}ft"),
+                    code,
+                    &overview,
+                    target,
+                    &world,
+                )?;
+            }
+        }
         for height in [100., 500., 2000., 10000.] {
             let cam = camera(&world, &spot, height);
             write_camera(
@@ -311,8 +327,8 @@ pub fn run(resources: &BTreeMap<String, Vec<u8>>, out: &Path) -> AppResult<()> {
     Ok(())
 }
 
-/// Unlit reference strips: upper half source, lower half mean correction. Art
-/// and its high-frequency residual stay at their own UVs on both sides.
+/// Unlit reference strips: upper half baked source, lower half texture blend.
+/// Both halves use the same bilinear source filtering.
 fn strip(
     out: &Path,
     code: &str,
@@ -351,10 +367,13 @@ fn strip(
                 rotation,
             );
             let index = scene.texture_indices[layer * 65536 + v * 256 + u];
-            let mut color = palette[usize::from(index)];
+            let mut color = packed
+                .sample(map, p.map(|v| v as f32), &scene.texture_indices, &palette)
+                .unwrap_or(palette[usize::from(index)]);
             if y >= H / 2 {
-                let delta = packed.correction(map, p.map(|v| v as f32), &palette);
-                color = std::array::from_fn(|k| (color[k] + delta[k]).max(0.));
+                color = packed
+                    .surface(map, p.map(|v| v as f32), &scene.texture_indices, &palette)
+                    .unwrap_or(color);
             }
             let rgb = color.map(|v| {
                 let v = if v <= 0.0031308 {
@@ -489,59 +508,268 @@ fn line_probe(out: &Path, world: &Terrain, scene: &Scenery) -> AppResult<()> {
     let map = &scene.vegetation.as_ref().ok_or("no seam atlas")?.seams;
     let packed = map.pack();
     let palette = scene.palette.map(|p| p.map(super::linear));
-    let point = |d: f64| [16384., 32768. + d];
-    let sample = |d: f64| -> AppResult<([f32; 3], [f32; 3])> {
-        let before = ground_color(world, scene, point(d))?;
-        let correction = packed.correction(map, point(d).map(|v| v as f32), &palette);
-        Ok((
-            before,
-            std::array::from_fn(|k| (before[k] + correction[k]).max(0.)),
-        ))
+    // Synthesis can remove the colour difference exactly at the camera's
+    // centre. Keep the same edge, but choose the nearest nonzero ramp probe.
+    let mut segments: Vec<usize> = (3..253).collect();
+    segments.sort_by_key(|s| s.abs_diff(128));
+    let segment = segments
+        .into_iter()
+        .find(|&s| {
+            let x = s as f32 * 128. + 64.;
+            map.record(0, 1, s)[0] & super::FALLBACK != 0
+                && map.edge_strength(0, 1, x, BLEND) >= 0.999
+                && packed
+                    .correction(map, [x, 32767.], &palette)
+                    .iter()
+                    .any(|v| v.abs() > 0.001)
+                && packed
+                    .sample(map, [x, 32767.], &scene.texture_indices, &palette)
+                    .zip(packed.sample(map, [x, 32769.], &scene.texture_indices, &palette))
+                    .is_some_and(|(a, b)| (0..3).any(|k| (a[k] - b[k]).abs() > 0.002))
+        })
+        .ok_or("no nonzero UKR colour-ramp probe")?;
+    let x = segment as f32 * 128. + 64.;
+    let noise = f32::from(packed.record(0, 1, segment)[7]) / 127.5 - 1.;
+    let point = |d: f32| [x, 32768. + d];
+    let surface = |d: f32| {
+        packed
+            .surface(map, point(d), &scene.texture_indices, &palette)
+            .ok_or("no material")
     };
     if map.record(0, 1, 128)[0] & (BLEND | super::FALLBACK) != (BLEND | super::FALLBACK) {
-        return Err("known LAND boundary is not enabled for colour correction".into());
+        return Err("known LAND boundary is not enabled".into());
     }
-    let a = sample(-250.)?.0;
-    let b = sample(250.)?.0;
     let mut csv = std::fs::File::create(out.join("UKR-LAND-line.csv"))?;
     writeln!(
         csv,
-        "offset_ft,before_r,before_g,before_b,after_r,after_g,after_b"
+        "offset_ft,source_r,source_g,source_b,after_r,after_g,after_b,mean_weight,texture_weight"
     )?;
+    // Test the colour component independently of the now-varying texture.
+    let delta = packed
+        .correction(map, point(-1.), &palette)
+        .map(|v| v / super::weight(1.));
     let mut max_error = 0_f32;
     for d in (-300_i32..=300).step_by(5) {
-        let (before, after) = sample(f64::from(d))?;
-        let t = ((d as f32 + 250.) / 500.).clamp(0., 1.);
-        let t = t * t * (3. - 2. * t);
+        let before = ground_color(world, scene, point(d as f32).map(f64::from))?;
+        let after = surface(d as f32)?;
+        let correction = packed.correction(map, point(d as f32), &palette);
         for k in 0..3 {
-            max_error = max_error.max((after[k] - (a[k] + (b[k] - a[k]) * t)).abs());
+            let expected = delta[k] * super::weight(d as f32) * if d < 0 { 1. } else { -1. };
+            max_error = max_error.max((correction[k] - expected).abs());
         }
-        if d.abs() >= 250 && before != after {
-            return Err("correction escapes the 500 ft band".into());
+        if d.abs() >= 250 && before.iter().zip(after).any(|(a, b)| (a - b).abs() > 1e-6) {
+            return Err("texture correction escapes the 500 ft band".into());
         }
         let a = srgb(before);
         let b = srgb(after);
+        let t = ((d as f32 + 250.) / 500.).clamp(0., 1.);
         writeln!(
             csv,
-            "{d},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}",
-            a[0], a[1], a[2], b[0], b[1], b[2]
+            "{d},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6}",
+            a[0],
+            a[1],
+            a[2],
+            b[0],
+            b[1],
+            b[2],
+            t * t * (3. - 2. * t),
+            super::texture::blend_weight(d as f32, noise)
         )?;
     }
-    let left = sample(-1.)?;
-    let right = sample(1.)?;
-    let step = |a: [f32; 3], b: [f32; 3]| (0..3).map(|k| (a[k] - b[k]).abs()).fold(0., f32::max);
-    let before = step(srgb(left.0), srgb(right.0));
-    let after = step(srgb(left.1), srgb(right.1));
-    if before < 5. || after > 0.15 || max_error > 0.0007 {
-        return Err(format!(
-            "LAND ramp fails: before={before} after={after} linear error={max_error}"
-        )
-        .into());
+    if max_error > 1e-6 {
+        return Err("colour ramp differs from 500 ft analytic smoothstep".into());
     }
+    let step = |a: [f32; 3], b: [f32; 3]| (0..3).map(|k| (a[k] - b[k]).abs()).fold(0., f32::max);
+    let before = step(
+        srgb(ground_color(world, scene, point(-1.).map(f64::from))?),
+        srgb(ground_color(world, scene, point(1.).map(f64::from))?),
+    );
+    let after = step(srgb(surface(-1.)?), srgb(surface(1.)?));
     let text = format!(
-        "UKR LAND/PIC boundary x=16384 z=32768. Unlit bilinear source material, actual RG32Uint upload data.\nSource step across -1/+1 ft: {before:.6} RGB levels. Corrected: {after:.6}.\n500 ft smoothstep, -250/+250 endpoints unchanged; maximum linear-RGB error against analytic ramp: {max_error:.9}.\nPASS\n"
+        "UKR LAND/PIC boundary x={x} z=32768, nearest nonzero colour ramp to camera x=16384. Actual packed pages, rotations and palette.\nBaked source step -1/+1 ft: {before:.6} RGB levels. Texture blended: {after:.6}.\n500 ft colour component analytic error: {max_error:.9}; texture endpoints unchanged at +/-250 ft.\nPASS\n"
     );
     std::fs::write(out.join("line-check.txt"), &text)?;
+    print!("{text}");
+    Ok(())
+}
+
+fn texture_probe(out: &Path, code: &str, scene: &Scenery, spot: &Spot) -> AppResult<()> {
+    let map = &scene.vegetation.as_ref().ok_or("no atlas")?.seams;
+    let m = &map.mottle;
+    if m.pixels.is_empty() || m.source_pages == 0 {
+        return Err(format!("{code}: green LAND synthesis is missing").into());
+    }
+    for k in 0..16 {
+        let limit = if (4..10).contains(&k) { 0.25 } else { 0.01 };
+        let a = m.statistics[0][k];
+        let b = m.statistics[1][k];
+        if (a - b).abs() > a.max(1e-6) * limit {
+            return Err(format!(
+                "{code}: LAND statistic {k} exceeds {}% tolerance ({a} -> {b})",
+                limit * 100.
+            )
+            .into());
+        }
+    }
+    if !m.pixels.is_empty() {
+        let mut p = [spot.x as f32, spot.z as f32];
+        p[spot.axis] += 128.;
+        let tile = (p[1] / TILE) as usize * map.cols + (p[0] / TILE) as usize;
+        let mut page = map.material(tile)[0] as usize - 1;
+        if scene.land_texture == Some(page) {
+            page = map.material(tile - if spot.axis == 0 { 1 } else { map.cols })[0] as usize - 1;
+        }
+        let source = &scene.texture_indices[page * 65536..(page + 1) * 65536];
+        let panels = [&m.source[..], source, &m.pixels[..]];
+        let mut rgba = vec![255; 768 * 256 * 4];
+        for (panel, pixels) in panels.into_iter().enumerate() {
+            for y in 0..256 {
+                for x in 0..256 {
+                    let at = (y * 768 + panel * 256 + x) * 4;
+                    rgba[at..at + 3]
+                        .copy_from_slice(&scene.palette[usize::from(pixels[y * 256 + x])]);
+                }
+            }
+        }
+        std::fs::write(
+            out.join(format!("{code}-LAND-source-synthetic.png")),
+            crate::replay::png::encode_rgba(768, 256, &rgba)?,
+        )?;
+    }
+    let mut stats = std::fs::File::create(out.join(format!("{code}-mottle-statistics.csv")))?;
+    writeln!(stats, "metric,source,LAND,relative_error_percent")?;
+    for (k, name) in [
+        "mean_r",
+        "mean_g",
+        "mean_b",
+        "luminance_sd",
+        "rms_256ft",
+        "rms_512ft",
+        "rms_1024ft",
+        "rms_2048ft",
+        "rms_4096ft",
+        "rms_8192ft",
+        "dark_r",
+        "dark_g",
+        "dark_b",
+        "light_r",
+        "light_g",
+        "light_b",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let a = m.statistics[0][k];
+        let b = m.statistics[1][k];
+        writeln!(
+            stats,
+            "{name},{a:.9},{b:.9},{:.3}",
+            100. * (b - a).abs() / a.max(1e-6)
+        )?;
+    }
+    std::fs::write(
+        out.join(format!("{code}-mottle-fit.txt")),
+        format!(
+            "{} distinct neighbouring source pages; noise scale {} ft, small-octave share {}.\n",
+            m.source_pages, m.parameters[0], m.parameters[1]
+        ),
+    )?;
+    let packed = map.pack();
+    let palette = scene.palette.map(|p| p.map(super::linear));
+    let mut csv = std::fs::File::create(out.join(format!("{code}-texture-band.csv")))?;
+    writeln!(
+        csv,
+        "offset_ft,source_luminance_mean,source_luminance_sd,after_luminance_mean,after_luminance_sd,colour_only_mean,colour_only_sd,samples"
+    )?;
+    let lum = |p: [f32; 3]| p[0] * 0.2126 + p[1] * 0.7152 + p[2] * 0.0722;
+    let mut centre = [Vec::new(), Vec::new()];
+    for d in [-250., -125., -32., -1., 1., 32., 125., 250.] {
+        let mut sums = [0_f64; 6];
+        let mut count = 0;
+        for along in (-4096..4096).step_by(16) {
+            let mut p = [spot.x as f32, spot.z as f32];
+            p[spot.axis] += d;
+            p[1 - spot.axis] += along as f32;
+            let cell = p.map(|v| (v / TILE).floor() as usize);
+            let mut owner = cell;
+            if d >= 0. {
+                owner[spot.axis] -= 1;
+            }
+            let along = (p[1 - spot.axis] % TILE) / 128.;
+            if map.edge_strength(
+                owner[1] * map.cols + owner[0],
+                spot.axis,
+                along * 128.,
+                BLEND,
+            ) < 0.999
+            {
+                continue;
+            }
+            let Some(a) = packed.sample(map, p, &scene.texture_indices, &palette) else {
+                continue;
+            };
+            let b = packed
+                .surface(map, p, &scene.texture_indices, &palette)
+                .ok_or("texture sample missing")?;
+            let correction = packed.correction(map, p, &palette);
+            let c = f64::from(lum(std::array::from_fn(|k| (a[k] + correction[k]).max(0.))));
+            let a = f64::from(lum(a));
+            let b = f64::from(lum(b));
+            sums[0] += a;
+            sums[1] += a * a;
+            sums[2] += b;
+            sums[3] += b * b;
+            sums[4] += c;
+            sums[5] += c * c;
+            count += 1;
+            if d == -1. || d == 1. {
+                centre[usize::from(d > 0.)].push([a, b, c, f64::from(p[1 - spot.axis])]);
+            }
+            if d.abs() == 250. && (a - b).abs() > 1e-6 {
+                return Err("texture blend escapes band".into());
+            }
+        }
+        if count == 0 {
+            return Err(format!("{code}: no accepted texture strip samples").into());
+        }
+        let n = f64::from(count);
+        let mean = [sums[0] / n, sums[2] / n, sums[4] / n];
+        let sd = [
+            (sums[1] / n - mean[0] * mean[0]).max(0.).sqrt(),
+            (sums[3] / n - mean[1] * mean[1]).max(0.).sqrt(),
+            (sums[5] / n - mean[2] * mean[2]).max(0.).sqrt(),
+        ];
+        writeln!(
+            csv,
+            "{d},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{count}",
+            mean[0], sd[0], mean[1], sd[1], mean[2], sd[2]
+        )?;
+    }
+    if centre[0].len() != centre[1].len()
+        || centre[0].iter().zip(&centre[1]).any(|(a, b)| a[3] != b[3])
+    {
+        return Err("texture-strip sample positions differ across seam".into());
+    }
+    let n = centre[0].len();
+    let rms = |k: usize| {
+        (centre[0]
+            .iter()
+            .zip(&centre[1])
+            .map(|(a, b)| (a[k] - b[k]).powi(2))
+            .sum::<f64>()
+            / n.max(1) as f64)
+            .sqrt()
+    };
+    let before = rms(0);
+    let after = rms(1);
+    let colour_only = rms(2);
+    if after > before * 0.05 + 0.0001 {
+        return Err(format!("{code}: texture discontinuity {before} -> {after}").into());
+    }
+    let text = format!(
+        "{code}: accepted seam strips {n} pairs; luminance RMS jump across -1/+1 ft: source {before:.9}, colour-only {colour_only:.9}, texture blend {after:.9}. PASS\n"
+    );
+    std::fs::write(out.join(format!("{code}-texture-check.txt")), &text)?;
     print!("{text}");
     Ok(())
 }

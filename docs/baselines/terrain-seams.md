@@ -75,45 +75,75 @@ canopy handoff and measured millisecond cost require the lead's script. Retail
 runtime comparison remains unavailable. No window, GPU run, commit or push is
 part of this sandbox pass.
 
-## Lead review and revised CPU results
+## Current seam validation
 
-The first GPU review, retained in
-`.local/next-round/renders/exp-vegetation/seams-20261018-075956-525988/`, rejected
-the initial result. Camera files wrote degrees into a radian reader. The
-20,000 ft overview retained a LAND/PIC colour edge. The existing mask called
-LAND's green fill Field and the authored tile Forest, so it selected only a
-tree belt. The earlier CPU camera search examined accepted segments and missed
-this excluded boundary. The GPU timing job used in-memory radians and its
-cost was real: about 1 ms at 100 ft and 0.3 to 0.4 ms in several higher views.
-Those are measurements of the initial shader, not the revised one.
+The initial GPU review found degree-valued cameras and an excluded LAND edge.
+The lead's rerun of the fixes at `bcffd680`, retained under
+`.local/next-round/renders/exp-vegetation/seams-review-20261018-085122-572570/`,
+confirmed centred cameras and the working colour ramp. Its comparison images
+still show a texture-pattern boundary. The current implementation adds
+statistical LAND synthesis and a texture residual cross-fade, retaining the
+500 ft mean-colour ramp. These are opinionated presentation changes, not an
+importer correction or a retail parity claim.
 
-Implementation-mode review fixes start at `3207123815bbf11d729531ae71f607bc66329852`.
-The revised camera writer uses radians and checks the exact serialized camera
-through the actual reader, projection and a terrain ray. All 51 capture/cost
-cameras pass; maximum target-centre error is below 0.0001 pixel at 4K.
+CPU material evidence is in `.local/tmp-exp-vegetation/seams-texture-proof/`.
+It evaluates the actual RG32Uint upload records and indexed texture pages.
+Synthetic tests additionally cover all four neighbour rotations with reversed
+page order, source-class exclusions, unchanged outer endpoints and the exact
+500 ft colour ramp. All 65 serialized capture/cost cameras pass the real reader,
+projection and terrain ray; maximum centre error is below 0.0001 pixel at 4K.
 
-The pinned UKR boundary at x=16,384, z=32,768 joins LAND palette index 193,
-sRGB (45,105,77), to UKR23 index 194, (40,97,65). Both base T2 cells have colour
-212 and class 2. Treating the generic fallback shade as a crop field was the
-wrong exclusion. Green fallback can now blend into natural authored ground
-when those T2 values agree, while authored fields and all protected features
-retain their exclusions.
+The LAND fit uses only natural green pixels in distinct source pictures that
+adjoin accepted fallback edges. It records mean RGB, luminance standard
+deviation, dark/light patch colours, and RMS luminance increments at 256,
+512, 1,024, 2,048, 4,096 and 8,192 ft. Histograms and these statistics determine
+a synthesized page; no source spatial layout is copied. The source LAND has
+30 neutral flecks among 65,536 pixels, so the generic-fill gate requires at
+least 99% green and no transparent pixels. Protected-feature masks still use
+the original source art. Per-theater results:
 
-The new numeric probe uses unlit bilinear source colour and the actual RG32Uint
-upload bytes. Across -1/+1 ft the largest channel step falls from 12 to
-0.071686 RGB levels. Samples every 5 ft match the 500 ft analytic smoothstep
-within 0.000000015 in linear RGB; endpoints and samples outside +/-250 ft
-remain unchanged. Source-derived CSV, strips and camera checks are in
-`.local/tmp-exp-vegetation/seams-review-maps/`.
+| Theater | Distinct source pages | Noise cells / small octave share | Largest spatial-statistic error | Luminance contrast error |
+| --- | --- | --- | --- | --- |
+| UKR | 6 | 4,096 ft / 0.5 | 18.083% | 0.008% |
+| FRA | 4 | 2,048 ft / 0.25 | 22.544% | below 0.001% |
+| BAL | 16 | 1,024 ft / 0.5 | 8.144% | below 0.001% |
 
-The packed shader reads one or two edge records instead of individual bytes,
-and skips redundant palette resolutions. Constant edges resolve two palette
-indices; interpolated varying mixtures can still require eight. The GPU input
-uses 10,649,600 bytes for UKR/FRA and 16,777,216 for BAL, replacing the old
-shared-art seam pages. It uploads once and adds no draw call. Revised GPU
-appearance and milliseconds remain unmeasured in this sandbox. The updated
-lead script measures both implementations from the same verified cameras.
+Mean and dark/light RGB also match within 0.01%. The headless audit requires
+spatial errors within 25% and the other statistics within 1%. The finite
+32,768 ft procedural repetition and the use of one fit per theater remain
+approximations requiring visual review.
 
-Validation and current guard context are recorded in the session report's
-Tile seams / Review fixes section. No simulation, imported terrain, wire or
-recording format changes accompany these presentation fixes.
+The texture-band probe samples parallel strips one foot either side of a
+known accepted seam. Its colour-only control uses the synthesized LAND page
+and the retained mean ramp, isolating the extra texture contribution:
+
+| Theater | Colour-only RMS discontinuity | Texture-blended RMS discontinuity | Colour-only contrast gap | Texture-blended contrast gap |
+| --- | --- | --- | --- | --- |
+| UKR | 0.000802306 | 0.000011960 | 39.75% | 1.22% |
+| FRA | 0.001987366 | 0.000024485 | 30.97% | 0.16% |
+| BAL | 0.002623923 | 0.000084551 | 16.66% | 0.52% |
+
+RMS values are linear luminance. Contrast is strip luminance standard deviation;
+the gap is the absolute difference divided by the larger value. UKR/FRA have
+512 paired positions, BAL has 189 after feature exclusions. The CSVs also cover
+-250, -125, -32, +32, +125 and +250 ft; outer endpoints remain unchanged.
+The mean-ramp probe chooses a nonzero sample on the reviewed UKR edge because
+synthesis can already match the exact original camera-centre colour.
+
+GPU input uses 10,682,368 bytes for UKR/FRA and 16,809,984 for BAL, an extra
+32 KiB over the colour-only baseline for page/rotation metadata. Boundary noise
+occupies an existing spare byte and needs no per-pixel hash. LAND synthesis
+replaces one existing upload page without extra shader fetches or GPU memory.
+Accepted bands add one neighbour texture sample and one metadata read; existing
+footprint filtering remains. There is no new binding, draw or per-frame upload.
+
+The updated local `seams-lead.sh` builds unchanged `bcffd680` and the candidate
+with separate fresh target directories. It renders identical cameras, including
+5,000 and 10,000 ft overhead UKR LAND-edge views, and records 24 alternating
+4K High timing pairs at 100 and 2,000 ft plus the existing higher views. It also
+compares full on-state GPU times to include changes in the ordinary material
+path. New GPU appearance and milliseconds are unmeasured in this sandbox.
+
+Validation and the unchanged simulation/guard boundary are recorded in the
+report's Tile seams / Texture blend section. No importer, terrain-height,
+simulation-class, wire or replay data changes accompany this work.

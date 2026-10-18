@@ -48,7 +48,11 @@ def scenarios():
         env={'TORE_VEGETATION': '1', 'TORE_TERRAIN_SEAMS': '1'}, timeout=600,
         outputs=['seams/seam-metrics.tsv', 'seams/seam-cameras.txt',
                  'seams/camera-check.tsv', 'seams/seam-cost-cameras.txt',
-                 'seams/UKR-LAND-line.csv', 'seams/line-check.txt'],
+                 'seams/UKR-LAND-line.csv', 'seams/line-check.txt',
+                 'seams/UKR-mottle-statistics.csv', 'seams/FRA-mottle-statistics.csv',
+                 'seams/BAL-mottle-statistics.csv', 'seams/UKR-texture-band.csv',
+                 'seams/UKR-texture-check.txt', 'seams/FRA-texture-check.txt',
+                 'seams/BAL-texture-check.txt'],
         expect=['terrain seams: PASS UKR', 'terrain seams: PASS FRA',
                 'terrain seams: PASS BAL', 'exact cache and portable limits'],
     ), Scenario(

@@ -482,7 +482,23 @@ fn seam_mean(word:u32,row:i32,remaps:vec2<f32>)->vec3<f32> {
 fn seam_delta(record:vec2<u32>,row:i32,remaps:vec2<f32>)->vec3<f32> {
  return seam_mean(record.y,row,remaps)-seam_mean(record.x,row,remaps);
 }
-fn terrain_seam_color(color:vec3<f32>,world:vec2<f32>,row:i32,remaps:vec2<f32>)->vec3<f32> {
+fn seam_uv(uv:vec2<f32>,rotation:u32)->vec2<f32> {
+ switch rotation%4u {
+  case 1u:{return vec2<f32>(1.0-uv.y,1.0-uv.x);}
+  case 2u:{return vec2<f32>(1.0-uv.x,uv.y);}
+  case 3u:{return uv.yx;}
+  default:{return vec2<f32>(uv.x,1.0-uv.y);}
+ }
+}
+fn seam_uv_grad(uv:vec2<f32>,rotation:u32)->vec2<f32> {
+ switch rotation%4u {
+  case 1u:{return -uv.yx;}
+  case 2u:{return vec2<f32>(-uv.x,uv.y);}
+  case 3u:{return uv.yx;}
+  default:{return vec2<f32>(uv.x,-uv.y);}
+ }
+}
+fn terrain_seam_surface(color:vec3<f32>,world:vec2<f32>,world_grad:vec4<f32>,row:i32,core:i32,remaps:vec2<f32>)->vec3<f32> {
  let size=vec2<i32>(scene.canopy_detail.zw);
  if size.x<=0 || size.y<=0 {return color;}
  let cell=vec2<i32>(floor(world/32768.0));
@@ -503,18 +519,40 @@ fn terrain_seam_color(color:vec3<f32>,world:vec2<f32>,row:i32,remaps:vec2<f32>)-
  if (flags&8u)==0u {strength=smoothstep(0.0,1.0,t);}
  if (flags&16u)==0u {strength=min(strength,smoothstep(0.0,1.0,1.0-t));}
  var delta=seam_delta(current,row,remaps);
+ var noise=f32(current.y>>24u)/127.5-1.0;
  var next=segment;var blend=0.0;
  if t<0.5 && (flags&8u)!=0u {next=segment-1;blend=0.5-t;}
  if t>=0.5 && (flags&16u)!=0u {next=segment+1;blend=t-0.5;}
  if blend>0.0 {
   let other=seam_record(owner,axis,next);
+  noise=mix(noise,f32(other.y>>24u)/127.5-1.0,blend);
   // Long constant-colour edges need only two palette resolutions total.
   if any((current&vec2<u32>(0xffffffu))!=(other&vec2<u32>(0xffffffu))) {
    delta=mix(delta,seam_delta(other,row,remaps),blend);
   }
  }
  let weight=smoothstep(0.0,500.0,250.0-near[axis])*strength*select(1.0,-1.0,negative);
- return max(color+delta*weight,vec3<f32>(0.0));
+ // Fetch only the neighbour. The fragment already sampled its own page.
+ let neighbour=cell.y*size.x+cell.x+select(1,size.x,axis==1)*select(1,-1,negative);
+ let address=size.x*size.y*512+neighbour;
+ let width=i32(textureDimensions(seam_records).x);
+ let material=textureLoad(seam_records,vec2<i32>(address%width,address/width),0).rg;
+ if material.x==0u {return color;}
+ var uv=local/32768.0;uv[axis]=1.0-uv[axis];
+ var dx=world_grad.xy;var dy=world_grad.zw;dx[axis]=-dx[axis];dy[axis]=-dy[axis];
+ let rotated=seam_uv(uv,material.y);
+ let grad=vec4<f32>(seam_uv_grad(dx,material.y),seam_uv_grad(dy,material.y));
+ var other=vec4<f32>(0.0);
+ if row==0 {other=filtered_tile(rotated,grad,i32(material.x)-1,-1,core,remaps);}
+ else {other=sample_tile(rotated,i32(material.x)-1,row,-1,core,remaps);}
+ // Defensive coverage guard; the CPU mask also rejects nearby features.
+ if other.a<0.999 {return color;}
+ let signed_distance=near[axis]*select(-1.0,1.0,negative);
+ let displaced=signed_distance+80.0*noise*max(1.0-(signed_distance/250.0)*(signed_distance/250.0),0.0);
+ let pattern=smoothstep(-250.0,250.0,displaced);
+ let texture_weight=select(pattern,1.0-pattern,negative)*strength;
+ let residual=other.rgb-color-delta*select(1.0,-1.0,negative);
+ return max(color+delta*weight+residual*texture_weight,vec3<f32>(0.0));
 }
 // Forest horizon: expected crown coverage and mean art colour from CPU placement.
 // World-anchored texture replaces the missing crown share as objects thin/fade.
@@ -552,6 +590,8 @@ fn forest_canopy(color:vec3<f32>,direction:vec3<f32>,row:i32)->vec3<f32> {
 @fragment fn terrain_fragment(in:VertexOut)->@location(0) vec4<f32>{
  // Derivatives must be taken before the untextured early return.
  let grad=vec4<f32>(dpdx(in.uv),dpdy(in.uv));
+ let world=scene.origin.xz+scene.local_eye.xz+in.direction.xz;
+ let world_grad=vec4<f32>(dpdx(world/32768.0),dpdy(world/32768.0));
  let receiver=surface_normal(in.direction);
  let normal=select(receiver,normalize(in.terrain_normal),dot(in.terrain_normal,in.terrain_normal)>0.1 && smooth_weather());
  if in.layer<0.0 {
@@ -567,16 +607,15 @@ fn forest_canopy(color:vec3<f32>,direction:vec3<f32>,row:i32)->vec3<f32> {
  // Fitted bilinear coverage boundary; discarded water writes no depth.
  if tex.a<0.5 {discard;}
  if thermal_on() {
-  let bare=sample_tile(in.uv,i32(in.layer),base_row(),-1,-1,vec2<f32>(-1.0)).rgb;
+  let bare=terrain_seam_surface(sample_tile(in.uv,i32(in.layer),base_row(),-1,-1,vec2<f32>(-1.0)).rgb,world,world_grad,base_row(),-1,vec2<f32>(-1.0));
   return scenery(thermal_grey(thermal_ground(bare,normal,in.direction,in.distance)));
  }
  // One detail term for the shaded colour and the flare-lit albedo, so a
  // dynamic light (flare, afterburner, fire, gun flash) only adds light.
- let world=scene.origin.xz+scene.local_eye.xz+in.direction.xz;
- let field_color=terrain_seam_color(tex.rgb,world,0,remaps);
+ let field_color=terrain_seam_surface(tex.rgb,world,world_grad,0,in.light_row,remaps);
  let detail=ground_detail(field_color,in.direction,normal);
  var albedo=field_color;
- if flares_burning() {albedo=terrain_seam_color(sample_tile(in.uv,i32(in.layer),base_row(),-1,in.light_row,vec2<f32>(-1.0)).rgb,world,base_row(),vec2<f32>(-1.0));}
+ if flares_burning() {albedo=terrain_seam_surface(sample_tile(in.uv,i32(in.layer),base_row(),-1,in.light_row,vec2<f32>(-1.0)).rgb,world,world_grad,base_row(),in.light_row,vec2<f32>(-1.0));}
  let forest=forest_canopy(field_color,in.direction,0);
  albedo=forest_canopy(albedo,in.direction,base_row());
  return scenery(aerial_perspective(surface_color(forest*detail.tint,in.direction,detail.normal,false,receiver,albedo*detail.tint),in.direction,in.altitude));

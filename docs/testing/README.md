@@ -455,11 +455,21 @@ at pixel (1920,1080) in 4K. Degree-valued pitch is rejected by the reader.
 The fixed UKR LAND/PIC boundary at (16384,32768) must qualify, independently of
 what the mask's generic camera search accepts. `UKR-LAND-line.csv` samples
 unlit bilinear source colour and the actual packed GPU input at 5 ft intervals.
-`line-check.txt` checks a 500 ft analytic ramp and unchanged outer endpoints.
+`line-check.txt` checks the 500 ft analytic colour component and unchanged outer
+texture endpoints. `*-mottle-statistics.csv` compares LAND's mean, contrast,
+light/dark colours and RMS luminance increments with adjoining imported tiles.
+`*-texture-band.csv` measures mean and variance along both sides of the band;
+`*-texture-check.txt` requires their centre discontinuity to converge and
+also records the colour-only control.
+The audit requires spatial statistics within 25% and mean/contrast/patch
+colours within 1% for UKR/FRA/BAL. Missing synthesis fails. Cached synthetic pages
+and page/rotation metadata must roundtrip exactly. Dedicated overhead views at
+5,000 and 10,000 ft cover the reviewed UKR LAND rectangle edge.
 The standalone `seam-review` job also writes per-texel class/page diagnostics.
 All source-derived outputs stay local. Synthetic tests cover the fallback
 exception, protected authored fields, packed GPU data, palette changes,
-camera roundtrips, 500 ft width and exclusions.
+camera roundtrips, all neighbour rotations, statistical synthesis, the noisy
+texture weight, 500 ft width and exclusions.
 
 The lead-only `seam-cost` job requires GPU timestamps. It alternates correction
 off/on in one scene at 4K High and 100/500/2,000/10,000 ft over UKR and FRA.

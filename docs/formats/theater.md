@@ -281,6 +281,8 @@ The 2026-10-18 UKR/FRA/BAL audit compares imported layout, T2, picture and weath
 payloads with the source archives, recomputes `tdic` coverage, and checks the
 render mesh's texture pages and quarter-turn UVs. No new per-tile palette or
 shade mapping is established. The source pictures differ in colour, including
-the fitted LAND fallback. Retail runtime appearance and exact fallback-land
+the fitted LAND fallback. The exploratory renderer now derives a synthetic green
+LAND page from runtime tile statistics and blends texture detail at accepted
+edges; imported source resources and T2 cells stay unchanged. Retail runtime appearance and exact fallback-land
 projection remain unverified. [Measured evidence](../baselines/terrain-seams.md)
 and [exploratory seam presentation](../spec/terrain-detail.md#tile-seams).

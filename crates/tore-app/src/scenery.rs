@@ -536,6 +536,12 @@ impl Scenery {
                 } else {
                     [0.; 3]
                 };
+                if let Some(land) = land_texture.filter(|_| !map.mottle.pixels.is_empty()) {
+                    // A wholly synthesized page, fitted only to source colour
+                    // and spatial statistics. Same sampler, palette and UVs.
+                    out.texture_indices[land * 65536..(land + 1) * 65536]
+                        .copy_from_slice(&map.mottle.pixels);
+                }
                 atlas.seams = Arc::new(map);
             }
             out.vegetation = atlas.map(Arc::new);

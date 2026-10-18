@@ -2,6 +2,8 @@
 //! Shared edge masks and low-frequency colours, cached beside habitat/canopy.
 #[path = "terrain_seams_audit.rs"]
 pub mod audit;
+#[path = "terrain_seams_texture.rs"]
+pub mod texture;
 
 use crate::{
     terrain::Terrain,
@@ -37,6 +39,9 @@ pub struct Map {
     /// and north masks. Opposite sides read the very same edge record.
     pub bytes: Vec<u8>,
     pub mean_error: f32,
+    /// RG32Uint metadata after edge records: page + 1, quarter rotation.
+    pub materials: Vec<u8>,
+    pub mottle: texture::Mottle,
 }
 
 fn linear(v: u8) -> f32 {
@@ -140,6 +145,7 @@ impl Map {
             rows,
             bytes: vec![0; cols * rows * STRIDE],
             mean_error: 0.,
+            ..Default::default()
         };
         // Use the actual uploaded pages, including neutralized airfield art
         // and the fitted LAND fallback, never a guessed texture ordinal.
@@ -161,6 +167,21 @@ impl Map {
                     .or(land)
             })
             .collect();
+        for (i, &page) in pages.iter().enumerate() {
+            let key = ((i % cols * 4) as i32, (i / cols * 4) as i32);
+            out.materials
+                .extend_from_slice(&page.map_or(0, |p| p as u32 + 1).to_le_bytes());
+            out.materials.extend_from_slice(
+                &u32::from(
+                    world
+                        .environment
+                        .textures
+                        .get(&key)
+                        .map_or(0, |p| p.rotation % 4),
+                )
+                .to_le_bytes(),
+            );
+        }
         for (i, &page) in pages.iter().enumerate() {
             if let Some(p) = page {
                 out.bytes[i * STRIDE..i * STRIDE + 3].copy_from_slice(&means[p].1);
@@ -346,7 +367,13 @@ impl Map {
                     let edge = sampled.map(|p| [p[0], p[3], p[6]]);
                     let a = mean_linear(&edge[0], &linear_palette);
                     let b = mean_linear(&edge[1], &linear_palette);
-                    if (candidate & BLEND != 0 || filler) && difference(a.0, b.0) >= NOTICEABLE {
+                    // Texture discontinuities also qualify when their means
+                    // agree. Class and feature exclusions are unchanged.
+                    let texture_change =
+                        out.material(tile) != out.material(next) && sampled[0] != sampled[1];
+                    if (candidate & BLEND != 0 || filler)
+                        && (difference(a.0, b.0) >= NOTICEABLE || texture_change || filler)
+                    {
                         flags |= BLEND;
                         if filler {
                             flags |= FALLBACK;
@@ -360,7 +387,62 @@ impl Map {
                 }
             }
         }
+        out.mottle = texture::Mottle::build(&out, land, pixels, &atlas.palette);
+        // Keep the established colour ramp, now around the synthetic fill's
+        // actual edge means. Source masks and population never read its art.
+        if !out.mottle.pixels.is_empty() {
+            let whole = mean_linear(&out.mottle.pixels, &linear_palette).1;
+            for (tile, page) in pages.iter().enumerate() {
+                if *page == land {
+                    out.bytes[tile * STRIDE..tile * STRIDE + 3].copy_from_slice(&whole);
+                }
+            }
+            for tile in 0..cols * rows {
+                for axis in 0..2 {
+                    for segment in 0..256 {
+                        if out.record(tile, axis, segment)[0] & FALLBACK == 0 {
+                            continue;
+                        }
+                        let next = tile + if axis == 0 { 1 } else { cols };
+                        for (side, t) in [tile, next].into_iter().enumerate() {
+                            if pages[t] != land {
+                                continue;
+                            }
+                            let edge: Vec<_> = [-1, 0, 1]
+                                .map(|offset| {
+                                    let mut uv = [0; 2];
+                                    uv[axis] = if side == 0 { 255 } else { 0 };
+                                    uv[1 - axis] = (segment as i32 + offset) as usize;
+                                    let (u, v) = crate::vegetation::rotate(
+                                        uv[0],
+                                        uv[1],
+                                        out.material(t)[1] as u8,
+                                    );
+                                    out.mottle.pixels[v * 256 + u]
+                                })
+                                .into();
+                            let m = mean_linear(&edge, &linear_palette);
+                            let at = tile * STRIDE
+                                + 4
+                                + (axis * SEGMENTS + segment) * RECORD
+                                + 1
+                                + side * 3;
+                            out.bytes[at..at + 3].copy_from_slice(&m.1);
+                            out.mean_error = out.mean_error.max(m.2);
+                        }
+                    }
+                }
+            }
+        }
         out
+    }
+
+    pub fn material(&self, tile: usize) -> [u32; 2] {
+        let r = &self.materials[tile * 8..tile * 8 + 8];
+        [
+            u32::from_le_bytes(r[..4].try_into().unwrap()),
+            u32::from_le_bytes(r[4..].try_into().unwrap()),
+        ]
     }
 
     pub fn record(&self, tile: usize, axis: usize, segment: usize) -> &[u8] {
@@ -407,8 +489,8 @@ impl Map {
     }
 
     pub fn gpu_size(&self) -> [u32; 2] {
-        let count = (self.cols * self.rows * 2 * SEGMENTS).max(1) as u32;
-        let width = count.min(1024);
+        let count = (self.cols * self.rows * (2 * SEGMENTS + 1)).max(1) as u32;
+        let width = count.min(2048);
         [width, count.div_ceil(width)]
     }
 
@@ -434,11 +516,22 @@ impl Map {
                         flags |= NEXT;
                     }
                     let at = ((tile * 2 + axis) * SEGMENTS + segment) * 8;
+                    let mut world = [
+                        (tile % self.cols) as f32 * TILE,
+                        (tile / self.cols) as f32 * TILE,
+                    ];
+                    world[axis] += TILE;
+                    world[1 - axis] += segment as f32 * 128. + 64.;
+                    let noise = (crate::vegetation::detail_noise(world.map(|v| v / 512.), 0, 403)
+                        * 255.)
+                        .round() as u8;
                     bytes[at..at + 8]
-                        .copy_from_slice(&[r[1], r[2], r[3], flags, r[4], r[5], r[6], 0]);
+                        .copy_from_slice(&[r[1], r[2], r[3], flags, r[4], r[5], r[6], noise]);
                 }
             }
         }
+        let offset = self.cols * self.rows * 2 * SEGMENTS * 8;
+        bytes[offset..offset + self.materials.len()].copy_from_slice(&self.materials);
         Packed { size, bytes }
     }
 
@@ -500,6 +593,139 @@ pub struct Packed {
     pub bytes: Vec<u8>,
 }
 impl Packed {
+    fn material(&self, map: &Map, tile: usize) -> [u32; 2] {
+        let at = (map.cols * map.rows * 512 + tile) * 8;
+        std::array::from_fn(|k| {
+            u32::from_le_bytes(self.bytes[at + k * 4..at + k * 4 + 4].try_into().unwrap())
+        })
+    }
+
+    /// Bilinear indexed source sampling with the real uploaded page/rotation.
+    /// Used by the CPU material audit, including synthesized LAND pages.
+    pub fn sample(
+        &self,
+        map: &Map,
+        world: [f32; 2],
+        pixels: &[u8],
+        palette: &[[f32; 3]; 256],
+    ) -> Option<[f32; 3]> {
+        let cell = world.map(|v| (v / TILE).floor() as i32);
+        if cell[0] < 0 || cell[1] < 0 || cell[0] >= map.cols as i32 || cell[1] >= map.rows as i32 {
+            return None;
+        }
+        let material = self.material(map, cell[1] as usize * map.cols + cell[0] as usize);
+        Self::sample_material(material, world.map(|v| (v / TILE).fract()), pixels, palette)
+    }
+
+    fn sample_material(
+        material: [u32; 2],
+        uv: [f32; 2],
+        pixels: &[u8],
+        palette: &[[f32; 3]; 256],
+    ) -> Option<[f32; 3]> {
+        if material[0] == 0 {
+            return None;
+        }
+        let [u, v] = uv;
+        let uv = match material[1] % 4 {
+            1 => [1. - v, 1. - u],
+            2 => [1. - u, v],
+            3 => [v, u],
+            _ => [u, 1. - v],
+        };
+        let p = uv.map(|v| v * 256. - 0.5);
+        let base = p.map(|v| v.floor() as i32);
+        let f = p.map(|v| v - v.floor());
+        let mut result = [0.; 3];
+        let mut coverage = 0.;
+        for y in 0..2 {
+            for x in 0..2 {
+                let at = (material[0] as usize - 1) * 65536
+                    + (base[1] + y).clamp(0, 255) as usize * 256
+                    + (base[0] + x).clamp(0, 255) as usize;
+                let index = pixels[at];
+                let w =
+                    if x == 0 { 1. - f[0] } else { f[0] } * if y == 0 { 1. - f[1] } else { f[1] };
+                if index != 255 {
+                    coverage += w;
+                    for k in 0..3 {
+                        result[k] += palette[usize::from(index)][k] * w;
+                    }
+                }
+            }
+        }
+        (coverage >= 0.999).then(|| result.map(|v| v / coverage))
+    }
+
+    pub fn surface(
+        &self,
+        map: &Map,
+        world: [f32; 2],
+        pixels: &[u8],
+        palette: &[[f32; 3]; 256],
+    ) -> Option<[f32; 3]> {
+        let own = self.sample(map, world, pixels, palette)?;
+        let cell = world.map(|v| (v / TILE).floor() as usize);
+        let local = world.map(|v| v % TILE);
+        let near = local.map(|v| v.min(TILE - v));
+        let axis = usize::from(near[1] < near[0]);
+        if near[axis] >= HALF_WIDTH {
+            return Some(own);
+        }
+        let negative = local[axis] < TILE / 2.;
+        if (negative && cell[axis] == 0)
+            || (!negative && cell[axis] + 1 == [map.cols, map.rows][axis])
+        {
+            return Some(own);
+        }
+        let offset = [1, map.cols][axis];
+        let tile = cell[1] * map.cols + cell[0];
+        let owner = tile - if negative { offset } else { 0 };
+        let along = local[1 - axis] / 128.;
+        let t = along.fract();
+        let flags = self.record(owner, axis, along.floor() as usize)[3];
+        if flags & BLEND == 0 {
+            return Some(own);
+        }
+        let smooth = |v: f32| v * v * (3. - 2. * v);
+        let strength =
+            (if flags & PREVIOUS != 0 { 1. } else { smooth(t) }).min(if flags & NEXT != 0 {
+                1.
+            } else {
+                smooth(1. - t)
+            });
+        let neighbour = if negative {
+            tile - offset
+        } else {
+            tile + offset
+        };
+        let mut uv = local.map(|v| v / TILE);
+        uv[axis] = 1. - uv[axis];
+        let Some(other) = Self::sample_material(self.material(map, neighbour), uv, pixels, palette)
+        else {
+            return Some(own);
+        };
+        let correction = self.correction(map, world, palette);
+        let w = weight(near[axis]) * strength;
+        if w <= 0. {
+            return Some(own);
+        }
+        let segment = along.floor() as usize;
+        let mut noise = f32::from(self.record(owner, axis, segment)[7]) / 127.5 - 1.;
+        let (next, mix) = if t < 0.5 && flags & PREVIOUS != 0 {
+            (segment - 1, 0.5 - t)
+        } else if t >= 0.5 && flags & NEXT != 0 {
+            (segment + 1, t - 0.5)
+        } else {
+            (segment, 0.)
+        };
+        noise += (f32::from(self.record(owner, axis, next)[7]) / 127.5 - 1. - noise) * mix;
+        let blend = texture::blend_weight(near[axis] * if negative { 1. } else { -1. }, noise);
+        let blend = (if negative { 1. - blend } else { blend }) * strength;
+        Some(std::array::from_fn(|k| {
+            (own[k] + correction[k] + (other[k] - own[k] - correction[k] / w) * blend).max(0.)
+        }))
+    }
     fn record(&self, tile: usize, axis: usize, segment: usize) -> &[u8] {
         let at = ((tile * 2 + axis) * SEGMENTS + segment) * 8;
         &self.bytes[at..at + 8]
@@ -572,6 +798,64 @@ impl Packed {
 mod tests {
     use super::*;
     #[test]
+    fn textured_edges_converge_with_every_neighbour_rotation_and_page_order() {
+        let (mut world, atlas, mut layers, mut pixels) = two_tiles();
+        // Reverse the page order and give both pages different spatial detail.
+        layers.insert((0, 0), 1);
+        layers.insert((4, 0), 0);
+        for y in 0..256 {
+            for x in 0..256 {
+                pixels[y * 256 + x] = if (x / 3 + y / 5) % 2 == 0 { 12 } else { 13 };
+                pixels[65536 + y * 256 + x] = if (x / 7 + y / 2) % 2 == 0 { 12 } else { 13 };
+            }
+        }
+        for rotation in 0..4 {
+            world.environment.textures.insert(
+                (4, 0),
+                tore_formats::theater::TexturePlacement {
+                    col: 4,
+                    row: 0,
+                    texture: 1,
+                    rotation,
+                    resource: None,
+                },
+            );
+            let map = Map::build(&world, &atlas, &layers, None, &pixels);
+            let packed = map.pack();
+            assert_eq!(packed.material(&map, 0), [2, 0]);
+            assert_eq!(packed.material(&map, 1), [1, u32::from(rotation)]);
+            let palette = atlas.palette.map(|p| p.map(linear));
+            let mut jump = 0_f32;
+            let mut blended = 0_f32;
+            for z in (8192..16384).step_by(32) {
+                // Mixed-class/run-end exclusions intentionally remain sharp.
+                if map.edge_strength(0, 0, z as f32, BLEND) < 0.999 {
+                    continue;
+                }
+                let left = [32768. - 0.125, z as f32];
+                let right = [32768. + 0.125, z as f32];
+                let a = packed.sample(&map, left, &pixels, &palette).unwrap();
+                let b = packed.sample(&map, right, &pixels, &palette).unwrap();
+                let aa = packed.surface(&map, left, &pixels, &palette).unwrap();
+                let bb = packed.surface(&map, right, &pixels, &palette).unwrap();
+                jump += (a[1] - b[1]).powi(2);
+                blended += (aa[1] - bb[1]).powi(2);
+                for d in [-300., -250., 250., 300.] {
+                    let p = [32768. + d, z as f32];
+                    assert_eq!(
+                        packed.sample(&map, p, &pixels, &palette),
+                        packed.surface(&map, p, &pixels, &palette)
+                    );
+                }
+            }
+            assert!(jump > 0.001);
+            assert!(
+                blended < jump * 0.0001,
+                "rotation {rotation}: {jump} -> {blended}"
+            );
+        }
+    }
+    #[test]
     fn land_fill_shade_does_not_make_an_authored_field_boundary() {
         let (mut world, mut atlas, mut layers, mut pixels) = two_tiles();
         layers.remove(&(0, 0));
@@ -639,7 +923,7 @@ mod tests {
             rows: 64,
             ..Default::default()
         };
-        assert_eq!(large.gpu_size(), [1024, 2048]);
+        assert_eq!(large.gpu_size(), [2048, 1026]);
         assert_eq!(Map::default().pack().bytes, [0; 8]);
     }
     type Fixture = (Terrain, Atlas, BTreeMap<(i32, i32), usize>, Vec<u8>);
@@ -716,7 +1000,11 @@ mod tests {
         }
         let map = Map::build(&world, &atlas, &layers, None, &pixels);
         assert_ne!(&map.bytes[..3], &map.bytes[STRIDE..STRIDE + 3]);
-        assert_eq!(map.record(0, 0, 100)[0], 0);
+        assert_eq!(map.record(0, 0, 100)[0], BLEND);
+        assert_eq!(
+            map.edge_delta(0, 0, 12864., &atlas.palette.map(|p| p.map(linear))),
+            [0.; 3]
+        );
     }
     #[test]
     fn field_forest_belt_increases_trees_only_inside_its_band() {
@@ -727,6 +1015,7 @@ mod tests {
             rows: 1,
             bytes: vec![0; 2 * STRIDE],
             mean_error: 0.,
+            ..Default::default()
         };
         for s in 80..120 {
             map.bytes[4 + s * RECORD] = HEDGE;
@@ -829,6 +1118,7 @@ mod tests {
             rows: 1,
             bytes: vec![0; 2 * STRIDE],
             mean_error: 0.,
+            ..Default::default()
         };
         for segment in 80..84 {
             m.bytes[4 + segment * RECORD] = HEDGE;

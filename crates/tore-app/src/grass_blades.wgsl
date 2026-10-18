@@ -100,7 +100,12 @@ struct BladeOut {
   index=read_tile(p,i32(a.y));
  }
  if index==255u {return out;}
- let ground=terrain_seam_color(shade(index,base_row()).rgb,world,base_row(),vec2<f32>(-1.0));
+ var source=shade(index,base_row()).rgb;
+ let tile_local=fract(world/32768.0)*32768.0;
+ if a.y>=0.0 && scene.canopy_detail.z>0.0 && min(min(tile_local.x,tile_local.y),min(32768.0-tile_local.x,32768.0-tile_local.y))<250.0 {
+  source=sample_tile(seam_uv(fract(world/32768.0),u32(a.z)),i32(a.y),base_row(),-1,-1,vec2<f32>(-1.0)).rgb;
+ }
+ let ground=terrain_seam_surface(source,world,vec4<f32>(0.0),base_row(),-1,vec2<f32>(-1.0));
  let dry=scene.veg.w==1.0 || scene.veg.w==2.0 || habitat==3u;
  var color=ground*select(vec3<f32>(0.92,1.10,0.83),vec3<f32>(1.12,1.02,0.75),dry);
  if habitat==2u {color*=vec3<f32>(1.12,1.04,0.79);}
