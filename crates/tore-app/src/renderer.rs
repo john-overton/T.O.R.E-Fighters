@@ -164,7 +164,9 @@ pub struct Renderer {
     cockpit: crate::cockpit_renderer::CockpitRenderer,
     mirror_camera: crate::camera::Camera,
     mirror_vertices: Vec<f32>,
+    /// Rear mirror renders, and which flight frames draw one.
     pub mirror_frames: u64,
+    mirror_cadence: crate::mirrors::Cadence,
     mirrors_enabled: bool,
     graphics: crate::graphics::Options,
     /// The present modes the surface offers, and the frame rate in effect
@@ -228,7 +230,16 @@ impl Renderer {
                 camera.position = eye;
                 let mut encoder = device.create_command_encoder(&Default::default());
                 vegetation.set_settle(true);
-                vegetation.prepare(&queue, &mut encoder, &camera, world, [0.; 3], [640, 480]);
+                vegetation.prepare(
+                    &device,
+                    &queue,
+                    &mut encoder,
+                    crate::sim_renderer::ViewKind::Main,
+                    &camera,
+                    world,
+                    [0.; 3],
+                    [640, 480],
+                );
                 vegetation.set_settle(false);
                 queue.submit([encoder.finish()]);
             }
@@ -275,6 +286,8 @@ impl Renderer {
     ) -> Option<std::thread::JoinHandle<()>> {
         self.previews.clear();
         self.mirror_vertices.clear();
+        // The mirror picture belongs to the previous aircraft or scene.
+        self.mirror_cadence = Default::default();
         let old = LoadingGraphics {
             sim: std::mem::replace(&mut self.sim, graphics.sim),
             cockpit: std::mem::replace(&mut self.cockpit, graphics.cockpit),
@@ -295,6 +308,8 @@ impl Renderer {
     pub fn prepare_aircraft(&mut self, hornet: &crate::aircraft::Airframe) {
         self.previews.clear();
         self.mirror_vertices.clear();
+        // The mirror picture belongs to the previous aircraft or scene.
+        self.mirror_cadence = Default::default();
         self.sim.clear_aircraft();
         self.sim.aircraft(&self.device, &self.queue, hornet, &[]);
         self.cockpit.prepare(
@@ -421,6 +436,7 @@ impl Renderer {
             self.graphics,
             self.samples(self.graphics.anti_aliasing),
         );
+        self.mirror_cadence = Default::default();
     }
     pub fn begin_cpu_frame(&mut self) {
         self.frame_cpu = Some(std::time::Instant::now());
@@ -662,6 +678,7 @@ impl Renderer {
             mirror_camera: crate::camera::Camera::new(),
             mirror_vertices: Vec::new(),
             mirror_frames: 0,
+            mirror_cadence: Default::default(),
             mirrors_enabled: std::env::var("TORE_MIRRORS").as_deref() != Ok("0"),
             graphics,
             sample_counts,
@@ -691,29 +708,46 @@ impl Renderer {
         })
     }
     /// Submit before the primary pass writes the shared camera/vertex buffers.
-    /// GPU-only render-to-texture, every visible frame, with no pixel readback.
-    /// With `timed` its GPU time joins the frame counter's GPU figure.
+    /// GPU-only render-to-texture with no pixel readback: every other visible
+    /// flight frame (`cadence`), always for a capture. One rear camera feeds
+    /// every mirror. With `timed` its GPU time joins the frame counter's GPU
+    /// figure.
     fn render_mirrors(
         &mut self,
         world: &crate::terrain::Terrain,
         scenery: &crate::scenery::Scenery,
         timed: bool,
+        cadence: bool,
     ) {
-        if !self.mirrors_enabled || !self.cockpit.mirrors_visible {
+        let visible = self.mirrors_enabled && self.cockpit.mirrors_visible;
+        let due = if cadence {
+            self.mirror_cadence.due(visible)
+        } else {
+            visible
+        };
+        if !visible {
             return;
         }
+        // The main view draws after this with the aircraft buffer as the
+        // mirror left it, drawn or not, so its picture (the flown
+        // aircraft's shadow) is the same either way.
         self.sim
             .update_aircraft_vertices(&self.queue, &self.mirror_vertices);
+        if !due {
+            self.sim.hide_aircraft();
+            return;
+        }
         let view = self.cockpit.mirror_target.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
         let timed = timed && self.counter_shown();
         if timed {
             self.frame_gpu.begin(&mut encoder);
         }
-        self.sim.draw(
+        self.sim.draw_view(
             &self.device,
             &self.queue,
             &mut encoder,
+            crate::sim_renderer::ViewKind::Mirror,
             &view,
             crate::mirrors::SIZE,
             &self.mirror_camera,
@@ -741,7 +775,15 @@ impl Renderer {
         } else {
             [960, 720]
         };
-        let pixels = self.scene_pixels(camera, world, scenery, width, height, overlay)?;
+        let pixels = self.scene_pixels(
+            crate::sim_renderer::ViewKind::Main,
+            camera,
+            world,
+            scenery,
+            width,
+            height,
+            overlay,
+        )?;
         let mut file = std::fs::File::create(path)?;
         write!(file, "P6\n{width} {height}\n255\n")?;
         for p in pixels.chunks_exact(4) {
@@ -750,8 +792,12 @@ impl Renderer {
         println!("Scene capture: {}", path.display());
         Ok(())
     }
+    /// A blocking capture of `kind`'s view (the main view for a screenshot,
+    /// a camera panel's page for the smoke test's panels).
+    #[allow(clippy::too_many_arguments)]
     pub fn scene_pixels(
         &mut self,
+        kind: crate::sim_renderer::ViewKind,
         camera: &crate::camera::Camera,
         world: &crate::terrain::Terrain,
         scenery: &crate::scenery::Scenery,
@@ -760,7 +806,7 @@ impl Renderer {
         overlay: bool,
     ) -> AppResult<Vec<u8>> {
         let pending =
-            self.submit_readback(camera, world, scenery, width, height, overlay, false)?;
+            self.submit_readback(kind, camera, world, scenery, width, height, overlay, false)?;
         self.device.poll(wgpu::PollType::Wait {
             submission_index: None,
             timeout: Some(std::time::Duration::from_secs(30)),
@@ -801,7 +847,16 @@ impl Renderer {
             return Err("invalid camera instrument".into());
         }
         if !self.previews.contains_key(&page) {
-            let pending = self.submit_readback(camera, world, scenery, 138, 114, false, true)?;
+            let pending = self.submit_readback(
+                crate::sim_renderer::ViewKind::Panel(page),
+                camera,
+                world,
+                scenery,
+                138,
+                114,
+                false,
+                true,
+            )?;
             self.previews.insert(page, pending);
             return Ok(true);
         }
@@ -810,6 +865,7 @@ impl Renderer {
     #[allow(clippy::too_many_arguments)]
     fn submit_readback(
         &mut self,
+        kind: crate::sim_renderer::ViewKind,
         camera: &crate::camera::Camera,
         world: &crate::terrain::Terrain,
         scenery: &crate::scenery::Scenery,
@@ -825,7 +881,7 @@ impl Renderer {
             .readbacks
             .texture(&self.device, [width, height], self.config.format);
         if overlay {
-            self.render_mirrors(world, scenery, false);
+            self.render_mirrors(world, scenery, false, false);
         }
         let view = texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
@@ -834,10 +890,11 @@ impl Renderer {
         if timed {
             self.frame_gpu.begin(&mut encoder);
         }
-        self.sim.draw(
+        self.sim.draw_view(
             &self.device,
             &self.queue,
             &mut encoder,
+            kind,
             &view,
             [width, height],
             camera,
@@ -1132,7 +1189,7 @@ impl Renderer {
         if flight_size.is_some()
             && let Some((_, world, scenery)) = scene
         {
-            self.render_mirrors(world, scenery, true);
+            self.render_mirrors(world, scenery, true, true);
         }
         let view = frame.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());

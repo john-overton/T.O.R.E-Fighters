@@ -713,12 +713,22 @@ pub struct EffectRenderer {
     glows: Vec<crate::night_glow::Glow>,
     sustained_lights: Vec<crate::countermeasure_renderer::FlareLight>,
     glow_on: bool,
+    /// This frame's sprites with their fires fitted, and those sprites'
+    /// glows and lights, shared by every view until the next `prepare` or
+    /// `fit_fires`.
+    fitted: Option<FittedSprites>,
 }
+
+type FittedSprites = (
+    Vec<Sprite>,
+    Vec<crate::night_glow::Glow>,
+    Vec<crate::countermeasure_renderer::FlareLight>,
+);
 
 /// What the camera at `eye` draws, in drawing order: the nearest
 /// [`MAX_MARK_INSTANCES`] flat marks within their draw distance, far to
 /// near, then everything else far to near, [`MAX_INSTANCES`] in all.
-fn visible(sprites: &[Sprite], eye: [f64; 3]) -> Vec<&Sprite> {
+fn visible<'a>(sprites: impl IntoIterator<Item = &'a Sprite>, eye: [f64; 3]) -> Vec<&'a Sprite> {
     let distance = |s: &Sprite| -> f64 {
         let offset: [f64; 3] = std::array::from_fn(|i| s.position[i] - eye[i]);
         offset.iter().map(|v| v * v).sum::<f64>().sqrt()
@@ -889,12 +899,14 @@ impl EffectRenderer {
             glows: Vec::new(),
             sustained_lights: Vec::new(),
             glow_on: crate::night_glow::enabled(),
+            fitted: None,
         }
     }
     /// The fires of destroyed units and the width each is drawn at, for the
     /// next `update`.
     pub fn fit_fires(&mut self, fires: &[([f64; 3], f64)]) {
         self.fires = fires.to_vec();
+        self.fitted = None;
     }
     /// The burning city buildings' fires for this frame, `tick` the
     /// presentation tick that turns their flames' frames. Replaces the last
@@ -1113,6 +1125,7 @@ impl EffectRenderer {
         }
         self.fire_present = art.present[FIRE_SHEET];
         self.sprites = sprites(art, effects, marks, climate);
+        self.fitted = None;
     }
     /// Sorts what the camera can see: craters first, then everything else
     /// far to near.
@@ -1123,15 +1136,31 @@ impl EffectRenderer {
         world: &crate::terrain::Terrain,
     ) {
         let eye = camera.position;
-        let mut fitted = fit_fires(&self.sprites, &self.fires);
-        fitted.extend_from_slice(&self.city);
+        // The fitted sprites and their glows do not depend on the camera:
+        // made once per frame (after `prepare` and `fit_fires`), shared by
+        // every view. The city's fires are per view and follow them.
+        let glow_on = self.glow_on;
+        let (sprites, fires) = (&self.sprites, &self.fires);
+        let (base, base_glows, base_lights) = self.fitted.get_or_insert_with(|| {
+            let fitted = fit_fires(sprites, fires);
+            let (glows, lights) = if glow_on {
+                glows_of(&fitted)
+            } else {
+                Default::default()
+            };
+            (fitted, glows, lights)
+        });
         self.glows.clear();
         self.sustained_lights.clear();
         if self.glow_on {
-            (self.glows, self.sustained_lights) = glows_of(&fitted);
+            let (city_glows, city_lights) = glows_of(&self.city);
+            self.glows.extend_from_slice(base_glows);
+            self.glows.extend(city_glows);
+            self.sustained_lights.extend_from_slice(base_lights);
+            self.sustained_lights.extend(city_lights);
             self.glows.extend_from_slice(&self.far_city);
         }
-        let visible = visible(&fitted, eye);
+        let visible = visible(base.iter().chain(&self.city), eye);
         self.flat_count = visible.iter().take_while(|s| s.mode == Mode::Flat).count() as u32;
         let mut instances = Vec::with_capacity(visible.len().min(MAX_INSTANCES) * INSTANCE_BYTES);
         for s in visible {

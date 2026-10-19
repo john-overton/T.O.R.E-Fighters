@@ -1,4 +1,5 @@
 //! Extensible 3D pass. World data/camera are independent of wgpu; UI composites afterward.
+pub use crate::vegetation_renderer::ViewKind;
 use crate::{
     camera::Camera,
     scenery::{Scenery, StaticGeometry},
@@ -182,6 +183,9 @@ pub struct SimRenderer {
     city_clock: Option<crate::city_fires::Clock>,
     /// The burning city as the last draw had it, in numbers (nr-fx4).
     city_report: crate::city_fires::Report,
+    /// The main view's last burning-city frame and wall clock, which the
+    /// mirror shows (optimization S10).
+    city_main: Option<(crate::city_fires::Frame, f64)>,
     /// Whether they are drawn (`TORE_NO_CITY_FIRES=1` turns them off, a
     /// developer aid like `TORE_CITY_FILL=0`; the stress measurement flips
     /// it).
@@ -1045,6 +1049,7 @@ impl SimRenderer {
             city_fires: crate::city_fires::CityFires::new(),
             city_clock: None,
             city_report: crate::city_fires::Report::default(),
+            city_main: None,
             city_fires_on: std::env::var_os("TORE_NO_CITY_FIRES").is_none(),
         }
     }
@@ -1680,12 +1685,42 @@ impl SimRenderer {
         self.targets.push(targets);
         self.targets.len() - 1
     }
+    /// Draws the main view ([`ViewKind::Main`]).
     #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        size: [u32; 2],
+        camera: &Camera,
+        world: &Terrain,
+        scenery: &Scenery,
+    ) {
+        self.draw_view(
+            device,
+            queue,
+            encoder,
+            ViewKind::Main,
+            target,
+            size,
+            camera,
+            world,
+            scenery,
+        );
+    }
+    /// Draws one camera's view. Only the main view moves the vegetation
+    /// stream and the burning city's frame; the mirror reuses both, and a
+    /// camera panel far from the main eye streams its own vegetation
+    /// ([`ViewKind`]).
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_view(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        kind: ViewKind,
         target: &wgpu::TextureView,
         size: [u32; 2],
         camera: &Camera,
@@ -1880,13 +1915,24 @@ impl SimRenderer {
                     None => (wall, None),
                 };
                 self.city_fires.observe_with(fill, now, falls);
-                let frame = self.city_fires.frame(camera.position, now);
-                self.city_report = frame.report(self.city_fires.blazes().len());
+                // The mirror's eye is about 12 ft from the main one: it
+                // shows the main view's last fires and columns.
+                let (frame, wall) = match (&self.city_main, kind) {
+                    (Some(main), ViewKind::Mirror) => main.clone(),
+                    _ => (self.city_fires.frame(camera.position, now), wall),
+                };
+                if kind == ViewKind::Main {
+                    self.city_report = frame.report(self.city_fires.blazes().len());
+                }
                 self.effects.set_city_fires(&frame.fires, wall as u64);
-                self.effects.set_far_city(frame.glows);
+                self.effects.set_far_city(frame.glows.clone());
                 self.smoke.set_city_smoke(&frame.puffs);
+                if kind == ViewKind::Main {
+                    self.city_main = Some((frame, wall));
+                }
             }
             None => {
+                self.city_main = None;
                 self.city_report = crate::city_fires::Report::default();
                 self.effects.set_city_fires(&[], 0);
                 self.effects.set_far_city(Vec::new());
@@ -1976,7 +2022,16 @@ impl SimRenderer {
             fill.prepare(queue, encoder, camera, scenery.origin, size);
         }
         if let Some(vegetation) = &mut self.vegetation {
-            vegetation.prepare(queue, encoder, camera, world, scenery.origin, size);
+            vegetation.prepare(
+                device,
+                queue,
+                encoder,
+                kind,
+                camera,
+                world,
+                scenery.origin,
+                size,
+            );
             // Use this frame's uploaded circle for the terrain hand-off too.
             let end = uniform.len();
             uniform[end - 6] = vegetation.draw_reach().max(1.);

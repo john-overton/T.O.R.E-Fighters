@@ -152,6 +152,9 @@ pub struct Lights {
     /// Which flashers the flash buffer holds lit, so an unchanged sequence
     /// (the same tick, or another view of it) is not written again.
     flash_lit: Option<Vec<bool>>,
+    /// The weather tick `flash_lit` was worked out for: the pattern depends
+    /// only on it, so other views of the same tick skip the work.
+    flash_tick: Option<i64>,
 }
 
 impl Default for Lights {
@@ -169,6 +172,7 @@ impl Lights {
             flashers: Vec::new(),
             flash: None,
             flash_lit: None,
+            flash_tick: None,
         }
     }
 
@@ -185,6 +189,7 @@ impl Lights {
             let mut steady = Vec::new();
             self.flashers.clear();
             self.flash_lit = None;
+            self.flash_tick = None;
             for light in world.redrawn.iter().flat_map(|b| &b.lights) {
                 if light.kind == LightKind::Flasher {
                     self.flashers.push(*light);
@@ -215,8 +220,12 @@ impl Lights {
                 )
             });
         }
-        if let Some(flash) = &self.flash {
-            let seconds = world.weather.ticks() as f64 / 120.;
+        let tick = world.weather.ticks();
+        if let Some(flash) = &self.flash
+            && self.flash_tick != Some(tick)
+        {
+            self.flash_tick = Some(tick);
+            let seconds = tick as f64 / 120.;
             let lit: Vec<bool> = self
                 .flashers
                 .iter()

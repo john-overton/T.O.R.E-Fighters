@@ -3663,6 +3663,7 @@ impl Viewer {
     pub fn save_png(&self, renderer: &mut Renderer, path: &Path) -> AppResult<()> {
         let [width, height] = renderer.flight_size();
         let pixels = renderer.scene_pixels(
+            crate::sim_renderer::ViewKind::Main,
             &self.camera,
             &self.world,
             &self.scenery,

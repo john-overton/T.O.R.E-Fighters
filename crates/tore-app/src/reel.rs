@@ -115,10 +115,11 @@ impl Gpu {
     pub fn mirror(&mut self, camera: &Camera, world: &Terrain, scenery: &Scenery) {
         let view = self.cockpit.mirror_target.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        self.sim.draw(
+        self.sim.draw_view(
             &self.device,
             &self.queue,
             &mut encoder,
+            crate::sim_renderer::ViewKind::Mirror,
             &view,
             crate::mirrors::SIZE,
             camera,
