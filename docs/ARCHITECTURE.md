@@ -9550,7 +9550,9 @@ compared before and after):
   and the weather camera lean (the player and the missiles) when the main view
   and the saved Other View follow the player's own aircraft
   (`Rig::needs_bodies`), finds each aircraft type's engine sounds once, and
-  works out the ejection warning only for a mixer. A frame's spatial sound is
+  works out the ejection warning only for a mixer. A camera's weather step
+  reads the weather layer and the camera's facing once for the sun's alignment
+  and its smooth target. A frame's spatial sound is
   one call: each tick keeps its own listener, emissions, launches and player
   (`audio::SpatialStep`) and `Audio::spatial_frame` steps them all on the
   sources and loops of the frame's last tick, with one lock and one copy of the
