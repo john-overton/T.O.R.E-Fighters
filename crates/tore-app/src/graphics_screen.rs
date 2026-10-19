@@ -17,9 +17,9 @@ use crate::controls_editor::{
     ResultAction, TITLE, WHITE, fit, inside, text_width,
 };
 use crate::graphics::{
-    AntiAliasing, BUILDING_DETAILS, BUILDING_DISTANCES, GRASS_DISTANCES, GROUND_TEXTURE_DISTANCES,
-    Grass, GroundTexture, Options, RENDER_SCALES, SpottingAid, VEGETATION_DETAILS,
-    VEGETATION_DISTANCES, VegCards, VegDensity, scaled_size,
+    AntiAliasing, BUILDING_DETAILS, BUILDING_DISTANCES, FrameLimit, GRASS_DISTANCES,
+    GROUND_TEXTURE_DISTANCES, Grass, GroundTexture, Options, RENDER_SCALES, SpottingAid,
+    VEGETATION_DETAILS, VEGETATION_DISTANCES, VegCards, VegDensity, scaled_size,
 };
 use crate::menu::Canvas;
 use crate::widgets::{ArrowBar, ArrowRows, RowPress};
@@ -39,6 +39,7 @@ enum Row {
     AntiAliasing,
     RenderScale,
     SpottingAid,
+    FrameLimit,
     TerrainFiltering,
     FrameRate,
     BuildingDistance,
@@ -55,10 +56,11 @@ enum Row {
 }
 
 /// Every row in display order, grouped.
-const ALL_ROWS: [Row; 16] = [
+const ALL_ROWS: [Row; 17] = [
     Row::AntiAliasing,
     Row::RenderScale,
     Row::SpottingAid,
+    Row::FrameLimit,
     Row::TerrainFiltering,
     Row::GroundTexture,
     Row::GroundTextureDistance,
@@ -129,7 +131,7 @@ impl Row {
     /// The heading the row sits under.
     fn group(self) -> &'static str {
         match self {
-            Row::AntiAliasing | Row::RenderScale | Row::SpottingAid => "DISPLAY",
+            Row::AntiAliasing | Row::RenderScale | Row::SpottingAid | Row::FrameLimit => "DISPLAY",
             Row::TerrainFiltering
             | Row::GroundTexture
             | Row::GroundTextureDistance
@@ -151,6 +153,7 @@ impl Row {
             Row::RenderScale => "Render scale",
             Row::SpottingAid => "Spotting aid",
             Row::TerrainFiltering => "Terrain filtering",
+            Row::FrameLimit => "Frame rate",
             Row::FrameRate => "Frame rate counter",
             Row::BuildingDistance => "Building distance",
             Row::BuildingDetail => "Building detail",
@@ -177,6 +180,9 @@ impl Row {
                 "Outlines distant aircraft so they are easier to see against the sky and ground."
             }
             Row::TerrainFiltering => "Reduces shimmer and crawling patterns on distant ground.",
+            Row::FrameLimit => {
+                "V-sync draws one frame per display refresh. 60, 100 and 200 cap the rate without waiting for the display: less delay, more power."
+            }
             Row::FrameRate => {
                 "Shows frame rate, CPU/GPU milliseconds and the recent low. Keeps rendering while menus or flight are paused."
             }
@@ -217,6 +223,7 @@ impl Row {
             Row::RenderScale => RENDER_SCALES.map(|s| format!("{s}%")).to_vec(),
             Row::SpottingAid => SpottingAid::ALL.map(|a| a.label().to_owned()).to_vec(),
             Row::TerrainFiltering => vec!["Off".into(), "On".into()],
+            Row::FrameLimit => FrameLimit::ALL.map(|a| a.label().to_owned()).to_vec(),
             Row::FrameRate => vec!["Off".into(), "On".into()],
             Row::BuildingDistance => BUILDING_DISTANCES.map(|n| format!("{n} nm")).to_vec(),
             Row::BuildingDetail => BUILDING_DETAILS.map(|n| format!("{n} nm")).to_vec(),
@@ -356,6 +363,10 @@ impl Editor {
                 .position(|a| *a == d.spotting_aid)
                 .unwrap_or(0),
             Row::TerrainFiltering => usize::from(d.terrain_filtering),
+            Row::FrameLimit => FrameLimit::ALL
+                .iter()
+                .position(|a| *a == d.frame_limit)
+                .unwrap_or(FrameLimit::ALL.len() - 1),
             Row::FrameRate => usize::from(d.show_frame_rate),
             Row::BuildingDistance => BUILDING_DISTANCES
                 .iter()
@@ -401,6 +412,7 @@ impl Editor {
             Row::RenderScale => d.render_scale = RENDER_SCALES[i],
             Row::SpottingAid => d.spotting_aid = SpottingAid::ALL[i],
             Row::TerrainFiltering => d.terrain_filtering = i == 1,
+            Row::FrameLimit => d.frame_limit = FrameLimit::ALL[i],
             Row::FrameRate => d.show_frame_rate = i == 1,
             Row::BuildingDistance => d.building_distance_nm = BUILDING_DISTANCES[i],
             Row::BuildingDetail => d.building_detail_nm = BUILDING_DETAILS[i],
@@ -469,6 +481,10 @@ impl Editor {
     fn note(&self, row: usize) -> Option<String> {
         match rows()[row] {
             Row::RenderScale => return self.resolution_summary(),
+            Row::FrameLimit => {
+                return crate::frame_pacing::Limit::overridden()
+                    .then(|| "TORE_FRAME_LIMIT replaces this choice for this run.".into());
+            }
             Row::AntiAliasing => {}
             _ => return None,
         }
@@ -1106,6 +1122,9 @@ mod tests {
         press(&mut e, "ArrowRight");
         assert_eq!(e.draft.spotting_aid, SpottingAid::Strong);
         press(&mut e, "ArrowDown");
+        press(&mut e, "ArrowLeft");
+        assert_eq!(e.draft.frame_limit, FrameLimit::Fps200);
+        press(&mut e, "ArrowDown");
         press(&mut e, "Space");
         assert!(!e.draft.terrain_filtering);
         // A click on a choice picks it and focuses its row.
@@ -1380,6 +1399,43 @@ mod tests {
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.contains("frame-rate"));
         assert!(!Options::load(&path).show_frame_rate);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+    #[test]
+    fn the_frame_rate_choice_sits_in_display_and_saves() {
+        let row = row_of(Row::FrameLimit);
+        assert_eq!(Row::FrameLimit.group(), "DISPLAY");
+        assert_eq!(Row::FrameLimit.label(), "Frame rate");
+        assert_eq!(Row::FrameLimit.choices(), ["60", "100", "200", "V-sync"]);
+        assert_eq!(rows()[row - 1], Row::SpottingAid);
+        let mut e = editor();
+        // V-sync is the default and the last choice.
+        assert_eq!(e.choice(row), 3);
+        let dir = temp("frame-limit");
+        let path = dir.join("graphics-v1.conf");
+        for (i, limit) in FrameLimit::ALL.into_iter().enumerate() {
+            let r = choice(&e, row, i);
+            // Each choice differs from the one before (V-sync, then 60...).
+            assert_eq!(click(&mut e, r), ResultAction::Changed);
+            assert_eq!(e.draft.frame_limit, limit);
+            let applied = e.apply(Some(&path));
+            assert_eq!(applied.frame_limit, limit);
+            assert_eq!(Options::load(&path).frame_limit, limit);
+        }
+        // Back at V-sync the file leaves the line out.
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("frame-limit"));
+        // Left from V-sync steps to 200, then 100, then stops at 60.
+        e.set_focus(Focus::Row(row));
+        for expected in [
+            FrameLimit::Fps200,
+            FrameLimit::Fps100,
+            FrameLimit::Fps60,
+            FrameLimit::Fps60,
+        ] {
+            press(&mut e, "ArrowLeft");
+            assert_eq!(e.draft.frame_limit, expected);
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

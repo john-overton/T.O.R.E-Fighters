@@ -69,6 +69,7 @@ mod flight_views;
 mod flight_watch;
 mod formation_trace;
 mod frame_gpu;
+mod frame_pacing;
 mod frame_rate;
 mod graphics;
 mod graphics_screen;
@@ -305,6 +306,10 @@ fn sync_stability(
         ));
     }
 }
+/// The most wall time the first running flight frame after a stopped one
+/// turns into ticks, seconds: one frame at 30 a second.
+const RESUME_MAX_ELAPSED: f64 = 1. / 30.;
+
 struct App {
     creator_loading_view: Option<loading::CreatorView>,
     network_loading_stage: Option<loading::Progress>,
@@ -446,6 +451,13 @@ struct App {
     head_look: [f32; 2],
     finished: bool,
     next_frame: Option<Instant>,
+    /// Frame pacing (`frame_pacing`): the capped rates' timer, whether a
+    /// stopped flight's picture has settled, whether the window is hidden,
+    /// and whether the last flight frame had its time stopped.
+    pacer: frame_pacing::Pacer,
+    stillness: frame_pacing::Stillness,
+    occluded: bool,
+    stopped_frame: bool,
     error: Option<Box<dyn Error>>,
     /// Where every flight's mission recording goes; `None` turns recording
     /// off (captures and diagnostics). See docs/REPLAYS.md.
@@ -2594,6 +2606,56 @@ impl App {
             }
         }
     }
+    /// The window's state for frame pacing. Scripted and measured runs,
+    /// captures and smoke tests are never throttled.
+    fn pace_window(&self) -> frame_pacing::Window {
+        let hidden = self.renderer.as_ref().is_some_and(|renderer| {
+            let size = renderer.window.inner_size();
+            size.width == 0 || size.height == 0
+        });
+        frame_pacing::Window {
+            focused: self.focused,
+            hidden: self.occluded || hidden,
+            automated: self.script.is_some()
+                || self.performance.measuring()
+                || self.capture_terrain.is_some()
+                || self.smoke_test,
+        }
+    }
+    /// When to draw again after a frame that wants `want`; None waits for
+    /// an event. The frame-rate counter keeps every view drawing while it
+    /// measures.
+    fn pace(&mut self, want: frame_pacing::Want) -> Option<Instant> {
+        let renderer = self.renderer.as_ref()?;
+        let limit = renderer.frame_limit();
+        let want = if renderer.counter_shown() && want != frame_pacing::Want::Nothing {
+            frame_pacing::Want::Live
+        } else {
+            want
+        };
+        let window = self.pace_window();
+        self.pacer.next(limit, want, window, Instant::now())
+    }
+    /// What a flight wants after its frame: the next frame, or, while a
+    /// single-player flight is stopped and its picture has settled, nothing
+    /// until an event or the next notice expiring. `moving` is an overlay
+    /// that animated this frame.
+    fn flight_want(&mut self, moving: bool) -> frame_pacing::Want {
+        let pose = frame_pacing::Pose::of(&self.camera, self.flight_view);
+        let moving = moving
+            || !self.camera.keys.is_empty()
+            || self.mouse_look.is_some()
+            || self.flight_ui.map.open
+            || self.pace_window().automated
+            || self.renderer.as_ref().is_some_and(|r| r.counter_shown());
+        if self.stillness.still(self.flight_ui.stopped(), pose, moving) {
+            self.flight_ui
+                .notices_until()
+                .map_or(frame_pacing::Want::Nothing, frame_pacing::Want::At)
+        } else {
+            frame_pacing::Want::Live
+        }
+    }
     /// Applies the Graphics screen's pending changes and saves them, once
     /// they have settled (`graphics_screen::SETTLE` after the last one) or
     /// at once with `now`. Every change on the screen comes through here, so
@@ -3779,6 +3841,10 @@ impl ApplicationHandler for App {
                 diagnostics::stage_done();
                 renderer.window.request_redraw();
                 self.renderer = Some(renderer);
+                let automated = self.pace_window().automated;
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.automate(automated);
+                }
                 if let Some(session) = self.connect.take() {
                     match session {
                         net::options::Session::Join(options) => self.start_session(options),
@@ -4007,10 +4073,35 @@ impl ApplicationHandler for App {
         if renderer.window.id() != id {
             return;
         }
+        // A stopped flight waiting on a still picture draws again when
+        // anything happens, as soon as the frame rate allows.
+        if self.screen == Screen::Flight
+            && self.next_frame.is_none()
+            && !matches!(
+                event,
+                WindowEvent::RedrawRequested | WindowEvent::Occluded(true)
+            )
+        {
+            let limit = renderer.frame_limit();
+            let window = self.pace_window();
+            self.next_frame = self.pacer.soonest(limit, window, Instant::now());
+        }
+        let Some(renderer) = self.renderer.as_mut() else {
+            return;
+        };
         let action = match event {
             WindowEvent::CloseRequested => Action::Exit,
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
                 renderer.resize();
+                // Minimised to nothing (Windows): a single-player flight
+                // pauses, as it does when the window loses focus.
+                let size = renderer.window.inner_size();
+                if (size.width == 0 || size.height == 0)
+                    && self.screen == Screen::Flight
+                    && self.script.is_none()
+                {
+                    self.flight_ui.pause_for_focus();
+                }
                 self.menu.state.cancel();
                 self.quick.cancel();
                 self.instruments.cancel_press();
@@ -4184,6 +4275,21 @@ impl ApplicationHandler for App {
             }
             WindowEvent::Focused(true) => {
                 self.focused = true;
+                // Back to full rate at once, not after the unfocused wait.
+                renderer.window.request_redraw();
+                Action::None
+            }
+            // Hidden (minimised or covered, where the platform says so):
+            // nothing is drawn until it shows again, and a single-player
+            // flight pauses as it does on focus loss. A session's flight
+            // keeps its network turns (`about_to_wait`).
+            WindowEvent::Occluded(occluded) => {
+                self.occluded = occluded;
+                if !occluded {
+                    renderer.window.request_redraw();
+                } else if self.screen == Screen::Flight && self.script.is_none() {
+                    self.flight_ui.pause_for_focus();
+                }
                 Action::None
             }
             WindowEvent::Focused(false) if self.script.is_none() => {
@@ -4504,6 +4610,8 @@ impl ApplicationHandler for App {
                 // The text the multiplayer screens drew this frame, for the
                 // renderer to draw sharp over the canvas.
                 let mut menu_text: Option<ui_text::Layer> = None;
+                // A screen over a flight that animated this frame.
+                let mut overlay_moving = false;
                 let mut animating = match self.screen {
                     Screen::Main => {
                         // The Replays screen covers the menu, so a menu
@@ -4572,6 +4680,18 @@ impl ApplicationHandler for App {
                         } else {
                             (now - self.frame_time).as_secs_f64().min(0.25)
                         };
+                        // A stopped flight with a still picture draws only on
+                        // events, so its last frame can be long before the
+                        // resume. Every resume resets the clock; should one
+                        // not, the first running frame still owes no more
+                        // than a frame's time, as when stopped frames ran
+                        // continuously.
+                        let elapsed = if self.stopped_frame && !self.flight_ui.stopped() {
+                            elapsed.min(RESUME_MAX_ELAPSED)
+                        } else {
+                            elapsed
+                        };
+                        self.stopped_frame = self.flight_ui.stopped();
                         // A networked flight's ticks are the client session's.
                         let session = self.net_flight.is_some();
                         let steps = if session {
@@ -6011,7 +6131,7 @@ impl ApplicationHandler for App {
                             editor.draw(&mut self.menu.pixels, &self.hornet.font);
                         }
                         if let Some(screen) = &mut self.sound_screen {
-                            screen.animate();
+                            overlay_moving |= screen.animate();
                             if screen.take_switch_sound()
                                 && let Some(audio) = &self.audio
                             {
@@ -6162,14 +6282,15 @@ impl ApplicationHandler for App {
                     self.finished = true;
                     event_loop.exit();
                 }
-                // Simulation views are paced by presentation, not an extra post-render sleep.
-                self.next_frame = animating.then(|| {
-                    if matches!(self.screen, Screen::Flight | Screen::Viewer) {
-                        Instant::now()
-                    } else {
-                        Instant::now() + Duration::from_millis(16)
-                    }
-                });
+                // Live views are paced by the frame rate choice: V-sync by
+                // presentation, the capped rates by a timer (`frame_pacing`).
+                let want = match self.screen {
+                    _ if !animating => frame_pacing::Want::Nothing,
+                    Screen::Flight => self.flight_want(overlay_moving),
+                    Screen::Viewer => frame_pacing::Want::Live,
+                    _ => frame_pacing::Want::Menu,
+                };
+                self.next_frame = self.pace(want);
                 return;
             }
             _ => return,
@@ -6528,6 +6649,18 @@ impl ApplicationHandler for App {
         // not the flight redrawing, the screen redraws about 60 times a second.
         if self.net.is_some() && self.screen != Screen::Flight && self.next_frame.is_none() {
             self.next_frame = Some(Instant::now() + Duration::from_millis(16));
+        }
+        // A session takes its turns between frames too: drawing may wait (a
+        // capped rate, an unfocused window, or a hidden one, which with
+        // V-sync on Wayland gets no redraws at all), the session's ticks,
+        // controls and keepalives do not.
+        if self.next_frame.is_none_or(|next| Instant::now() < next)
+            && self
+                .net
+                .as_ref()
+                .is_some_and(|session| session.next_wake() < Duration::from_micros(500))
+        {
+            self.net_tick(event_loop);
         }
         if self.next_frame.is_some_and(|next| Instant::now() >= next) {
             if let Some(renderer) = &self.renderer {
@@ -15126,6 +15259,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         head_look: [0.; 2],
         finished: false,
         next_frame: None,
+        pacer: Default::default(),
+        stillness: Default::default(),
+        occluded: false,
+        stopped_frame: false,
         error: None,
         replay_library: match std::env::var("TORE_RECORD_MISSIONS").as_deref() {
             Err(std::env::VarError::NotPresent) => preferences_enabled,

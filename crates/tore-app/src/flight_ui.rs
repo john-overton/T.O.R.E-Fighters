@@ -1088,6 +1088,14 @@ impl FlightUi {
             .text(font, "PAUSED - Ctrl-P to resume", 232, 42);
         }
     }
+    /// When the next notice on screen expires, for a still picture to be
+    /// drawn again without it.
+    pub fn notices_until(&self) -> Option<Instant> {
+        self.notices
+            .iter()
+            .map(|(_, at)| *at + NOTICE_LIFETIME)
+            .min()
+    }
     /// Draw the message lines straight onto the flight view at the HUD's
     /// on-screen scale, with smoothed edges like the HUD's filtered symbols.
     /// Pass the HUD font. Lines are centered and grow upward from the bottom.
@@ -1210,6 +1218,25 @@ mod tests {
     use super::*;
     fn shown(ui: &FlightUi) -> Vec<&str> {
         ui.notices.iter().map(|(text, _)| text.as_str()).collect()
+    }
+    #[test]
+    fn a_still_paused_picture_wakes_when_its_oldest_notice_expires() {
+        let mut ui = FlightUi::default();
+        assert_eq!(ui.notices_until(), None);
+        let before = Instant::now();
+        ui.message("first");
+        ui.message("second");
+        let until = ui.notices_until().unwrap();
+        assert!(until >= before + NOTICE_LIFETIME);
+        assert!(until <= Instant::now() + NOTICE_LIFETIME);
+        assert_eq!(until, ui.notices[0].1 + NOTICE_LIFETIME);
+        // Pausing for focus loss stops single-player time; a session's never.
+        ui.pause_for_focus();
+        assert!(ui.stopped());
+        let mut session = FlightUi::default();
+        session.enter_session();
+        session.pause_for_focus();
+        assert!(!session.stopped());
     }
     #[test]
     fn messages_stack_to_seven_lines_and_repeats_move_to_the_bottom() {
