@@ -153,3 +153,38 @@ fn a_host_registers_and_a_browser_finds_it_on_real_sockets() {
     let out = String::from_utf8(out).unwrap();
     assert_eq!(out, "Stopping\n");
 }
+
+#[test]
+fn a_paced_idle_master_answers_a_probe_well_inside_the_handshake_retry() {
+    use tore_master::run::{BUSY_SLEEP, IDLE_SLEEP};
+    let mut config = Config::defaults(Path::new("."));
+    config.listen = Listen::Address(Ipv4Addr::LOCALHOST.into());
+    config.port = 0;
+    config.probe_port = 0;
+    let (mut master, _) = Running::bind(config, Entropy::System, false).unwrap();
+    let main: SocketAddr = master.main_addresses()[0];
+    let mut out = Vec::new();
+    // Idle: a turn that reads nothing sleeps the long idle sleep.
+    assert_eq!(master.step(&mut out).unwrap(), IDLE_SLEEP);
+    let mut host = bind_udp("127.0.0.1:0".parse().unwrap()).unwrap();
+    let probe = MasterPacket::Probe(Probe { nonce: 9 }).encode().unwrap();
+    host.send_datagram(main, &probe).unwrap();
+    // The loop as `run` drives it: step, then sleep what it says.
+    let sent = Instant::now();
+    let mut answer = None;
+    while answer.is_none() && sent.elapsed() < Duration::from_secs(1) {
+        let sleep = master.step(&mut out).unwrap();
+        if !sleep.is_zero() {
+            std::thread::sleep(sleep);
+        }
+        answer = receive(&mut host);
+    }
+    assert!(matches!(answer, Some(MasterPacket::ProbeAnswer(_))));
+    assert!(
+        sent.elapsed() < Duration::from_millis(250),
+        "{:?}",
+        sent.elapsed()
+    );
+    // The datagram made it busy: the next quiet turn sleeps a millisecond.
+    assert_eq!(master.step(&mut out).unwrap(), BUSY_SLEEP);
+}

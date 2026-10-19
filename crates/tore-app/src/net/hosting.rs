@@ -115,8 +115,8 @@ use tore_net::master::{
 };
 use tore_net::peers::{Peers, Route};
 use tore_net::{
-    Datagrams, Entropy, LINK_ADDRESS, LinkEnd, Linked, Listen, MAX_NAP, Platform, RealClock,
-    SPIN_MARGIN, ServerSocket, wait_until,
+    Datagrams, Entropy, LINK_ADDRESS, LinkEnd, Linked, Listen, Platform, RealClock, SPIN_MARGIN,
+    ServerSocket, plan_wake, wait_until,
 };
 use tore_realtime_native::{Activity, real_time_thread, summary};
 use tore_session::{
@@ -1266,8 +1266,9 @@ fn serve(
             forward_listing(listing, reports, &mut listing_state);
             return End::Stopped;
         }
-        let wake = (now + host.next_wake(now)).min(now + MAX_NAP);
-        wait_until(&mut clock, wake, SPIN_MARGIN);
+        // A tick deadline is spun to; a housekeeping nap is slept to.
+        let wake = plan_wake(now, host.next_wake(now), host.wake_pace(), SPIN_MARGIN);
+        wait_until(&mut clock, wake.at, wake.spin_margin);
     }
 }
 

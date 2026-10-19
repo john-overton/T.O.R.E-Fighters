@@ -14,7 +14,7 @@
 use crate::config::Config;
 use std::{sync::Arc, time::Duration};
 use tore_import::Resources;
-use tore_net::ServerSocket;
+use tore_net::{Pace, ServerSocket};
 use tore_world::mission::MissionSpec;
 
 /// Time since the server's clock started. The same kind of value as
@@ -201,6 +201,10 @@ pub trait Host {
     /// the sockets.
     fn next_wake(&self, now: Time) -> Duration;
 
+    /// Whether a mission is flying and whether any connection is open, which
+    /// decide how the loop naps between polls.
+    fn wake_pace(&self) -> Pace;
+
     /// What happened since the last call, oldest first.
     fn take_events(&mut self) -> Vec<Event>;
 
@@ -298,7 +302,16 @@ pub mod scripted {
             }
         }
         fn next_wake(&self, now: Time) -> Duration {
+            if !self.flying {
+                return tore_session::host::IDLE_WAKE;
+            }
             Duration::from_nanos((self.tick + 1) * 1_000_000_000 / 120 + 1).saturating_sub(now)
+        }
+        fn wake_pace(&self) -> Pace {
+            Pace {
+                flying: self.flying,
+                connections: !self.players.is_empty(),
+            }
         }
         fn take_events(&mut self) -> Vec<Event> {
             self.events.drain(..).collect()

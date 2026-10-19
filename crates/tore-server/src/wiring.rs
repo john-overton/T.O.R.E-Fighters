@@ -28,7 +28,7 @@ use tore_net::master::{
     RendezvousEvent, Role,
 };
 use tore_net::portmap::keeper::{self, Keeper, KeeperConfig};
-use tore_net::{Entropy, Platform, ServerSocket};
+use tore_net::{Entropy, Pace, Platform, ServerSocket};
 use tore_session::wire::chat::receiver_label;
 use tore_session::{BuildId, HostConfig, HostLog, LeaveReason, Phase};
 
@@ -436,6 +436,10 @@ impl Host for SessionHost {
 
     fn next_wake(&self, now: Time) -> Duration {
         self.host.next_wake(now)
+    }
+
+    fn wake_pace(&self) -> Pace {
+        self.host.wake_pace()
     }
 
     fn take_events(&mut self) -> Vec<Event> {

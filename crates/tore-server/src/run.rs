@@ -3,7 +3,7 @@
 //! seconds and log each player's figures once a minute.
 
 use crate::{
-    clock::{MAX_NAP, SPIN_MARGIN, Timer, wait_until},
+    clock::{SPIN_MARGIN, Timer, plan_wake, wait_until},
     console::{Command, HELP},
     host::{Host, Time},
     log::Logger,
@@ -84,11 +84,13 @@ impl<'a> Loop<'a> {
                 }
                 next_figures = now + FIGURES_INTERVAL;
             }
-            let mut wake = (now + host.next_wake(now)).min(now + MAX_NAP);
+            // A tick deadline is spun to; a housekeeping nap or a status or
+            // figures deadline is slept to.
+            let mut wake = plan_wake(now, host.next_wake(now), host.wake_pace(), self.spin_margin);
             for due in [next_status, Some(next_figures)].into_iter().flatten() {
-                wake = wake.min(due);
+                wake.limit(due);
             }
-            wait_until(self.timer, wake, self.spin_margin);
+            wait_until(self.timer, wake.at, wake.spin_margin);
         }
     }
 
@@ -305,6 +307,7 @@ mod tests {
         let mut rig = Rig::new("run-pace");
         let mut host = ScriptedHost {
             flying: true,
+            players: vec![player(1, "Viper")],
             finish_at: Some(Duration::from_secs(1)),
             ..Default::default()
         };
@@ -315,6 +318,70 @@ mod tests {
         // was polled at least every 4 ms, about 8.3 ms apart per tick.
         assert_eq!(host.tick, 120);
         assert!(host.polls >= 120 && host.polls < 600, "{}", host.polls);
+    }
+
+    #[test]
+    fn a_flying_host_with_nobody_connected_wakes_for_its_ticks_alone() {
+        let mut rig = Rig::new("run-flying-empty");
+        let mut host = ScriptedHost {
+            flying: true,
+            finish_at: Some(Duration::from_secs(1)),
+            ..Default::default()
+        };
+        let (_keep, console) = channel();
+        let mut log = rig.logger();
+        Loop::new(&mut rig.timer, &mut log, &console, 0).run(&mut host);
+        assert_eq!(host.tick, 120);
+        assert!(host.polls < 140, "{}", host.polls);
+    }
+
+    #[test]
+    fn a_lobby_with_players_polls_at_the_hosts_wake_and_never_spins() {
+        let mut rig = Rig::new("run-lobby");
+        let mut host = ScriptedHost {
+            players: vec![player(1, "Viper")],
+            finish_at: Some(Duration::from_secs(1)),
+            ..Default::default()
+        };
+        let (_keep, console) = channel();
+        let mut log = rig.logger();
+        Loop::new(&mut rig.timer, &mut log, &console, 0).run(&mut host);
+        // 10 ms naps, not the 4 ms of a flying host, and no spin tail.
+        assert!((90..=105).contains(&host.polls), "{}", host.polls);
+        assert_eq!(rig.timer.spins.get(), 0);
+    }
+
+    #[test]
+    fn an_empty_lobby_polls_every_twenty_milliseconds_and_never_spins() {
+        let mut rig = Rig::new("run-lobby-empty");
+        let mut host = ScriptedHost {
+            finish_at: Some(Duration::from_secs(1)),
+            ..Default::default()
+        };
+        let (_keep, console) = channel();
+        let mut log = rig.logger();
+        Loop::new(&mut rig.timer, &mut log, &console, 0).run(&mut host);
+        assert!((45..=55).contains(&host.polls), "{}", host.polls);
+        assert_eq!(rig.timer.spins.get(), 0);
+    }
+
+    #[test]
+    fn a_flying_host_with_players_spins_only_before_tick_deadlines() {
+        let mut rig = Rig::new("run-spin");
+        let mut host = ScriptedHost {
+            flying: true,
+            players: vec![player(1, "Viper")],
+            finish_at: Some(Duration::from_secs(1)),
+            ..Default::default()
+        };
+        let (_keep, console) = channel();
+        let mut log = rig.logger();
+        Loop::new(&mut rig.timer, &mut log, &console, 0).run(&mut host);
+        assert_eq!(host.tick, 120);
+        // Each tick spins at most its last 0.4 ms once; the old loop spun the
+        // whole 0.4 ms after each of three naps.
+        let spins = rig.timer.spins.get();
+        assert!(spins > 0 && spins <= 121 * 400, "{spins}");
     }
 
     #[test]

@@ -4,9 +4,12 @@
 //! each to [`Master::receive`], calls [`Master::update`], sends what the
 //! master queued from the port it names, and writes the log lines, the
 //! status line and the state files when they are due. A turn that had nothing
-//! to do sleeps a millisecond (agent decision in the design, measured in I2:
-//! the loop then costs well under 1 percent of a core when idle, and a
-//! datagram waits at most that millisecond).
+//! to do sleeps a millisecond while the master is busy (it read a datagram or
+//! held a relay channel within the last second), so a datagram or relay frame
+//! waits at most that millisecond; once idle for a second it sleeps ten
+//! milliseconds and runs its timers every 25 ([`Pacer`]), so the first
+//! datagram after a quiet spell waits at most ten, well inside a client's
+//! 250 ms handshake retry (optimization run S2).
 //!
 //! The loop stops when its stop flag is set: by the console's `quit`, or by
 //! a test. The standard library cannot catch Ctrl+C or SIGTERM without
@@ -29,8 +32,77 @@ use crate::stats::Interval;
 
 /// The minute table and the telemetry file are written this often.
 pub const FILE_INTERVAL: Duration = Duration::from_secs(60);
-/// A turn with nothing to do sleeps this long.
-pub const IDLE_SLEEP: Duration = Duration::from_millis(1);
+/// A turn with nothing to do sleeps this long while the master is busy: it
+/// read a datagram or held a relay channel within [`BUSY_WINDOW`].
+pub const BUSY_SLEEP: Duration = Duration::from_millis(1);
+/// A turn with nothing to do sleeps this long once the master has been idle
+/// for [`BUSY_WINDOW`]: the first datagram after a quiet spell waits at most
+/// this long, well inside a client's 250 ms handshake retry.
+pub const IDLE_SLEEP: Duration = Duration::from_millis(10);
+/// How long after a datagram or an open relay channel the master counts as
+/// busy.
+pub const BUSY_WINDOW: Duration = Duration::from_secs(1);
+/// While idle, the timers (listing expiry, introductions, relay checks), the
+/// status line and the file writes run this often rather than each turn.
+pub const IDLE_HOUSEKEEPING: Duration = Duration::from_millis(25);
+
+/// How briskly the loop turns: every millisecond while busy, every ten and
+/// with housekeeping every 25 when idle. A pure value on the master's clock
+/// so it can be tested.
+#[derive(Clone, Copy, Debug)]
+pub struct Pacer {
+    last_busy: Option<Duration>,
+    next_housekeeping: Duration,
+}
+
+impl Default for Pacer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Pacer {
+    pub const fn new() -> Self {
+        Self {
+            last_busy: None,
+            next_housekeeping: Duration::ZERO,
+        }
+    }
+
+    /// Notes a turn at `now`: `busy` when it read a datagram or a relay
+    /// channel is open.
+    pub fn note(&mut self, now: Duration, busy: bool) {
+        if busy {
+            self.last_busy = Some(now);
+        }
+    }
+
+    /// Whether the master was busy within [`BUSY_WINDOW`] of `now`.
+    pub fn busy(&self, now: Duration) -> bool {
+        self.last_busy
+            .is_some_and(|at| now.saturating_sub(at) < BUSY_WINDOW)
+    }
+
+    /// Whether this turn runs the timers and the rest: always when it read
+    /// something or the master is busy, else every [`IDLE_HOUSEKEEPING`].
+    pub fn housekeeping_due(&self, now: Duration, read: bool) -> bool {
+        read || self.busy(now) || now >= self.next_housekeeping
+    }
+
+    /// Notes that housekeeping ran at `now`.
+    pub fn housekept(&mut self, now: Duration) {
+        self.next_housekeeping = now + IDLE_HOUSEKEEPING;
+    }
+
+    /// How long a turn at `now` that read nothing sleeps.
+    pub fn sleep(&self, now: Duration) -> Duration {
+        if self.busy(now) {
+            BUSY_SLEEP
+        } else {
+            IDLE_SLEEP
+        }
+    }
+}
 
 /// The build: the version and the commit it was built from.
 pub fn version() -> String {
@@ -54,6 +126,7 @@ pub struct Running {
     asked: Interval,
     next_status: Option<Duration>,
     next_files: Duration,
+    pacer: Pacer,
 }
 
 impl Running {
@@ -119,6 +192,7 @@ impl Running {
                 files,
                 next_status,
                 next_files: now + FILE_INTERVAL,
+                pacer: Pacer::new(),
             },
             notes,
         ))
@@ -190,15 +264,47 @@ impl Running {
         lines
     }
 
-    /// One turn of the loop. Returns true when it received anything.
-    pub fn turn(&mut self, out: &mut dyn Write) -> io::Result<bool> {
-        let now = self.clock.now();
+    /// Reads what is waiting on both ports. Returns how many datagrams.
+    fn receive(&mut self, now: Duration) -> io::Result<usize> {
         let mut read = self
             .master
             .receive_from(now, MasterPort::Main, &mut self.main)?;
         if let Some(probe) = &mut self.probe {
             read += self.master.receive_from(now, MasterPort::Probe, probe)?;
         }
+        Ok(read)
+    }
+
+    /// One turn of the loop. Returns true when it received anything.
+    pub fn turn(&mut self, out: &mut dyn Write) -> io::Result<bool> {
+        let now = self.clock.now();
+        let read = self.receive(now)?;
+        self.housekeeping(now, out)?;
+        Ok(read > 0)
+    }
+
+    /// One paced turn of [`Running::run`]: reads, runs the timers, the sends,
+    /// the status line and the file writes when due (every turn while busy,
+    /// else every [`IDLE_HOUSEKEEPING`]), and returns how long to sleep: none
+    /// after a turn that read something.
+    pub fn step(&mut self, out: &mut dyn Write) -> io::Result<Duration> {
+        let now = self.clock.now();
+        let read = self.receive(now)?;
+        let busy = read > 0 || self.master.relays().channels() > 0;
+        self.pacer.note(now, busy);
+        if self.pacer.housekeeping_due(now, read > 0) {
+            self.housekeeping(now, out)?;
+            self.pacer.housekept(now);
+        }
+        Ok(if read > 0 {
+            Duration::ZERO
+        } else {
+            self.pacer.sleep(now)
+        })
+    }
+
+    /// The timers, the sends, the log, the status line and the files.
+    fn housekeeping(&mut self, now: Duration, out: &mut dyn Write) -> io::Result<()> {
         self.master.update(now);
         // A send that fails (a peer's network unreachable) is the network's
         // loss, not the master's: it carries on.
@@ -216,8 +322,7 @@ impl Running {
             self.next_files = now + FILE_INTERVAL;
             self.write_files(now, out)?;
         }
-        out.flush()?;
-        Ok(read > 0)
+        out.flush()
     }
 
     /// The minute table's row, the telemetry file, the day's change.
@@ -291,8 +396,9 @@ impl Running {
         Ok(())
     }
 
-    /// Turns until `stop` is set or the console says `quit`, sleeping a
-    /// millisecond after an idle turn. `console` brings the lines typed on
+    /// Turns until `stop` is set or the console says `quit`, sleeping after
+    /// a turn that read nothing (a millisecond while busy, ten once idle for
+    /// a second; see [`Pacer`]). `console` brings the lines typed on
     /// standard input.
     pub fn run(
         &mut self,
@@ -309,8 +415,9 @@ impl Running {
                     stop.store(true, Ordering::Relaxed);
                 }
             }
-            if !self.turn(out)? {
-                std::thread::sleep(IDLE_SLEEP);
+            let sleep = self.step(out)?;
+            if !sleep.is_zero() {
+                std::thread::sleep(sleep);
             }
         }
         self.finish(out)
@@ -332,3 +439,62 @@ impl Running {
 /// The console's commands.
 pub const CONSOLE_HELP: &str =
     "commands: status (the status line now), listings (every listing), quit";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
+
+    #[test]
+    fn a_fresh_master_is_idle_and_does_its_first_housekeeping() {
+        let pacer = Pacer::new();
+        assert!(!pacer.busy(ms(0)));
+        assert_eq!(pacer.sleep(ms(0)), IDLE_SLEEP);
+        assert!(pacer.housekeeping_due(ms(0), false));
+    }
+
+    #[test]
+    fn traffic_makes_the_master_busy_for_a_second() {
+        let mut pacer = Pacer::new();
+        pacer.note(ms(5_000), true);
+        assert_eq!(pacer.sleep(ms(5_001)), BUSY_SLEEP);
+        assert_eq!(pacer.sleep(ms(5_999)), BUSY_SLEEP);
+        assert_eq!(pacer.sleep(ms(6_000)), IDLE_SLEEP);
+        // A quiet turn does not extend it.
+        pacer.note(ms(5_500), false);
+        assert_eq!(pacer.sleep(ms(6_000)), IDLE_SLEEP);
+        // An open relay channel keeps it busy turn after turn.
+        for t in (6_000..9_000).step_by(100) {
+            pacer.note(ms(t), true);
+            assert_eq!(pacer.sleep(ms(t)), BUSY_SLEEP);
+        }
+    }
+
+    #[test]
+    fn idle_housekeeping_runs_every_twenty_five_milliseconds() {
+        let mut pacer = Pacer::new();
+        pacer.note(ms(0), true);
+        // Busy: every turn.
+        assert!(pacer.housekeeping_due(ms(100), false));
+        pacer.housekept(ms(100));
+        assert!(pacer.housekeeping_due(ms(101), false));
+        // Idle: only when 25 ms have passed, or a datagram was read.
+        let idle = ms(10_000);
+        pacer.housekept(idle);
+        assert!(!pacer.housekeeping_due(idle + ms(10), false));
+        assert!(!pacer.housekeeping_due(idle + ms(24), false));
+        assert!(pacer.housekeeping_due(idle + ms(25), false));
+        assert!(pacer.housekeeping_due(idle + ms(1), true));
+    }
+
+    #[test]
+    fn the_first_datagram_after_a_quiet_spell_waits_at_most_the_idle_sleep() {
+        // The handshake retries after 250 ms; the idle sleep is well inside.
+        assert!(IDLE_SLEEP <= ms(10));
+        assert!(IDLE_SLEEP * 10 <= ms(250));
+        assert!(IDLE_HOUSEKEEPING <= ms(50));
+    }
+}

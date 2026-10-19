@@ -3618,9 +3618,18 @@ the plane's exact state in a second packet. The
 [wire protocol](formats/net-protocol.md#snapshots) has the rules.
 
 The dedicated server runs the host on its main thread: it polls its
-non-blocking sockets at least every 4 ms, steps due ticks and sends due
-packets, sleeping and then spinning to each tick's deadline
-(`tore_net::wait_until`). Stage E runs the same host, with the same loop, on a
+non-blocking sockets, steps due ticks and sends due packets, sleeping and then
+spinning to each tick's deadline (`tore_net::wait_until`). *Idle pacing
+(optimization run S2):* `tore_net::plan_wake` chooses each wake from the host's
+`next_wake` and `Host::wake_pace` (flying or not, any connection or not). A
+flying host with a connection polls at least every 4 ms (`MAX_NAP`), spinning
+only in the last `SPIN_MARGIN` before a tick deadline; those 4 ms housekeeping
+naps sleep with no spin tail. A flying host with nobody connected wakes for its
+ticks alone. A host that is not flying honours `next_wake` (10 ms) and never
+spins, and with no connection at all it sleeps 20 ms (`EMPTY_NAP`), so a lobby
+join, keepalive, console command or status line is served at most that much
+later. Tick pacing and catch-up are the host's and are unchanged; the Windows
+margin (2 ms) is unchanged and should be re-measured there. Stage E runs the same host, with the same loop, on a
 thread inside the game ([the host inside the game](#the-host-inside-the-game-stage-e)).
 
 **The calls** (agreed with the server slice, D7b). `Host::new(spec,
@@ -8353,8 +8362,10 @@ Anthology, and nothing derived from retail media ever reaches it.
 datagrams from each of its two ports, hands each to `Master::receive(now,
 port, from, bytes)`, calls `Master::update(now)` for its timers (expiry,
 retries, relay idle, statistics), sends what `Master::poll_transmit` gives,
-and sleeps a millisecond when there was nothing to do (agent decision: a
-portable loop, measured in I2; a relay frame waits at most that long). Its
+and sleeps a millisecond when there was nothing to do while busy (a datagram
+read or a relay channel open within the last second; a relay frame waits at
+most that long), else ten milliseconds, running its timers every 25
+(optimization run S2; agent decision: a portable loop, measured in I2). Its
 two ports are `ServerSocket`s on `Listen::Any`, so it serves IPv4 and IPv6 on
 each.
 
