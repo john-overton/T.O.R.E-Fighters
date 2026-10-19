@@ -36,7 +36,7 @@ their buffers) are rebuilt once, not once per step. A change still settling is
 applied and saved when the screen closes or the game quits.
 
 The rows sit under four headings in a list that scrolls: **Display**
-(anti-aliasing, render scale, spotting aid), **Terrain and scenery** (terrain
+(anti-aliasing, render scale, spotting aid, frame rate), **Terrain and scenery** (terrain
 filtering, ground detail and its distance, building distance and detail),
 **Vegetation and grass** (vegetation distance, detail, density and cards,
 grass, grass density and distance) and **Performance** (the frame-rate
@@ -57,6 +57,7 @@ resolutions); the group names and wording are agent decisions.
 | Anti-aliasing | Off, 2x, 4x, 8x | 4x |
 | Render scale | 75%, 100%, 125%, 150%, 200% | 100% |
 | Spotting aid | Off, Subtle, Strong | Subtle |
+| Frame rate | 60, 100, 200, V-sync | V-sync |
 | Terrain filtering | Off, On | On |
 | Building distance (city fill) | 10 nm, 20 nm, 30 nm | 30 nm |
 | Building detail (city fill) | 1 nm, 2 nm, 5 nm, 10 nm, 20 nm | 5 nm |
@@ -72,7 +73,64 @@ Choices are saved in `graphics-v1.conf` in the application data directory,
 beside `preferences-v1.conf`. A missing file uses the defaults quietly; an unreadable or malformed one uses them and logs a warning saying why.
 Smoke tests and captures ignore the saved file, like the other display
 preferences. The frame-rate line is written only when the counter is on
-(`frame-rate true`), so a default file is unchanged.
+(`frame-rate true`), so a default file is unchanged. The frame rate is
+written only when it is not V-sync (`frame-limit 60`, `100` or `200`); a file
+from before the choice existed reads as V-sync.
+
+## Frame rate
+
+How often the window is drawn. The choices and the V-sync default were set by
+John on 2026-10-19; the rest of this section is agent decisions, made the same
+day. The simulation does not depend on it: every flight frame still turns the
+wall time since the last frame into 120 Hz ticks (at most 0.25 s, every owed
+tick run), and a multiplayer flight's ticks belong to the session.
+
+| Choice | Presentation | Pacing |
+| --- | --- | --- |
+| V-sync (default) | `Fifo`: each frame waits for the display | One frame per display refresh |
+| 60, 100, 200 | `Mailbox` (no tearing), else `Immediate`, else `Fifo` | A timer spaces frames evenly at that rate; the event loop sleeps until each frame is due, it does not spin |
+
+V-sync uses `Fifo` rather than `Mailbox` plus a timer at the monitor's
+refresh. A timer is not locked to the display: its drift against the refresh
+shows as a doubled or dropped frame every so often, which is the uneven
+pacing V-sync is meant to avoid. `Fifo` costs up to one refresh of input delay
+over a non-waiting mode. With `Fifo` the window also asks Wayland for frame
+callbacks, so a hidden window on Wayland gets no redraws rather than blocking
+in its next present. Above the display's refresh, 100 and 200 lower the input
+delay at the cost of drawing frames that are never shown. A late frame starts
+the timer's count again rather than rushing to catch up. A change applies at
+once, in flight too; the surface is configured again when the presentation
+mode changes.
+
+Throttles that need no setting:
+
+- A single-player flight that is stopped (paused, its Escape menu or a screen
+  opened from it) draws only when something happens once its picture has
+  settled: a key, the mouse, a controller button, a resize, a notice expiring,
+  or an animation on the screen over it. Mouse look-around while paused, the
+  map and the frame-rate counter keep it drawing. The first running frame
+  after a stop turns at most 1/30 s of wall time into ticks; every resume
+  already restarts the flight clock, so this only guards a missed one.
+- An unfocused window draws about ten frames a second.
+- A hidden window draws nothing until it shows again: `Occluded` where the
+  platform reports it (X11, macOS), or minimised to no size (Windows).
+  Wayland reports neither; there V-sync's frame callbacks stop the drawing,
+  and focus loss pauses a single-player flight.
+- A minimised or hidden single-player flight pauses, as on focus loss.
+  Multiplayer never pauses: the session takes its network turns between
+  frames whenever its next tick is due, so its ticks, controls and keepalives
+  continue while the window is unfocused, hidden or drawing slowly.
+
+Scripted runs (`--input-script`), performance measurements (`TORE_PERF_FRAMES`),
+captures and smoke tests are never throttled, and draw uncapped (`Immediate`)
+unless `TORE_FRAME_LIMIT` is set: they keep the presentation they were written
+against, and agent windows on a hidden workspace get no frame callbacks.
+
+`TORE_FRAME_LIMIT` replaces the saved choice for one run without saving it:
+`vsync`, `60`, `100`, `200`, or `off` for uncapped rendering (`Immediate`,
+else `Mailbox`, else `Fifo`, no timer and no unfocused cap) for benchmarks.
+Uncapped is not offered on the screen. Any other value is ignored with a
+warning. While it is set, the About panel says so under the Frame rate row.
 
 ## Anti-aliasing
 
@@ -293,9 +351,10 @@ the top right of the window, over the picture, in the bundled Noto face:
 `62 fps  16.1 ms  cpu 4.2  gpu 11.8  low 48`. The rate and the milliseconds are the mean
 frame over about the last half second. `low` is the slowest frame in the
 last second, written as a rate. Slow rendering frames, including frames longer
-than half a second, count. Disabling the counter resets its history. While enabled, presentation requests the next
-redraw continuously, including idle menus and paused flight/replay, so the line
-measures the actual render load. CPU milliseconds are the main thread's wall-clock time
+than half a second, count. Disabling the counter resets its history. While enabled, every
+screen redraws continuously at the [frame rate](#frame-rate) in effect,
+including idle menus and paused flight/replay, so the line measures the actual
+render load. CPU milliseconds are the main thread's wall-clock time
 for frame preparation and encoding, excluding surface acquisition waits; they are
 not the CPU seconds summed over worker threads. GPU milliseconds
 are asynchronous timestamps over all of the frame's GPU work: each live camera
@@ -335,7 +394,8 @@ For one run, without saving: `--anti-aliasing off|2x|4x|8x`,
 `--vegetation-detail 1|2|3|4`, `--vegetation-density low|medium|high|ultra`,
 and `--original-graphics` for everything off
 at 100%. `TORE_SHOW_FPS=1` shows the frame-rate counter for that run without
-writing it into the file. Flags apply in order, so `--original-graphics --spotting-aid strong`
+writing it into the file, and `TORE_FRAME_LIMIT=off|vsync|60|100|200` sets the
+[frame rate](#frame-rate) for that run. Flags apply in order, so `--original-graphics --spotting-aid strong`
 turns on only the outline. Any change on the Graphics screen saves everything
 the screen shows, including a flag's value.
 

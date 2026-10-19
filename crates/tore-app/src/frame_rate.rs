@@ -310,16 +310,21 @@ mod tests {
         m = Meter::default();
         m.push(0.0161);
         assert!(m.line().unwrap().contains("cpu --  gpu --"));
-        // Every window surface uses Renderer::draw, which schedules another
-        // frame when shown, including paused flight and idle menus.
-        let render = include_str!("renderer.rs");
-        let tail = render.split("frame.present();").nth(1).unwrap();
-        assert!(
-            tail.split("self.first_frame.complete()")
-                .next()
-                .unwrap()
-                .contains("request_redraw()")
-        );
+        // Shown, the counter keeps every view drawing, paused flight and
+        // idle menus included, through the frame pacing (`App::pace` and
+        // the stopped flight's stillness), so the frame rate choice still
+        // caps it.
+        let main = include_str!("main.rs");
+        for function in ["fn pace(&mut self", "fn flight_want(&mut self"] {
+            let body = main.split(function).nth(1).unwrap();
+            assert!(
+                body.split("\n    }\n")
+                    .next()
+                    .unwrap()
+                    .contains("counter_shown()"),
+                "{function}"
+            );
+        }
     }
     #[test]
     fn the_average_is_half_a_second_and_low_is_the_slowest_frame() {

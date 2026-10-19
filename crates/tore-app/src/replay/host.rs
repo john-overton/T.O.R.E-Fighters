@@ -497,7 +497,7 @@ impl App {
             }
             Ok(_) => {}
         }
-        // Playback is paced by presentation, like flight.
-        self.next_frame = Some(Instant::now());
+        // Playback is paced like flight, by the frame rate choice.
+        self.next_frame = self.pace(crate::frame_pacing::Want::Live);
     }
 }

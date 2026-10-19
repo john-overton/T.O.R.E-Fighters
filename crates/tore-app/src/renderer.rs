@@ -94,6 +94,13 @@ pub struct Renderer {
     pub mirror_frames: u64,
     mirrors_enabled: bool,
     graphics: crate::graphics::Options,
+    /// The present modes the surface offers, and the frame rate in effect
+    /// (`crate::frame_pacing`), which picks one of them.
+    present_modes: Vec<wgpu::PresentMode>,
+    frame_limit: crate::frame_pacing::Limit,
+    /// A scripted or measured run, a capture or a smoke test: uncapped
+    /// unless `TORE_FRAME_LIMIT` says otherwise (`Limit::for_run`).
+    automated: bool,
     /// MSAA sample counts the adapter supports for the surface and depth.
     sample_counts: Vec<u32>,
     /// The AC-130 sensor console (`crate::sensor_console`): its CRT pass,
@@ -355,6 +362,42 @@ impl Renderer {
         self.graphics = options;
         let samples = self.samples(options.anti_aliasing);
         self.sim.set_graphics(&self.device, options, samples);
+        self.set_frame_limit(crate::frame_pacing::Limit::for_run(
+            options.frame_limit,
+            self.automated,
+        ));
+    }
+    /// Marks the run as automated (see `automated`), applying its frame rate.
+    pub fn automate(&mut self, automated: bool) {
+        self.automated = automated;
+        self.set_frame_limit(crate::frame_pacing::Limit::for_run(
+            self.graphics.frame_limit,
+            automated,
+        ));
+    }
+    /// The frame rate in effect: the saved choice or `TORE_FRAME_LIMIT`.
+    pub fn frame_limit(&self) -> crate::frame_pacing::Limit {
+        self.frame_limit
+    }
+    /// Whether the frame-rate counter is on for this run: it keeps menus and
+    /// paused views drawing while it measures.
+    pub fn counter_shown(&self) -> bool {
+        crate::frame_rate::shown(self.graphics.show_frame_rate)
+    }
+    /// Applies a frame rate at once, configuring the surface again when the
+    /// present mode changes.
+    fn set_frame_limit(&mut self, limit: crate::frame_pacing::Limit) {
+        self.frame_limit = limit;
+        let mode = limit.present_mode(&self.present_modes);
+        if mode != self.config.present_mode {
+            self.config.present_mode = mode;
+            log::info!("Presentation: {mode:?} for frame rate {limit:?}");
+            let s = self.window.inner_size();
+            if s.width > 0 && s.height > 0 {
+                self.surface.configure(&self.device, &self.config);
+            }
+            self.window.request_redraw();
+        }
     }
     /// Whether this adapter can draw the given anti-aliasing level exactly.
     pub fn supports(&self, level: crate::graphics::AntiAliasing) -> bool {
@@ -418,18 +461,14 @@ impl Renderer {
         let mut config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
             .ok_or("surface has no configuration")?;
-        let modes = surface.get_capabilities(&adapter).present_modes;
-        config.present_mode = if modes.contains(&wgpu::PresentMode::Immediate) {
-            wgpu::PresentMode::Immediate
-        } else if modes.contains(&wgpu::PresentMode::Mailbox) {
-            wgpu::PresentMode::Mailbox
-        } else {
-            wgpu::PresentMode::Fifo
-        };
+        let present_modes = surface.get_capabilities(&adapter).present_modes;
+        let frame_limit = crate::frame_pacing::Limit::for_run(graphics.frame_limit, false);
+        config.present_mode = frame_limit.present_mode(&present_modes);
         config.desired_maximum_frame_latency = 1;
         log::info!(
-            "Presentation: {:?}, maximum queued frames: {}",
+            "Presentation: {:?} for frame rate {:?}, maximum queued frames: {}",
             config.present_mode,
+            frame_limit,
             config.desired_maximum_frame_latency
         );
         surface.configure(&device, &config);
@@ -566,6 +605,9 @@ impl Renderer {
             device,
             queue,
             config,
+            present_modes,
+            frame_limit,
+            automated: false,
             texture,
             bind_group,
             veil,
@@ -609,10 +651,6 @@ impl Renderer {
         self.queue.submit([encoder.finish()]);
         self.sim.hide_aircraft();
         self.mirror_frames += 1;
-    }
-    /// Whether the frame-rate counter is on for this run.
-    fn counter_shown(&self) -> bool {
-        crate::frame_rate::shown(self.graphics.show_frame_rate)
     }
     pub fn capture_sim(
         &mut self,
@@ -1115,17 +1153,13 @@ impl Renderer {
                 gpu_ms,
             );
         }
-        // Wayland frame callbacks throttle redraw requests to compositor refresh.
-        // Only request that pacing when the surface must fall back to FIFO.
+        // Wayland frame callbacks throttle redraw requests to compositor
+        // refresh. Request that pacing with FIFO (V-sync): a hidden window
+        // then gets no redraws rather than blocking in its next present.
         if self.config.present_mode == wgpu::PresentMode::Fifo {
             self.window.pre_present_notify();
         }
         frame.present();
-        // Keep menus and paused views rendering while measuring rendering load.
-        // Requesting the next frame here covers every surface using this presenter.
-        if show_counter {
-            self.window.request_redraw();
-        }
         self.first_frame.complete();
         Ok(true)
     }
