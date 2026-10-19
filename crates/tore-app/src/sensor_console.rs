@@ -852,12 +852,51 @@ struct Mask {
     h: i32,
     cells: Vec<u8>,
 }
+
+/// Buffers the console's overlay drawing reuses from frame to frame: the
+/// mask raster (about 2 MB at 1080p) and the overlay pixels (8.3 MB), which
+/// the renderer hands back after uploading them (see [`recycle`]).
+#[derive(Default)]
+struct Spare {
+    cells: Vec<u8>,
+    overlay: Vec<u8>,
+}
+thread_local! {
+    static SPARE: std::cell::RefCell<Spare> = std::cell::RefCell::new(Spare::default());
+}
+
+/// Gives an overlay returned by [`draw`], [`draw_pod`] or [`captions`] back
+/// for the next one to draw into.
+pub fn recycle(overlay: Vec<u8>) {
+    SPARE.with(|spare| {
+        let mut spare = spare.borrow_mut();
+        if overlay.capacity() > spare.overlay.capacity() {
+            spare.overlay = overlay;
+        }
+    });
+}
+
+impl Drop for Mask {
+    fn drop(&mut self) {
+        let cells = std::mem::take(&mut self.cells);
+        SPARE.with(|spare| {
+            let mut spare = spare.borrow_mut();
+            if cells.capacity() > spare.cells.capacity() {
+                spare.cells = cells;
+            }
+        });
+    }
+}
 impl Mask {
     fn new(size: [u32; 2]) -> Self {
+        let len = size[0] as usize * size[1] as usize;
+        let mut cells = SPARE.with(|spare| std::mem::take(&mut spare.borrow_mut().cells));
+        cells.clear();
+        cells.resize(len, 0);
         Self {
             w: size[0] as i32,
             h: size[1] as i32,
-            cells: vec![0; size[0] as usize * size[1] as usize],
+            cells,
         }
     }
     fn rect(&mut self, x: i32, y: i32, w: i32, h: i32, v: u8) {
@@ -917,7 +956,75 @@ impl Mask {
     }
     /// The overlay's pixels: ink, its dark outline `o` pixels wide, and the
     /// dark fills.
+    ///
+    /// A clear cell takes the outline when any ink cell lies within `o`
+    /// cells of it in both directions (a square window). That window is the
+    /// same as a run along the row followed by a run along the column, so two
+    /// sliding counts replace the search of up to (2o+1)^2 cells per pixel.
     fn pixels(&self, o: i32) -> Vec<u8> {
+        let (w, h, o) = (self.w as usize, self.h as usize, o.max(0) as usize);
+        let mut out = SPARE.with(|spare| std::mem::take(&mut spare.borrow_mut().overlay));
+        // Every pixel is written below, so no clearing pass is needed.
+        out.resize(w * h * 4, 0);
+        // `row_near[y * w + x]`: ink within `o` cells of (x, y) along row y.
+        let mut row_near = vec![false; w * h];
+        for (cells, near) in self.cells.chunks_exact(w).zip(row_near.chunks_exact_mut(w)) {
+            // Ink in the window [x - o, x + o], kept as a running count.
+            let mut count = cells[..(o + 1).min(w)].iter().filter(|&&v| v == 1).count();
+            for x in 0..w {
+                near[x] = count > 0;
+                if x + o + 1 < w && cells[x + o + 1] == 1 {
+                    count += 1;
+                }
+                if x >= o && cells[x - o] == 1 {
+                    count -= 1;
+                }
+            }
+        }
+        // Per column, how many rows in the window [y - o, y + o] have ink
+        // near the pixel.
+        let mut column_near = vec![0u32; w];
+        for row in 0..(o + 1).min(h) {
+            for (count, &near) in column_near
+                .iter_mut()
+                .zip(&row_near[row * w..(row + 1) * w])
+            {
+                *count += u32::from(near);
+            }
+        }
+        for y in 0..h {
+            let cells = &self.cells[y * w..(y + 1) * w];
+            let pixels = &mut out[y * w * 4..(y + 1) * w * 4];
+            for ((&v, &count), pixel) in cells
+                .iter()
+                .zip(&column_near)
+                .zip(pixels.chunks_exact_mut(4))
+            {
+                pixel.copy_from_slice(&match v {
+                    1 => INK,
+                    2 => DARK,
+                    _ if count > 0 => DARK,
+                    _ => [0; 4],
+                });
+            }
+            if y + o + 1 < h {
+                let add = &row_near[(y + o + 1) * w..(y + o + 2) * w];
+                for (count, &near) in column_near.iter_mut().zip(add) {
+                    *count += u32::from(near);
+                }
+            }
+            if y >= o {
+                let remove = &row_near[(y - o) * w..(y - o + 1) * w];
+                for (count, &near) in column_near.iter_mut().zip(remove) {
+                    *count -= u32::from(near);
+                }
+            }
+        }
+        out
+    }
+    /// The outline search `pixels` replaced, kept to show they agree.
+    #[cfg(test)]
+    fn pixels_reference(&self, o: i32) -> Vec<u8> {
         let mut out = vec![0u8; (self.w * self.h * 4) as usize];
         for y in 0..self.h {
             for x in 0..self.w {
@@ -1910,6 +2017,69 @@ mod tests {
             (1..=6).map(field_name).collect::<Vec<_>>(),
             ["WFOV", "MFOV", "NFOV", "NFOV E2", "NFOV E4", "NFOV E8"]
         );
+    }
+
+    /// A deterministic pseudo-random mask of ink, fill and clear cells.
+    fn noisy_mask(size: [u32; 2], density: u32, seed: u32) -> Mask {
+        let mut m = Mask::new(size);
+        let mut state = seed.wrapping_mul(2_654_435_761).wrapping_add(1);
+        for cell in &mut m.cells {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let r = (state >> 16) % 1000;
+            *cell = if r < density {
+                1
+            } else if r < density * 2 {
+                2
+            } else {
+                0
+            };
+        }
+        m
+    }
+
+    #[test]
+    fn the_separable_outline_matches_the_window_search_cell_for_cell() {
+        for (size, density, o) in [
+            ([1, 1], 500, 1),
+            ([7, 5], 100, 1),
+            ([5, 7], 100, 2),
+            ([31, 17], 20, 3),
+            ([40, 3], 300, 4),
+            ([3, 40], 300, 4),
+            ([64, 48], 5, 1),
+            ([64, 48], 5, 2),
+            ([64, 48], 5, 6),
+            ([64, 48], 200, 2),
+            ([64, 48], 0, 2),
+            ([13, 9], 30, 20),
+        ] {
+            for seed in 0..4 {
+                let m = noisy_mask(size, density, seed);
+                assert_eq!(
+                    m.pixels(o),
+                    m.pixels_reference(o),
+                    "{size:?} density {density} o {o} seed {seed}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_overlay_buffers_are_reused_without_changing_pixels() {
+        let mut camera = Camera::new();
+        camera.position = [0., 6000., 0.];
+        camera.pitch = -0.4;
+        let size = [480, 270];
+        let first = draw(&sample(), &camera, size);
+        // Hand the dirty buffer back and draw again, at a different size too.
+        recycle(first.clone());
+        let again = draw(&sample(), &camera, size);
+        assert_eq!(first, again);
+        recycle(again);
+        let smaller = draw(&sample(), &camera, [240, 135]);
+        assert_eq!(smaller.len(), 240 * 135 * 4);
+        recycle(smaller);
+        assert_eq!(first, draw(&sample(), &camera, size));
     }
 
     #[test]

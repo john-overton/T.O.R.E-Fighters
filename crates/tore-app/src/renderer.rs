@@ -1088,6 +1088,10 @@ impl Renderer {
         if flight_size.is_some() && console.is_none() {
             self.cockpit.draw(&mut encoder, &view);
         }
+        if let Some((_, overlay, _)) = console {
+            // Uploaded above; the next overlay draws into the same buffer.
+            crate::sensor_console::recycle(overlay);
+        }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Main menu"),
