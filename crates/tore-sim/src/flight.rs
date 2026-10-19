@@ -1195,6 +1195,22 @@ impl State {
             self.gear = 1.;
         }
         let hovering = self.autopilot.mode() == crate::autopilot::Mode::Hover;
+        // The step asks for the surface under one point several times (the
+        // autopilot, the systems, the wind coupling, the contact check). The
+        // answer for a point is the same each time within a step, so the last
+        // one asked is kept, keyed on the bits of the point.
+        let last = std::cell::Cell::new(None::<([u64; 2], crate::research::Surface)>);
+        let ground = |x: f64, z: f64| {
+            let key = [x.to_bits(), z.to_bits()];
+            match last.get() {
+                Some((at, surface)) if at == key => surface,
+                _ => {
+                    let surface = ground(x, z);
+                    last.set(Some((key, surface)));
+                    surface
+                }
+            }
+        };
         self.step_once(input, ground);
         if hovering && self.autopilot.mode() != crate::autopilot::Mode::Hover {
             self.systems.notify(HOVER_HOLD_OFF);
@@ -2298,6 +2314,51 @@ mod tests {
         s.velocity = [0., 0., speed];
         s.throttle = 1.;
         s
+    }
+    #[test]
+    fn the_step_asks_for_each_surface_once_and_flies_as_it_did() {
+        // `step_surface` keeps the last surface asked for. A flight stepped
+        // through it must equal one stepped by `step_once` over the same
+        // ground, tick for tick, while the ground is asked for less often.
+        use crate::research::Surface;
+        let a = transport();
+        fn ground(calls: &std::cell::Cell<u32>, x: f64, z: f64) -> Surface {
+            calls.set(calls.get() + 1);
+            // Rolling ground, a wind and a stretch of water.
+            let mut surface = Surface::terrain(40. * (x / 700.).sin() + 25. * (z / 900.).cos());
+            surface.wind = [6., 0., -3.];
+            surface.water = x > 6_000.;
+            surface.slope_deg = 2.;
+            surface
+        }
+        let calls = std::cell::Cell::new(0u32);
+        let plain = std::cell::Cell::new(0u32);
+        // Low and slow so that the ground matters, then a climb.
+        for (altitude, speed) in [(60., 330.), (400., 420.), (8_000., 600.)] {
+            let mut memoized = level(&a, altitude, speed);
+            memoized.pitch = -0.05;
+            memoized.velocity = Basis::new(0., memoized.pitch, 0.)
+                .forward
+                .map(|v| v * speed);
+            let mut direct = memoized.clone();
+            for tick in 0..900 {
+                let input = PilotInput {
+                    pitch: if tick > 300 { 0.4 } else { -0.1 },
+                    ..Default::default()
+                };
+                memoized.step_surface(&input, |x, z| ground(&calls, x, z));
+                direct.trace.0 = FlightTrace::default();
+                direct.step_once(&input, |x, z| ground(&plain, x, z));
+                direct.trace.0.tick = direct.ticks;
+                assert_eq!(memoized, direct, "{altitude} ft, tick {tick}");
+            }
+        }
+        assert!(
+            calls.get() < plain.get(),
+            "{} of {}",
+            calls.get(),
+            plain.get()
+        );
     }
     #[test]
     fn a_heavy_keeps_its_pull_from_the_last_g_row_up_to_and_past_its_top_speed() {

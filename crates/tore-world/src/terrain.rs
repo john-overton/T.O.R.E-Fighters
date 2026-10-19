@@ -1804,11 +1804,15 @@ impl Terrain {
         to: [f64; 3],
         alive: impl IntoIterator<Item = u32>,
     ) -> Option<(u32, f64)> {
-        let alive: BTreeSet<_> = alive.into_iter().collect();
+        let mut alive: Vec<u32> = alive.into_iter().collect();
+        alive.sort_unstable();
         self.airport_scene
             .objects
             .iter()
-            .filter(|object| !object.runway && alive.contains(&object.id))
+            .filter(|object| !object.runway && alive.binary_search(&object.id).is_ok())
+            // A box the segment cannot reach at all is not tested exactly,
+            // which needs the box's trigonometry.
+            .filter(|object| !segment_misses_sphere(&object.bounds, from, to))
             .filter_map(|object| {
                 object
                     .bounds
@@ -1902,6 +1906,35 @@ pub fn edge_distance_nm(cols: usize, rows: usize, x: f64, z: f64) -> f64 {
     let extent = |cells: usize| cells.saturating_sub(1) as f64 * cell;
     let beyond = |value: f64, extent: f64| (0. - value).max(value - extent).max(0.);
     beyond(x, extent(cols)).hypot(beyond(z, extent(rows))) / FEET_PER_NAUTICAL_MILE
+}
+
+/// Whether the segment `from` to `to` is certainly clear of `bounds`: it
+/// passes farther from the box's centre than the box's half diagonal (a
+/// sphere that holds the box at any heading), by a margin far above rounding.
+/// A segment this says nothing of may still miss the box, which the exact
+/// test settles; a segment it clears can never touch it.
+fn segment_misses_sphere(
+    bounds: &tore_sim::airport::OrientedBox,
+    from: [f64; 3],
+    to: [f64; 3],
+) -> bool {
+    let along: [f64; 3] = std::array::from_fn(|i| to[i] - from[i]);
+    let centre: [f64; 3] = std::array::from_fn(|i| bounds.center[i] - from[i]);
+    let length_squared: f64 = along.iter().map(|v| v * v).sum();
+    let at = if length_squared > 0. {
+        (centre.iter().zip(&along).map(|(c, a)| c * a).sum::<f64>() / length_squared).clamp(0., 1.)
+    } else {
+        0.
+    };
+    let distance_squared: f64 = (0..3)
+        .map(|i| {
+            let d = centre[i] - along[i] * at;
+            d * d
+        })
+        .sum();
+    let reach = bounds.half.iter().map(|h| h * h).sum::<f64>().sqrt() + 1.;
+    // Anything not finite is left to the exact test.
+    distance_squared.is_finite() && reach.is_finite() && distance_squared > reach * reach
 }
 
 /// A roof on an airfield's box must stand this high above the runway plane to
@@ -2188,6 +2221,87 @@ mod tests {
                 .is_none()
         );
         assert!(!world.surface(50.0, 50.0).landable);
+    }
+
+    /// `solid_contact` as it was: a set of ids, the exact test on each.
+    fn solid_contact_reference(
+        world: &Terrain,
+        from: [f64; 3],
+        to: [f64; 3],
+        alive: impl IntoIterator<Item = u32>,
+    ) -> Option<(u32, f64)> {
+        let alive: BTreeSet<_> = alive.into_iter().collect();
+        world
+            .airport_scene
+            .objects
+            .iter()
+            .filter(|object| !object.runway && alive.contains(&object.id))
+            .filter_map(|object| {
+                object
+                    .bounds
+                    .segment_fraction(from, to)
+                    .map(|at| (object.id, at))
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)))
+    }
+
+    #[test]
+    fn solid_contact_finds_what_the_exact_test_on_every_live_object_found() {
+        let mut world = world();
+        let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1_u64 << 53) as f64
+        };
+        for id in 0..120 {
+            world
+                .airport_scene
+                .objects
+                .push(tore_sim::airport::StaticObject {
+                    id,
+                    source: tore_sim::airport::SourceKey {
+                        layout: "T.MM".into(),
+                        ordinal: id,
+                    },
+                    name: "Hangar".into(),
+                    object_type: "HANGR.OT".into(),
+                    bounds: tore_sim::airport::OrientedBox {
+                        center: [next() * 4000., next() * 300., next() * 4000.],
+                        half: [3. + next() * 60., 3. + next() * 40., 3. + next() * 90.],
+                        heading: next() * 6.3,
+                        pitch: (next() - 0.5) * 0.6,
+                        bank: (next() - 0.5) * 0.6,
+                    },
+                    hit_points: 100,
+                    runway: id % 17 == 0,
+                    category: 0x2000,
+                    radar_signature: 1.0,
+                    infrared_signature: 0.0,
+                    type_flags: 0,
+                    max_visible: 0,
+                });
+        }
+        let mut hits = 0;
+        for _ in 0..4000 {
+            let from = [next() * 4000., next() * 300., next() * 4000.];
+            let to = if next() < 0.1 {
+                from
+            } else {
+                [
+                    from[0] + (next() - 0.5) * 900.,
+                    from[1] + (next() - 0.5) * 200.,
+                    from[2] + (next() - 0.5) * 900.,
+                ]
+            };
+            let alive: Vec<u32> = (0..140).filter(|_| next() < 0.7).collect();
+            let old = solid_contact_reference(&world, from, to, alive.iter().copied());
+            let new = world.solid_contact(from, to, alive.iter().copied());
+            assert_eq!(new, old, "{from:?} to {to:?}");
+            hits += usize::from(new.is_some());
+        }
+        assert!(hits > 50, "only {hits} of the segments touched a box");
     }
 
     #[test]

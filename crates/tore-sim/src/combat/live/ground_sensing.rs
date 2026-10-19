@@ -49,6 +49,20 @@ impl State {
             self.sensor_weather = weather;
         }
     }
+    /// [`Self::set_sensor_weather`] for bands the caller has not collected:
+    /// they are collected only when they differ from the ones held, which is
+    /// almost never (the active layers change a few times a mission).
+    pub fn set_sensor_weather_bands(
+        &mut self,
+        bands: impl ExactSizeIterator<Item = sensors::WeatherBand> + Clone,
+    ) {
+        let held = &self.sensor_weather.bands;
+        if bands.len() != held.len() || bands.clone().zip(held).any(|(new, old)| new != *old) {
+            self.sensor_weather = sensors::Weather {
+                bands: bands.collect(),
+            };
+        }
+    }
     pub fn sensor_weather(&self) -> &sensors::Weather {
         &self.sensor_weather
     }

@@ -310,6 +310,35 @@ pub struct TickOutput {
     pub terms: Vec<(PlaneId, plane::OwnshipTerms)>,
 }
 
+impl TickOutput {
+    /// Empties the output for the next tick, as `*self = Self::default()`
+    /// would, but keeps what each queue grew to hold.
+    pub fn clear(&mut self) {
+        let Self {
+            cues,
+            commanded,
+            orders,
+            events,
+            releases,
+            outcomes,
+            journal,
+            emissions,
+            fault,
+            terms,
+        } = self;
+        cues.clear();
+        *commanded = 0;
+        orders.clear();
+        events.clear();
+        releases.clear();
+        outcomes.clear();
+        *journal = None;
+        emissions.clear();
+        *fault = None;
+        terms.clear();
+    }
+}
+
 impl World {
     /// Restarts the weather clock and every cockpit's turbulence from the
     /// launch conditions and their fixed seeds. The camera weather is the
@@ -786,7 +815,7 @@ impl World {
         out: &mut TickOutput,
         commands_applied: impl FnOnce(&World, &TickOutput) -> WorldResult<()>,
     ) -> WorldResult<()> {
-        *out = TickOutput::default();
+        out.clear();
         let stepped = self.tick();
         self.check_inputs(mission, inputs)?;
         // Mission commands first, then each seat's commands in seat order on
@@ -851,7 +880,7 @@ impl World {
         // The ground pages scale their ranges by the weather's sensor effects.
         self.combat
             .state
-            .set_sensor_weather(self.terrain.weather.sensor_weather());
+            .set_sensor_weather_bands(self.terrain.weather.sensor_weather_bands());
         for index in 0..self.cockpits.len() {
             let seat = self.seat_of_cockpit(index);
             let cockpit = &mut self.cockpits[index];
