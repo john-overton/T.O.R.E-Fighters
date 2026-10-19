@@ -212,3 +212,133 @@ fn packs_release_their_burst_and_pods_one_round() {
     assert!(is_bomb(&w(0x82a052, 1, 1)));
     assert!(!is_bomb(&w(0x2a543, 1, 1)));
 }
+
+/// A fall's cursor (optimization slice S1) answers bit for bit what the stored
+/// motion answers flying again from its release: over random releases
+/// (heights, speeds, climbs and dives, bodies and drag), random ages walked
+/// forward with random strides, some steps back, part ticks, stored motions
+/// already advanced, and fall times to random ground heights, including
+/// heights the path already went below and heights above the release.
+#[test]
+fn a_fall_cursor_matches_the_stored_motion_bit_for_bit() {
+    let mut seed = 0x51_7cc1_b727_220a_u64;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 11) as f64 / (1u64 << 53) as f64
+    };
+    let bits = |f: Flight| {
+        [f.position, f.velocity]
+            .concat()
+            .iter()
+            .map(|v| v.to_bits())
+            .collect::<Vec<_>>()
+    };
+    let mut checks = 0;
+    let mut fallbacks = 0;
+    let mut impacts = 0;
+    let mut searched_on = 0;
+    for case in 0..64 {
+        let height = 100. + next() * 25_000.;
+        let pitch = (next() - 0.6) * 1.4;
+        let heading = next() * std::f64::consts::TAU;
+        let mut release = ReleaseState::new(
+            [next() * 1e5 - 5e4, height, next() * 1e5 - 5e4],
+            [
+                pitch.cos() * heading.sin(),
+                pitch.sin(),
+                pitch.cos() * heading.cos(),
+            ],
+            50. + next() * 1_500.,
+        );
+        release.body = Body {
+            mass: (50. + next() * 2_500.) / 32.,
+            area: 0.05 + next() * 0.4,
+            retarder: [0., 0., 2.4, 5.5][case % 4],
+            steering: 0,
+            guidance_seconds: 0.,
+        };
+        let mut stored = BombMotion::new(release);
+        // A stored motion that was itself advanced starts its paths there.
+        if case % 8 == 7 {
+            stored.advance((next() * 300.) as u64);
+        }
+        let mut cursor = FallCursor::new(stored);
+        let start = if case % 3 == 0 {
+            (next() * 50.) as u64
+        } else {
+            0
+        };
+        let end = 200 + (next() * 1_300.) as u64;
+        let mut age = start;
+        while age < end {
+            // Mostly forward, now and then back (a restore, a replay seek).
+            if next() < 0.03 {
+                age = age.saturating_sub((next() * 200.) as u64).max(start);
+            } else {
+                age += 1 + (next() * 16.) as u64;
+            }
+            let seconds =
+                (age - start) as f64 / 120. + if case % 5 == 4 { next() / 120. } else { 0. };
+            let got = cursor.at(&stored, seconds);
+            assert_eq!(
+                bits(got),
+                bits(stored.at(seconds)),
+                "case {case} age {age} seconds {seconds}"
+            );
+            assert_eq!(
+                got.position.map(f64::to_bits),
+                stored.position(seconds).map(f64::to_bits)
+            );
+            assert_eq!(
+                unit(got.velocity).map(f64::to_bits),
+                stored.direction(seconds).map(f64::to_bits)
+            );
+            let lowest = cursor.lowest;
+            let ground = match (next() * 4.) as u32 {
+                0 => height + 1. + next() * 500.,
+                1 if lowest.is_finite() => lowest + (next() - 0.5) * 40.,
+                _ => got.position[1] - next() * 4_000.,
+            };
+            if lowest - ground <= 0. || lowest.is_nan() {
+                fallbacks += 1;
+            }
+            let expected = stored.fall_time(ground);
+            impacts += usize::from(expected.is_some());
+            // Found by searching on from the cursor, not from the release.
+            searched_on += usize::from(
+                expected.is_some()
+                    && stored.tick == 0
+                    && lowest - ground > 0.
+                    && lowest.is_finite(),
+            );
+            assert_eq!(
+                cursor.fall_time(&stored, ground).map(f64::to_bits),
+                expected.map(f64::to_bits),
+                "case {case} age {age} ground {ground}"
+            );
+            checks += 1;
+        }
+    }
+    assert!(checks > 3_000, "{checks}");
+    assert!(fallbacks > 50, "{fallbacks}");
+    assert!(impacts > 1_000, "{impacts}");
+    assert!(searched_on > 500, "{searched_on}");
+}
+
+/// The cursors drop out of `Debug`, so they never tell two states apart.
+#[test]
+fn fall_cursors_are_transient() {
+    let release = ReleaseState::new([0., 5_000., 0.], [0., 0., 1.], 700.);
+    let stored = BombMotion::new(release);
+    let mut cursors = FallCursors::default();
+    cursors.follow(3, &stored).at(&stored, 2.);
+    assert_eq!(format!("{cursors:?}"), "FallCursors");
+    // Another fall under the same number starts its cursor again.
+    let other = BombMotion::new(ReleaseState::new([0., 5_000., 0.], [0., 0., 1.], 701.));
+    assert!(!cursors.follow(3, &other).follows(&stored));
+    assert_eq!(cursors.follow(3, &other).motion.tick, 0);
+    cursors.retain(|id| id != 3);
+    assert!(cursors.is_empty());
+}

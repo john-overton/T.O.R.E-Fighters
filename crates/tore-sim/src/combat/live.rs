@@ -1758,6 +1758,12 @@ pub struct State {
     /// bomb keeps its release rather than a velocity. Mission state.
     bombs: BTreeMap<u32, super::ballistics::BombMotion>,
     jettisoned: BTreeMap<u32, bool>,
+    /// Where each jettisoned store and each guided bomb falling blind has
+    /// got to along its stored fall, by projectile number, so a fall steps
+    /// once a tick rather than again from its release. Not mission state:
+    /// a checkpoint leaves it out and it is rebuilt from `bombs` and
+    /// `guided` with the identical result.
+    falls: super::ballistics::FallCursors,
     /// The guidance of each guided air-to-ground weapon an ownship released
     /// and is in flight, by projectile number ([`guided`]). Mission state.
     guided: BTreeMap<u32, guided::GuidedFlight>,
@@ -3141,6 +3147,7 @@ impl State {
             next_surface_shot: SURFACE_PROJECTILE_ID_BASE,
             bombs: BTreeMap::new(),
             jettisoned: BTreeMap::new(),
+            falls: Default::default(),
             guided: BTreeMap::new(),
             guided_impacts: BTreeMap::new(),
             kept: BTreeMap::new(),
@@ -5241,15 +5248,18 @@ impl State {
             });
             // Inert stores never enter guidance, fuzing, collision damage or scoring.
             if self.jettisoned.contains_key(&p.id) {
-                let Some(motion) = self.bombs.get(&p.id).copied() else {
+                let Some(motion) = self.bombs.get(&p.id) else {
                     return false;
                 };
                 p.previous = p.position;
                 p.age += 1;
                 let seconds = p.age as f64 / 120.;
-                p.position = motion.position(seconds);
-                p.direction = motion.direction(seconds);
-                p.speed_f8 = (missiles::length(motion.velocity(seconds)) * 256.) as i32;
+                // The stored motion's position, direction and velocity at
+                // `seconds`, from one sample on the store's cursor.
+                let flight = self.falls.follow(p.id, motion).at(motion, seconds);
+                p.position = flight.position;
+                p.direction = unit(flight.velocity);
+                p.speed_f8 = (missiles::length(flight.velocity) * 256.) as i32;
                 if let Some(at) = terrain_hit(p.previous, p.position, &ground) {
                     let mut position = std::array::from_fn(|i| {
                         p.previous[i] + (p.position[i] - p.previous[i]) * at
@@ -5496,6 +5506,7 @@ impl State {
                         targets: &self.targets,
                         ground: &ground,
                     },
+                    &mut self.falls,
                 )
             });
             if super::guided::is_glide_bomb(w)
@@ -5517,9 +5528,10 @@ impl State {
                 p.speed_f8 = (missiles::length(flight.velocity) * 256.) as i32;
             } else if let Some(Some((fall, start))) = guided_fall {
                 let seconds = (p.age + 1 - start) as f64 / 120.;
-                p.position = fall.position(seconds);
-                p.direction = fall.direction(seconds);
-                p.speed_f8 = (missiles::length(fall.velocity(seconds)) * 256.) as i32;
+                let flight = self.falls.follow(p.id, &fall).at(&fall, seconds);
+                p.position = flight.position;
+                p.direction = unit(flight.velocity);
+                p.speed_f8 = (missiles::length(flight.velocity) * 256.) as i32;
             } else if let Some(motion) = &mut p.motion {
                 if guided_fall.is_none() {
                     motion.turn(old_direction, p.direction);
@@ -6095,6 +6107,7 @@ impl State {
             || !self.surface_rounds.is_empty()
             || !self.bombs.is_empty()
             || !self.guided.is_empty()
+            || !self.falls.is_empty()
         {
             let flying: std::collections::BTreeSet<u32> =
                 self.projectiles.iter().map(|p| p.id).collect();
@@ -6102,6 +6115,7 @@ impl State {
             self.surface_rounds.retain(|id, _| flying.contains(id));
             self.bombs.retain(|id, _| flying.contains(id));
             self.jettisoned.retain(|id, _| flying.contains(id));
+            self.falls.retain(|id| flying.contains(&id));
             // A guided weapon that is gone marks its aircraft's last impact.
             let (tick, impacts) = (self.tick, &mut self.guided_impacts);
             self.guided.retain(|id, flight| {

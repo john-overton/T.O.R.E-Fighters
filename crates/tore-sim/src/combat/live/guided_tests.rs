@@ -810,6 +810,7 @@ fn a_late_first_laser_lock_checks_terrain_but_an_existing_lock_keeps_its_rules()
                     targets: &s.targets,
                     ground: &ground,
                 },
+                &mut Default::default(),
             );
         };
     steer(&mut flight, &mut p, &ridge);

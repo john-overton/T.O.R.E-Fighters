@@ -257,9 +257,14 @@ impl BombMotion {
         let mut motion = *self;
         let ticks = seconds.max(0.) / DT;
         motion.advance(ticks.floor() as u64);
-        let before = motion.flight;
-        motion.advance(motion.tick + 1);
-        let f = ticks.fract();
+        motion.between(ticks.fract())
+    }
+    /// The flight `f` of the way from this tick to the next: the one sample
+    /// [`Self::at`] takes once it has reached the whole tick.
+    fn between(mut self, f: f64) -> Flight {
+        let before = self.flight;
+        self.advance(self.tick + 1);
+        let motion = self;
         Flight {
             position: std::array::from_fn(|i| {
                 before.position[i] + f * (motion.flight.position[i] - before.position[i])
@@ -282,11 +287,15 @@ impl BombMotion {
         self.impact(&|_, _| ground).map(|i| i.seconds)
     }
     pub fn impact(&self, ground: &impl Fn(f64, f64) -> f64) -> Option<Impact> {
-        let mut m = *self;
+        let m = *self;
         let above = m.flight.position[1] - ground(m.flight.position[0], m.flight.position[2]);
         if above <= 0. {
             return None;
         }
+        Self::crossing(m, ground)
+    }
+    /// The first terrain crossing after `m`'s tick, stepping on from it.
+    fn crossing(mut m: Self, ground: &impl Fn(f64, f64) -> f64) -> Option<Impact> {
         while (m.tick as f64) < MAX_SECONDS / DT {
             let before = m.flight.position;
             m.advance(m.tick + 1);
@@ -315,6 +324,125 @@ impl BombMotion {
             }
         }
         None
+    }
+}
+
+/// A cursor along a stored [`BombMotion`], advanced one whole tick at a time,
+/// so a store falling for `n` ticks costs `n` integration steps instead of
+/// the `n` squared of sampling the stored motion from its release each tick
+/// (optimization slice S1). It runs the identical step sequence, so every
+/// answer is bit for bit the stored motion's own. Transient: never
+/// checkpointed, sent or recorded; it is rebuilt from the stored motion
+/// whenever it is missing or no longer follows it.
+#[derive(Clone, Copy, Debug)]
+pub struct FallCursor {
+    motion: BombMotion,
+    /// The lowest height reached at any tick after the release up to the
+    /// cursor's tick, so [`Self::fall_time`] knows no crossing was skipped.
+    lowest: f64,
+}
+impl FallCursor {
+    pub fn new(stored: BombMotion) -> Self {
+        Self {
+            motion: stored,
+            lowest: f64::INFINITY,
+        }
+    }
+
+    /// Whether this cursor runs along `stored`: the same release, body and
+    /// starting point, compared bit for bit.
+    pub fn follows(&self, stored: &BombMotion) -> bool {
+        let release = |m: &BombMotion| {
+            // Every field, so a new one cannot be missed.
+            let Body {
+                mass,
+                area,
+                retarder,
+                steering,
+                guidance_seconds,
+            } = m.body;
+            [
+                m.origin[0],
+                m.origin[1],
+                m.origin[2],
+                m.horizontal[0],
+                m.horizontal[1],
+                m.vertical,
+                mass,
+                area,
+                retarder,
+                f64::from(steering),
+                guidance_seconds,
+            ]
+            .map(f64::to_bits)
+        };
+        release(&self.motion) == release(stored)
+    }
+
+    /// [`BombMotion::position`], [`BombMotion::velocity`] and
+    /// [`BombMotion::direction`] of `stored` at `seconds`, in one sample:
+    /// the identical bits, stepping on from the cursor's last tick.
+    pub fn at(&mut self, stored: &BombMotion, seconds: f64) -> Flight {
+        let ticks = seconds.max(0.) / DT;
+        let floor = ticks.floor() as u64;
+        // `BombMotion::at` starts from the stored tick, or from the release
+        // when asked for an earlier one: start again wherever the cursor
+        // could not be on that same path.
+        if floor < self.motion.tick || (self.motion.tick < stored.tick && stored.tick <= floor) {
+            *self = Self::new(*stored);
+        }
+        if floor < self.motion.tick {
+            // Earlier than the stored tick: from the release, as `advance`.
+            self.motion.advance(floor);
+            self.lowest = f64::NEG_INFINITY;
+        }
+        while self.motion.tick < floor {
+            self.motion.advance(self.motion.tick + 1);
+            self.lowest = self.lowest.min(self.motion.flight.position[1]);
+        }
+        self.motion.between(ticks.fract())
+    }
+
+    /// [`BombMotion::fall_time`] of `stored` to `ground`, bit for bit,
+    /// searching on from the cursor's tick when no tick before it reached
+    /// the ground. The "already below" check stays on the stored release.
+    pub fn fall_time(&self, stored: &BombMotion, ground: f64) -> Option<f64> {
+        let known = stored.tick == 0 && self.lowest > f64::NEG_INFINITY;
+        if !known || self.lowest - ground <= 0. {
+            return stored.fall_time(ground);
+        }
+        if stored.flight.position[1] - ground <= 0. {
+            return None;
+        }
+        BombMotion::crossing(self.motion, &|_, _| ground).map(|i| i.seconds)
+    }
+}
+
+/// [`FallCursor`]s by projectile number: the falls of jettisoned stores and
+/// of guided bombs falling blind. Transient, so its `Debug` shows nothing and
+/// the checkpoint, the wire and replays never see it.
+#[derive(Clone, Default)]
+pub struct FallCursors(std::collections::BTreeMap<u32, FallCursor>);
+impl std::fmt::Debug for FallCursors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("FallCursors")
+    }
+}
+impl FallCursors {
+    /// The cursor of projectile `id` along `stored`, made afresh when there
+    /// is none or it follows another fall.
+    pub fn follow(&mut self, id: u32, stored: &BombMotion) -> &mut FallCursor {
+        let cursor = self.0.entry(id).or_insert_with(|| FallCursor::new(*stored));
+        if !cursor.follows(stored) {
+            *cursor = FallCursor::new(*stored);
+        }
+        cursor
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+    pub fn retain(&mut self, mut keep: impl FnMut(u32) -> bool) {
+        self.0.retain(|id, _| keep(*id));
     }
 }
 

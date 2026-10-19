@@ -618,6 +618,8 @@ impl Checkpoint for State {
             next_surface_shot,
             bombs,
             jettisoned,
+            // Transient: rebuilt from `bombs` and `guided` with identical results.
+            falls: _,
             guided,
             guided_impacts,
             kept,
@@ -728,6 +730,7 @@ impl Checkpoint for State {
             next_surface_shot: Checkpoint::load(l, None)?,
             bombs: Checkpoint::load(l, None)?,
             jettisoned: Checkpoint::load(l, None)?,
+            falls: Default::default(),
             guided: Checkpoint::load(l, None)?,
             guided_impacts: Checkpoint::load(l, None)?,
             kept: Checkpoint::load(l, None)?,
@@ -774,6 +777,51 @@ mod tests {
             step(&mut state, false, 0);
             step(&mut copy, false, 0);
         }
+        assert_eq!(text(&copy), text(&state));
+    }
+
+    /// A checkpoint taken while jettisoned stores fall leaves their cursors
+    /// behind (optimization slice S1); the restored copy rebuilds them and
+    /// flies on bit for bit with the uninterrupted run, and both stay on the
+    /// stored motion flown from its release.
+    #[test]
+    fn jettisoned_stores_fall_on_identically_after_a_mid_fall_checkpoint() {
+        let mut state = super::super::tests::fixture(true);
+        state.command(0, super::super::Command::Jettison, shooter());
+        for _ in 0..240 {
+            step(&mut state, false, 0);
+        }
+        let falling: Vec<u32> = state
+            .projectiles
+            .iter()
+            .filter(|p| state.jettisoned.contains_key(&p.id))
+            .map(|p| p.id)
+            .collect();
+        assert!(!falling.is_empty(), "stores still falling");
+        assert!(!state.falls.is_empty());
+        let mut copy: State = round_trip(&state, &Models::default()).unwrap();
+        assert!(copy.falls.is_empty(), "the cursors are not checkpointed");
+        let mut landed = false;
+        for _ in 0..1200 {
+            step(&mut state, false, 0);
+            step(&mut copy, false, 0);
+            assert_eq!(text(&copy.projectiles), text(&state.projectiles));
+            for p in state.projectiles.iter().filter(|p| falling.contains(&p.id)) {
+                let motion = state.bomb_motion(p.id).unwrap();
+                let seconds = p.age as f64 / 120.;
+                assert_eq!(
+                    p.position.map(f64::to_bits),
+                    motion.position(seconds).map(f64::to_bits)
+                );
+                assert_eq!(
+                    p.direction.map(f64::to_bits),
+                    motion.direction(seconds).map(f64::to_bits)
+                );
+            }
+            landed |= !state.projectiles.iter().any(|p| falling.contains(&p.id));
+        }
+        assert!(landed, "the stores reached the ground");
+        assert!(state.falls.is_empty() && copy.falls.is_empty());
         assert_eq!(text(&copy), text(&state));
     }
 

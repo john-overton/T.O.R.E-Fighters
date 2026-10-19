@@ -1240,7 +1240,11 @@ identical non-translational launch states. In-flight guided TTI refreshes every 
 and counts down between refreshes. Client CCIP trails receive the body
 parameters in the readout, so peers must agree on these parameters and this
 model. Checkpoints include the integrated bomb state. Recorded transforms
-continue to drive replay playback.
+continue to drive replay playback. A jettisoned store or a guided bomb falling
+blind keeps its stored fall from the release; a transient cursor, never
+checkpointed, sent or recorded, steps along it once a tick so the fall is not
+flown again from the release every tick, with bit-identical positions,
+velocities and fall times (rebuilt from the stored fall after a restore).
 
 Scatter stays plus or minus **1.5 degrees**, with the same random stream,
 release count and pack offsets. Guided releases with no spot retain their
