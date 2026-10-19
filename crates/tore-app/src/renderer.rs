@@ -1034,7 +1034,7 @@ impl Renderer {
                     }
                     held => {
                         *held = Some(pixels.to_vec());
-                        vec![0..size[1] as usize]
+                        std::iter::once(0..size[1] as usize).collect()
                     }
                 };
                 rows.clear();
@@ -1042,7 +1042,7 @@ impl Renderer {
             }
             _ => {
                 self.canvas_held = None;
-                vec![0..size[1] as usize]
+                std::iter::once(0..size[1] as usize).collect()
             }
         };
         for band in bands {

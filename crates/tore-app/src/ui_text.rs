@@ -524,6 +524,13 @@ pub struct Quad {
 const MARGIN: f32 = 1.5;
 
 pub(crate) fn srgb_to_linear(byte: u8) -> f32 {
+    static TABLE: std::sync::OnceLock<[f32; 256]> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| std::array::from_fn(|byte| srgb_to_linear_exact(byte as u8)))
+        [usize::from(byte)]
+}
+
+/// The curve itself, worked out; `srgb_to_linear` looks these up.
+fn srgb_to_linear_exact(byte: u8) -> f32 {
     let c = f32::from(byte) / 255.0;
     if c <= 0.04045 {
         c / 12.92
@@ -599,34 +606,33 @@ impl Run {
     /// The pen position of each glyph in canvas pixels: the retail cell for
     /// a cell run, otherwise the face's own spacing spread to end where the
     /// retail text would.
-    fn lefts(&self, atlas: &Atlas) -> Vec<f32> {
+    ///
+    /// Written into `out`; `own` is scratch.
+    fn lefts(&self, atlas: &Atlas, out: &mut Vec<f32>, own: &mut Vec<f32>) {
         let first = self.glyphs.first().map_or(0.0, |g| g.x as f32);
+        out.clear();
         if self.cells {
-            return self.glyphs.iter().map(|g| g.x as f32).collect();
+            out.extend(self.glyphs.iter().map(|g| g.x as f32));
+            return;
         }
         let across = self.style.scale * self.style.squeeze;
-        let own: Vec<f32> = self
-            .glyphs
-            .iter()
-            .map(|g| match g.code {
-                b' ' => SPACE * atlas.em * across,
-                code if atlas.glyphs[usize::from(code)].is_some() => {
-                    atlas.advances[usize::from(code)] * across
-                }
-                _ => f32::from(g.advance),
-            })
-            .collect();
+        own.clear();
+        own.extend(self.glyphs.iter().map(|g| match g.code {
+            b' ' => SPACE * atlas.em * across,
+            code if atlas.glyphs[usize::from(code)].is_some() => {
+                atlas.advances[usize::from(code)] * across
+            }
+            _ => f32::from(g.advance),
+        }));
         let retail: f32 = self.glyphs.iter().map(|g| f32::from(g.advance)).sum();
         let spread =
             ((retail - own.iter().sum::<f32>()) / own.len().max(1) as f32).clamp(-1.0, 1.5);
         let mut pen = first;
-        own.iter()
-            .map(|advance| {
-                let at = pen;
-                pen += advance + spread;
-                at
-            })
-            .collect()
+        out.extend(own.iter().map(|advance| {
+            let at = pen;
+            pen += advance + spread;
+            at
+        }));
     }
 }
 
@@ -644,13 +650,15 @@ impl Layer {
         let mut quads = Vec::new();
         let mut pieces = Vec::new();
         let mut next = Vec::new();
+        let (mut covers, mut lefts, mut own) = (Vec::new(), Vec::new(), Vec::new());
         for (index, item) in self.items.iter().enumerate() {
-            let covers: Vec<[f32; 4]> = self
-                .occluders
-                .iter()
-                .filter(|(_, after)| *after > index)
-                .map(|(rect, _)| *rect)
-                .collect();
+            covers.clear();
+            covers.extend(
+                self.occluders
+                    .iter()
+                    .filter(|(_, after)| *after > index)
+                    .map(|(rect, _)| *rect),
+            );
             let run = match item {
                 Item::Text(run) => run,
                 Item::Icon(icon) => {
@@ -706,8 +714,8 @@ impl Layer {
             ];
             let scale = run.style.scale;
             let across = scale * run.style.squeeze;
-            let lefts = run.lefts(atlas);
-            for (placed, pen) in run.glyphs.iter().zip(lefts) {
+            run.lefts(atlas, &mut lefts, &mut own);
+            for (placed, &pen) in run.glyphs.iter().zip(&lefts) {
                 let Some(glyph) = atlas.glyphs[usize::from(placed.code)] else {
                     continue;
                 };
@@ -836,6 +844,17 @@ pub fn composite(canvas: &[u8], layer: &Layer, scale: usize) -> Vec<u8> {
 mod tests {
     use super::*;
     use crate::widgets::test_kit::{blank, kit};
+
+    #[test]
+    fn the_srgb_table_holds_the_curve_for_every_byte() {
+        for byte in 0..=255u8 {
+            assert_eq!(
+                srgb_to_linear(byte).to_bits(),
+                srgb_to_linear_exact(byte).to_bits(),
+                "{byte}"
+            );
+        }
+    }
 
     #[test]
     fn the_bundled_atlas_holds_the_glyphs_the_screens_need() {

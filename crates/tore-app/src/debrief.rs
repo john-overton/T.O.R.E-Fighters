@@ -534,7 +534,7 @@ impl Debrief {
         let panel = &s["PANELFNT.PIC"];
         c.text(panel, "PREV", ox + 20, oy + 41, None);
         c.text(panel, "NEXT", ox + 20, oy + 63, None);
-        let rocker = &s[&self.rocker.sprite()];
+        let rocker = &s[self.rocker.sprite()];
         c.blit(rocker, (ox + 48, oy + 39), 0, rocker.width, 1.);
         self.controls.extend([
             (PREVIOUS, (ox + 48, oy + 39, 18, 16)),

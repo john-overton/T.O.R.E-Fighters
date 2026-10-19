@@ -549,10 +549,12 @@ impl Menu {
             } else {
                 1.0 + self.state.glow[i] * 0.15
             };
-            let stem = if enabled(i) { "ACTION0" } else { "ACTIOD0" };
-            let l = &self.sprites[&format!("{stem}L.PIC")];
-            let m = &self.sprites[&format!("{stem}M.PIC")];
-            let r = &self.sprites[&format!("{stem}R.PIC")];
+            let (l, m, r) = if enabled(i) {
+                ("ACTION0L.PIC", "ACTION0M.PIC", "ACTION0R.PIC")
+            } else {
+                ("ACTIOD0L.PIC", "ACTIOD0M.PIC", "ACTIOD0R.PIC")
+            };
+            let (l, m, r) = (&self.sprites[l], &self.sprites[m], &self.sprites[r]);
             let (x, y) = (b.x + shift, b.y + shift);
             canvas.blit(l, (x, y), 0, l.width, gain);
             let end = b.width - r.width as i32;
@@ -685,6 +687,21 @@ pub(crate) fn text_width(font: &Sprite, text: &str) -> i32 {
         .sum()
 }
 pub(crate) struct Canvas<'a>(pub &'a mut [u8]);
+/// The piece `{prefix}{edge}.PIC` of a button, found without building its
+/// name on the heap (a button is drawn every frame).
+fn button_piece<'a>(sprites: &'a BTreeMap<String, Sprite>, prefix: &str, edge: char) -> &'a Sprite {
+    let tail = [edge as u8, b'.', b'P', b'I', b'C'];
+    let mut name = [0u8; 48];
+    if !edge.is_ascii() || prefix.len() + tail.len() > name.len() {
+        return &sprites[&format!("{prefix}{edge}.PIC")];
+    }
+    name[..prefix.len()].copy_from_slice(prefix.as_bytes());
+    name[prefix.len()..prefix.len() + tail.len()].copy_from_slice(&tail);
+    let key = std::str::from_utf8(&name[..prefix.len() + tail.len()])
+        .expect("a prefix and ASCII are UTF-8");
+    &sprites[key]
+}
+
 impl Canvas<'_> {
     pub(crate) fn centered_text(&mut self, font: &Sprite, text: &str, rect: (i32, i32, i32, i32)) {
         self.centered_text_by(font, text, text, rect);
@@ -764,9 +781,9 @@ impl Canvas<'_> {
         gain: f32,
         prefix: &str,
     ) {
-        let l = &sprites[&format!("{prefix}L.PIC")];
-        let m = &sprites[&format!("{prefix}M.PIC")];
-        let r = &sprites[&format!("{prefix}R.PIC")];
+        let l = button_piece(sprites, prefix, 'L');
+        let m = button_piece(sprites, prefix, 'M');
+        let r = button_piece(sprites, prefix, 'R');
         self.blit(l, (x, y), 0, l.width, gain);
         let end = w - r.width as i32;
         let mut at = l.width as i32;
@@ -880,6 +897,27 @@ impl Canvas<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn button_pieces_are_found_by_prefix_and_edge() {
+        let piece = |width| Sprite {
+            width,
+            height: 1,
+            rgba: vec![0; width * 4],
+            glyphs: vec![],
+        };
+        let mut sprites = BTreeMap::new();
+        let long = "P".repeat(60);
+        for (n, prefix) in ["ACTION0", "BUTTON", long.as_str()].into_iter().enumerate() {
+            for (m, edge) in ['L', 'M', 'R'].into_iter().enumerate() {
+                sprites.insert(format!("{prefix}{edge}.PIC"), piece(1 + n * 3 + m));
+            }
+        }
+        for (n, prefix) in ["ACTION0", "BUTTON", long.as_str()].into_iter().enumerate() {
+            for (m, edge) in ['L', 'M', 'R'].into_iter().enumerate() {
+                assert_eq!(button_piece(&sprites, prefix, edge).width, 1 + n * 3 + m);
+            }
+        }
+    }
     #[test]
     fn centered_labels_ignore_transparent_top_padding() {
         let mut glyphs = vec![[0, 0, 0]; 256];

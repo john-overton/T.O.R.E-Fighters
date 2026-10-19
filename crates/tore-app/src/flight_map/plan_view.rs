@@ -633,7 +633,7 @@ impl PlanView {
             x - 8 - advance(font, zoom_out),
             y + HALF.1 + (HALF.1 - at) / 2,
         );
-        match sprites.get(&self.rocker.sprite()) {
+        match sprites.get(self.rocker.sprite()) {
             Some(rocker) => Canvas(pixels).blit(rocker, (x, y), 0, rocker.width, 1.),
             None => {
                 // An import without the rocker's art gets two plain halves.

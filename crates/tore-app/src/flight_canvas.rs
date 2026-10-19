@@ -1342,7 +1342,7 @@ mod tests {
                 (dice.next() % (h + 20)) as f64 - 10.,
             );
             // Alternately a whole-pixel copy and a filtered one.
-            let size = if dice.next() % 2 == 0 {
+            let size = if dice.next().is_multiple_of(2) {
                 (6., 4.)
             } else {
                 (9.7, 6.3)
@@ -1374,7 +1374,7 @@ mod tests {
             [0, 0, 0],
             0.65,
         );
-        if frame % 4 == 0 {
+        if frame.is_multiple_of(4) {
             canvas.anchored_layer(&layer);
         }
         if frame % 5 == 3 {
@@ -1422,7 +1422,7 @@ mod tests {
                 ),
                 held => {
                     *held = Some(canvas.pixels.clone());
-                    vec![0..height]
+                    std::iter::once(0..height).collect()
                 }
             };
             canvas.pending.clear();
