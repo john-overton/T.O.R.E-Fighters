@@ -1,5 +1,6 @@
 // Original implementation for this engine. Fixed world-cell identity, no
 // instance data or alpha test. Appended to terrain.wgsl for shared lighting.
+// reserved.x: the candidate count (the candidate pass's bound).
 struct BladeParams { area:vec4<f32>, grid:vec4<f32>, wind:vec4<f32>, reserved:vec4<f32> }
 @group(2) @binding(0) var<uniform> blades:BladeParams;
 @group(2) @binding(1) var blade_habitat:texture_2d_array<u32>;
@@ -27,9 +28,18 @@ struct BladeOut {
  @location(1) direction:vec3<f32>, @location(2) normal:vec3<f32>,
  @location(3) altitude:f32, @location(4) height:f32
 }
-@vertex fn blade_vertex(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->BladeOut {
- var out:BladeOut;
- out.clip=vec4<f32>(0.0,0.0,-1.0,1.0);
+// One candidate blade's vertex-independent part: whether it grows, and
+// where, how tall, what colour and how it bends. The candidate pass
+// (blade_cull) evaluates it once per candidate and keeps the survivors; the
+// fallback vertex path (blade_vertex) evaluates it in each of its five
+// vertices, as before.
+struct Blade {
+ ok:bool, base:vec3<f32>, height:f32, color:vec3<f32>, width:f32,
+ across:vec2<f32>, bend:vec2<f32>, grad:vec2<f32>
+}
+fn blade_candidate(instance:u32)->Blade {
+ var out:Blade;
+ out.ok=false;
  let side=u32(blades.grid.x);
  let level=instance/(side*side);
  let slot=instance%(side*side);
@@ -114,7 +124,6 @@ struct BladeOut {
  height*=(0.75+0.50*blade_random(cell,61u))*grow*(1.0+0.35*far);
  let yaw=6.2831853*blade_random(cell,67u);
  let across=vec2<f32>(cos(yaw),sin(yaw));
- let shape=array<vec2<f32>,5>(vec2<f32>(-0.5,0.0),vec2<f32>(0.5,0.0),vec2<f32>(-0.22,0.55),vec2<f32>(0.22,0.55),vec2<f32>(0.0,1.0))[vertex];
  let width=(0.20+0.20*blade_random(cell,71u))*grow*(1.0+0.8*far);
  let speed=length(blades.wind.yz);
  let wind=normalize(blades.wind.yz+vec2<f32>(0.001,0.0007));
@@ -123,16 +132,67 @@ struct BladeOut {
  let wave=sin(dot(world,vec2<f32>(0.009,0.006))+phase)*0.65
          +sin(dot(world,vec2<f32>(-0.004,0.011))+phase*0.71)*0.35;
  let lean=vec2<f32>(blade_random(cell,79u)-0.5,blade_random(cell,83u)-0.5)*0.45;
- let bend=(lean+wind*(0.06+min(speed,60.0)*0.004)*(0.65+0.35*gust)*wave)*height*shape.y*shape.y;
- let offset=across*shape.x*width;
+ out.ok=true;out.base=base;out.height=height;out.color=color;out.width=width;
+ out.across=across;out.grad=grad;
+ out.bend=(lean+wind*(0.06+min(speed,60.0)*0.004)*(0.65+0.35*gust)*wave)*height;
+ return out;
+}
+// One of a grown blade's five strip vertices.
+fn blade_shape(b:Blade,vertex:u32)->BladeOut {
+ var out:BladeOut;
+ let shape=array<vec2<f32>,5>(vec2<f32>(-0.5,0.0),vec2<f32>(0.5,0.0),vec2<f32>(-0.22,0.55),vec2<f32>(0.22,0.55),vec2<f32>(0.0,1.0))[vertex];
+ let bend=b.bend*shape.y*shape.y;
+ let offset=b.across*shape.x*b.width;
  // Both root vertices follow the same terrain plane, preserving bottom contact.
- let p=base+vec3<f32>(offset.x+bend.x,shape.y*height+dot(offset,grad),offset.y+bend.y);
+ let p=b.base+vec3<f32>(offset.x+bend.x,shape.y*b.height+dot(offset,b.grad),offset.y+bend.y);
  let direction=p-scene.local_eye.xyz;
  let placed=placed_vertex(p+scene.origin.xyz,direction,vec2<f32>(0.0),-1.0,vec3<f32>(1.0),-1.0);
  out.clip=placed.clip;out.direction=direction;out.altitude=placed.altitude;
- out.color=color;out.height=shape.y;
- out.normal=normalize(vec3<f32>(-across.y*0.25,1.0,across.x*0.25));
+ out.color=b.color;out.height=shape.y;
+ out.normal=normalize(vec3<f32>(-b.across.y*0.25,1.0,b.across.x*0.25));
  return out;
+}
+// The fallback path (no compute, or TORE_GRASS_PATH=vertex): every
+// candidate is drawn and each vertex evaluates its blade.
+@vertex fn blade_vertex(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance:u32)->BladeOut {
+ var out:BladeOut;
+ out.clip=vec4<f32>(0.0,0.0,-1.0,1.0);
+ let b=blade_candidate(instance);
+ if !b.ok {return out;}
+ return blade_shape(b,vertex);
+}
+// The candidate pass: one thread per candidate, the grown blades appended
+// to blade_list (four vec4 each) and counted into the indirect draw.
+struct BladeDraw { vertex_count:u32, instance_count:atomic<u32>, first_vertex:u32, first_instance:u32 }
+@group(3) @binding(0) var<storage,read_write> blade_list:array<vec4<f32>>;
+@group(3) @binding(1) var<storage,read_write> blade_draw:BladeDraw;
+var<workgroup> blade_grown:atomic<u32>;
+var<workgroup> blade_first:u32;
+@compute @workgroup_size(64) fn blade_cull(@builtin(global_invocation_id) id:vec3<u32>,@builtin(local_invocation_index) local:u32) {
+ if local==0u {atomicStore(&blade_grown,0u);}
+ workgroupBarrier();
+ var b:Blade;
+ b.ok=false;
+ if id.x<u32(blades.reserved.x) {b=blade_candidate(id.x);}
+ var slot=0u;
+ if b.ok {slot=atomicAdd(&blade_grown,1u);}
+ workgroupBarrier();
+ if local==0u {blade_first=atomicAdd(&blade_draw.instance_count,atomicLoad(&blade_grown));}
+ let first=workgroupUniformLoad(&blade_first);
+ if b.ok {
+  let at=(first+slot)*4u;
+  blade_list[at]=vec4<f32>(b.base,b.height);
+  blade_list[at+1u]=vec4<f32>(b.color,b.width);
+  blade_list[at+2u]=vec4<f32>(b.across,b.bend);
+  blade_list[at+3u]=vec4<f32>(b.grad,0.0,0.0);
+ }
+}
+// The candidate pass's draw: one instance per grown blade.
+@vertex fn blade_list_vertex(@builtin(vertex_index) vertex:u32,@location(0) a:vec4<f32>,@location(1) c:vec4<f32>,@location(2) s:vec4<f32>,@location(3) g:vec4<f32>)->BladeOut {
+ var b:Blade;
+ b.ok=true;b.base=a.xyz;b.height=a.w;b.color=c.xyz;b.width=c.w;
+ b.across=s.xy;b.bend=s.zw;b.grad=g.xy;
+ return blade_shape(b,vertex);
 }
 @fragment fn blade_fragment(in:BladeOut)->@location(0) vec4<f32> {
  let color=in.color*mix(0.55,1.15,in.height);

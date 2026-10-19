@@ -11204,6 +11204,26 @@ synchronous default. Transport updates continue, and session events retain their
 order behind the pending build. See the [loading specification](spec/loading-screen.md)
 and [CPU measurement](baselines/loading-screen.md).
 
+## City fill rendering
+
+`fill_renderer.rs` draws the city fill buildings in tiers chosen per view on
+the GPU (`fill_cull.wgsl` writes per-piece full detail lists, the far box
+list and shadow boxes; indirect draws read them). The building records are
+stored in spatial blocks (`fill_blocks.rs`): sorted by 8,192 ft cell, then a
+Z curve of 256 ft squares, cut at each cell and every 256 records, each with
+a sphere around its buildings' test points and the largest radius and
+on-screen size inside. Per view, main, mirror and panel alike, the CPU drops
+blocks that no building could pass the shader's own rejections from (draw
+distance, behind the eye, outside a side of the view, under the smallest
+drawn size), with 16 ft plus 0.01% of the distance of slack for the shader's
+single precision, and dispatches one workgroup per remaining block. The
+per-building test is unchanged, so the drawn set is the same
+(`TORE_CITY_FILL_BLOCKS=0` dispatches every block for comparisons). Knocked
+down buildings change one flag word per record: the renderer diffs the
+fill's flattened set against the last one it uploaded and rewrites only the
+changed records (runs closer than 8 records merged), instead of the whole
+record buffer (16 MB at 500,000 buildings).
+
 ## Exploratory vegetation rendering
 
 On `exp/vegetation`, vegetation is app presentation data. The menu scene omits
@@ -11333,7 +11353,15 @@ pages/rotations and fallback colours. Both textures upload once per scene.
 Cache identity includes source, palette, terrain and exclusion changes.
 
 `grass_blades.wgsl` generates five-vertex strips from vertex and instance indices.
-A single draw has no vertex/instance buffer and no alpha discard. Integer world
+A compute pass (`blade_cull`) evaluates each candidate once with the same
+`blade_candidate` function and appends grown blades (64 bytes each) to a list
+whose count feeds an indirect draw (`blade_list_vertex`), so per-candidate
+hashing, habitat, ground, canopy and wind work runs once instead of in each of
+five vertices. `SimRenderer::draw_view` records the pass after the vegetation
+prepare, before the world pass. Adapters without compute limits (and
+`TORE_GRASS_PATH=vertex`) keep the original single draw, which evaluates the
+blade in every vertex; both render the same pixels (GPU test
+`gpu_candidate_pass_matches_the_vertex_path`). No alpha discard. Integer world
 cells keep the same hash as the camera moves. Coarse levels own disjoint subsets
 through the inner disk too, avoiding LOD identity changes. The default path sends
 zero radius to the legacy worker and bypasses grass patch selection/packing.

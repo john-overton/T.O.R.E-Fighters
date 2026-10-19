@@ -2635,3 +2635,77 @@ mod grass_camera_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod blade_pass_tests {
+    use super::*;
+
+    /// The grass candidate pass (one compute thread per candidate, then an
+    /// indirect draw of the grown blades) draws the same blades as the
+    /// vertex path, which evaluates every candidate in each vertex: over a
+    /// real meadow, close and at the grass distance, both paths render the
+    /// same picture to within floating-point noise, and the pass grew
+    /// blades.
+    fn blades(view: &mut View) -> &mut crate::vegetation::grass::gpu::Blades {
+        view.sim.vegetation.as_mut().unwrap().blades_mut()
+    }
+
+    #[test]
+    #[ignore = "requires a GPU adapter and TORE_DATA_DIR pointing to a full import"]
+    fn gpu_candidate_pass_matches_the_vertex_path() {
+        let assets = crate::reel::load_assets().unwrap();
+        let resources = &assets.theater_resources;
+        for code in ["UKR", "TVIET"] {
+            let world =
+                Terrain::for_mission(resources, code, Some(0), &overrides([12, 0]).unwrap())
+                    .unwrap();
+            let scenery = Scenery::build(resources, &world).unwrap();
+            let atlas = crate::vegetation::Atlas::build(resources, &world)
+                .unwrap()
+                .unwrap();
+            let spots = crate::vegetation::spots(&atlas, &world);
+            let spot = spots
+                .iter()
+                .find(|s| s.label == "meadow" || s.label == "field")
+                .expect("a meadow or field");
+            let size = [640, 360];
+            let mut view = pollster::block_on(View::new(
+                &scenery,
+                size,
+                options(crate::graphics::VegDensity::High),
+                false,
+            ))
+            .unwrap();
+            for (height, pitch) in [(6., 12.), (30., 4.), (450., 40.)] {
+                let mut scenery = Scenery::build(resources, &world).unwrap();
+                let camera = look_at(&world, spot, &shot("grass", "meadow", height, pitch, 0.));
+                scenery.resolve_palette(&world, camera.position[1]);
+                scenery.set_origin(camera.position);
+                blades(&mut view).set_vertex_only(false);
+                let listed = view.pixels(&camera, &world, &scenery).unwrap();
+                let grown = view
+                    .sim
+                    .vegetation
+                    .as_ref()
+                    .unwrap()
+                    .blades()
+                    .grown(&view.device, &view.queue);
+                blades(&mut view).set_vertex_only(true);
+                let direct = view.pixels(&camera, &world, &scenery).unwrap();
+                let changed = listed
+                    .chunks_exact(4)
+                    .zip(direct.chunks_exact(4))
+                    .filter(|(a, b)| a.iter().zip(*b).any(|(x, y)| x.abs_diff(*y) > 2))
+                    .count();
+                println!(
+                    "{code} {height} ft: grown {grown:?}, {changed} pixels differ by more than 2"
+                );
+                assert!(grown.is_some_and(|n| n > 0) || height > 400.);
+                assert!(
+                    changed * 2000 < listed.len() / 4,
+                    "{code} {height} ft: {changed} pixels differ"
+                );
+            }
+        }
+    }
+}

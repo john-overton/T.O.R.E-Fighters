@@ -1,4 +1,4 @@
-// CF0 city fill: per view, every building is culled and given its tier on
+// CF0 city fill: per view, every building in a visible block is culled and given its tier on
 // the GPU, writing the instance lists the indirect draws read. See
 // fill_renderer.rs for the tiers.
 
@@ -27,10 +27,14 @@ struct Args { vertex_count:u32, instance_count:u32, first_vertex:u32, first_inst
 @group(0) @binding(6) var<storage,read_write> args:array<Args>;
 // Every drawn building's box, for the shadow maps.
 @group(0) @binding(7) var<storage,read_write> shadows:array<vec4<f32>>;
+// This view's visible blocks (fill_blocks.rs): first and end record, at
+// most 256 records each, one workgroup per block.
+@group(0) @binding(8) var<storage,read> blocks:array<vec2<u32>>;
 
-@compute @workgroup_size(256) fn cull(@builtin(global_invocation_id) id:vec3<u32>) {
- let i=id.x;
- if i>=params.counts.x {return;}
+@compute @workgroup_size(256) fn cull(@builtin(workgroup_id) group:vec3<u32>,@builtin(local_invocation_index) local:u32) {
+ let block=blocks[group.x];
+ let i=block.x+local;
+ if i>=block.y || i>=params.counts.x {return;}
  let inst=instances[i];
  if (inst.flags&1u)!=0u {return;}
  let piece=pieces[inst.piece];

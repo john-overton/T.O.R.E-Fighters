@@ -1,4 +1,7 @@
-//! Static texture upload plus a vertex-buffer-free grass draw.
+//! Static texture upload plus the grass draw: a candidate pass (compute)
+//! evaluates each candidate blade once and an indirect draw shapes the
+//! grown ones; without compute, every candidate is drawn and each vertex
+//! evaluates its blade (the original path, `TORE_GRASS_PATH=vertex`).
 use super::{Map, PAGE, VERTICES, candidates, root_lift, side, spacing};
 use crate::{graphics::VegDensity, terrain::Terrain};
 
@@ -7,6 +10,11 @@ pub struct Blades {
     bind: wgpu::BindGroup,
     uniform: wgpu::Buffer,
     pipeline: wgpu::RenderPipeline,
+    /// The candidate pass, when the device can run it.
+    cull: Option<Cull>,
+    /// Draw with the vertex path even where the candidate pass runs
+    /// (`TORE_GRASS_PATH=vertex`, a comparison aid).
+    vertex_only: bool,
     area: [f32; 4],
     pages_x: u32,
     count: u32,
@@ -15,6 +23,46 @@ pub struct Blades {
     heights: Vec<f32>,
     terrain_size: [u32; 2],
 }
+
+/// Bytes per grown blade in the candidate pass's list: four vec4.
+const BLADE_BYTES: u64 = 64;
+/// Candidate pass threads per workgroup.
+const GROUP: u32 = 64;
+
+/// The candidate pass and its indirect draw.
+struct Cull {
+    pipeline: wgpu::ComputePipeline,
+    draw: wgpu::RenderPipeline,
+    /// Group 1 is not read by the pass; an empty group fills its slot.
+    empty: wgpu::BindGroup,
+    out_layout: wgpu::BindGroupLayout,
+    /// The indirect draw: five vertices, the grown count.
+    args: wgpu::Buffer,
+    /// The grown blades, its bindings and capacity in blades.
+    list: Option<(wgpu::Buffer, wgpu::BindGroup, u32)>,
+    /// This view uses the pass (its candidates fit the device limits).
+    active: bool,
+}
+
+/// Whether the device runs the candidate pass: compute with a 64-thread
+/// workgroup and two storage buffers per stage. WebGPU guarantees these;
+/// downlevel (WebGL2-class) adapters report zero and keep the vertex path.
+/// The city fill and tree culls already need compute and indirect draws.
+fn cull_supported(limits: &wgpu::Limits) -> bool {
+    limits.max_compute_workgroup_size_x >= GROUP
+        && limits.max_compute_invocations_per_workgroup >= GROUP
+        && limits.max_storage_buffers_per_shader_stage >= 2
+        && limits.max_compute_workgroups_per_dimension > 0
+}
+
+/// Whether `candidates` fit one dispatch and one list binding.
+fn cull_fits(limits: &wgpu::Limits, candidates: u32) -> bool {
+    let bytes = u64::from(candidates) * BLADE_BYTES;
+    candidates.div_ceil(GROUP) <= limits.max_compute_workgroups_per_dimension
+        && bytes <= u64::from(limits.max_storage_buffer_binding_size)
+        && bytes <= limits.max_buffer_size
+}
+
 impl Blades {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -30,7 +78,7 @@ impl Blades {
         let limits = device.limits();
         let texture_entry = |binding, dimension, sample_type| wgpu::BindGroupLayoutEntry {
             binding,
-            visibility: wgpu::ShaderStages::VERTEX,
+            visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Texture {
                 sample_type,
                 view_dimension: dimension,
@@ -43,7 +91,7 @@ impl Blades {
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -177,12 +225,77 @@ impl Blades {
                 },
             ],
         });
-        let pipeline = pipeline(device, shader, format, samples, material, lighting, &layout);
+        let vertex_pipeline = pipeline(
+            device, shader, format, samples, material, lighting, &layout, false,
+        );
+        let cull = cull_supported(&limits).then(|| {
+            let empty_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Blade grass candidate pass, unused group"),
+                entries: &[],
+            });
+            let empty = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Blade grass candidate pass, unused group"),
+                layout: &empty_layout,
+                entries: &[],
+            });
+            let storage = |binding| wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            };
+            let out_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Blade grass candidate pass output"),
+                entries: &[storage(0), storage(1)],
+            });
+            let compute_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Blade grass candidate pass"),
+                bind_group_layouts: &[material, &empty_layout, &layout, &out_layout],
+                push_constant_ranges: &[],
+            });
+            let compute = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Blade grass candidates"),
+                layout: Some(&compute_layout),
+                module: shader,
+                entry_point: Some("blade_cull"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
+            use wgpu::util::DeviceExt;
+            let args = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Blade grass indirect draw"),
+                contents: &[VERTICES, 0, 0, 0]
+                    .iter()
+                    .flat_map(|v| v.to_le_bytes())
+                    .collect::<Vec<u8>>(),
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::INDIRECT
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
+            });
+            Cull {
+                pipeline: compute,
+                draw: pipeline(
+                    device, shader, format, samples, material, lighting, &layout, true,
+                ),
+                empty,
+                out_layout,
+                args,
+                list: None,
+                active: false,
+            }
+        });
         Self {
             layout,
             bind,
             uniform,
-            pipeline,
+            pipeline: vertex_pipeline,
+            cull,
+            vertex_only: std::env::var("TORE_GRASS_PATH").as_deref() == Ok("vertex"),
             area: map.area,
             pages_x: map.pages_x,
             count: 0,
@@ -208,13 +321,28 @@ impl Blades {
             material,
             lighting,
             &self.layout,
+            false,
         );
+        if let Some(cull) = &mut self.cull {
+            cull.draw = pipeline(
+                device,
+                shader,
+                format,
+                samples,
+                material,
+                lighting,
+                &self.layout,
+                true,
+            );
+        }
     }
     /// Fixed-size stack uniform. No placement, chunk enumeration, packing or
     /// blade buffer upload is allowed here, including while the camera moves.
     /// `eye` is this view's camera position in world feet.
+    #[allow(clippy::too_many_arguments)]
     pub fn prepare(
         &mut self,
+        device: &wgpu::Device,
         queue: &wgpu::Queue,
         world: &Terrain,
         density: VegDensity,
@@ -222,6 +350,14 @@ impl Blades {
         eye: [f64; 3],
     ) {
         let wind = world.wind();
+        self.count = if self.pages_x > 0
+            && radius > 0.
+            && !above_blades(&self.heights, self.terrain_size, eye, radius)
+        {
+            candidates(density, radius)
+        } else {
+            0
+        };
         let values = [
             self.area[0],
             self.area[1],
@@ -235,7 +371,7 @@ impl Blades {
             wind[0] as f32,
             wind[2] as f32,
             spacing(density),
-            0.,
+            self.count as f32,
             0.,
             0.,
             0.,
@@ -245,22 +381,99 @@ impl Blades {
             bytes[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
         }
         queue.write_buffer(&self.uniform, 0, &bytes);
-        self.count = if self.pages_x > 0
-            && radius > 0.
-            && !above_blades(&self.heights, self.terrain_size, eye, radius)
-        {
-            candidates(density, radius)
-        } else {
-            0
+        let count = self.count;
+        if let Some(cull) = &mut self.cull {
+            cull.active = count > 0 && !self.vertex_only && cull_fits(&device.limits(), count);
+            if cull.active && cull.list.as_ref().is_none_or(|l| l.2 < count) {
+                let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Blade grass grown blades"),
+                    size: u64::from(count) * BLADE_BYTES,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::VERTEX,
+                    mapped_at_creation: false,
+                });
+                let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("Blade grass candidate pass output"),
+                    layout: &cull.out_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: cull.args.as_entire_binding(),
+                        },
+                    ],
+                });
+                cull.list = Some((buffer, bind, count));
+            }
+        }
+    }
+    /// Records the candidate pass for the prepared view (before its world
+    /// pass): `material` is the view's world bind group, as the draw uses.
+    pub fn encode(&self, encoder: &mut wgpu::CommandEncoder, material: &wgpu::BindGroup) {
+        let Some(cull) = self.cull.as_ref().filter(|c| c.active) else {
+            return;
         };
+        let Some((_, out, _)) = &cull.list else {
+            return;
+        };
+        encoder.clear_buffer(&cull.args, 4, Some(4));
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("Blade grass candidates"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&cull.pipeline);
+        pass.set_bind_group(0, material, &[]);
+        pass.set_bind_group(1, &cull.empty, &[]);
+        pass.set_bind_group(2, &self.bind, &[]);
+        pass.set_bind_group(3, out, &[]);
+        pass.dispatch_workgroups(self.count.div_ceil(GROUP), 1, 1);
     }
     pub fn draw<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
         if self.count == 0 {
             return;
         }
-        pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(2, &self.bind, &[]);
+        if let Some(cull) = self.cull.as_ref().filter(|c| c.active)
+            && let Some((list, _, _)) = &cull.list
+        {
+            pass.set_pipeline(&cull.draw);
+            pass.set_vertex_buffer(0, list.slice(..));
+            pass.draw_indirect(&cull.args, 0);
+            return;
+        }
+        pass.set_pipeline(&self.pipeline);
         pass.draw(0..VERTICES, 0..self.count);
+    }
+    /// Draws with the vertex path only (a comparison aid).
+    #[cfg(test)]
+    pub fn set_vertex_only(&mut self, on: bool) {
+        self.vertex_only = on;
+    }
+    /// The blades the candidate pass grew in the last view, or none when
+    /// it did not run (waits for the GPU; a test aid).
+    #[cfg(test)]
+    pub fn grown(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Option<u32> {
+        let cull = self.cull.as_ref().filter(|c| c.active)?;
+        let read = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: 16,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&Default::default());
+        encoder.copy_buffer_to_buffer(&cull.args, 0, &read, 0, 16);
+        queue.submit([encoder.finish()]);
+        read.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+        device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: None,
+            })
+            .ok()?;
+        let words = read.slice(..).get_mapped_range();
+        Some(u32::from_le_bytes([words[4], words[5], words[6], words[7]]))
     }
     pub fn count(&self) -> u64 {
         u64::from(self.count)
@@ -303,6 +516,8 @@ fn above_blades(heights: &[f32], size: [u32; 2], eye: [f64; 3], radius: f32) -> 
     eye[1] - (top + f64::from(root_lift()).max(0.)) > f64::from(radius) + ALTITUDE_MARGIN
 }
 
+/// The blade pipeline: the fallback vertex path, or (`listed`) the
+/// candidate pass's draw reading grown blades as instances.
 #[allow(clippy::too_many_arguments)]
 fn pipeline(
     device: &wgpu::Device,
@@ -312,7 +527,13 @@ fn pipeline(
     material: &wgpu::BindGroupLayout,
     lighting: &wgpu::BindGroupLayout,
     resources: &wgpu::BindGroupLayout,
+    listed: bool,
 ) -> wgpu::RenderPipeline {
+    let blade = [wgpu::VertexBufferLayout {
+        array_stride: BLADE_BYTES,
+        step_mode: wgpu::VertexStepMode::Instance,
+        attributes: &wgpu::vertex_attr_array![0=>Float32x4,1=>Float32x4,2=>Float32x4,3=>Float32x4],
+    }];
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Procedural blades"),
         bind_group_layouts: &[material, lighting, resources],
@@ -323,9 +544,13 @@ fn pipeline(
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: shader,
-            entry_point: Some("blade_vertex"),
+            entry_point: Some(if listed {
+                "blade_list_vertex"
+            } else {
+                "blade_vertex"
+            }),
             compilation_options: Default::default(),
-            buffers: &[],
+            buffers: if listed { &blade } else { &[] },
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,

@@ -658,6 +658,7 @@ impl Renderer {
         ];
         if self.grass_mode == crate::graphics::Grass::Blades {
             self.blades.prepare(
+                device,
                 queue,
                 world,
                 self.grass_density,
@@ -880,6 +881,28 @@ impl Renderer {
         }
         if !bytes.is_empty() {
             queue.write_buffer(&self.patches, 0, &bytes);
+        }
+    }
+
+    /// The blade grass (a test aid).
+    #[cfg(test)]
+    pub fn blades_mut(&mut self) -> &mut vegetation::grass::gpu::Blades {
+        &mut self.blades
+    }
+    #[cfg(test)]
+    pub fn blades(&self) -> &vegetation::grass::gpu::Blades {
+        &self.blades
+    }
+
+    /// Records the blade grass candidate pass for the prepared view, when
+    /// its draw will draw blades. `bind` is the world bind group `draw`
+    /// gets.
+    pub fn encode_blades(&self, encoder: &mut wgpu::CommandEncoder, bind: &wgpu::BindGroup) {
+        if self.prepared
+            && !self.grass_suppressed
+            && self.grass_mode == crate::graphics::Grass::Blades
+        {
+            self.blades.encode(encoder, bind);
         }
     }
 

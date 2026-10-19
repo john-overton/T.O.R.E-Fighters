@@ -990,6 +990,9 @@ mod shader_tests {
             ("vegetation depth", &["veg_vertex", "veg_depth"], 2),
             ("grass", &["grass_vertex", "grass_fragment"], 2),
             ("opaque blades", &["blade_vertex", "blade_fragment"], 3),
+            ("blade list", &["blade_list_vertex", "blade_fragment"], 3),
+            // Group 1 is an empty placeholder in the candidate pass.
+            ("blade candidates", &["blade_cull"], 4),
             (
                 "vegetation shadow 0",
                 &["veg_shadow_vertex0", "terrain_shadow_fragment"],
@@ -1029,11 +1032,11 @@ mod shader_tests {
                 );
                 assert!(
                     binding
-                        < if *label == "opaque blades" {
-                            [9, 3, 3][group as usize]
-                        } else {
-                            [9, 3, 2][group as usize]
-                        },
+                        < match *label {
+                            "opaque blades" | "blade list" => [9, 3, 3, 0],
+                            "blade candidates" => [9, 0, 3, 2],
+                            _ => [9, 3, 2, 0],
+                        }[group as usize],
                     "{label}: unavailable binding {binding}"
                 );
             }
