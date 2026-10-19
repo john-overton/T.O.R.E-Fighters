@@ -3519,12 +3519,24 @@ impl Host {
         let owed = whole_ticks(now.saturating_sub(origin)) + 1;
         let behind = owed.saturating_sub(self.ticks_run);
         let run = behind.min(MAX_CATCH_UP_TICKS);
+        let mut worst = Duration::ZERO;
         for _ in 0..run {
             if !matches!(self.life, Life::Flying) {
                 return;
             }
             self.ticks_run += 1;
+            let started = Instant::now();
             self.tick(now);
+            worst = worst.max(started.elapsed());
+        }
+        if run > 0 {
+            // Slice S9: the shared workers fan out only while the host is
+            // slow or late (a tick over budget, or more than one tick owed).
+            tore_workers::observe(tore_workers::Load {
+                compression: 1.,
+                tick_cost: worst,
+                late: behind > 1,
+            });
         }
         if behind > MAX_CATCH_UP_TICKS {
             let dropped = behind - MAX_CATCH_UP_TICKS;

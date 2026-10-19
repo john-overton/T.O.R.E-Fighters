@@ -200,9 +200,45 @@ byte-identical. Times include process startup and loading.
 One explicitly requested worker pays dispatch/copying costs without parallel
 throughput and is slower than inline execution here. Automatic sizing uses
 serial execution when fewer than two workers remain after its headroom rule.
-The 4- and 8-worker results support retaining the bounded eight-worker default
-on this machine. The separate debug quick guard with `TORE_WORKERS=0` reports
+The 4- and 8-worker results supported the bounded eight-worker default on this
+machine at the time; [slice S9](#load-aware-dispatch-optimization-slice-s9-2026-10-19) replaced it. The separate debug quick guard with `TORE_WORKERS=0` reports
 **SAME 52, DIFFERENT 0, MISSING 0** against the canonical reference.
+
+## Load-aware dispatch (optimization slice S9, 2026-10-19)
+
+Superseding the eight-worker default above. After the serial work of the
+optimization run (slices S1 to S8), the worker counts were measured again on
+the same machine, from a release build, the 15 against 15 fight at 5 nautical
+miles (`--ai-probe-ticks`, scripted attack, no audio), three repeats at 2,400
+ticks and one at 21,600, and a dedicated server flying a 12 AI mission for 30
+seconds. Every worker count printed the same checksum.
+
+| Workers | 2,400 ticks wall s (median of 3) | CPU s | Voluntary context switches | 21,600 ticks wall s | CPU s |
+| --- | --- | --- | --- | --- | --- |
+| 0 (serial) | 4.62 | 4.57 | 1 | 10.27 | 10.22 |
+| 2 | 4.42 | 4.98 | 7,400 | 10.02 | 12.10 |
+| 4 | 4.25 | 5.23 | 12,200 | 9.64 | 13.86 |
+| 8 | 4.12 | 5.76 | 22,300 | 9.68 | 17.77 |
+
+Eight workers bought about 11% of the wall time at the cost of 26% more CPU
+on the short run, and about 6% of the wall time for 80% more CPU on the long
+one. The dedicated server, flying, used 11.6% of a core, 174 wake-ups a second
+and 2 threads serial; 13.8% (14.1% with eight), 1,254 (1,334) and 10 threads
+with the automatic pool. A host that keeps up has no use for the workers.
+
+So the shared executor is serial until a loop is slow or late and fans out to
+at most four workers only then (rules in
+[the architecture](../ARCHITECTURE.md#shared-scoped-workers)): time compression
+above 1x, a tick over the 8.3 ms budget, or a loop that is late (the host: more
+than one tick owed; the flight frame loop: a frame over 100 ms). A second after
+the last report of that it goes serial again. The pool is built on first
+fan-out. `TORE_WORKERS=N` still forces a fixed count. One-off loading jobs
+(vegetation placement, grass tiles, coast distances, sprite baking, the
+canopy) keep using the whole automatic pool through `tore_workers::bulk()`,
+which starts its threads for the job and stops them after it.
+The probe's checksum is `416d3b1e5e8e4f05` serial, forced and by default.
+The lead's measurement of the new default is recorded with the run's final
+figures.
 
 ## Unchanged behavior and capture correction
 

@@ -99,6 +99,51 @@ fn serial_and_worker_steps_agree_at_a_slow_rate() {
     }
 }
 
+/// Slice S9: the shared executor fans out only while the loop is under
+/// pressure, so the dispatch changes from tick to tick. A mission stepped
+/// through an executor whose governor is flipped between ticks stays
+/// bit-identical to a serial one, at the default and at a slow rate.
+#[test]
+fn flipping_the_dispatch_between_ticks_changes_nothing() {
+    use std::sync::Arc;
+    use tore_workers::{Governor, Load};
+    for (hz, lean) in [(120, true), (120, false), (30, true)] {
+        let governor = Arc::new(Governor::new());
+        let workers = tore_workers::Executor::governed(4, Arc::clone(&governor));
+        let mut reference = fixture(30, 7);
+        reference.set_test_settings(settings(hz, lean));
+        let mut actual = reference.clone();
+        let (mut reference_human, mut actual_human) = (None, None);
+        let (mut fanned, mut serial) = (0, 0);
+        for tick in 0..40 {
+            if tick % 5 < 2 {
+                governor.observe(Load {
+                    late: true,
+                    ..Load::CALM
+                });
+            } else {
+                governor.release();
+            }
+            if governor.fans_out() {
+                fanned += 1;
+            } else {
+                serial += 1;
+            }
+            scripted(&mut reference, tick, &mut reference_human);
+            scripted(&mut actual, tick, &mut actual_human);
+            compare_step(
+                &mut reference,
+                &mut actual,
+                &workers,
+                reference_human.as_ref(),
+            )
+            .unwrap();
+            assert_eq!(reference.take_journal(), actual.take_journal());
+        }
+        assert!(fanned > 0 && serial > 0, "{hz} Hz: both dispatches ran");
+    }
+}
+
 /// Between two observations an actor holds its picture: the memory, the
 /// sensors and the emitters stay as they were, while the lookout follows the
 /// aircraft.
@@ -205,8 +250,9 @@ fn a_slow_rate_keeps_the_sensor_clock_with_the_mission() {
 #[test]
 fn lean_sensors_change_nothing_a_decision_reads() {
     let mut full = fixture(30, 21);
+    full.set_test_settings(AiTestSettings::full());
     let mut lean = full.clone();
-    lean.set_test_settings(settings(120, true));
+    lean.set_test_settings(AiTestSettings::default());
     let (mut full_human, mut lean_human) = (None, None);
     let mut compared_emitters = 0;
     for tick in 0..60 {

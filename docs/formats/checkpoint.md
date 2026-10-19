@@ -510,10 +510,12 @@ Scratch since optimization run S7: `SurfaceState::static_places` and the spare
 list of an AI aircraft's incoming fire samples (the samples themselves are coded
 exactly as the map they replaced). The AI test settings (slice S7b: `AiMission::test`,
 `AiWings::ai_test`, `HostConfig::ai_test`) are host setup the host sets before every
-step, and `AiActor::last_visual` is a why-record; none is coded, and at the defaults
-every byte is as before. With a slower observation rate or lean sensors the coded
-values differ (an AI aircraft's sensors clock counts ticks, and lean sensors leave
-the visual list, map list and received emitters empty) but not the layout. Local:
+step, and `AiActor::last_visual` is a why-record; none is coded. Lean sensors are
+the default since slice S9, so a default AI aircraft's coded sensors hold an empty
+visual list, map list and received-emitter list (a build without the settings, or
+`--ai-lean-sensors off`, coded them filled): the same layout and the same decisions,
+different bytes. With a slower observation rate the coded values differ too (an AI
+aircraft's sensors clock counts ticks) but not the layout. Local:
 `Combat::{tape, notes, last_launcher, terrain_tti}` (the last the readout's kept
 fly-out times, cleared on a load). Everything else is coded.
 

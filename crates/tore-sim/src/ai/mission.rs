@@ -4483,7 +4483,8 @@ impl AiActor {
         self.observe_sighted(tick, world, &sight)
     }
 
-    /// Observation with the tick's shared sight lines from this actor.
+    /// Observation with the tick's shared sight lines from this actor, with
+    /// the full sensors (the reference the unsplit-observation tests hold).
     #[cfg(test)]
     fn observe_sighted(
         &mut self,
@@ -4491,7 +4492,7 @@ impl AiActor {
         world: &[WorldObject],
         sight: &observation::SightLines<'_>,
     ) -> Vec<TargetView> {
-        self.observe_sighted_with(tick, world, sight, AiTestSettings::default())
+        self.observe_sighted_with(tick, world, sight, AiTestSettings::full())
     }
 
     /// [`Self::observe_sighted`] under the AI test settings.

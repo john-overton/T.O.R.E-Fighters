@@ -9376,13 +9376,48 @@ candidate measurements, not the before reference for this implementation.
 
 ### Shared scoped workers
 
-One `tore-workers::Executor` is shared by the process, including a hosting game
-and its frame loop. The fitted automatic size is available logical CPUs minus
-three, capped at eight. If that leaves fewer than two workers, automatic
-execution is serial. This leaves scheduling headroom, not reserved cores.
-`TORE_WORKERS=0` runs inline; explicit sizes, including one, are capped at eight.
-Invalid settings or thread-creation failure produce a diagnostic and retain
-serial execution. Successful initialization is silent.
+One `tore-workers::Executor` (`shared()`) is shared by the process, including a
+hosting game and its frame loop, and it is **load-aware** (optimization run,
+slice S9; John, 2026-10-19). Measured on the 15 against 15 fight, eight
+workers cost a quarter more CPU for a tenth less wall time, and a dedicated
+server flying 12 AI woke up seven times as often (174 to 1,254 a second) for
+a little more CPU, so the simulation runs on its own thread unless it needs
+help:
+
+- **Serial by default**, in the game and the dedicated server. No pool exists
+  and no worker thread has been started: the pool is built the first time a
+  collection fans out, and an idle server shows its own few threads.
+- **Fans out** to at most four workers (fewer when the machine has fewer than
+  seven logical CPUs, and none under five) while a loop reports pressure
+  through `tore_workers::observe(Load { compression, tick_cost, late })`:
+  time compression above 1x, a tick that cost more than its 8.3 ms budget, or
+  a loop that is late. The host loop (`Host::fly`, so a hosted game and the
+  dedicated server) reports after each batch of ticks, late meaning more than
+  one tick owed; the flight frame loop (`main.rs`) reports once per frame,
+  late meaning a frame over 100 ms.
+- **Back to serial** a second after the last report of pressure
+  (`KEEP_UP`), so a loop hovering at its budget does not flap every frame.
+  The pool stays parked, not spinning: rayon's idle workers sleep.
+- **`TORE_WORKERS=N` forces a fixed count** (zero is always serial, sizes are
+  capped at eight) and is never gated by load; the probe, tests and CI use
+  it. Without it the automatic size is available logical CPUs minus three,
+  capped at eight, with serial execution when that leaves fewer than two
+  workers; the load-aware executor uses at most four of those. Invalid
+  settings or thread-creation failure produce a diagnostic and retain
+  serial execution. Successful initialization is silent.
+- Results never depend on any of it: jobs are independent and results are
+  published in input order, so a run is bit for bit the same whichever way
+  each collection was dispatched, including when the dispatch flips between
+  two ticks (tested).
+
+`tore_workers::bulk()` is the other entry: an executor for a one-off job
+(vegetation placement, grass tiles, coast distances, sprite baking and the
+canopy at load, and the unbudgeted vegetation chunk build) where the machine
+is otherwise idle and the whole automatic pool clearly helps. It starts its
+threads when the job first fans out and stops them when the job's statement
+ends. It follows `TORE_WORKERS` but not the load. Per-frame work (the
+aircraft batches, the instrument pages, the host's snapshots, the budgeted
+vegetation pass in flight) uses `shared()`.
 
 The interface provides ordered borrowed maps and disjoint mutable visits.
 The unused mutable-map and join APIs were removed after review. Instrument
@@ -9481,23 +9516,28 @@ handoff and error partial state.
 ### AI test settings: observation rate and lean sensors
 
 Two settings for trying how much CPU the AI's observation takes and how the AI
-fights without part of it (optimization run, slice S7b; John, 2026-10-19). They
-are for testing, off by default, and with the defaults a run is bit for bit the
-run of a build without them. `tore_sim::ai::test_settings::AiTestSettings`
-holds them; `AiWings::set_ai_test` hands them to the mission before every step.
-They are host setup like the ground ceiling, not state: no checkpoint codes
-them, the host sets them wherever it steps the world, and a restored world
-starts with the defaults until it does.
+fights without part of it (optimization run, slice S7b; John, 2026-10-19).
+The observation rate defaults to 120 Hz and **lean sensors are on by
+default** since slice S9 (John, 2026-10-19: S7b measured the same decisions,
+journal and checksum with lean and full sensors at every rate, for about 2%
+less CPU). The 120 Hz default with either sensor setting is bit for bit the
+run of a build without the settings, apart from the values a checkpoint
+codes (see below). `tore_sim::ai::test_settings::AiTestSettings`
+holds them (`AiTestSettings::full()` is 120 Hz with full sensors, what tests
+compare against); `AiWings::set_ai_test` hands them to the mission before
+every step. They are host setup like the ground ceiling, not state: no
+checkpoint codes them, the host sets them wherever it steps the world, and a
+restored world starts with the defaults until it does.
 
 Where they are set:
 
 | Where | How |
 | --- | --- |
 | Flight menu, Debug tab (Escape, then Debug) | Two rows and Back to defaults. Single player applies them at the next tick; a game the player hosts sends them to its host thread (`Command::SetAiTest`); a joined game shows them dimmed with the host's governing |
-| `tore-app` | `--ai-observe-hz N`, `--ai-lean-sensors`: the AI probe's settings, and the starting values of a windowed flight's Debug tab |
-| `tore-server` | `--ai-observe-hz N`, `--ai-lean-sensors` (`HostConfig::ai_test`) |
+| `tore-app` | `--ai-observe-hz N`, `--ai-lean-sensors [on\|off]` (bare means on): the AI probe's settings, and the starting values of a windowed flight's Debug tab |
+| `tore-server` | `--ai-observe-hz N`, `--ai-lean-sensors [on\|off]` (`HostConfig::ai_test`) |
 
-**Observation rate.** 120 (today), 60, 40, 30 or 20 Hz: an AI aircraft's
+**Observation rate.** 120 (the default), 60, 40, 30 or 20 Hz: an AI aircraft's
 observation, which is its sensors, its lookout over the world, its received
 emitters and the awareness memory they feed, runs once every 1, 2, 3, 4 or 6
 ticks. Aircraft are staggered by their place in the mission,
@@ -9533,11 +9573,15 @@ what the eyes and the radar showed the pilot), and the emitters are built when
 such a warning needs them, from the same inputs as the observation would
 (`received_emitters_on_demand`). A lean run flies, decides and journals exactly
 as a full one at the same rate (tested over a 30-aircraft mission); its
-checkpoints hold an empty visual list, map list and emitter list.
+checkpoints hold an empty visual list, map list and emitter list. Since slice
+S9 this is the default, so a default run's checkpoints are smaller than a
+build without the setting wrote and not byte for byte theirs; the layout is
+unchanged. `--ai-lean-sensors off` (or the Debug tab) runs the full sensors
+for comparison.
 
-A host with either setting off its default appoints no standby: a standby
-replays the journal with the defaults, which the journal does not say
-otherwise. Nothing is told to joined players, and no wire message carries the
+A host with either setting off its default (a slower rate, or lean sensors
+turned off) appoints no standby: a standby replays the journal with the
+defaults, which the journal does not say otherwise. Nothing is told to joined players, and no wire message carries the
 settings (no protocol change).
 
 ### Ownships and host pictures
