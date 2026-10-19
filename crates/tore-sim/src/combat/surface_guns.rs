@@ -574,6 +574,11 @@ pub fn tuning(unit: &str, record: &str) -> Option<&'static GunTuning> {
         .or_else(|| for_record().find(|row| row.unit.is_none()))
 }
 
+/// Every record the table tunes, for the lookup [`super::live::is_gun`] builds.
+pub(super) fn records() -> impl Iterator<Item = &'static str> {
+    TABLE.iter().map(|row| row.record)
+}
+
 /// Whether `record` is a surface gun the table tunes (any row). The shot code
 /// treats these records as guns, as it does the aircraft guns.
 pub fn is_surface_gun(record: &str) -> bool {

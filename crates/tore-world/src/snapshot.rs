@@ -106,7 +106,7 @@ pub struct AircraftPose {
 
 /// One external station's pylon and the stores still on it (B3,
 /// docs/spec/stores-on-pylons.md).
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq)]
 pub struct StorePose {
     /// The source hardpoint record (PT ordinal) it hangs from: the drawing
     /// finds the pylon's height under that aircraft's model with it.
@@ -125,6 +125,33 @@ pub struct StorePose {
     /// A fitted body's length and diameter, feet (a pod or a tank, which
     /// have no shape); zero for a store drawn with its own shape.
     pub body: [f64; 2],
+}
+
+impl Clone for StorePose {
+    fn clone(&self) -> Self {
+        Self {
+            hardpoint: self.hardpoint,
+            mount: self.mount,
+            rack: self.rack,
+            shape: self.shape.clone(),
+            look: self.look,
+            items: self.items,
+            loaded: self.loaded,
+            body: self.body,
+        }
+    }
+    /// Writes over the shape's string in place, so a list of stores copied
+    /// over another allocates only for the stores it has more of.
+    fn clone_from(&mut self, source: &Self) {
+        self.hardpoint = source.hardpoint;
+        self.mount = source.mount;
+        self.rack = source.rack;
+        self.shape.clone_from(&source.shape);
+        self.look = source.look;
+        self.items = source.items;
+        self.loaded = source.loaded;
+        self.body = source.body;
+    }
 }
 
 impl StorePose {
@@ -389,7 +416,7 @@ impl Damage {
 }
 
 /// One projectile in flight.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ProjectilePose {
     pub id: u32,
     /// 0 is the player, otherwise the firing AI aircraft.

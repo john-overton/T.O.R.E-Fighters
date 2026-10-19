@@ -134,6 +134,13 @@ impl Camera {
         }
         Some(Locate::Edge([dx / length, dy / length]))
     }
+    /// The direction the camera faces, as the uniform holds it (its entries
+    /// 12 to 14), without building the uniform.
+    pub fn facing(&self) -> [f32; 3] {
+        let (sy, cy) = self.yaw.sin_cos();
+        let (sp, cp) = self.pitch.sin_cos();
+        [sy * cp, sp, cy * cp]
+    }
     pub fn uniform(&self, aspect: f32, fog: [f32; 4], sky: [u8; 3]) -> Vec<f32> {
         let (sy, cy) = self.yaw.sin_cos();
         let (sp, cp) = self.pitch.sin_cos();
@@ -162,6 +169,20 @@ impl Camera {
 mod tests {
     use super::*;
     use tore_world::test_support::terrain as world;
+    #[test]
+    fn facing_is_the_uniforms_forward_vector_bit_for_bit() {
+        let mut camera = Camera::new();
+        for step in 0..400 {
+            camera.yaw = (step as f32 * 0.37) - 70.;
+            camera.pitch = ((step % 41) as f32 - 20.) * 0.07;
+            camera.roll = step as f32 * 0.11;
+            let uniform = camera.uniform(1.5, [0.; 4], [0; 3]);
+            let facing = camera.facing();
+            for i in 0..3 {
+                assert_eq!(facing[i].to_bits(), uniform[12 + i].to_bits());
+            }
+        }
+    }
     #[test]
     fn variant_label_does_not_move_the_inspection_camera() {
         let mut w = world();

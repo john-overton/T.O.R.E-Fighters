@@ -1297,3 +1297,76 @@ fn flak_shells_have_no_dispersion_and_other_gun_rounds_keep_theirs() {
     }
     assert!(spread > 30, "{spread}");
 }
+
+#[test]
+fn the_gun_lookup_classifies_every_record_as_the_scan_it_replaced_did() {
+    // Every record the aircraft and the surface table name, in every case
+    // mix, plus names that are not guns, near misses and odd strings.
+    let mut names: Vec<String> = AircraftId::ALL
+        .into_iter()
+        .chain([AircraftId::Faxx])
+        .flat_map(|aircraft| aircraft.guns().iter().map(|s| s.to_string()))
+        .chain(surface_guns::TABLE.iter().map(|row| row.record.to_string()))
+        .collect();
+    names.extend(
+        [
+            "",
+            "M61",
+            "M61.J",
+            "M61.JTT",
+            "SA6.JT",
+            "AIM9.JT",
+            "SUU16.JT",
+            "C_105.JT",
+            "é.JT",
+            "M61.JT\u{0}",
+            "0123456789012345678901234567890123456789012345678901234567890123.JT",
+        ]
+        .map(String::from),
+    );
+    for index in 0..names.len() {
+        let name = names[index].clone();
+        names.push(name.to_ascii_lowercase());
+        let mixed: String = name
+            .chars()
+            .enumerate()
+            .map(|(i, c)| {
+                if i % 2 == 0 {
+                    c.to_ascii_lowercase()
+                } else {
+                    c
+                }
+            })
+            .collect();
+        names.push(mixed);
+    }
+    let mut guns = 0;
+    for name in &names {
+        let w = record(name);
+        assert_eq!(is_gun(&w), is_gun_scan(&w), "{name:?}");
+        guns += usize::from(is_gun(&w));
+    }
+    assert!(guns > 100, "the table gave only {guns} gun spellings");
+}
+
+#[test]
+fn no_gun_record_has_a_missile_profile() {
+    // `State::snapshots` skips the profile table for a gun round.
+    for aircraft in AircraftId::ALL.into_iter().chain([AircraftId::Faxx]) {
+        for gun in aircraft.guns() {
+            let w = record(gun);
+            assert!(
+                is_gun(&w) && missiles::Profile::for_weapon(&w).is_none(),
+                "{gun}"
+            );
+        }
+    }
+    for row in surface_guns::TABLE {
+        let w = record(row.record);
+        assert!(
+            is_gun(&w) && missiles::Profile::for_weapon(&w).is_none(),
+            "{}",
+            row.record
+        );
+    }
+}

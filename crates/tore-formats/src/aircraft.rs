@@ -163,9 +163,10 @@ impl Envelope {
             low = low.min(v);
             high = high.max(v);
         };
-        for i in 0..self.points.len() {
+        let count = self.points.len();
+        for i in 0..count {
             let a = self.points[i];
-            let b = self.points[(i + 1) % self.points.len()];
+            let b = self.points[if i + 1 == count { 0 } else { i + 1 }];
             if (a[1] - alt).abs() < 1e-9 {
                 hit(a[0]);
             }
@@ -1364,6 +1365,56 @@ pub fn dependency_report(
 }
 #[cfg(test)]
 mod tests {
+    /// `Envelope::speeds` with the modulo it used to step round the polygon.
+    fn speeds_by_modulo(envelope: &super::Envelope, alt: f64) -> Option<(f64, f64)> {
+        let mut low = f64::INFINITY;
+        let mut high = f64::NEG_INFINITY;
+        let mut hit = |v: f64| {
+            low = low.min(v);
+            high = high.max(v);
+        };
+        for i in 0..envelope.points.len() {
+            let a = envelope.points[i];
+            let b = envelope.points[(i + 1) % envelope.points.len()];
+            if (a[1] - alt).abs() < 1e-9 {
+                hit(a[0]);
+            }
+            if (a[1] < alt && b[1] > alt) || (a[1] > alt && b[1] < alt) {
+                hit(a[0] + (b[0] - a[0]) * (alt - a[1]) / (b[1] - a[1]));
+            }
+        }
+        (low <= high).then_some((low, high))
+    }
+    #[test]
+    fn envelope_speeds_are_what_the_modulo_walk_gave() {
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1_u64 << 53) as f64
+        };
+        for size in 0..9 {
+            for _ in 0..200 {
+                let envelope = super::Envelope {
+                    g: 1,
+                    points: (0..size)
+                        .map(|_| [next() * 900., (next() * 60.).floor() * 1000.])
+                        .collect(),
+                };
+                for alt in [0., 500., 1000., 5000., 17_300., 59_999., 60_000., 70_000.]
+                    .into_iter()
+                    .chain((0..4).map(|_| next() * 60_000.))
+                {
+                    let (new, old) = (envelope.speeds(alt), speeds_by_modulo(&envelope, alt));
+                    assert_eq!(
+                        new.map(|(a, b)| (a.to_bits(), b.to_bits())),
+                        old.map(|(a, b)| (a.to_bits(), b.to_bits()))
+                    );
+                }
+            }
+        }
+    }
     #[test]
     fn every_selectable_aircraft_is_offered_to_the_ai() {
         use super::AircraftId::*;

@@ -53,7 +53,7 @@ use crate::{
     snapshot::RenderSnapshot,
     terrain,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{SyncSender, TrySendError};
 use std::thread::JoinHandle;
@@ -165,6 +165,43 @@ struct Watch {
     pilot_dead: bool,
     hp: i32,
     sections: [i32; replay::SECTION_COUNT],
+}
+
+/// The rows of a slice found by id, as the map from ids to rows that every
+/// tick used to build answered: of a repeated id the last row. The order
+/// vector is the recorder's, handed in and taken back, so a tick allocates no
+/// tree.
+struct ById<'a, T> {
+    rows: &'a [T],
+    order: Vec<(u32, u32)>,
+}
+impl<'a, T> ById<'a, T> {
+    fn new(rows: &'a [T], id: impl Fn(&T) -> u32, mut order: Vec<(u32, u32)>) -> Self {
+        order.clear();
+        order.extend(
+            rows.iter()
+                .enumerate()
+                .map(|(index, row)| (id(row), index as u32)),
+        );
+        order.sort_unstable();
+        let mut kept = 0;
+        for at in 0..order.len() {
+            if order.get(at + 1).is_some_and(|next| next.0 == order[at].0) {
+                continue;
+            }
+            order[kept] = order[at];
+            kept += 1;
+        }
+        order.truncate(kept);
+        Self { rows, order }
+    }
+    fn get(&self, id: &u32) -> Option<&'a T> {
+        let at = self.order.binary_search_by_key(id, |(id, _)| *id).ok()?;
+        Some(&self.rows[self.order[at].1 as usize])
+    }
+    fn into_order(self) -> Vec<(u32, u32)> {
+        self.order
+    }
 }
 
 /// What the recorder remembers about one projectile between ticks.
@@ -318,7 +355,7 @@ pub struct Recorder {
     sender: Option<SyncSender<Message>>,
     thread: Option<WriterThread>,
     /// Messages the queue could not take, sent before the next frame.
-    backlog: Vec<Message>,
+    backlog: VecDeque<Message>,
     /// The frame being built between `begin` and `end`.
     frame: Option<Frame>,
     /// The last closed frame, still open to notes made between ticks.
@@ -327,6 +364,10 @@ pub struct Recorder {
     early: Vec<Event>,
     registered: BTreeSet<u32>,
     weapons: BTreeMap<String, u32>,
+    /// The source name of each registered weapon, by id.
+    weapon_sources: Vec<String>,
+    /// Scratch for the id orders of a tick's target and projectile lookups.
+    id_orders: [Vec<(u32, u32)>; 2],
     /// What each registered weapon type is, by id.
     weapon_notes: BTreeMap<u32, WeaponNote>,
     effects: EffectWatch,
@@ -429,12 +470,14 @@ impl Recorder {
             path,
             sender: Some(sender),
             thread,
-            backlog: Vec::new(),
+            backlog: VecDeque::new(),
             frame: None,
             held: None,
             early: Vec::new(),
             registered: BTreeSet::new(),
             weapons: BTreeMap::new(),
+            weapon_sources: Vec::new(),
+            id_orders: Default::default(),
             weapon_notes: BTreeMap::new(),
             effects: EffectWatch::default(),
             marks: 0,
@@ -521,7 +564,7 @@ impl Recorder {
         };
         if self.wait {
             let mut pending = std::mem::take(&mut self.backlog);
-            pending.push(message);
+            pending.push_back(message);
             for message in pending {
                 if sender.send(message).is_err() {
                     self.sender = None;
@@ -531,10 +574,10 @@ impl Recorder {
             return true;
         }
         while !self.backlog.is_empty() {
-            match sender.try_send(self.backlog.remove(0)) {
+            match sender.try_send(self.backlog.pop_front().expect("not empty")) {
                 Ok(()) => {}
                 Err(TrySendError::Full(message)) => {
-                    self.backlog.insert(0, message);
+                    self.backlog.push_front(message);
                     break;
                 }
                 Err(TrySendError::Disconnected(_)) => {
@@ -558,7 +601,7 @@ impl Recorder {
         match message {
             Message::Frame(_) => false,
             other => {
-                self.backlog.push(other);
+                self.backlog.push_back(other);
                 true
             }
         }
@@ -847,11 +890,30 @@ impl Recorder {
         }
         let id = self.weapons.len() as u32;
         self.weapons.insert(weapon.source.clone(), id);
+        self.weapon_sources.push(weapon.source.clone());
         let info = convert::weapon_info(id, weapon);
         self.weapon_notes
             .insert(id, WeaponNote::of(weapon, info.class));
         self.send(Message::Weapon(Box::new(info)));
         id
+    }
+
+    /// [`Self::weapon_id`] for a round whose id the last tick knew: the same
+    /// id when the round's weapon still has that id's name, with no search.
+    fn weapon_id_after(
+        &mut self,
+        weapon: &tore_formats::weapons::Weapon,
+        before: Option<u32>,
+    ) -> u32 {
+        if let Some(id) = before
+            && self
+                .weapon_sources
+                .get(id as usize)
+                .is_some_and(|source| *source == weapon.source)
+        {
+            return id;
+        }
+        self.weapon_id(weapon)
     }
 
     /// Records the tick. See the module documentation.
@@ -876,13 +938,11 @@ impl Recorder {
             events: std::mem::take(&mut self.early),
             ..Frame::default()
         };
-        let targets: BTreeMap<u32, &live::Target> = tick
-            .combat
-            .state
-            .targets
-            .iter()
-            .map(|t| (t.id, t))
-            .collect();
+        let targets = ById::new(
+            &tick.combat.state.targets,
+            |t| t.id,
+            std::mem::take(&mut self.id_orders[0]),
+        );
         let player_ground = ground_height(tick.world, tick.flight.position);
         let player = self.player;
 
@@ -897,6 +957,7 @@ impl Recorder {
             let data = flight_data(player, pose, &tick, &targets, player_ground);
             frame.aircraft.push(convert::aircraft_state(pose, &data));
         }
+        self.id_orders[0] = targets.into_order();
         // Surface rows whose hit points ran out this tick: wrecks.
         let mut lost: Vec<(u32, i32)> = Vec::new();
         for target in snapshot.targets.iter().filter(|p| p.aircraft.is_none()) {
@@ -916,19 +977,18 @@ impl Recorder {
         }
 
         // Weapons in flight.
-        let live_shots: BTreeMap<u32, &live::Projectile> = tick
-            .combat
-            .state
-            .projectiles
-            .iter()
-            .map(|p| (p.id, p))
-            .collect();
-        let mut shots = BTreeMap::new();
+        let live_shots = ById::new(
+            &tick.combat.state.projectiles,
+            |p| p.id,
+            std::mem::take(&mut self.id_orders[1]),
+        );
+        let mut laid: Vec<(u32, Shot)> = Vec::with_capacity(snapshot.projectiles.len());
         for pose in &snapshot.projectiles {
             let simulated = live_shots.get(&pose.id);
+            let before = self.shots.get(&pose.id).copied();
             let weapon = simulated.map(|p| p.weapon(stores_of(&tick, player, p.owner)));
             let weapon_id = match weapon {
-                Some(weapon) => self.weapon_id(weapon),
+                Some(weapon) => self.weapon_id_after(weapon, before.map(|shot| shot.weapon)),
                 None => self.weapons.get(&pose.weapon).copied().unwrap_or(u32::MAX),
             };
             let seeker = simulated
@@ -940,7 +1000,7 @@ impl Recorder {
                 simulated.map_or(0, |p| p.age),
                 seeker,
             ));
-            shots.insert(
+            laid.push((
                 pose.id,
                 Shot {
                     owner: pose.owner,
@@ -948,15 +1008,18 @@ impl Recorder {
                     target: pose.target,
                     status: seeker.map(|s| s.status),
                     position: pose.position,
-                    lost: self.shots.get(&pose.id).is_some_and(|shot| shot.lost),
-                    lost_at: self.shots.get(&pose.id).and_then(|shot| shot.lost_at),
+                    lost: before.is_some_and(|shot| shot.lost),
+                    lost_at: before.and_then(|shot| shot.lost_at),
                     station: simulated.map_or(0, |p| p.station),
                     launched_t: simulated.map_or(0, |p| p.launched_t),
                     age: simulated.map_or(0, |p| p.age),
                     motion: simulated.is_some_and(|p| p.motion.is_some()),
                 },
-            );
+            ));
         }
+        // Built in one go from the rounds in the order they flew, which the
+        // map sorts; a repeated id keeps its last row, as inserting did.
+        let mut shots: BTreeMap<u32, Shot> = laid.into_iter().collect();
         frame.debris = convert::debris_states(&snapshot.debris);
         frame.escapees = snapshot.pilots.iter().map(convert::escapee_state).collect();
         frame.new_effects = self.effects.started(&snapshot.effects);
@@ -976,6 +1039,7 @@ impl Recorder {
         self.decoys(&tick, &frame, &mut events);
         self.dispensers = devices::dispensers(tick.wings);
         self.weapon_events(&tick, &frame, &mut shots, &live_shots, &mut events);
+        self.id_orders[1] = live_shots.into_order();
         self.surface_watch.events(&tick, &lost, &mut events);
         self.aircraft_events(&tick, &frame, &mut events);
         self.cue_events(&tick, player_ground, &mut events);
@@ -1100,7 +1164,7 @@ impl Recorder {
         tick: &Tick<'_>,
         frame: &Frame,
         shots: &mut BTreeMap<u32, Shot>,
-        live_shots: &BTreeMap<u32, &live::Projectile>,
+        live_shots: &ById<'_, live::Projectile>,
         events: &mut Vec<Event>,
     ) {
         let state_of = |id: u32| frame.aircraft.iter().find(|a| a.id == id);
@@ -1115,8 +1179,12 @@ impl Recorder {
                     .and_then(|a| a.controller().target())
             }
         };
+        // Both maps run in id order, so the shot's row of the last tick is
+        // found by walking along them together.
+        let mut old = self.shots.iter().peekable();
         for (id, shot) in shots.iter_mut() {
-            let Some(previous) = self.shots.get(id) else {
+            while old.next_if(|(before, _)| *before < id).is_some() {}
+            let Some((_, previous)) = old.next_if(|(before, _)| *before == id) else {
                 // A launch, with its geometry at release.
                 let mut event = Event::new(kind::WEAPON_LAUNCH)
                     .with_subject(shot.owner)
@@ -1253,12 +1321,19 @@ impl Recorder {
         }
         // Rounds that hit the ground: each ground impact effect this tick,
         // matched to the nearest weapon that vanished.
-        let mut vanished: Vec<(u32, Shot)> = self
-            .shots
+        let mut vanished: Vec<(u32, Shot)> = if frame
+            .new_effects
             .iter()
-            .filter(|(id, _)| !shots.contains_key(id))
-            .map(|(id, shot)| (*id, *shot))
-            .collect();
+            .any(|effect| is_ground_burst(effect.kind))
+        {
+            self.shots
+                .iter()
+                .filter(|(id, _)| !shots.contains_key(id))
+                .map(|(id, shot)| (*id, *shot))
+                .collect()
+        } else {
+            Vec::new()
+        };
         for effect in frame.new_effects.iter().filter(|e| is_ground_burst(e.kind)) {
             let nearest = vanished
                 .iter()
@@ -2134,7 +2209,7 @@ fn flight_data(
     player: u32,
     pose: &crate::snapshot::AircraftPose,
     tick: &Tick<'_>,
-    targets: &BTreeMap<u32, &live::Target>,
+    targets: &ById<'_, live::Target>,
     player_ground: f64,
 ) -> FlightData {
     let controls = |f: &flight::State, input: &flight::PilotInput| {

@@ -9509,6 +9509,58 @@ each guarded by a test against the path it replaced):
   takes the clear-pixel result directly; menu text uses a 256-entry sRGB
   table, reused scratch vectors and static sprite names.
 
+Simulation and presenter hygiene (optimization run S8; every change keeps the
+simulation, the wire bytes and the recorded replay bytes, each guarded by a test
+against the code it replaced, and the headless probe's output and recording were
+compared before and after):
+
+- A round's weapon record is taken out of the projectile for its pass in
+  `State::step` and put back, instead of being cloned for every round every
+  tick. `live::is_gun` is one binary search in a sorted table of the upper-cased
+  gun records (built from the aircraft guns and the surface-gun table), and the
+  pass classifies each round once. `State::snapshots` skips the missile profile
+  table for a gun (tested: no gun record has a profile). The broad-phase boxes,
+  row bounds and side map of the hit search are built only when a round that is
+  not an inert store is in the air. Checkpoint bytes are unchanged.
+- `Combat::snapshot` is `snapshot_reusing`: the picture is written over the
+  snapshot that fell out of the history (`RenderHistory::spare`), so the lists
+  and the strings in them are reused. The four per-actor maps are one id-sorted
+  walk of the roster; the AI aircraft's drawn stores are kept per actor
+  (`RenderHistory::ai_stores`, forgotten at a restart) while their loads and
+  loadout stay as they were; `places` is a sorted list; a piece of debris finds
+  its owner's row by id. Debug builds make every history snapshot a second time
+  from nothing and compare. `snapshot()` keeps its signature for the host's
+  per-seat pictures.
+- The recorder finds a tick's targets and rounds by id in an id-sorted index
+  (`ById`) it reuses, builds the next tick's shot map in one go, finds a shot's
+  weapon id from its last tick's id, and builds the list of rounds that
+  vanished only on a tick with a ground burst. Its writer backlog is a
+  `VecDeque`.
+- `Smoke::step` ages, moves and expires puffs in one pass with the per-kind
+  rise and lifetime looked up once, popping the expired from the front; the
+  contrail outlets are compared and stored in place, with no map built.
+- `flight::State::step_surface` keeps the last surface asked for (by the bits of
+  the point), as the step asks for the surface under one point several times.
+  `Envelope::speeds` has no modulo in its loop. `solid_contact` tests a box
+  only after a sphere test that cannot reject a box the segment touches, and
+  keeps the live ids in a sorted list.
+  `TickOutput` is cleared, not replaced, and the sensor weather's bands are
+  compared before they are collected.
+- The single-player tick presenter builds the scene for the listener's camera
+  and the weather camera lean (the player and the missiles) when the main view
+  and the saved Other View follow the player's own aircraft
+  (`Rig::needs_bodies`), finds each aircraft type's engine sounds once, and
+  works out the ejection warning only for a mixer. A camera's weather step
+  reads the weather layer and the camera's facing once for the sun's alignment
+  and its smooth target. A frame's spatial sound is
+  one call: each tick keeps its own listener, emissions, launches and player
+  (`audio::SpatialStep`) and `Audio::spatial_frame` steps them all on the
+  sources and loops of the frame's last tick, with one lock and one copy of the
+  loops. With one tick in a frame this is the sound it always was.
+  What stays per tick is whatever carries state across ticks: the recorder, the
+  cues, the weather presentations (a seeded step each tick), the music and
+  warning tones, the vapor, and the propagation of sound.
+
 The tick presenter reuses an identical camera scene instead of rebuilding it
 between unchanged simulation inputs. GPU and window work never moves to workers.
 

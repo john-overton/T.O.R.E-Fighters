@@ -1055,32 +1055,39 @@ impl Scenery {
     /// Slots have independent seeded presentation state; queries never consume RNG.
     pub fn step_view_weather(&mut self, terrain: &Terrain, camera: &Camera, speed_fps: f64) {
         let altitude = camera.position[1];
-        let alignment = if self.glare_enabled() {
-            terrain
-                .weather
-                .sample(altitude)
+        let glare = self.glare_enabled();
+        // The weather layer at the camera's altitude and the direction the
+        // camera faces, which the sun's alignment and its smooth target both
+        // read: worked out once (the same layer and the same vector as when
+        // each worked them out for itself).
+        let layer = if glare {
+            terrain.weather.sample(altitude)
+        } else {
+            None
+        };
+        let facing = camera.facing();
+        let alignment = if glare {
+            layer
+                .as_ref()
                 .and_then(|l| {
-                    tore_sim::environment::sun_angles(&l, terrain.weather.seconds_of_day())
+                    tore_sim::environment::sun_angles(l, terrain.weather.seconds_of_day())
                 })
                 .map_or(-1., |a| {
                     let sun = crate::celestial::rotate([0., 0., 1.], a);
-                    let view = camera.uniform(1., [0.; 4], [0; 3]);
                     (0..3)
-                        .map(|i| f64::from(sun[i]) * f64::from(view[12 + i]))
+                        .map(|i| f64::from(sun[i]) * f64::from(facing[i]))
                         .sum()
                 })
         } else {
             -1.
         };
-        let visual_target = if self.smooth_weather && self.glare_enabled() {
-            terrain
-                .weather
-                .sample(altitude)
-                .and_then(|layer| crate::celestial::visual_sun_direction(&layer, &terrain.weather))
+        let visual_target = if self.smooth_weather && glare {
+            layer
+                .as_ref()
+                .and_then(|layer| crate::celestial::visual_sun_direction(layer, &terrain.weather))
                 .map_or(0., |sun| {
-                    let view = camera.uniform(1., [0.; 4], [0; 3]);
                     let alignment: f64 = (0..3)
-                        .map(|i| f64::from(sun[i]) * f64::from(view[12 + i]))
+                        .map(|i| f64::from(sun[i]) * f64::from(facing[i]))
                         .sum();
                     let response = (((alignment.clamp(-1., 1.) * (32767. * 32767. / 65536.))
                         .floor()
@@ -1772,6 +1779,150 @@ pub(crate) mod tests {
             s.celestial.as_ref().unwrap().sun_uniform(&w, &s, 5000.)
         );
         assert_eq!(ticks, w.weather.ticks());
+    }
+
+    /// `step_view_weather` as it was: the layer and the camera's uniform
+    /// worked out again for each use.
+    fn step_view_weather_reference(
+        s: &mut Scenery,
+        terrain: &Terrain,
+        camera: &Camera,
+        speed_fps: f64,
+    ) {
+        let altitude = camera.position[1];
+        let alignment = if s.glare_enabled() {
+            terrain
+                .weather
+                .sample(altitude)
+                .and_then(|l| {
+                    tore_sim::environment::sun_angles(&l, terrain.weather.seconds_of_day())
+                })
+                .map_or(-1., |a| {
+                    let sun = crate::celestial::rotate([0., 0., 1.], a);
+                    let view = camera.uniform(1., [0.; 4], [0; 3]);
+                    (0..3)
+                        .map(|i| f64::from(sun[i]) * f64::from(view[12 + i]))
+                        .sum()
+                })
+        } else {
+            -1.
+        };
+        let visual_target = if s.smooth_weather && s.glare_enabled() {
+            terrain
+                .weather
+                .sample(altitude)
+                .and_then(|layer| crate::celestial::visual_sun_direction(&layer, &terrain.weather))
+                .map_or(0., |sun| {
+                    let view = camera.uniform(1., [0.; 4], [0; 3]);
+                    let alignment: f64 = (0..3)
+                        .map(|i| f64::from(sun[i]) * f64::from(view[12 + i]))
+                        .sum();
+                    let response = (((alignment.clamp(-1., 1.) * (32767. * 32767. / 65536.))
+                        .floor()
+                        - 15564.)
+                        / 3.)
+                        .clamp(0., 255.);
+                    response
+                        * f64::from(crate::celestial::glare_strength(terrain, s, altitude, sun))
+                })
+        } else {
+            0.
+        };
+        let presentation = if camera.weather_slot == 0 {
+            &mut s.weather_presentation
+        } else {
+            &mut s.auxiliary_presentations[camera.weather_slot - 1]
+        };
+        let previous_visual = presentation.visual_sun;
+        presentation.step_with_alignment(&terrain.weather, altitude, speed_fps, alignment);
+        if s.smooth_weather {
+            presentation.visual_sun =
+                previous_visual + (visual_target - previous_visual).clamp(-16. / 7.2, 16. / 7.2);
+        }
+    }
+
+    #[test]
+    fn the_sun_inputs_of_a_cameras_weather_are_what_each_use_worked_out_for_itself() {
+        use tore_formats::weather::shape::{Primitive, WeatherShape};
+        let mut module =
+            tore_formats::weather::Module::parse(&tore_formats::weather::synthetic_module(1))
+                .unwrap();
+        let l = &mut module.layers[0];
+        l.flags = 8;
+        l.start_seconds = 0;
+        l.end_seconds = 86399;
+        l.sunrise_seconds = 0;
+        l.sunset_seconds = 86400;
+        let angles = tore_sim::environment::sun_angles(l, 9 * 3600).unwrap();
+        let mut w = tore_world::test_support::terrain();
+        w.weather = tore_sim::environment::Environment::new(
+            tore_sim::environment::Configuration::new(module, 9, 0, 0, None).unwrap(),
+        );
+        let empty = WeatherShape {
+            primitives: vec![],
+            scale_exponent: 8,
+            publishes_point: false,
+        };
+        let celestial = || crate::celestial::Celestial {
+            sun: WeatherShape {
+                primitives: vec![Primitive::Circle {
+                    center: [0., 0., 160.],
+                    diameter: 4,
+                    fill: 254,
+                }],
+                ..empty.clone()
+            },
+            moon: empty.clone(),
+            stars: empty.clone(),
+            sun_effects: true,
+            moon_texture: 0,
+            moon_uv: [0., 0., 1., 1.],
+            sun_remap: 0,
+            shade_rows: BTreeMap::new(),
+            light_rows: [0; 2],
+            flare: tore_formats::weather::flare::Layout {
+                circles: vec![tore_formats::weather::flare::Circle {
+                    offset_percent: 50,
+                    radius: 10,
+                    fill: 265,
+                }],
+            },
+        };
+        let (mut now, mut then) = (scenery(), scenery());
+        for s in [&mut now, &mut then] {
+            s.celestial = Some(celestial());
+            s.smooth_weather = true;
+        }
+        let sun = crate::celestial::rotate([0., 0., 1.], angles);
+        let mut forward = Camera::new();
+        forward.position[1] = 5000.;
+        forward.yaw = sun[0].atan2(sun[2]);
+        forward.pitch = sun[1].asin() - 0.1;
+        let mut rear = Camera::new();
+        rear.weather_slot = 1;
+        rear.position = forward.position;
+        rear.yaw = forward.yaw + std::f32::consts::PI;
+        rear.pitch = -forward.pitch;
+        let mut wandering = Camera::new();
+        wandering.weather_slot = 2;
+        for tick in 0..400 {
+            w.weather.step();
+            // A camera that swings through the sun and climbs through the day.
+            wandering.position[1] = 3000. + f64::from(tick) * 11.;
+            wandering.yaw = forward.yaw + (tick as f32 * 0.013).sin();
+            wandering.pitch = forward.pitch + (tick as f32 * 0.021).cos() * 0.2;
+            for camera in [&forward, &rear, &wandering] {
+                now.step_view_weather(&w, camera, 700.);
+                step_view_weather_reference(&mut then, &w, camera, 700.);
+            }
+            assert_eq!(
+                (&now.weather_presentation, &now.auxiliary_presentations),
+                (&then.weather_presentation, &then.auxiliary_presentations),
+                "tick {tick}"
+            );
+        }
+        assert!(now.weather_presentation.sun_whitening > 0);
+        assert!(now.weather_presentation.visual_sun != 0.);
     }
 
     #[test]

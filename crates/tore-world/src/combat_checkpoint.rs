@@ -21,7 +21,9 @@
 //!   readout's kept fly-out times, cleared on a load) and `notes` (the
 //!   mission recorder's command notes, which nothing in flight reads);
 //! - rebuilt: `RenderHistory::places` is each snapshot's target index by id,
-//!   built again from the coded snapshots, as `set_current` and `advance` do.
+//!   built again from the coded snapshots, as `set_current` and `advance` do;
+//!   `RenderHistory::spare` and `ai_stores` are scratch the next snapshot is
+//!   written over and from, and start empty.
 //!
 //! The wrapper's own fields are coded by [`Combat::save_wrapper`] and
 //! [`Combat::restore_wrapper`], apart from `state`, so they are tested before
@@ -60,6 +62,10 @@ impl Checkpoint for RenderHistory {
             // Rebuilt from the snapshots, as `set_current` and `advance`
             // build it.
             places: _,
+            // The spare snapshot and the stores cache are only what a
+            // snapshot is written over and from; neither is read back.
+            spare: _,
+            ai_stores: _,
             restarts,
         } = self;
         plane.save(s, None)?;
@@ -74,16 +80,18 @@ impl Checkpoint for RenderHistory {
         let current = RenderSnapshot::load(l, previous.as_ref())?;
         // `places[0]` indexes `previous` (empty without one, as after a
         // restart) and `places[1]` indexes `current`.
-        let places = [
-            previous.as_ref().map(Self::places).unwrap_or_default(),
-            Self::places(&current),
-        ];
+        let mut places: [Vec<(u32, u32)>; 2] = Default::default();
+        if let Some(previous) = &previous {
+            Self::place(&mut places[0], previous);
+        }
+        Self::place(&mut places[1], &current);
         Ok(RenderHistory {
             plane,
             previous,
             current,
             places,
             restarts,
+            ..RenderHistory::default()
         })
     }
 }

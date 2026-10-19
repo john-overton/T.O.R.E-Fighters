@@ -3290,6 +3290,11 @@ impl State {
     pub fn motor_powered(&self, projectile: &Projectile) -> bool {
         motor_powered(self.weapon(projectile), projectile, (self.tick / 30) as u16)
     }
+    /// [`Self::motor_powered`] for a caller that has the projectile's weapon
+    /// already ([`Self::weapon`]).
+    pub fn motor_powered_with(&self, weapon: &Weapon, projectile: &Projectile) -> bool {
+        motor_powered(weapon, projectile, (self.tick / 30) as u16)
+    }
     /// Development-only visual fixture. Gameplay damage always arrives through impacts.
     pub fn preview_localized_damage(&mut self, section: DamageSection, fraction: f64) {
         let fraction = fraction.clamp(0., 1.);
@@ -3393,9 +3398,12 @@ impl State {
             .filter_map(|projectile| {
                 let weapon = projectile_weapon(ships, projectile);
                 let flight = projectile.guidance.as_ref();
-                let profile = flight
-                    .map(|flight| flight.profile)
-                    .or_else(|| missiles::Profile::for_weapon(weapon))?;
+                // A gun has no profile (tested), so its round skips the table.
+                let profile = flight.map(|flight| flight.profile).or_else(|| {
+                    (!is_gun(weapon))
+                        .then(|| missiles::Profile::for_weapon(weapon))
+                        .flatten()
+                })?;
                 let target = flight
                     .and_then(|flight| flight.seeker.target)
                     .or(projectile.target);
@@ -5214,14 +5222,26 @@ impl State {
                 .get(&t.id)
                 .map(|bounds| (bounds.center, bounds.half)),
         };
+        // These three are read only for a round that is not an inert store,
+        // so a sky with no such round in the air (the usual case between
+        // fights) does not build them.
+        let live_rounds = if self.jettisoned.is_empty() {
+            !self.projectiles.is_empty()
+        } else {
+            self.projectiles
+                .iter()
+                .any(|p| !self.jettisoned.contains_key(&p.id))
+        };
         let target_broad = broad::Broad::new(
             self.targets
                 .iter()
                 .zip(&old_targets)
+                .filter(|_| live_rounds)
                 .map(|(t, previous)| body(t, *previous)),
         );
         let row_bounds: Vec<Option<broad::Bounds>> = rows
             .iter()
+            .filter(|_| live_rounds)
             .map(|r| {
                 broad::Body {
                     solid: None,
@@ -5233,7 +5253,7 @@ impl State {
         // Each aircraft's side, the first row of an id answering, for the
         // friendly fire rule and for whom a surface round counts as hostile.
         let mut target_sides: BTreeMap<u32, Side> = BTreeMap::new();
-        if friendly_fire_off || !self.surface_rounds.is_empty() {
+        if live_rounds && (friendly_fire_off || !self.surface_rounds.is_empty()) {
             for t in &self.targets {
                 target_sides.entry(t.id).or_insert(t.side);
             }
@@ -5241,8 +5261,11 @@ impl State {
         let mut candidates: Vec<usize> = Vec::new();
         // Every round's collateral bursts, applied after the search.
         let mut bursts: Vec<collateral::Burst> = Vec::new();
-        self.projectiles.retain_mut(|p| {
-            let owned = p.weapon.clone();
+        // A round's pass reads its weapon record while the round is borrowed
+        // whole, so the record is taken out of the round for the pass (a
+        // round that carries its own has no station to read) and put back
+        // after it, with no clone of the record.
+        let mut pass = |p: &mut Projectile, owned: &Option<Weapon>| -> bool {
             let w = owned.as_ref().unwrap_or_else(|| {
                 &owner_configuration(&ships, p.owner).stations[p.station].weapon
             });
@@ -5279,7 +5302,9 @@ impl State {
             }
             let by_ownship = ships.iter().any(|o| o.aircraft == p.owner);
             let easy = self.cheats.easy_aiming && by_ownship && p.incoming.is_none();
-            let eased = (easy && !is_gun(w)).then(|| eased_weapon(w));
+            // Classified once; the eased copy keeps the record.
+            let gun = is_gun(w);
+            let eased = (easy && !gun).then(|| eased_weapon(w));
             let w = eased.as_ref().unwrap_or(w);
             // A surface unit's round, and its shooter's side: who is hostile
             // to its flak fuze, and whom friendly fire spares from any
@@ -5295,7 +5320,7 @@ impl State {
             } else {
                 NO_SIDE
             };
-            let surface_gun = surface.is_some() && is_gun(w);
+            let surface_gun = surface.is_some() && gun;
             let shooter = collateral::Shooter {
                 side: if friendly_fire_off {
                     owner_side
@@ -5317,7 +5342,7 @@ impl State {
                 .rewinds
                 .get(&p.id)
                 .copied()
-                .filter(|ticks| *ticks > 0 && is_gun(w));
+                .filter(|ticks| *ticks > 0 && gun);
             let volumes = &self.volumes;
             let past = |id: u32| rewind.and_then(|ticks| volumes.volume(id, ticks));
             if p.age == 0 {
@@ -5367,7 +5392,7 @@ impl State {
             // Every motor smokes while it burns, a rocket's (no seeker) as
             // well as a missile's (bug B6); gun rounds and bombs have none.
             // The same rule as `motor_powered`.
-            if phase == super::EnginePhase::Powered && !is_gun(w) {
+            if phase == super::EnginePhase::Powered && !gun {
                 sources.push((
                     std::array::from_fn(|i| p.position[i] - p.direction[i] * 4.),
                     super::smoke::Kind::Missile,
@@ -5453,7 +5478,7 @@ impl State {
                     let supported = if p.incoming.is_some() {
                         // The diagnostic incoming round is always illuminated.
                         true
-                    } else if p.weapon.is_some() {
+                    } else if owned.is_some() {
                         self.targets.iter().any(|owner| {
                             owner.id == p.owner && owner.hp > 0 && owner.radar_emitting
                         })
@@ -5612,11 +5637,11 @@ impl State {
                     // Easy aiming widens the volume of the aircraft it shoots at,
                     // never the shooter's own.
                     let hitbox = if p.owner == t.id { 1. } else { hitbox };
-                    if (!is_gun(w) || p.owner != t.id)
+                    if (!gun || p.owner != t.id)
                         && (t.hp <= 0 || !spares(t.side))
                         && (t.hp <= 0 || p.guidance.as_ref().is_none_or(|f| f.eligible(w, t)))
                         && t.body_present()
-                        && let Some(at) = if is_gun(w) {
+                        && let Some(at) = if gun {
                             if let Some(v) = past(t.id) {
                                 rewound_contact(p, v, hitbox)
                             } else {
@@ -5659,7 +5684,7 @@ impl State {
                         continue;
                     }
                     if !(t.body_present()
-                        && (!is_gun(w) || t.id != p.owner)
+                        && (!gun || t.id != p.owner)
                         && !(t.hp > 0 && t.role == TargetRole::Aircraft && spares(t.side)))
                     {
                         continue;
@@ -5673,7 +5698,7 @@ impl State {
                         // radius remains a separate damage rule and does not turn
                         // a long runway into a giant interception sphere.
                         bounds.segment_fraction(p.previous, p.position)
-                    } else if is_gun(w)
+                    } else if gun
                         && (t.role == TargetRole::Aircraft || self.parked.contains_key(&t.id))
                     {
                         // A parked aircraft has the same aircraft volume.
@@ -5855,7 +5880,7 @@ impl State {
                             None,
                             super::blast_scale::of(w),
                         ));
-                        if !is_gun(w) {
+                        if !gun {
                             events.push(Event::Jolt(Jolt {
                                 target: r.target.id,
                                 from: position,
@@ -5916,7 +5941,7 @@ impl State {
                         )
                     };
                     let scaled = projectile_damage(p, w, nominal);
-                    if t.role == TargetRole::Aircraft && !is_gun(w) {
+                    if t.role == TargetRole::Aircraft && !gun {
                         events.push(Event::Jolt(Jolt {
                             target: t.id,
                             from: position,
@@ -6100,6 +6125,12 @@ impl State {
                 return false;
             }
             true
+        };
+        self.projectiles.retain_mut(|p| {
+            let owned = p.weapon.take();
+            let kept = pass(p, &owned);
+            p.weapon = owned;
+            kept
         });
         // A round that is gone takes its rewind, its surface record and its
         // bomb path with it.
@@ -6557,6 +6588,56 @@ pub fn is_gun_pod(w: &Weapon) -> bool {
 /// tuning table. Gun rounds are hit-tested against the aircraft volume, spread
 /// by the gun dispersion and never home.
 pub fn is_gun(w: &Weapon) -> bool {
+    GunRecords::get().contains(&w.source)
+}
+/// The gun records, aircraft and surface, upper-cased and sorted, so that
+/// classifying a round is one binary search and no scan of about sixty names.
+/// Record names compare without regard to ASCII case, as before.
+struct GunRecords {
+    names: Vec<Vec<u8>>,
+    longest: usize,
+}
+impl GunRecords {
+    fn get() -> &'static Self {
+        static RECORDS: std::sync::OnceLock<GunRecords> = std::sync::OnceLock::new();
+        RECORDS.get_or_init(|| {
+            let mut names: Vec<Vec<u8>> = AircraftId::ALL
+                .into_iter()
+                .chain([AircraftId::Faxx])
+                .flat_map(|aircraft| aircraft.guns().iter().copied())
+                .chain(super::surface_guns::records())
+                .map(|name| name.to_ascii_uppercase().into_bytes())
+                .collect();
+            names.sort_unstable();
+            names.dedup();
+            let longest = names.iter().map(Vec::len).max().unwrap_or(0);
+            GunRecords { names, longest }
+        })
+    }
+    fn contains(&self, source: &str) -> bool {
+        let source = source.as_bytes();
+        if source.len() > self.longest {
+            return false;
+        }
+        let mut upper = [0u8; 48];
+        let Some(slot) = upper.get_mut(..source.len()) else {
+            // A table name this long is not expected; scan instead.
+            return self
+                .names
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(source));
+        };
+        for (to, from) in slot.iter_mut().zip(source) {
+            *to = from.to_ascii_uppercase();
+        }
+        self.names
+            .binary_search_by(|name| name.as_slice().cmp(&*slot))
+            .is_ok()
+    }
+}
+/// The scan [`is_gun`] replaced, kept to test it against.
+#[cfg(test)]
+fn is_gun_scan(w: &Weapon) -> bool {
     is_aircraft_gun(w) || super::surface_guns::is_surface_gun(&w.source)
 }
 /// The station Tab fires: the first gun with rounds left, else the first gun,
