@@ -185,6 +185,10 @@ impl Library {
             palette,
             pages,
         );
+        // Side cells keep crop debris from neighbouring sprites in the source
+        // sheets (the conifer carries the red bush's ground strip at its top).
+        // On an upright card that strip floats above the tree as a flat card.
+        clean_side_cells(&mut pages[base_start..]);
         let tropical = region.climate == 3;
         let desert = region.climate == 1;
         for species in Species::ALL {
@@ -892,6 +896,92 @@ fn normalize(n: [f32; 3]) -> [f32; 3] {
 }
 
 /// A flat-shaded triangle in a drawn part.
+/// Runs `drop_detached_debris` on every side cell of the two supplied packs,
+/// given as their appended indexed pages (the v2 pack's 8, then pass 5's).
+fn clean_side_cells(pages: &mut [u8]) {
+    let cells = PACK.iter().enumerate().chain(
+        EXTRA
+            .iter()
+            .enumerate()
+            .map(|(id, sprite)| (32 + id, sprite)),
+    );
+    for (slot, (name, _)) in cells {
+        if is_side_sprite(name) {
+            let page = slot / 4 * 65536;
+            drop_detached_debris(&mut pages[page..page + 65536], slot % 4);
+        }
+    }
+}
+
+/// Supplied side views stand upright; top views (`top_*`, `sahara_top_*`)
+/// lie flat and may legitimately hold separate crowns or stones.
+fn is_side_sprite(name: &str) -> bool {
+    !name.starts_with("top_") && !name.starts_with("sahara_top_")
+}
+
+/// The 8-connected opaque components of one 128 px cell of a 256 px indexed
+/// page, as (pixel indices within the page, top row, bottom row).
+fn cell_components(page: &[u8], tile: usize) -> Vec<(Vec<usize>, usize, usize)> {
+    let (cx, cy) = (tile % 2 * 128, tile / 2 * 128);
+    let mut seen = vec![false; 128 * 128];
+    let mut out = Vec::new();
+    for start in 0..128 * 128 {
+        if seen[start] || page[(cy + start / 128) * 256 + cx + start % 128] == 255 {
+            continue;
+        }
+        seen[start] = true;
+        let mut pending = vec![start];
+        let mut pixels = Vec::new();
+        let (mut top, mut bottom) = (127, 0);
+        while let Some(at) = pending.pop() {
+            let (x, y) = (at % 128, at / 128);
+            top = top.min(y);
+            bottom = bottom.max(y);
+            pixels.push((cy + y) * 256 + cx + x);
+            for ny in y.saturating_sub(1)..=(y + 1).min(127) {
+                for nx in x.saturating_sub(1)..=(x + 1).min(127) {
+                    let next = ny * 128 + nx;
+                    if !seen[next] && page[(cy + ny) * 256 + cx + nx] != 255 {
+                        seen[next] = true;
+                        pending.push(next);
+                    }
+                }
+            }
+        }
+        out.push((pixels, top, bottom));
+    }
+    out
+}
+
+/// Clears opaque islands that cannot belong to an upright plant or rock: any
+/// lying wholly above or below the main body's rows (crop strips from the
+/// sprite above or below in the source sheet), and specks under 1% of the
+/// main body touching the cell's usable border (side-neighbour bleed).
+/// Separate stones and leaves beside the main body stay. Agent rule,
+/// 2026-10-19, for John's floating pine card report.
+fn drop_detached_debris(page: &mut [u8], tile: usize) {
+    let parts = cell_components(page, tile);
+    let Some(main) = parts.iter().max_by_key(|p| p.0.len()) else {
+        return;
+    };
+    let (size, top, bottom) = (main.0.len(), main.1, main.2);
+    let (cx, cy) = (tile % 2 * 128, tile / 2 * 128);
+    let mut clear = Vec::new();
+    for (pixels, t, b) in &parts {
+        let outside = *b < top || *t > bottom;
+        let edge = pixels.iter().any(|&at| {
+            let (x, y) = (at % 256 - cx, at / 256 - cy);
+            x <= 2 || y <= 2 || x >= 125 || y >= 125
+        });
+        if outside || (edge && pixels.len() * 100 < size) {
+            clear.extend_from_slice(pixels);
+        }
+    }
+    for at in clear {
+        page[at] = 255;
+    }
+}
+
 fn packed_page(first: usize, id: usize) -> f32 {
     -((first * 4 + id + 1) as f32)
 }
@@ -1153,11 +1243,104 @@ mod tests {
                             assert_eq!(mesh.top[2..], [0., 0.]);
                         } else {
                             assert!(mesh.top[2] > 0. && mesh.top[3] > 0.);
+                            // The flat top lies inside the upright card's
+                            // crown: within its half width and its height.
+                            let side_half = mesh.radius * 1.02 + 1e-4;
+                            assert!(
+                                mesh.top[2] <= side_half && mesh.top[3] <= side_half,
+                                "{mode} {code} {}: top {:?} wider than side {side_half}",
+                                mesh.source,
+                                mesh.top
+                            );
+                            assert!(
+                                (0.05..=0.95).contains(&mesh.top[1]),
+                                "{mode} {code} {}: top height {}",
+                                mesh.source,
+                                mesh.top[1]
+                            );
                         }
                     }
                 }
             }
         }
+    }
+
+    /// John, 2026-10-19: a flat brownish-green card floated above each pack
+    /// pine. It was the red bush's ground strip, cropped into the conifer's
+    /// side cell, drawn on the upright card. No side cell may keep an island
+    /// wholly above or below its body, or a border speck.
+    #[test]
+    fn side_sprites_have_no_detached_floating_cards() {
+        let mut pages = Vec::new();
+        let palette = [[80; 3]; 256];
+        append_rgba(
+            include_bytes!("../assets/vegetation/pack.rgba"),
+            &palette,
+            &mut pages,
+        );
+        append_rgba(
+            include_bytes!("../assets/vegetation/pass5/pack.rgba"),
+            &palette,
+            &mut pages,
+        );
+        let before = pages.clone();
+        clean_side_cells(&mut pages);
+        let opaque = |pages: &[u8], slot: usize| {
+            let page = &pages[slot / 4 * 65536..][..65536];
+            cell_components(page, slot % 4)
+                .iter()
+                .map(|p| p.0.len())
+                .sum::<usize>()
+        };
+        let cells = PACK
+            .iter()
+            .enumerate()
+            .chain(EXTRA.iter().enumerate().map(|(id, s)| (32 + id, s)));
+        let mut sides = 0;
+        for (slot, &(name, _)) in cells {
+            let page = &pages[slot / 4 * 65536..][..65536];
+            let parts = cell_components(page, slot % 4);
+            if !is_side_sprite(name) {
+                assert_eq!(opaque(&pages, slot), opaque(&before, slot), "{name}");
+                continue;
+            }
+            sides += 1;
+            let main = parts.iter().max_by_key(|p| p.0.len()).expect(name);
+            for (pixels, top, bottom) in &parts {
+                assert!(
+                    *bottom >= main.1 && *top <= main.2,
+                    "{name}: island rows {top}..{bottom} outside body {}..{}",
+                    main.1,
+                    main.2
+                );
+                assert!(
+                    pixels.len() * 100 >= main.0.len() || {
+                        pixels.iter().all(|&at| {
+                            let (x, y) = (at % 128, at / 256 % 128);
+                            (3..125).contains(&x) && (3..125).contains(&y)
+                        })
+                    }
+                );
+            }
+            let lost = opaque(&before, slot) - opaque(&pages, slot);
+            match name {
+                // The reported pine strip, and the same crop fault below the
+                // banana and grey shrub.
+                "conifer" => {
+                    assert!(lost > 300, "{name} lost {lost}");
+                    let top = (0..128).find(|&y| {
+                        (0..128).any(|x| {
+                            page[(slot % 4 / 2 * 128 + y) * 256 + slot % 2 * 128 + x] != 255
+                        })
+                    });
+                    assert_eq!(top, Some(main.1), "{name} has rows above its crown");
+                }
+                "banana" | "grey_shrub" => assert!(lost > 50, "{name} lost {lost}"),
+                // Legitimate separate stones, leaves and acacia canopy stay.
+                _ => assert!(lost * 100 < opaque(&before, slot), "{name} lost {lost}"),
+            }
+        }
+        assert_eq!(sides, PACK.len() + 21);
     }
 
     #[test]

@@ -320,6 +320,19 @@ an agent choice in response to John's 2026-10-17 green-cap report. Other species
 retain their existing tops. A directly overhead pine therefore has a thinner
 silhouette; this tradeoff needs GPU review.
 
+The floating card John reported again on 2026-10-19 was not a top card. It was
+part of the supplied pack pine's upright side cell: the source sheet's crop for
+the conifer included the red bush's ground strip, which the slicer kept as a
+substantial component, so a flat green-brown strip stood above every pack pine
+(the conifer fallback when an import has no TREED.SH). At load, every supplied
+side cell (v2 pack and Sahara sides, not top views) now drops opaque islands
+lying wholly above or below its main body's rows, plus border specks under 1% of
+the body. Separate stones, leaves and acacia canopy beside the body stay. This
+cleans the conifer, banana and grey shrub strips and a few edge specks; the
+rule is an agent choice. The test `side_sprites_have_no_detached_floating_cards`
+covers every side cell. The cache key includes a hash of the source tree, so
+cached cards rebuild.
+
 ### Tile seams
 
 John requested a 500 ft transition centred on colour seams on 2026-10-18.

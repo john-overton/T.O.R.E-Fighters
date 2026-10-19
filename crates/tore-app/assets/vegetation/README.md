@@ -20,7 +20,10 @@ Nearest-neighbour resizing preserves the pixel style. Runtime restores each
 sprite's original aspect ratio. The last page contains three sprites.
 
 `pack.rgba` is eight consecutive 256 by 256 RGBA pages. It is embedded generated
-art, not an extracted game resource. PNG pages and individual PNGs are review
+art, not an extracted game resource. At load, the app clears side-cell islands that lie
+wholly above or below the sprite's main body, plus border specks (crop strips
+from neighbouring sheet sprites, such as the red bush's ground under the
+conifer's top edge); the committed pages still contain them. PNG pages and individual PNGs are review
 and authoring artifacts. The app maps RGB at 78% brightness into the theater's
 palette once on scene construction. Live palette/weather lighting, local tint,
 fog and shadows are the same as for retail vegetation.
