@@ -118,3 +118,148 @@ fn the_shared_picture_sends_the_same_packets_to_15_humans() {
 fn the_shared_picture_sends_the_same_packets_to_30_humans() {
     compare(30, 6_000);
 }
+
+/// A host and bots on the network simulator, for the real import.
+struct Bots {
+    net: SimNetwork,
+    host: Host,
+    socket: SimSocket,
+    bots: Vec<(SimSocket, crate::bot::Bot)>,
+}
+
+impl Bots {
+    fn new(
+        spec: MissionSpec,
+        resources: &Arc<BTreeMap<String, Vec<u8>>>,
+        bots: u32,
+        legacy: bool,
+    ) -> Self {
+        let net = SimNetwork::new(13);
+        net.set_default_link(LinkConfig::for_round_trip(
+            Duration::from_millis(40),
+            0.,
+            0.,
+            0.,
+        ));
+        let socket = net.bind(host_address()).unwrap();
+        let mut host = Host::new(
+            spec,
+            Arc::clone(resources),
+            HostConfig {
+                open_planes: OpenPlanes::All,
+                start: StartMode::Now,
+                ..config()
+            },
+        )
+        .unwrap();
+        host.snapshot_executor = Some(Arc::new(Executor::serial()));
+        host.legacy_pictures = legacy;
+        let bots = (0..bots)
+            .map(|plane| {
+                let port = 41_000 + plane as u16;
+                let address: SocketAddr = format!("10.0.0.2:{port}").parse().unwrap();
+                let socket = net.bind(address).unwrap();
+                let config = crate::client::ClientConfig {
+                    entropy: Entropy::Seeded(u64::from(port)),
+                    plane: Some(plane),
+                    ..crate::client::ClientConfig::new(host_address(), "Bot", build())
+                };
+                let client =
+                    crate::client::Client::connect(config, Arc::clone(resources), net.now())
+                        .unwrap();
+                (socket, crate::bot::Bot::new(client))
+            })
+            .collect();
+        Self {
+            net,
+            host,
+            socket,
+            bots,
+        }
+    }
+
+    fn step(&mut self) -> Vec<Transmit> {
+        self.net.advance(MS);
+        let now = self.net.now();
+        self.host.receive_from(now, &mut self.socket).unwrap();
+        self.host.update(now);
+        let mut packets = Vec::new();
+        while let Some(packet) = self.host.poll_transmit() {
+            self.socket
+                .send_datagram(packet.to, &packet.datagram)
+                .unwrap();
+            packets.push(packet);
+        }
+        while self.host.poll_log().is_some() {}
+        for (socket, bot) in &mut self.bots {
+            bot.client.receive_from(now, socket).unwrap();
+            bot.update(now);
+            bot.client.transmit(socket).unwrap();
+            while bot.client.poll_event().is_some() {}
+        }
+        packets
+    }
+}
+
+/// The comparison on a real import: 15 against 15 F/A-18Ds and MiG-29s, a
+/// bot in each of `TORE_S11_BOTS` planes (default 15), for
+/// `TORE_S11_SECONDS` (default 60), every packet compared. Run it in release:
+///
+/// ```sh
+/// TORE_DATA_DIR=... cargo test --release -p tore-session --lib \
+///     real_data_pictures -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "reads a real import through TORE_DATA_DIR; run by hand in release"]
+fn real_data_pictures_send_the_same_packets() {
+    let directory = tore_import::data_directory().expect("TORE_DATA_DIR");
+    let import = Arc::new(tore_import::load(&directory).expect("an imported pack"));
+    let mut spec = MissionSpec::new("UKR", AircraftId::F18);
+    for (index, wing) in spec.wings.iter_mut().enumerate() {
+        wing.count = 5;
+        wing.skill = Skill::Average;
+        if index >= 3 {
+            wing.aircraft = AircraftId::Mig29;
+        }
+    }
+    spec.separation_nm = 5;
+    spec.start = Start::Airborne {
+        altitude_ft: 20_000,
+    };
+    let number = |name: &str, default: u64| {
+        std::env::var(name)
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(default)
+    };
+    let bots = number("TORE_S11_BOTS", 15) as u32;
+    let seconds = number("TORE_S11_SECONDS", 60);
+    let mut legacy = Bots::new(spec.clone(), &import, bots, true);
+    let mut shared = Bots::new(spec, &import, bots, false);
+    let (mut packets, mut bytes) = (0usize, 0usize);
+    let (mut rounds, mut debris, mut pilots) = (0usize, 0usize, 0usize);
+    for ms in 0..seconds * 1_000 {
+        let before = legacy.step();
+        let after = shared.step();
+        assert_eq!(after, before, "packets at {ms} ms");
+        packets += after.len();
+        bytes += after.iter().map(|p| p.datagram.len()).sum::<usize>();
+        let state = &shared.host.world.combat.state;
+        rounds = rounds.max(state.projectiles.len());
+        debris = debris.max(state.debris.len());
+        pilots = pilots.max(
+            shared
+                .host
+                .world
+                .ai_wings
+                .iter()
+                .map(|w| w.escapees().count())
+                .sum(),
+        );
+    }
+    eprintln!(
+        "{bots} bots, {seconds} s: {packets} packets, {bytes} bytes the same; \
+         at most {rounds} rounds, {debris} debris, {pilots} AI pilots out"
+    );
+    assert!(packets > 0);
+}

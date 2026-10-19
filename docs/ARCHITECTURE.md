@@ -9608,6 +9608,33 @@ compared before and after):
   cues, the weather presentations (a seeded step each tick), the music and
   warning tones, the vapor, and the propagation of sound.
 
+Host and network (optimization run S11; every change but the last keeps the
+wire bytes, each guarded by a test against the code it replaced):
+
+- The seats' pictures share one picture a tick. `Combat::wire_picture` gives
+  the part of every seat's picture that does not depend on the seat, as a seat
+  flying none of the human-flown planes would draw it, holding only what the
+  wire reads (no stores, gun rounds, effects, marks or models);
+  `from_world::SharedPicture` quantizes its aircraft and rounds once; each due
+  seat adds its own plane (`SeatOwn`: the debris of its own plane drawn as its
+  type in its cockpit's damage variant, its own pilot and second crew member
+  from its cockpit) in `from_world::seat_entities`. A seat keeps of its last
+  picture only the sorted places of the debris, pilots and surface units
+  (`PictureMemory`), so a velocity is a binary search, not a walk. The readout
+  stays per seat. Where combat draws every target over the player's state (no
+  target models) the seats take whole pictures as before. Compared tick by
+  tick against the per-seat pictures in a fight with missiles, debris and
+  ejections, and packet by packet in the host with 0, 15 and 30 humans.
+- `EntitySender::select` finds the entities by key in a sorted list instead of
+  a hash map and moves the chosen records out; the lobby state is built once
+  per pass; the session part of the journal is coded once a tick; CRC-32 takes
+  eight bytes a step (slice-by-8, the same checksums).
+- The PvP observers' ring is kept only while someone watches (see
+  [the observer view](#the-observer-view)).
+- A dedicated server's world makes no contrail puffs (see
+  [a mission with no window](#a-mission-with-no-window)).
+  This one changes checkpoint and standby-stream bytes.
+
 The tick presenter reuses an identical camera scene instead of rebuilding it
 between unchanged simulation inputs. GPU and window work never moves to workers.
 
