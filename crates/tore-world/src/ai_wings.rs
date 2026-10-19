@@ -696,6 +696,14 @@ pub(crate) struct NewAircraft {
     pub dummy: bool,
 }
 
+/// A receiver of perceived attacks: its id, the human flying it with its
+/// ownship, and the mission's actor of that id.
+type Receiver<'a, 'h> = (
+    u32,
+    Option<(&'a HumanAircraft<'h>, &'a live::Ownship)>,
+    Option<&'a AiActor>,
+);
+
 /// One perceived attack: the receiver, its report, the world bearing and
 /// the event's id.
 type PerceivedAttack = (
@@ -2066,6 +2074,15 @@ impl AiWings {
     /// `humans` is one entry per human-flown aircraft, in id order. Each is a
     /// world object in every AI decision; the RWR records, emitters and sensor
     /// picture that reach the AI's attack evidence are the first ownship's.
+    /// Uses `ceiling`, built from the terrain every step is given, instead
+    /// of building the same one again.
+    pub(crate) fn share_ground_ceiling(
+        &mut self,
+        ceiling: std::sync::Arc<tore_sim::ground_ceiling::GroundCeiling>,
+    ) {
+        self.ground_ceiling = Some(ceiling);
+    }
+
     pub fn step(
         &mut self,
         state: &mut live::State,
@@ -2436,11 +2453,7 @@ impl AiWings {
         // The receivers, each looked up once: a human with its ownship, or
         // an AI actor. A human without an ownship has no records to perceive
         // a shot with, so it is not a receiver here.
-        let receivers: Vec<(
-            u32,
-            Option<(&HumanAircraft, &live::Ownship)>,
-            Option<&AiActor>,
-        )> = combats
+        let receivers: Vec<Receiver<'_, '_>> = combats
             .iter()
             .map(|&(h, own)| (h.slot.id, Some((h, own)), self.mission.actor(h.slot.id)))
             .chain(

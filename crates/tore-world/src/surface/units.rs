@@ -280,6 +280,10 @@ pub struct SurfaceState {
     /// Every armed unit's pose this tick. Not checkpointed: rebuilt every
     /// surface tick from the units' movers.
     pub places: std::collections::BTreeMap<UnitId, super::fire::Place>,
+    /// Each armed unit's place while it stands where the mission put it,
+    /// with the unit and the bits of its position and heading, in arsenal
+    /// order: worked out once, not every tick. Not checkpointed.
+    pub static_places: Vec<(UnitId, [u64; 4], super::fire::Place)>,
     /// This tick's new gun bursts, for a networked host's clients. Not
     /// checkpointed: rebuilt every tick.
     pub bursts: Vec<super::fire::BurstNote>,
@@ -324,6 +328,7 @@ impl SurfaceState {
         self.locks.clear();
         self.painting.clear();
         self.places.clear();
+        self.static_places.clear();
         self.bursts.clear();
         self.flak_teams.clear();
     }

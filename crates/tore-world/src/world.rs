@@ -1168,6 +1168,8 @@ impl World {
             // The radars painting each aircraft: a helicopter learns where
             // they stand (slice H4).
             bridge.set_painting(self.combat.surface.painting.clone());
+            // One ground ceiling for the world's terrain, shared with combat.
+            bridge.share_ground_ceiling(self.combat.ground_ceiling(&self.terrain));
             let stepped = bridge.step(&mut self.combat.state, &humans, &self.terrain);
             // The A-G page lists aircraft only in an airfield sequence.
             for (id, attached) in bridge.airfield_attachment() {

@@ -1089,6 +1089,32 @@ fn wanted(side: Side, react: u32, weapon: &WeaponArms, contact: &Contact) -> boo
     }
 }
 
+/// This tick's contacts: the aircraft first, then the ground units and
+/// ships ([`surface_contacts`]).
+#[derive(Clone, Copy)]
+struct Contacts<'a> {
+    all: &'a [Contact],
+    /// How many of `all` are aircraft, at its start.
+    aircraft: usize,
+}
+
+impl<'a> Contacts<'a> {
+    /// The contacts `weapon` may aim at by kind, in order: the aircraft
+    /// only for a weapon that never aims at the surface, the ground units
+    /// and ships only for one that never aims at aircraft. The others would
+    /// all fail [`wanted`], so leaving them out changes no answer.
+    fn for_weapon(self, weapon: &WeaponArms) -> &'a [Contact] {
+        debug_assert!(self.all[..self.aircraft].iter().all(|c| !c.surface));
+        debug_assert!(self.all[self.aircraft..].iter().all(|c| c.surface));
+        match (weapon.aims_at_aircraft(), weapon.aims_at_any_surface()) {
+            (true, true) => self.all,
+            (true, false) => &self.all[..self.aircraft],
+            (false, true) => &self.all[self.aircraft..],
+            (false, false) => &[],
+        }
+    }
+}
+
 /// What a unit's controller, or a battery's, sees.
 struct Look<'a> {
     /// Where it looks from.
@@ -1110,7 +1136,15 @@ impl Look<'_> {
     /// eligible ones (inside the detection band, the search limit and line of
     /// sight) of the preferred kind while there is one, else of the other,
     /// nearest first, ties by id.
-    fn sees(&self, contacts: &[Contact], scene: &Scene<'_>) -> (bool, Vec<u32>) {
+    fn sees(&self, contacts: Contacts<'_>, scene: &Scene<'_>) -> (bool, Vec<u32>) {
+        let seen = self.sees_among(contacts.for_weapon(self.weapon), scene);
+        // Every surface test checks the narrowed list against every contact.
+        #[cfg(test)]
+        assert_eq!(seen, self.sees_among(contacts.all, scene));
+        seen
+    }
+
+    fn sees_among(&self, contacts: &[Contact], scene: &Scene<'_>) -> (bool, Vec<u32>) {
         let mut in_range = false;
         let mut eligible: Vec<(bool, f64, u32)> = Vec::new();
         let surface = self.weapon.aims_at_any_surface();
@@ -1207,12 +1241,48 @@ pub fn step(
     }
     state.arm(arsenal);
     // Where every armed unit stands this tick: a moving unit fires and looks
-    // from its current pose.
+    // from its current pose, any other from where the mission put it (kept
+    // from tick to tick while the arsenal is the same).
+    let key = |arms: &Arms| {
+        [
+            arms.position[0].to_bits(),
+            arms.position[1].to_bits(),
+            arms.position[2].to_bits(),
+            arms.heading.to_bits(),
+        ]
+    };
+    if state.static_places.len() != arsenal.units.len()
+        || state
+            .static_places
+            .iter()
+            .zip(&arsenal.units)
+            .any(|((unit, bits, _), arms)| *unit != arms.unit || *bits != key(arms))
+    {
+        state.static_places = arsenal
+            .units
+            .iter()
+            .map(|arms| (arms.unit, key(arms), arms.place(None)))
+            .collect();
+    }
     let places: BTreeMap<UnitId, Place> = arsenal
         .units
         .iter()
-        .map(|arms| (arms.unit, arms.place(state.unit(arms.unit))))
+        .zip(&state.static_places)
+        .map(|(arms, (_, _, fixed))| {
+            let unit = state.unit(arms.unit);
+            let place = if unit.is_some_and(|u| u.mover.is_some()) {
+                arms.place(unit)
+            } else {
+                *fixed
+            };
+            (arms.unit, place)
+        })
         .collect();
+    // Every surface test checks the kept places against working them out.
+    #[cfg(test)]
+    assert!(arsenal.units.iter().all(|arms| {
+        format!("{:?}", places[&arms.unit]) == format!("{:?}", arms.place(state.unit(arms.unit)))
+    }));
     state.places = places;
     // Each surface id's combat row, and whether it stands.
     let rows: BTreeMap<u32, usize> = live
@@ -1231,26 +1301,32 @@ pub fn step(
     // What the controllers may aim at: the aircraft, then the ground units
     // and ships of a side.
     let ground = surface_contacts(surface, live);
-    let contacts: Vec<Contact> = scene
+    let list: Vec<Contact> = scene
         .aircraft
         .iter()
         .map(Contact::from)
         .chain(ground.iter().copied())
         .collect();
+    let contacts = Contacts {
+        all: &list,
+        aircraft: scene.aircraft.len(),
+    };
     // Radars first: who emits this tick, HARM shutdowns.
     let radars = emitters::step(surface, state, live, scene, &rows, &ground);
     let mut supports = Vec::new();
     // In-flight surface missiles by (owner, target).
     let mut in_flight: BTreeSet<(u32, u32)> = BTreeSet::new();
     for projectile in &live.projectiles {
-        if let (Some(round), Some(target)) = (live.surface_round(projectile.id), projectile.target)
-            && !round.flak
+        // The projectile's own fields before the surface round lookup.
+        if let Some(target) = projectile.target
             && projectile.guidance.is_some()
+            && let Some(round) = live.surface_round(projectile.id)
+            && !round.flak
         {
             in_flight.insert((projectile.owner, target));
         }
     }
-    let aircraft_by_id: BTreeMap<u32, Contact> = contacts.iter().map(|c| (c.id, *c)).collect();
+    let aircraft_by_id: BTreeMap<u32, Contact> = list.iter().map(|c| (c.id, *c)).collect();
     let observe = |from: Vector, id: u32| {
         aircraft_by_id.get(&id).map(|a| seeker::Observation {
             id,
@@ -1319,7 +1395,7 @@ pub fn step(
                     prefer_surface: false,
                     line_of_sight_needed: true,
                 }
-                .sees(&contacts, scene)
+                .sees(contacts, scene)
             }
             None => (false, Vec::new()),
         };
@@ -1452,7 +1528,7 @@ pub fn step(
     }
 
     // Flak teams: what each team sees, and which groups it fires at.
-    let plans = plan_teams(arsenal, state, &|id| alive(live, id), &contacts, scene);
+    let plans = plan_teams(arsenal, state, &|id| alive(live, id), &list, scene);
     let team_of: BTreeMap<UnitId, usize> = plans
         .iter()
         .enumerate()
@@ -1480,7 +1556,7 @@ pub fn step(
                 live,
                 &View {
                     scene,
-                    contacts: &contacts,
+                    contacts,
                     by_id: &aircraft_by_id,
                     prefer_surface,
                     team: team_of
@@ -1514,7 +1590,7 @@ fn slot_lock(controller: &Controller) -> Option<u32> {
 /// id too) and whether the unit engages ground units and ships first.
 struct View<'a> {
     scene: &'a Scene<'a>,
-    contacts: &'a [Contact],
+    contacts: Contacts<'a>,
     by_id: &'a BTreeMap<u32, Contact>,
     prefer_surface: bool,
     /// The flak team the unit fights in, with its picture this tick.

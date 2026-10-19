@@ -216,7 +216,7 @@ crate::checkpoint_struct!(Controller {
     mission_search_bearing,
 } skip {
     gun_views = Vec::new(),
-    formation_traffic = Vec::new(),
+    formation_traffic = std::sync::Arc::default(),
     strike = None,
     strike_handling = crate::ai::strike::Handling::PLAIN,
     trace = crate::ai::thought::Record::default(),

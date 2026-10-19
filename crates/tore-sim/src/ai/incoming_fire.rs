@@ -255,7 +255,7 @@ impl Service {
         let reach = |center: f64, radius: f64| (center - radius, center + radius);
         let windows = [reach(own.position[0], pass), reach(sight.center[0], seen)];
         for (low, high) in windows {
-            if !(low <= high) {
+            if low.partial_cmp(&high).is_none_or(|order| order.is_gt()) {
                 // Not a number: no window can be trusted, visit every round.
                 scratch.clear();
                 scratch.extend(rounds.by_x.iter().map(|(_, index)| *index));
@@ -753,9 +753,9 @@ mod tests {
                 let center = std::array::from_fn(|i| position[i] + lookout_offset[i]);
                 let visible = |p: Vector| {
                     let d = sub(p, center);
-                    dot(d, d).sqrt() <= radius && (p[0].to_bits() >> 7) % 3 != 0
+                    dot(d, d).sqrt() <= radius && !(p[0].to_bits() >> 7).is_multiple_of(3)
                 };
-                let clear = |p: Vector| (p[2].to_bits() >> 9) % 5 != 0;
+                let clear = |p: Vector| !(p[2].to_bits() >> 9).is_multiple_of(5);
                 if tick % 11 == 3 {
                     reference.pending_hit = true;
                     service.hit();

@@ -893,12 +893,12 @@ impl Sensors {
                 let relative = effective / 100.;
                 let height = target.position[1]
                     - (environment.ground)(target.position[0], target.position[2]);
-                let clutter = clutter_exposure(&sighting, height);
+                let clutter = clutter_exposure(sighting, height);
                 let look_down = look_down_factor(radar.look_down, clutter);
                 let notch = notch_factor(
                     &radar.notch,
                     clutter,
-                    notch_speed_fps(&sighting, target.velocity),
+                    notch_speed_fps(sighting, target.velocity),
                 );
                 let coupled: f64 = self
                     .strobes

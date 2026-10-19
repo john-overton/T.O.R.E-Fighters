@@ -2476,25 +2476,23 @@ impl AiMission {
         self.refresh_leaders(world, &mut output);
         self.fly_opportunities(world);
 
-        let traffic: Vec<_> = world
+        // One table for the tick, shared by every controller.
+        let traffic: std::sync::Arc<[super::formation::Traffic]> = world
             .iter()
             .filter(|o| o.alive && !o.destroyed && o.is_aircraft)
-            .map(|o| super::formation::Traffic {
-                id: o.id,
-                position: o.position,
-                velocity: o.velocity,
-                planned_velocity: self
+            .map(|o| {
+                let trace = self
                     .actors
                     .iter()
                     .find(|a| a.id() == o.id)
-                    .and_then(|a| a.controller().formation_trace())
-                    .and_then(|t| t.planned_velocity),
-                phase: self
-                    .actors
-                    .iter()
-                    .find(|a| a.id() == o.id)
-                    .and_then(|a| a.controller().formation_trace())
-                    .map(|t| t.phase),
+                    .and_then(|a| a.controller().formation_trace());
+                super::formation::Traffic {
+                    id: o.id,
+                    position: o.position,
+                    velocity: o.velocity,
+                    planned_velocity: trace.and_then(|t| t.planned_velocity),
+                    phase: trace.map(|t| t.phase),
+                }
             })
             .collect();
         let mut observations = self
@@ -3080,7 +3078,7 @@ impl AiMission {
         &mut self,
         index: usize,
         world: &[WorldObject],
-        traffic: &[super::formation::Traffic],
+        traffic: &std::sync::Arc<[super::formation::Traffic]>,
         terrain: &dyn Fn(f64, f64) -> f64,
         surface: &dyn Fn(f64, f64) -> Surface,
         height: &dyn Fn(f64, f64) -> f64,
@@ -3132,7 +3130,8 @@ impl AiMission {
             .set_strike_handling(super::strike::Handling::PLAIN);
         actor.trace.clearance = clearance;
         actor.route_random.clear_log();
-        actor.controller.set_formation_observation(traffic.to_vec());
+        // Every controller shares the tick's one traffic list.
+        actor.controller.set_formation_observation(traffic.clone());
         if !actor.dummy {
             if actor.flight.escape.is_some() {
                 actor.flight.step_escape(ground);
@@ -3501,12 +3500,13 @@ impl AiMission {
             .copied()
             .collect();
         let current = actor.controller.target();
-        let mut choice: &[TargetView] = &targets;
-        let mut kept = current;
-        let mut selection = None;
+        // The selection and its explanation come from one pass over the
+        // list the selection was made from (the explanation reads the leash
+        // state that selection just updated).
+        let mut chosen = None;
         if !yielded.is_empty() {
             let leaving = current.filter(|id| !yielded.contains(id));
-            selection = actor.mission_policy.select(
+            let (selection, explanation) = actor.mission_policy.select_explained(
                 actor_id,
                 identity.side,
                 own.position,
@@ -3518,12 +3518,12 @@ impl AiMission {
                 2,
             );
             if selection.is_some() {
-                choice = &others;
-                kept = leaving;
+                chosen = Some((selection, explanation));
             }
         }
-        if selection.is_none() {
-            selection = actor.mission_policy.select(
+        let (selection, explanation) = match chosen {
+            Some(chosen) => chosen,
+            None => actor.mission_policy.select_explained(
                 actor_id,
                 identity.side,
                 own.position,
@@ -3533,20 +3533,8 @@ impl AiMission {
                 &reports,
                 current,
                 2,
-            );
-        }
-        // The explanation reads the leash state `select` just updated.
-        let explanation = actor.mission_policy.explain(
-            actor_id,
-            identity.side,
-            own.position,
-            permission,
-            choice,
-            &protected,
-            &reports,
-            kept,
-            2,
-        );
+            ),
+        };
         let must_rejoin = actor.mission_policy.must_rejoin();
         actor.trace.engagement = Some(EngagementTrace {
             neutral: actor.neutral,

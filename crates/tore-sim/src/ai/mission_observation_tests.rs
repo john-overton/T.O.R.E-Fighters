@@ -954,7 +954,7 @@ impl Hills {
                 state ^= state >> 7;
                 state ^= state << 17;
                 // Mostly low ground with scattered tall hills.
-                if state % 5 == 0 {
+                if state.is_multiple_of(5) {
                     (state >> 8) as f64 % highest as f64
                 } else {
                     (state >> 8) as f64 % 800.

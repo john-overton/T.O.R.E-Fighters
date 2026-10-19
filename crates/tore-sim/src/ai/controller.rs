@@ -803,7 +803,7 @@ pub struct Controller {
     pending_warnings: Vec<(u64, ThreatReport)>,
     pursuit: Option<(u32, PursuitOffset)>,
     formation_guidance: super::formation::Guidance,
-    formation_traffic: Vec<super::formation::Traffic>,
+    formation_traffic: std::sync::Arc<[super::formation::Traffic]>,
     ordered_approach: Option<(u32, f64, f64, bool)>,
     search_contact: Option<SearchContact>,
     search_started_tick: Option<u64>,
@@ -965,8 +965,11 @@ impl Controller {
     }
 
     /// Supply one immutable mission snapshot before advancing this controller.
-    pub fn set_formation_observation(&mut self, traffic: Vec<super::formation::Traffic>) {
-        self.formation_traffic = traffic;
+    pub fn set_formation_observation(
+        &mut self,
+        traffic: impl Into<std::sync::Arc<[super::formation::Traffic]>>,
+    ) {
+        self.formation_traffic = traffic.into();
     }
 
     /// Diagnostics/extension hook, with no normal-flight display or side effects.
@@ -1050,7 +1053,7 @@ impl Controller {
             pending_warnings: Vec::new(),
             pursuit: None,
             formation_guidance: super::formation::Guidance::default(),
-            formation_traffic: Vec::new(),
+            formation_traffic: std::sync::Arc::default(),
             ordered_approach: None,
             search_contact: None,
             search_started_tick: None,

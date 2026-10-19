@@ -409,7 +409,9 @@ mod tests {
                 .collect();
             let blocked_every = 2 + round % 5;
             let obscured = |from: [f64; 3], to: [f64; 3]| {
-                (from[0] + to[2]).to_bits() % blocked_every as u64 == 0
+                (from[0] + to[2])
+                    .to_bits()
+                    .is_multiple_of(blocked_every as u64)
             };
             let environment = environment(&ground, &obscured);
             let expected = reference_emitters(&observer, &targets, &contacts, &environment);
