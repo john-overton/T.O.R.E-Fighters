@@ -190,6 +190,37 @@ The GPU cockpit texture survives view and size changes; projection uniforms trac
 
 `look.rs` owns authored held-key classification, look limits and exterior spherical orbit. Shift arrows are isolated from flight input and retain their look classification until physical release, including after modifier changes; Ctrl arrows, FA's thrust vectoring, do nothing yet. Camera motion uses elapsed presentation time while unpaused. Internal elevation is limited to the forward eye line through overhead; exterior orbit keeps a fixed radius and aims at the same interpolated aircraft pose. It does not alter simulation state or synchronously capture the GPU.
 
+### Menu pacing (optimization slice S4)
+
+A menu with a session open (the lobby, Direct Connection, the Internet Lobby, a
+debrief) used to redraw about 60 times a second only to pump the socket. Now
+`about_to_wait` calls `App::pump_in_wait`, which takes the session's turn
+(`net_tick`) when `NetSession::next_wake` says (at most 10 ms, so keepalives,
+timeouts and the input clock behave as before) and records what it saw in
+`net::pace::MenuPace`. A frame is requested when the pump handled events or
+the lobby, the client's `unable` word or its phase changed; for 600 ms after
+any input event (so button rockers and check lamps animate at the display's
+pace); and on a 100 ms heartbeat for what changes by itself (the King's Force
+Start countdown, search results). The network loading screen and the load
+screens draw at 20 Hz, with the loader still polled every 16 ms. The lobby,
+Direct and Internet screens no longer report themselves as animating.
+Flight, the replay viewer and sessions in flight are unchanged.
+
+Controller polling: the app polls every 8 ms in flight, the replay viewer and
+the controls screen (`Input::set_pace`), every 16 ms in menus with a controller
+connected and every 33 ms with none; a key or mouse change that can make an
+action brings the next poll forward. The device thread of `tore-input-native`
+rests 4 ms only with a controller connected and the game in flight
+(`Backend::set_flight`), 16 ms with a controller in a menu and 50 ms with none,
+never past a rumble's end, and is woken at once by rumble, stop and flight. The
+Linux scan keeps a set of event nodes known not to be controllers so their
+sysfs files are not read every second; a node that leaves `/dev/input` is
+forgotten.
+
+The loading screen composes its photograph and logo once per window size and
+photograph (`loading.rs`, `Background`), builds its font once, and each frame
+copies that and draws the stage words, the bar and the percentage.
+
 ### The frame loop under load
 
 Every rendered flight frame turns the wall time since the last frame into
@@ -3769,7 +3800,8 @@ debrief.
 *Built (D8b, the game joins a server).* `tore-app --connect` starts a
 `NetSession` (`net/session.rs`): the client session,
 its UDP socket, the files and the game's own build of the mission. The game's
-turn comes at the start of every redraw (`App::net_tick` in `net/play.rs`): the
+turn comes at the start of every redraw in flight and from the event loop's
+wait everywhere else (`App::net_tick` in `net/play.rs`, `net/pace.rs`): the
 controls go in (one `Controls` a frame from the keyboard, mouse and
 controllers, neutral while the Esc menu is up or the window has lost focus),
 the network is pumped, session events become messages, and once the host has
@@ -4454,10 +4486,12 @@ A player whose window stalls should come back to their flight, not to a
 
 **What stalls the loop, by platform.** Read from the source of winit 0.30.13,
 the version in `Cargo.lock`, on 2026-10-01; none of it has been checked by a
-run on Windows or macOS yet. The game pumps its session only at the start of
-a redraw (`net_tick` on `RedrawRequested`, `net/play.rs`), and `about_to_wait`
-asks for the redraws, with `ControlFlow::WaitUntil` no later than the
-session's next wake, about 10 ms (`main.rs`).
+run on Windows or macOS yet. In flight the game pumps its session at the start
+of a redraw (`net_tick` on `RedrawRequested`, `net/play.rs`), and
+`about_to_wait` asks for the redraws, with `ControlFlow::WaitUntil` no later
+than the session's next wake, about 10 ms (`main.rs`). Outside flight
+`about_to_wait` pumps the session itself on that wake (see "Menu pacing"
+below), so a stalled loop stalls both the same way.
 
 - **Windows.** Dragging the title bar or a border runs the system's modal
   move and size loop inside `DefWindowProcW`. Winit emits `about_to_wait` and

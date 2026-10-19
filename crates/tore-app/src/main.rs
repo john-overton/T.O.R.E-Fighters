@@ -446,6 +446,8 @@ struct App {
     head_look: [f32; 2],
     finished: bool,
     next_frame: Option<Instant>,
+    /// When a menu with a session open pumps the network and draws.
+    menu_pace: net::pace::MenuPace,
     error: Option<Box<dyn Error>>,
     /// Where every flight's mission recording goes; `None` turns recording
     /// off (captures and diagnostics). See docs/REPLAYS.md.
@@ -3821,6 +3823,7 @@ impl ApplicationHandler for App {
         if self.finished {
             return;
         }
+        self.note_menu_input(&event);
         if matches!(event, WindowEvent::RedrawRequested)
             && let Some(renderer) = &mut self.renderer
         {
@@ -3839,9 +3842,7 @@ impl ApplicationHandler for App {
                 self.end_session(event_loop);
                 return;
             }
-            if matches!(event, WindowEvent::RedrawRequested) && self.world.0.is_some() {
-                self.net_tick(event_loop);
-            }
+            // The session is pumped from the event loop's wait (about_to_wait).
             if let Some(renderer) = &mut self.renderer {
                 if renderer.window.id() != id {
                     return;
@@ -3913,7 +3914,9 @@ impl ApplicationHandler for App {
         if matches!(event, WindowEvent::RedrawRequested)
             && self.renderer.as_ref().is_some_and(|r| r.window.id() == id)
         {
-            self.net_tick(event_loop);
+            if !self.net_pumped_in_wait() {
+                self.net_tick(event_loop);
+            }
             self.direct_tick(event_loop);
             self.internet_tick(event_loop);
         }
@@ -3996,7 +3999,7 @@ impl ApplicationHandler for App {
                         self.error = Some(error);
                         event_loop.exit();
                     }
-                    renderer.window.request_redraw();
+                    // The next frame is asked for by about_to_wait, at 20 Hz.
                 }
                 return;
             }
@@ -4527,8 +4530,10 @@ impl ApplicationHandler for App {
                             &mut menu::Canvas(&mut self.menu.pixels),
                         );
                         menu_text = ui_text::finish().filter(|_| drawn);
+                        // The lobby, Direct and Internet screens are drawn on
+                        // the menu pace (net::pace), not every frame.
                         let mut animating = if drawn {
-                            true
+                            false
                         } else {
                             self.menu.render()
                                 || self.direct.is_building()
@@ -6212,6 +6217,9 @@ impl ApplicationHandler for App {
         // The Graphics screen's changes apply once they settle; this also
         // keeps its window size current after a resize.
         self.settle_graphics(false);
+        // A session outside flight is pumped here, on its own wake, not at
+        // the start of a redraw (net::pace).
+        self.pump_in_wait(event_loop);
         // Measure event-loop service, not the arrival of window events: a
         // minimized or untouched window can legitimately receive none.
         let preparing = self.loading.is_some()
@@ -6250,7 +6258,8 @@ impl ApplicationHandler for App {
         }
 
         if self.pending_host.is_some() {
-            if net::session::content_ready(&self.theater_resources) {
+            let ready = net::session::content_ready(&self.theater_resources);
+            if ready {
                 let (options, lobby) = self.pending_host.take().unwrap();
                 let name = options.name.clone();
                 match self.begin_hosting(options, lobby) {
@@ -6259,31 +6268,24 @@ impl ApplicationHandler for App {
                     Err(error) => self.message(error),
                 }
             }
-            if let Some(renderer) = &self.renderer {
-                renderer.window.request_redraw();
-            }
-            event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(16),
-            ));
+            self.loading_wait(event_loop, ready);
             return;
         }
 
         if self.pending_join.is_some() {
-            if net::session::content_ready(&self.theater_resources) {
+            let ready = net::session::content_ready(&self.theater_resources);
+            if ready {
                 let (join, label) = self.pending_join.take().unwrap();
                 self.start_join(join, &label);
             }
-            if let Some(renderer) = &self.renderer {
-                renderer.window.request_redraw();
-            }
-            event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(16),
-            ));
+            self.loading_wait(event_loop, ready);
             return;
         }
 
         if let Some(job) = &self.loading {
+            let mut finished = false;
             if let Some(result) = job.poll() {
+                finished = true;
                 let continuation = job.progress.clone();
                 self.loading = None;
                 match result {
@@ -6370,22 +6372,14 @@ impl ApplicationHandler for App {
                 }
                 self.frame_time = Instant::now();
             }
-            if let Some(renderer) = &self.renderer {
-                renderer.window.request_redraw();
-            }
-            event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(16),
-            ));
+            // The photo and text are drawn at 20 Hz; the job is still
+            // polled every 16 ms so a finished load starts at once.
+            self.loading_wait(event_loop, finished);
             return;
         }
         self.run_script(event_loop);
         if self.loading.is_some() || self.pending_join.is_some() || self.pending_host.is_some() {
-            if let Some(renderer) = &self.renderer {
-                renderer.window.request_redraw();
-            }
-            event_loop.set_control_flow(ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(16),
-            ));
+            self.loading_wait(event_loop, true);
             return;
         }
         // The replay viewer shows instead of the Replays screen, which stays
@@ -6397,6 +6391,13 @@ impl ApplicationHandler for App {
         }
         let paused = self.input_paused();
         self.input.context(paused, self.focused);
+        // Controllers are polled every 8 ms in flight, the replay viewer and
+        // the controls screen; the menus poll less often.
+        self.input.set_pace(
+            self.screen == Screen::Replay
+                || self.controls.is_some()
+                || (self.screen == Screen::Flight && !paused),
+        );
         let cockpit = self
             .world
             .cockpits
@@ -6523,11 +6524,20 @@ impl ApplicationHandler for App {
             if changed && let Some(renderer) = &self.renderer {
                 renderer.window.request_redraw();
             }
+            if changed {
+                self.menu_pace.activity(Instant::now());
+            }
         }
-        // A joined server needs a turn every few milliseconds, so while it is
-        // not the flight redrawing, the screen redraws about 60 times a second.
-        if self.net.is_some() && self.screen != Screen::Flight && self.next_frame.is_none() {
-            self.next_frame = Some(Instant::now() + Duration::from_millis(16));
+        // A menu with a session or a network screen is drawn when the pump
+        // brought news, after input, and on a slow heartbeat (net::pace).
+        let paced = self.menu_paced();
+        if paced
+            && self
+                .menu_pace
+                .redraw_due(Instant::now(), self.net_preparing())
+            && let Some(renderer) = &self.renderer
+        {
+            renderer.window.request_redraw();
         }
         if self.next_frame.is_some_and(|next| Instant::now() >= next) {
             if let Some(renderer) = &self.renderer {
@@ -6538,7 +6548,15 @@ impl ApplicationHandler for App {
         let mut next = self
             .next_frame
             .map_or(self.input.next_poll, |n| n.min(self.input.next_poll));
-        if let Some(session) = &self.net {
+        if paced {
+            next = next.min(self.menu_pace.next_due(
+                Instant::now(),
+                self.net_preparing(),
+                self.net_pumped_in_wait(),
+            ));
+        } else if self.net_pumped_in_wait() {
+            next = next.min(self.menu_pace.next_pump());
+        } else if let Some(session) = &self.net {
             next = next.min(Instant::now() + session.next_wake());
         }
         if self.script.is_some() {
@@ -15126,6 +15144,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         head_look: [0.; 2],
         finished: false,
         next_frame: None,
+        menu_pace: net::pace::MenuPace::new(Instant::now()),
         error: None,
         replay_library: match std::env::var("TORE_RECORD_MISSIONS").as_deref() {
             Err(std::env::VarError::NotPresent) => preferences_enabled,

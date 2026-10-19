@@ -199,10 +199,13 @@ impl App {
 
     /// The session's turn: controls in, the network pumped, what happened
     /// handled, and, once flying, the frame the screen draws and what that
-    /// frame presents. Called at the start of every redraw.
-    pub(crate) fn net_tick(&mut self, event_loop: &ActiveEventLoop) {
+    /// frame presents. In flight it is called at the start of every redraw;
+    /// everywhere else from the event loop's wait on the session's own wake
+    /// ([`super::pace`]). True when events were handled or the session
+    /// ended.
+    pub(crate) fn net_tick(&mut self, event_loop: &ActiveEventLoop) -> bool {
         if self.net.is_none() {
-            return;
+            return false;
         }
         let flying = self.net_flight.is_some() && self.screen == Screen::Flight;
         let sensors = self.instruments.controls();
@@ -229,12 +232,14 @@ impl App {
         if let Some(failure) = session.take_host_failure() {
             self.net_ending = Some(failure);
             self.end_session(event_loop);
-            return;
+            return true;
         }
+        let mut news = false;
         for event in session.take_events() {
+            news = true;
             if !self.net_event(event) {
                 self.end_session(event_loop);
-                return;
+                return true;
             }
         }
         // Stage F phase 2: the observer screen (F2-O2), and the AI flying an
@@ -252,11 +257,114 @@ impl App {
             && self.net_flight.is_none()
             && !self.begin_session_flight(event_loop)
         {
-            return;
+            return true;
         }
         if self.net_flight.is_some() && self.screen == Screen::Flight {
             self.net_present();
         }
+        news
+    }
+
+    /// Whether the session is pumped from the event loop's wait on its own
+    /// wake ([`super::pace`]) rather than at the start of a redraw: outside
+    /// flight and the replay viewer, and while a load runs with a world.
+    /// Flight pumps in its frame, as it always did.
+    pub(crate) fn net_pumped_in_wait(&self) -> bool {
+        self.net.is_some()
+            && if self.loading.is_some() {
+                self.world.0.is_some()
+            } else {
+                !matches!(self.screen, Screen::Flight | Screen::Replay)
+            }
+    }
+
+    /// Whether the screen is a menu drawn on the menu pace: a session open
+    /// over the main menu, the creator or a viewer, or the lobby, Direct or
+    /// Internet screen with or without one. Loads draw on their own pace.
+    pub(crate) fn menu_paced(&self) -> bool {
+        self.loading.is_none()
+            && self.pending_host.is_none()
+            && self.pending_join.is_none()
+            && ((self.net.is_some()
+                && matches!(self.screen, Screen::Main | Screen::Quick | Screen::Viewer))
+                || (self.screen == Screen::Main
+                    && (self.lobby.screen.is_some()
+                        || self.direct.screen.is_some()
+                        || self.internet.screen.is_some())))
+    }
+
+    /// Whether the session is connecting or loading its mission, which the
+    /// network loading screen shows.
+    pub(crate) fn net_preparing(&self) -> bool {
+        (self.net_built.is_some() && self.network_loading_stage.is_some())
+            || self.net.as_ref().is_some_and(|s| {
+                s.client.is_building()
+                    || matches!(
+                        s.client.phase(),
+                        tore_session::ClientPhase::Connecting | tore_session::ClientPhase::Loading
+                    )
+            })
+    }
+
+    /// The session's turn when it is due, from the event loop's wait.
+    pub(crate) fn pump_in_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if !self.net_pumped_in_wait() || !self.menu_pace.pump_due(Instant::now()) {
+            return;
+        }
+        let news = self.net_tick(event_loop);
+        let (wake, phase) = self.net.as_ref().map_or((Duration::ZERO, None), |s| {
+            (s.next_wake(), Some(s.client.phase()))
+        });
+        let lobby = self.net.as_ref().and_then(|s| s.client.lobby());
+        let unable = self.net.as_ref().and_then(|s| s.client.unable());
+        // A session that ended is news too: the screens close on it.
+        let news = news || self.net.is_none();
+        self.menu_pace
+            .pumped(Instant::now(), wake, news, lobby, unable, phase);
+    }
+
+    /// The player did something on a menu: frames at the display's pace for
+    /// a moment, starting now. The network screens do not ask for their own
+    /// frames, so every event that can change them does.
+    pub(crate) fn note_menu_input(&mut self, event: &winit::event::WindowEvent) {
+        use winit::event::WindowEvent as W;
+        if !matches!(
+            event,
+            W::CursorMoved { .. }
+                | W::CursorLeft { .. }
+                | W::MouseInput { .. }
+                | W::MouseWheel { .. }
+                | W::KeyboardInput { .. }
+                | W::Ime(_)
+                | W::Touch(_)
+                | W::Focused(_)
+                | W::Resized(_)
+                | W::ScaleFactorChanged { .. }
+        ) || !self.menu_paced()
+        {
+            return;
+        }
+        self.menu_pace.activity(Instant::now());
+        if let Some(renderer) = &self.renderer {
+            renderer.window.request_redraw();
+        }
+    }
+
+    /// The end of an about_to_wait on a loading screen: its frame at 20 Hz
+    /// (at once when `now`), the loader polled every 16 ms, and the session
+    /// pumped on its own wake.
+    pub(crate) fn loading_wait(&mut self, event_loop: &ActiveEventLoop, now: bool) {
+        let at = Instant::now();
+        if (self.menu_pace.loading_redraw_due(at) || now)
+            && let Some(renderer) = &self.renderer
+        {
+            renderer.window.request_redraw();
+        }
+        let mut next = at + Duration::from_millis(16);
+        if self.net_pumped_in_wait() {
+            next = next.min(self.menu_pace.next_pump());
+        }
+        event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(next));
     }
 
     /// The pilot's controls for this frame from the keyboard, the mouse and
