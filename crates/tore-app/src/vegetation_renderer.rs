@@ -1158,7 +1158,8 @@ mod tests {
     /// must carry the same detail tint and normal.
     #[test]
     fn a_dynamic_light_never_drops_the_ground_detail() {
-        let shader = include_str!("terrain.wgsl");
+        // A Windows checkout may give the shader CRLF line ends.
+        let shader = include_str!("terrain.wgsl").replace("\r\n", "\n");
         let start = shader
             .find("@fragment fn terrain_fragment")
             .expect("terrain fragment");
