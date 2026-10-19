@@ -71,8 +71,9 @@ cargo test --release --locked -p tore-app instrument_canvas_workers_wall_time --
 ## Host elapsed time
 
 Platform CI sets `TORE_WORKERS=2` for the workspace tests, real UDP loopback
-and strict Linux host tests. Small hosted runners would otherwise select the
-automatic serial fallback. This exercises the production pool during the
+and strict Linux host tests. `TORE_WORKERS=N` forces a fixed count, ignoring
+load; unset, the shared executor is serial until a loop is slow or late (slice
+S9), which small hosted runners would otherwise never exercise. This exercises the production pool during the
 Apple Silicon golden comparisons and Windows 32-bit tests, alongside explicit
 0/1/2/4/8-worker and shuffled equivalence tests. It does not substitute for
 interactive flight and shared host/render performance checks on real machines.

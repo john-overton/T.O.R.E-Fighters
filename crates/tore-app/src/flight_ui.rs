@@ -2582,11 +2582,11 @@ mod tests {
         let rows: Vec<_> = t[1].children.iter().map(|n| n.label.as_str()).collect();
         assert_eq!(rows, DEBUG_ROWS);
 
-        // The defaults are today's behaviour and read so.
+        // The defaults are 120 Hz with lean sensors and read so.
         let mut ui = FlightUi::default();
         assert!(ui.ai_test.is_default());
         assert_eq!(ui.cheat_state(AI_OBSERVATION_RATE), Some("120 Hz"));
-        assert_eq!(ui.cheat_state(LEAN_AI_SENSORS), Some("Off"));
+        assert_eq!(ui.cheat_state(LEAN_AI_SENSORS), Some("On"));
 
         // Escape, Right to the tab, Enter on the rate row: the next rate.
         ui.key("Escape", false, false, false, &t);
@@ -2603,15 +2603,16 @@ mod tests {
             );
         }
         ui.activate(LEAN_AI_SENSORS, "");
-        assert!(ui.ai_test.lean_sensors);
-        assert_eq!(ui.cheat_state(LEAN_AI_SENSORS), Some("On"));
+        assert!(!ui.ai_test.lean_sensors);
+        assert_eq!(ui.cheat_state(LEAN_AI_SENSORS), Some("Off"));
         // A restart keeps the test settings; Back to defaults clears them.
         ui.activate(AI_OBSERVATION_RATE, "");
         ui.reset_for_flight();
         assert_eq!(ui.ai_test.observation_hz(), 60);
-        assert!(ui.ai_test.lean_sensors);
+        assert!(!ui.ai_test.lean_sensors);
         ui.activate(DEBUG_DEFAULTS, "");
         assert_eq!(ui.ai_test, AiTestSettings::default());
+        assert_eq!(ui.cheat_state(LEAN_AI_SENSORS), Some("On"));
 
         // A joined game has the host's settings: the rows are dimmed, say so
         // and change nothing.
@@ -2630,7 +2631,7 @@ mod tests {
         ui.lock_ai_test(false);
         assert!(ui.pause.dim.is_empty());
         ui.activate(LEAN_AI_SENSORS, "");
-        assert!(ui.ai_test.lean_sensors);
+        assert!(!ui.ai_test.lean_sensors);
     }
     #[test]
     fn the_debug_rows_survive_the_session_menu_filter() {

@@ -21,7 +21,7 @@ impl Coast {
         let rows = w.rows * per;
         let mut wet = vec![false; w.cols * w.rows];
         let mut wet_rows: Vec<_> = wet.chunks_mut(w.cols).collect();
-        tore_workers::shared().for_each_mut(&mut wet_rows, 2, |z, row| {
+        tore_workers::bulk().for_each_mut(&mut wet_rows, 2, |z, row| {
             for (x, cell) in row.iter_mut().enumerate() {
                 // Only actual water cutouts, never a blue/green palette guess.
                 let mut n = 0;
@@ -53,7 +53,7 @@ impl Coast {
         let mut dist = vec![255u8; cols * rows];
         let mut sand = vec![false; cols * rows];
         let mut rows_mut: Vec<_> = dist.chunks_mut(cols).zip(sand.chunks_mut(cols)).collect();
-        tore_workers::shared().for_each_mut(&mut rows_mut, 2, |z, (distance, beach)| {
+        tore_workers::bulk().for_each_mut(&mut rows_mut, 2, |z, (distance, beach)| {
             for x in 0..cols {
                 if sea[(z / per) * w.cols + x / per] {
                     distance[x] = 0;

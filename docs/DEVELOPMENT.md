@@ -1449,24 +1449,30 @@ explicit development batch, not a retail comparison or automated balance score.
 
 ### AI test settings in the probe
 
-`--ai-observe-hz 120|60|40|30|20` and `--ai-lean-sensors` run the probe with the
-AI test settings described under
+`--ai-observe-hz 120|60|40|30|20` and `--ai-lean-sensors [on|off]` run the probe
+with the AI test settings described under
 [AI test settings](ARCHITECTURE.md#ai-test-settings-observation-rate-and-lean-sensors):
 AI aircraft observe at that rate (staggered across ticks; their controllers and
-flight stay at 120 Hz), and with lean sensors skip the visual channel and build
-the received-radar list only when a warning needs it. Without either flag the
+flight stay at 120 Hz), and with lean sensors (the default; a bare flag means
+on, `off` gives the full sensors) skip the visual channel and build the
+received-radar list only when a warning needs it. Without either flag the
 run, its stdout and its checksum are exactly those of a build without the
-settings; with one, the probe adds an `AI probe test settings:` line. Compare
+settings (lean sensors decide as full ones do); with a setting off its default
+the probe adds an `AI probe test settings:` line. Compare
 runs by the probe's own outcome lines: `AI probe attack:` (`lost_friendly`,
 `lost_enemy`, `destroyed`, `decoys_used`), `AI probe encounter:`
 (`first_visual`, `first_engage`, `first_gun_defense` per aircraft), the
 `AI probe debrief:` line and the `destroyed:` and `ejected` lines. The same
 two settings are in the flight menu's Debug tab (Escape, then Debug).
 
+The probe runs its ticks flat out, so the load-aware shared workers (see
+[shared scoped workers](ARCHITECTURE.md#shared-scoped-workers)) stay serial
+unless `TORE_WORKERS=N` forces a count; the checksum is the same either way.
+
 ```sh
 TORE_DATA_DIR="$PWD/.local/dev-profile" target/release/tore-app --ai-probe-ticks 2400 \
   --probe-fight 15:15 --separation 5 --probe-attack 600:10 --no-audio \
-  --ai-observe-hz 30 --ai-lean-sensors
+  --ai-observe-hz 30 --ai-lean-sensors off
 ```
 
 ## Mission recordings for debugging

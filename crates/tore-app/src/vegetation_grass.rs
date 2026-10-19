@@ -76,7 +76,7 @@ impl Map {
         let nz = w.rows.div_ceil(PAGE);
         let kinds: [Kind; 256] = std::array::from_fn(|i| atlas.kind_index(i as u8));
         let tiles: Vec<_> = (0..nx * nz).collect();
-        let built = tore_workers::shared().ordered_map(&tiles, 1, |_, &tile| {
+        let built = tore_workers::bulk().ordered_map(&tiles, 1, |_, &tile| {
             let mut bytes = vec![0; PAGE * PAGE * 4];
             // Lookup locality avoids repeating a BTree search and colour
             // classification for every texel of the same source picture.

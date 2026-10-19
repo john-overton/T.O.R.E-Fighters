@@ -1920,7 +1920,11 @@ impl Placement {
             .map(|(_, key)| *key)
             .collect();
         let started = std::time::Instant::now();
-        let chunks = tore_workers::shared().ordered_map(&missing, 2, |_, key| {
+        // Building everything (the load) is a bulk job; a budgeted pass in
+        // flight is a few chunks a frame and follows the load-aware executor.
+        let bulk = budget.is_none().then(tore_workers::bulk);
+        let workers = bulk.as_ref().unwrap_or_else(|| tore_workers::shared());
+        let chunks = workers.ordered_map(&missing, 2, |_, key| {
             let mut objects = self.atlas.chunk(world, key.0, key.1, 0., 1., self.density);
             if objects.len() > self.chunk_budget {
                 objects.sort_by(|a, b| {
