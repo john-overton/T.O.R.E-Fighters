@@ -3453,7 +3453,13 @@ difference is refused with the names of the files that differ.
 **What a joining client also needs.** The host tick, from which the weather
 clock's reading follows (its seconds of day and ticks are a function of the
 tick and the mission's start time), and the combat's contrail sortie number,
-which sets each aircraft's contrail height. Both travel in the Mission message.
+which sets each aircraft's contrail height. Both travel in the Mission message. A
+dedicated server's world makes no contrail puffs of its own (optimization slice
+S11, John, 2026-10-19): no screen draws its world, and every client makes its
+own contrails from the aircraft it draws and the sortie number. The switch is
+in the combat checkpoint and the standby stream's Flight record, so a standby's
+copy steps the same way and a takeover keeps the sortie; the players' contrails
+never came from the host, so they go on without a gap.
 
 ### One step for a human's plane
 

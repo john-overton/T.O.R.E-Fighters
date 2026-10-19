@@ -752,10 +752,12 @@ pub(crate) enum Unforeseen {
 fn build_world(
     spec: &MissionSpec,
     resources: &BTreeMap<String, Vec<u8>>,
+    contrail_puffs: bool,
 ) -> Result<(journal::Driver, Manifest), HostError> {
     let reads = ResourceReads::new(resources);
-    let world = World::new(spec, &reads, Seating::Open)
+    let mut world = World::new(spec, &reads, Seating::Open)
         .map_err(|error| HostError::Mission(error.to_string()))?;
+    world.combat.set_contrail_puffs(contrail_puffs);
     Ok((journal::Driver::new(world), reads.manifest()))
 }
 
@@ -937,7 +939,7 @@ impl Host {
         let spec = king::with_settings(spec, &settings);
         let session_id = session_id(config.entropy);
         let spec = with_surface_seed(spec, session_id, 1);
-        let (world, manifest) = build_world(&spec, &resources)?;
+        let (world, manifest) = build_world(&spec, &resources, config.contrail_puffs)?;
         let mut server = Server::new(ServerConfig {
             protocol_version: PROTOCOL_VERSION,
             max_connections: config.max_players,

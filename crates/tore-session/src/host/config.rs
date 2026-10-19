@@ -163,6 +163,11 @@ pub struct HostConfig {
     /// server's `king-mission locked`): its file's stay. Start, kick, slot
     /// locks and the crown still work.
     pub mission_locked: bool,
+    /// The world makes contrail puffs. A dedicated server's world, which no
+    /// screen draws, makes none: every client makes its own from the
+    /// aircraft it draws and the sortie number (optimization slice S11;
+    /// John, 2026-10-19).
+    pub contrail_puffs: bool,
     /// The King's settings the configuration sets beyond the fields above
     /// (a dedicated server's file; [`crate::settings`]), by number: never
     /// the player limit, the password or the time limit, which are fields
@@ -200,6 +205,7 @@ impl HostConfig {
             house: None,
             crown: CrownRule::None,
             mission_locked: false,
+            contrail_puffs: true,
             settings: Vec::new(),
             listable: false,
             content: None,

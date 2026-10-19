@@ -561,10 +561,16 @@ impl Standby {
         });
     }
 
-    /// Builds the mission with the builder, unchecked.
+    /// Builds the mission with the builder, unchecked, making contrail
+    /// puffs as the host's world does.
     fn build(&mut self) -> Result<World, String> {
         let key = self.key.ok_or_else(|| "no mission to build".to_owned())?;
-        (self.builder)(&key).map_err(|why| format!("cannot build mission {}: {why}", key.mission))
+        let mut world = (self.builder)(&key)
+            .map_err(|why| format!("cannot build mission {}: {why}", key.mission))?;
+        if let Some(flight) = &self.flight {
+            world.combat.set_contrail_puffs(flight.contrail_puffs);
+        }
+        Ok(world)
     }
 
     /// Knows the identity of its own build, building the spare if it must.

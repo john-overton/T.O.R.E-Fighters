@@ -750,6 +750,43 @@ fn a_warm_and_a_cold_standby_follow_the_crowd_fight() {
     warm_and_cold(30);
 }
 
+/// Slice S11: a host whose world makes no contrail puffs (as a dedicated
+/// server's makes none) tells its standbys so in the Flight record and the
+/// checkpoints: the warm copy and the cold one step without puffs too and
+/// match every Check.
+#[test]
+fn standbys_of_a_host_without_contrail_puffs_match_its_world() {
+    let mut rig = Rig::with(
+        crowd_spec(),
+        resources(),
+        HostConfig {
+            contrail_puffs: false,
+            ..config()
+        },
+    );
+    rig.host.set_standbys_enabled(true);
+    rig.join("Viper", 0, Platform::current());
+    rig.join("Cobra", 1, other_platform());
+    rig.join("Hawk", 2, Platform::current());
+    rig.settle();
+    assert!(
+        rig.run_until(Duration::from_secs(5), |r| r.host.ready_standbys().len()
+            == 2),
+        "ready in the lobby"
+    );
+    rig.fly();
+    rig.fly_for(12);
+    assert!(!rig.host.world.combat.contrail_puffs());
+    let warm = rig.figures(0).unwrap();
+    assert_eq!(warm.mismatches, 0);
+    assert!(warm.checks_equal >= 1, "{} checks equal", warm.checks_equal);
+    for player in [0, 1] {
+        rig.holds_the_hosts_world(player);
+        let replica = rig.players[player].standby.replica().unwrap();
+        assert!(!replica.combat.contrail_puffs(), "player {player}'s copy");
+    }
+}
+
 /// The acceptance at full length (5 minutes), for the full run: slow
 /// (minutes in a debug build).
 #[test]
