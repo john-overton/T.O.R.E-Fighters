@@ -73,6 +73,10 @@ pub struct Renderer {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     texture: wgpu::Texture,
+    /// What the canvas texture holds of the flight canvas, when the last
+    /// upload was the flight canvas's: the next one sends only the rows that
+    /// differ from it.
+    canvas_held: Option<Vec<u8>>,
     bind_group: wgpu::BindGroup,
     /// Redout and blackout levels the canvas shader veils in flight.
     veil: wgpu::Buffer,
@@ -609,6 +613,7 @@ impl Renderer {
             frame_limit,
             automated: false,
             texture,
+            canvas_held: None,
             bind_group,
             veil,
             veil_levels: [0.; 2],
@@ -918,6 +923,7 @@ impl Renderer {
         if self.texture.width() == size[0] && self.texture.height() == size[1] {
             return;
         }
+        self.canvas_held = None;
         self.texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Responsive UI"),
             size: wgpu::Extent3d {
@@ -979,6 +985,7 @@ impl Renderer {
             &crate::scenery::Scenery,
         )>,
         flight_size: Option<[u32; 2]>,
+        canvas_rows: Option<&mut crate::canvas_rows::RowSet>,
         readout: crate::frame_rate::Surface,
     ) -> AppResult<bool> {
         let frame_started = std::time::Instant::now();
@@ -1009,25 +1016,60 @@ impl Renderer {
         let size = flight_size.unwrap_or([WIDTH as u32, HEIGHT as u32]);
         self.canvas_texture(size);
         self.write_veil(flight_size.is_some());
-        self.queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            pixels,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(size[0] * 4),
-                rows_per_image: Some(size[1]),
-            },
-            wgpu::Extent3d {
-                width: size[0],
-                height: size[1],
-                depth_or_array_layers: 1,
-            },
-        );
+        let stride = size[0] as usize * 4;
+        // The flight canvas names the rows it may have changed; only those
+        // rows that really differ from what the texture holds are sent. Any
+        // other picture, or a first one, goes up whole.
+        let bands = match canvas_rows {
+            Some(rows) if pixels.len() == stride * size[1] as usize => {
+                let bands = match &mut self.canvas_held {
+                    Some(held) if held.len() == pixels.len() && rows.len() == size[1] as usize => {
+                        crate::canvas_rows::changed_bands(
+                            pixels,
+                            held,
+                            stride,
+                            rows,
+                            crate::canvas_rows::GAP,
+                        )
+                    }
+                    held => {
+                        *held = Some(pixels.to_vec());
+                        vec![0..size[1] as usize]
+                    }
+                };
+                rows.clear();
+                bands
+            }
+            _ => {
+                self.canvas_held = None;
+                vec![0..size[1] as usize]
+            }
+        };
+        for band in bands {
+            self.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d {
+                        x: 0,
+                        y: band.start as u32,
+                        z: 0,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &pixels[band.start * stride..band.end * stride],
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(size[0] * 4),
+                    rows_per_image: Some((band.end - band.start) as u32),
+                },
+                wgpu::Extent3d {
+                    width: size[0],
+                    height: (band.end - band.start) as u32,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
         if flight_size.is_some()
             && let Some((_, world, scenery)) = scene
         {

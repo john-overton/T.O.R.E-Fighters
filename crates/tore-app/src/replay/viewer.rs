@@ -3496,6 +3496,7 @@ impl Viewer {
             &canvas.pixels,
             Some((&camera, &self.world, &self.scenery)),
             Some(canvas.size),
+            None,
             crate::frame_rate::Surface::Replay {
                 right_panel: self.panels.right_open(),
                 hud_camera: self.view == tape_views::HUD_CAMERA,

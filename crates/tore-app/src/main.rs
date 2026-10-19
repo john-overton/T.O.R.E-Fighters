@@ -29,6 +29,7 @@ mod blast_preview;
 mod c130_animation;
 mod camera;
 mod canvas_present;
+mod canvas_rows;
 mod celestial;
 mod city_fill_dump;
 mod city_fires;
@@ -3952,6 +3953,7 @@ impl ApplicationHandler for App {
                             &self.loading_pixels,
                             None,
                             Some(size),
+                            None,
                             frame_rate::Surface::Loading,
                         ) {
                             self.error = Some(error);
@@ -4060,6 +4062,7 @@ impl ApplicationHandler for App {
                         &self.loading_pixels,
                         None,
                         Some(size),
+                        None,
                         frame_rate::Surface::Loading,
                     ) {
                         self.error = Some(error);
@@ -5868,7 +5871,10 @@ impl ApplicationHandler for App {
                             &self.menu.pixels,
                             &cockpit_palette,
                         );
-                        self.menu.pixels.fill(0);
+                        // Only the HUD drawings above left anything in the layer.
+                        if self.flight_ui.hud && self.view_rig.cockpit(self.flight_view) {
+                            self.menu.pixels.fill(0);
+                        }
                         if self.view_rig.cockpit(self.flight_view)
                             && self.flight_ui.weapon_diagnostics_shown(self.flight_view)
                         {
@@ -5880,8 +5886,8 @@ impl ApplicationHandler for App {
                                 cockpit_palette[usize::from(self.hornet.hud.primary_color)],
                             );
                             self.flight_canvas.weapon_debug(&self.menu.pixels);
+                            self.menu.pixels.fill(0);
                         }
-                        self.menu.pixels.fill(0);
                         let aim_color = cockpit_palette[usize::from(self.hornet.hud.primary_color)];
                         if let Some(point) = easy_square {
                             self.flight_canvas.target_square(
@@ -6001,9 +6007,7 @@ impl ApplicationHandler for App {
                                 self.mission_markup.as_ref(),
                             );
                             // Opaque letterbox prevents the cockpit leaking around the map.
-                            for pixel in self.flight_canvas.pixels.chunks_exact_mut(4) {
-                                pixel.copy_from_slice(&[72, 72, 72, 255]);
-                            }
+                            self.flight_canvas.fill_opaque([72, 72, 72]);
                             self.flight_canvas.legacy_layer(&self.menu.pixels, 1.);
                             self.menu.pixels.fill(0);
                         }
@@ -6112,6 +6116,16 @@ impl ApplicationHandler for App {
                             &mut self.flight_canvas,
                             &self.hornet.hud_font,
                         );
+                        // The layer is clear here unless one of these draws on it.
+                        let layer_drawn = self.flight_ui.menu
+                            || self.flight_ui.paused
+                            || self
+                                .net_flight
+                                .as_ref()
+                                .is_some_and(|f| f.respawn_menu.is_some())
+                            || self.controls.is_some()
+                            || self.graphics_screen.is_some()
+                            || self.sound_screen.is_some();
                         self.flight_ui.draw(
                             &mut self.menu.pixels,
                             &self.hornet.font,
@@ -6144,7 +6158,9 @@ impl ApplicationHandler for App {
                             }
                             screen.draw(&mut self.menu.pixels, &self.menu.sprites);
                         }
-                        self.flight_canvas.legacy_layer(&self.menu.pixels, 1.);
+                        if layer_drawn {
+                            self.flight_canvas.legacy_layer(&self.menu.pixels, 1.);
+                        }
                         if let Some(audio) = &self.audio {
                             // The tone follows the flight as the last tick left
                             // it, not the blended one the screen draws.
@@ -6231,6 +6247,9 @@ impl ApplicationHandler for App {
                 } else {
                     frame_rate::Surface::Menu
                 };
+                if self.screen == Screen::Flight {
+                    self.flight_canvas.prepare_upload();
+                }
                 match renderer.draw(
                     if self.screen == Screen::Flight {
                         &self.flight_canvas.pixels
@@ -6243,6 +6262,7 @@ impl ApplicationHandler for App {
                         &self.scenery,
                     )),
                     (self.screen == Screen::Flight).then_some(self.flight_canvas.size),
+                    (self.screen == Screen::Flight).then_some(&mut self.flight_canvas.pending),
                     readout,
                 ) {
                     Ok(true) if self.smoke_test => {

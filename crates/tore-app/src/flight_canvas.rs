@@ -1,4 +1,5 @@
 //! Aspect-responsive flight composition; menus keep their original 640x480 canvas.
+use crate::canvas_rows::RowSet;
 use crate::{aim_box, aircraft::Airframe, flight::State, instruments::Instruments, menu::Sprite};
 use std::sync::Arc;
 use tore_formats::text::GlyphCodes;
@@ -67,6 +68,14 @@ pub struct FlightCanvas {
     pub pixels: Vec<u8>,
     pub size: [u32; 2],
     panels: std::collections::BTreeMap<u8, Arc<PanelCache>>,
+    /// Rows drawn on since the canvas was last cleared. Every row outside
+    /// this set is all zero, so the next frame clears only these.
+    touched: RowSet,
+    /// Rows that may differ from what the renderer last uploaded: the rows
+    /// touched this frame and in frames it did not upload.
+    pub pending: RowSet,
+    /// Scratch for the filter in `blit`.
+    premultiplied: Vec<[f64; 4]>,
 }
 impl FlightCanvas {
     pub fn begin(&mut self, size: [u32; 2], h: &Airframe, s: &State, panels: &Instruments) {
@@ -81,11 +90,8 @@ impl FlightCanvas {
         s: &State,
         panels: &Instruments,
     ) {
-        self.size = size;
-        self.pixels
-            .resize(size[0] as usize * size[1] as usize * 4, 0);
+        self.clear_for(size);
         let (w, height) = (size[0] as f64, size[1] as f64);
-        self.pixels.fill(0);
         let distinct = panels
             .pages
             .iter()
@@ -141,6 +147,53 @@ impl FlightCanvas {
         }
     }
 
+    /// A clear canvas of `size`. When the size is unchanged only the rows
+    /// drawn on since the last clear are cleared; the rest are zero already.
+    fn clear_for(&mut self, size: [u32; 2]) {
+        let height = size[1] as usize;
+        let len = size[0] as usize * height * 4;
+        if self.size == size && self.pixels.len() == len && self.touched.len() == height {
+            let stride = size[0] as usize * 4;
+            for run in self.touched.runs() {
+                self.pixels[run.start * stride..run.end * stride].fill(0);
+            }
+            self.pending.merge(&self.touched);
+            self.touched.clear();
+            return;
+        }
+        self.size = size;
+        self.pixels.clear();
+        self.pixels.resize(len, 0);
+        self.touched.reset(height);
+        self.pending.reset_all(height);
+    }
+    /// Panics if a row holds a pixel but is not noted as drawn on, which
+    /// would leave it uncleared and unsent.
+    #[cfg(test)]
+    pub fn assert_drawn_rows_noted(&self) {
+        let lit = crate::canvas_rows::lit_rows(&self.pixels, self.size[0] as usize);
+        for run in lit.runs() {
+            for row in run {
+                assert!(self.touched.contains(row), "row {row} drawn but not noted");
+            }
+        }
+    }
+    /// Notes that rows `from..to` were drawn on.
+    pub fn touch_rows(&mut self, from: usize, to: usize) {
+        self.touched.mark(from, to);
+    }
+    /// Makes `pending` cover everything drawn so far this frame, for the
+    /// renderer to upload.
+    pub fn prepare_upload(&mut self) {
+        self.pending.merge(&self.touched);
+    }
+    /// Fills the whole canvas with one opaque `color`.
+    pub fn fill_opaque(&mut self, color: [u8; 3]) {
+        for pixel in self.pixels.chunks_exact_mut(4) {
+            pixel.copy_from_slice(&[color[0], color[1], color[2], 255]);
+        }
+        self.touched.mark_all();
+    }
     fn compose_panel(&mut self, page: u8, rect: (f64, f64, f64, f64), cached: Arc<PanelCache>) {
         self.blit(
             &cached.image,
@@ -160,6 +213,7 @@ impl FlightCanvas {
             return;
         }
         let at = (y * width + x) as usize * 4;
+        self.touched.mark(y as usize, y as usize + 1);
         let p = &mut self.pixels[at..at + 4];
         // Straight-alpha "over", as in `veil`.
         let under = f64::from(p[3]) / 255. * (1. - alpha);
@@ -169,12 +223,59 @@ impl FlightCanvas {
         }
         p[3] = (out * 255.).round() as u8;
     }
+    /// Blend `color` at `alpha` over the pixels `x0..x1` by `y0..y1` (clipped
+    /// to the view), the same as [`blend`](Self::blend) on each of them. A
+    /// pixel with no alpha yet takes the one result that formula gives it
+    /// without working it out again.
+    pub fn blend_rect(
+        &mut self,
+        (x0, y0, x1, y1): (i32, i32, i32, i32),
+        color: [u8; 3],
+        alpha: f64,
+    ) {
+        let [width, height] = self.size.map(|n| n as i32);
+        let (x0, x1) = (x0.clamp(0, width), x1.clamp(0, width));
+        let (y0, y1) = (y0.clamp(0, height), y1.clamp(0, height));
+        if x0 >= x1 || y0 >= y1 {
+            return;
+        }
+        self.touched.mark(y0 as usize, y1 as usize);
+        // What `blend` makes of a pixel whose alpha is zero: it weighs none
+        // of that pixel's colour.
+        let over_nothing = {
+            let out = alpha + 0.;
+            let mut pixel = [0; 4];
+            for c in 0..3 {
+                pixel[c] = ((f64::from(color[c]) * alpha + 0.) / out).round() as u8;
+            }
+            pixel[3] = (out * 255.).round() as u8;
+            pixel
+        };
+        for y in y0..y1 {
+            let at = (y * width + x0) as usize * 4;
+            let row = &mut self.pixels[at..at + (x1 - x0) as usize * 4];
+            for p in row.chunks_exact_mut(4) {
+                if p[3] == 0 && alpha > 0. {
+                    p.copy_from_slice(&over_nothing);
+                    continue;
+                }
+                let under = f64::from(p[3]) / 255. * (1. - alpha);
+                let out = alpha + under;
+                for c in 0..3 {
+                    p[c] = ((f64::from(color[c]) * alpha + f64::from(p[c]) * under) / out).round()
+                        as u8;
+                }
+                p[3] = (out * 255.).round() as u8;
+            }
+        }
+    }
     /// Blend `color` over the whole flight view, `coverage(radius)` per pixel
     /// with radius 0 at the centre and 1 at the corners.
     pub fn veil(&mut self, color: [u8; 3], coverage: impl Fn(f64) -> f64) {
         let [w, h] = self.size.map(f64::from);
         let (cx, cy) = (w / 2., h / 2.);
         let corner = cx.hypot(cy).max(1.);
+        self.touched.mark_all();
         for (i, p) in self.pixels.chunks_exact_mut(4).enumerate() {
             let x = (i % self.size[0] as usize) as f64 + 0.5;
             let y = (i / self.size[0] as usize) as f64 + 0.5;
@@ -266,7 +367,11 @@ impl FlightCanvas {
     fn dot(&mut self, x: f64, y: f64, size: f64, color: [u8; 3]) {
         let half = size / 2.;
         let [w, h] = self.size.map(|v| v as i64);
-        for py in ((y - half).floor() as i64).max(0)..((y + half).ceil() as i64).min(h) {
+        let rows = ((y - half).floor() as i64).max(0)..((y + half).ceil() as i64).min(h);
+        if rows.start < rows.end {
+            self.touched.mark(rows.start as usize, rows.end as usize);
+        }
+        for py in rows {
             for px in ((x - half).floor() as i64).max(0)..((x + half).ceil() as i64).min(w) {
                 let cover =
                     |p: i64, c: f64| ((p + 1) as f64).min(c + half) - (p as f64).max(c - half);
@@ -303,7 +408,11 @@ impl FlightCanvas {
     /// An empty, fully transparent canvas of `size`: the mission replay's
     /// view has no instruments.
     pub fn blank(&mut self, size: [u32; 2]) {
-        self.size = size;
+        if self.size != size || self.touched.len() != size[1] as usize {
+            self.size = size;
+            self.touched.reset(size[1] as usize);
+            self.pending.reset_all(size[1] as usize);
+        }
         self.pixels.clear();
         self.pixels
             .resize(size[0] as usize * size[1] as usize * 4, 0);
@@ -421,6 +530,9 @@ impl FlightCanvas {
             h,
             s.height,
         );
+        if let (Some(first), Some(last)) = (rows.first(), rows.last()) {
+            self.touched.mark(first.0, last.0 + 1);
+        }
         for &(yy, sy) in &rows {
             for &(xx, sx) in &columns {
                 let from = (sy * s.width + sx) * 4;
@@ -526,6 +638,9 @@ impl FlightCanvas {
     }
     fn blit(&mut self, s: &Sprite, (x, y, w, h): (f64, f64, f64, f64)) {
         let dw = self.size[0] as usize;
+        let touched =
+            (y.floor().max(0.) as usize)..((y + h).ceil().clamp(0., self.size[1] as f64) as usize);
+        self.touched.mark(touched.start, touched.end);
         let whole_pixels = w == s.width as f64
             && h == s.height as f64
             && x >= 0.
@@ -579,36 +694,67 @@ impl FlightCanvas {
             return;
         }
 
-        for yy in (y.floor() as i32).max(0)..((y + h).ceil() as i32).min(self.size[1] as i32) {
-            for xx in (x.floor() as i32).max(0)..((x + w).ceil() as i32).min(self.size[0] as i32) {
-                let u = ((xx as f64 + 0.5 - x) * s.width as f64 / w - 0.5)
-                    .clamp(0., (s.width - 1) as f64);
+        // The four-tap filter. What each destination column and row takes
+        // from the source (its two source columns or rows and the weight of
+        // the second) depends only on that column or row, so it is worked
+        // out once, and each source pixel's colour times its alpha is too.
+        // Every product and sum below is the same as the per-pixel original,
+        // in the same order.
+        let rows: Vec<(usize, usize, usize, f64)> = ((y.floor() as i32).max(0)
+            ..((y + h).ceil() as i32).min(self.size[1] as i32))
+            .map(|yy| {
                 let v = ((yy as f64 + 0.5 - y) * s.height as f64 / h - 0.5)
                     .clamp(0., (s.height - 1) as f64);
-                let (sx, sy) = (u.floor() as usize, v.floor() as usize);
-                let (fx, fy) = (u - sx as f64, v - sy as f64);
+                let sy = v.floor() as usize;
+                (yy as usize, sy, (sy + 1).min(s.height - 1), v - sy as f64)
+            })
+            .collect();
+        let columns: Vec<(usize, usize, usize, f64)> = ((x.floor() as i32).max(0)
+            ..((x + w).ceil() as i32).min(self.size[0] as i32))
+            .map(|xx| {
+                let u = ((xx as f64 + 0.5 - x) * s.width as f64 / w - 0.5)
+                    .clamp(0., (s.width - 1) as f64);
+                let sx = u.floor() as usize;
+                (xx as usize, sx, (sx + 1).min(s.width - 1), u - sx as f64)
+            })
+            .collect();
+        let mut premultiplied = std::mem::take(&mut self.premultiplied);
+        premultiplied.clear();
+        premultiplied.extend(s.rgba.chunks_exact(4).map(|p| {
+            let alpha = p[3] as f64 / 255.;
+            [
+                p[0] as f64 * alpha,
+                p[1] as f64 * alpha,
+                p[2] as f64 * alpha,
+                alpha,
+            ]
+        }));
+        for &(yy, sy, sy1, fy) in &rows {
+            for &(xx, sx, sx1, fx) in &columns {
+                let taps = [
+                    (&premultiplied[sy * s.width + sx], (1. - fx) * (1. - fy)),
+                    (&premultiplied[sy * s.width + sx1], fx * (1. - fy)),
+                    (&premultiplied[sy1 * s.width + sx], (1. - fx) * fy),
+                    (&premultiplied[sy1 * s.width + sx1], fx * fy),
+                ];
+                // Four clear pixels sum to nothing whatever their (finite)
+                // weights.
+                if taps
+                    .iter()
+                    .all(|(tap, weight)| tap[3] == 0. && weight.is_finite())
+                {
+                    continue;
+                }
                 let mut rgba = [0.; 4];
-                for (px, py, weight) in [
-                    (sx, sy, (1. - fx) * (1. - fy)),
-                    ((sx + 1).min(s.width - 1), sy, fx * (1. - fy)),
-                    (sx, (sy + 1).min(s.height - 1), (1. - fx) * fy),
-                    (
-                        (sx + 1).min(s.width - 1),
-                        (sy + 1).min(s.height - 1),
-                        fx * fy,
-                    ),
-                ] {
-                    let at = (py * s.width + px) * 4;
-                    let alpha = s.rgba[at + 3] as f64 / 255.;
-                    for (c, sum) in rgba.iter_mut().enumerate().take(3) {
-                        *sum += s.rgba[at + c] as f64 * alpha * weight;
+                for (tap, weight) in taps {
+                    for (sum, value) in rgba.iter_mut().zip(tap) {
+                        *sum += value * weight;
                     }
-                    rgba[3] += alpha * weight;
                 }
                 if rgba[3] == 0. {
                     continue;
                 }
-                let at = (yy as usize * dw + xx as usize) * 4;
+                let at = (yy * dw + xx) * 4;
                 let old = self.pixels[at + 3] as f64 / 255.;
                 let alpha = rgba[3] + old * (1. - rgba[3]);
                 for (c, value) in rgba.iter().enumerate().take(3) {
@@ -619,6 +765,7 @@ impl FlightCanvas {
                 self.pixels[at + 3] = (alpha * 255.).round() as u8;
             }
         }
+        self.premultiplied = premultiplied;
     }
 }
 
@@ -1037,6 +1184,290 @@ mod tests {
             let scale = (size[0] as f64 / 640.).min(size[1] as f64 / 480.) * HUD_SCALE;
             let focal = 240. * 3f64.sqrt() * canvas.hud_zoom(1.) as f64 * scale;
             assert!((focal - size[1] as f64 * 0.5 * 3f64.sqrt()).abs() < 0.001);
+        }
+    }
+
+    /// A pseudo-random sequence, so the scribbles are the same every run.
+    struct Dice(u32);
+    impl Dice {
+        fn next(&mut self) -> usize {
+            self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (self.0 >> 12) as usize
+        }
+    }
+
+    fn sprite(dice: &mut Dice, width: usize, height: usize) -> Sprite {
+        let mut rgba = Vec::new();
+        for _ in 0..width * height {
+            let alpha = [0, 0, 255, 128, 77, 255][dice.next() % 6];
+            rgba.extend_from_slice(&[
+                (dice.next() % 256) as u8,
+                (dice.next() % 256) as u8,
+                (dice.next() % 256) as u8,
+                alpha,
+            ]);
+        }
+        Sprite {
+            width,
+            height,
+            rgba,
+            glyphs: vec![],
+        }
+    }
+
+    /// Draws a frame's worth of everything that writes to the canvas.
+    fn scribble(canvas: &mut FlightCanvas, frame: usize) {
+        let mut dice = Dice(frame as u32 * 7919 + 1);
+        let [w, h] = canvas.size.map(|n| n as usize);
+        let layer: Vec<u8> = {
+            let mut layer = vec![0u8; 640 * 480 * 4];
+            for _ in 0..40 {
+                let at = (dice.next() % (640 * 480)) * 4;
+                layer[at..at + 4].copy_from_slice(&[200, 90, 10, 255]);
+            }
+            layer
+        };
+        for _ in 0..dice.next() % 5 {
+            let sprite = sprite(&mut dice, 6, 4);
+            let place = (
+                (dice.next() % (w + 20)) as f64 - 10.,
+                (dice.next() % (h + 20)) as f64 - 10.,
+            );
+            // Alternately a whole-pixel copy and a filtered one.
+            let size = if dice.next() % 2 == 0 {
+                (6., 4.)
+            } else {
+                (9.7, 6.3)
+            };
+            canvas.blit(&sprite, (place.0.round(), place.1.round(), size.0, size.1));
+            canvas.scaled(&sprite, (place.0, place.1, size.0 * 1.5, size.1 * 1.5));
+        }
+        for _ in 0..dice.next() % 20 {
+            canvas.blend(
+                (dice.next() % (w + 4)) as i32 - 2,
+                (dice.next() % (h + 4)) as i32 - 2,
+                [10, 200, 30],
+                0.1 + (dice.next() % 9) as f64 / 10.,
+            );
+            canvas.dot(
+                (dice.next() % w) as f64,
+                (dice.next() % h) as f64,
+                1.5,
+                [0, 255, 0],
+            );
+        }
+        canvas.blend_rect(
+            (
+                (dice.next() % w) as i32 - 3,
+                (dice.next() % h) as i32 - 3,
+                (dice.next() % w) as i32 + 3,
+                (dice.next() % h) as i32 + 3,
+            ),
+            [0, 0, 0],
+            0.65,
+        );
+        if frame % 4 == 0 {
+            canvas.anchored_layer(&layer);
+        }
+        if frame % 5 == 3 {
+            canvas.centered_rects(&layer, &[(100, 100, 300, 200)]);
+        }
+        if frame % 6 == 2 {
+            canvas.veil([150, 0, 0], |radius| radius * 0.5);
+        }
+        if frame % 11 == 7 {
+            canvas.fill_opaque([72, 72, 72]);
+        }
+        if frame % 13 == 9 {
+            canvas.blank(canvas.size);
+        }
+        if frame % 3 == 1 {
+            canvas.legacy_layer(&layer, 1.);
+        }
+    }
+
+    /// The renderer's side of an upload, on a CPU copy of the texture.
+    #[derive(Default)]
+    struct FakeTexture {
+        size: [u32; 2],
+        texture: Vec<u8>,
+        held: Option<Vec<u8>>,
+        rows_sent: usize,
+    }
+    impl FakeTexture {
+        fn upload(&mut self, canvas: &mut FlightCanvas) {
+            canvas.prepare_upload();
+            let stride = canvas.size[0] as usize * 4;
+            let height = canvas.size[1] as usize;
+            if self.size != canvas.size {
+                self.size = canvas.size;
+                self.texture = vec![0; canvas.pixels.len()];
+                self.held = None;
+            }
+            let bands = match &mut self.held {
+                Some(held) if canvas.pending.len() == height => crate::canvas_rows::changed_bands(
+                    &canvas.pixels,
+                    held,
+                    stride,
+                    &canvas.pending,
+                    crate::canvas_rows::GAP,
+                ),
+                held => {
+                    *held = Some(canvas.pixels.clone());
+                    vec![0..height]
+                }
+            };
+            canvas.pending.clear();
+            for band in bands {
+                self.rows_sent += band.len();
+                self.texture[band.start * stride..band.end * stride]
+                    .copy_from_slice(&canvas.pixels[band.start * stride..band.end * stride]);
+            }
+        }
+    }
+
+    #[test]
+    fn clearing_only_the_rows_drawn_on_gives_the_same_canvas_as_clearing_all() {
+        let mut reused = FlightCanvas::default();
+        let mut gpu = FakeTexture::default();
+        let sizes = [[64, 48], [64, 48], [64, 48], [80, 60], [80, 60], [64, 48]];
+        for frame in 0..90 {
+            let size = sizes[frame / 15];
+            reused.clear_for(size);
+            scribble(&mut reused, frame);
+            let mut fresh = FlightCanvas::default();
+            fresh.blank(size);
+            scribble(&mut fresh, frame);
+            assert_eq!(reused.pixels, fresh.pixels, "frame {frame}");
+            // Rows nobody drew on are clear, which is what lets the next
+            // frame leave them alone.
+            let lit = crate::canvas_rows::lit_rows(&reused.pixels, size[0] as usize);
+            for run in lit.runs() {
+                for row in run {
+                    assert!(reused.touched.contains(row), "frame {frame} row {row}");
+                }
+            }
+            // Some frames are not presented (a lost surface), so their rows
+            // must still go up with the next one.
+            if frame % 4 != 1 {
+                gpu.upload(&mut reused);
+                assert_eq!(gpu.texture, reused.pixels, "frame {frame}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_unchanged_canvas_uploads_no_rows_and_a_small_change_uploads_few() {
+        let mut canvas = FlightCanvas::default();
+        let mut gpu = FakeTexture::default();
+        let still = |canvas: &mut FlightCanvas| {
+            canvas.clear_for([64, 48]);
+            canvas.blend_rect((4, 10, 30, 14), [0, 0, 0], 0.5);
+        };
+        still(&mut canvas);
+        gpu.upload(&mut canvas);
+        assert_eq!(gpu.rows_sent, 48);
+        for _ in 0..3 {
+            still(&mut canvas);
+            gpu.upload(&mut canvas);
+        }
+        assert_eq!(gpu.rows_sent, 48, "redrawn identically");
+        canvas.clear_for([64, 48]);
+        canvas.blend_rect((4, 10, 30, 14), [0, 0, 0], 0.5);
+        canvas.blend_rect((4, 40, 8, 41), [0, 0, 0], 0.5);
+        gpu.upload(&mut canvas);
+        assert_eq!(gpu.rows_sent, 49);
+        // Drawing it away again sends those rows once more and no others.
+        canvas.clear_for([64, 48]);
+        gpu.upload(&mut canvas);
+        assert_eq!(gpu.rows_sent, 49 + 5);
+        assert_eq!(gpu.texture, canvas.pixels);
+    }
+
+    #[test]
+    fn blending_a_rectangle_matches_blending_each_pixel() {
+        for (alpha, color) in [
+            (0.65, [0, 0, 0]),
+            (0.65, [90, 200, 17]),
+            (1., [3, 4, 5]),
+            (0.3, [255, 255, 255]),
+            (0.01, [10, 20, 30]),
+            (0., [10, 20, 30]),
+        ] {
+            let mut dice = Dice(5);
+            let mut base = FlightCanvas::default();
+            base.blank([20, 12]);
+            for p in base.pixels.chunks_exact_mut(4) {
+                let alpha = [0, 0, 255, 17, 128, 254][dice.next() % 6];
+                p.copy_from_slice(&[
+                    (dice.next() % 256) as u8,
+                    (dice.next() % 256) as u8,
+                    (dice.next() % 256) as u8,
+                    alpha,
+                ]);
+            }
+            for rect in [
+                (2, 3, 15, 9),
+                (-4, -4, 30, 30),
+                (5, 5, 5, 8),
+                (18, 1, 40, 3),
+            ] {
+                let mut fast = FlightCanvas {
+                    pixels: base.pixels.clone(),
+                    size: base.size,
+                    ..Default::default()
+                };
+                let mut each = FlightCanvas {
+                    pixels: base.pixels.clone(),
+                    size: base.size,
+                    ..Default::default()
+                };
+                fast.blend_rect(rect, color, alpha);
+                for y in rect.1..rect.3 {
+                    for x in rect.0..rect.2 {
+                        each.blend(x, y, color, alpha);
+                    }
+                }
+                assert_eq!(fast.pixels, each.pixels, "{rect:?} alpha {alpha}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_hoisted_filter_matches_the_per_pixel_original_on_random_layers() {
+        let mut dice = Dice(99);
+        for case in 0..60 {
+            let (sw, sh) = (1 + dice.next() % 24, 1 + dice.next() % 20);
+            let source = sprite(&mut dice, sw, sh);
+            let size = [
+                30 + (dice.next() % 20) as u32,
+                26 + (dice.next() % 12) as u32,
+            ];
+            let mut actual = FlightCanvas::default();
+            actual.blank(size);
+            for p in actual.pixels.chunks_exact_mut(4) {
+                let alpha = [0, 255, 90][dice.next() % 3];
+                p.copy_from_slice(&[
+                    (dice.next() % 256) as u8,
+                    (dice.next() % 256) as u8,
+                    (dice.next() % 256) as u8,
+                    alpha,
+                ]);
+            }
+            let mut expected = FlightCanvas {
+                pixels: actual.pixels.clone(),
+                size,
+                ..Default::default()
+            };
+            let rect = (
+                (dice.next() % 400) as f64 / 10. - 12.,
+                (dice.next() % 300) as f64 / 10. - 9.,
+                0.5 + (dice.next() % 500) as f64 / 10.,
+                0.5 + (dice.next() % 400) as f64 / 10.,
+            );
+            actual.blit(&source, rect);
+            filtered_reference(&mut expected, &source, rect);
+            assert_eq!(actual.pixels, expected.pixels, "case {case} {rect:?}");
         }
     }
 }
