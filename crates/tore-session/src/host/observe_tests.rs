@@ -680,9 +680,13 @@ fn with_a_delay_nothing_newer_than_now_less_the_delay_leaves_the_host() {
     }));
     let started = rig.watchers[w].started().unwrap().clone();
     assert_eq!(started.delay_seconds, 10);
-    // The first snapshot shows the ring's first frame, ten seconds after it
-    // was recorded.
-    assert_eq!(started.tick, 0);
+    // Nobody watched before: the ring starts when the observer asks, and
+    // the first snapshot shows its first frame, ten seconds after it was
+    // recorded (slice S11).
+    let tps = u64::from(rig.host.config().ticks_per_snapshot());
+    let first = rig.host.stream.ring().unwrap().first();
+    assert_eq!(u64::from(started.tick), first);
+    assert!((230..=260).contains(&first), "the ring starts at {first}");
     // The scores of a tick reach the observer once its stream shows it.
     let id = rig.connection(w);
     let now_tick = rig.host.world().tick();
@@ -697,7 +701,6 @@ fn with_a_delay_nothing_newer_than_now_less_the_delay_leaves_the_host() {
     let seen: Vec<&Seen> = watcher.flight_seen(started.flight).collect();
     assert!(seen.len() > 200, "{} snapshots", seen.len());
     assert_eq!(seen[0].header.tick, started.tick);
-    let tps = u64::from(rig.host.config().ticks_per_snapshot());
     for s in &seen {
         let shown = u64::from(s.header.tick);
         assert_eq!(shown % tps, 0, "the ring's ticks");
@@ -751,6 +754,94 @@ fn with_a_delay_nothing_newer_than_now_less_the_delay_leaves_the_host() {
         (595..=602).contains(&ring.frames()),
         "{} frames",
         ring.frames()
+    );
+}
+
+/// Slice S11 (John, 2026-10-19): with nobody watching the host keeps no
+/// ring. An observer who asks later is told the mission as it stands when
+/// it asks (a crater made before is among it), is shown the mission from its
+/// asking on once the delay has passed, and nothing older; when the last
+/// observer stops, the ring goes, and the next one starts afresh.
+#[test]
+fn a_late_observer_is_shown_the_mission_from_its_asking_after_the_delay() {
+    let mut rig = Rig::new(spec(2, 2, 5), |_| {});
+    rig.delayed(10);
+    rig.bot(Some(0));
+    rig.bot(Some(2));
+    rig.run(Duration::from_secs(4));
+    assert!(
+        rig.host.stream.ring().is_none(),
+        "no ring with nobody watching"
+    );
+    // A crater made before anyone watches.
+    let tick = rig.host.world().tick();
+    rig.host
+        .world
+        .combat
+        .state
+        .marks
+        .push(tore_sim::combat::blast::Mark {
+            position: [1_000., 0., 2_000.],
+            kind: tore_sim::combat::blast::MarkKind::Crater(9),
+            ticks: tore_sim::combat::blast::FOREVER,
+            born: tick,
+            serial: 77,
+            scale: tore_sim::combat::blast_scale::FULL,
+        });
+    rig.run(Duration::from_millis(500));
+    let asked = rig.host.world().tick();
+    let w = rig.watcher(Some(Subject::Aircraft(0)));
+    assert!(rig.run_until(Duration::from_secs(3), |r| {
+        r.watchers[w].started().is_some()
+    }));
+    let started = rig.watchers[w].started().unwrap().clone();
+    let first = rig.host.stream.ring().unwrap().first();
+    assert_eq!(u64::from(started.tick), first);
+    assert!(
+        first >= asked,
+        "the ring starts at {first}, asked at {asked}"
+    );
+    rig.run(Duration::from_secs(13));
+    // The crater made before is told, as standing, with the first
+    // snapshots.
+    assert!(
+        rig.watchers[w].events.iter().any(|(_, e)| matches!(
+            e.event,
+            WireEvent::Mark {
+                kind: tore_sim::combat::blast::MarkKind::Crater(9),
+                ..
+            }
+        )),
+        "the crater made before is told"
+    );
+    let delay = 10 * TICKS_PER_SECOND;
+    let watcher = &rig.watchers[w];
+    assert!(watcher.errors.is_empty(), "{:?}", watcher.errors);
+    let seen: Vec<&Seen> = watcher.flight_seen(started.flight).collect();
+    assert!(seen.len() > 100, "{} snapshots", seen.len());
+    assert_eq!(u64::from(seen[0].header.tick), first, "nothing older");
+    assert!(seen[0].arrived >= first + delay, "only after the delay");
+    for s in &seen {
+        assert!(u64::from(s.header.tick) + delay <= s.arrived);
+    }
+
+    // The last observer stops: the ring goes. The next starts afresh.
+    rig.watchers[w].send(&Message::Observe(Observe::Stop));
+    rig.run(Duration::from_millis(500));
+    assert!(
+        rig.host.stream.ring().is_none(),
+        "the ring went with the observer"
+    );
+    let again = rig.host.world().tick();
+    let v = rig.watcher(Some(Subject::None));
+    assert!(rig.run_until(Duration::from_secs(3), |r| {
+        r.watchers[v].started().is_some()
+    }));
+    let restarted = rig.host.stream.ring().unwrap().first();
+    assert!(restarted >= again, "a fresh ring at {restarted}");
+    assert_eq!(
+        u64::from(rig.watchers[v].started().unwrap().tick),
+        restarted
     );
 }
 

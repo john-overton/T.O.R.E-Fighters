@@ -21,7 +21,10 @@
 //! interval, at the ticks whose number is a multiple of the ticks per
 //! snapshot) and the mission-wide events with their ticks, for the delay,
 //! and every observer's snapshots and events come from the ring at the
-//! host's tick less the delay. Nothing newer leaves the host for an
+//! host's tick less the delay. The ring is kept only while some connection
+//! watches or asks to (John, 2026-10-19, optimization slice S11): the
+//! first to ask starts it, and is shown the mission from its asking on once
+//! the delay has passed; with nobody left watching it is dropped. Nothing newer leaves the host for an
 //! observer. Messages about the mission at a tick that the slices send
 //! observers (the scores, a revival's new plane) go through
 //! [`Host::send_as_of`], which holds them the same way.
@@ -242,6 +245,12 @@ impl Ring {
     pub fn frames(&self) -> usize {
         self.frames.len()
     }
+
+    /// The tick of the first frame the ring records.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn first(&self) -> u64 {
+        self.first
+    }
 }
 
 /// What the host keeps for every observer of the mission flying: the
@@ -437,7 +446,13 @@ impl Host {
             self.stream.ring = None;
         }
         let watching = self.peers.values().any(|peer| peer.watch.is_some());
-        if delay == 0 && !watching {
+        if !watching {
+            // Nobody watches or asks to: no ring is kept (John, 2026-10-19).
+            // One who asks later is shown the mission from its asking on,
+            // once the delay has passed.
+            if self.stream.ring.take().is_some() {
+                self.stream.last_picture = None;
+            }
             return;
         }
         // The tick's mission-wide events, the AI's ejections with them.

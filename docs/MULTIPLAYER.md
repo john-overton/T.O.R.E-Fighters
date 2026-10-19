@@ -642,7 +642,9 @@ no slot available, and pure spectators. Observers cannot chat to the players
 flying, but they talk among themselves ([decision](#decisions)). In
 PvP the King can set an observer delay so observers cannot relay live positions
 to a side. The delay is applied by the host before anything is sent, so an
-observer's machine never holds live positions.
+observer's machine never holds live positions. The host keeps the delayed
+picture only while someone watches (John, 2026-10-19): an observer who starts
+watching sees the battle from the moment it asked, once the delay has passed.
 
 *Designed (phase 2; the decision above is John's, the rest agent proposals):*
 a connection with no plane while the mission flies can **Watch**: the host

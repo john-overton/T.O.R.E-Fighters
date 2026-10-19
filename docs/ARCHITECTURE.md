@@ -7538,11 +7538,14 @@ otherwise.
   as it stands (the destroyed ground objects in Observing, the craters, fires
   and effects as events), as a seated player is.
 - **The delay** applies to every observer of a PvP mission whose
-  `observer-delay` is set (co-op has none). The ring records from the mission's
-  first tick whenever the mission flies with a delay, watched or not, so an
-  observer who starts sees the battle as it was a delay ago at once: one frame
-  each snapshot interval, at the ticks whose number is a multiple of the ticks
-  per snapshot, and every mission-wide event with the tick it became known.
+  `observer-delay` is set (co-op has none). The ring records only while some
+  connection watches or asks to (John, 2026-10-19, optimization slice S11;
+  until then it recorded from the mission's first tick, watched or not): the
+  first observer to ask starts it at its asking, so it is shown the battle from
+  that moment once the delay has passed, and when the last observer stops the
+  ring is dropped and the next one starts afresh. It holds one frame each
+  snapshot interval, at the ticks whose number is a multiple of the ticks per
+  snapshot, and every mission-wide event with the tick it became known.
   **Every delayed observer's snapshot ticks are the ring's** (a correction to
   the wire's lobby-id phase, which holds without a delay): the host sends the
   frame of its tick less the delay, and with it the events that became known by
