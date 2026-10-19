@@ -1499,4 +1499,39 @@ mod tests {
         let playback = vapor_matches_rebuild_at_every_tick(recording);
         assert!(playback.rebuilds[1] > 60, "{}", playback.rebuilds[1]);
     }
+
+    /// Plays a real recording (`TORE_S14_REPLAY=path`) forward, then through
+    /// a session of seeks, reverse stretches and strides, holding the
+    /// smoke and the vapor to the rebuild at every tick. Run by hand:
+    /// `TORE_S14_REPLAY=x.tore-replay cargo test -p tore-app a_recording_from_a_run -- --ignored`.
+    #[test]
+    #[ignore = "needs a recording named by TORE_S14_REPLAY"]
+    fn a_recording_from_a_run_steps_forward_as_it_rebuilds() {
+        let Some(path) = std::env::var_os("TORE_S14_REPLAY") else {
+            return;
+        };
+        let recording = Arc::new(Recording::open(path).unwrap());
+        let mut playback = Playback::new(Arc::clone(&recording));
+        let mut checked = Playback::new(recording);
+        let ownship = winged();
+        let template = crate::combat_view::render_hash_tests::player();
+        let (mut scratch, mut reference) = (template.clone(), template);
+        let (first, last) = (playback.first, playback.last);
+        let mut vapors = 0;
+        let mut puffs = 0;
+        for tick in session(first, last) {
+            let smoke = playback.smoke(tick).clone();
+            puffs += smoke[0].puffs.len() + smoke[1].puffs.len();
+            assert_eq!(smoke, smoke_rebuilt(&checked, tick), "smoke at tick {tick}");
+            let vapor = playback.vapor(tick, &ownship, &mut scratch);
+            vapors += usize::from(vapor.is_some());
+            let rebuilt = vapor_rebuilt(&mut checked, tick, &ownship, &mut reference);
+            assert_eq!(vapor, rebuilt, "vapor at tick {tick}");
+        }
+        eprintln!(
+            "{first}..={last}: {puffs} puff-ticks, {vapors} vapors; smoke {:?} vapor {:?} (rebuilds, steps)",
+            (playback.rebuilds[0], playback.steps_on[0]),
+            (playback.rebuilds[1], playback.steps_on[1]),
+        );
+    }
 }
