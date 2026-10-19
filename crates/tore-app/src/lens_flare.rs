@@ -9,8 +9,17 @@ pub struct LensFlare {
     palette: wgpu::Texture,
     maps: wgpu::Texture,
     format: wgpu::TextureFormat,
-    backing: Option<(wgpu::Texture, wgpu::BindGroup)>,
+    /// The world picture under the flare, one per output size: the main
+    /// view, mirrors and camera panels alternate sizes within a frame.
+    backings: Vec<(wgpu::Texture, wgpu::BindGroup)>,
+    /// The backing of the last `prepare`, which `draw` reads.
+    current: usize,
+    /// The palette and fill bytes last uploaded, so an unchanged view does
+    /// not upload them again.
+    uploaded: Option<(Vec<u8>, Vec<u8>)>,
 }
+/// Backing sizes kept: the main view, mirrors and the camera panels.
+const BACKINGS: usize = 4;
 fn texture(
     device: &wgpu::Device,
     size: [u32; 2],
@@ -149,7 +158,9 @@ impl LensFlare {
                 wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             ),
             format,
-            backing: None,
+            backings: Vec::new(),
+            current: 0,
+            uploaded: None,
         }
     }
     #[allow(clippy::too_many_arguments)]
@@ -167,11 +178,13 @@ impl LensFlare {
         if circles.is_empty() {
             return None;
         }
-        if self
-            .backing
-            .as_ref()
-            .is_none_or(|(t, _)| t.width() != size[0] || t.height() != size[1])
+        if let Some(i) = self
+            .backings
+            .iter()
+            .position(|(t, _)| t.width() == size[0] && t.height() == size[1])
         {
+            self.current = i;
+        } else {
             let source = texture(
                 device,
                 size,
@@ -206,7 +219,11 @@ impl LensFlare {
                     },
                 ],
             });
-            self.backing = Some((source, bind));
+            if self.backings.len() >= BACKINGS {
+                self.backings.remove(0);
+            }
+            self.backings.push((source, bind));
+            self.current = self.backings.len() - 1;
         }
         let strength = if scenery.smooth_weather {
             world
@@ -235,22 +252,27 @@ impl LensFlare {
             .collect();
         let maps = world.weather.configuration().flare_fills();
         let maps: Vec<u8> = (0..256).flat_map(|i| [maps[0][i], maps[1][i]]).collect();
-        for (t, b, pitch) in [(&self.palette, pixels, 1024), (&self.maps, maps, 512)] {
-            queue.write_texture(
-                t.as_image_copy(),
-                &b,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(pitch),
-                    rows_per_image: Some(1),
-                },
-                t.size(),
-            );
+        if self
+            .uploaded
+            .as_ref()
+            .is_none_or(|(p, m)| *p != pixels || *m != maps)
+        {
+            for (t, b, pitch) in [(&self.palette, &pixels, 1024), (&self.maps, &maps, 512)] {
+                queue.write_texture(
+                    t.as_image_copy(),
+                    b,
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(pitch),
+                        rows_per_image: Some(1),
+                    },
+                    t.size(),
+                );
+            }
+            self.uploaded = Some((pixels, maps));
         }
         Some(
-            self.backing
-                .as_ref()
-                .unwrap()
+            self.backings[self.current]
                 .0
                 .create_view(&Default::default()),
         )
@@ -270,7 +292,7 @@ impl LensFlare {
             ..Default::default()
         });
         pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &self.backing.as_ref().unwrap().1, &[]);
+        pass.set_bind_group(0, &self.backings[self.current].1, &[]);
         pass.draw(0..3, 0..1);
     }
 }
@@ -357,7 +379,8 @@ mod tests {
                     },
                 ],
             });
-            flare.backing = Some((input, bind));
+            flare.backings = vec![(input, bind)];
+            flare.current = 0;
             let output = texture(
                 &device,
                 [64, 1],

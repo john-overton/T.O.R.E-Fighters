@@ -10,6 +10,10 @@ pub struct Blades {
     area: [f32; 4],
     pages_x: u32,
     count: u32,
+    /// Ground elevation per terrain vertex, as the shader reads it, for the
+    /// altitude bound in [`Blades::prepare`].
+    heights: Vec<f32>,
+    terrain_size: [u32; 2],
 }
 impl Blades {
     #[allow(clippy::too_many_arguments)]
@@ -182,6 +186,8 @@ impl Blades {
             area: map.area,
             pages_x: map.pages_x,
             count: 0,
+            heights: map.terrain.chunks_exact(4).map(|v| v[0]).collect(),
+            terrain_size: map.terrain_size,
         }
     }
     #[allow(clippy::too_many_arguments)]
@@ -206,12 +212,14 @@ impl Blades {
     }
     /// Fixed-size stack uniform. No placement, chunk enumeration, packing or
     /// blade buffer upload is allowed here, including while the camera moves.
+    /// `eye` is this view's camera position in world feet.
     pub fn prepare(
         &mut self,
         queue: &wgpu::Queue,
         world: &Terrain,
         density: VegDensity,
         radius: f32,
+        eye: [f64; 3],
     ) {
         let wind = world.wind();
         let values = [
@@ -237,7 +245,10 @@ impl Blades {
             bytes[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
         }
         queue.write_buffer(&self.uniform, 0, &bytes);
-        self.count = if self.pages_x > 0 && radius > 0. {
+        self.count = if self.pages_x > 0
+            && radius > 0.
+            && !above_blades(&self.heights, self.terrain_size, eye, radius)
+        {
             candidates(density, radius)
         } else {
             0
@@ -255,6 +266,43 @@ impl Blades {
         u64::from(self.count)
     }
 }
+/// Feet added to the altitude bound: more than the tallest blade (under
+/// 8 ft) plus the rounding of the shader's single-precision distance.
+const ALTITUDE_MARGIN: f64 = 64.;
+
+/// Whether the eye is so high above the highest ground within `radius` that
+/// every blade root already fails the vertex shader's `eye_distance` test,
+/// so drawing them would change no pixel. Conservative: the shader's ground
+/// height interpolates the four vertices of its cell, never above their
+/// maximum, and its root sits `root_lift` above that.
+fn above_blades(heights: &[f32], size: [u32; 2], eye: [f64; 3], radius: f32) -> bool {
+    let [w, h] = size.map(|n| n as i64);
+    if heights.len() as i64 != w * h || w < 2 || h < 2 {
+        return false;
+    }
+    let reach = f64::from(radius) + 1.;
+    let cell = |v: f64| (v / 8192.).floor() as i64;
+    let x = (
+        cell(eye[0] - reach).clamp(0, w - 1),
+        (cell(eye[0] + reach) + 1).clamp(0, w - 1),
+    );
+    let z = (
+        cell(eye[2] - reach).clamp(0, h - 1),
+        (cell(eye[2] + reach) + 1).clamp(0, h - 1),
+    );
+    let mut top = f64::NEG_INFINITY;
+    for row in z.0..=z.1 {
+        for column in x.0..=x.1 {
+            let v = f64::from(heights[(row * w + column) as usize]);
+            if v.is_nan() {
+                return false;
+            }
+            top = top.max(v);
+        }
+    }
+    eye[1] - (top + f64::from(root_lift()).max(0.)) > f64::from(radius) + ALTITUDE_MARGIN
+}
+
 #[allow(clippy::too_many_arguments)]
 fn pipeline(
     device: &wgpu::Device,
@@ -308,4 +356,37 @@ fn pipeline(
         multiview: None,
         cache: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn altitude_bound_skips_only_when_every_root_is_out_of_reach() {
+        // 4 x 4 vertices 8,192 ft apart; one 3,000 ft peak at vertex (2, 1).
+        let mut heights = vec![100.; 16];
+        heights[4 + 2] = 3_000.;
+        let size = [4, 4];
+        let radius = 500.;
+        // Over flat ground far from the peak's cells.
+        let flat = [1_000., 0., 1_000.];
+        let at = |y: f64| [flat[0], y, flat[2]];
+        let lift = f64::from(root_lift()).max(0.);
+        let edge = 100. + lift + f64::from(radius) + ALTITUDE_MARGIN;
+        assert!(!above_blades(&heights, size, at(edge), radius));
+        assert!(above_blades(&heights, size, at(edge + 1.), radius));
+        // Grass on the ground just below: never skipped.
+        assert!(!above_blades(&heights, size, at(150.), radius));
+        // Within reach of the peak's cell the peak sets the bound.
+        let near_peak = [2. * 8192. - 200., 2_000., 8192. + 100.];
+        assert!(!above_blades(&heights, size, near_peak, radius));
+        let high = [near_peak[0], 3_000. + lift + 600., near_peak[2]];
+        assert!(above_blades(&heights, size, high, radius));
+        // A cell boundary within the radius pulls in the next vertex column.
+        let beside = [8192. - 400., 2_000., 8192. + 100.];
+        assert!(!above_blades(&heights, size, beside, radius));
+        // No terrain table: no bound.
+        assert!(!above_blades(&[], size, at(1e6), radius));
+    }
 }

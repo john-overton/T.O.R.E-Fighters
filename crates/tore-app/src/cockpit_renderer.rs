@@ -11,9 +11,15 @@ pub struct CockpitRenderer {
     bind: Option<wgpu::BindGroup>,
     hud: wgpu::Texture,
     palette: wgpu::Texture,
+    /// The palette last uploaded, so an unchanged one is not sent again.
+    palette_uploaded: Option<[[u8; 3]; 256]>,
     uniform: wgpu::Buffer,
     art_size: [u32; 2],
     enabled: bool,
+    /// The canvas-pixel rectangle outside which the shader returns exact
+    /// zero (`[x0, y0, x1, y1]`), and the canvas size, from the last
+    /// `update`; `None` when neither the art nor the HUD is drawn.
+    bounds: Option<([f32; 4], [u32; 2])>,
     pub mirror_target: wgpu::Texture,
     mirror_rects: [[f32; 4]; 3],
     pub mirrors_visible: bool,
@@ -152,9 +158,11 @@ impl CockpitRenderer {
             bind: None,
             hud,
             palette: texture(device, 256, 1),
+            palette_uploaded: None,
             uniform,
             art_size: [1, 1],
             enabled: false,
+            bounds: None,
         }
     }
     pub fn prepare(
@@ -313,7 +321,11 @@ impl CockpitRenderer {
         }));
     }
     /// Upload the palette shared with the CPU HUD raster.
-    pub fn weather(&self, queue: &wgpu::Queue, colors: &[[u8; 3]; 256]) {
+    pub fn weather(&mut self, queue: &wgpu::Queue, colors: &[[u8; 3]; 256]) {
+        if self.palette_uploaded.as_ref() == Some(colors) {
+            return;
+        }
+        self.palette_uploaded = Some(*colors);
         let pixels: Vec<u8> = colors
             .iter()
             .flat_map(|c| [c[0], c[1], c[2], 255])
@@ -344,6 +356,15 @@ impl CockpitRenderer {
         let yaw = axes[2][0].atan2(axes[2][2]);
         let pitch = axes[2][1].clamp(-1., 1.).asin();
         let placement = layout(size, self.art_size, yaw, pitch, camera.zoom);
+        self.bounds = drawn_bounds(
+            size,
+            self.art_size,
+            placement,
+            hud_layout(size, [placement[0], placement[1]], camera.zoom),
+            art,
+            hud,
+        )
+        .map(|b| (b, size));
         self.mirrors_visible = art
             && placement[3] > 0.
             && self.mirror_rects.iter().any(|r| {
@@ -383,13 +404,16 @@ impl CockpitRenderer {
     pub fn symbols_only(&self, queue: &wgpu::Queue) {
         queue.write_buffer(&self.uniform, 28, &1f32.to_le_bytes());
     }
-    pub fn draw(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
-        if !self.enabled {
+    /// Draws into its own pass over `view`, a `target`-sized picture.
+    pub fn draw(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        target: [u32; 2],
+    ) {
+        if !self.enabled || self.bind.is_none() {
             return;
         }
-        let Some(bind) = &self.bind else {
-            return;
-        };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Directional cockpit and HUD"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -403,15 +427,152 @@ impl CockpitRenderer {
             })],
             ..Default::default()
         });
+        self.draw_in(&mut pass, target);
+    }
+    /// Draws into `pass`, whose target is `target` pixels with the default
+    /// viewport, scissored to the art and HUD rectangles: outside them the
+    /// shader returns exact zero, which the premultiplied blend leaves as is.
+    /// The scissor is reset to the whole target afterwards.
+    pub fn draw_in(&self, pass: &mut wgpu::RenderPass<'_>, target: [u32; 2]) {
+        if !self.enabled {
+            return;
+        }
+        let Some(bind) = &self.bind else {
+            return;
+        };
+        let Some([x, y, w, h]) = self
+            .bounds
+            .and_then(|(bounds, size)| scissor(bounds, size, target))
+        else {
+            return;
+        };
+        pass.set_scissor_rect(x, y, w, h);
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, bind, &[]);
         pass.draw(0..3, 0..1);
+        pass.set_scissor_rect(0, 0, target[0], target[1]);
     }
+}
+/// The union of the art and HUD rectangles in canvas pixels, as the shader
+/// tests them, or `None` when neither is drawn. Outside it every output is 0.
+fn drawn_bounds(
+    size: [u32; 2],
+    art_size: [u32; 2],
+    placement: [f32; 4],
+    hud_rect: [f32; 4],
+    art: bool,
+    hud: bool,
+) -> Option<[f32; 4]> {
+    let [w, h] = size.map(|v| v as f32);
+    let [aw, ah] = art_size.map(|v| v as f32);
+    let scale = placement[2];
+    let mut rects = Vec::with_capacity(2);
+    if art {
+        let x = (w - aw * scale) * 0.5 + placement[0];
+        let y = (h - ah * scale).max((h - ah * scale) * 0.5) + placement[1];
+        rects.push([x, y, x + aw * scale, y + ah * scale]);
+    }
+    if hud {
+        let [hw, hh, cx, cy] = hud_rect;
+        rects.push([cx - hw * 0.5, cy - hh * 0.5, cx + hw * 0.5, cy + hh * 0.5]);
+    }
+    rects.into_iter().reduce(|a, b| {
+        [
+            a[0].min(b[0]),
+            a[1].min(b[1]),
+            a[2].max(b[2]),
+            a[3].max(b[3]),
+        ]
+    })
+}
+/// Window pixels whose centres can map into `bounds` (canvas pixels of a
+/// `size` canvas stretched over `target`), widened by two pixels for the
+/// GPU's rounding: `[x, y, width, height]`, or `None` when empty. A
+/// non-finite bound covers the whole target.
+fn scissor(bounds: [f32; 4], size: [u32; 2], target: [u32; 2]) -> Option<[u32; 4]> {
+    if bounds.iter().any(|v| !v.is_finite()) || size.contains(&0) {
+        return Some([0, 0, target[0], target[1]]);
+    }
+    let axis = |lo: f32, hi: f32, canvas: u32, window: u32| {
+        let k = f64::from(window) / f64::from(canvas);
+        let (lo, hi) = (f64::from(lo.min(hi)), f64::from(lo.max(hi)));
+        let start = ((lo * k - 0.5).floor() - 2.).clamp(0., f64::from(window)) as u32;
+        let end = ((hi * k).ceil() + 2.).clamp(0., f64::from(window)) as u32;
+        (start, end)
+    };
+    let (x0, x1) = axis(bounds[0], bounds[2], size[0], target[0]);
+    let (y0, y1) = axis(bounds[1], bounds[3], size[1], target[1]);
+    (x1 > x0 && y1 > y0).then_some([x0, y0, x1 - x0, y1 - y0])
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn scissor_keeps_every_pixel_the_shader_draws() {
+        // The shader's tests (cockpit.wgsl) at each window pixel centre.
+        for (size, target) in [
+            ([1920, 1080], [1920, 1080]),
+            ([1920, 1080], [3840, 2160]),
+            ([827, 1080], [1000, 1306]),
+            ([640, 480], [641, 479]),
+        ] {
+            for (yaw, pitch, zoom, art, hud) in [
+                (0., 0., 1., true, true),
+                (0.4, -0.2, 1., true, true),
+                (-0.7, 0.5, 2., true, false),
+                (0.3, 0.1, 0.5, false, true),
+                (0., 0., 4., false, true),
+                (1.4, 0., 1., true, true),
+            ] {
+                let art_size = [1280, 490];
+                let placement = layout(size, art_size, yaw, pitch, zoom);
+                let hud_rect = hud_layout(size, [placement[0], placement[1]], zoom);
+                let bounds = drawn_bounds(size, art_size, placement, hud_rect, art, hud).unwrap();
+                let rect = scissor(bounds, size, target);
+                let [w, h] = size.map(|v| v as f32);
+                let [aw, ah] = art_size.map(|v| v as f32);
+                let origin = [
+                    (w - aw * placement[2]) * 0.5 + placement[0],
+                    (h - ah * placement[2]).max((h - ah * placement[2]) * 0.5) + placement[1],
+                ];
+                for wy in 0..target[1] {
+                    for wx in 0..target[0] {
+                        let pixel = [
+                            (wx as f32 + 0.5) / target[0] as f32 * w,
+                            (wy as f32 + 0.5) / target[1] as f32 * h,
+                        ];
+                        let inside = |uv: [f32; 2]| uv.iter().all(|v| (0. ..=1.).contains(v));
+                        let art_uv =
+                            [0, 1].map(|k| (pixel[k] - origin[k]) / ([aw, ah][k] * placement[2]));
+                        let hud_uv =
+                            [0, 1].map(|k| 0.5 + (pixel[k] - hud_rect[k + 2]) / hud_rect[k]);
+                        if !(art && inside(art_uv) || hud && inside(hud_uv)) {
+                            continue;
+                        }
+                        let [x, y, rw, rh] = rect.expect("a drawn pixel needs a scissor");
+                        assert!(
+                            (x..x + rw).contains(&wx) && (y..y + rh).contains(&wy),
+                            "{size:?} {target:?} {yaw} {pitch} {zoom}: ({wx}, {wy}) outside {rect:?}"
+                        );
+                    }
+                }
+            }
+        }
+        // Nothing on screen: no draw. Non-finite bounds: the whole target.
+        assert_eq!(
+            scissor([-500., -500., -10., -10.], [640, 480], [640, 480]),
+            None
+        );
+        assert_eq!(
+            scissor([f32::NAN, 0., 1., 1.], [640, 480], [800, 600]),
+            Some([0, 0, 800, 600])
+        );
+        assert_eq!(
+            drawn_bounds([640, 480], [1, 1], [0.; 4], [0.; 4], false, false),
+            None
+        );
+    }
     #[test]
     fn hud_zoom_preserves_the_center_at_every_aspect_ratio() {
         for size in [[640, 480], [1920, 1080], [827, 1080]] {

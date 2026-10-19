@@ -569,7 +569,10 @@ fn forest_canopy(color:vec3<f32>,direction:vec3<f32>,row:i32)->vec3<f32> {
  if in.layer<0.0 {
   if thermal_on() {return scenery(thermal_grey(thermal_ground(in.albedo,normal,in.direction,in.distance)));}
   let forest=forest_canopy(in.color,in.direction,0);
-  let bare=forest_canopy(in.albedo,in.direction,base_row());
+  // The albedo only lights flares (surface_color multiplies it by zero
+  // otherwise), so its canopy is skipped when none burn.
+  var bare=in.albedo;
+  if flares_burning() {bare=forest_canopy(in.albedo,in.direction,base_row());}
   let detail=ground_detail(in.color,in.direction,normal);
   return scenery(aerial_perspective(surface_color(forest*detail.tint,in.direction,detail.normal,false,receiver,bare*detail.tint),in.direction,in.altitude));
  }
@@ -598,7 +601,7 @@ fn forest_canopy(color:vec3<f32>,direction:vec3<f32>,row:i32)->vec3<f32> {
  var albedo=field_color;
  if flares_burning() {albedo=seam_apply(seam_apply(sample_tile(in.uv,i32(in.layer),base_row(),-1,in.light_row,vec2<f32>(-1.0)).rgb,flat_response),seam_response);}
  let forest=forest_canopy(field_color,in.direction,0);
- albedo=forest_canopy(albedo,in.direction,base_row());
+ if flares_burning() {albedo=forest_canopy(albedo,in.direction,base_row());}
  return scenery(aerial_perspective(surface_color(forest*detail.tint,in.direction,detail.normal,false,receiver,albedo*detail.tint),in.direction,in.altitude));
 }
 // Close-range ground detail (exploratory vegetation, 2026-10-16; desert and
@@ -1803,6 +1806,8 @@ struct SmokeOut { @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, 
  if any(in.tint<vec3<f32>(1.0)) {edge=1.0-smoothstep(0.6,1.0,length(in.local));}
  let color=vec4<f32>(art.rgb*in.tint*dim,art.a*edge);
  let alpha=color.a*in.opacity*(1.0-clamp(haze(in.distance),0.0,1.0));
+ // A transparent texel adds nothing under the premultiplied blend.
+ if alpha==0.0 {discard;}
  // Glow lights the puff's own undarkened art, as flare light does elsewhere.
  var bare=color.rgb;
  if any(in.glow>vec3<f32>(0.0)) {bare=sample_tile(in.uv,0,base_row(),-1,-1,vec2<f32>(-1.0)).rgb*in.tint;}
@@ -1869,12 +1874,15 @@ fn glow_clear(p:vec3<f32>,altitude:f32)->vec3<f32> {
   }
   // Preserve day exactly. At night the entire art emits through the same
   // atmosphere as its additive halo, rather than retaining only a point.
-  let visibility=mix(vec3<f32>(clear),glow_clear(in.direction,in.altitude),device_night());
   let alpha=color.a*in.opacity;
+  // A transparent texel adds nothing under the premultiplied blend.
+  if alpha==0.0 {discard;}
+  let visibility=mix(vec3<f32>(clear),glow_clear(in.direction,in.altitude),device_night());
   return vec4<f32>(color.rgb*alpha*visibility,alpha*max(visibility.r,max(visibility.g,visibility.b)));
  }
  let color=sample_tile(in.uv,in.layer,0,-1,-1,ray_rows(in.distance,in.altitude));
  let alpha=color.a*in.opacity*clear;
+ if alpha==0.0 {discard;}
  // A shockwave's dust is its puff art times the climate's colour.
  return vec4<f32>(aerial_perspective(color.rgb*in.tint,in.direction,in.altitude)*alpha,alpha);
 }

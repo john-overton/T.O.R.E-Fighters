@@ -150,6 +150,9 @@ pub struct SimRenderer {
     material_layout: wgpu::BindGroupLayout,
     vapor_bind: wgpu::BindGroup,
     palette: wgpu::Texture,
+    /// The palette rows last uploaded. Views of one weather share them, so
+    /// an unchanged palette is not uploaded again.
+    palette_uploaded: Vec<u8>,
     weather_tiles: wgpu::TextureView,
     seam_records: wgpu::TextureView,
     seam_tints: wgpu::TextureView,
@@ -1018,6 +1021,7 @@ impl SimRenderer {
             material_layout,
             vapor_bind,
             palette,
+            palette_uploaded: Vec::new(),
             weather_tiles: view,
             seam_records,
             seam_tints,
@@ -1920,25 +1924,28 @@ impl SimRenderer {
         for rgb in world.weather.daylight_palette() {
             entries.extend([rgb[0], rgb[1], rgb[2], 255]);
         }
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.palette,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &entries,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(1024),
-                rows_per_image: Some(12),
-            },
-            wgpu::Extent3d {
-                width: 256,
-                height: 12,
-                depth_or_array_layers: 1,
-            },
-        );
+        if entries != self.palette_uploaded {
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.palette,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &entries,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(1024),
+                    rows_per_image: Some(12),
+                },
+                wgpu::Extent3d {
+                    width: 256,
+                    height: 12,
+                    depth_or_array_layers: 1,
+                },
+            );
+            self.palette_uploaded = entries;
+        }
         let cloud_data = scenery
             .clouds
             .as_ref()
@@ -2042,6 +2049,12 @@ impl SimRenderer {
             Some(color) => (color, Some(direct)),
             None => (direct, None),
         };
+        // Flare glare and the spotting aid are the only later readers of the
+        // world depth; both are decided before the pass.
+        let flares = self.countermeasures.has_flares();
+        let spotting = rim && !contacts.is_empty();
+        let (color_store, depth_store) =
+            world_store_ops(resolve_target.is_some(), flares || spotting);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Simulation world"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -2055,14 +2068,14 @@ impl SimRenderer {
                         b: linear(sky[2]),
                         a: if camera.weather_slot == 4 { 0. } else { 1. },
                     }),
-                    store: wgpu::StoreOp::Store,
+                    store: color_store,
                 },
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &targets.depth,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(0.0),
-                    store: wgpu::StoreOp::Store,
+                    store: depth_store,
                 }),
                 stencil_ops: None,
             }),
@@ -2212,7 +2225,7 @@ impl SimRenderer {
         }
         // Flare glare goes over the finished image, where it can spill across
         // the aircraft that released it while the core stays in view.
-        if self.countermeasures.has_flares() {
+        if flares {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Flare glare"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -2241,7 +2254,7 @@ impl SimRenderer {
                 .draw_glare(&mut pass, &self.p.countermeasures);
         }
         // The spotting aid goes over the finished image at output resolution.
-        if rim && !contacts.is_empty() {
+        if spotting {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Spotting aid"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -2292,9 +2305,35 @@ impl SimRenderer {
     }
 }
 
+/// Store operations for the world pass's colour and depth. Multisampled
+/// colour that resolves is never read again, and the depth only by flare
+/// glare and the spotting aid, so neither is written back otherwise.
+fn world_store_ops(resolves: bool, depth_read: bool) -> (wgpu::StoreOp, wgpu::StoreOp) {
+    let store = |keep: bool| {
+        if keep {
+            wgpu::StoreOp::Store
+        } else {
+            wgpu::StoreOp::Discard
+        }
+    };
+    (store(!resolves), store(depth_read))
+}
+
 #[cfg(test)]
 mod lighting_tests {
     use super::*;
+
+    #[test]
+    fn world_pass_stores_only_what_a_later_pass_reads() {
+        use wgpu::StoreOp::{Discard, Store};
+        // A single-sample picture is the destination itself.
+        assert_eq!(world_store_ops(false, false), (Store, Discard));
+        // Multisampled colour is read through its resolve.
+        assert_eq!(world_store_ops(true, false), (Discard, Discard));
+        // Glare or the spotting aid read the depth.
+        assert_eq!(world_store_ops(true, true), (Discard, Store));
+        assert_eq!(world_store_ops(false, true), (Store, Store));
+    }
 
     #[test]
     fn world_pages_pack_more_than_256_images_without_losing_indices() {

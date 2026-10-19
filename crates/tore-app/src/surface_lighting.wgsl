@@ -82,7 +82,7 @@ fn shadow_sample(relative:vec3<f32>,normal:vec3<f32>,cascade:i32)->f32 {
   var offset=vec2<f32>(0.0);
   if i>0 {
    let ring=(i-1)/4;let axis=(i-1)%4;
-   let radius=pow(4.0,f32(ring));
+   let radius=f32(1<<u32(2*ring));
    let directions=array<vec2<f32>,4>(vec2<f32>(1.0,0.0),vec2<f32>(-1.0,0.0),vec2<f32>(0.0,1.0),vec2<f32>(0.0,-1.0));
    offset=directions[axis]*radius/2048.0;
   }
@@ -193,7 +193,10 @@ fn surface_color(color:vec3<f32>,relative:vec3<f32>,normal:vec3<f32>,panels:bool
  if surface.sun.w<=0.0 {return color;}
  let day=smoothstep(-0.104528,0.0348995,surface.reserved.y);
  let facing=max(dot(normal,surface.sun.xyz),0.0);
- let visibility=geometric_visibility(relative,receiver_normal)*sunlight_transmission(surface.origin.y+relative.y)*surface.reserved.x;
+ // Only ever used as facing*visibility, so the shadow search is skipped
+ // where the surface faces away from the sun.
+ var visibility=0.0;
+ if facing>0.0 {visibility=geometric_visibility(relative,receiver_normal)*sunlight_transmission(surface.origin.y+relative.y)*surface.reserved.x;}
  let tint=mix(vec3<f32>(1.0),solar_tint(surface.reserved.y),0.65);
  let skyward=clamp(normal.y*0.5+0.5,0.0,1.0);
  var ambient=mix(vec3<f32>(0.12,0.14,0.18),vec3<f32>(0.28,0.32,0.39),skyward);
