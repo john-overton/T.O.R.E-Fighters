@@ -570,6 +570,8 @@ impl Host {
                 test_designations: _,
             #[cfg(test)]
                 snapshot_executor: _,
+            #[cfg(test)]
+                legacy_pictures: _,
             // Coded.
             session_id,
             settings,

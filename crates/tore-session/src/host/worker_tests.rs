@@ -45,21 +45,15 @@ fn bookkeeping(host: &Host) -> Vec<String> {
             // EntitySender uses hash tables internally. Compare its public
             // acknowledged states in entity order, and exercise all pending
             // history through exact outgoing packets and subsequent ACKs.
-            let mut names = peer.wire.names.clone();
             let acknowledged: Vec<_> = peer
                 .picture
                 .as_ref()
                 .map(|picture| {
-                    from_world::entities(
-                        picture,
-                        None,
-                        peer.plane.map_or(u32::MAX, |plane| plane.0),
-                        &mut names,
-                    )
-                    .unwrap()
-                    .into_iter()
-                    .map(|entity| (entity.key(), peer.wire.entities.acknowledged(entity.key())))
-                    .collect()
+                    picture
+                        .keys()
+                        .iter()
+                        .map(|key| (*key, peer.wire.entities.acknowledged(*key)))
+                        .collect()
                 })
                 .unwrap_or_default();
             let unsent_names = peer.wire.names.clone().take_new();
@@ -199,7 +193,8 @@ fn snapshot_workers_preserve_failed_send_discard_and_recovery() {
             let tick = rig.host.world.tick();
             let now = rig.net.now();
             let plane = rig.host.peers[&connection].plane.unwrap();
-            let prepared = prepare_seat(&rig.host.world, plane).unwrap();
+            let shared = from_world::SharedPicture::of(&rig.host.world);
+            let prepared = prepare_seat(&rig.host.world, plane, shared.as_ref()).unwrap();
             let peer = &rig.host.peers[&connection];
             let previous = (peer.last_own_state, peer.unforeseen, peer.mismatch_answered);
             // The server has ended this connection but the session has not
@@ -209,7 +204,15 @@ fn snapshot_workers_preserve_failed_send_discard_and_recovery() {
                 .disconnect(connection, DisconnectReason::ServerStopping);
             let out = std::mem::take(&mut rig.host.out);
             rig.host
-                .snapshot(connection, tick, now, &out, &BTreeMap::new(), prepared)
+                .snapshot(
+                    connection,
+                    tick,
+                    now,
+                    &out,
+                    &BTreeMap::new(),
+                    prepared,
+                    shared.as_ref(),
+                )
                 .unwrap();
             rig.host.out = out;
             let peer = &rig.host.peers[&connection];

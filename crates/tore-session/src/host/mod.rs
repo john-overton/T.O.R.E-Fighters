@@ -517,9 +517,9 @@ struct Peer {
     mismatch_answered: u32,
     /// The ownship terms the plane took last tick.
     terms: Option<OwnshipTerms>,
-    /// The seat's picture at its last snapshot, for debris and pilots'
-    /// velocities.
-    picture: Option<tore_world::snapshot::RenderSnapshot>,
+    /// What the seat's next snapshot needs of its last picture: debris,
+    /// pilots' and surface units' places, for their velocities.
+    picture: Option<from_world::PictureMemory>,
     /// The mission ended while it was connected, and the host stops.
     ended: bool,
     /// Its place in the lobby.
@@ -682,21 +682,42 @@ pub struct Host {
     /// change or a second production pool.
     #[cfg(test)]
     snapshot_executor: Option<Arc<tore_workers::Executor>>,
+    /// Every seat takes a whole picture of its own and its entities as they
+    /// were made before slice S11, for the tests that compare the two.
+    #[cfg(test)]
+    legacy_pictures: bool,
 }
 
 /// Pure per-seat output prepared from the completed world before any name
 /// registration, packet budgeting, sending, or acknowledgement bookkeeping.
 struct PreparedSeat {
-    picture: tore_world::snapshot::RenderSnapshot,
+    picture: SeatPicture,
     readout: Option<tore_world::readout::CockpitReadout>,
 }
 
-fn prepare_seat(world: &World, plane: PlaneId) -> Option<PreparedSeat> {
+/// A seat's share of the tick's picture: its own plane beside the part
+/// every seat shares ([`from_world::SharedPicture`], slice S11), or a whole
+/// picture of its own where the seats share none.
+enum SeatPicture {
+    Own(from_world::SeatOwn),
+    Whole(Box<tore_world::snapshot::RenderSnapshot>),
+}
+
+/// `world`'s picture for the seat flying `plane`, beside `shared` when the
+/// tick has one.
+fn prepare_seat(
+    world: &World,
+    plane: PlaneId,
+    shared: Option<&from_world::SharedPicture>,
+) -> Option<PreparedSeat> {
     let cockpit = world
         .cockpits
         .iter()
         .find(|cockpit| cockpit.plane == plane)?;
-    let picture = from_world::seat_picture(world, plane)?;
+    let picture = match shared {
+        Some(_) => SeatPicture::Own(from_world::SeatOwn::of(world, plane)?),
+        None => SeatPicture::Whole(Box::new(from_world::seat_picture(world, plane)?)),
+    };
     // Combat's readout with the plane's share of the data link, as
     // `World::cockpit_readout` builds it (slice G7).
     let readout = world
@@ -969,6 +990,8 @@ impl Host {
             test_designations: BTreeMap::new(),
             #[cfg(test)]
             snapshot_executor: None,
+            #[cfg(test)]
+            legacy_pictures: false,
             out: TickOutput::default(),
             stream: observe::Stream::default(),
             score: score::Scoring::default(),
@@ -3960,14 +3983,24 @@ impl Host {
             set.extend(own.sensors.contacts().iter().map(|c| c.id));
             set.extend(own.sensors.visual().iter().map(|c| c.id));
         }
+        // The part of the pictures every seat shares, built once (slice
+        // S11); none, and each seat takes a whole picture of its own.
+        #[cfg(test)]
+        let legacy = self.legacy_pictures;
+        #[cfg(not(test))]
+        let legacy = false;
+        let shared = (!legacy && ids.iter().any(|id| self.peers[id].plane.is_some()))
+            .then(|| from_world::SharedPicture::of(&self.world))
+            .flatten();
         // Only immutable pictures and readouts cross the worker boundary.
         // Preserve connection-ID order, snapshot phases, and all transport
         // mutations below. Fitted: two due seats amortize the dispatch.
         let mut prepared = executor.should_dispatch(ids.len(), 2).then(|| {
             let planes: Vec<_> = ids.iter().map(|id| self.peers[id].plane).collect();
             let world = &self.world;
+            let shared = shared.as_ref();
             executor.ordered_map(&planes, 2, |_, plane| {
-                plane.and_then(|plane| prepare_seat(world, plane))
+                plane.and_then(|plane| prepare_seat(world, plane, shared))
             })
         });
         let mut failed = Vec::new();
@@ -3976,13 +4009,13 @@ impl Host {
                 Some(pictures) => pictures[index].take(),
                 None => self.peers[&id]
                     .plane
-                    .and_then(|plane| prepare_seat(&self.world, plane)),
+                    .and_then(|plane| prepare_seat(&self.world, plane, shared.as_ref())),
             };
             let Some(picture) = picture else {
                 continue;
             };
             if self
-                .snapshot(id, tick, now, out, &tracked, picture)
+                .snapshot(id, tick, now, out, &tracked, picture, shared.as_ref())
                 .is_err()
             {
                 failed.push(id);
@@ -3993,6 +4026,7 @@ impl Host {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn snapshot(
         &mut self,
         connection: ConnectionId,
@@ -4001,6 +4035,7 @@ impl Host {
         out: &TickOutput,
         tracked: &BTreeMap<bool, BTreeSet<u32>>,
         prepared: PreparedSeat,
+        shared: Option<&from_world::SharedPicture>,
     ) -> Result<(), WireError> {
         let world = &self.world;
         let Some(peer) = self.peers.get_mut(&connection) else {
@@ -4023,23 +4058,55 @@ impl Host {
             .collect();
         let side_tracks = slot.and_then(|s| tracked.get(&(s.wing.side == Side::Friendly)));
         let own = cockpit.flight.position;
-        let entities: Vec<(Entity, _)> = from_world::entities(
-            &picture,
-            peer.picture.as_ref(),
-            plane.0,
-            &mut peer.wire.names,
-        )?
-        .into_iter()
-        .map(|entity| {
-            let mut relevance = from_world::distance_relevance(&entity, own, plane.0);
-            let aircraft = entity.state.kind() == EntityKind::Aircraft;
-            relevance.own_flight = aircraft && flight.contains(&entity.id);
-            relevance.friendly_tracked =
-                aircraft && side_tracks.is_some_and(|t| t.contains(&entity.id));
-            relevance.viewed = peer.inputs.view_subject == Some(entity.key());
-            (entity, relevance)
-        })
-        .collect();
+        let (entities, memory) = match (&picture, shared) {
+            (SeatPicture::Own(seat), Some(shared)) => from_world::seat_entities(
+                shared,
+                seat,
+                peer.picture.as_ref(),
+                &mut peer.wire.names,
+            )?,
+            #[cfg(test)]
+            (SeatPicture::Whole(picture), _) if self.legacy_pictures => {
+                let entities = from_world::entities_scan(
+                    picture,
+                    peer.picture.as_ref().and_then(|m| m.whole.as_deref()),
+                    plane.0,
+                    &mut peer.wire.names,
+                )?;
+                let mut memory = from_world::PictureMemory::of(picture);
+                memory.keys = entities.iter().map(Entity::key).collect();
+                memory.whole = Some(picture.clone());
+                (entities, memory)
+            }
+            (SeatPicture::Whole(picture), _) => {
+                let entities = from_world::entities_after(
+                    picture,
+                    peer.picture.as_ref(),
+                    plane.0,
+                    &mut peer.wire.names,
+                )?;
+                #[allow(unused_mut)]
+                let mut memory = from_world::PictureMemory::of(picture);
+                #[cfg(test)]
+                {
+                    memory.keys = entities.iter().map(Entity::key).collect();
+                }
+                (entities, memory)
+            }
+            (SeatPicture::Own(_), None) => return Err(WireError::Invalid("no shared picture")),
+        };
+        let entities: Vec<(Entity, _)> = entities
+            .into_iter()
+            .map(|entity| {
+                let mut relevance = from_world::distance_relevance(&entity, own, plane.0);
+                let aircraft = entity.state.kind() == EntityKind::Aircraft;
+                relevance.own_flight = aircraft && flight.contains(&entity.id);
+                relevance.friendly_tracked =
+                    aircraft && side_tracks.is_some_and(|t| t.contains(&entity.id));
+                relevance.viewed = peer.inputs.view_subject == Some(entity.key());
+                (entity, relevance)
+            })
+            .collect();
         let terms = out.terms.iter().find(|(p, _)| *p == plane).map(|(_, t)| *t);
         let exact = ExactState::of(&OwnPlane::of(cockpit), terms.as_ref());
         let (input_margin, inputs_repeated) = peer.inputs.report();
@@ -4078,7 +4145,7 @@ impl Host {
             Ok(sequence) => peer.wire.sent(sequence),
             Err(_) => peer.wire.discard(),
         }
-        peer.picture = Some(picture);
+        peer.picture = Some(memory);
 
         // The Seated message comes first: an exact state is held until it
         // is acknowledged (every reliable message acknowledged, since the

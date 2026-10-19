@@ -45,7 +45,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tore_net::DisconnectReason;
 use tore_world::seats::PlaneId;
-use tore_world::snapshot::RenderSnapshot;
 use tore_world::world::{Cue, TickOutput};
 
 /// The host applies at most two camera changes a second from one
@@ -252,7 +251,7 @@ impl Ring {
 #[derive(Debug, Default)]
 pub(super) struct Stream {
     names: NameTable,
-    last_picture: Option<RenderSnapshot>,
+    last_picture: Option<from_world::PictureMemory>,
     live: Option<Arc<Frame>>,
     ring: Option<Ring>,
 }
@@ -614,14 +613,14 @@ impl Host {
     /// The whole mission's picture after `tick`'s step, quantized.
     fn build_frame(&mut self, tick: u64) -> Option<Arc<Frame>> {
         let picture = from_world::observer_picture(&self.world);
-        let entities = from_world::entities(
+        let entities = from_world::entities_after(
             &picture,
             self.stream.last_picture.as_ref(),
             NO_PLANE,
             &mut self.stream.names,
         )
         .ok()?;
-        self.stream.last_picture = Some(picture);
+        self.stream.last_picture = Some(from_world::PictureMemory::of(&picture));
         Some(Arc::new(Frame { tick, entities }))
     }
 

@@ -3039,3 +3039,8 @@ pub mod fixtures {
 // Exact checkpoints (docs/formats/checkpoint.md).
 #[path = "combat_checkpoint.rs"]
 mod checkpoint;
+
+// The seats' shared network picture (optimization slice S11).
+#[path = "combat_wire.rs"]
+mod wire;
+pub use wire::{WirePicture, WirePilot};

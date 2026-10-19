@@ -7,9 +7,11 @@
 
 use super::WireResult;
 use super::bits::{steps, turn16};
+#[cfg(test)]
+use super::entity::EntityKind;
 use super::entity::{
-    AircraftState, DamageState, DebrisState, Devices, EngineState, Entity, EntityKind, EntityState,
-    Motion, MoverState, POSITION_STEP, PilotState, ProjectileState, RATE_STEP, ROTOR_SPEED_MAX,
+    AircraftState, DamageState, DebrisState, Devices, EngineState, Entity, EntityState, Motion,
+    MoverState, POSITION_STEP, PilotState, ProjectileState, RATE_STEP, ROTOR_SPEED_MAX,
     ROTOR_SPEED_STEP, ROTOR_TILT_STEP, RotorState, SPEED_STEP, Status,
 };
 use super::events::{LinkEvent, MountView, Rumble, SurfaceUnitView, WireEvent};
@@ -324,6 +326,92 @@ fn targets_picture(world: &World) -> RenderSnapshot {
     }
 }
 
+/// What the next entities of a seat or an observer need of its last
+/// picture: where each debris piece's owner, each ejected pilot and each
+/// surface unit was, the first of each in the picture's order, and the
+/// picture's tick. Sorted, so a lookup is a binary search rather than a walk
+/// of the last picture for every entity (optimization slice S11).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PictureMemory {
+    tick: u64,
+    debris: std::sync::Arc<Vec<(u32, [f64; 3])>>,
+    pilots: Vec<((u32, bool), [f64; 3])>,
+    surface: std::sync::Arc<Vec<(u32, [f64; 3])>>,
+    /// The keys of the entities sent with it, for the tests' bookkeeping.
+    #[cfg(test)]
+    pub(crate) keys: Vec<super::entity::EntityKey>,
+    /// The whole picture, for the tests that make entities as they were
+    /// made before slice S11.
+    #[cfg(test)]
+    pub(crate) whole: Option<Box<RenderSnapshot>>,
+}
+
+/// `rows` sorted by key, keeping the first row of each key.
+fn first_of_each<K: Ord + Copy>(mut rows: Vec<(K, [f64; 3])>) -> Vec<(K, [f64; 3])> {
+    // A stable sort keeps rows of one key in their order.
+    rows.sort_by_key(|(key, _)| *key);
+    rows.dedup_by_key(|(key, _)| *key);
+    rows
+}
+
+fn find<K: Ord + Copy>(rows: &[(K, [f64; 3])], key: K) -> Option<[f64; 3]> {
+    rows.binary_search_by_key(&key, |(k, _)| *k)
+        .ok()
+        .map(|index| rows[index].1)
+}
+
+impl PictureMemory {
+    /// What `picture` leaves for the next entities.
+    pub fn of(picture: &RenderSnapshot) -> Self {
+        Self {
+            tick: picture.tick,
+            debris: std::sync::Arc::new(first_of_each(
+                picture
+                    .debris
+                    .iter()
+                    .map(|d| (d.owner, d.position))
+                    .collect(),
+            )),
+            pilots: first_of_each(
+                picture
+                    .pilots
+                    .iter()
+                    .map(|p| ((p.owner, p.crew), p.position))
+                    .collect(),
+            ),
+            surface: std::sync::Arc::new(first_of_each(
+                picture
+                    .surface
+                    .iter()
+                    .map(|s| (s.id.0, s.position))
+                    .collect(),
+            )),
+            #[cfg(test)]
+            keys: Vec::new(),
+            #[cfg(test)]
+            whole: None,
+        }
+    }
+
+    fn debris(&self, owner: u32) -> Option<[f64; 3]> {
+        find(&self.debris, owner)
+    }
+
+    fn pilot(&self, owner: u32, crew: bool) -> Option<[f64; 3]> {
+        find(&self.pilots, (owner, crew))
+    }
+
+    fn surface(&self, id: u32) -> Option<[f64; 3]> {
+        find(&self.surface, id)
+    }
+
+    /// The keys of the entities sent with this picture (tests).
+    #[cfg(test)]
+    pub(crate) fn keys(&self) -> &[super::entity::EntityKey] {
+        &self.keys
+    }
+}
+
 /// Every entity of `current` a client flying `player` draws: every aircraft
 /// but its own (plane 0 included when another seat flies it), every missile,
 /// bomb and rocket (gun rounds are burst events), every debris piece, every
@@ -334,6 +422,400 @@ fn targets_picture(world: &World) -> RenderSnapshot {
 /// velocity from `previous`, the seat's picture a tick or more before. The entities come
 /// in key order.
 pub fn entities(
+    current: &RenderSnapshot,
+    previous: Option<&RenderSnapshot>,
+    player: u32,
+    names: &mut NameTable,
+) -> WireResult<Vec<Entity>> {
+    let memory = previous.map(PictureMemory::of);
+    entities_after(current, memory.as_ref(), player, names)
+}
+
+/// [`entities`] with the last picture's [`PictureMemory`].
+///
+/// Where two entities share a key the first of them is sent: the list is
+/// put in key order by a stable sort and the later ones dropped.
+pub fn entities_after(
+    current: &RenderSnapshot,
+    previous: Option<&PictureMemory>,
+    player: u32,
+    names: &mut NameTable,
+) -> WireResult<Vec<Entity>> {
+    let mut out = Vec::with_capacity(
+        1 + current.targets.len()
+            + current.projectiles.len()
+            + current.debris.len()
+            + current.pilots.len()
+            + current.surface.len(),
+    );
+    for pose in std::iter::once(&current.player).chain(&current.targets) {
+        if pose.aircraft.is_none() || pose.id == player {
+            continue;
+        }
+        out.push(Entity {
+            id: pose.id,
+            state: EntityState::Aircraft(aircraft_state(pose)),
+        });
+    }
+    for pose in current.projectiles.iter().filter(|p| !p.gun) {
+        out.push(Entity {
+            id: pose.id,
+            state: EntityState::Projectile(projectile_state(pose, player, names)?),
+        });
+    }
+    let ticks = previous.map_or(0, |p| current.tick.saturating_sub(p.tick));
+    // The aircraft a piece of debris is drawn as: the first pose of its
+    // owner's id, found by id.
+    let poses_by_id = (!current.debris.is_empty()).then(|| {
+        first_of_index(
+            std::iter::once(&current.player)
+                .chain(&current.targets)
+                .map(|pose| pose.id),
+        )
+    });
+    let aircraft_of = |id: u32| -> Option<AircraftId> {
+        let index = find_index(poses_by_id.as_deref()?, id)?;
+        std::iter::once(&current.player)
+            .chain(&current.targets)
+            .nth(index)
+            .and_then(|pose| pose.aircraft)
+    };
+    for pose in &current.debris {
+        let then = previous.and_then(|p| p.debris(pose.owner));
+        let model = match pose.draw {
+            Draw::Model(id) => Some(id),
+            Draw::Ownship | Draw::Hidden => aircraft_of(pose.owner),
+        };
+        out.push(Entity {
+            id: pose.owner,
+            state: EntityState::Debris(debris_state(
+                pose,
+                model,
+                velocity_between(pose.position, then, ticks),
+            )),
+        });
+    }
+    // The own pilot's escape is part of its plane's exact state, but the
+    // second crew member of its plane is not: he is sent like any other.
+    for pose in current
+        .pilots
+        .iter()
+        .filter(|p| p.owner != player || p.crew)
+    {
+        let then = previous.and_then(|p| p.pilot(pose.owner, pose.crew));
+        out.push(Entity {
+            id: super::entity::pilot_id(pose.owner, pose.crew),
+            state: EntityState::Pilot(pilot_state(
+                pose,
+                velocity_between(pose.position, then, ticks),
+            )),
+        });
+    }
+    for pose in &current.surface {
+        let then = previous.and_then(|p| p.surface(pose.id.0));
+        out.push(Entity {
+            id: pose.id.0,
+            state: EntityState::Surface(mover_state(
+                pose,
+                velocity_between(pose.position, then, ticks),
+            )),
+        });
+    }
+    out.sort_by_key(Entity::key);
+    out.dedup_by_key(|e| e.key());
+    Ok(out)
+}
+
+/// Each id of `ids` with the index of its first appearance, sorted by id.
+fn first_of_index(ids: impl Iterator<Item = u32>) -> Vec<(u32, usize)> {
+    let mut rows: Vec<(u32, usize)> = ids.enumerate().map(|(i, id)| (id, i)).collect();
+    rows.sort_unstable();
+    rows.dedup_by_key(|(id, _)| *id);
+    rows
+}
+
+fn find_index(rows: &[(u32, usize)], id: u32) -> Option<usize> {
+    rows.binary_search_by_key(&id, |(row, _)| *row)
+        .ok()
+        .map(|at| rows[at].1)
+}
+
+/// A round of [`SharedPicture`], quantized but for its names.
+#[derive(Clone, Debug)]
+struct SharedRound {
+    id: u32,
+    owner: u32,
+    weapon: String,
+    shape: Option<String>,
+    target: Option<u32>,
+    motion: Motion,
+    direction: [u16; 2],
+}
+
+/// A debris piece of [`SharedPicture`], as a seat flying none of the
+/// human-flown planes is sent it, its velocity left to each seat.
+#[derive(Clone, Copy, Debug)]
+struct SharedDebris {
+    owner: u32,
+    model: Option<AircraftId>,
+    variant: Option<usize>,
+    position: [f64; 3],
+    attitude: [u16; 3],
+}
+
+/// The network's share of one tick's pictures, quantized once for every due
+/// seat (optimization slice S11): the aircraft and rounds as they go on the
+/// wire, and what each seat's debris, pilots and surface units need. A
+/// seat's entities come from it with [`seat_entities`], equal to
+/// [`entities`] of the seat's own picture ([`seat_picture`]).
+#[derive(Debug)]
+pub struct SharedPicture {
+    tick: u64,
+    /// The aircraft, the first of each id, in id order.
+    aircraft: Vec<Entity>,
+    rounds: Vec<SharedRound>,
+    debris: Vec<SharedDebris>,
+    pilots: Vec<tore_world::combat::WirePilot>,
+    surface: Vec<SurfacePose>,
+    /// The debris and surface parts of every seat's [`PictureMemory`].
+    debris_memory: std::sync::Arc<Vec<(u32, [f64; 3])>>,
+    surface_memory: std::sync::Arc<Vec<(u32, [f64; 3])>>,
+}
+
+impl SharedPicture {
+    /// The shared part of `world`'s pictures now; `None` where each seat's
+    /// differs throughout ([`tore_world::combat::Combat::wire_picture`]),
+    /// when every seat takes its own [`seat_picture`].
+    pub fn of(world: &World) -> Option<Self> {
+        let picture = world.combat.wire_picture(world.ai_wings.as_ref())?;
+        let ids = first_of_index(picture.aircraft.iter().map(|pose| pose.id));
+        let aircraft_of =
+            |id: u32| find_index(&ids, id).and_then(|index| picture.aircraft[index].aircraft);
+        let mut aircraft: Vec<Entity> = picture
+            .aircraft
+            .iter()
+            .filter(|pose| pose.aircraft.is_some())
+            .map(|pose| Entity {
+                id: pose.id,
+                state: EntityState::Aircraft(aircraft_state(pose)),
+            })
+            .collect();
+        aircraft.sort_by_key(|e| e.id);
+        aircraft.dedup_by_key(|e| e.id);
+        let rounds = picture
+            .rounds
+            .into_iter()
+            .map(|pose| {
+                let velocity: [f64; 3] = std::array::from_fn(|i| {
+                    (pose.position[i] - pose.previous[i]) * tore_sim::flight::DT.recip()
+                });
+                let [x, y, z] = pose.direction;
+                SharedRound {
+                    id: pose.id,
+                    owner: pose.owner,
+                    weapon: pose.weapon,
+                    shape: pose.shape,
+                    target: pose.target,
+                    motion: Motion::of(pose.position, velocity),
+                    direction: [turn16(x.atan2(z)), turn16(y.atan2(x.hypot(z)))],
+                }
+            })
+            .collect();
+        let debris: Vec<SharedDebris> = picture
+            .debris
+            .iter()
+            .map(|pose| SharedDebris {
+                owner: pose.owner,
+                model: match pose.draw {
+                    Draw::Model(id) => Some(id),
+                    Draw::Ownship | Draw::Hidden => aircraft_of(pose.owner),
+                },
+                variant: pose.variant,
+                position: pose.position,
+                attitude: attitude(pose.attitude),
+            })
+            .collect();
+        let debris_memory = std::sync::Arc::new(first_of_each(
+            debris.iter().map(|d| (d.owner, d.position)).collect(),
+        ));
+        let surface_memory = std::sync::Arc::new(first_of_each(
+            picture
+                .surface
+                .iter()
+                .map(|s| (s.id.0, s.position))
+                .collect(),
+        ));
+        Some(Self {
+            tick: picture.tick,
+            aircraft,
+            rounds,
+            debris,
+            pilots: picture.pilots,
+            surface: picture.surface,
+            debris_memory,
+            surface_memory,
+        })
+    }
+}
+
+/// What a seat's own picture adds to [`SharedPicture`]: its own plane, as
+/// its cockpit flies it.
+#[derive(Clone, Copy, Debug)]
+pub struct SeatOwn {
+    plane: u32,
+    aircraft: Option<AircraftId>,
+    damage_variant: Option<usize>,
+    /// Its pilot and second crew member, once they eject.
+    escape: Option<PilotPose>,
+    crew_escape: Option<PilotPose>,
+}
+
+impl SeatOwn {
+    /// The seat flying `plane` in `world`; `None` when no cockpit flies it
+    /// or it has no ownship, as for [`seat_picture`].
+    pub fn of(world: &World, plane: PlaneId) -> Option<Self> {
+        let cockpit = world
+            .cockpits
+            .iter()
+            .find(|cockpit| cockpit.plane == plane)?;
+        let own = world.combat.state.ownship(plane.0)?;
+        let pilot = |crew: bool, escape: &tore_sim::ejection::Escape| PilotPose {
+            owner: plane.0,
+            position: escape.position,
+            heading: escape.heading,
+            phase: escape.phase,
+            crew,
+        };
+        Some(Self {
+            plane: plane.0,
+            aircraft: Some(own.configuration().aircraft),
+            damage_variant: cockpit.flight.damage_variant,
+            escape: cockpit.flight.escape.as_ref().map(|e| pilot(false, e)),
+            crew_escape: cockpit.flight.crew_escape.as_ref().map(|e| pilot(true, e)),
+        })
+    }
+}
+
+/// [`entities_after`] of the seat's own picture, from the tick's shared
+/// part and the seat's own plane, and what the next one needs of it.
+pub fn seat_entities(
+    shared: &SharedPicture,
+    own: &SeatOwn,
+    previous: Option<&PictureMemory>,
+    names: &mut NameTable,
+) -> WireResult<(Vec<Entity>, PictureMemory)> {
+    let player = own.plane;
+    let mut out = Vec::with_capacity(
+        shared.aircraft.len()
+            + shared.rounds.len()
+            + shared.debris.len()
+            + shared.pilots.len()
+            + shared.surface.len()
+            + 2,
+    );
+    out.extend(shared.aircraft.iter().filter(|e| e.id != player).copied());
+    for round in &shared.rounds {
+        out.push(Entity {
+            id: round.id,
+            state: EntityState::Projectile(ProjectileState {
+                owner: round.owner,
+                weapon: names.intern(&round.weapon)?,
+                shape: round
+                    .shape
+                    .as_deref()
+                    .map(|s| names.intern(s))
+                    .transpose()?,
+                target: round.target,
+                aimed_at_player: round.target == Some(player),
+                motion: round.motion,
+                direction: round.direction,
+            }),
+        });
+    }
+    let ticks = previous.map_or(0, |p| shared.tick.saturating_sub(p.tick));
+    for piece in &shared.debris {
+        // The seat's own plane's debris is drawn as its own aircraft, in the
+        // damage variant its cockpit shows.
+        let (model, variant) = if piece.owner == player {
+            (own.aircraft, own.damage_variant)
+        } else {
+            (piece.model, piece.variant)
+        };
+        let then = previous.and_then(|p| p.debris(piece.owner));
+        out.push(Entity {
+            id: piece.owner,
+            state: EntityState::Debris(DebrisState {
+                owner: piece.owner,
+                model,
+                variant: variant.map(|v| v.min(7) as u8),
+                motion: Motion::of(
+                    piece.position,
+                    velocity_between(piece.position, then, ticks),
+                ),
+                attitude: piece.attitude,
+            }),
+        });
+    }
+    // The seat's picture's pilots in its order: its own pilot from its
+    // cockpit first, the others' and the AI's, then the second crew members
+    // the same way. Every one is remembered; the own pilot is not sent.
+    let mut pilots = Vec::with_capacity(shared.pilots.len() + 2);
+    let others = |crew: bool| {
+        shared
+            .pilots
+            .iter()
+            .filter(move |p| p.pose.crew == crew && !(p.human && p.pose.owner == player))
+            .map(|p| p.pose)
+    };
+    let list = own
+        .escape
+        .into_iter()
+        .chain(others(false))
+        .chain(own.crew_escape)
+        .chain(others(true));
+    for pose in list {
+        pilots.push(((pose.owner, pose.crew), pose.position));
+        if pose.owner == player && !pose.crew {
+            continue;
+        }
+        let then = previous.and_then(|p| p.pilot(pose.owner, pose.crew));
+        out.push(Entity {
+            id: super::entity::pilot_id(pose.owner, pose.crew),
+            state: EntityState::Pilot(pilot_state(
+                &pose,
+                velocity_between(pose.position, then, ticks),
+            )),
+        });
+    }
+    for pose in &shared.surface {
+        let then = previous.and_then(|p| p.surface(pose.id.0));
+        out.push(Entity {
+            id: pose.id.0,
+            state: EntityState::Surface(mover_state(
+                pose,
+                velocity_between(pose.position, then, ticks),
+            )),
+        });
+    }
+    out.sort_by_key(Entity::key);
+    out.dedup_by_key(|e| e.key());
+    let memory = PictureMemory {
+        tick: shared.tick,
+        debris: std::sync::Arc::clone(&shared.debris_memory),
+        pilots: first_of_each(pilots),
+        surface: std::sync::Arc::clone(&shared.surface_memory),
+        #[cfg(test)]
+        keys: out.iter().map(Entity::key).collect(),
+        #[cfg(test)]
+        whole: None,
+    };
+    Ok((out, memory))
+}
+
+/// [`entities`] as it was before slice S11, walking the last picture for
+/// every entity: kept for the tests that compare the two.
+#[cfg(test)]
+pub(crate) fn entities_scan(
     current: &RenderSnapshot,
     previous: Option<&RenderSnapshot>,
     player: u32,
@@ -901,6 +1383,180 @@ mod tests {
         assert_eq!(aircraft_ids(&sent_to(&world, 0)), [1, 2, 3]);
         assert_eq!(aircraft_ids(&sent_to(&world, 1)), [0, 2, 3]);
         check_plane_0_reaches(&world, 1);
+    }
+
+    /// Slice S11: a fight with three seats (one ejects, two crew), the AI
+    /// shooting missiles and losing aircraft. Every seat's entities from
+    /// the shared picture, and the merge-walk [`entities`], equal what the
+    /// per-seat picture and the walk of the last picture gave, tick by
+    /// tick, names and velocities included.
+    #[test]
+    fn the_shared_picture_sends_every_seat_what_its_own_picture_sent() {
+        use std::collections::BTreeMap;
+        let map = resources();
+        let mut spec = spec();
+        spec.wings[0].count = 4;
+        spec.wings[3].count = 4;
+        spec.wings[3].skill = Skill::Ace;
+        spec.separation_nm = 5;
+        let mut world = World::new(&spec, &map, Seating::Open).unwrap();
+        let seats: [(u8, u32); 3] = [(1, 0), (2, 1), (3, 2)];
+        let mut out = TickOutput::default();
+        let mut old_previous: BTreeMap<u32, RenderSnapshot> = BTreeMap::new();
+        let mut merged_previous: BTreeMap<u32, PictureMemory> = BTreeMap::new();
+        let mut new_previous: BTreeMap<u32, PictureMemory> = BTreeMap::new();
+        let mut names: BTreeMap<(u32, u8), NameTable> = BTreeMap::new();
+        let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+        let mut missiles = 0;
+        for tick in 0..4800u64 {
+            let take: Vec<MissionCommand> = if tick == 0 {
+                seats
+                    .iter()
+                    .map(|&(seat, plane)| MissionCommand::Take {
+                        seat: SeatId(seat),
+                        plane: PlaneId(plane),
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let inputs: Vec<SeatInput> = seats
+                .iter()
+                .map(|&(seat, _)| {
+                    // Seat 2 fires its gun, seat 3 its missiles at whatever
+                    // its radar gives it.
+                    let mut input = SeatInput {
+                        seat: SeatId(seat),
+                        tick: world.tick(),
+                        trigger: (seat == 2 && tick % 240 < 40) || (seat == 3 && tick % 300 < 20),
+                        ..SeatInput::default()
+                    };
+                    if seat == 3 && tick == 10 {
+                        input
+                            .commands
+                            .push(tore_world::seats::SeatCommand::CycleWeapon { forward: true });
+                    }
+                    if seat == 3 && tick % 300 == 290 {
+                        input.commands.push(tore_world::seats::SeatCommand::Combat(
+                            tore_sim::combat::live::Command::Designate,
+                        ));
+                    }
+                    input
+                })
+                .collect();
+            world
+                .step_with(&take, &inputs, &mut out, |_, _| Ok(()))
+                .unwrap();
+            // Seat 1's pilot and second crew member eject.
+            if tick == 700 {
+                let cockpit = world
+                    .cockpits
+                    .iter_mut()
+                    .find(|c| c.plane == PlaneId(0))
+                    .unwrap();
+                let flight = &mut cockpit.flight;
+                let basis = tore_sim::attitude::Basis::new(flight.yaw, flight.pitch, flight.bank);
+                flight.escape = Some(tore_sim::ejection::Escape::new(
+                    flight.position,
+                    flight.velocity,
+                    basis,
+                ));
+                let mut crew = flight.position;
+                crew[0] += 12.;
+                flight.crew_escape = Some(tore_sim::ejection::Escape::new(
+                    crew,
+                    flight.velocity,
+                    basis,
+                ));
+            }
+            // Debris of a seat's own plane, of another seat's and of the
+            // AI's, two pieces of one owner among them.
+            if [300, 302, 900, 1500].contains(&tick) {
+                let owner = match tick {
+                    300 | 302 => 0,
+                    900 => 1,
+                    _ => 5,
+                };
+                let at = world
+                    .combat
+                    .state
+                    .targets
+                    .iter()
+                    .find(|t| t.id == 5)
+                    .map_or([0., 9000., 0.], |t| t.position);
+                world
+                    .combat
+                    .state
+                    .debris
+                    .push(tore_sim::combat::debris::Piece {
+                        owner,
+                        variant: (tick % 3) as usize,
+                        position: [at[0] + tick as f64, at[1], at[2]],
+                        velocity: [100., 0., 50.],
+                        basis: tore_sim::attitude::Basis::new(0.3, 0.1, -0.2),
+                    });
+            }
+            missiles += world.combat.state.projectiles.len();
+            if tick % 2 != 1 {
+                continue;
+            }
+            let shared = SharedPicture::of(&world).expect("an open mission's pictures share");
+            for &(_, plane) in &seats {
+                let Some(picture) = seat_picture(&world, PlaneId(plane)) else {
+                    assert!(SeatOwn::of(&world, PlaneId(plane)).is_none());
+                    continue;
+                };
+                let mut table = |n: u8| names.remove(&(plane, n)).unwrap_or_default();
+                let (mut old_names, mut merged_names, mut new_names) =
+                    (table(0), table(1), table(2));
+                let old = entities_scan(&picture, old_previous.get(&plane), plane, &mut old_names)
+                    .unwrap();
+                let merged = entities_after(
+                    &picture,
+                    merged_previous.get(&plane),
+                    plane,
+                    &mut merged_names,
+                )
+                .unwrap();
+                let own = SeatOwn::of(&world, PlaneId(plane)).unwrap();
+                let (new, memory) =
+                    seat_entities(&shared, &own, new_previous.get(&plane), &mut new_names).unwrap();
+                assert_eq!(merged, old, "plane {plane} at tick {tick}: merge walk");
+                assert_eq!(new, old, "plane {plane} at tick {tick}: shared picture");
+                let text = |n: &NameTable| format!("{:?} {:?}", n.names(), n.clone().take_new());
+                assert_eq!(text(&merged_names), text(&old_names));
+                assert_eq!(text(&new_names), text(&old_names));
+                for e in &old {
+                    let kind = match e.state {
+                        EntityState::Aircraft(_) => "aircraft",
+                        EntityState::Projectile(_) => "rounds",
+                        EntityState::Debris(d) if d.owner == plane => "own debris",
+                        EntityState::Debris(_) => "debris",
+                        EntityState::Pilot(p)
+                            if p.owner == crate::wire::entity::pilot_id(plane, true) =>
+                        {
+                            "own crew"
+                        }
+                        EntityState::Pilot(_) => "pilots",
+                        EntityState::Surface(_) => "surface",
+                    };
+                    *counts.entry(kind).or_default() += 1;
+                }
+                merged_previous.insert(plane, PictureMemory::of(&picture));
+                old_previous.insert(plane, picture);
+                new_previous.insert(plane, memory);
+                names.insert((plane, 0), old_names);
+                names.insert((plane, 1), merged_names);
+                names.insert((plane, 2), new_names);
+            }
+        }
+        eprintln!("{counts:?}, {missiles} rounds in flight-ticks");
+        for kind in ["aircraft", "rounds", "debris", "pilots", "own crew"] {
+            assert!(
+                counts.get(kind).is_some_and(|n| *n > 0),
+                "no {kind}: {counts:?}"
+            );
+        }
     }
 
     /// What an observer is sent of `world`.
