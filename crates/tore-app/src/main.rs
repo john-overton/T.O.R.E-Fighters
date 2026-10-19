@@ -68,6 +68,8 @@ mod flight_ui;
 mod flight_views;
 mod flight_watch;
 mod formation_trace;
+mod frame_gpu;
+mod frame_rate;
 mod graphics;
 mod graphics_screen;
 mod gun_flash;
@@ -150,12 +152,19 @@ mod surface_trace;
 mod tape_file;
 mod target_info;
 mod target_preview;
+mod terrain_audit;
 mod terrain_colors;
+mod terrain_seams;
 mod ui_text;
 mod ui_text_renderer;
 mod v22_animation;
 mod variety_animation;
 mod variety_rotors;
+mod vegetation;
+mod vegetation_limits;
+mod vegetation_preview;
+mod vegetation_renderer;
+mod vegetation_shapes;
 mod version;
 mod view_compass;
 mod weapon_hud;
@@ -2674,7 +2683,11 @@ impl App {
                         &built.world.combat.surface,
                     ));
                     Some(build(
-                        &scenery,
+                        renderer::LoadingScene {
+                            scenery: &scenery,
+                            world: &built.world.terrain,
+                            eye: built.world.cockpits[OWN].flight.position,
+                        },
                         &aircraft,
                         &view.models,
                         &view.art,
@@ -3780,6 +3793,11 @@ impl ApplicationHandler for App {
         if self.finished {
             return;
         }
+        if matches!(event, WindowEvent::RedrawRequested)
+            && let Some(renderer) = &mut self.renderer
+        {
+            renderer.begin_cpu_frame();
+        }
         if self.loading.is_some() {
             if self.net.is_some()
                 && self.world.0.is_some()
@@ -3835,7 +3853,12 @@ impl ApplicationHandler for App {
                             [window.width, window.height],
                             [name, &players],
                         );
-                        if let Err(error) = renderer.draw(&self.loading_pixels, None, Some(size)) {
+                        if let Err(error) = renderer.draw(
+                            &self.loading_pixels,
+                            None,
+                            Some(size),
+                            frame_rate::Surface::Loading,
+                        ) {
                             self.error = Some(error);
                             event_loop.exit();
                         }
@@ -3936,7 +3959,12 @@ impl ApplicationHandler for App {
                         [window.width, window.height],
                         [name, &players],
                     );
-                    if let Err(error) = renderer.draw(&self.loading_pixels, None, Some(size)) {
+                    if let Err(error) = renderer.draw(
+                        &self.loading_pixels,
+                        None,
+                        Some(size),
+                        frame_rate::Surface::Loading,
+                    ) {
                         self.error = Some(error);
                         event_loop.exit();
                     }
@@ -6037,6 +6065,13 @@ impl ApplicationHandler for App {
                 let present_start = Instant::now();
                 renderer.set_menu_text(menu_text.as_ref());
                 renderer.show_menu_text(menu_text.is_some());
+                let readout = if self.screen == Screen::Flight {
+                    frame_rate::Surface::Flight {
+                        right_panel: self.live_debug.panels.right_open(),
+                    }
+                } else {
+                    frame_rate::Surface::Menu
+                };
                 match renderer.draw(
                     if self.screen == Screen::Flight {
                         &self.flight_canvas.pixels
@@ -6049,6 +6084,7 @@ impl ApplicationHandler for App {
                         &self.scenery,
                     )),
                     (self.screen == Screen::Flight).then_some(self.flight_canvas.size),
+                    readout,
                 ) {
                     Ok(true) if self.smoke_test => {
                         if let Some(path) = &self.capture_terrain
@@ -6063,6 +6099,7 @@ impl ApplicationHandler for App {
                             self.error = Some(error);
                         }
 
+                        log::info!("Smoke test: requested screen presented successfully");
                         println!("Smoke test: requested screen presented successfully");
                         self.finished = true;
                         event_loop.exit();
@@ -10589,6 +10626,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
         terrain_colors::run()?;
         return Ok(Outcome::Done);
     }
+    if std::env::args().nth(1).as_deref() == Some("--terrain-audit") {
+        terrain_audit::run()?;
+        return Ok(Outcome::Done);
+    }
     if std::env::args().nth(1).as_deref() == Some("--blast-preview") {
         blast_preview::run()?;
         return Ok(Outcome::Done);
@@ -10627,6 +10668,18 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     }
     if std::env::args().nth(1).as_deref() == Some("--gun-flash-preview") {
         gun_flash_preview::run()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--vegetation-survey") {
+        vegetation::survey()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--vegetation-art") {
+        vegetation_preview::art()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--vegetation-preview") {
+        vegetation_preview::run()?;
         return Ok(Outcome::Done);
     }
     if std::env::args().nth(1).as_deref() == Some("--city-fill-survey") {
@@ -11827,7 +11880,9 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             "--smoke-test" => smoke_test = true,
             "--windowed" => windowed_flag = true,
             flag @ ("--anti-aliasing" | "--render-scale" | "--spotting-aid"
-            | "--terrain-filtering" | "--building-distance" | "--building-detail") => {
+            | "--terrain-filtering" | "--building-distance" | "--building-detail"
+            | "--vegetation-texture" | "--vegetation-texture-distance"
+            | "--vegetation-distance" | "--vegetation-detail" | "--vegetation-density") => {
                 let value = args.next().ok_or(format!("{flag} needs a value"))?;
                 graphics_flags.push((flag.to_owned(), value));
             }
@@ -13491,7 +13546,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     diagnostics::stage("terrain construction");
     let mut world =
         scenery::launch_terrain(&assets.theater_resources, &theater_code, weather_condition)?;
-    let mut scenery = scenery::Scenery::build(&assets.theater_resources, &world)?;
+    let mut scenery = scenery::Scenery::build_for(
+        &assets.theater_resources,
+        &world,
+        !launch_creator && matches!(initial_screen, Screen::Flight | Screen::Viewer),
+    )?;
     diagnostics::stage_done();
     let ground_start = ground_object(&world)?;
     if std::env::var_os("TORE_AIRPORT_PROBE").is_some() {

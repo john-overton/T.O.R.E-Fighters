@@ -1,6 +1,8 @@
 struct Band { info:vec4<f32>, ramp:vec4<f32> }
 // scene.view.z is the shared CPU night factor (night_glow::night_factor).
-struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32>, ocean:vec4<f32>, cloud_reflection:vec4<f32>, view:vec4<f32>, quality:vec4<f32>, viewport:vec4<f32>, origin:vec4<f32>, local_eye:vec4<f32> }
+struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32>, ocean:vec4<f32>, cloud_reflection:vec4<f32>, view:vec4<f32>, quality:vec4<f32>, viewport:vec4<f32>, origin:vec4<f32>, local_eye:vec4<f32>, veg:vec4<f32>, canopy_area:vec4<f32>, canopy:vec4<f32>, canopy_detail:vec4<f32> }
+// veg: ground-detail mode (0 off, 1 on, 2 fine), detail distance in feet,
+// unused, climate (0 temperate, 1 desert, 2 arctic, 3 tropical).
 // quality: spotting aid strength (0 off), terrain filtering (0/1), thermal
 // sensor picture (0/1, see "Thermal sensor picture" at the end), the thermal
 // picture's reference brightness (sim_renderer.rs `thermal_reference`). viewport: world image width and height in pixels, MSAA
@@ -20,6 +22,9 @@ fn scenery(color:vec3<f32>)->vec4<f32> {
 @group(0) @binding(3) var weather_tiles:texture_2d_array<u32>;
 @group(0) @binding(4) var engine_art:texture_2d<f32>;
 @group(0) @binding(5) var<uniform> tile_storage:vec4<u32>;
+@group(0) @binding(6) var seam_records:texture_2d<u32>;
+@group(0) @binding(7) var seam_tints:texture_2d_array<f32>;
+@group(0) @binding(8) var seam_sampler:sampler;
 fn tile_size()->vec2<u32> {
  if tile_storage.x!=0u {return vec2<u32>(256u);}
  return textureDimensions(tiles);
@@ -455,31 +460,435 @@ fn fill_shadow(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,size:vec4<f32>,
 @vertex fn fill_shadow_vertex2(@location(0) position:vec3<f32>,@location(5) place:vec4<f32>,@location(6) turn:vec4<f32>,@location(7) size:vec4<f32>)->ShadowOut {return fill_shadow(position,place,turn,size,2u);}
 @vertex fn terrain_vertex(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) color:vec3<f32>,@location(4) index:f32,@location(5) normal:vec3<f32>)->VertexOut {
  var out=world_vertex(position,uv,layer,color,index);
- out.terrain_normal=normal;return out;
+ out.terrain_normal=normal;
+ out.own_color=select(0.0,1.0,flat_page(i32(layer)));return out;
 }
 // Terrain cutouts expose the already rendered ocean/horizon, never the T2
 // land color. Keep this separate from aircraft's base-color texture blending.
+// One RG32Uint record holds both palette mixtures and run-end flags.
+// Masks include LAND fallback edges. All coordinates remain world feet.
+fn seam_record(tile:i32,axis:i32,segment:i32)->vec2<u32> {
+ let address=(tile*2+axis)*256+segment;
+ let width=i32(textureDimensions(seam_records).x);
+ return textureLoad(seam_records,vec2<i32>(address%width,address/width),0).rg;
+}
+// Baked from the source material and the noisy 500 ft reference blend.
+// No source page is replaced. A neutral tint is returned outside the band.
+struct SeamResponse { delta:vec3<f32>, luminance:f32, mask:f32 }
+fn material_record(address:i32)->vec2<u32> {
+ let width=i32(textureDimensions(seam_records).x);
+ return textureLoad(seam_records,vec2<i32>(address%width,address/width),0).rg;
+}
+fn flat_page(layer:i32)->bool {
+ let size=vec2<i32>(scene.canopy_detail.zw);
+ if layer<0 || size.x<=0 || size.y<=0 {return false;}
+ return material_record(size.x*size.y*513+layer).x!=0u;
+}
+fn terrain_flat_response(world:vec2<f32>)->SeamResponse {
+ let size=vec2<i32>(scene.canopy_detail.zw);let cell=vec2<i32>(floor(world/32768.0));
+ if size.x<=0 || size.y<=0 || any(cell<vec2<i32>(0)) || any(cell>=size) {return SeamResponse(vec3<f32>(0.0),1.0,0.0);}
+ let record=material_record(size.x*size.y*512+cell.y*size.x+cell.x);
+ if record.x==0u {return SeamResponse(vec3<f32>(0.0),1.0,0.0);}
+ let slot=record.x-1u;let uv=world/32768.0-vec2<f32>(cell);
+ let pixel=vec2<f32>(f32(slot%10u),f32((slot%100u)/10u))*96.0+vec2<f32>(0.5)+uv*95.0;
+ let value=textureSampleLevel(seam_tints,seam_sampler,pixel/vec2<f32>(textureDimensions(seam_tints)),i32(slot/100u),0.0);
+ let distances=vec4<f32>(uv.x,1.0-uv.x,uv.y,1.0-uv.y)*32768.0;
+ var fade=1.0;
+ for(var i=0u;i<4u;i++) {if (record.y&(1u<<i))!=0u {fade=min(fade,smoothstep(0.0,250.0,distances[i]));}}
+ return SeamResponse(value.rgb*fade,value.a,1.0);
+}
+fn terrain_seam_response(world:vec2<f32>)->SeamResponse {
+ let size=vec2<i32>(scene.canopy_detail.zw);
+ if size.x<=0 || size.y<=0 {return SeamResponse(vec3<f32>(0.0),1.0,0.0);}
+ let cell=vec2<i32>(floor(world/32768.0));
+ if any(cell<vec2<i32>(0)) || any(cell>=size) {return SeamResponse(vec3<f32>(0.0),1.0,0.0);}
+ let local=world-vec2<f32>(cell)*32768.0;
+ let near=min(local,vec2<f32>(32768.0)-local);let axis=select(0,1,near.y<near.x);
+ if near[axis]>=250.0 {return SeamResponse(vec3<f32>(0.0),1.0,0.0);}
+ let negative=local[axis]<16384.0;let adjacent=cell[axis]+select(1,-1,negative);
+ if adjacent<0 || adjacent>=size[axis] {return SeamResponse(vec3<f32>(0.0),1.0,0.0);}
+ let owner=cell.y*size.x+cell.x-select(0,select(1,size.x,axis==1),negative);
+ let along=local[1-axis]/128.0;let t=fract(along);
+ let record=seam_record(owner,axis,i32(floor(along)));let flags=record.x>>24u;
+ if (flags&1u)==0u {return SeamResponse(vec3<f32>(0.0),1.0,0.0);}
+ var strength=1.0;
+ if (flags&8u)==0u {strength=smoothstep(0.0,1.0,t);}
+ if (flags&16u)==0u {strength=min(strength,smoothstep(0.0,1.0,1.0-t));}
+ let column=record.y-1u;
+ let layer=column/57344u;
+ let row=(column/1024u)%56u;
+ let pixel=vec2<f32>(f32(column%1024u)+t, f32(row*18u)+select(0.0,9.0,negative)+0.5+near[axis]*8.0/250.0);
+ let value=textureSampleLevel(seam_tints,seam_sampler,pixel/vec2<f32>(textureDimensions(seam_tints)),i32(layer),0.0);
+ return SeamResponse(value.rgb*strength,value.a,strength);
+}
+fn seam_apply(color:vec3<f32>,response:SeamResponse)->vec3<f32> {
+ if response.mask<=0.0 {return color;}
+ let scale=dot(color,vec3<f32>(0.2126,0.7152,0.0722))/max(response.luminance,0.000001);
+ return max(color+response.delta*scale,vec3<f32>(0.0));
+}
+// Forest horizon: expected crown coverage and mean art colour from CPU placement.
+// World-anchored texture replaces the missing crown share as objects thin/fade.
+fn canopy_cell(at:vec2<i32>,row:i32,remaps:vec2<f32>)->vec4<f32> {
+ if any(at<vec2<i32>(0)) || any(at>=vec2<i32>(scene.canopy_area.zw)) {return vec4<f32>(0.0);}
+ let page=i32(scene.canopy.x)+(at.y/256)*i32(scene.canopy.y)+at.x/128;
+ let pixel=vec2<i32>((at.x%128)*2,at.y%256);
+ let density=f32(read_tile(pixel,page))/63.75;
+ let index=read_tile(pixel+vec2<i32>(1,0),page);
+ var color=shade(index,row).rgb;
+ if remaps.x>=0.0 {color=remap_color(index,remaps);}
+ return vec4<f32>(color*density,density);
+}
+fn forest_canopy(color:vec3<f32>,direction:vec3<f32>,row:i32)->vec3<f32> {
+ if scene.canopy.w<=0.0 || scene.canopy.y<1.0 {return color;}
+ let full=max(scene.canopy_detail.x,1.0);
+ let missing=select(smoothstep(full,max(full+1.0,scene.canopy.z),length(direction.xz)),1.0,scene.canopy.z<full);
+ if missing<=0.0 {return color;}
+ let dist=length(direction);
+ let world=scene.origin.xz+scene.local_eye.xz+direction.xz;
+ let cell=(world-scene.canopy_area.xy)/512.0-vec2<f32>(0.5);
+ let at=vec2<i32>(floor(cell));let f=fract(cell);
+ var remaps=vec2<f32>(-1.0);
+ if row==0 {remaps=ray_rows(dist,scene.eye.y+direction.y);}
+ let c=mix(mix(canopy_cell(at,row,remaps),canopy_cell(at+vec2<i32>(1,0),row,remaps),f.x),
+           mix(canopy_cell(at+vec2<i32>(0,1),row,remaps),canopy_cell(at+vec2<i32>(1,1),row,remaps),f.x),f.y);
+ if c.a<0.001 {return color;}
+
+ let footprint=detail_footprint(direction,dist);
+ let grain=detail_noise(world/76.0,0,74u)-0.5;
+ let crowns=1.0+grain*0.38*detail_band(100.0,footprint);
+ let coverage=(1.0-exp(-c.a*scene.canopy.w))*missing;
+ return mix(color,c.rgb/c.a*crowns,coverage);
+}
 @fragment fn terrain_fragment(in:VertexOut)->@location(0) vec4<f32>{
  // Derivatives must be taken before the untextured early return.
  let grad=vec4<f32>(dpdx(in.uv),dpdy(in.uv));
+ let world=scene.origin.xz+scene.local_eye.xz+in.direction.xz;
+
  let receiver=surface_normal(in.direction);
  let normal=select(receiver,normalize(in.terrain_normal),dot(in.terrain_normal,in.terrain_normal)>0.1 && smooth_weather());
  if in.layer<0.0 {
   if thermal_on() {return scenery(thermal_grey(thermal_ground(in.albedo,normal,in.direction,in.distance)));}
-  return scenery(aerial_perspective(surface_color(in.color,in.direction,normal,false,receiver,in.albedo),in.direction,in.altitude));
+  let forest=forest_canopy(in.color,in.direction,0);
+  let bare=forest_canopy(in.albedo,in.direction,base_row());
+  let detail=ground_detail(in.color,in.direction,normal);
+  return scenery(aerial_perspective(surface_color(forest*detail.tint,in.direction,detail.normal,false,receiver,bare*detail.tint),in.direction,in.altitude));
  }
  var remaps=vec2<f32>(-1.0);
  if in.fog_enabled!=0u {remaps=ray_rows(in.distance,in.altitude);}
- let tex=filtered_tile(in.uv,grad,i32(in.layer),-1,in.light_row,remaps);
+ var tex=filtered_tile(in.uv,grad,i32(in.layer),-1,in.light_row,remaps);
+ if scene.canopy_detail.y>2.5 {tex=sample_tile(in.uv,i32(in.layer),base_row(),-1,-1,vec2<f32>(-1.0));}
  // Fitted bilinear coverage boundary; discarded water writes no depth.
  if tex.a<0.5 {discard;}
  if thermal_on() {
-  let bare=sample_tile(in.uv,i32(in.layer),base_row(),-1,-1,vec2<f32>(-1.0)).rgb;
+  var bare=sample_tile(in.uv,i32(in.layer),base_row(),-1,-1,vec2<f32>(-1.0)).rgb;
+  if in.own_color>0.5 {bare=seam_apply(bare,terrain_flat_response(world));}
+  bare=seam_apply(bare,terrain_seam_response(world));
   return scenery(thermal_grey(thermal_ground(bare,normal,in.direction,in.distance)));
  }
- var albedo=tex.rgb;
- if flares_burning() {albedo=sample_tile(in.uv,i32(in.layer),base_row(),-1,in.light_row,vec2<f32>(-1.0)).rgb;}
- return scenery(aerial_perspective(surface_color(tex.rgb,in.direction,normal,false,receiver,albedo),in.direction,in.altitude));
+ // One detail term for the shaded colour and the flare-lit albedo, so a
+ // dynamic light (flare, afterburner, fire, gun flash) only adds light.
+ let seam_response=terrain_seam_response(world);
+ if scene.canopy_detail.y>1.5 && scene.canopy_detail.y<2.5 {return vec4<f32>(vec3<f32>(seam_response.mask),1.0);}
+ var flat_response=SeamResponse(vec3<f32>(0.0),1.0,0.0);
+ if in.own_color>0.5 {flat_response=terrain_flat_response(world);}
+ if scene.canopy_detail.y>3.5 {return vec4<f32>(vec3<f32>(select(0.0,1.0,any(abs(flat_response.delta)>vec3<f32>(0.0000001)))),1.0);}
+ let field_color=seam_apply(seam_apply(tex.rgb,flat_response),seam_response);
+ if scene.canopy_detail.y>2.5 {return scenery(field_color);}
+ let detail=ground_detail(field_color,in.direction,normal);
+ var albedo=field_color;
+ if flares_burning() {albedo=seam_apply(seam_apply(sample_tile(in.uv,i32(in.layer),base_row(),-1,in.light_row,vec2<f32>(-1.0)).rgb,flat_response),seam_response);}
+ let forest=forest_canopy(field_color,in.direction,0);
+ albedo=forest_canopy(albedo,in.direction,base_row());
+ return scenery(aerial_perspective(surface_color(forest*detail.tint,in.direction,detail.normal,false,receiver,albedo*detail.tint),in.direction,in.altitude));
+}
+// Close-range ground detail (exploratory vegetation, 2026-10-16; desert and
+// band-limited rework in pass 2). Presentation only. Colours stay the
+// tile's own: the detail is a tint around 1 and a bent lighting normal.
+// Fine patterns run on world coordinates wrapped to DETAIL_Q (one tile), so
+// they keep their precision anywhere in a theater; every fine pattern
+// repeats exactly on that period, so the wrap never shows. Coarse fields
+// read the plain world position. Each pattern fades out before it is
+// smaller than a pixel. vegetation.rs mirrors detail_hash, detail_noise,
+// sand_sea and wadi to put objects on the same ground.
+const DETAIL_Q:f32=32768.0;
+const DETAIL_TAU:f32=6.2831853;
+struct Detail { tint:vec3<f32>, normal:vec3<f32> }
+fn detail_hash(c:vec2<i32>,salt:u32)->f32 {
+ var h=(bitcast<u32>(c.x)*0x8da6b343u)^(bitcast<u32>(c.y)*0xd8163841u)^(salt*0xcb1ab31fu);
+ h^=h>>15u;h*=0x2c1b3c6du;h^=h>>12u;h*=0x297a2d39u;h^=h>>15u;
+ return f32(h>>8u)/16777216.0;
+}
+// Smooth value noise in 0..1, `period` cells (a power of two) or 0.
+fn detail_noise(p:vec2<f32>,period:i32,salt:u32)->f32 {
+ let i=floor(p);let f=p-i;let u=f*f*(3.0-2.0*f);
+ let m=vec2<i32>(select(-1,period-1,period>0));
+ let c=vec2<i32>(i);
+ let a=detail_hash(c&m,salt);
+ let b=detail_hash((c+vec2<i32>(1,0))&m,salt);
+ let d=detail_hash((c+vec2<i32>(0,1))&m,salt);
+ let e=detail_hash((c+vec2<i32>(1,1))&m,salt);
+ return mix(mix(a,b,u.x),mix(d,e,u.x),u.y);
+}
+// Wrapped fine noise, `scale` feet per cell (a power of two up to DETAIL_Q).
+fn fine_noise(q:vec2<f32>,scale:f32,salt:u32)->f32 {
+ return detail_noise(q/scale,i32(DETAIL_Q/scale),salt);
+}
+// Feet of ground one pixel covers along the view at this point.
+fn detail_footprint(direction:vec3<f32>,dist:f32)->f32 {
+ let pixel=2.0/(max(scene.viewport.y,1.0)*1.7320508*max(scene.up.w,0.0001));
+ return dist*pixel/max(abs(direction.y)/max(dist,1.0),0.03);
+}
+// 1 while a feature of `size` feet spans several pixels, 0 before it aliases.
+fn detail_band(size:f32,footprint:f32)->f32 {
+ return 1.0-smoothstep(0.3*size,1.1*size,footprint);
+}
+// A wave of `wavelength` feet along `angle`, its lattice vector rounded so
+// the wave repeats exactly on DETAIL_Q. Phase in cycles.
+fn detail_wave(q:vec2<f32>,angle:f32,wavelength:f32)->f32 {
+ let m=round(vec2<f32>(cos(angle),sin(angle))*DETAIL_Q/wavelength);
+ return dot(q,m)/DETAIL_Q;
+}
+fn detail_lattice(angle:f32,wavelength:f32)->vec2<f32> {
+ return round(vec2<f32>(cos(angle),sin(angle))*DETAIL_Q/wavelength)/DETAIL_Q;
+}
+// 0..1: how much a point lies in a sand sea, before the tile's colour says
+// whether it is sand at all. Fields a few nautical miles across.
+fn sand_sea(w:vec2<f32>)->f32 {
+ let n=detail_noise(w/36000.0,0,11u)*0.7+detail_noise(w/9000.0,0,12u)*0.3;
+ return smoothstep(0.42,0.60,n);
+}
+// 0..1: a dry wadi bed, contours of a warped noise field, about 150 ft
+// wide, meandering a few thousand feet apart.
+fn wadi(w:vec2<f32>,widen:f32)->f32 {
+ let warp=vec2<f32>(detail_noise(w/5200.0,0,13u),detail_noise(w/5200.0,0,14u))-vec2<f32>(0.5);
+ let n=detail_noise(w/14000.0+warp*0.9,0,15u)-0.5;
+ let width=(0.008+0.006*detail_noise(w/3000.0,0,16u))*widen;
+ return 1.0-smoothstep(width*0.45,width,abs(n));
+}
+// Transverse dune profile at phase t: a flat corridor, a long convex
+// windward rise, a sharp crest and a steep slip face. Height share and its
+// rate per cycle.
+fn dune_profile(t:f32)->vec2<f32> {
+ let flat=0.22;let crest=0.86;
+ if t<flat {return vec2<f32>(0.0);}
+ if t<crest {
+  let s=(t-flat)/(crest-flat);
+  return vec2<f32>(1.0-(1.0-s)*(1.0-s),2.0*(1.0-s)/(crest-flat));
+ }
+ let r=(t-crest)/(1.0-crest);
+ return vec2<f32>(1.0-r,-1.0/(1.0-crest));
+}
+// Ripple profile: windward rise, short lee drop. Height share and rate.
+fn ripple_profile(t:f32)->vec2<f32> {
+ if t<0.74 {return vec2<f32>(t/0.74,1.0/0.74);}
+ return vec2<f32>((1.0-t)/0.26,-1.0/0.26);
+}
+// Height in feet of the barchan field: at most one crescent per 1,600 ft
+// cell, horns trailing downwind. A rounded windward body, cut on its lee
+// by a bowl whose rim is the crest and whose side is the slip face.
+fn barchan(w:vec2<f32>,along:vec2<f32>,across:vec2<f32>)->f32 {
+ let cell=1600.0;
+ let p=vec2<f32>(dot(w,along),dot(w,across))/cell;
+ let c=floor(p);let ci=vec2<i32>(c);
+ if detail_hash(ci,70u)<0.3 {return 0.0;}
+ let size=0.14+0.14*detail_hash(ci,71u);
+ let room=0.5-1.45*size;
+ let centre=c+vec2<f32>(0.5)+(vec2<f32>(detail_hash(ci,72u),detail_hash(ci,73u))-vec2<f32>(0.5))*2.0*room;
+ let l=(p-centre)/size;
+ let x=select(l.x,l.x/1.5,l.x>0.0);
+ let r=sqrt(x*x+l.y*l.y);
+ if r>=1.0 {return 0.0;}
+ let body=1.0-smoothstep(0.0,1.0,r);
+ let d=length(l-vec2<f32>(0.6,0.0));
+ let fall=clamp(1.0-(0.7-d)/0.22,0.0,1.0);
+ let height=size*cell*(0.16+0.06*detail_hash(ci,74u));
+ return height*body*fall;
+}
+// The distance is the interpolated offset's length: the vertices' own
+// distance, interpolated across a terrain triangle thousands of feet wide,
+// reads far too long near the camera.
+fn ground_detail(color:vec3<f32>,direction:vec3<f32>,normal:vec3<f32>)->Detail {
+ var out=Detail(vec3<f32>(1.0),normal);
+ let dist=length(direction);
+ let mode=scene.veg.x;
+ let reach=scene.veg.y;
+ if mode<0.5 || reach<1.0 {return out;}
+ let alt=scene.eye.y;
+ // Near patterns follow the Graphics distance; the coarse colour fields
+ // and dune relief reach farther and fade slowly, and average out to the
+ // tile's colour, so their edge never shows as a ring.
+ let near=(1.0-smoothstep(reach*0.45,reach,dist))*(1.0-smoothstep(2200.0,7500.0,alt));
+ let far=(1.0-smoothstep(reach*2.0,reach*6.0,dist))*(1.0-smoothstep(9000.0,26000.0,alt));
+ if far<0.01 {return out;}
+ let fine=mode>1.5;
+ let w=scene.origin.xz+scene.local_eye.xz+direction.xz;
+ let q=scene.origin.xz-floor(scene.origin.xz/DETAIL_Q)*DETAIL_Q+scene.local_eye.xz+direction.xz;
+ let foot=detail_footprint(direction,dist);
+ let luma=dot(color,vec3<f32>(0.299,0.587,0.114));
+ let sat=max(color.r,max(color.g,color.b))-min(color.r,min(color.g,color.b));
+ let slope=length(normal.xz);
+ let climate=scene.veg.w;
+ var tint=vec3<f32>(1.0);
+ var bend=vec2<f32>(0.0);
+ // Ratios of linear colour: sand is red over blue, with green well under red.
+ let warm=smoothstep(1.25,1.7,color.r/max(color.b,0.0001))*smoothstep(0.26,0.38,color.g/max(color.r,0.0001));
+ let green=smoothstep(1.02,1.22,color.g/max(color.r,0.0001));
+ let grey=1.0-smoothstep(0.03,0.09,sat/max(luma,0.02)*0.25);
+ if climate>0.5 && climate<1.5 {
+  // Desert. Sand is the warm, not green colours; greens are oases and
+  // the river's fields, greys rock or town.
+  let sand=warm*(1.0-green)*(1.0-grey*0.7);
+  let stony=clamp(max(smoothstep(0.05,0.18,slope),grey*0.8)+(1.0-smoothstep(0.10,0.22,luma))*0.5,0.0,1.0);
+  let sea=sand_sea(w)*sand*(1.0-stony);
+  let gravel=(1.0-sea)*sand*smoothstep(0.35,0.7,detail_noise(w/7000.0,0,20u));
+  // Coarse colour, miles across: ochre, red and pale sands, grey serir.
+  let n1=detail_noise(w/11000.0,0,30u);let n2=detail_noise(w/4200.0,0,31u);let n3=detail_noise(w/26000.0,0,32u);
+  var coarse=vec3<f32>(1.0);
+  coarse*=mix(vec3<f32>(1.0),vec3<f32>(1.16,0.94,0.74),smoothstep(0.42,0.75,n3));
+  coarse*=mix(vec3<f32>(1.0),vec3<f32>(1.22,0.86,0.68),smoothstep(0.50,0.80,n1));
+  coarse*=mix(vec3<f32>(1.0),vec3<f32>(1.12,1.10,1.06),smoothstep(0.52,0.82,n2)*(1.0-gravel));
+  coarse=mix(coarse,coarse*vec3<f32>(0.80,0.77,0.74),gravel*0.85);
+  // Desert varnish: dark brown patina on stony ground.
+  let varnish=stony*smoothstep(0.40,0.72,detail_noise(w/1800.0,0,21u));
+  coarse=mix(coarse,coarse*vec3<f32>(0.58,0.48,0.42),varnish*0.8);
+  // Wadis: a pale silt bed, darker banks.
+  let bed=wadi(w,1.0);let bank=max(wadi(w,2.6)-bed,0.0);
+  coarse=mix(coarse,vec3<f32>(1.12,1.10,1.06),bed*0.75);
+  coarse=mix(coarse,vec3<f32>(0.78,0.75,0.70),bank*0.5);
+  tint=mix(vec3<f32>(1.0),coarse,far);
+  let wind=0.65;
+  let along=vec2<f32>(cos(wind),sin(wind));
+  let across=vec2<f32>(-along.y,along.x);
+  // Wind streaks: long pale and dark bands along the wind on open sand.
+  let streak=detail_noise(vec2<f32>(dot(w,along)/1400.0,dot(w,across)/110.0),0,33u)-0.5;
+  tint*=vec3<f32>(1.0+streak*0.10*sand*(1.0-stony)*far*detail_band(220.0,foot));
+  // Dunes, as relief on the lighting plus a little form shading, so they
+  // read under a high sun: transverse ridges in the sand seas, barchan
+  // crescents on their edges.
+  var slip=0.0;
+  var crest=0.0;
+  let dune_w=far*detail_band(160.0,foot);
+  if sea>0.01 && dune_w>0.01 {
+   let seg=smoothstep(0.25,0.7,detail_noise(vec2<f32>(dot(w,along)/900.0,dot(w,across)/2600.0),0,22u));
+   let shift=along*(detail_noise(w/2600.0,0,23u)-0.5)*900.0;
+   let k1=detail_lattice(wind,1150.0);
+   let p1=dune_profile(fract(dot(q+shift,k1)));
+   let core=smoothstep(0.35,0.8,sea);
+   let a1=80.0*core*(0.35+0.65*seg);
+   let k2=detail_lattice(wind+0.55,1750.0);
+   let p2=dune_profile(fract(dot(q+shift*0.7,k2)));
+   let a2=46.0*core*(0.4+0.6*(1.0-seg));
+   var g=k1*a1*p1.y;var h=p1.x*a1;var lee=p1.y<0.0;
+   if p2.x*a2>h {g=k2*a2*p2.y;h=p2.x*a2;lee=p2.y<0.0;}
+   bend-=g*dune_w;
+   crest=max(crest,h/80.0);
+   slip=max(slip,select(0.0,1.0,lee)*min(h/25.0,1.0));
+  }
+  let fringe=sand*(1.0-stony)*smoothstep(0.02,0.25,sand_sea(w))*(1.0-smoothstep(0.6,0.9,sea));
+  if fringe>0.01 && dune_w>0.01 {
+   let e=6.0;
+   let h0=barchan(w,along,across);
+   let hx=barchan(w+vec2<f32>(e,0.0),along,across);
+   let hz=barchan(w+vec2<f32>(0.0,e),along,across);
+   let g=vec2<f32>(hx-h0,hz-h0)/e;
+   bend-=g*fringe*dune_w;
+   crest=max(crest,h0/70.0*fringe);
+   // The slip face is the steep side facing downwind.
+   slip=max(slip,smoothstep(0.25,0.5,-dot(g,along))*min(h0/12.0,1.0)*fringe);
+  }
+  // Interdune corridors show darker gravel; crests are clean and pale.
+  let form=mix(vec3<f32>(0.92,0.89,0.86),vec3<f32>(1.05,1.03,1.0),smoothstep(0.0,0.9,crest));
+  tint*=mix(vec3<f32>(1.0),form,max(sea,fringe)*dune_w);
+  tint*=mix(vec3<f32>(1.0),vec3<f32>(1.03,0.96,0.88),slip*dune_w*0.8);
+  if near>0.01 {
+   // Ripples on sand sheets and windward flanks, never a carpet over a
+   // whole dune field, and never on a slip face. Three wind directions,
+   // spacing 20 to 40 ft, soft enough that the dune's own light still
+   // reads. Crests are slightly paler than the troughs.
+   let sheet=smoothstep(0.5,0.85,detail_noise(w/2600.0,0,24u))*sand*(1.0-gravel)*(1.0-stony);
+   let flank=max(sea,fringe)*(1.0-slip)*smoothstep(0.2,0.6,detail_noise(w/2200.0,0,29u));
+   let strength=max(sheet,flank)*0.45;
+   if strength>0.01 {
+    let shift=vec2<f32>(detail_noise(w/700.0,0,25u),detail_noise(w/700.0,0,26u))*40.0;
+    let wa=detail_noise(w/5000.0,0,27u);let wb=detail_noise(w/5000.0,0,28u);
+    let weights=vec3<f32>(wa,1.0-wa,wb)*vec3<f32>(1.0,1.0,0.8);
+    let angles=vec3<f32>(wind-0.4,wind+0.05,wind+0.45);
+    let lengths=vec3<f32>(24.0,31.0,40.0);
+    var rg=vec2<f32>(0.0);var shade=0.0;var total=0.0;
+    for(var i=0;i<3;i++){
+     let k=detail_lattice(angles[i],lengths[i]);
+     let p=ripple_profile(fract(dot(q+shift,k)));
+     let band=detail_band(lengths[i],foot);
+     rg+=k*p.y*0.035*lengths[i]*weights[i]*band;
+     shade+=(p.x-0.5)*weights[i]*band;
+     total+=weights[i];
+    }
+    if fine {
+     let k=detail_lattice(wind+0.2,9.0);
+     let p=ripple_profile(fract(dot(q+shift,k)));
+     let band=detail_band(9.0,foot);
+     rg+=k*p.y*0.06*9.0*band*0.6;
+     shade+=(p.x-0.5)*0.4*band;
+    }
+    let s=strength*near/max(total,0.5);
+    bend-=rg*s;
+    tint*=vec3<f32>(1.0+shade*0.06*s);
+   }
+   // Grit: soft grains, never blocks, and pebbles on gravel and stony ground.
+   var grain=(fine_noise(q,4.0,40u)-0.5)*0.14*detail_band(4.0,foot)
+       +(fine_noise(q,1.0,41u)-0.5)*0.16*detail_band(1.0,foot);
+   if fine {grain+=(fine_noise(q,0.5,42u)-0.5)*0.12*detail_band(0.5,foot);}
+   let stones=(fine_noise(q,2.0,43u)-0.5)*0.34*detail_band(2.0,foot)
+       +(fine_noise(q,8.0,44u)-0.5)*0.18*detail_band(8.0,foot);
+   let rough=max(gravel,stony*0.8);
+   grain+=stones*rough;
+   // Pebbles: sparse dark and pale stones about a foot across, one 2 ft
+   // cell each.
+   let cell=vec2<i32>(floor(q/2.0))&vec2<i32>(i32(DETAIL_Q/2.0)-1);
+   let roll=detail_hash(cell,45u);
+   let at=vec2<f32>(detail_hash(cell,46u),detail_hash(cell,47u))*0.4+vec2<f32>(0.3);
+   let spot=length(fract(q/2.0)-at)*2.0;
+   let pebble=(1.0-smoothstep(0.12+0.2*detail_hash(cell,48u),0.3+0.2*detail_hash(cell,48u),spot))*step(1.0-(0.02+0.3*rough),roll)*detail_band(1.0,foot);
+   grain-=pebble*select(0.22,-0.14,roll>0.995-0.05*rough);
+   tint*=vec3<f32>(1.0+grain*near);
+  }
+ } else {
+  // Temperate, tropical and arctic ground.
+  let field=smoothstep(0.80,0.95,color.r/max(color.g,0.0001))*smoothstep(1.25,1.6,color.r/max(color.b,0.0001));
+  let wood=(1.0-field)*green*(1.0-smoothstep(0.08,0.15,luma));
+  let grass=(1.0-field)*(1.0-wood)*green;
+  let rock=(1.0-green)*(1.0-field)*grey;
+  let n1=detail_noise(w/9000.0,0,50u);let n2=detail_noise(w/3200.0,0,51u);
+  var coarse=vec3<f32>(1.0);
+  coarse*=mix(vec3<f32>(1.0),vec3<f32>(1.06,1.03,0.86),smoothstep(0.55,0.85,n1)*(grass+field));
+  coarse*=mix(vec3<f32>(1.0),vec3<f32>(0.88,0.94,0.88),smoothstep(0.55,0.85,n2)*(grass+wood));
+  // Fields: a patchwork of plots, each its own crop shade.
+  let plot=vec2<i32>(floor(w/1024.0));
+  let plot_edge=min(min(fract(w.x/1024.0),1.0-fract(w.x/1024.0)),min(fract(w.y/1024.0),1.0-fract(w.y/1024.0)));
+  let plot_blend=smoothstep(0.0,0.035,plot_edge);
+  let crop=mix(detail_noise(w/1024.0,0,52u),detail_hash(plot,52u),plot_blend);
+  coarse*=mix(vec3<f32>(1.0),vec3<f32>(0.9+0.2*crop,0.92+0.14*mix(detail_noise(w/1024.0,0,53u),detail_hash(plot,53u),plot_blend),0.9+0.1*crop),field);
+  tint=mix(vec3<f32>(1.0),coarse,far);
+  if near>0.01 {
+   var v=0.0;
+   v+=((fine_noise(q,16.0,54u)-0.5)*0.16+(fine_noise(q,4.0,55u)-0.5)*0.12*detail_band(4.0,foot)
+      +(fine_noise(q,1.0,56u)-0.5)*0.08*detail_band(1.0,foot))*grass;
+   v+=((fine_noise(q,32.0,57u)-0.5)*0.22+(fine_noise(q,8.0,58u)-0.5)*0.26*detail_band(8.0,foot))*wood;
+   // Furrows run one of four ways per plot.
+   let way=f32(u32(crop*4.0))*0.785398;
+   let furrow=sin(DETAIL_TAU*dot(q,detail_lattice(way,12.0)));
+   v+=(furrow*plot_blend*0.10*detail_band(12.0,foot)+(fine_noise(q,2.0,59u)-0.5)*0.08*detail_band(2.0,foot))*field;
+   v+=((fine_noise(q,8.0,60u)-0.5)*0.22+(fine_noise(q,2.0,61u)-0.5)*0.14*detail_band(2.0,foot))*rock;
+   if fine {v+=(fine_noise(q,0.5,62u)-0.5)*0.06*detail_band(0.5,foot)*(grass+field);}
+   if climate>1.5 && climate<2.5 {v*=0.5;}
+   tint*=vec3<f32>(1.0+v*near);
+  }
+ }
+ if dot(bend,bend)>0.0 {
+  out.normal=normalize(normal+vec3<f32>(bend.x,0.0,bend.y));
+ }
+ out.tint=tint;
+ return out;
 }
 // User-requested material. Pink is a mask; metal pixels retain their source RGB.
 fn engine_texel(at:vec2<i32>,heat:f32)->vec3<f32> {
@@ -607,6 +1016,303 @@ fn tracer_night()->f32 {
 }
 @fragment fn fill_decal_fade_fragment(in:VertexOut)->FillOut{
  return FillOut(airport_color(in),fill_coverage(in.clip.xy,in.terrain_normal.x,in.terrain_normal.y));
+}
+// Vegetation objects (vegetation_renderer.rs). A mesh is normalised to a
+// height of 1; `turn` holds the yaw's cosine and sine, the height in feet
+// and the fade, `shape` the width, the ground rise east and north and the
+// look (0 foliage, 1 solid, 3 recoloured retail rock). Solid objects lean
+// with the ground; trees stand upright.
+struct VegOut {
+ @builtin(position) @invariant clip:vec4<f32>, @location(0) uv:vec2<f32>, @location(1) @interpolate(flat) layer:f32,
+ @location(2) color:vec3<f32>, @location(3) albedo:vec3<f32>, @location(4) direction:vec3<f32>,
+ @location(5) normal:vec3<f32>, @location(6) @interpolate(flat) fade:vec2<f32>, @location(7) @interpolate(flat) look:f32,
+ @location(8) @interpolate(flat) mean:vec3<f32>, @location(9) height:f32, @location(10) altitude:f32,
+ @location(11) @interpolate(flat) fog_enabled:u32,
+ @location(12) @interpolate(flat) overhead:u32
+}
+// Foliage and rock share distance coverage without changing their size.
+fn veg_turn(turn:vec4<f32>,shape:vec4<f32>)->vec4<f32> {
+ // All kinds use the same per-instance coverage fade, including rocks.
+ return turn;
+}
+fn veg_rotate(local:vec2<f32>,turn:vec2<f32>)->vec2<f32> {
+ return vec2<f32>(local.x*turn.x+local.y*turn.y,local.y*turn.x-local.x*turn.y);
+}
+fn veg_place(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,shape:vec4<f32>)->vec3<f32> {
+ let local=vec3<f32>(position.x*turn.z*shape.x,position.y*turn.z,position.z*turn.z*shape.x);
+ let flat=veg_rotate(local.xz,turn.xy);
+ let lean=select(0.0,1.0,shape.w>0.5);
+ return place.xyz+vec3<f32>(flat.x,local.y+lean*dot(flat,shape.yz),flat.y);
+}
+@vertex fn veg_vertex(@builtin(vertex_index) vertex:u32,@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(3) normal:vec3<f32>,@location(4) part:f32,@location(5) place:vec4<f32>,@location(6) spin:vec4<f32>,@location(7) shape:vec4<f32>,@location(8) tint:vec4<f32>,@location(9) mean:vec4<f32>,@location(10) top:vec4<f32>)->VegOut {
+ let turn=veg_turn(spin,shape);
+ // Stable seeded crosses, optional horizontal canopy, or a facing card.
+ let mode=u32(scene.veg.z);
+ let card=vertex/6u;
+ let overhead=(mode==2u && card==2u)||(mode==3u && card==1u);
+ let facing=scene.local_eye.xz-place.xz;
+ var right=normalize(vec2<f32>(facing.y,-facing.x)+vec2<f32>(0.00001,0.0));
+ if mode==1u || mode==2u {
+  right=veg_rotate(vec2<f32>(1.0,0.0),spin.xy);
+  if card==1u {right=veg_rotate(vec2<f32>(0.0,-1.0),spin.xy);}
+ }
+ var offset=right*position.x*turn.z*shape.x*tint.w;
+ var p=place.xyz+vec3<f32>(offset.x,position.y*turn.z,offset.y);
+ let azimuth=atan2(facing.x,facing.y)-atan2(spin.y,spin.x);
+ var view=u32(floor(azimuth/1.570796327+0.5)+8.0)%4u;
+ if mode==1u || mode==2u {view=card%2u;}
+ var code=mean.w;
+ var coverage=turn.w;
+ let crown=place.xyz+vec3<f32>(0.0,turn.z*top.y,0.0);
+ let ray=scene.local_eye.xyz-crown;
+ let has_top=all(top.zw>vec2<f32>(0.0));
+ let top_share=select(0.0,smoothstep(0.57357644,0.90630779,ray.y/max(length(ray),0.0001)),has_top);
+ if mode==2u || mode==3u { coverage*=select(1.0-top_share,top_share,overhead); }
+ if overhead {
+  code=top.x; view=0u;
+  // The crown sits inside the upright silhouette, relative to its grounded base.
+  // Opaque side-crown extents, with the same seeded height/width as the side.
+  // Coverage and canopy height do not change this world size.
+  let local=vec2<f32>(position.x,position.y*2.0-1.0)*turn.z*shape.x*top.zw;
+  offset=veg_rotate(local,spin.xy);
+  p=crown+vec3<f32>(offset.x,0.0,offset.y);
+ }
+ var sprite=code+f32(view);
+ var sprite_uv=uv;
+ if code<0.0 {
+  let packed=u32(-code-1.0);
+  sprite=f32(packed/4u);
+  let cell=packed%4u;
+  sprite_uv=(vec2<f32>(f32(cell%2u),f32(cell/2u))*128.0+vec2<f32>(2.5)+uv*123.0)/256.0;
+ }
+ let rel=p-scene.local_eye.xyz;
+ let base=placed_vertex(p+scene.origin.xyz,rel,sprite_uv,sprite,vec3<f32>(1.0),select(-1.0,part,part>=0.0));
+ var out:VegOut;
+ out.clip=base.clip;
+ // A fully hidden card is degenerate in both passes, avoiding all cutout
+ // texture and lighting work during the side/top angular hand-off.
+ if coverage<=0.0 {out.clip=vec4<f32>(0.0,0.0,0.0,1.0);}
+ out.uv=sprite_uv;out.layer=sprite;out.direction=rel;out.altitude=base.altitude;
+ out.fog_enabled=base.fog_enabled;out.overhead=select(0u,1u,overhead);
+ let n=vec3<f32>(normal.x*turn.x+normal.z*turn.y,normal.y,normal.z*turn.x-normal.x*turn.y);
+ out.normal=normalize(vec3<f32>(n.x,n.y*max(shape.x,0.2),n.z));
+ // A baked rock card has no useful face normal. Light it with its ground
+ // slope, not the arbitrary vertical shared quad normal.
+ if shape.w>0.5 {out.normal=normalize(vec3<f32>(-shape.y,1.0,-shape.z));}
+ if overhead {out.normal=vec3<f32>(0.0,1.0,0.0);}
+ out.fade=vec2<f32>(coverage,place.w);out.look=shape.w;out.mean=mean.xyz;out.height=select(position.y,1.0,overhead);
+ // Untextured colour: a retail face's palette colour, or a drawn part.
+ out.color=base.color;out.albedo=base.albedo;
+ if part<0.0 {
+  var c=tint.xyz;
+  if part>-1.5 {c=vec3<f32>(0.036,0.10,0.024)*tint.xyz;}
+  else if part>-2.5 {c=vec3<f32>(0.075,0.052,0.034)*(0.6+0.4*tint.y/max(tint.y,0.0001));}
+  out.color=c;out.albedo=c;
+ } else if layer<0.0 {
+  out.color=base.color*tint.xyz;out.albedo=base.albedo*tint.xyz;
+ } else {
+  out.color=tint.xyz;out.albedo=tint.xyz;
+ }
+ return out;
+}
+// Sun visibility for vegetation: one bilinear shadow tap instead of the
+// terrain's soft search, which would be too costly for overlapping cards.
+fn veg_visibility(relative:vec3<f32>)->f32 {
+ if surface.origin.w<=0.0 {return 1.0;}
+ for(var cascade=0;cascade<3;cascade++) {
+  let m=surface.maps[cascade];
+  let p=shadow_project(relative+surface.sun.xyz*m.scale.x*1.5,cascade);
+  if max(abs(p.x),abs(p.y))<0.98 && p.z>0.0 && p.z<1.0 {
+   let uv=p.xy*vec2<f32>(0.5,-0.5)+vec2<f32>(0.5);
+   return 1.0-shadow_tap(uv,p.z,vec2<f32>(0.0),cascade).x;
+  }
+ }
+ return 1.0;
+}
+// Light on vegetation. Foliage takes its light mostly from above and
+// wraps around, so a leaf card edge-on to the sun is not black; `occlusion`
+// darkens the inside and the foot of a crown.
+fn veg_light(color:vec3<f32>,albedo:vec3<f32>,relative:vec3<f32>,normal:vec3<f32>,foliage:bool,occlusion:f32)->vec3<f32> {
+ if thermal_on() {return thermal_grey(thermal_ground(albedo,normal,relative,length(relative)));}
+ if surface.sun.w<=0.0 {return color;}
+ var n=normal;
+ if dot(n,relative)>0.0 {n=-n;}
+ // Rock is lit as the ground it stands on is.
+ if !foliage {return surface_color(color,relative,n,false,n,albedo);}
+ var facing=max(dot(n,surface.sun.xyz),0.0);
+ if foliage {
+  n=normalize(mix(n,vec3<f32>(0.0,1.0,0.0),0.55));
+  facing=clamp((dot(n,surface.sun.xyz)+0.4)/1.4,0.0,1.0);
+ }
+ let day=smoothstep(-0.104528,0.0348995,surface.reserved.y);
+ let visibility=veg_visibility(relative)*sunlight_transmission(surface.origin.y+relative.y)*surface.reserved.x;
+ let tint=mix(vec3<f32>(1.0),solar_tint(surface.reserved.y),0.65);
+ let skyward=clamp(n.y*0.5+0.5,0.0,1.0);
+ let ambient=mix(vec3<f32>(0.12,0.14,0.18),vec3<f32>(0.28,0.32,0.39),skyward);
+ let night=vec3<f32>(mix(0.20,0.32,skyward)+0.30*max(dot(n,surface.moon.xyz),0.0));
+ let illumination=mix(night,ambient,day)*occlusion+0.90*facing*visibility*tint*mix(1.0,occlusion,0.5);
+ let lit=color*illumination+albedo*flare_light(relative,n);
+ return mix(color,lit,1.0-clamp(haze(length(relative)),0.0,1.0));
+}
+// Match colour-pass coverage exactly, including multisample cutouts and fade.
+// Palette shading cannot alter alpha, so this skips both palette and lighting.
+fn veg_alpha(uv:vec2<f32>,layer:i32)->f32 {
+ let size=vec2<i32>(tile_size());
+ let p=uv*vec2<f32>(size)-vec2<f32>(0.5);
+ let base=floor(p);
+ let f=p-base;
+ var alpha=0.0;
+ for(var j=0;j<2;j++){
+  for(var i=0;i<2;i++){
+   let at=clamp(vec2<i32>(base)+vec2<i32>(i,j),vec2<i32>(0),size-vec2<i32>(1));
+   let a=select(1.0,0.0,read_tile(at,layer)==255u);
+   let w=select(1.0-f.x,f.x,i==1)*select(1.0-f.y,f.y,j==1);
+   alpha+=a*w;
+  }
+ }
+ return alpha;
+}
+// Side and top occupy complementary samples, not just complementary alpha
+// fractions. At full distance opacity their overlapping interiors cover every
+// sample exactly once, including halfway through the angular hand-off.
+fn veg_coverage(in:VegOut,alpha:f32)->u32 {
+ if in.overhead!=0u {return ~fill_coverage(in.clip.xy,1.0-alpha,in.fade.y);}
+ return fill_coverage(in.clip.xy,alpha,in.fade.y);
+}
+@fragment fn veg_depth(in:VegOut)->FillOut {
+ var alpha=in.fade.x;
+ if in.layer>=0.0 {
+  let a=veg_alpha(in.uv,i32(in.layer));
+  alpha*=clamp((a-0.5)/max(fwidth(a),0.0001)+0.5,0.0,1.0);
+ }
+ let mask=veg_coverage(in,alpha);
+ if mask==0u {discard;}
+ return FillOut(vec4<f32>(0.0),mask);
+}
+@fragment fn veg_fragment(in:VegOut)->FillOut {
+ var color=in.color;
+ var albedo=in.albedo;
+ var alpha=in.fade.x;
+ if in.layer>=0.0 {
+  var remaps=vec2<f32>(-1.0);
+  if in.fog_enabled!=0u {remaps=ray_rows(length(in.direction),in.altitude);}
+  let tex=sample_tile(in.uv,i32(in.layer),0,-1,-1,remaps);
+  // Cut-out edges resolve through the sample mask, not a hard step.
+  let edge=clamp((tex.a-0.5)/max(fwidth(tex.a),0.0001)+0.5,0.0,1.0);
+  alpha*=edge;
+  var base=tex.rgb;
+  var bare=base;
+  if flares_burning() || thermal_on() {bare=sample_tile(in.uv,i32(in.layer),base_row(),-1,-1,vec2<f32>(-1.0)).rgb;}
+  if in.look>2.5 {
+   // Retail rock in the local ground's colour, keeping its shading.
+   let k=dot(base,vec3<f32>(0.2126,0.7152,0.0722))/max(dot(in.mean,vec3<f32>(0.2126,0.7152,0.0722)),0.0001);
+   base=in.color*k;bare=in.albedo*k;
+  } else {
+   base*=in.color;bare*=in.albedo;
+  }
+  color=base;albedo=bare;
+ }
+ let mask=veg_coverage(in,alpha);
+ if mask==0u {discard;}
+ let foliage=in.look<0.5;
+ let occlusion=select(1.0,mix(0.55,1.0,clamp(in.height*1.2,0.0,1.0)),foliage);
+ var lit=veg_light(color,albedo,in.direction,in.normal,foliage,occlusion);
+ if thermal_on() {return FillOut(vec4<f32>(lit,1.0),mask);}
+ if in.fog_enabled!=0u {lit=aerial_perspective(lit,in.direction,in.altitude);}
+ else {lit=cloud_occlusion(lit,in.direction,in.altitude);}
+ return FillOut(scenery(lit),mask);
+}
+fn veg_shadow(position:vec3<f32>,uv:vec2<f32>,layer:f32,place:vec4<f32>,turn:vec4<f32>,shape:vec4<f32>,cascade:u32)->ShadowOut {
+ return shadow_out(veg_place(position,place,veg_turn(turn,shape),shape)-scene.local_eye.xyz,uv,layer,cascade);
+}
+@vertex fn veg_shadow_vertex0(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(5) place:vec4<f32>,@location(6) turn:vec4<f32>,@location(7) shape:vec4<f32>)->ShadowOut {return veg_shadow(position,uv,layer,place,turn,shape,0u);}
+@vertex fn veg_shadow_vertex1(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(5) place:vec4<f32>,@location(6) turn:vec4<f32>,@location(7) shape:vec4<f32>)->ShadowOut {return veg_shadow(position,uv,layer,place,turn,shape,1u);}
+@vertex fn veg_shadow_vertex2(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(5) place:vec4<f32>,@location(6) turn:vec4<f32>,@location(7) shape:vec4<f32>)->ShadowOut {return veg_shadow(position,uv,layer,place,turn,shape,2u);}
+// Grass (vegetation_renderer.rs): one quad per tuft, its blades drawn
+// here. A patch is 32 ft square: `a` its centre relative to the render
+// origin and its cover, `b` the ground rise east and north, the style and
+// the blade height, `c` the ground colour and a hash, `d` the tufts in
+// this ring, the tufts at full detail and the grass radius. Tufts sit on
+// an R2 sequence, so any prefix spreads evenly: farther rings draw fewer,
+// wider tufts and the count still covers the patch.
+struct GrassOut {
+ @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>, @location(1) color:vec3<f32>,
+ @location(2) direction:vec3<f32>, @location(3) @interpolate(flat) fade:vec2<f32>,
+ @location(4) @interpolate(flat) style:vec2<f32>, @location(5) altitude:f32
+}
+@vertex fn grass_vertex(@builtin(vertex_index) vertex:u32,@location(5) a:vec4<f32>,@location(6) b:vec4<f32>,@location(7) c:vec4<f32>,@location(8) d:vec4<f32>)->GrassOut {
+ var out:GrassOut;
+ let tuft=vertex/6u;
+ let corner=array<vec2<f32>,6>(vec2<f32>(0.0,0.0),vec2<f32>(1.0,0.0),vec2<f32>(1.0,1.0),vec2<f32>(0.0,0.0),vec2<f32>(1.0,1.0),vec2<f32>(0.0,1.0))[vertex%6u];
+ let seed=u32(c.w*65535.0)*977u+tuft*7919u;
+ let h0=f32((seed*0x9e3779b1u)>>8u)/16777216.0;
+ let h1=f32(((seed^0x5bd1e995u)*0x85ebca6bu)>>8u)/16777216.0;
+ let h2=f32(((seed+0x68e31da4u)*0xc2b2ae35u)>>8u)/16777216.0;
+ // Cover thins a patch by dropping tufts.
+ if h2>a.w {out.clip=vec4<f32>(0.0,0.0,-1.0,1.0);return out;}
+ let fi=f32(tuft)+c.w*97.0;
+ let jitter=vec2<f32>(fract(0.5+fi*0.7548776662),fract(0.5+fi*0.5698402910))-vec2<f32>(0.5);
+ let along=(jitter+(vec2<f32>(h0,h1)-vec2<f32>(0.5))*0.06)*32.0;
+ let base=vec3<f32>(a.x+along.x,a.y+dot(along,b.xy),a.z+along.y);
+ let dist=length(base-scene.local_eye.xyz);
+ let radius=d.z;
+ // Fewer tufts farther out are widened to keep the cover; the outer part
+ // of the radius shrinks them into the ground.
+ let widen=clamp(sqrt(d.y/max(d.x,1.0)),1.0,2.6);
+ let shrink=1.0-smoothstep(radius*0.7,radius,dist);
+ if shrink<=0.0 {out.clip=vec4<f32>(0.0,0.0,-1.0,1.0);return out;}
+ let yaw=h0*6.2831853;
+ let side=vec3<f32>(cos(yaw),0.0,sin(yaw));
+ let width=2.4*widen*(0.8+0.4*h1);
+ let height=b.w*(0.75+0.5*h2)*mix(0.35,1.0,shrink);
+ // Lean with a fixed breeze, more at the tip.
+ let lean=vec3<f32>(0.35,0.0,0.2)*height*corner.y*corner.y;
+ let p=base+side*(corner.x-0.5)*width+vec3<f32>(0.0,corner.y*height,0.0)+lean;
+ let rel=p-scene.local_eye.xyz;
+ let placed=placed_vertex(p+scene.origin.xyz,rel,vec2<f32>(0.0),-1.0,vec3<f32>(1.0),-1.0);
+ out.clip=placed.clip;
+ out.uv=corner;
+ out.direction=rel;
+ out.altitude=placed.altitude;
+ out.fade=vec2<f32>(shrink,h1);
+ out.style=vec2<f32>(b.z,f32(seed%1024u)/1024.0);
+ out.color=c.xyz;
+ return out;
+}
+@fragment fn grass_fragment(in:GrassOut)->FillOut {
+ // Five tapered blades per tuft, each its own lean and height.
+ let u=in.uv.x;let v=in.uv.y;
+ var cover=0.0;var shade=0.0;
+ let px=max(fwidth(u),0.0001);
+ for(var i=0u;i<5u;i++){
+  let h=fract(in.style.y*7.31+f32(i)*0.618034);
+  let k=fract(in.style.y*3.17+f32(i)*0.414214);
+  let top=0.55+0.45*h;
+  if v>top {continue;}
+  let x=(f32(i)+0.5)/5.0+(k-0.5)*0.12+(h-0.5)*0.45*v;
+  let half=0.055*(1.0-v/top)+0.004;
+  let c=clamp((half-abs(u-x))/px+0.5,0.0,1.0);
+  if c>cover {cover=c;shade=h;}
+ }
+ let mask=fill_coverage(in.clip.xy,cover*in.fade.x,in.fade.y);
+ if mask==0u {discard;}
+ let style=in.style.x;
+ var color=in.color;
+ // Darker at the root, lighter at the tip, each blade its own shade.
+ color*=mix(0.55,1.25,v)*(0.82+0.3*shade);
+ if style>0.5 && style<1.5 {color=mix(color,color*vec3<f32>(1.18,1.05,0.7),0.5);}
+ if style>2.5 && style<3.5 {
+  let l=dot(in.color,vec3<f32>(0.2126,0.7152,0.0722));
+  // Dry grass: straw in the ground's own hue, paler toward the tips.
+  color=mix(in.color*vec3<f32>(1.05,0.95,0.72),vec3<f32>(0.80,0.66,0.40)*max(l,0.08)*1.6,0.4)*mix(0.7,1.2,v)*(0.88+0.24*shade);
+ }
+ if style>1.5 && style<2.5 {color*=0.8;}
+ if style>4.5 {color=mix(color,vec3<f32>(0.30,0.26,0.18)*mix(0.6,1.1,v),0.5);}
+ let normal=normalize(vec3<f32>(0.0,1.0,0.0)-normalize(in.direction)*0.35);
+ var lit=veg_light(color,color,in.direction,normal,true,mix(0.6,1.0,v));
+ if thermal_on() {return FillOut(vec4<f32>(lit,1.0),mask);}
+ lit=aerial_perspective(lit,in.direction,in.altitude);
+ return FillOut(scenery(lit),mask);
 }
 // City fill far boxes: the surface lighting without the shadow lookups,
 // flare light or panel sheen, so a distant box costs little per pixel. A box

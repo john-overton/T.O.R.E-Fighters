@@ -640,7 +640,17 @@ impl App {
                         scenery.static_geometry(&world.combat.state.targets, &world.combat.surface),
                     );
                     let graphics = graphics.map(|build| {
-                        build(&scenery, &hornet, &view.models, &view.art, Some(&geometry))
+                        build(
+                            crate::renderer::LoadingScene {
+                                scenery: &scenery,
+                                world: &world.terrain,
+                                eye: world.cockpits[usize::from(SEAT.0)].flight.position,
+                            },
+                            &hornet,
+                            &view.models,
+                            &view.art,
+                            Some(&geometry),
+                        )
                     });
                     Ok(crate::loading::Prepared::Net(Box::new((
                         world, markup, hornet, view, scenery, graphics,

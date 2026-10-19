@@ -254,3 +254,38 @@ this presentation repair.
 The imported T2 and MM bytes remain unchanged. Ground-picture water queries
 retain that same source mask, so neutralization does not fill coastal sea.
 See [merged airports](redrawn-airports.md#merged-pairs-airfield-scene-3).
+
+## Exploratory vegetation classification
+
+The `exp/vegetation` renderer samples this theater data and its reference
+palette to place presentation-only sprites and classify GPU grass habitat. It does not add terrain records
+or establish original vegetation placement. Cached patch, field, road, village
+edge, desert, broad-water beach exclusion and canopy sampling rules are specified in
+[terrain detail](../spec/terrain-detail.md#where-things-grow); retail card
+records and unresolved original distance rules are in
+[objects and shapes](objects-and-shapes.md#vegetation-card-assets).
+
+GPU blade grass additionally caches a two-bit habitat per 128 ft source-art
+texel and a terrain-vertex lookup grid. This is disposable presentation data,
+not a new retail format. See [grass habitat](../spec/terrain-detail.md#grass) and
+[renderer storage](../ARCHITECTURE.md#exploratory-vegetation-rendering).
+
+The exploratory vegetation habitat uses a device-sized atlas of 256-square
+logical pages, independent of theater rows. The shared canopy/card atlas and
+all vegetation buffers are checked by the CPU-only
+[theater limits audit](../testing/README.md#vegetation-theater-limits).
+
+## Temperate tile colour audit
+
+The 2026-10-18 UKR/FRA/BAL audit compares imported layout, T2, picture and weather
+payloads with the source archives, recomputes `tdic` coverage, and checks the
+render mesh's texture pages and quarter-turn UVs. No new per-tile palette or
+shade mapping is established. The source pictures differ in colour, including
+the fitted LAND fallback. The reviewed UKR seam has mottled LAND.PIC south of
+the edge and flat UKR23.PIC north of it. The renderer retains both source pages
+and applies a cached texture response inside accepted 500 ft bands. Separately,
+statistically flat natural pictures receive fitted world-space modulation,
+approved by John on 2026-10-18. Mottled interiors and protected features retain
+their source colour. Imported resources and T2 cells stay unchanged. Retail runtime appearance and exact fallback-land
+projection remain unverified. [Measured evidence](../baselines/terrain-seams.md)
+and [exploratory seam presentation](../spec/terrain-detail.md#tile-seams).

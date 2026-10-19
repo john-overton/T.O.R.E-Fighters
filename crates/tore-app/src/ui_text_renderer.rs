@@ -18,6 +18,13 @@ pub(crate) struct UiTextRenderer {
     /// Whether the target converts linear colour to sRGB, so colours go in
     /// linear.
     linear: bool,
+    /// The frame-rate readout, in window pixels. Its own buffer, so writing
+    /// it does not replace the menu glyphs already recorded for this frame.
+    fps_pipeline: wgpu::RenderPipeline,
+    fps_bind: wgpu::BindGroup,
+    fps_instances: wgpu::Buffer,
+    fps_capacity: usize,
+    fps_size: wgpu::Buffer,
 }
 
 impl UiTextRenderer {
@@ -140,6 +147,68 @@ impl UiTextRenderer {
             ],
         });
         let capacity = 1024;
+        let fps_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Frame rate"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("frame_rate.wgsl").into()),
+        });
+        let fps_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Frame rate"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &fps_shader,
+                entry_point: Some("vertex"),
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: (INSTANCE_FLOATS * 4) as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &wgpu::vertex_attr_array![
+                        0 => Float32x4,
+                        1 => Float32x4,
+                        2 => Float32x4,
+                        3 => Float32x4,
+                    ],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &fps_shader,
+                entry_point: Some("fragment"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview: None,
+            cache: None,
+        });
+        let fps_size = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Frame rate size"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let fps_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Frame rate atlas"),
+            layout: &fps_pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: fps_size.as_entire_binding(),
+                },
+            ],
+        });
         Self {
             pipeline,
             bind_group,
@@ -147,6 +216,11 @@ impl UiTextRenderer {
             capacity,
             count: 0,
             linear: format.is_srgb(),
+            fps_pipeline,
+            fps_bind,
+            fps_instances: Self::buffer(device, 64),
+            fps_capacity: 64,
+            fps_size,
         }
     }
 
@@ -197,6 +271,60 @@ impl UiTextRenderer {
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_vertex_buffer(0, self.instances.slice(..));
         pass.draw(0..6, 0..self.count);
+    }
+
+    /// Draws `quads` in window pixels over the whole target. A separate
+    /// buffer from [`set`], so the menu text of this frame is left as it is.
+    pub(crate) fn draw_window(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        quads: &[Quad],
+        size: [f32; 2],
+    ) {
+        if quads.is_empty() || size[0] < 1.0 || size[1] < 1.0 {
+            return;
+        }
+        if quads.len() > self.fps_capacity {
+            self.fps_capacity = quads.len().next_power_of_two();
+            self.fps_instances = Self::buffer(device, self.fps_capacity);
+        }
+        let mut bytes = Vec::with_capacity(quads.len() * INSTANCE_FLOATS * 4);
+        for quad in quads {
+            for value in quad
+                .dst
+                .iter()
+                .chain(&quad.uv)
+                .chain(&quad.clip)
+                .chain(&quad.color)
+            {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+        queue.write_buffer(&self.fps_instances, 0, &bytes);
+        let mut size_bytes = [0u8; 16];
+        size_bytes[..4].copy_from_slice(&size[0].to_le_bytes());
+        size_bytes[4..8].copy_from_slice(&size[1].to_le_bytes());
+        queue.write_buffer(&self.fps_size, 0, &size_bytes);
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Frame rate"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+        pass.set_pipeline(&self.fps_pipeline);
+        pass.set_bind_group(0, &self.fps_bind, &[]);
+        pass.set_vertex_buffer(0, self.fps_instances.slice(..));
+        pass.draw(0..6, 0..quads.len() as u32);
     }
 }
 

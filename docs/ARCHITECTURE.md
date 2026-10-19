@@ -10975,3 +10975,123 @@ a background mission builder while virtual-time headless clients retain the
 synchronous default. Transport updates continue, and session events retain their
 order behind the pending build. See the [loading specification](spec/loading-screen.md)
 and [CPU measurement](baselines/loading-screen.md).
+
+## Exploratory vegetation rendering
+
+On `exp/vegetation`, vegetation is app presentation data. The menu scene omits
+its atlas, baked cards and canopy pages. The mission worker builds them for its
+actual theater, using `tore-workers` for independent canopy pages, coast rows,
+retail sprite bakes and placement chunks. Publication remains ordered.
+
+`vegetation_cache` stores bounded, checksummed files under the imported profile's
+`vegetation-cache/`. Keys include theater, import generation and decoded resource
+contents, effective terrain/runway/city exclusions, palette, sprite mode, page
+base and an automatically computed code/data version. The build hashes app,
+world, simulation geometry, formats and workers sources plus supplied vegetation assets. Any change
+invalidates previous results. Missing, incompatible, truncated or corrupt entries
+are rebuilt. Atomic temporary-file renames publish complete entries; cache write
+failure leaves the load working. Runtime retail derivatives stay local. The
+coast mask uses one bit per cell. Canopy pages store 128 by 256 samples in each
+256-square index page, using every row and halving their former padded storage. `TORE_VEG_CACHE=0` bypasses caching for timings.
+
+`Placement` retains fixed geographic selections within configured quotas, with
+no distance-dependent repacking or budget squeeze. The bounded worker completes
+a guarded ring before publishing it. Near chunks precede velocity-prefetched
+outer chunks. The loading graphics factory builds and uploads the initial ring
+before releasing flight. Persistent 256-instance pages retain unchanged bytes.
+Normal uploads are capped at 256 KiB and 16 writes per frame. Mesh tables upload
+only after settings changes; chunk tables upload only on publication. Hidden
+angle cards degenerate before rasterization. Canopy shading exits before its
+texture reads inside the protected detail radius. See the
+[numerical specification](spec/terrain-detail.md#sprites-and-cached-placement).
+
+The 64-byte candidate record is unchanged. The culled record is 96 bytes and the
+mesh table is 48 bytes, with top-card page, height and opaque half extents. Facing/cross/top
+modes use 6/12/18 vertices in the same indirect draw. At new High the output is
+12 MiB; persistent input reserves 96 MiB including old/new selections and 5,120
+partial-page slots. The latter bound covers both maximum 8 nm guarded rings.
+At Ultra the corresponding allocations are 24 MiB and 112 MiB.
+
+Matching alpha-tested depth and colour draws share vertices and sample coverage,
+including the top card's view-angle fade. Side and top use complementary sample
+masks so their overlapping interiors keep full combined coverage. Top cards remain inside the side
+silhouettes at their grounded canopy height. Facing/top is the default. Single
+tops, except omitted conifer/pine-grove disks, use opaque side widths and the instance's seeded scale. Retail grove tops
+are runtime indexed composites of individual crown cutouts; their transparent
+gaps preserve the terrain underneath. No extra instances or draw calls are added.
+Supplied top-sheet alpha removes
+both bright and dark perimeter matte while retaining interior shading. Trimming
+is repeated after downsampling so every top fills its usable atlas cell.
+The draws use reversed-depth GreaterEqual and no colour-pass depth writes. Depth skips
+palette/lighting work. Colour skips the second daylight-palette sample outside thermal views when no
+flare light is burning. Grass is a separate selectable blade/tuft pass.
+Crosses/top cards may cost more overdraw, so all modes require GPU comparison.
+`terrain_seams` caches a 3,588-byte CPU record per 32,768 ft tile: a whole-tile
+mean and 256 segment records for each east/north edge. Opposite sides share
+those records. A generic LAND fill boundary can join green authored ground
+when T2 colour/class values agree; authored fields and protected features stay
+excluded. The mask also supplies tree-belt probabilities.
+
+For drawing, each segment becomes one RG32Uint texel containing accepted-run
+flags and a column address into a sparse RGBA16Float response atlas. Material
+bindings 6, 7 and 8 provide the records, response array and linear sampler.
+World/scenery and aircraft material groups bind the same resources. The CPU
+reference retains source page/quarter-rotation metadata for audits and baking.
+
+The response stores a linear RGB correction and the reference source luminance.
+Each accepted run has a padding column at either end, nine samples across each
+250 ft half-band and 128 ft spacing along the edge. There are 56 strip rows per
+1,024 by 1,008 array layer. The draw shader performs one mask load and one
+hardware-filtered response sample, scaling the correction by live/reference
+luminance. It performs no neighbour-art or extra palette lookup. Nonuniform
+weather remaps remain a fitted approximation. The noisy boundary is baked;
+there is no fragment noise hash. Grass reuses its normal source lookup.
+
+At or beyond 250 ft from an edge the response is exactly zero before any seam
+texture access. Segment flags and an additional run-end fade protect excluded
+features. Source art and mesh pages/UVs remain unchanged. Already mottled
+interiors, including UKR LAND, retain the original pixels.
+
+Flat-tile enrichment adds a separate cached modulation layer after runtime
+classification. Four low-pass statistics and a selected mottled reference are
+stored per picture. Each eligible placement gets a world-space 96-square
+RGBA16Float correction patch, with source-feature and site guards baked in.
+Patches occupy 100 slots per 1,024-square array layer appended to the existing
+response texture; existing seam layers are padded from 1,008 to 1,024 rows.
+Tile records carry patch addresses and edge-fade flags. Extra per-page records
+let the terrain vertex shader skip modulation on unchanged pages. Flat ground
+fragments perform one tile-record load and one filtered response lookup; grass
+uses the same field. No fragment noise or additional source-art sample is used.
+The seam bake composes both enriched samples before caching its response.
+No source page is overwritten. Both responses upload once, add no ordinary
+draw call or material binding, and are cached beside canopy/habitat data.
+The `.seams` cache retains bounded/checksummed atomic writes; code, art,
+layout, palette, airport/city exclusions, neutralized ground and enable state
+invalidate it. [Rules and limits](spec/terrain-detail.md#tile-seams).
+
+`vegetation_grass` builds a compact classification texture on the mission loader
+and caches it alongside canopy as a checksummed `.grass` entry. Four bytes per
+512 ft block encode sixteen 128 ft habitats. Logical pages are 256-square RGBA8Uint. `vegetation_limits::Pages` packs them
+into 1024-square atlas layers, growing within `device.limits()` if required.
+PGU's 272 logical pages use 17 physical layers. Pages upload directly into their
+slots without a second full-map CPU allocation. The shader derives its slot
+address from texture dimensions; the CPU cache remains device independent.
+`vegetation_limits::validate` checks the shared world art (including canopy and
+all sprite/card pages), habitat, terrain lookup and every vegetation buffer
+before GPU allocation. Both storage binding size and allocation size matter.
+The headless `limits-check` diagnostic runs the actual mission loading worker
+for every imported theater and variant against default and downlevel limits.
+A small RGBA32Float terrain grid supplies triangle elevations, terrain picture
+pages/rotations and fallback colours. Both textures upload once per scene.
+Cache identity includes source, palette, terrain and exclusion changes.
+
+`grass_blades.wgsl` generates five-vertex strips from vertex and instance indices.
+A single draw has no vertex/instance buffer and no alpha discard. Integer world
+cells keep the same hash as the camera moves. Coarse levels own disjoint subsets
+through the inner disk too, avoiding LOD identity changes. The default path sends
+zero radius to the legacy worker and bypasses grass patch selection/packing.
+Each frame writes one 64-byte stack uniform for grid budget, time and mission
+wind. Legacy tufts remain intact and selectable. Numerical rules and limits live
+in [the grass spec](spec/terrain-detail.md#grass).
+
+Nothing enters simulation, replays, checkpoints or networking.

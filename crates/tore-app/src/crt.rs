@@ -856,6 +856,7 @@ mod shader_tests {
             include_str!("gun_flash.wgsl"),
             include_str!("airfield_lights.wgsl"),
             include_str!("night_glow.wgsl"),
+            include_str!("grass_blades.wgsl"),
         ]
         .join("\n")
     }
@@ -985,6 +986,25 @@ mod shader_tests {
                 &["fill_shadow_vertex2", "shadow_fragment"],
                 2,
             ),
+            ("vegetation", &["veg_vertex", "veg_fragment"], 2),
+            ("vegetation depth", &["veg_vertex", "veg_depth"], 2),
+            ("grass", &["grass_vertex", "grass_fragment"], 2),
+            ("opaque blades", &["blade_vertex", "blade_fragment"], 3),
+            (
+                "vegetation shadow 0",
+                &["veg_shadow_vertex0", "terrain_shadow_fragment"],
+                2,
+            ),
+            (
+                "vegetation shadow 1",
+                &["veg_shadow_vertex1", "terrain_shadow_fragment"],
+                2,
+            ),
+            (
+                "vegetation shadow 2",
+                &["veg_shadow_vertex2", "terrain_shadow_fragment"],
+                2,
+            ),
         ];
         let module = naga::front::wgsl::parse_str(&world).unwrap();
         for entry in &module.entry_points {
@@ -1008,7 +1028,12 @@ mod shader_tests {
                     "{label}: unavailable group {group}, binding {binding}"
                 );
                 assert!(
-                    binding < [6, 3, 2][group as usize],
+                    binding
+                        < if *label == "opaque blades" {
+                            [9, 3, 3][group as usize]
+                        } else {
+                            [9, 3, 2][group as usize]
+                        },
                     "{label}: unavailable binding {binding}"
                 );
             }
@@ -1046,6 +1071,7 @@ mod shader_tests {
     #[test]
     fn the_crt_pass_and_the_thermal_world_shaders_validate() {
         validate("crt.wgsl", include_str!("crt.wgsl"));
+        validate("vegetation cull", include_str!("vegetation_cull.wgsl"));
         // The world module as `SimRenderer::new` concatenates it.
         let world = [
             include_str!("surface_lighting.wgsl"),
@@ -1055,6 +1081,7 @@ mod shader_tests {
             include_str!("gun_flash.wgsl"),
             include_str!("airfield_lights.wgsl"),
             include_str!("night_glow.wgsl"),
+            include_str!("grass_blades.wgsl"),
         ]
         .join("\n");
         validate("world", &world);

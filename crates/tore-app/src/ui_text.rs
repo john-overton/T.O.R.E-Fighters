@@ -149,6 +149,61 @@ impl Atlas {
             ((slot / self.columns) * self.cell.1 + ICON_PAD) as f32,
         ))
     }
+
+    /// Glyph rectangles for `text` with capitals `cap_px` tall. `origin` is
+    /// the top left of the line. The face keeps its own spacing (nothing is
+    /// squeezed into a retail cell). Returns the line's advance.
+    pub fn line_quads(
+        &self,
+        text: &str,
+        cap_px: f32,
+        origin: [f32; 2],
+        color: [f32; 4],
+    ) -> (f32, Vec<Quad>) {
+        let scale = cap_px / self.cap.max(1.0);
+        let baseline = origin[1] + cap_px;
+        let mut pen = origin[0];
+        let mut quads = Vec::new();
+        for code in text.bytes() {
+            let advance = if code == b' ' {
+                SPACE * self.em * scale
+            } else {
+                self.advances[usize::from(code)] * scale
+            };
+            if let Some(glyph) = self.glyphs[usize::from(code)] {
+                let ink_w = glyph.ink_w * scale;
+                let ink_h = glyph.ink_h * scale;
+                let pad_x = MARGIN * scale;
+                let pad_y = MARGIN * scale;
+                let left = pen + glyph.ink_x * scale;
+                let top = baseline + glyph.ink_y * scale;
+                let dst = [
+                    left - pad_x,
+                    top - pad_y,
+                    ink_w + 2.0 * pad_x,
+                    ink_h + 2.0 * pad_y,
+                ];
+                let (cell_x, cell_y) = (
+                    (glyph.slot % self.columns) as f32 * self.cell.0 as f32,
+                    (glyph.slot / self.columns) as f32 * self.cell.1 as f32,
+                );
+                let uv = [
+                    cell_x + self.origin_x + glyph.ink_x - MARGIN,
+                    cell_y + self.baseline + glyph.ink_y - MARGIN,
+                    cell_x + self.origin_x + glyph.ink_x + glyph.ink_w + MARGIN,
+                    cell_y + self.baseline + glyph.ink_y + glyph.ink_h + MARGIN,
+                ];
+                quads.push(Quad {
+                    dst,
+                    uv,
+                    clip: [dst[0], dst[1], dst[0] + dst[2], dst[1] + dst[3]],
+                    color,
+                });
+            }
+            pen += advance;
+        }
+        (pen - origin[0], quads)
+    }
 }
 
 /// How one retail font is drawn sharp: made from the font's own picture.

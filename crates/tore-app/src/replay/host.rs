@@ -69,9 +69,14 @@ impl App {
             let mut viewer = Viewer::open(&path, &resources, &Options::default())
                 .map_err(|error| error.to_string())?;
             progress.stage(crate::loading::Stage::Graphics);
+            let eye = viewer.loading_eye();
             let graphics = graphics.map(|build| {
                 build(
-                    &viewer.scenery,
+                    crate::renderer::LoadingScene {
+                        scenery: &viewer.scenery,
+                        world: &viewer.world,
+                        eye,
+                    },
                     &viewer.ownship,
                     viewer.loading_models(),
                     viewer.loading_art(),

@@ -1,0 +1,440 @@
+[
+  {
+    "name": "sahara_date_palm",
+    "page": 0,
+    "tile": 0,
+    "radius": 0.2744755244755245
+  },
+  {
+    "name": "sahara_date_cluster",
+    "page": 0,
+    "tile": 1,
+    "radius": 0.3101503759398496
+  },
+  {
+    "name": "sahara_date_medium",
+    "page": 0,
+    "tile": 2,
+    "radius": 0.3073394495412844
+  },
+  {
+    "name": "sahara_date_small",
+    "page": 0,
+    "tile": 3,
+    "radius": 0.36879432624113473
+  },
+  {
+    "name": "sahara_acacia",
+    "page": 1,
+    "tile": 0,
+    "radius": 0.5216346153846154
+  },
+  {
+    "name": "sahara_acacia_small",
+    "page": 1,
+    "tile": 1,
+    "radius": 0.6911764705882353
+  },
+  {
+    "name": "sahara_green_shrub",
+    "page": 1,
+    "tile": 2,
+    "radius": 0.7070707070707071
+  },
+  {
+    "name": "sahara_dry_shrub",
+    "page": 1,
+    "tile": 3,
+    "radius": 0.5797872340425532
+  },
+  {
+    "name": "sahara_bare_tree",
+    "page": 2,
+    "tile": 0,
+    "radius": 0.32044198895027626
+  },
+  {
+    "name": "sahara_bare_shrub",
+    "page": 2,
+    "tile": 1,
+    "radius": 0.6575342465753424
+  },
+  {
+    "name": "sahara_saguaro",
+    "page": 2,
+    "tile": 2,
+    "radius": 0.2801047120418848
+  },
+  {
+    "name": "sahara_agave",
+    "page": 2,
+    "tile": 3,
+    "radius": 0.4666666666666667
+  },
+  {
+    "name": "sahara_agave_small",
+    "page": 3,
+    "tile": 0,
+    "radius": 0.4835164835164835
+  },
+  {
+    "name": "sahara_shrub",
+    "page": 3,
+    "tile": 1,
+    "radius": 0.6074766355140186
+  },
+  {
+    "name": "sahara_brush",
+    "page": 3,
+    "tile": 2,
+    "radius": 0.46846846846846846
+  },
+  {
+    "name": "sahara_outcrop",
+    "page": 3,
+    "tile": 3,
+    "radius": 0.7285714285714285
+  },
+  {
+    "name": "sahara_spire",
+    "page": 4,
+    "tile": 0,
+    "radius": 0.46308724832214765
+  },
+  {
+    "name": "sahara_boulders",
+    "page": 4,
+    "tile": 1,
+    "radius": 0.6574074074074074
+  },
+  {
+    "name": "sahara_boulder",
+    "page": 4,
+    "tile": 2,
+    "radius": 0.5625
+  },
+  {
+    "name": "sahara_stones",
+    "page": 4,
+    "tile": 3,
+    "radius": 0.6918604651162791
+  },
+  {
+    "name": "sahara_small_stones",
+    "page": 5,
+    "tile": 0,
+    "radius": 0.7295081967213115
+  },
+  {
+    "name": "sahara_top_date_palm",
+    "page": 5,
+    "tile": 1,
+    "radius": 0.4838709677419355
+  },
+  {
+    "name": "sahara_top_date_cluster",
+    "page": 5,
+    "tile": 2,
+    "radius": 0.46551724137931033
+  },
+  {
+    "name": "sahara_top_date_medium",
+    "page": 5,
+    "tile": 3,
+    "radius": 0.484251968503937
+  },
+  {
+    "name": "sahara_top_date_small",
+    "page": 6,
+    "tile": 0,
+    "radius": 0.4787234042553192
+  },
+  {
+    "name": "sahara_top_acacia",
+    "page": 6,
+    "tile": 1,
+    "radius": 0.4605263157894737
+  },
+  {
+    "name": "sahara_top_acacia_small",
+    "page": 6,
+    "tile": 2,
+    "radius": 0.5398230088495575
+  },
+  {
+    "name": "sahara_top_green_shrub",
+    "page": 6,
+    "tile": 3,
+    "radius": 0.5166666666666667
+  },
+  {
+    "name": "sahara_top_dry_shrub",
+    "page": 7,
+    "tile": 0,
+    "radius": 0.49537037037037035
+  },
+  {
+    "name": "sahara_top_bare_tree",
+    "page": 7,
+    "tile": 1,
+    "radius": 0.33760683760683763
+  },
+  {
+    "name": "sahara_top_bare_shrub",
+    "page": 7,
+    "tile": 2,
+    "radius": 0.47761194029850745
+  },
+  {
+    "name": "sahara_top_saguaro",
+    "page": 7,
+    "tile": 3,
+    "radius": 0.39763779527559057
+  },
+  {
+    "name": "sahara_top_agave",
+    "page": 8,
+    "tile": 0,
+    "radius": 0.536036036036036
+  },
+  {
+    "name": "sahara_top_agave_small",
+    "page": 8,
+    "tile": 1,
+    "radius": 0.4521276595744681
+  },
+  {
+    "name": "sahara_top_shrub",
+    "page": 8,
+    "tile": 2,
+    "radius": 0.4690721649484536
+  },
+  {
+    "name": "sahara_top_brush",
+    "page": 8,
+    "tile": 3,
+    "radius": 0.5980392156862745
+  },
+  {
+    "name": "sahara_top_outcrop",
+    "page": 9,
+    "tile": 0,
+    "radius": 0.6642857142857143
+  },
+  {
+    "name": "sahara_top_spire",
+    "page": 9,
+    "tile": 1,
+    "radius": 0.5
+  },
+  {
+    "name": "sahara_top_boulders",
+    "page": 9,
+    "tile": 2,
+    "radius": 0.6368421052631579
+  },
+  {
+    "name": "sahara_top_boulder",
+    "page": 9,
+    "tile": 3,
+    "radius": 0.49375
+  },
+  {
+    "name": "sahara_top_stones",
+    "page": 10,
+    "tile": 0,
+    "radius": 0.56875
+  },
+  {
+    "name": "sahara_top_small_stones",
+    "page": 10,
+    "tile": 1,
+    "radius": 0.5942028985507246
+  },
+  {
+    "name": "top_saguaro",
+    "page": 10,
+    "tile": 2,
+    "radius": 0.45390070921985815
+  },
+  {
+    "name": "top_small_cactus",
+    "page": 10,
+    "tile": 3,
+    "radius": 0.51010101010101
+  },
+  {
+    "name": "top_prickly_pear",
+    "page": 11,
+    "tile": 0,
+    "radius": 0.46551724137931033
+  },
+  {
+    "name": "top_dry_shrub",
+    "page": 11,
+    "tile": 1,
+    "radius": 0.5154639175257731
+  },
+  {
+    "name": "top_yucca",
+    "page": 11,
+    "tile": 2,
+    "radius": 0.4968152866242038
+  },
+  {
+    "name": "top_dry_scrub",
+    "page": 11,
+    "tile": 3,
+    "radius": 0.5142857142857142
+  },
+  {
+    "name": "top_desert_rocks",
+    "page": 12,
+    "tile": 0,
+    "radius": 0.5280898876404494
+  },
+  {
+    "name": "top_desert_boulder",
+    "page": 12,
+    "tile": 1,
+    "radius": 0.445578231292517
+  },
+  {
+    "name": "top_desert_stones",
+    "page": 12,
+    "tile": 2,
+    "radius": 0.5950413223140496
+  },
+  {
+    "name": "top_broadleaf",
+    "page": 12,
+    "tile": 3,
+    "radius": 0.4793388429752066
+  },
+  {
+    "name": "top_autumn",
+    "page": 13,
+    "tile": 0,
+    "radius": 0.5022522522522522
+  },
+  {
+    "name": "top_birch",
+    "page": 13,
+    "tile": 1,
+    "radius": 0.49311926605504586
+  },
+  {
+    "name": "top_green_bush",
+    "page": 13,
+    "tile": 2,
+    "radius": 0.474025974025974
+  },
+  {
+    "name": "top_red_bush",
+    "page": 13,
+    "tile": 3,
+    "radius": 0.5170068027210885
+  },
+  {
+    "name": "top_sparse_bush",
+    "page": 14,
+    "tile": 0,
+    "radius": 0.49032258064516127
+  },
+  {
+    "name": "top_conifer",
+    "page": 14,
+    "tile": 1,
+    "radius": 0.4375
+  },
+  {
+    "name": "top_mossy_boulder",
+    "page": 14,
+    "tile": 2,
+    "radius": 0.5535714285714286
+  },
+  {
+    "name": "top_mossy_rock",
+    "page": 14,
+    "tile": 3,
+    "radius": 0.5217391304347826
+  },
+  {
+    "name": "top_flat_rock",
+    "page": 15,
+    "tile": 0,
+    "radius": 0.4797297297297297
+  },
+  {
+    "name": "top_palm_a",
+    "page": 15,
+    "tile": 1,
+    "radius": 0.5506329113924051
+  },
+  {
+    "name": "top_palm_b",
+    "page": 15,
+    "tile": 2,
+    "radius": 0.4166666666666667
+  },
+  {
+    "name": "top_jungle_tree",
+    "page": 15,
+    "tile": 3,
+    "radius": 0.46502057613168724
+  },
+  {
+    "name": "top_banana",
+    "page": 16,
+    "tile": 0,
+    "radius": 0.5460122699386503
+  },
+  {
+    "name": "top_fern",
+    "page": 16,
+    "tile": 1,
+    "radius": 0.4666666666666667
+  },
+  {
+    "name": "top_jungle_bush",
+    "page": 16,
+    "tile": 2,
+    "radius": 0.46405228758169936
+  },
+  {
+    "name": "top_tropical_shrub",
+    "page": 16,
+    "tile": 3,
+    "radius": 0.4966887417218543
+  },
+  {
+    "name": "top_jungle_boulder",
+    "page": 17,
+    "tile": 0,
+    "radius": 0.5755395683453237
+  },
+  {
+    "name": "top_jungle_rock",
+    "page": 17,
+    "tile": 1,
+    "radius": 0.5631067961165048
+  },
+  {
+    "name": "top_fallen_log",
+    "page": 17,
+    "tile": 2,
+    "radius": 0.9139344262295082
+  },
+  {
+    "name": "top_grey_shrub",
+    "page": 17,
+    "tile": 3,
+    "radius": 0.5166666666666667
+  },
+  {
+    "name": "top_small_rock",
+    "page": 18,
+    "tile": 0,
+    "radius": 0.47794117647058826
+  }
+]

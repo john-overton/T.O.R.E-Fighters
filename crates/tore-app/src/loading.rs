@@ -879,12 +879,20 @@ pub(crate) fn timing(name: &'static str) -> Timing {
 }
 impl Drop for Timing {
     fn drop(&mut self) {
-        log::info!(
-            "loading timing: {} {:.3} ms",
-            self.0,
-            self.1.elapsed().as_secs_f64() * 1000.
-        );
+        measured(self.0, self.1.elapsed());
     }
+}
+
+pub(crate) fn measured(name: &str, elapsed: std::time::Duration) {
+    log::info!(
+        "loading timing: {name} {:.3} ms",
+        elapsed.as_secs_f64() * 1000.
+    );
+    #[cfg(test)]
+    eprintln!(
+        "loading timing: {name} {:.3} ms",
+        elapsed.as_secs_f64() * 1000.
+    );
 }
 
 /// Command-line view options restored only after the creator's worker completes.

@@ -82,6 +82,11 @@ pub struct Renderer {
     /// screen up wants it drawn.
     ui_text: crate::ui_text_renderer::UiTextRenderer,
     menu_text_visible: bool,
+    /// Frame times for the optional corner readout. Drawn only in this
+    /// window pass, never into a capture.
+    frame_rate: crate::frame_rate::Meter,
+    frame_gpu: crate::frame_gpu::Timer,
+    frame_cpu: Option<std::time::Instant>,
     sim: crate::sim_renderer::SimRenderer,
     cockpit: crate::cockpit_renderer::CockpitRenderer,
     mirror_camera: crate::camera::Camera,
@@ -101,6 +106,11 @@ pub struct Renderer {
     // Fields drop in declaration order; keep the window alive through GPU cleanup.
     pub window: Arc<Window>,
 }
+pub(crate) struct LoadingScene<'a> {
+    pub scenery: &'a crate::scenery::Scenery,
+    pub world: &'a crate::terrain::Terrain,
+    pub eye: [f64; 3],
+}
 pub(crate) struct LoadingGraphics {
     sim: crate::sim_renderer::SimRenderer,
     cockpit: crate::cockpit_renderer::CockpitRenderer,
@@ -110,7 +120,7 @@ impl Renderer {
     pub fn loading_factory(
         &self,
     ) -> impl FnOnce(
-        &crate::scenery::Scenery,
+        LoadingScene<'_>,
         &crate::aircraft::Airframe,
         &[crate::aircraft::Airframe],
         &crate::render_snapshot::CombatArt,
@@ -123,10 +133,25 @@ impl Renderer {
         let format = self.config.format;
         let options = self.graphics;
         let samples = self.samples(options.anti_aliasing);
-        move |scenery, aircraft, models, art, static_geometry| {
+        move |scene, aircraft, models, art, static_geometry| {
+            let LoadingScene {
+                scenery,
+                world,
+                eye,
+            } = scene;
             let mut sim = crate::sim_renderer::SimRenderer::new(
                 &device, &queue, format, scenery, options, samples,
             );
+            if let Some(vegetation) = &mut sim.vegetation {
+                let _timing = crate::loading::timing("vegetation initial ring and upload");
+                let mut camera = crate::camera::Camera::for_world(world);
+                camera.position = eye;
+                let mut encoder = device.create_command_encoder(&Default::default());
+                vegetation.set_settle(true);
+                vegetation.prepare(&queue, &mut encoder, &camera, world, [0.; 3], [640, 480]);
+                vegetation.set_settle(false);
+                queue.submit([encoder.finish()]);
+            }
             sim.aircraft(&device, &queue, aircraft, &[]);
             sim.dummies(
                 &device,
@@ -317,6 +342,10 @@ impl Renderer {
             self.samples(self.graphics.anti_aliasing),
         );
     }
+    pub fn begin_cpu_frame(&mut self) {
+        self.frame_cpu = Some(std::time::Instant::now());
+    }
+
     pub fn graphics(&self) -> crate::graphics::Options {
         self.graphics
     }
@@ -374,7 +403,7 @@ impl Renderer {
             adapter.features() & wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
-                required_features: specific,
+                required_features: specific | crate::frame_gpu::features(adapter.features()),
                 ..Default::default()
             })
             .await?;
@@ -527,6 +556,9 @@ impl Renderer {
             cockpit,
             ui_text,
             menu_text_visible: false,
+            frame_rate: crate::frame_rate::Meter::default(),
+            frame_gpu: crate::frame_gpu::Timer::new(&device, &queue),
+            frame_cpu: None,
             previews: Default::default(),
             sim,
             window,
@@ -885,6 +917,7 @@ impl Renderer {
             &crate::scenery::Scenery,
         )>,
         flight_size: Option<[u32; 2]>,
+        readout: crate::frame_rate::Surface,
     ) -> AppResult<bool> {
         let frame_started = std::time::Instant::now();
         self.first_frame.begin("game first frame presentation");
@@ -892,6 +925,10 @@ impl Renderer {
         if s.width == 0 || s.height == 0 {
             return Ok(false);
         }
+        let cpu_before_acquire = self
+            .frame_cpu
+            .take()
+            .map_or(0., |start| start.elapsed().as_secs_f64());
         let frame = match self.surface.get_current_texture() {
             Ok(frame) => frame,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
@@ -904,6 +941,9 @@ impl Renderer {
             }
             Err(error) => return Err(error.into()),
         };
+        let cpu_started = std::time::Instant::now();
+        let show_counter = crate::frame_rate::shown(self.graphics.show_frame_rate);
+        let gpu_ms = self.frame_gpu.poll(&self.device);
         let size = flight_size.unwrap_or([WIDTH as u32, HEIGHT as u32]);
         self.canvas_texture(size);
         self.write_veil(flight_size.is_some());
@@ -933,6 +973,9 @@ impl Renderer {
         }
         let view = frame.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
+        if show_counter {
+            self.frame_gpu.begin(&mut encoder);
+        }
         let console = self.console.take().filter(|_| flight_size.is_some());
         if let (Some((crt, overlay, overlay_size)), Some((camera, world, scenery))) =
             (&console, scene)
@@ -1010,19 +1053,53 @@ impl Renderer {
                 self.ui_text.draw(&mut pass);
             }
         }
+        // After every other layer, and only on the window. Captures read the
+        // scene or the CPU canvas and never this pass.
+        if show_counter {
+            self.frame_rate.tick();
+        } else {
+            self.frame_rate = Default::default();
+        }
+        if show_counter && let Some(line) = self.frame_rate.line() {
+            let place = crate::frame_rate::anchor([s.width, s.height], readout);
+            let glyphs = crate::frame_rate::quads(&line, place, self.ui_text.linear());
+            self.ui_text.draw_window(
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                &view,
+                &glyphs,
+                [s.width as f32, s.height as f32],
+            );
+        }
         if frame_started.elapsed() > std::time::Duration::from_millis(100) {
             log::info!(
                 "slow render preparation: {:.3} ms",
                 frame_started.elapsed().as_secs_f64() * 1000.
             );
         }
+        if show_counter {
+            self.frame_gpu.end(&mut encoder);
+        }
         self.queue.submit([encoder.finish()]);
+        if show_counter {
+            self.frame_gpu.submitted();
+            self.frame_rate.work(
+                (cpu_before_acquire + cpu_started.elapsed().as_secs_f64()) * 1000.,
+                gpu_ms,
+            );
+        }
         // Wayland frame callbacks throttle redraw requests to compositor refresh.
         // Only request that pacing when the surface must fall back to FIFO.
         if self.config.present_mode == wgpu::PresentMode::Fifo {
             self.window.pre_present_notify();
         }
         frame.present();
+        // Keep menus and paused views rendering while measuring rendering load.
+        // Requesting the next frame here covers every surface using this presenter.
+        if show_counter {
+            self.window.request_redraw();
+        }
         self.first_frame.complete();
         Ok(true)
     }

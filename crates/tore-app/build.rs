@@ -56,6 +56,7 @@ struct IconImage {
 
 fn main() {
     stamp_build_identity();
+    vegetation_version();
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed={ICON_PATH}");
 
@@ -327,4 +328,42 @@ mod tests {
             .collect();
         assert_eq!(String::from_utf16(&text).unwrap(), "%1\r\n");
     }
+}
+
+/// Cache provenance follows source and supplied art automatically. No retail
+/// file is read by this script and no input bytes are embedded in the binary.
+fn vegetation_version() {
+    fn visit(path: &std::path::Path, hash: &mut u64) {
+        if path.is_dir() {
+            let mut paths: Vec<_> = fs::read_dir(path)
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .collect();
+            paths.sort();
+            for p in paths {
+                visit(&p, hash);
+            }
+        } else {
+            println!("cargo:rerun-if-changed={}", path.display());
+            for byte in path
+                .to_string_lossy()
+                .bytes()
+                .chain(fs::read(path).unwrap())
+            {
+                *hash = (*hash ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+            }
+        }
+    }
+    let mut hash = 0xcbf29ce484222325;
+    for root in [
+        "src",
+        "assets/vegetation",
+        "../tore-world/src",
+        "../tore-sim/src",
+        "../tore-formats/src",
+        "../tore-workers/src",
+    ] {
+        visit(std::path::Path::new(root), &mut hash);
+    }
+    println!("cargo:rustc-env=TORE_VEGETATION_VERSION={hash:016x}");
 }

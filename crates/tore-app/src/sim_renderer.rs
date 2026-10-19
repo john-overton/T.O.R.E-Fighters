@@ -57,7 +57,7 @@ pub(crate) fn bytes(values: &[f32]) -> Vec<u8> {
 }
 /// The shared `Scene` uniform, ending with the graphics `quality` and
 /// `viewport` vectors.
-const UNIFORM_BYTES: u64 = 1424;
+const UNIFORM_BYTES: u64 = 1488;
 type AircraftBatch = (wgpu::BindGroup, wgpu::Buffer, u32);
 /// One other aircraft inside a geometry batch, for the spotting aid: its
 /// vertex range, presented position and airframe extent in feet.
@@ -151,6 +151,9 @@ pub struct SimRenderer {
     vapor_bind: wgpu::BindGroup,
     palette: wgpu::Texture,
     weather_tiles: wgpu::TextureView,
+    seam_records: wgpu::TextureView,
+    seam_tints: wgpu::TextureView,
+    seam_sampler: wgpu::Sampler,
     canopy_visible: bool,
     aircraft: Option<(wgpu::BindGroup, wgpu::Buffer, u32)>,
     bind: wgpu::BindGroup,
@@ -166,6 +169,8 @@ pub struct SimRenderer {
     samples: u32,
     /// CF0 city fill buildings, when the scenery has them.
     pub fill: Option<crate::fill_renderer::FillRenderer>,
+    /// Exploratory vegetation, when the scenery has an atlas.
+    pub vegetation: Option<crate::vegetation_renderer::Renderer>,
     /// The fires of the fill's knocked-down buildings
     /// ([`crate::city_fires`]).
     city_fires: crate::city_fires::CityFires,
@@ -612,18 +617,21 @@ impl SimRenderer {
         options: crate::graphics::Options,
         samples: u32,
     ) -> Self {
+        crate::vegetation_limits::validate(scenery, &device.limits())
+            .expect("scene resources must fit device limits before upload");
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Simulation terrain"),
             source: wgpu::ShaderSource::Wgsl(
                 format!(
-                    "{}\n{}\n{}\n{}\n{}\n{}\n{}",
+                    "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
                     include_str!("surface_lighting.wgsl"),
                     include_str!("terrain.wgsl"),
                     include_str!("spotting.wgsl"),
                     include_str!("countermeasures.wgsl"),
                     include_str!("gun_flash.wgsl"),
                     include_str!("airfield_lights.wgsl"),
-                    include_str!("night_glow.wgsl")
+                    include_str!("night_glow.wgsl"),
+                    include_str!("grass_blades.wgsl")
                 )
                 .into(),
             ),
@@ -691,6 +699,32 @@ impl SimRenderer {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Uint,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
         let lighting =
@@ -718,6 +752,26 @@ impl SimRenderer {
         if let Some(fill) = &mut fill {
             fill.set_options(&options);
         }
+        let vegetation = scenery
+            .vegetation
+            .as_ref()
+            .zip(scenery.vegetation_meshes.as_ref())
+            .map(|(atlas, library)| {
+                let mut vegetation = crate::vegetation_renderer::Renderer::new(
+                    device,
+                    &shader,
+                    format,
+                    samples,
+                    &material_layout,
+                    &lighting,
+                    Arc::clone(atlas),
+                    Arc::clone(library),
+                    queue,
+                    &scenery.grass,
+                );
+                vegetation.set_options(device, &options);
+                vegetation
+            });
         let celestial_vertices = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Celestial vertices"),
             size: 256 * 1024,
@@ -789,6 +843,88 @@ impl SimRenderer {
             view_formats: &[],
         });
         let palette_view = palette.create_view(&wgpu::TextureViewDescriptor::default());
+        let empty_seams = crate::terrain_seams::Map::default();
+        let seams = scenery
+            .vegetation
+            .as_ref()
+            .filter(|a| a.seams.has_effects())
+            .map_or(&empty_seams, |a| &a.seams);
+        let record_size = seams.gpu_size();
+        let records = if seams.baked.records.is_empty() {
+            &[0_u8; 8][..]
+        } else {
+            &seams.baked.records
+        };
+        let seam_size = wgpu::Extent3d {
+            width: record_size[0],
+            height: record_size[1],
+            depth_or_array_layers: 1,
+        };
+        let seam_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Packed terrain seam records"),
+            size: seam_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rg32Uint,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            seam_texture.as_image_copy(),
+            records,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(record_size[0] * 8),
+                rows_per_image: None,
+            },
+            seam_size,
+        );
+        let seam_records = seam_texture.create_view(&Default::default());
+        let neutral = crate::terrain_seams::baked::Baked::build(
+            &crate::terrain_seams::Map::default(),
+            &[],
+            &[[0; 3]; 256],
+        );
+        let baked = scenery
+            .vegetation
+            .as_ref()
+            .filter(|a| !a.seams.baked.pixels.is_empty())
+            .map_or(&neutral, |a| &a.seams.baked);
+        let seam_tints_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Cached seam tints"),
+            size: wgpu::Extent3d {
+                width: baked.size[0],
+                height: baked.size[1],
+                depth_or_array_layers: baked.size[2],
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            seam_tints_texture.as_image_copy(),
+            &baked.pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(baked.size[0] * 8),
+                rows_per_image: Some(baked.size[1]),
+            },
+            seam_tints_texture.size(),
+        );
+        let seam_tints = seam_tints_texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
+        let seam_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Seam tint interpolation"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
         let material_storage = tile_layout(device, true);
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Simulation scene bindings"),
@@ -817,6 +953,18 @@ impl SimRenderer {
                 wgpu::BindGroupEntry {
                     binding: 5,
                     resource: material_storage.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(&seam_records),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::TextureView(&seam_tints),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: wgpu::BindingResource::Sampler(&seam_sampler),
                 },
             ],
         });
@@ -871,6 +1019,9 @@ impl SimRenderer {
             vapor_bind,
             palette,
             weather_tiles: view,
+            seam_records,
+            seam_tints,
+            seam_sampler,
             canopy_visible: false,
             aircraft: None,
             dummies: Vec::new(),
@@ -886,6 +1037,7 @@ impl SimRenderer {
             options,
             samples,
             fill,
+            vegetation,
             city_fires: crate::city_fires::CityFires::new(),
             city_clock: None,
             city_report: crate::city_fires::Report::default(),
@@ -1267,6 +1419,18 @@ impl SimRenderer {
                         binding: 5,
                         resource: material_storage.as_entire_binding(),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::TextureView(&self.seam_records),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::TextureView(&self.seam_tints),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: wgpu::BindingResource::Sampler(&self.seam_sampler),
+                    },
                 ],
             });
             let buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1320,6 +1484,9 @@ impl SimRenderer {
         if let Some(fill) = &mut self.fill {
             fill.set_options(&options);
         }
+        if let Some(vegetation) = &mut self.vegetation {
+            vegetation.set_options(device, &options);
+        }
         if samples == self.samples {
             return;
         }
@@ -1332,6 +1499,16 @@ impl SimRenderer {
             &self.material_layout,
             &self.lighting.layout,
         );
+        if let Some(vegetation) = &mut self.vegetation {
+            vegetation.rebuild(
+                device,
+                &self.shader,
+                self.format,
+                samples,
+                &self.material_layout,
+                &self.lighting,
+            );
+        }
         if let Some(fill) = &mut self.fill {
             fill.rebuild(
                 device,
@@ -1651,8 +1828,43 @@ impl SimRenderer {
         let [x, y, z] = scenery.origin.map(|v| v as f32);
         let [ex, ey, ez] = scenery.local(camera.position);
         uniform.extend([x, y, z, 0., ex, ey, ez, 0.]);
+        // Ground detail: mode, distance in feet, unused, theater climate.
+        // Objects are a separate pass. `TORE_VEGETATION=0` leaves both off
+        // because the scenery then has no atlas and the mode stays 0.
+        let veg_mode = if scenery.vegetation.is_none() {
+            0.
+        } else {
+            self.options.ground_texture.mode()
+        };
+        let veg_reach = self.options.ground_texture_distance_nm as f32 * 6_076.115_5;
+        uniform.extend([
+            veg_mode,
+            veg_reach,
+            self.options.vegetation_cards.effective() as u8 as f32,
+            crate::vegetation::climate_id(&world.layout) as f32,
+        ]);
+        uniform.extend(scenery.canopy.area);
+        let visible = self.vegetation.as_ref().is_some_and(|v| !v.suppressed());
+        uniform.extend([
+            scenery.canopy.first as f32,
+            scenery.canopy.pages_x as f32,
+            self.vegetation
+                .as_ref()
+                .map_or(0., |v| v.draw_reach())
+                .max(1.),
+            if visible {
+                self.options.vegetation_density.scale()
+            } else {
+                0.
+            },
+        ]);
+        uniform.extend([
+            self.vegetation.as_ref().map_or(0., |v| v.detail_reach()),
+            scenery.seams[0],
+            scenery.seams[1],
+            scenery.seams[2],
+        ]);
         debug_assert_eq!(uniform.len() * 4, UNIFORM_BYTES as usize);
-        queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
         // The burning city fill buildings: the nearest fires and columns of
         // the camera, replaced every draw (`crate::city_fires`).
         match world.city_fill.as_ref().filter(|_| self.city_fires_on) {
@@ -1757,6 +1969,14 @@ impl SimRenderer {
         if let Some(fill) = &mut self.fill {
             fill.prepare(queue, encoder, camera, scenery.origin, size);
         }
+        if let Some(vegetation) = &mut self.vegetation {
+            vegetation.prepare(queue, encoder, camera, world, scenery.origin, size);
+            // Use this frame's uploaded circle for the terrain hand-off too.
+            let end = uniform.len();
+            uniform[end - 6] = vegetation.draw_reach().max(1.);
+            uniform[end - 4] = vegetation.detail_reach();
+        }
+        queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
         if self
             .lighting
             .prepare(queue, camera, world, scenery, &lights)
@@ -1876,6 +2096,9 @@ impl SimRenderer {
         pass.set_vertex_buffer(0, self.vertices.slice(..));
         pass.set_vertex_buffer(1, self.terrain_normals.slice(..));
         pass.draw(0..self.count, 0..1);
+        if let Some(vegetation) = &self.vegetation {
+            vegetation.draw(&mut pass, &self.bind);
+        }
         if let Some((bind, buffer, count)) = &self.escapees {
             pass.set_pipeline(&self.p.pipeline);
             pass.set_bind_group(0, bind, &[]);

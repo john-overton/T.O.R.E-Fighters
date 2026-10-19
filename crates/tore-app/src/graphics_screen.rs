@@ -10,7 +10,9 @@ use crate::controls_editor::{
     ResultAction, TITLE, WHITE, fit, inside, text_width,
 };
 use crate::graphics::{
-    AntiAliasing, BUILDING_DETAILS, BUILDING_DISTANCES, Options, RENDER_SCALES, SpottingAid,
+    AntiAliasing, BUILDING_DETAILS, BUILDING_DISTANCES, GRASS_DISTANCES, GROUND_TEXTURE_DISTANCES,
+    Grass, GroundTexture, Options, RENDER_SCALES, SpottingAid, VEGETATION_DETAILS,
+    VEGETATION_DISTANCES, VegCards, VegDensity,
 };
 use crate::menu::Canvas;
 use std::path::Path;
@@ -22,32 +24,82 @@ enum Row {
     RenderScale,
     SpottingAid,
     TerrainFiltering,
+    FrameRate,
     BuildingDistance,
     BuildingDetail,
+    GroundTexture,
+    GroundTextureDistance,
+    VegetationDistance,
+    VegetationDetail,
+    VegetationDensity,
+    VegetationCards,
+    Grass,
+    GrassDensity,
+    GrassDistance,
 }
-const BASE_ROWS: [Row; 4] = [
+const BASE_ROWS: [Row; 5] = [
     Row::AntiAliasing,
     Row::RenderScale,
     Row::SpottingAid,
     Row::TerrainFiltering,
+    Row::FrameRate,
 ];
-const CITY_ROWS: [Row; 6] = [
+/// The rows shown. The city building rows hide when `TORE_CITY_FILL=0`, and
+/// the vegetation rows hide when `TORE_VEGETATION=0`. Both are developer
+/// escape hatches; both are on when the variable is unset.
+fn rows() -> &'static [Row] {
+    let city = crate::scenery::city_fill().unwrap_or(true);
+    let veg = crate::vegetation::enabled().unwrap_or(true);
+    match (city, veg) {
+        (true, true) => &ALL_ROWS,
+        (true, false) => &CITY_ONLY,
+        (false, true) => &VEG_ONLY,
+        (false, false) => &BASE_ROWS,
+    }
+}
+const ALL_ROWS: [Row; 16] = [
     Row::AntiAliasing,
     Row::RenderScale,
     Row::SpottingAid,
     Row::TerrainFiltering,
+    Row::FrameRate,
+    Row::BuildingDistance,
+    Row::BuildingDetail,
+    Row::GroundTexture,
+    Row::GroundTextureDistance,
+    Row::VegetationDistance,
+    Row::VegetationDetail,
+    Row::VegetationDensity,
+    Row::VegetationCards,
+    Row::Grass,
+    Row::GrassDensity,
+    Row::GrassDistance,
+];
+const CITY_ONLY: [Row; 7] = [
+    Row::AntiAliasing,
+    Row::RenderScale,
+    Row::SpottingAid,
+    Row::TerrainFiltering,
+    Row::FrameRate,
     Row::BuildingDistance,
     Row::BuildingDetail,
 ];
-/// The rows shown: the two city building rows unless the city fill is
-/// switched off (`TORE_CITY_FILL=0`, a developer escape hatch).
-fn rows() -> &'static [Row] {
-    if crate::scenery::city_fill().unwrap_or(true) {
-        &CITY_ROWS
-    } else {
-        &BASE_ROWS
-    }
-}
+const VEG_ONLY: [Row; 14] = [
+    Row::AntiAliasing,
+    Row::RenderScale,
+    Row::SpottingAid,
+    Row::TerrainFiltering,
+    Row::FrameRate,
+    Row::GroundTexture,
+    Row::GroundTextureDistance,
+    Row::VegetationDistance,
+    Row::VegetationDetail,
+    Row::VegetationDensity,
+    Row::VegetationCards,
+    Row::Grass,
+    Row::GrassDensity,
+    Row::GrassDistance,
+];
 impl Row {
     fn label(self) -> &'static str {
         match self {
@@ -55,8 +107,18 @@ impl Row {
             Row::RenderScale => "Render scale",
             Row::SpottingAid => "Spotting aid",
             Row::TerrainFiltering => "Terrain filtering",
+            Row::FrameRate => "Frame rate counter",
             Row::BuildingDistance => "Building distance",
             Row::BuildingDetail => "Building detail",
+            Row::GroundTexture => "Ground detail",
+            Row::GroundTextureDistance => "Ground detail distance",
+            Row::VegetationDistance => "Vegetation distance",
+            Row::VegetationDetail => "Vegetation detail",
+            Row::VegetationDensity => "Vegetation density",
+            Row::VegetationCards => "Vegetation cards",
+            Row::Grass => "Grass",
+            Row::GrassDensity => "Grass density",
+            Row::GrassDistance => "Grass distance",
         }
     }
     fn description(self) -> &'static str {
@@ -71,9 +133,37 @@ impl Row {
                 "Outlines distant aircraft so they are easier to see against the sky and ground."
             }
             Row::TerrainFiltering => "Reduces shimmer and crawling patterns on distant ground.",
+            Row::FrameRate => {
+                "Shows frame rate, CPU/GPU milliseconds and the recent low. Keeps rendering while menus or flight are paused."
+            }
             Row::BuildingDistance => "How far away city buildings are drawn.",
             Row::BuildingDetail => {
                 "City buildings inside this distance are drawn with full texture and detail, farther ones as plain blocks."
+            }
+            Row::GroundTexture => {
+                "Close-range field, grass, sand and rock detail on the ground. Fine is a tighter grain."
+            }
+            Row::GroundTextureDistance => {
+                "How far that ground detail reaches. It also fades out as you climb, so high altitude keeps the retail look."
+            }
+            Row::VegetationDistance => "How far away trees, bushes and ground clutter are drawn.",
+            Row::VegetationDetail => {
+                "Vegetation stays denser inside this distance and thins gradually beyond it."
+            }
+            Row::GrassDensity => {
+                "How thick the grass is, independent of trees. Off removes grass geometry."
+            }
+            Row::GrassDistance => {
+                "How far grass reaches before blending into ground detail. Default 500 ft."
+            }
+            Row::Grass => {
+                "Opaque wind-blown blades, the earlier sprite tufts, or no grass geometry."
+            }
+            Row::VegetationCards => {
+                "Camera-facing cards, fixed crossed cards, or either with a canopy top view."
+            }
+            Row::VegetationDensity => {
+                "How thick the vegetation is. High is the tuned look. Ultra is denser."
             }
         }
     }
@@ -83,8 +173,22 @@ impl Row {
             Row::RenderScale => RENDER_SCALES.map(|s| format!("{s}%")).to_vec(),
             Row::SpottingAid => SpottingAid::ALL.map(|a| a.label().to_owned()).to_vec(),
             Row::TerrainFiltering => vec!["Off".into(), "On".into()],
+            Row::FrameRate => vec!["Off".into(), "On".into()],
             Row::BuildingDistance => BUILDING_DISTANCES.map(|n| format!("{n} nm")).to_vec(),
             Row::BuildingDetail => BUILDING_DETAILS.map(|n| format!("{n} nm")).to_vec(),
+            Row::GroundTexture => GroundTexture::ALL.map(|a| a.label().to_owned()).to_vec(),
+            Row::GroundTextureDistance => {
+                GROUND_TEXTURE_DISTANCES.map(|n| format!("{n} nm")).to_vec()
+            }
+            Row::VegetationDistance => VEGETATION_DISTANCES.map(|n| format!("{n} nm")).to_vec(),
+            Row::VegetationDetail => VEGETATION_DETAILS.map(|n| format!("{n} nm")).to_vec(),
+            Row::VegetationDensity => VegDensity::ALL.map(|a| a.label().to_owned()).to_vec(),
+            Row::Grass => Grass::ALL.map(|a| a.label().to_owned()).to_vec(),
+            Row::GrassDensity => std::iter::once("Off".to_owned())
+                .chain(VegDensity::ALL.map(|a| a.label().to_owned()))
+                .collect(),
+            Row::GrassDistance => GRASS_DISTANCES.map(|n| format!("{n} ft")).to_vec(),
+            Row::VegetationCards => VegCards::ALL.map(|a| a.label().to_owned()).to_vec(),
         }
     }
 }
@@ -104,14 +208,30 @@ enum Hit {
 }
 
 const FOOTER: [&str; 3] = ["Apply", "Defaults", "Cancel"];
-const PANEL_RECT: Rect = (6, 24, 628, 184);
-const ROW_TOP: i32 = 48;
-const ROW_STEP: i32 = 30;
-const CHOICE_X: i32 = 250;
-const CHOICE_W: i32 = 70;
-const CHOICE_GAP: i32 = 6;
-const ABOUT_RECT: Rect = (6, 214, 628, 96);
+const CHOICE_X: i32 = 248;
+const CHOICE_W: i32 = 62;
+const CHOICE_GAP: i32 = 4;
 const OUTLINE: [u8; 4] = [110, 130, 156, 255];
+
+/// Row step, settings panel and about panel. Sixteen rows (city fill and
+/// vegetation both on, plus the frame-rate counter) use a tighter step so
+/// the about panel still sits above the status bar.
+fn layout() -> (i32, Rect, Rect) {
+    let n = rows().len() as i32;
+    let step = if n > 8 {
+        17
+    } else if n > 4 {
+        22
+    } else {
+        30
+    };
+    let row_top = 40;
+    let panel_h = row_top - 24 + n * step + 6;
+    let panel = (6, 24, 628, panel_h);
+    let about_y = 28 + panel_h;
+    let about_h = (428 - about_y).clamp(56, 96);
+    (step, panel, (6, about_y, 628, about_h))
+}
 
 pub struct Editor {
     /// The values shown and edited; they take effect only on Apply.
@@ -169,6 +289,7 @@ impl Editor {
                 .position(|a| *a == d.spotting_aid)
                 .unwrap_or(0),
             Row::TerrainFiltering => usize::from(d.terrain_filtering),
+            Row::FrameRate => usize::from(d.show_frame_rate),
             Row::BuildingDistance => BUILDING_DISTANCES
                 .iter()
                 .position(|n| *n == d.building_distance_nm)
@@ -176,6 +297,33 @@ impl Editor {
             Row::BuildingDetail => BUILDING_DETAILS
                 .iter()
                 .position(|n| *n == d.building_detail_nm)
+                .unwrap_or(2),
+            Row::GroundTexture => GroundTexture::ALL
+                .iter()
+                .position(|a| *a == d.ground_texture)
+                .unwrap_or(1),
+            Row::GroundTextureDistance => GROUND_TEXTURE_DISTANCES
+                .iter()
+                .position(|n| *n == d.ground_texture_distance_nm)
+                .unwrap_or(1),
+            Row::VegetationDistance => VEGETATION_DISTANCES
+                .iter()
+                .position(|n| *n == d.vegetation_distance_nm)
+                .unwrap_or(1),
+            Row::VegetationDetail => VEGETATION_DETAILS
+                .iter()
+                .position(|n| *n == d.vegetation_detail_nm)
+                .unwrap_or(1),
+            Row::VegetationCards => d.vegetation_cards as usize,
+            Row::Grass => d.grass as usize,
+            Row::GrassDensity => d.grass_density.map_or(0, |v| v as usize + 1),
+            Row::GrassDistance => GRASS_DISTANCES
+                .iter()
+                .position(|&n| n == d.grass_distance_ft)
+                .unwrap_or(1),
+            Row::VegetationDensity => VegDensity::ALL
+                .iter()
+                .position(|a| *a == d.vegetation_density)
                 .unwrap_or(2),
         }
     }
@@ -186,8 +334,20 @@ impl Editor {
             Row::RenderScale => d.render_scale = RENDER_SCALES[i],
             Row::SpottingAid => d.spotting_aid = SpottingAid::ALL[i],
             Row::TerrainFiltering => d.terrain_filtering = i == 1,
+            Row::FrameRate => d.show_frame_rate = i == 1,
             Row::BuildingDistance => d.building_distance_nm = BUILDING_DISTANCES[i],
             Row::BuildingDetail => d.building_detail_nm = BUILDING_DETAILS[i],
+            Row::GroundTexture => d.ground_texture = GroundTexture::ALL[i],
+            Row::GroundTextureDistance => {
+                d.ground_texture_distance_nm = GROUND_TEXTURE_DISTANCES[i]
+            }
+            Row::VegetationDistance => d.vegetation_distance_nm = VEGETATION_DISTANCES[i],
+            Row::VegetationDetail => d.vegetation_detail_nm = VEGETATION_DETAILS[i],
+            Row::VegetationDensity => d.vegetation_density = VegDensity::ALL[i],
+            Row::VegetationCards => d.vegetation_cards = VegCards::ALL[i],
+            Row::Grass => d.grass = Grass::ALL[i],
+            Row::GrassDensity => d.grass_density = i.checked_sub(1).map(|n| VegDensity::ALL[n]),
+            Row::GrassDistance => d.grass_distance_ft = GRASS_DISTANCES[i],
         }
     }
     fn available(&self, row: usize, i: usize) -> bool {
@@ -360,22 +520,16 @@ impl Editor {
     // ---- pointer --------------------------------------------------------
 
     fn row_rect(row: usize) -> Rect {
-        // Six rows fit the panel at a tighter step.
-        let step = if rows().len() > 4 { 24 } else { ROW_STEP };
-        (
-            PANEL_RECT.0 + 4,
-            ROW_TOP + row as i32 * step,
-            PANEL_RECT.2 - 8,
-            step - 4,
-        )
+        let (step, panel, _) = layout();
+        (panel.0 + 4, 40 + row as i32 * step, panel.2 - 8, step - 2)
     }
     fn choice_rect(row: usize, i: usize) -> Rect {
         let r = Self::row_rect(row);
         (
             CHOICE_X + i as i32 * (CHOICE_W + CHOICE_GAP),
-            r.1 + 4,
+            r.1 + 1,
             CHOICE_W,
-            r.3 - 8,
+            (r.3 - 2).max(8),
         )
     }
     /// The same footer positions as the input configuration screen.
@@ -434,7 +588,7 @@ impl Editor {
         }
     }
     fn draw_rows(&self, pixels: &mut [u8], font: &Font) {
-        let panel = PANEL_RECT;
+        let (_, panel, _) = layout();
         Canvas(pixels).rect(panel, PANEL);
         Chrome::text(
             pixels,
@@ -488,7 +642,7 @@ impl Editor {
         }
     }
     fn draw_about(&self, pixels: &mut [u8], font: &Font) {
-        let panel = ABOUT_RECT;
+        let (_, _, panel) = layout();
         Canvas(pixels).rect(panel, PANEL);
         let (title, description, note) = match self.focus {
             Focus::Footer(i) => (
@@ -541,7 +695,7 @@ impl Editor {
             MUTED,
             &fit(
                 font,
-                "The original game had none of these. All off, at 100%, is closest to its look.",
+                "These are optional presentation choices. Render scale 100% uses the window resolution.",
                 width,
             ),
             (panel.0 + 8, panel.1 + 76),
@@ -580,12 +734,32 @@ mod tests {
     }
 
     #[test]
+    fn grass_rows_fit_and_edit_without_changing_tree_density() {
+        let mut editor = Editor::new(Options::default(), [true; 4], "test");
+        let tree = editor.draft.vegetation_density;
+        let density = rows().iter().position(|r| *r == Row::GrassDensity).unwrap();
+        let distance = rows()
+            .iter()
+            .position(|r| *r == Row::GrassDistance)
+            .unwrap();
+        editor.set_choice(density, 0);
+        editor.set_choice(distance, 3);
+        assert_eq!(editor.draft.grass_density, None);
+        assert_eq!(editor.draft.grass_distance_ft, 1000);
+        assert_eq!(editor.draft.vegetation_density, tree);
+        editor.set_choice(density, 4);
+        assert_eq!(editor.draft.grass_density, Some(VegDensity::Ultra));
+        let (_, settings, about) = layout();
+        assert!(settings.1 + settings.3 < about.1);
+        assert!(about.1 + about.3 <= 428);
+    }
+    #[test]
     fn navigation_reaches_rows_and_footer() {
         let mut e = editor();
         assert_eq!(e.focus, Focus::Row(0));
         press(&mut e, "ArrowUp");
         assert_eq!(e.focus, Focus::Row(0), "the top row stops the focus");
-        // Six rows with the city fill's two (the default), four without.
+        // Eleven rows with city fill and vegetation (both default on).
         let last = rows().len() - 1;
         for _ in 0..last {
             press(&mut e, "ArrowDown");
@@ -677,6 +851,12 @@ mod tests {
     #[test]
     fn apply_cancel_and_defaults() {
         let mut e = editor();
+        let cards = rows()
+            .iter()
+            .position(|r| *r == Row::VegetationCards)
+            .unwrap();
+        assert_eq!(e.choice(cards), VegCards::BillboardTop as usize);
+        e.set_choice(cards, VegCards::CrossTop as usize);
         press(&mut e, "ArrowLeft");
         assert!(e.dirty());
         // Escape and Cancel close; the host drops the draft with the screen.
@@ -691,6 +871,7 @@ mod tests {
         // Defaults only change the draft.
         assert_eq!(click(&mut e, Editor::footer_rect(1)), ResultAction::Changed);
         assert_eq!(e.draft, Options::default());
+        assert_eq!(e.choice(cards), VegCards::BillboardTop as usize);
         assert!(e.dirty());
         assert_eq!(e.applied.anti_aliasing, AntiAliasing::X2);
         // Apply with a path saves; a failed save reports the error.
@@ -723,5 +904,30 @@ mod tests {
         // The header strip is the panel colour, the body the paper colour.
         assert_eq!(pixels[..4], PANEL);
         assert_eq!(pixels[(300 * 640 + 2) * 4..][..4], chrome::PAPER);
+    }
+    #[test]
+    fn the_frame_rate_row_saves_and_comes_back() {
+        let mut e = editor();
+        let row = rows().iter().position(|r| *r == Row::FrameRate).unwrap();
+        for _ in 0..row {
+            press(&mut e, "ArrowDown");
+        }
+        assert!(!e.draft.show_frame_rate);
+        press(&mut e, "ArrowRight");
+        assert!(e.draft.show_frame_rate);
+        assert!(e.dirty());
+        let dir = std::env::temp_dir().join(format!("tore-graphics-fps-{}", std::process::id()));
+        let path = dir.join("graphics-v1.conf");
+        let applied = e.apply(Some(&path));
+        assert!(applied.show_frame_rate);
+        assert!(applied.text().contains("frame-rate true"));
+        assert!(Options::load(&path).show_frame_rate);
+        // Off again is the default, so the file omits the line.
+        press(&mut e, "ArrowLeft");
+        e.apply(Some(&path));
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("frame-rate"));
+        assert!(!Options::load(&path).show_frame_rate);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

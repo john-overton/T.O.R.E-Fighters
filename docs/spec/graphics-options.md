@@ -34,11 +34,19 @@ shown below the options.
 | Terrain filtering | Off, On | On |
 | Building distance (city fill) | 10 nm, 20 nm, 30 nm | 30 nm |
 | Building detail (city fill) | 1 nm, 2 nm, 5 nm, 10 nm, 20 nm | 5 nm |
+| Ground detail | Off, On, Fine | On |
+| Ground detail distance | 1 nm, 2 nm, 4 nm | 2 nm |
+| Vegetation distance | 2 nm, 4 nm, 6 nm, 8 nm | 4 nm |
+| Vegetation detail | 1 nm, 2 nm, 3 nm, 4 nm | 2 nm |
+| Vegetation density | Low, Med, High, Ultra | High |
+| Vegetation cards | Facing, Cross, Cross+top, Face+top | Face+top |
+| Frame rate counter | Off, On | Off |
 
 Choices are saved in `graphics-v1.conf` in the application data directory,
 beside `preferences-v1.conf`. A missing file uses the defaults quietly; an unreadable or malformed one uses them and logs a warning saying why.
 Smoke tests and captures ignore the saved file, like the other display
-preferences.
+preferences. The frame-rate line is written only when the counter is on
+(`frame-rate true`), so a default file is unchanged.
 
 ## Anti-aliasing
 
@@ -154,13 +162,150 @@ only when they differ from the defaults. Measured costs are in the city
 fill notes; at 4K the 5 nm default adds about 2 to 5 ms over Kiev, 1 nm
 about 1 ms. The fades cost about 0.1 to 0.4 ms more at 4K (2026-10-12).
 
+## Vegetation texture and vegetation objects
+
+Shown when the exploratory vegetation is on, which it is on this branch
+(hidden only under the developer switch `TORE_VEGETATION=0`). John asked
+on 2026-10-16 for the same kind of control the city buildings have. The
+steps and the defaults are an agent choice the same day, aimed at an
+RTX 4070 at 4K. Vegetation is presentation only: it is not collidable,
+and it is not part of the simulation, the network session, replays or
+checkpoints. What was drawn is seeded from the theater and the tile, so
+every machine that uses the same settings shows the same scene.
+
+**Ground detail** is the close-range ground detail: furrows on
+fields, grass, a mottled forest floor, sand grain, ripples and dunes,
+pebbles on gravel, and scree on rock. It is described in
+[terrain detail](terrain-detail.md#exploratory-vegetation-and-ground-detail).
+Off leaves the retail tile. On is the ordinary grain. Fine is a
+tighter grain. **Ground detail distance** is how far that grain
+reaches. It also fades with height, full below about 2,200 ft and gone
+by about 7,500 ft, so a cruise view stays the retail tile; the desert's
+broad colour fields and dune shading reach farther and fade out by
+about 26,000 ft. A flare,
+afterburner, fire or gun flash only adds light to it: the grain is the
+same with and without one.
+
+**Vegetation distance** is how far trees, bushes, palms and rocks are
+drawn, the same idea as building distance. **Vegetation detail** sets
+how far every configured instance stays at full distance opacity and density.
+The setting is used directly for all species, including small stones and clumps.
+Only the band from detail to draw distance fades, with matching distant-canopy
+coverage. The trees, bushes, palms and rocks are the
+cutout sprites from retail art and John's supplied v2/Sahara packs. The developer
+switch `TORE_VEGETATION_SPRITES=retail|pack|mixed` selects art at scene startup,
+with `mixed` the branch default. Missing retail species use supplied art.
+**Vegetation cards** switches live between Facing, Cross, Cross+top and Face+top.
+Face+top (camera-facing sides with angle-gated tops) is the default, requested by
+John on 2026-10-17. Missing saved card settings take that default; explicit saved
+choices remain selectable and round-trip. The original-presentation pixel-test
+preset retains Facing.
+`TORE_VEGETATION_CARDS=billboard|cross|cross-top|billboard-top` overrides that row
+for a run and is not saved. Sprites have full distance opacity inside detail range. Distant forest coverage
+continues on the terrain. Top modes use complementary side/top coverage from
+35 to 65 degrees down, at the measured visual crown centre. Conifers and pine
+groves retain upright cards at all angles, with no horizontal top disk.
+
+**Vegetation density** is Low, Med, High or Ultra. John requested a one-step
+reduction on 2026-10-17: new Ultra equals previous High, High equals previous
+Medium, and Medium equals previous Low. The new Low is an **agent choice** at
+half the previous Low candidate density. Default remains High. Relative to the
+previous High grid, the multipliers are 0.2, 0.4, 0.7 and 1.0.
+
+| Tree density | Objects kept at most |
+| --- | ---: |
+| Low | 32,768 |
+| Med | 65,536 |
+| High | 131,072 |
+| Ultra | 262,144 |
+
+**Grass** selects Blades (branch default), Tufts or Off, live on Apply.
+`TORE_GRASS=blades|tufts|off` overrides it for the run. **Grass density** is
+Off, Low, Med, High or Ultra, independent of trees, default High. **Grass
+distance** is 250, 500, 750 or 1,000 ft, default 500 ft. John requested these
+controls and denser grass reaching about 500 ft on 2026-10-17. Off in either
+grass row removes grass geometry while retaining ground detail, trees and canopy.
+
+Blades use four world-snapped grids, doubling the base spacing at each level.
+The following budgets are agent choices at the 500 ft default:
+
+| Grass density | Base spacing | Grid side per level | Submitted blade slots | Maximum vertices | Legacy tufts per near patch |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Low | 2 ft | 128 | 65,536 | 327,680 | 24 |
+| Med | 1.5 ft | 192 | 147,456 | 737,280 | 48 |
+| High | 1 ft | 256 | 262,144 | 1,310,720 | 96 |
+| Ultra | 0.75 ft | 320 | 409,600 | 2,048,000 | 160 |
+
+Ultra grows to a 344-square grid at 1,000 ft, with a hard maximum of 2,366,720
+vertices. Low grows to 136 at 1,000 ft; Medium and High retain their grid side. These limits include rejected
+candidates in every direction; actual visible counts are lower. Geometry stays
+opaque, with no blade buffers or CPU placement. See [grass rules](terrain-detail.md#grass).
+Grass-only GPU cost and final appearance require measurement on a GPU host.
+
+Tufts retain their legacy horizontal footprint; Blades use distance from the eye.
+In Tufts mode each tuft has five blades. Legacy grass thins in four rings: full within 14%
+of its radius, then half, a quarter and an eighth. Object budgets are divided into fixed geographic patch quotas, independent
+of the camera. Saturated patches retain the same seeded population throughout
+an approach. This is a fitted agent choice; a saturated forest can be sparser
+than its unconstrained candidate grid. Detail distance is never silently
+shortened to meet the budget. Object opacity has no separate altitude or
+projected-pixel fade inside detail range. Grass uses the selected mode's separate distance
+and habitat rules.
+
+The nine values are saved in `graphics-v1.conf` only when they differ
+from the defaults (`vegetation-texture`, `vegetation-texture-distance`,
+`vegetation-distance`, `vegetation-detail`, `vegetation-density`, `vegetation-cards`, `grass`, `grass-density`, `grass-distance`). An
+older file that has none of them reads as the defaults. Apply puts them
+into effect at once, the same way as the building settings. Original
+graphics turns the texture off and leaves the object distances at the
+defaults, as it does for buildings.
+
+## Frame rate counter
+
+Requested by John on 2026-10-17. Off by default. On draws a single line in
+the top right of the window, over the picture, in the bundled Noto face:
+`62 fps  16.1 ms  cpu 4.2  gpu 11.8  low 48`. The rate and the milliseconds are the mean
+frame over about the last half second. `low` is the slowest frame in the
+last second, written as a rate. Slow rendering frames, including frames longer
+than half a second, count. Disabling the counter resets its history. While enabled, presentation requests the next
+redraw continuously, including idle menus and paused flight/replay, so the line
+measures the actual render load. CPU milliseconds include main-thread frame
+preparation and encoding, excluding surface acquisition waits. GPU milliseconds
+are asynchronous timestamps around the main window command encoder, including
+scene and interface passes, excluding separately submitted mirrors, queued staging
+uploads, CPU time and presentation waits. CPU/GPU values average up to 30 recent samples. Three
+readback slots never wait on the GPU. Adapters without both timestamp features
+show `gpu --`, never an estimate. GPU/CPU timings overlap and need not sum to the
+frame interval. These measurement choices are agent decisions.
+
+The line is drawn only when the window is presented. Offscreen renders,
+previews, recordings and `P` screenshots copy the picture before that pass,
+so they stay the same with the counter off or on. `TORE_SHOW_FPS=1` forces
+the line on for one run, and `TORE_SHOW_FPS=0` forces it off. Neither value
+is saved. Any other value is ignored.
+
+Where it sits (agent decision, 2026-10-17), so it stays clear of the title
+strip, the large instrument window, the HUD camera's tape counter and an
+open right-hand debug panel:
+
+| Screen | Place |
+| --- | --- |
+| Menus, lobby, Escape and pause screens | On a wide window, in the black bar to the right of the 4:3 canvas, 10 pixels from the top. On a 4:3 window, just under the title strip. |
+| Loading screen | 10 pixels from the top and the right. The loading words are centred. |
+| Flight | In the corner above the large instrument window when that margin holds the line (1080p and above). Otherwise just under that window, still on the right. If a right-hand debug panel covers that spot, the line moves to the left of the panel. |
+| Replay viewer | In the corner. The mission timer is on the left, and the HUD camera counter starts 7% down, so the corner is above it. A right-hand panel starts lower and leaves the corner free. On a short window the line drops under the tape counter. |
+
 ## Command line
 
 For one run, without saving: `--anti-aliasing off|2x|4x|8x`,
 `--render-scale 75|100|125|150|200`, `--spotting-aid off|subtle|strong`,
 `--terrain-filtering on|off`, `--building-distance 10|20|30`,
-`--building-detail 1|2|5|10|20`, and `--original-graphics` for everything off
-at 100%. Flags apply in order, so `--original-graphics --spotting-aid strong`
+`--building-detail 1|2|5|10|20`, `--vegetation-texture off|on|fine`,
+`--vegetation-texture-distance 1|2|4`, `--vegetation-distance 2|4|6|8`,
+`--vegetation-detail 1|2|3|4`, `--vegetation-density low|medium|high|ultra`,
+and `--original-graphics` for everything off
+at 100%. `TORE_SHOW_FPS=1` shows the frame-rate counter for that run without
+writing it into the file. Flags apply in order, so `--original-graphics --spotting-aid strong`
 turns on only the outline. Pressing Apply on the Graphics screen saves whatever
 the screen shows, including a flag's value.
 

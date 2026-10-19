@@ -21,6 +21,7 @@ tore-input-native = { path = "../tore-input-native" }
 tore-sim = { path = "../tore-sim" }
 tore-world = { path = "../tore-world" }
 tore-workers = { path = "../tore-workers" }
+tore-codec = { path = "../tore-codec" }
 tore-replay = { path = "../tore-replay" }
 tore-session = { path = "../tore-session" }
 tore-net = { path = "../tore-net" }

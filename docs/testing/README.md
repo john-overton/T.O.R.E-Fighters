@@ -337,3 +337,172 @@ above). The ordinary CPU checks cover 10, 15 and 20 degree planes, both
 terrain triangle halves at distant map coordinates, and standing effects
 that must not sample ground. `TORE_DECAL_RENDERS` also writes `hill15-*`
 reference, before, after and coverage PPMs.
+
+## Exploratory vegetation benchmark
+
+The `vegetation-cpu-cameras` battery scenario runs the CPU-only
+`--vegetation-preview OUT cameras` job. It writes fixed field-edge, slope,
+Egypt water-belt candidate and Vietnam jungle camera coordinates without opening
+a window or creating a GPU adapter. Use the same resulting camera file for both
+builds via `TORE_VEG_PREVIEW_CAMERAS`. This checks camera coverage, not rendered
+appearance. The synthetic vegetation unit tests cover placement, scale, missing
+cutouts and indexed atlas selection. `tools/test_slice_vegetation.py` checks the
+generated packs' alpha, gutters, chroma removal and local glow rejection.
+The CPU-only `vegetation-pass5-cameras` case selects coast, forest hand-off and
+top-view situations. `--vegetation-preview OUT pass5-cameras` writes that list.
+These reproduce the requested situations; player screenshot coordinates are unknown.
+
+`vegetation-grass-cameras` runs `--vegetation-preview OUT grass-cameras` on the
+CPU. It freezes Ukraine meadow at 10/50/100/200 ft, a retained pine at
+8/25/45/70 degrees, an actual field boundary,
+a riverbank, Vietnam meadow and an Egypt water belt candidate. Site classes are
+recorded too. Sand-classified Egypt banks intentionally have no blades. The job
+also writes `grass-lowpass-cameras.txt`, usable with `TORE_VEG_LOWPASS_CAMERAS`
+for both `UKR` and `UKR-MEADOW`. Run the same camera file with
+`TORE_GRASS=blades`, `tufts` and `off`, leaving trees and ground detail on.
+Grass unit tests cover integer hash identity, snapping and disjoint level
+ownership, hard vertex budgets, triangle grounding, packed habitat boundaries
+and cache decoding. Shader and binding tests validate the blade entry points
+without creating a GPU adapter. GPU cost and visual quality remain lead checks.
+
+`vegetation-stream-convergence` runs `--vegetation-preview OUT stream-check`
+without a GPU. It exercises the production worker, bounded page uploads and
+visibility-radius growth at the lowpass start camera. It must converge within
+1,000 simulated 60 Hz frames, remain idle for 120 frames, and upload each selected
+instance only once. This waits for each bounded worker job and does not measure
+real-time scheduling or GPU cost. It honors `TORE_VEG_LOWPASS_THEATERS`,
+`TORE_VEG_LOWPASS_DENSITIES` and the baseline camera file described below.
+Synthetic unit tests also check that moving the camera builds only entering
+chunks, including reversing direction before a ring finishes.
+
+On `exp/vegetation`, `tore-app --vegetation-preview OUT cost` renders open
+country and woods at 1440p and 4K, at Medium, High and Ultra. This is an
+offscreen GPU job, not a GPU-free test. Use an isolated profile and the machine's
+current throttle. `frame-cost.txt` keeps the mean of eight frames after warmup,
+from CPU submission until GPU idle, with vegetation off/on and their difference.
+
+`tore-app --vegetation-preview OUT lowpass` flies a 100 ft, 480 kt, 3 nm
+straight pass through the densest vegetation in UKR, FRA, NSK, EGY, PGU, IRA,
+TVIET, APA, WTA and KURILE, plus `UKR-MEADOW` for open grass. It samples 1,350 frames (60 per second of the 22.5 s
+run) at 3840x2160 and 2560x1440, High and Ultra, and leaves the other Graphics
+vegetation settings at their defaults. GPU timestamps compare objects, canopy and grass
+on and off. A third timestamped frame suppresses only grass and reuses the exact
+uploaded tree scene with the same cull commands. An untimed priming frame
+prepares that scene, then grass on/off order alternates between samples. `grass-cost.txt` and the
+`gpu_no_grass_ms`/`grass_only_ms` CSV columns report the signed grass on-minus-off
+cost. CSVs also expose submitted blade candidates and legacy grass chunk builds.
+Ground detail stays on in all three frames. Warmup, while the patch cache fills
+at the in-flight budget, is reported separately. `TORE_VEG_LOWPASS_STRIDE=2`
+samples every second frame when a full run is too slow. Optional
+`TORE_VEG_LOWPASS_THEATERS`, `TORE_VEG_LOWPASS_SIZES`, `TORE_VEG_LOWPASS_DENSITIES`
+and `TORE_VEG_LOWPASS_FRAMES` limit a partial run.
+`TORE_VEG_LOWPASS_CAMERAS` points at the baseline lowpass `cameras.txt` to reuse
+its exact dense coordinates and heading. Run each
+`TORE_VEGETATION_CARDS=billboard|cross|cross-top|billboard-top` at High and both
+resolutions. Compare density tables when benchmarking older passes; pass 6 and pass 7 have
+the same tree density. This is an offscreen GPU job.
+Each case writes `*-warmup.csv` even if warmup fails. It records builds, packing,
+uploaded and pending bytes/chunks, worker/range pending flags and available/visible
+radii for every frame. `TORE_VEG_STREAM_TRACE=1` additionally logs each built and
+packed chunk key and worker completion state. Use it for diagnosis, not timings.
+
+Set `TORE_VEG_GPU_TIMING=1` to also emit `GPU` lines using timestamp queries.
+These measure the GPU commands without CPU placement/submission or readback.
+An adapter without the required timestamp features returns an explicit error.
+Use repeated runs and compare medians, with the same camera and settings.
+Compare `TORE_VEGETATION_SPRITES=retail`, `pack` and `mixed`. The pass 4 acceptance
+target is added GPU cost below 2 ms in woods and 1 ms in open country at 4K High.
+These are targets, not measurements for the current density and pack.
+The placement rules and presentation scope are in the
+[vegetation specification](../spec/terrain-detail.md#sprites-and-cached-placement).
+
+### Vegetation theater limits
+
+`vegetation-theater-limits` runs `--vegetation-preview OUT limits-check` on a
+private full import. It starts with PGU, then runs every base theater and every
+imported variant through the real mission loader, up to and including scenery
+and vegetation preparation. It creates no window or GPU adapter. Each prepared
+scene must fit default and downlevel texture dimensions, array layers, buffer
+allocation and binding sizes, and compute dispatch limits at every density.
+`theater-limits.tsv` records actual sizes; `limits-check.txt` is written only
+when all layouts pass. Allow up to an hour for a cold full-import run.
+
+The same audit is an explicitly ignored local-import Rust test:
+`TORE_DATA_DIR=PRIVATE_PROFILE TORE_VEG_LIMITS_OUT=OUT cargo test --locked -p tore-app every_imported_theater_and_variant_loads_and_fits_gpu_limits -- --ignored --nocapture`.
+Committed packing and resource-boundary tests use synthetic data only.
+Before and after grass captures must reuse the same camera file.
+
+The existing `vegetation-top-crowns` audit requires zero rendered top extents for
+pine groves, while checking individual crown bounds and floor cutouts for the
+remaining groves. Pine source art is retained even though its horizontal disk
+is no longer drawn.
+
+## Terrain tile seam audit
+
+`--terrain-audit OUT RETAIL_INSTALL_DIR` is CPU-only. It compares the imported
+UKR, FRA and BAL families with the supplied archives, checks coverage tables
+and actual mesh UV/page selection, and writes per-cell/per-texture TSVs plus
+unlit source and mean PNGs. Keep all output local: it derives from retail art.
+The maps exclude GPU lighting, fog, filtering, canopy and object overlays.
+
+`vegetation-tile-seams` runs `--vegetation-preview OUT seam-check`. It checks
+real UKR/FRA/BAL mask/cache reconstruction and portable resource limits, writes
+accepted edge segments and unlit correction strips, and selects exact cameras.
+`camera-check.tsv` verifies serialized radians through the actual preview
+reader and camera projection, with a terrain-clear ray and the seam centred
+at pixel (1920,1080) in 4K. Degree-valued pitch is rejected by the reader.
+
+The fixed UKR LAND/PIC boundary at (16384,32768) must qualify, independently of
+what the mask's generic camera search accepts. `UKR-LAND-line.csv` samples
+unlit bilinear source colour and the actual packed GPU input at 5 ft intervals.
+`line-check.txt` checks the 500 ft analytic colour component and unchanged outer
+texture endpoints. `*-source-statistics.csv` records actual source-page
+contrast. `*-interior-check.txt` requires unchanged original page bytes and
+terrain vertices, exact zero seam response at interior samples across every
+tile, and zero flat modulation on unclassified placements. The source picture names establish which side is LAND; image appearance
+alone must not establish that label. `*-texture-band.csv` compares the actual
+baked response with a colour-only control. Cached response bytes and metadata
+must roundtrip exactly and fit portable limits.
+
+`*-flat-pages.tsv` records runtime flatness classification, four low-pass
+standard deviations, reference pages and noise parameters. `*-flat-contrast.csv`
+checks a representative of every flat page, including the reviewed UKR23
+placement, before and after modulation against its reference. Selection is
+independent of the resulting contrast. It records valid block counts, requires
+512 ft contrast within 25% where enough blocks survive exclusions, and requires
+contrast gain. Protected feature samples remain exact. The generated three-panel
+PNGs show source, modulated source and reference, all unlit CPU data.
+
+Dedicated interior cameras and local `flat-gpu-check.py` compare GPU pixels,
+large-scale luminance standard deviation and light/dark colours. Preview-only
+`TORE_TERRAIN_MATERIAL_ONLY=1` isolates unlit base colour. The lead script adds
+that observer to baseline 0cd9f492 with a recorded patch, leaving ordinary
+captures intact. Fixed central crops must show increased flat-tile contrast
+within 25% of the mottled reference, and exact equality on mottled controls.
+UKR, FRA and BAL all receive flat/reference probes. Material mode `mask` renders
+flat-modulation eligibility. The same candidate mask selects fully eligible
+blocks in both captures; the report also retains whole-crop statistics and
+coverage. Guarded features are not forced to acquire mottled contrast. `TORE_SEAM_MASK_ONLY=1` draws accepted coverage for diagnosis;
+`mask-projection.tsv` gives the 500 ft width projected through the real camera
+and terrain. The lead script checks that coverage has the expected pixel width
+and that 100/2,000 ft 4K High median correction cost is at most 0.5 ms. This is
+an acceptance target, not a CPU timing claim.
+The standalone `seam-review` job also writes per-texel class/page diagnostics.
+All source-derived outputs stay local. Synthetic tests cover the fallback
+exception, protected authored fields, packed GPU data, palette changes,
+camera roundtrips, all neighbour rotations, half-float response precision,
+zero seam correction outside its band, flat-only enrichment, painted-feature
+protection, retained fine texture, nonrepeating world noise, the noisy texture
+weight and the exact 500 ft width.
+
+The lead-only `seam-cost` job requires GPU timestamps. It alternates correction
+off/on in one scene at 4K High and 100/500/2,000/10,000 ft over UKR and FRA.
+`TORE_SEAM_COST_CAMERAS` supplies the fixed radian camera file emitted by the
+CPU audit. Both builds use identical viewpoints and separate fresh Cargo
+targets. The candidate's off/on pair disables both the seam response and flat
+modulation, so the reported increment includes the entire material feature.
+The preview-only `TORE_SEAM_SURFACE_ONLY=1` observer suppresses vegetation
+and procedural detail while retaining the seam correction for isolated
+ground captures. Tree, canopy and habitat populations stay fixed within each
+timing off/on pair.
+The reported signed deltas remain subject to timing noise and GPU review.

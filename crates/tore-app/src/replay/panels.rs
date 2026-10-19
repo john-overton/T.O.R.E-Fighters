@@ -510,6 +510,11 @@ impl Panels {
         self.comms.is_some()
     }
 
+    /// The right-hand tree panel is open.
+    pub fn right_open(&self) -> bool {
+        self.slots[Side::Right.index()].is_some()
+    }
+
     /// Nothing is open.
     pub fn is_empty(&self) -> bool {
         self.slots.iter().all(Option::is_none) && self.comms.is_none()
