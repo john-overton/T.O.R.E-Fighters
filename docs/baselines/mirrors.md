@@ -42,7 +42,9 @@ forward of model origin. The rear pass sees the original animated exterior;
 the primary cockpit pass does not. The same interpolated state drives both.
 
 Every flight frame with visible mirror art submits a rear pass. No timer, frame
-skipping, CPU pixel transfer or GPU wait is used. Shared world/aircraft resources
+skipping, CPU pixel transfer or GPU wait is used. (Since 2026-10-19 the rear
+pass runs on every other visible frame with a 10% wider camera; see
+[rear-view mirrors](../spec/flight-views.md#rear-view-mirrors).) Shared world/aircraft resources
 are reused; the rear submission precedes primary camera-buffer updates so the
 views cannot overwrite each other's uniforms. Mirrors share the cockpit's
 source-coordinate pan, zoom and fade. Hidden/offscreen mirrors skip rendering.

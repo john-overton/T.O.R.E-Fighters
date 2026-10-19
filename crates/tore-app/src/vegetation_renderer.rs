@@ -21,19 +21,101 @@ const PATCH_STRIDE: u64 = 64;
 /// the share of a patch's full tufts drawn in it.
 const RINGS: [(f32, f32); 4] = [(0.14, 1.), (0.32, 0.5), (0.6, 0.25), (1.0, 0.125)];
 
+/// Which camera a world draw is for. Only the main view streams vegetation
+/// (optimization S10): the mirror, whose eye is about 12 ft from the main
+/// one, draws the main view's uploaded chunks and reach read-only, and so
+/// does a camera panel near the main eye. A panel far from it (the target
+/// camera framing a distant target) streams its own small circle, keyed by
+/// its page, so it never moves the main view's circle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViewKind {
+    Main,
+    Mirror,
+    /// An instrument camera panel, by page.
+    Panel(u8),
+}
+
+/// Where a view's vegetation comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Route {
+    /// The main stream, which this view moves.
+    Stream,
+    /// The main stream as it stands, read-only.
+    Share,
+    /// The panel's own small stream.
+    Panel(u8),
+}
+
+/// A panel this close to the main view's eye, feet, draws the main stream:
+/// the stream keeps a two-chunk guard ring beyond its drawn circle.
+pub(crate) const PANEL_SHARE_FT: f64 = 2. * vegetation::CHUNK as f64;
+/// A panel's own stream: drawn circle and full-density circle at most, feet
+/// (fitted, agent decision 2026-10-19: a 138 by 114 pixel picture of a
+/// target at most a mile from its camera).
+pub(crate) const PANEL_DRAW_FT: f32 = 2. * vegetation::NM as f32;
+pub(crate) const PANEL_FULL_FT: f32 = vegetation::NM as f32;
+/// A panel stream not drawn for this long is dropped with its GPU buffers.
+pub(crate) const PANEL_IDLE: std::time::Duration = std::time::Duration::from_secs(5);
+
+pub(crate) fn route(kind: ViewKind, eye: [f64; 2], main_eye: Option<[f64; 2]>) -> Route {
+    match kind {
+        ViewKind::Main => Route::Stream,
+        ViewKind::Mirror => Route::Share,
+        ViewKind::Panel(page) => {
+            if main_eye.is_some_and(|m| (m[0] - eye[0]).hypot(m[1] - eye[1]) <= PANEL_SHARE_FT) {
+                Route::Share
+            } else {
+                Route::Panel(page)
+            }
+        }
+    }
+}
+
+/// A panel stream's circles and budget for the main stream's `full` and
+/// `draw` (feet) and `capacity` (objects): the same objects per chunk as the
+/// main stream, so it is as dense, over the smaller ring. Returns the full
+/// and draw distances, the capacity and the spare pages.
+pub(crate) fn panel_shape(full: f32, draw: f32, capacity: usize) -> (f32, f32, usize, usize) {
+    let panel_draw = draw.min(PANEL_DRAW_FT);
+    let panel_full = full.min(PANEL_FULL_FT).min(panel_draw);
+    let quota = capacity / vegetation::ring_chunks(draw).max(1);
+    let chunks = vegetation::ring_chunks(panel_draw);
+    let objects = (quota * chunks)
+        .next_multiple_of(stream::PAGE)
+        .clamp(stream::PAGE, capacity.max(stream::PAGE));
+    // One partial page per chunk, for the published and the staged selection.
+    (panel_full, panel_draw, objects, 2 * chunks)
+}
+
+/// A stream with its GPU instance pages, page table and cull bindings.
+struct GpuStream {
+    cpu: stream::Stream,
+    instances: wgpu::Buffer,
+    chunks: wgpu::Buffer,
+    bind: wgpu::BindGroup,
+}
+
+/// A far camera panel's own stream.
+struct PanelStream {
+    page: u8,
+    full: f32,
+    draw: f32,
+    capacity: usize,
+    used: std::time::Instant,
+    gpu: GpuStream,
+}
+
 pub struct Renderer {
     atlas: Arc<vegetation::Atlas>,
-    worker: Option<stream::Worker>,
     epoch: u64,
-    ready: Option<stream::Ready>,
-    incoming: Option<stream::Ready>,
-    chunks: wgpu::Buffer,
-    pages: stream::Slots,
-    page_count: u32,
+    main: GpuStream,
+    panels: Vec<PanelStream>,
+    /// The stream the last `prepare` drew from (`None` for the main one),
+    /// with its object count, page count and reach.
+    view: (Option<u8>, u32, u32, f32),
     depth_pipeline: wgpu::RenderPipeline,
     library: Arc<Library>,
     vertices: wgpu::Buffer,
-    instances: wgpu::Buffer,
     drawn: wgpu::Buffer,
     shadow_drawn: wgpu::Buffer,
     counts: wgpu::Buffer,
@@ -42,7 +124,6 @@ pub struct Renderer {
     meshes: wgpu::Buffer,
     mesh_dirty: bool,
     patches: wgpu::Buffer,
-    bind: wgpu::BindGroup,
     layout: wgpu::BindGroupLayout,
     /// Objects the instance buffers hold: the density's budget.
     capacity: usize,
@@ -55,23 +136,17 @@ pub struct Renderer {
     grass_density: crate::graphics::VegDensity,
     grass_suppressed: bool,
     repeat_frame: bool,
-    count: u32,
     /// Per ring: patch range and tufts per patch.
     rings: Vec<(std::ops::Range<u32>, u32)>,
     prepared: bool,
     suppressed: bool,
     settle: bool,
     draw_nm: f32,
-    visible_reach: f32,
-    last_prepare: std::time::Instant,
-    last_eye: Option<[f64; 2]>,
     detail_nm: f32,
     density: f32,
     grass_radius: f32,
     tufts: u32,
     cards: crate::graphics::VegCards,
-    /// Object chunks, grass chunks and CPU build time on the last `prepare`.
-    last_cache: CacheFrame,
 }
 
 /// Cache work done while preparing one frame. Zeros when vegetation is hidden.
@@ -179,11 +254,6 @@ impl Renderer {
             vegetation::MAX_PATCHES as u64 * PATCH_STRIDE,
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let chunks = buffer(
-            "Vegetation chunk pages",
-            crate::vegetation_limits::CHUNK_BYTES,
-            storage,
-        );
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Vegetation cull layout"),
             entries: &[
@@ -197,21 +267,17 @@ impl Renderer {
                 storage_entry(7, true),
             ],
         });
-        let (instances, drawn, shadow_drawn) = object_buffers(device, capacity);
-        let bind = cull_bind(
-            device,
-            &layout,
-            [
-                &instances,
-                &params,
-                &counts,
-                &drawn,
-                &shadow_drawn,
-                &args,
-                &meshes,
-                &chunks,
-            ],
-        );
+        let (drawn, shadow_drawn) = drawn_buffers(device, capacity);
+        let shared = Shared {
+            layout: &layout,
+            params: &params,
+            counts: &counts,
+            drawn: &drawn,
+            shadow_drawn: &shadow_drawn,
+            args: &args,
+            meshes: &meshes,
+        };
+        let main = main_stream(device, &shared, capacity);
         let cull_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Vegetation cull"),
             source: wgpu::ShaderSource::Wgsl(include_str!("vegetation_cull.wgsl").into()),
@@ -247,17 +313,13 @@ impl Renderer {
         );
         Self {
             atlas,
-            worker: None,
             epoch: 0,
-            ready: None,
-            incoming: None,
-            chunks,
-            pages: stream::Slots::new(capacity),
-            page_count: 0,
+            main,
+            panels: Vec::new(),
+            view: (None, 0, 0, 0.),
             depth_pipeline,
             library,
             vertices,
-            instances,
             drawn,
             shadow_drawn,
             counts,
@@ -266,7 +328,6 @@ impl Renderer {
             meshes,
             mesh_dirty: true,
             patches,
-            bind,
             layout,
             capacity,
             cull,
@@ -278,21 +339,16 @@ impl Renderer {
             grass_density: crate::graphics::VegDensity::High,
             grass_suppressed: false,
             repeat_frame: false,
-            count: 0,
             rings: Vec::new(),
             prepared: false,
             suppressed: false,
             settle: false,
             draw_nm: 0.,
-            visible_reach: 0.,
-            last_prepare: std::time::Instant::now(),
-            last_eye: None,
             detail_nm: 0.,
             density: 1.,
             grass_radius: 0.,
             tufts: 0,
             cards: Default::default(),
-            last_cache: CacheFrame::default(),
         }
     }
 
@@ -314,25 +370,18 @@ impl Renderer {
         let capacity = object_budget(density);
         if capacity != self.capacity {
             self.capacity = capacity;
-            (self.instances, self.drawn, self.shadow_drawn) = object_buffers(device, capacity);
-            self.bind = cull_bind(
-                device,
-                &self.layout,
-                [
-                    &self.instances,
-                    &self.params,
-                    &self.counts,
-                    &self.drawn,
-                    &self.shadow_drawn,
-                    &self.args,
-                    &self.meshes,
-                    &self.chunks,
-                ],
-            );
-            self.count = 0;
-            self.pages = stream::Slots::new(capacity);
-            self.page_count = 0;
+            (self.drawn, self.shadow_drawn) = drawn_buffers(device, capacity);
+            let fresh = main_stream(device, &self.shared(), capacity);
+            let worker_kept = std::mem::replace(&mut self.main, fresh);
+            // The worker, its results and the stream's eye carry over; the
+            // pages restart.
+            let mut cpu = worker_kept.cpu;
+            cpu.reset_pages(capacity, stream::SPARE_PAGES);
+            self.main.cpu = cpu;
         }
+        // Panel streams are sized from these settings; the next far panel
+        // makes a new one.
+        self.panels.clear();
         self.tufts = options.grass_density.map_or(0, |d| d.grass().1);
         self.grass_radius = if options.grass_density.is_some() {
             options.grass_distance_ft as f32
@@ -368,19 +417,28 @@ impl Renderer {
     /// Drops the patch cache so the next frames fill it at the current budget.
     pub fn reset_cache(&mut self) {
         self.epoch = self.epoch.wrapping_add(1);
-        self.ready = None;
-        self.incoming = None;
-        self.pages = stream::Slots::new(self.capacity);
-        self.page_count = 0;
-        self.count = 0;
+        self.main.cpu.reset(self.capacity, stream::SPARE_PAGES);
+        self.panels.clear();
+        self.view = (None, 0, 0, 0.);
         self.rings.clear();
         self.prepared = false;
-        self.last_cache = CacheFrame::default();
     }
 
-    /// Chunks built while preparing the last frame, and the CPU time that took.
+    /// Chunks built while preparing the last main frame, and the CPU time that took.
     pub fn cache_frame(&self) -> CacheFrame {
-        self.last_cache
+        self.main.cpu.cache
+    }
+
+    fn shared(&self) -> Shared<'_> {
+        Shared {
+            layout: &self.layout,
+            params: &self.params,
+            counts: &self.counts,
+            drawn: &self.drawn,
+            shadow_drawn: &self.shadow_drawn,
+            args: &self.args,
+            meshes: &self.meshes,
+        }
     }
 
     // PASS6_POPIN_OBSERVER_BEGIN
@@ -389,7 +447,7 @@ impl Renderer {
     pub fn near_population(&self, camera: &Camera, _size: [u32; 2]) -> popin::Population {
         let full = self.detail_nm * vegetation::NM as f32;
         let mut out = popin::Population::new();
-        if let Some(ready) = &self.ready {
+        if let Some(ready) = &self.main.cpu.ready {
             for (_, bytes) in &ready.chunks {
                 for bytes in bytes.chunks_exact(INST_STRIDE as usize) {
                     let words: [f32; 16] = std::array::from_fn(|i| {
@@ -397,7 +455,7 @@ impl Renderer {
                     });
                     let distance = (words[0] - camera.position[0] as f32)
                         .hypot(words[2] - camera.position[2] as f32);
-                    if distance > full || distance >= self.visible_reach {
+                    if distance > full || distance >= self.main.cpu.visible_reach {
                         continue;
                     }
                     let fade = 1.;
@@ -420,23 +478,24 @@ impl Renderer {
     }
     // PASS6_POPIN_OBSERVER_END
 
-    /// Objects placed around the camera.
+    /// Objects placed around the main camera.
     pub fn placed(&self) -> u32 {
-        self.count
+        self.main.cpu.count
     }
 
     /// Feet to the farthest chunk of objects within the instance budget.
     pub fn kept_reach(&self, _eye: [f64; 2]) -> f32 {
-        self.ready.as_ref().map_or(0., |r| r.reach)
+        self.main.cpu.ready.as_ref().map_or(0., |r| r.reach)
     }
 
-    /// How far full density reaches, as a share of the setting's distance.
+    /// How far the last prepared view draws objects, feet: the main view's
+    /// reach for the main view, the mirror and near panels.
     pub fn draw_reach(&self) -> f32 {
-        self.visible_reach
+        self.view.3
     }
 
     pub fn squeeze(&self) -> f32 {
-        self.ready.as_ref().map_or(1., |r| r.squeeze)
+        self.main.cpu.ready.as_ref().map_or(1., |r| r.squeeze)
     }
 
     /// Grass tufts drawn last frame, before the shader drops any.
@@ -476,8 +535,10 @@ impl Renderer {
     #[allow(clippy::too_many_arguments)]
     pub fn prepare(
         &mut self,
+        device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
+        kind: ViewKind,
         camera: &Camera,
         world: &Terrain,
         origin: [f64; 3],
@@ -491,117 +552,96 @@ impl Renderer {
         self.prepared = false;
         self.rings.clear();
         if self.suppressed || self.draw_nm <= 0. {
-            self.last_cache = CacheFrame::default();
+            self.main.cpu.cache = CacheFrame::default();
+            self.view = (None, 0, 0, 0.);
             return;
         }
-        self.last_cache = CacheFrame::default();
         let eye2 = [camera.position[0], camera.position[2]];
-        let dt = self.last_prepare.elapsed().as_secs_f64().max(0.001);
-        let ahead = self.last_eye.map_or([0.; 2], |last| {
-            let delta = [eye2[0] - last[0], eye2[1] - last[1]];
-            let distance = delta[0].hypot(delta[1]);
-            // Five seconds at 480 kt is about 4,050 ft, within the guard ring.
-            let scale = (5. / dt).min(4096. / distance.max(1.));
-            let ahead = delta.map(|v| (v * scale / 512.).round() * 512.);
-            let scale = 4096. / ahead[0].hypot(ahead[1]).max(4096.);
-            ahead.map(|v| v * scale)
-        });
-        self.last_eye = Some(eye2);
         let full = self.detail_nm * vegetation::NM as f32;
         let draw = self.draw_nm * vegetation::NM as f32;
-        let request = stream::Request {
+        let grass_radius = if self.grass_mode == crate::graphics::Grass::Tufts {
+            self.grass_radius
+        } else {
+            0.
+        };
+        let shape = stream::Shape {
             epoch: self.epoch,
-            eye: eye2,
-            ahead,
             full,
             draw,
             density: self.density,
             capacity: self.capacity,
-            grass_radius: if self.grass_mode == crate::graphics::Grass::Tufts {
-                self.grass_radius
-            } else {
-                0.
-            },
+            grass_radius,
             settle: self.settle,
         };
-        if self.settle {
-            self.pages.upload(usize::MAX, |offset, bytes| {
-                queue.write_buffer(&self.instances, offset, bytes)
-            });
-            if self.incoming.is_some() {
-                self.ready = self.incoming.take();
+        let route = route(kind, eye2, self.main.cpu.last_eye);
+        let mut full_drawn = full;
+        let mut source = None;
+        match route {
+            Route::Stream => {
+                let request = self.main.cpu.request(shape, eye2);
+                let (atlas, library) = (&self.atlas, &self.library);
+                let GpuStream {
+                    cpu,
+                    instances,
+                    chunks,
+                    ..
+                } = &mut self.main;
+                cpu.advance(
+                    request,
+                    || stream::Worker::new(atlas.clone(), library.clone(), world),
+                    false,
+                    |offset, bytes| queue.write_buffer(instances, offset, bytes),
+                    |table| queue.write_buffer(chunks, 0, &bytes_of_u32(table)),
+                );
+                // Panels that stopped asking give their memory back.
+                let now = std::time::Instant::now();
+                self.panels
+                    .retain(|p| now.duration_since(p.used) < PANEL_IDLE);
+            }
+            Route::Share => {}
+            Route::Panel(page) => {
+                let at = self.panel(device, page);
+                let (atlas, library) = (&self.atlas, &self.library);
+                let panel = &mut self.panels[at];
+                panel.used = std::time::Instant::now();
+                let request = panel.gpu.cpu.request(
+                    stream::Shape {
+                        full: panel.full,
+                        draw: panel.draw,
+                        capacity: panel.capacity,
+                        ..shape
+                    },
+                    eye2,
+                );
+                let GpuStream {
+                    cpu,
+                    instances,
+                    chunks,
+                    ..
+                } = &mut panel.gpu;
+                cpu.advance(
+                    request,
+                    || stream::Worker::new(atlas.clone(), library.clone(), world),
+                    true,
+                    |offset, bytes| queue.write_buffer(instances, offset, bytes),
+                    |table| queue.write_buffer(chunks, 0, &bytes_of_u32(table)),
+                );
+                // Until its circle is in, the panel draws whatever the main
+                // stream holds there.
+                if cpu.visible_reach > 0. {
+                    full_drawn = panel.full;
+                    source = Some(page);
+                }
             }
         }
-        let worker = self.worker.get_or_insert_with(|| {
-            stream::Worker::new(self.atlas.clone(), self.library.clone(), world)
-        });
-        // Normal frames never wait. Captures explicitly request a settled view.
-        if self.settle && worker.busy {
-            let _ = worker.poll(true);
-        }
-        if self.settle {
-            worker.request(request);
-        }
-        if let Some(ready) = worker.poll(self.settle)
-            && ready.epoch == self.epoch
-        {
-            self.last_cache = ready.cache;
-            self.pages.sync(&ready.chunks);
-            self.incoming = Some(ready);
-        }
-        self.pages.upload(
-            if self.settle {
-                usize::MAX
-            } else {
-                stream::UPLOAD_BYTES
-            },
-            |offset, bytes| {
-                queue.write_buffer(&self.instances, offset, bytes);
-                self.last_cache.uploaded_bytes += bytes.len();
-            },
+        let stream = self.stream(source);
+        self.view = (
+            source,
+            stream.cpu.count,
+            stream.cpu.page_count,
+            stream.cpu.visible_reach,
         );
-        if !self.pages.pending() && (self.incoming.is_some() || self.settle) {
-            if self.incoming.is_some() {
-                self.ready = self.incoming.take();
-            }
-            let (table, count) = self.pages.table();
-            self.count = count;
-            self.page_count = (table.len() / 2) as u32;
-            if !table.is_empty() {
-                queue.write_buffer(&self.chunks, 0, &bytes_of_u32(&table));
-            }
-        }
-        if !self.pages.pending() && !self.settle {
-            worker.request(request);
-        }
-        self.last_cache.worker_pending = worker.busy || self.ready.as_ref().is_none_or(|r| !r.done);
-        (self.last_cache.upload_chunks, self.last_cache.upload_bytes) = self.pages.remaining();
-        self.last_cache.pending = self.pages.pending() || self.last_cache.worker_pending;
-        // Uploaded coverage defines a circle, never individual patch visibility.
-        // The outer fade stays wholly inside that circle, including during a
-        // teleport or a worker delay. A new circle expands continuously.
-        let available = self
-            .ready
-            .as_ref()
-            .map_or(0., |r| {
-                (r.available - (r.eye[0] - eye2[0]).hypot(r.eye[1] - eye2[1]) as f32).max(0.)
-            })
-            .min(draw);
-        let dt = self.last_prepare.elapsed().as_secs_f32().min(0.1);
-        self.last_prepare = std::time::Instant::now();
-        let (reach, range_pending) =
-            advance_visible_range(self.visible_reach, available, draw, dt, self.settle);
-        let reach = if available >= full {
-            reach.max(full)
-        } else {
-            0.
-        };
-        self.visible_reach = reach;
-        self.last_cache.available = available;
-        self.last_cache.visible = reach;
-        self.last_cache.range_pending = range_pending;
-        self.last_cache.pending |= range_pending;
-        let draw = self.visible_reach;
+        let draw = self.view.3;
         if self.mesh_dirty {
             self.upload_meshes(queue);
             queue.write_buffer(&self.args, 0, &self.cards.vertices().to_le_bytes());
@@ -635,10 +675,13 @@ impl Renderer {
                 [aspect / f, 1. / f],
             );
         }
-        if self.count == 0 {
+        let main = route == Route::Stream;
+        if self.view.1 == 0 {
             self.prepared =
                 self.grass_mode == crate::graphics::Grass::Blades || !self.rings.is_empty();
-            self.last_cache.submit_ms = started.elapsed().as_secs_f64() * 1000.;
+            if main {
+                self.main.cpu.cache.submit_ms = started.elapsed().as_secs_f64() * 1000.;
+            }
             return;
         }
         let mesh_count = self.library.meshes.len();
@@ -654,18 +697,58 @@ impl Renderer {
             height * f * 0.5,
             camera.position[1] as f32,
         ]);
-        params.extend([full, draw, 0., 1.5]);
-        params.extend(u32s(&[self.count, mesh_count as u32, self.page_count, 0]));
+        params.extend([full_drawn, draw, 0., 1.5]);
+        params.extend(u32s(&[self.view.1, mesh_count as u32, self.view.2, 0]));
         queue.write_buffer(&self.params, 0, &bytes_of_f32(&params));
         self.encode_cull(encoder);
         self.prepared = true;
-        self.last_cache.submit_ms = started.elapsed().as_secs_f64() * 1000.;
+        if main {
+            self.main.cpu.cache.submit_ms = started.elapsed().as_secs_f64() * 1000.;
+        }
+    }
+
+    /// The stream a view draws: the main one, or a panel's own.
+    fn stream(&self, source: Option<u8>) -> &GpuStream {
+        source
+            .and_then(|page| self.panels.iter().find(|p| p.page == page))
+            .map_or(&self.main, |p| &p.gpu)
+    }
+
+    /// The index of `page`'s own stream, made at the current settings if it
+    /// has none.
+    fn panel(&mut self, device: &wgpu::Device, page: u8) -> usize {
+        if let Some(at) = self.panels.iter().position(|p| p.page == page) {
+            return at;
+        }
+        let (full, draw, capacity, spare) = panel_shape(
+            self.detail_nm * vegetation::NM as f32,
+            self.draw_nm * vegetation::NM as f32,
+            self.capacity,
+        );
+        let gpu = gpu_stream(
+            device,
+            &self.shared(),
+            capacity,
+            spare,
+            stream::pages(capacity, spare) as u64 * 8,
+            "Panel vegetation",
+        );
+        self.panels.push(PanelStream {
+            page,
+            full,
+            draw,
+            capacity,
+            used: std::time::Instant::now(),
+            gpu,
+        });
+        self.panels.len() - 1
     }
 
     // The diagnostic grass-off repeat reuses the exact uploaded tree scene,
     // but encodes the same culling workload so its GPU delta isolates grass.
     fn encode_cull(&self, encoder: &mut wgpu::CommandEncoder) {
-        if self.count == 0 {
+        let (source, count, page_count, _) = self.view;
+        if count == 0 {
             return;
         }
         encoder.clear_buffer(&self.counts, 0, None);
@@ -675,8 +758,8 @@ impl Renderer {
             timestamp_writes: None,
         });
         pass.set_pipeline(&self.cull);
-        pass.set_bind_group(0, &self.bind, &[]);
-        pass.dispatch_workgroups(self.page_count, 1, 1);
+        pass.set_bind_group(0, &self.stream(source).bind, &[]);
+        pass.dispatch_workgroups(page_count, 1, 1);
         pass.set_pipeline(&self.finish);
         pass.dispatch_workgroups((mesh_count as u32).div_ceil(64), 1, 1);
         drop(pass);
@@ -729,7 +812,13 @@ impl Renderer {
             return;
         }
         let radius = self.grass_radius;
-        let Some(ready) = &self.ready else {
+        // Field borrows, so `self.rings` stays free to fill below.
+        let stream = self
+            .view
+            .0
+            .and_then(|page| self.panels.iter().find(|p| p.page == page))
+            .map_or(&self.main, |p| &p.gpu);
+        let Some(ready) = &stream.cpu.ready else {
             return;
         };
         let patches = &ready.grass;
@@ -799,7 +888,7 @@ impl Renderer {
             return;
         }
         pass.set_bind_group(0, bind, &[]);
-        if self.count > 0 {
+        if self.view.1 > 0 {
             pass.set_pipeline(&self.depth_pipeline);
             pass.set_vertex_buffer(0, self.vertices.slice(..));
             pass.set_vertex_buffer(1, self.drawn.slice(..));
@@ -846,30 +935,35 @@ fn object_budget(density: crate::graphics::VegDensity) -> usize {
     density.object_budget()
 }
 
-/// The instance list and the two lists the cull pass writes.
-fn object_buffers(
-    device: &wgpu::Device,
-    capacity: usize,
-) -> (wgpu::Buffer, wgpu::Buffer, wgpu::Buffer) {
-    let buffer = |label, count: usize, stride: u64, usage| {
-        crate::vegetation_limits::buffer(label, count as u64 * stride, usage, &device.limits())
-            .expect("vegetation buffer limits");
-        device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
-            size: count as u64 * stride,
-            usage,
-            mapped_at_creation: false,
-        })
-    };
+/// The cull pass's bindings that every stream shares: each view culls and
+/// draws in its own submission, so one set of output lists serves them all.
+struct Shared<'a> {
+    layout: &'a wgpu::BindGroupLayout,
+    params: &'a wgpu::Buffer,
+    counts: &'a wgpu::Buffer,
+    drawn: &'a wgpu::Buffer,
+    shadow_drawn: &'a wgpu::Buffer,
+    args: &'a wgpu::Buffer,
+    meshes: &'a wgpu::Buffer,
+}
+
+/// The two lists the cull pass writes, for `capacity` objects.
+fn drawn_buffers(device: &wgpu::Device, capacity: usize) -> (wgpu::Buffer, wgpu::Buffer) {
     let listed = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::VERTEX;
+    crate::vegetation_limits::buffer(
+        "Vegetation drawn",
+        capacity as u64 * DRAWN_STRIDE,
+        listed,
+        &device.limits(),
+    )
+    .expect("vegetation buffer limits");
     (
-        buffer(
-            "Vegetation instances",
-            (2 * capacity.div_ceil(stream::PAGE) + stream::SPARE_PAGES) * stream::PAGE,
-            INST_STRIDE,
-            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        ),
-        buffer("Vegetation drawn", capacity, DRAWN_STRIDE, listed),
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Vegetation drawn"),
+            size: capacity as u64 * DRAWN_STRIDE,
+            usage: listed,
+            mapped_at_creation: false,
+        }),
         device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Unused vegetation caster binding"),
             size: DRAWN_STRIDE,
@@ -879,11 +973,53 @@ fn object_buffers(
     )
 }
 
-fn cull_bind(
+/// The main view's stream at the density's budget.
+fn main_stream(device: &wgpu::Device, shared: &Shared<'_>, capacity: usize) -> GpuStream {
+    gpu_stream(
+        device,
+        shared,
+        capacity,
+        stream::SPARE_PAGES,
+        crate::vegetation_limits::CHUNK_BYTES,
+        "Vegetation",
+    )
+}
+
+/// A stream's instance pages, page table and cull bindings.
+fn gpu_stream(
     device: &wgpu::Device,
-    layout: &wgpu::BindGroupLayout,
-    buffers: [&wgpu::Buffer; 8],
-) -> wgpu::BindGroup {
+    shared: &Shared<'_>,
+    capacity: usize,
+    spare: usize,
+    table_bytes: u64,
+    label: &str,
+) -> GpuStream {
+    let storage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST;
+    let size = stream::pages(capacity, spare) as u64 * stream::PAGE as u64 * INST_STRIDE;
+    crate::vegetation_limits::buffer("Vegetation instances", size, storage, &device.limits())
+        .expect("vegetation buffer limits");
+    let instances = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(&format!("{label} instances")),
+        size,
+        usage: storage,
+        mapped_at_creation: false,
+    });
+    let chunks = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(&format!("{label} chunk pages")),
+        size: table_bytes,
+        usage: storage,
+        mapped_at_creation: false,
+    });
+    let buffers = [
+        &instances,
+        shared.params,
+        shared.counts,
+        shared.drawn,
+        shared.shadow_drawn,
+        shared.args,
+        shared.meshes,
+        &chunks,
+    ];
     let entries: Vec<wgpu::BindGroupEntry<'_>> = buffers
         .iter()
         .enumerate()
@@ -892,11 +1028,17 @@ fn cull_bind(
             resource: buffer.as_entire_binding(),
         })
         .collect();
-    device.create_bind_group(&wgpu::BindGroupDescriptor {
+    let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Vegetation cull"),
-        layout,
+        layout: shared.layout,
         entries: &entries,
-    })
+    });
+    GpuStream {
+        cpu: stream::Stream::new(capacity, spare),
+        instances,
+        chunks,
+        bind,
+    }
 }
 
 fn basis(camera: &Camera) -> ([f32; 3], [f32; 3], [f32; 3]) {

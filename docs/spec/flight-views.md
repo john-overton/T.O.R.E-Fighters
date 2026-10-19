@@ -138,6 +138,19 @@ the target's last live missile and missile-relative F12 follows the player missi
 Next research: bounded review of the original camera selection and placement
 handlers, only if closer tuning is wanted. These gaps do not block fitted views.
 
+## Rear-view mirrors
+
+The cockpit's mirrors (the aircraft with them are listed in the
+[mirror review](../baselines/mirrors.md)) all show crops of one rear picture,
+768 by 384 pixels, taken from the pilot's eye looking straight back with the
+aircraft's up. Its field of view is 66 degrees vertically and about 105 degrees
+across, 10% wider than a 1x view's 60 degrees (98 across before 2026-10-19).
+The picture is redrawn on every other flight frame and the mirrors show the last
+one in between, so at 60 frames a second the mirrors update 30 times a second;
+the first frame they appear on always draws a fresh picture. Both are
+opinionated, requested by John on 2026-10-19 to halve the mirrors' cost. The
+crops' placement and the eye stay fitted.
+
 ## Target views and visual range
 
 Without the Easy targeting cheat, a target drops when the radar or infrared

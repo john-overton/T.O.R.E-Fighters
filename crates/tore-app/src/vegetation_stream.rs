@@ -48,6 +48,8 @@ pub struct Worker {
     pub busy: bool,
     last_request: Option<Request>,
     done: bool,
+    /// Requests sent to the worker thread so far.
+    pub sent: u64,
 }
 impl Worker {
     pub fn new(atlas: Arc<Atlas>, library: Arc<Library>, world: &Terrain) -> Self {
@@ -192,6 +194,7 @@ impl Worker {
             busy: false,
             last_request: None,
             done: false,
+            sent: 0,
         }
     }
     pub fn request(&mut self, request: Request) {
@@ -199,6 +202,7 @@ impl Worker {
             return;
         }
         if self.send.try_send(request).is_ok() {
+            self.sent += 1;
             self.busy = true;
             self.last_request = Some(request);
             self.done = false;
@@ -221,6 +225,204 @@ impl Worker {
     }
 }
 
+/// Pages an instance buffer holds for `capacity` objects and `spare` pages.
+pub fn pages(capacity: usize, spare: usize) -> usize {
+    2 * capacity.div_ceil(PAGE) + spare
+}
+
+/// One streamed circle of vegetation on the CPU side: its worker, the page
+/// bookkeeping for its GPU instance buffer and the reach drawn from it. The
+/// main view owns one; a camera panel far from the main eye owns a small one
+/// (optimization S10). GPU writes go through the caller's closures, so the
+/// same code runs in CPU tests.
+pub struct Stream {
+    worker: Option<Worker>,
+    pub ready: Option<Ready>,
+    incoming: Option<Ready>,
+    pub pages: Slots,
+    /// Objects and page-table entries published to the GPU.
+    pub count: u32,
+    pub page_count: u32,
+    /// How far the drawn circle reaches, feet.
+    pub visible_reach: f32,
+    /// The eye of the last view that streamed.
+    pub last_eye: Option<[f64; 2]>,
+    last_prepare: std::time::Instant,
+    /// Work done by the last `advance`.
+    pub cache: CacheFrame,
+}
+
+/// What one `advance` asks of the worker, apart from the eye.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Shape {
+    pub epoch: u64,
+    pub full: f32,
+    pub draw: f32,
+    pub density: f32,
+    pub capacity: usize,
+    pub grass_radius: f32,
+    pub settle: bool,
+}
+
+impl Stream {
+    pub fn new(capacity: usize, spare: usize) -> Self {
+        Self {
+            worker: None,
+            ready: None,
+            incoming: None,
+            pages: Slots::with_spare(capacity, spare),
+            count: 0,
+            page_count: 0,
+            visible_reach: 0.,
+            last_eye: None,
+            last_prepare: std::time::Instant::now(),
+            cache: CacheFrame::default(),
+        }
+    }
+
+    /// Forgets everything streamed (a new epoch follows); keeps the worker.
+    pub fn reset(&mut self, capacity: usize, spare: usize) {
+        self.ready = None;
+        self.incoming = None;
+        self.reset_pages(capacity, spare);
+        self.cache = CacheFrame::default();
+    }
+
+    /// Requests this stream has sent to its worker.
+    #[cfg(test)]
+    pub fn worker_runs(&self) -> u64 {
+        self.worker.as_ref().map_or(0, |w| w.sent)
+    }
+
+    /// New, empty GPU pages for `capacity` objects.
+    pub fn reset_pages(&mut self, capacity: usize, spare: usize) {
+        self.pages = Slots::with_spare(capacity, spare);
+        self.page_count = 0;
+        self.count = 0;
+    }
+
+    /// The request for a view at `eye`, with `ahead` taken from this
+    /// stream's previous eye. Records `eye` as the stream's eye.
+    pub fn request(&mut self, shape: Shape, eye: [f64; 2]) -> Request {
+        let dt = self.last_prepare.elapsed().as_secs_f64().max(0.001);
+        let ahead = self.last_eye.map_or([0.; 2], |last| {
+            let delta = [eye[0] - last[0], eye[1] - last[1]];
+            let distance = delta[0].hypot(delta[1]);
+            // Five seconds at 480 kt is about 4,050 ft, within the guard ring.
+            let scale = (5. / dt).min(4096. / distance.max(1.));
+            let ahead = delta.map(|v| (v * scale / 512.).round() * 512.);
+            let scale = 4096. / ahead[0].hypot(ahead[1]).max(4096.);
+            ahead.map(|v| v * scale)
+        });
+        self.last_eye = Some(eye);
+        Request {
+            epoch: shape.epoch,
+            eye,
+            ahead,
+            full: shape.full,
+            draw: shape.draw,
+            density: shape.density,
+            capacity: shape.capacity,
+            grass_radius: shape.grass_radius,
+            settle: shape.settle,
+        }
+    }
+
+    /// Takes the worker's finished result, uploads pages within the frame's
+    /// budget (`write`), publishes a complete selection (`table`), asks the
+    /// worker for `request` and moves the visible circle. `snap` sets the
+    /// circle to everything available at once instead of growing it, as a
+    /// small panel does.
+    pub fn advance(
+        &mut self,
+        request: Request,
+        spawn: impl FnOnce() -> Worker,
+        snap: bool,
+        mut write: impl FnMut(u64, &[u8]),
+        mut table: impl FnMut(&[u32]),
+    ) {
+        let settle = request.settle;
+        self.cache = CacheFrame::default();
+        if settle {
+            self.pages.upload(usize::MAX, &mut write);
+            if self.incoming.is_some() {
+                self.ready = self.incoming.take();
+            }
+        }
+        let worker = self.worker.get_or_insert_with(spawn);
+        // Normal frames never wait. Captures explicitly request a settled view.
+        if settle && worker.busy {
+            let _ = worker.poll(true);
+        }
+        if settle {
+            worker.request(request);
+        }
+        if let Some(ready) = worker.poll(settle)
+            && ready.epoch == request.epoch
+        {
+            self.cache = ready.cache;
+            self.pages.sync(&ready.chunks);
+            self.incoming = Some(ready);
+        }
+        let mut uploaded = 0;
+        self.pages.upload(
+            if settle { usize::MAX } else { UPLOAD_BYTES },
+            |offset, bytes| {
+                write(offset, bytes);
+                uploaded += bytes.len();
+            },
+        );
+        self.cache.uploaded_bytes += uploaded;
+        if !self.pages.pending() && (self.incoming.is_some() || settle) {
+            if self.incoming.is_some() {
+                self.ready = self.incoming.take();
+            }
+            let (entries, count) = self.pages.table();
+            self.count = count;
+            self.page_count = (entries.len() / 2) as u32;
+            if !entries.is_empty() {
+                table(&entries);
+            }
+        }
+        if !self.pages.pending() && !settle {
+            worker.request(request);
+        }
+        self.cache.worker_pending = worker.busy || self.ready.as_ref().is_none_or(|r| !r.done);
+        (self.cache.upload_chunks, self.cache.upload_bytes) = self.pages.remaining();
+        self.cache.pending = self.pages.pending() || self.cache.worker_pending;
+        // Uploaded coverage defines a circle, never individual patch visibility.
+        // The outer fade stays wholly inside that circle, including during a
+        // teleport or a worker delay. A new circle expands continuously.
+        let eye = request.eye;
+        let available = self
+            .ready
+            .as_ref()
+            .map_or(0., |r| {
+                (r.available - (r.eye[0] - eye[0]).hypot(r.eye[1] - eye[1]) as f32).max(0.)
+            })
+            .min(request.draw);
+        let dt = self.last_prepare.elapsed().as_secs_f32().min(0.1);
+        self.last_prepare = std::time::Instant::now();
+        let (reach, range_pending) = super::advance_visible_range(
+            self.visible_reach,
+            available,
+            request.draw,
+            dt,
+            settle || snap,
+        );
+        let reach = if available >= request.full {
+            reach.max(request.full)
+        } else {
+            0.
+        };
+        self.visible_reach = reach;
+        self.cache.available = available;
+        self.cache.visible = reach;
+        self.cache.range_pending = range_pending;
+        self.cache.pending |= range_pending;
+    }
+}
+
 #[derive(Clone)]
 struct Resident {
     bytes: Arc<Vec<u8>>,
@@ -238,13 +440,16 @@ pub struct Slots {
 }
 impl Slots {
     pub fn new(capacity: usize) -> Self {
+        Self::with_spare(capacity, SPARE_PAGES)
+    }
+    /// Pages for two selections of `capacity` objects plus `spare` pages for
+    /// their partial pages (one per chunk in each selection).
+    pub fn with_spare(capacity: usize, spare: usize) -> Self {
         Self {
             residents: BTreeMap::new(),
             order: Vec::new(),
             staged: None,
-            free: (0..2 * capacity.div_ceil(PAGE) + SPARE_PAGES)
-                .rev()
-                .collect(),
+            free: (0..pages(capacity, spare)).rev().collect(),
         }
     }
     pub fn sync(&mut self, chunks: &Chunks) {
@@ -488,101 +693,221 @@ mod tests {
         assert!(stats.selected as usize <= request.capacity);
     }
 
-    /// What the production renderer does for one view: take a finished
-    /// result if there is one, then ask for the view's eye. The worker is
-    /// waited for after each ask, which is the kindest timing there is.
-    /// Returns whether the request was sent and the work it cost.
-    fn view(worker: &mut Worker, eye: [f64; 2], ahead: [f64; 2]) -> (bool, u64, Option<Ready>) {
-        let request = Request {
+    /// One view as the production renderer handles it (`Renderer::prepare`):
+    /// route the view, then advance the stream it streams, if any. Settled
+    /// requests wait for the worker, the kindest timing there is. Returns the
+    /// route taken.
+    fn draw_view(
+        main: &mut Stream,
+        panel: &mut Stream,
+        kind: super::super::ViewKind,
+        eye: [f64; 2],
+        atlas: &Arc<Atlas>,
+        world: &Terrain,
+    ) -> super::super::Route {
+        let shape = Shape {
             epoch: 0,
-            eye,
-            ahead,
             full: 3000.,
             draw: 6000.,
             density: 0.7,
             capacity: 2048,
             grass_radius: 0.,
-            settle: false,
+            settle: true,
         };
-        let was_busy = worker.busy;
-        worker.request(request);
-        let sent = !was_busy && worker.busy;
-        let ready = worker.poll(true);
-        let builds = ready.as_ref().map_or(0, |r| r.cache.object_chunks);
-        (sent, builds, ready)
+        let route = super::super::route(kind, eye, main.last_eye);
+        let spawn = || Worker::new(atlas.clone(), library(), world);
+        match route {
+            super::super::Route::Stream => {
+                let request = main.request(shape, eye);
+                main.advance(request, spawn, false, |_, _| {}, |_| {});
+            }
+            super::super::Route::Share => {}
+            super::super::Route::Panel(_) => {
+                let (full, draw, capacity, _) =
+                    super::super::panel_shape(shape.full, shape.draw, shape.capacity);
+                let shape = Shape {
+                    full,
+                    draw,
+                    capacity,
+                    ..shape
+                };
+                let request = panel.request(shape, eye);
+                panel.advance(request, spawn, true, |_, _| {}, |_| {});
+            }
+        }
+        route
     }
 
-    /// Optimization slice S0 finding, kept as a CPU-only characterization.
-    /// Every camera view (main, mirrors, camera panels) asks this one worker
-    /// for its own eye. The worker keeps only the chunks near the latest eye,
-    /// so an eye far from the main one throws the main view's chunks away, and
-    /// an eye a few feet off defeats the "same request, nothing to do" check.
+    /// Optimization S0 found that every camera view (main, mirror, camera
+    /// panels) asked one worker for its own eye: a mirror 12 ft off defeated
+    /// the "same request, nothing to do" check on every view, and one far
+    /// panel view threw the main view's chunks away. S10 routes the views:
+    /// only the main view streams, the mirror and near panels read it, and a
+    /// far panel streams its own circle. Extra views now cost the main
+    /// stream nothing.
     #[test]
-    fn extra_views_with_other_eyes_make_the_stream_redo_work() {
+    fn extra_views_no_longer_redo_the_main_stream_work() {
+        use super::super::{Route, ViewKind};
         let mut world = tore_world::test_support::terrain();
         for cell in &mut world.theater.cells {
             cell.elevation = 0;
         }
         let atlas = Arc::new(Atlas::synthetic(vec![10; 256 * 256], 0));
-        let main = [4000., 4000.];
-        let mut worker = Worker::new(atlas, library(), &world);
+        let main_eye = [4000., 4000.];
+        let mut main = Stream::new(2048, SPARE_PAGES);
+        let mut panel = Stream::new(2048, SPARE_PAGES);
+        let view = |main: &mut Stream, panel: &mut Stream, kind, eye| {
+            draw_view(main, panel, kind, eye, &atlas, &world)
+        };
         // The main view alone settles, then asks for nothing more.
-        let mut settled = false;
         for _ in 0..300 {
-            let (_, _, ready) = view(&mut worker, main, [0.; 2]);
-            if ready.is_some_and(|r| r.done) {
-                settled = true;
+            view(&mut main, &mut panel, ViewKind::Main, main_eye);
+            if main.ready.as_ref().is_some_and(|r| r.done) {
                 break;
             }
         }
-        assert!(settled, "the main view should converge by itself");
-        let (sent, builds, _) = view(&mut worker, main, [0.; 2]);
-        assert!(
-            !sent && builds == 0,
+        assert!(main.ready.as_ref().is_some_and(|r| r.done));
+        let settled = main.worker_runs();
+        let selected = main.count;
+        let reach = main.visible_reach;
+        assert!(selected > 0 && reach > 0.);
+        view(&mut main, &mut panel, ViewKind::Main, main_eye);
+        assert_eq!(
+            main.worker_runs(),
+            settled,
             "a settled still camera asks for nothing"
         );
-        let (sent, ..) = view(&mut worker, main, [0.; 2]);
-        assert!(!sent);
 
-        // Mirror: about 12 ft from the head. The eye differs, so the request
-        // is never the same as the last one, and `ahead` (taken from the
-        // previous view's eye) points the opposite way on alternate views.
+        // Mirror, about 12 ft from the head, alternating with the main view:
+        // it reads the main stream and sends nothing.
         let mirror = [4012., 4000.];
-        let mut sent_count = 0;
-        let mut mirror_builds = 0u64;
         for _ in 0..20 {
-            let (sent, builds, _) = view(&mut worker, mirror, [4096., 0.]);
-            sent_count += usize::from(sent);
-            mirror_builds += builds;
-            let (sent, builds, _) = view(&mut worker, main, [-4096., 0.]);
-            sent_count += usize::from(sent);
-            mirror_builds += builds;
+            assert_eq!(
+                view(&mut main, &mut panel, ViewKind::Mirror, mirror),
+                Route::Share
+            );
+            assert_eq!(
+                view(&mut main, &mut panel, ViewKind::Main, main_eye),
+                Route::Stream
+            );
         }
-        assert_eq!(sent_count, 40, "every view re-runs the worker");
-        eprintln!(
-            "mirror-like eye: {sent_count} worker runs in 40 views, {mirror_builds} chunk builds"
+        assert_eq!(
+            main.worker_runs(),
+            settled,
+            "the mirror costs no worker run"
         );
 
-        // A camera panel looking at a target 100,000 ft away. One panel view
-        // is enough to drop the main view's chunks; the main view then has
-        // to rebuild them, bounded by the per-request build budget.
+        // A panel near the main eye (the front view) reads the main stream.
+        assert_eq!(
+            view(&mut main, &mut panel, ViewKind::Panel(2), [5000., 4000.]),
+            Route::Share
+        );
+
+        // The target camera 100,000 ft away streams its own small circle;
+        // the main stream keeps its chunks and its reach.
         let target = [104_000., 4000.];
-        let (_, far_builds, _) = view(&mut worker, target, [0.; 2]);
-        assert!(far_builds > 0);
-        let mut rebuilt = 0u64;
-        let mut requests = 0;
-        loop {
-            let (_, builds, ready) = view(&mut worker, main, [0.; 2]);
-            rebuilt += builds;
-            requests += 1;
-            if ready.is_some_and(|r| r.done) || requests > 300 {
+        assert_eq!(
+            view(&mut main, &mut panel, ViewKind::Panel(4), target),
+            Route::Panel(4)
+        );
+        assert!(panel.worker_runs() > 0);
+        assert!(panel.ready.as_ref().is_some_and(|r| r.eye == target));
+        for _ in 0..10 {
+            view(&mut main, &mut panel, ViewKind::Panel(4), target);
+            view(&mut main, &mut panel, ViewKind::Main, main_eye);
+        }
+        assert_eq!(main.worker_runs(), settled, "the far panel moved nothing");
+        assert_eq!(main.count, selected);
+        assert_eq!(main.visible_reach, reach);
+        assert!(
+            main.ready
+                .as_ref()
+                .is_some_and(|r| r.eye == main_eye && r.done)
+        );
+        assert!(panel.visible_reach > 0. && panel.count > 0);
+        assert!(panel.count <= super::super::panel_shape(3000., 6000., 2048).2 as u32);
+    }
+
+    #[test]
+    fn views_route_to_the_stream_their_eye_needs() {
+        use super::super::{PANEL_SHARE_FT, Route, ViewKind, route};
+        let main = Some([0., 0.]);
+        assert_eq!(route(ViewKind::Main, [9e9, 0.], main), Route::Stream);
+        assert_eq!(route(ViewKind::Main, [0., 0.], None), Route::Stream);
+        // The mirror never streams, wherever its eye is.
+        assert_eq!(route(ViewKind::Mirror, [12., 0.], main), Route::Share);
+        assert_eq!(route(ViewKind::Mirror, [0., 0.], None), Route::Share);
+        // Panels: the main stream within its guard ring, their own beyond.
+        assert_eq!(
+            route(ViewKind::Panel(2), [PANEL_SHARE_FT, 0.], main),
+            Route::Share
+        );
+        assert_eq!(
+            route(ViewKind::Panel(4), [PANEL_SHARE_FT + 1., 0.], main),
+            Route::Panel(4)
+        );
+        assert_eq!(route(ViewKind::Panel(3), [0., 0.], None), Route::Panel(3));
+    }
+
+    #[test]
+    fn a_panel_stream_is_small_and_as_dense_as_the_main_one() {
+        use crate::vegetation::{NM, ring_chunks};
+        // The default settings: 4 nm drawn, 2 nm at full density, High.
+        let (full, draw, capacity) = (2. * NM as f32, 4. * NM as f32, 131_072);
+        let (p_full, p_draw, p_capacity, spare) = super::super::panel_shape(full, draw, capacity);
+        assert_eq!((p_full, p_draw), (NM as f32, 2. * NM as f32));
+        assert_eq!(p_capacity % PAGE, 0);
+        // At least the main stream's objects per chunk over its own ring.
+        let quota = capacity / ring_chunks(draw);
+        assert!(p_capacity / ring_chunks(p_draw) >= quota);
+        assert!(p_capacity < capacity / 2);
+        // A selection's partial pages fit: one per chunk, two selections.
+        assert!(spare >= 2 * ring_chunks(p_draw));
+        // GPU instance memory: a small share of the main stream's.
+        let main_bytes = pages(capacity, SPARE_PAGES) * PAGE * INST_STRIDE as usize;
+        let panel_bytes = pages(p_capacity, spare) * PAGE * INST_STRIDE as usize;
+        assert!(
+            panel_bytes * 5 < main_bytes,
+            "{panel_bytes} of {main_bytes}"
+        );
+        // Short settings: never more than the main view draws or holds.
+        let (f, d, c, _) = super::super::panel_shape(1000., 3000., 32_768);
+        assert_eq!((f, d), (1000., 3000.));
+        assert!(c <= 32_768);
+        // A panel stream at the smallest budget runs to a settled selection
+        // within its pages (Slots panics if a selection outgrows them).
+        let mut world = tore_world::test_support::terrain();
+        for cell in &mut world.theater.cells {
+            cell.elevation = 0;
+        }
+        let atlas = Arc::new(Atlas::synthetic(vec![10; 256 * 256], 0));
+        let (full, draw, capacity, spare) = super::super::panel_shape(3000., 12_000., 4096);
+        let mut panel = Stream::new(capacity, spare);
+        let shape = Shape {
+            epoch: 0,
+            full,
+            draw,
+            density: 1.,
+            capacity,
+            grass_radius: 0.,
+            settle: true,
+        };
+        for _ in 0..50 {
+            let request = panel.request(shape, [20_000., 20_000.]);
+            panel.advance(
+                request,
+                || Worker::new(atlas.clone(), library(), &world),
+                true,
+                |_, _| {},
+                |_| {},
+            );
+            if panel.ready.as_ref().is_some_and(|r| r.done) {
                 break;
             }
         }
-        eprintln!(
-            "after one far panel view the main view needed {requests} requests to rebuild {rebuilt} chunks"
-        );
-        assert!(rebuilt > 0 && requests > 1);
+        assert!(panel.ready.as_ref().is_some_and(|r| r.done));
+        assert!(panel.count > 0 && panel.count as usize <= capacity);
+        assert_eq!(panel.visible_reach, draw);
     }
 
     fn chunk(n: usize, value: u8) -> Arc<Vec<u8>> {

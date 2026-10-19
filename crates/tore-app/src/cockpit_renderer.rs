@@ -273,7 +273,7 @@ impl CockpitRenderer {
         };
         self.mirror_rects = masks.as_ref().map_or([[0.; 4]; 3], |m| m.rects);
         println!(
-            "Cockpit mirrors: {} reviewed regions, {}x{} rear feed, every visible frame",
+            "Cockpit mirrors: {} reviewed regions, {}x{} rear feed, every other visible frame",
             self.mirror_rects
                 .iter()
                 .filter(|r| r[2] > 0. && r[3] > 0.)

@@ -5483,6 +5483,7 @@ impl ApplicationHandler for App {
                                     let result = if self.smoke_test {
                                         renderer
                                             .scene_pixels(
+                                                sim_renderer::ViewKind::Panel(page),
                                                 &camera,
                                                 &self.world.terrain,
                                                 &self.scenery,
@@ -6341,7 +6342,7 @@ impl ApplicationHandler for App {
                     )
                 {
                     println!(
-                        "  rear mirror renders: {} (one per visible frame; no readback)",
+                        "  rear mirror renders: {} (every other visible frame; no readback)",
                         renderer.mirror_frames
                     );
                     self.finished = true;

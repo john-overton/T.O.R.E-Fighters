@@ -358,7 +358,7 @@ render load. CPU milliseconds are the main thread's wall-clock time
 for frame preparation and encoding, excluding surface acquisition waits; they are
 not the CPU seconds summed over worker threads. GPU milliseconds
 are asynchronous timestamps over all of the frame's GPU work: each live camera
-panel picture, the cockpit mirrors, and the window pass (scene, cockpit, interface
+panel picture, the cockpit mirrors on the frames that draw them, and the window pass (scene, cockpit, interface
 and the counter). Each submission is timed on its own and the figure is the sum, so
 GPU idle time between submissions is not counted. Queued staging
 uploads, CPU time and presentation waits are excluded. Offscreen captures and
