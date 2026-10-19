@@ -240,7 +240,17 @@ fn deferred_visibility_matches_the_original_observation_bits() {
                                 obscured: &obscured,
                             };
                             assert_eq!(
-                                bits(sensors.observe(&observer, &target, channel, &environment)),
+                                bits(sensors.observe(
+                                    &observer,
+                                    &target,
+                                    channel,
+                                    &LazySighting::new(
+                                        observer.position,
+                                        &observer.basis,
+                                        target.position
+                                    ),
+                                    &environment
+                                )),
                                 bits(sensors.reference_observe(
                                     &observer,
                                     &target,
@@ -368,4 +378,115 @@ fn out_of_volume_contacts_do_not_query_terrain_and_channels_share_one_query() {
         0,
         "passive receiver range rejection must precede terrain sampling"
     );
+}
+
+/// The range reject before the angles and the one sighting both channels
+/// share give the original contact bits for any volume maxima, including
+/// zero, negative, infinite and NaN ones, and any target placement.
+#[test]
+fn the_range_reject_matches_the_original_for_odd_maxima() {
+    let (mut sensors, mut observer, mut target) = fixture();
+    let ground = |x: f64, z: f64| (x * 0.001).sin() * 200. + (z * 0.002).cos() * 100.;
+    let mut state = 0x6a09_e667_f3bc_c909_u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let maxima = [
+        0.,
+        -1.,
+        -0.,
+        10.,
+        30_000.,
+        50_000.,
+        80_000.,
+        1e9,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NAN,
+    ];
+    let mut contacts = 0;
+    for round in 0..4_000 {
+        let mut pick = || maxima[(next() % maxima.len() as u64) as usize];
+        let (search, track) = (pick(), pick());
+        let radar = sensors.profiles.radar.as_mut().unwrap();
+        radar.search.maximum_ft = search;
+        radar.track.maximum_ft = track;
+        for passive in [
+            sensors.profiles.infrared.as_mut().unwrap(),
+            sensors.profiles.visual.as_mut().unwrap(),
+        ] {
+            passive.search.maximum_ft = search;
+            passive.track.maximum_ft = track;
+        }
+        let retained = round % 3 == 0;
+        sensors.selected = retained.then_some(target.id);
+        sensors.acquired = retained.then_some(target.id);
+        let mut coordinate = |scale: u64| (next() % (2 * scale)) as f64 - scale as f64;
+        observer.position = [
+            coordinate(50_000),
+            20_000. + coordinate(10_000),
+            coordinate(50_000),
+        ];
+        target.position = match round % 5 {
+            0 => observer.position,
+            1 => [f64::NAN, 0., 0.],
+            _ => [
+                coordinate(120_000),
+                20_000. + coordinate(30_000),
+                coordinate(120_000),
+            ],
+        };
+        observer.basis = Basis::new(coordinate(180), coordinate(30), coordinate(60));
+        target.signature.infrared = (next() % 300) as f64;
+        let blocked = round % 7 == 0;
+        let obscured = |_: Vector, _: Vector| blocked;
+        let environment = Environment {
+            ground: &ground,
+            obscured: &obscured,
+        };
+        let sighting = LazySighting::new(observer.position, &observer.basis, target.position);
+        for channel in [
+            Channel::Radar,
+            Channel::Infrared,
+            Channel::Visual,
+            Channel::Harm,
+        ] {
+            let actual = sensors.observe(&observer, &target, channel, &sighting, &environment);
+            let expected = sensors.reference_observe(&observer, &target, channel, &environment);
+            contacts += usize::from(expected.is_some());
+            assert_eq!(
+                bits(actual),
+                bits(expected),
+                "{round} {channel:?} {search} {track}"
+            );
+        }
+    }
+    assert!(
+        contacts > 500,
+        "too few contacts to mean anything: {contacts}"
+    );
+}
+
+#[test]
+fn the_sight_distance_is_the_sightings_bit_for_bit() {
+    let mut state = 0xbb67_ae85_84ca_a73b_u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        f64::from_bits(state >> 2) // positive values of every magnitude
+            * if state & 1 == 0 { 1. } else { -1. }
+    };
+    let basis = Basis::new(10., 20., 30.);
+    for _ in 0..20_000 {
+        let a = [next(), next(), next()];
+        let b = [next(), next(), next()];
+        assert_eq!(
+            crate::sensors::detection::sight_distance_ft(a, b).to_bits(),
+            Sighting::new(a, &basis, b).distance_ft.to_bits()
+        );
+    }
 }

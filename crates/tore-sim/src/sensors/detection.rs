@@ -33,6 +33,40 @@ pub struct Sighting {
     /// World unit vector from the observer to the target.
     pub line_of_sight: Vector,
 }
+/// The distance [`Sighting::new`] gives for the same ends, bit for bit,
+/// without the angles: a range test can reject a target before the
+/// trigonometry.
+pub fn sight_distance_ft(observer: Vector, target: Vector) -> f64 {
+    let delta: Vector = std::array::from_fn(|i| target[i] - observer[i]);
+    dot(delta, delta).sqrt()
+}
+
+/// A [`Sighting`] worked out on first use and kept, with its distance
+/// known at once.
+pub struct LazySighting<'a> {
+    observer: Vector,
+    basis: &'a Basis,
+    target: Vector,
+    pub distance_ft: f64,
+    sighting: std::cell::OnceCell<Sighting>,
+}
+
+impl<'a> LazySighting<'a> {
+    pub fn new(observer: Vector, basis: &'a Basis, target: Vector) -> Self {
+        Self {
+            observer,
+            basis,
+            target,
+            distance_ft: sight_distance_ft(observer, target),
+            sighting: std::cell::OnceCell::new(),
+        }
+    }
+    pub fn get(&self) -> &Sighting {
+        self.sighting
+            .get_or_init(|| Sighting::new(self.observer, self.basis, self.target))
+    }
+}
+
 impl Sighting {
     pub fn new(observer: Vector, basis: &Basis, target: Vector) -> Self {
         let delta: Vector = std::array::from_fn(|i| target[i] - observer[i]);

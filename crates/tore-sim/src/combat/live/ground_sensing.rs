@@ -52,6 +52,16 @@ impl State {
     pub fn sensor_weather(&self) -> &sensors::Weather {
         &self.sensor_weather
     }
+    /// The highest the host's step `ground` reaches over each square, so a
+    /// round's or a missile's sight line wholly above it is not sampled.
+    /// Host setup, not state: never checkpointed. It must describe the
+    /// `ground` every step is given, or be `None`.
+    pub fn set_ground_ceiling(
+        &mut self,
+        ceiling: Option<std::sync::Arc<crate::ground_ceiling::GroundCeiling>>,
+    ) {
+        self.ground_ceiling = ceiling;
+    }
     /// Ctrl+X: the nearest standing ground object (a surface row: a unit, a
     /// structure, a ship or a parked aircraft) of another side than `own`'s,
     /// neutral scenery excluded.

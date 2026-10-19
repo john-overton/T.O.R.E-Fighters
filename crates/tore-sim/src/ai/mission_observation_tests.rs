@@ -100,7 +100,7 @@ fn prepared_target_visibility_matches_original_queries_and_complete_state() {
         actor
             .observation_input(0)
             .unwrap()
-            .prepare(0, &world, &prepared_ground, &surface);
+            .prepare(0, &world, &prepared_ground, &|x, z| surface(x, z).height);
     assert_eq!(prepared.terrain_blocked, blocked);
     assert_target_bits(&prepared.observed.targets, &targets);
     assert!(
@@ -115,10 +115,15 @@ fn prepared_target_visibility_matches_original_queries_and_complete_state() {
     actual.trace.visual = prepared.visual;
     actual.apply_observation(prepared.observed);
     assert_actor_state(&reference, &actual);
-    assert_eq!(
+    // Shared sight lines sample each line once: the same answers from fewer
+    // ground reads than the original's repeated queries.
+    let (reference, prepared) = (
         reference_reads.load(Ordering::Relaxed),
         prepared_reads.load(Ordering::Relaxed),
-        "preparation moves the same queries without changing their sampled values"
+    );
+    assert!(
+        prepared > 0 && prepared < reference,
+        "shared sight lines read the ground less: {prepared} of {reference}"
     );
 }
 
@@ -139,8 +144,9 @@ fn prepared_target_visibility_never_changes_observation_memory() {
         sensors: None,
         memory: &actor.awareness,
         use_surface: false,
+        ceiling: None,
     }
-    .prepare(0, &world, &ridge, &surface);
+    .prepare(0, &world, &ridge, &|x, z| surface(x, z).height);
     assert_eq!(prepared.terrain_blocked, [true]);
     assert_target_bits(&prepared.observed.targets, &targets);
     assert_eq!(prepared.memory, reference.awareness);
@@ -925,5 +931,262 @@ impl AiActor {
             .current_observations()
             .map(|snapshot| snapshot.target)
             .collect()
+    }
+}
+
+/// A hilly test ground on a grid of points `HILL_CELL_FT` apart from the
+/// origin, blended over each square's triangles and clamped at the edges as
+/// the host terrain is, with the ceiling built from the same points.
+struct Hills {
+    cols: usize,
+    rows: usize,
+    heights: Vec<f64>,
+}
+
+const HILL_CELL_FT: f64 = 2000.;
+
+impl Hills {
+    fn random(cols: usize, rows: usize, seed: u64, highest: u64) -> Self {
+        let mut state = seed;
+        let heights = (0..cols * rows)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                // Mostly low ground with scattered tall hills.
+                if state % 5 == 0 {
+                    (state >> 8) as f64 % highest as f64
+                } else {
+                    (state >> 8) as f64 % 800.
+                }
+            })
+            .collect();
+        Self {
+            cols,
+            rows,
+            heights,
+        }
+    }
+    fn point(&self, col: usize, row: usize) -> f64 {
+        self.heights[row * self.cols + col]
+    }
+    fn height(&self, x: f64, z: f64) -> f64 {
+        let fx = (x / HILL_CELL_FT).clamp(0., (self.cols - 1) as f64 - 0.001);
+        let fz = (z / HILL_CELL_FT).clamp(0., (self.rows - 1) as f64 - 0.001);
+        let (col, row) = (fx as usize, fz as usize);
+        let (u, v) = (fx - col as f64, fz - row as f64);
+        let h = |dc, dr| self.point(col + dc, row + dr);
+        if u + v <= 1. {
+            h(0, 0) + (h(1, 0) - h(0, 0)) * u + (h(0, 1) - h(0, 0)) * v
+        } else {
+            h(1, 1) + (h(0, 1) - h(1, 1)) * (1. - u) + (h(1, 0) - h(1, 1)) * (1. - v)
+        }
+    }
+    fn ceiling(&self) -> crate::ground_ceiling::GroundCeiling {
+        crate::ground_ceiling::GroundCeiling::from_grid(
+            self.cols,
+            self.rows,
+            HILL_CELL_FT,
+            |col, row| self.point(col, row),
+        )
+    }
+}
+
+/// A hill between two aircraft hides each from the other, the shared sight
+/// lines say so once for every reader, and a line over the hill's top is
+/// answered from the ceiling without reading the ground.
+#[test]
+fn a_hill_between_two_actors_blocks_their_sight_line() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    // Flat ground at 100 ft with one 5,000 ft hill point between them.
+    let mut hills = Hills {
+        cols: 12,
+        rows: 12,
+        heights: vec![100.; 144],
+    };
+    hills.heights[5 * 12 + 5] = 5000.;
+    let ceiling = hills.ceiling();
+    let reads = AtomicUsize::new(0);
+    let ground = |x: f64, z: f64| {
+        reads.fetch_add(1, Ordering::Relaxed);
+        hills.height(x, z)
+    };
+    let mut actor = sensor_actor(Experience::Ace);
+    actor.flight.position = [10_000., 3000., 2000.];
+    actor.flight.yaw = 0.;
+    let behind = [10_000., 3000., 18_000.];
+    let over = [10_000., 8_000., 18_000.];
+    let sight = observation::SightLines::new(actor.flight.position, &ground, Some(&ceiling));
+    assert!(sight.blocked(actor.flight.position, behind));
+    assert!(crate::combat::live::terrain_hit(actor.flight.position, behind, &ground).is_some());
+    let before = reads.load(Ordering::Relaxed);
+    // Asked again: the kept answer, no new samples.
+    assert!(sight.blocked(actor.flight.position, behind));
+    assert_eq!(reads.load(Ordering::Relaxed), before);
+    // From somewhere else: sampled again, the same answer.
+    let other = [10_000., 3000., 2000.5];
+    assert!(sight.blocked(other, behind));
+    assert!(reads.load(Ordering::Relaxed) > before);
+    // Above the ceiling: clear without a single ground read.
+    let high = [10_000., 5_500., 2000.];
+    let sight_high = observation::SightLines::new(high, &ground, Some(&ceiling));
+    let before = reads.load(Ordering::Relaxed);
+    assert!(!sight_high.blocked(high, over));
+    assert_eq!(reads.load(Ordering::Relaxed), before);
+    assert!(crate::combat::live::terrain_hit(high, over, &ground).is_none());
+    // The lookout reports the hill, and the observation keeps the target out
+    // exactly as the original did.
+    let world = [
+        visible_object(&actor, 2, behind),
+        visible_object(&actor, 3, over),
+    ];
+    let mut reference = actor.clone();
+    let expected = reference.observe_unsplit(0, &world, &|x, z| hills.height(x, z));
+    let mut actual = actor.clone();
+    let sight = observation::SightLines::new(actor.flight.position, &ground, Some(&ceiling));
+    let targets = actual.observe_sighted(0, &world, &sight);
+    assert_target_bits(&expected, &targets);
+    assert_actor_state(&reference, &actual);
+    let result = |id| {
+        actual
+            .trace
+            .visual
+            .iter()
+            .find(|t| t.id == id)
+            .map(|t| t.result)
+    };
+    assert_eq!(result(2), Some(awareness::VisualResult::Terrain));
+    assert_eq!(result(3), Some(awareness::VisualResult::Visible));
+    assert!(targets.iter().all(|t| t.id != 2));
+    assert!(targets.iter().any(|t| t.id == 3));
+}
+
+/// Over random hills, observation through shared sight lines and the ground
+/// ceiling gives the original's targets, memory, traces and sensor state bit
+/// for bit, and the decision frame's terrain answers match `terrain_hit`.
+#[test]
+fn shared_sight_lines_over_hills_match_the_unsplit_reference() {
+    let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let mut blocked_seen = 0;
+    let mut clear_seen = 0;
+    for round in 0..24 {
+        let hills = Hills::random(24, 24, next() | 1, 14_000);
+        let ceiling = hills.ceiling();
+        let ground = |x: f64, z: f64| hills.height(x, z);
+        let level = Experience::ALL[round % 4];
+        let mut actor = sensor_actor(level);
+        actor.sensors.as_mut().unwrap().controls.channel = match round % 3 {
+            0 => sensors::Channel::Radar,
+            1 => sensors::Channel::Infrared,
+            _ => sensors::Channel::Visual,
+        };
+        actor.flight.yaw = (next() % 628) as f64 / 100.;
+        let span = HILL_CELL_FT * 26.;
+        let mut place = |low: f64, high: f64| {
+            [
+                (next() % 1_000_000) as f64 / 1e6 * span - HILL_CELL_FT,
+                low + (next() % 1_000_000) as f64 / 1e6 * (high - low),
+                (next() % 1_000_000) as f64 / 1e6 * span - HILL_CELL_FT,
+            ]
+        };
+        actor.flight.position = place(500., 16_000.);
+        let world: Vec<_> = (2..=31)
+            .map(|id| {
+                let mut object = visible_object(&actor, id, place(0., 18_000.));
+                object.side = super::super::targeting::Side(1 + id % 2);
+                let observable = object.observable.as_mut().unwrap();
+                observable.radar_emitting = id % 3 == 0;
+                observable.airborne = id % 11 != 0;
+                object
+            })
+            .collect();
+        let mut reference = actor.clone();
+        let expected = reference.observe_unsplit(round as u64, &world, &ground);
+        let mut actual = actor.clone();
+        let sight = observation::SightLines::new(actor.flight.position, &ground, Some(&ceiling));
+        let targets = actual.observe_sighted(round as u64, &world, &sight);
+        assert_target_bits(&expected, &targets);
+        assert_actor_state(&reference, &actual);
+        // The prepared path, with the ceiling, against the original queries.
+        let mut input = actor.observation_input(0).unwrap();
+        input.ceiling = Some(&ceiling);
+        let prepared = input.prepare(round as u64, &world, &ground, &ground);
+        assert_target_bits(&prepared.observed.targets, &expected);
+        for (target, blocked) in expected.iter().zip(&prepared.terrain_blocked) {
+            let original =
+                crate::combat::live::terrain_hit(actor.flight.position, target.position, &ground)
+                    .is_some();
+            assert_eq!(*blocked, original);
+        }
+        // Every pair, every order: the same answer as sampling.
+        for object in &world {
+            let to = object.position;
+            let original =
+                crate::combat::live::terrain_hit(actor.flight.position, to, &ground).is_some();
+            assert_eq!(sight.blocked(actor.flight.position, to), original);
+            assert_eq!(
+                sight.blocked(to, actor.flight.position),
+                crate::combat::live::terrain_hit(to, actor.flight.position, &ground).is_some()
+            );
+            if original {
+                blocked_seen += 1;
+            } else {
+                clear_seen += 1;
+            }
+        }
+    }
+    assert!(
+        blocked_seen > 50 && clear_seen > 50,
+        "the hills must hide some lines and not others: {blocked_seen} {clear_seen}"
+    );
+}
+
+/// A whole mission over hills: the ground ceiling and shared sight lines,
+/// on every worker count, leave every actor's state, the journal and the
+/// output exactly as the serial mission without the ceiling.
+#[test]
+fn the_ground_ceiling_keeps_hilly_missions_exact_on_every_executor() {
+    let hills = Hills::random(20, 20, 0x1234_5678_9abc_def1, 14_000);
+    let ceiling = std::sync::Arc::new(hills.ceiling());
+    let terrain = |x: f64, z: f64| hills.height(x, z);
+    let raised = |x: f64, z: f64| {
+        if x.abs() <= 100. && z.abs() <= 4000. {
+            Surface::runway(hills.height(x, z) + 50.)
+        } else {
+            Surface::terrain(hills.height(x, z))
+        }
+    };
+    for workers in executors() {
+        let mut reference = fixture(30, 41);
+        // Over the hills: the fixture's two sides face each other across
+        // the grid's middle.
+        for actor in &mut reference.actors {
+            actor.flight.position[0] += 18_000.;
+            actor.flight.position[2] += 20_000.;
+        }
+        let mut actual = reference.clone();
+        actual.set_ground_ceiling(Some(ceiling.clone()));
+        for _ in 0..12 {
+            let world = snapshot(&reference, None);
+            let expected = reference.step_using(
+                &world,
+                &terrain,
+                &raised,
+                TimeOfDay(reference.tick),
+                &tore_workers::Executor::serial(),
+            );
+            let result =
+                actual.step_using(&world, &terrain, &raised, TimeOfDay(actual.tick), &workers);
+            assert_eq!(expected, result);
+            actual.set_ground_ceiling(None);
+            assert_mission_state(&reference, &actual);
+            actual.set_ground_ceiling(Some(ceiling.clone()));
+        }
     }
 }

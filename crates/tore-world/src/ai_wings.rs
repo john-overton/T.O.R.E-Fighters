@@ -696,6 +696,15 @@ pub(crate) struct NewAircraft {
     pub dummy: bool,
 }
 
+/// One perceived attack: the receiver, its report, the world bearing and
+/// the event's id.
+type PerceivedAttack = (
+    u32,
+    tore_sim::ai::engagement::ThreatReport,
+    Option<f64>,
+    Option<u32>,
+);
+
 /// The live AI bridge for one mission.
 pub struct AiWings {
     mission: AiMission,
@@ -2119,9 +2128,13 @@ impl AiWings {
         gunship::step(self, state, &ground);
         // Aircraft on the researched flight model roll on runways and feel
         // the wind; legacy airborne actors keep the terrain-only surface.
-        let output = self.advance_on_surface(objects, &mut state.targets, &ground, &|x, z| {
-            world.surface(x, z)
-        })?;
+        let output = self.advance_on_ground(
+            objects,
+            &mut state.targets,
+            &ground,
+            &|x, z| world.surface(x, z),
+            &|x, z| world.surface_height(x, z),
+        )?;
         self.lose_uncredited(&mut state.ledger);
         self.observe_chatter(&output, &humans);
         let positions: Vec<(u32, Vector)> = humans
@@ -2337,6 +2350,32 @@ impl AiWings {
         humans: &[&HumanAircraft],
         ground: &dyn Fn(f64, f64) -> f64,
     ) {
+        let attacks = self.perceived_attacks(state, humans, ground);
+        // Every test that steps the AI checks the reordered search against
+        // the original.
+        #[cfg(test)]
+        assert_eq!(
+            format!("{attacks:?}"),
+            format!(
+                "{:?}",
+                self.perceived_attacks_reference(state, humans, ground)
+            ),
+            "perceived attacks differ from the original search"
+        );
+        for (receiver, report, bearing, event_id) in attacks {
+            self.mission
+                .report_attack_evidence(receiver, report, bearing, event_id);
+        }
+    }
+
+    /// The attack evidence each receiver perceives this tick, in delivery
+    /// order: (receiver, report, world bearing, event id).
+    fn perceived_attacks(
+        &self,
+        state: &live::State,
+        humans: &[&HumanAircraft],
+        ground: &dyn Fn(f64, f64) -> f64,
+    ) -> Vec<PerceivedAttack> {
         use tore_sim::ai::{awareness, engagement::ThreatReport};
         use tore_sim::combat::threats::EvidenceSource;
         // The human-flown aircraft that combat keeps an ownship for, in id
@@ -2393,84 +2432,116 @@ impl AiWings {
         // A fresh, visibly departing missile or tracer can reveal its shooter
         // only when that aircraft is independently observed. Hidden projectile
         // target IDs do not participate in this association.
+        //
+        // The receivers, each looked up once: a human with its ownship, or
+        // an AI actor. A human without an ownship has no records to perceive
+        // a shot with, so it is not a receiver here.
+        let receivers: Vec<(
+            u32,
+            Option<(&HumanAircraft, &live::Ownship)>,
+            Option<&AiActor>,
+        )> = combats
+            .iter()
+            .map(|&(h, own)| (h.slot.id, Some((h, own)), self.mission.actor(h.slot.id)))
+            .chain(
+                self.mission
+                    .actors()
+                    .iter()
+                    .filter(|a| a.alive() && !a.is_dummy())
+                    .map(|a| {
+                        // An id a human also flies reads as that human.
+                        let human = combats.iter().copied().find(|(h, _)| h.slot.id == a.id());
+                        (a.id(), human, self.mission.actor(a.id()))
+                    }),
+            )
+            .collect();
+        // A sight line wholly above the highest ground is clear without
+        // sampling; the answer is the samples' either way.
+        let ceiling = self.ground_ceiling.as_deref();
+        let terrain_clear = |from, to| {
+            ceiling.is_some_and(|c| c.clear_above(from, to)) || terrain_visible(from, to, ground)
+        };
         for projectile in state.projectiles.iter().filter(|p| p.age <= 30) {
             let weapon = state.weapon(projectile);
             let gun = live::is_gun(weapon);
             if gun && !projectile.tracer {
                 continue;
             }
-            // A human without an ownship has no records to perceive a shot
-            // with, so it is not a receiver here.
-            for receiver in combats.iter().map(|(h, _)| h.slot.id).chain(
-                self.mission
-                    .actors()
-                    .iter()
-                    .filter(|a| a.alive() && !a.is_dummy())
-                    .map(AiActor::id),
-            ) {
+            for &(receiver, human, actor) in &receivers {
                 if receiver == projectile.owner {
                     continue;
                 }
-                let (position, velocity, heading, pitch, skill, possible_shooters, incoming) =
-                    if let Some((human, own)) =
-                        combats.iter().copied().find(|(h, _)| h.slot.id == receiver)
-                    {
-                        let player = human.flight;
-                        (
-                            player.position,
-                            player.velocity,
-                            player.yaw.to_degrees(),
-                            player.pitch.to_degrees(),
-                            tore_sim::ai::Experience::Ace,
-                            state
-                                .targets
-                                .iter()
-                                .filter(|target| {
-                                    self.slot(target.id)
-                                        .is_some_and(|slot| slot.side != human.slot.side)
-                                })
-                                .filter_map(|target| {
-                                    own.sensors
-                                        .observation(target.id)
-                                        .map(|o| (target.id, o.position))
-                                })
-                                .collect::<Vec<_>>(),
-                            own.missile_threats.records().any(|r| {
-                                r.missile_id == projectile.id && r.targeting_receiver && !r.stale
-                            }),
-                        )
-                    } else {
-                        let actor = self.mission.actor(receiver).unwrap();
-                        (
-                            actor.flight().position,
-                            actor.flight().velocity,
-                            actor.flight().yaw.to_degrees(),
-                            actor.flight().pitch.to_degrees(),
-                            actor.controller().experience().level,
-                            actor
-                                .awareness()
-                                .current_observations()
-                                .filter(|o| o.target.side != actor.identity().side)
-                                .map(|o| (o.target.id, o.target.position))
-                                .collect::<Vec<_>>(),
-                            actor.missile_threats().any(|r| {
-                                r.missile_id == projectile.id && r.targeting_receiver && !r.stale
-                            }),
-                        )
-                    };
+                // `actor` is the mission's actor of the receiver's id, if any:
+                // for a human only its lookout and its incoming fire are read.
+                let (position, velocity, heading, pitch, skill) = if let Some((human, _)) = human {
+                    let player = human.flight;
+                    (
+                        player.position,
+                        player.velocity,
+                        player.yaw.to_degrees(),
+                        player.pitch.to_degrees(),
+                        tore_sim::ai::Experience::Ace,
+                    )
+                } else {
+                    let actor = actor.unwrap();
+                    (
+                        actor.flight().position,
+                        actor.flight().velocity,
+                        actor.flight().yaw.to_degrees(),
+                        actor.flight().pitch.to_degrees(),
+                        actor.controller().experience().level,
+                    )
+                };
+                // Range and the lookout's cones before the ground under the
+                // sight line, as the result needs.
+                let lookout = actor.and_then(AiActor::lookout);
                 let pilot_sees = |point| {
-                    let clear = terrain_visible(position, point, ground);
-                    if let Some(lookout) = self.mission.actor(receiver).and_then(AiActor::lookout) {
-                        lookout.check(skill, point, None, clear) == awareness::VisualResult::Visible
+                    let clear = || terrain_clear(position, point);
+                    if let Some(lookout) = lookout {
+                        lookout.check_with(skill, point, None, clear)
+                            == awareness::VisualResult::Visible
                     } else {
                         awareness::visual_eligible(
-                            skill, position, heading, pitch, point, None, clear,
-                        )
+                            skill, position, heading, pitch, point, None, true,
+                        ) && clear()
                     }
                 };
                 if !pilot_sees(projectile.position) {
                     continue;
                 }
+                let (possible_shooters, incoming) = if let Some((human, own)) = human {
+                    (
+                        state
+                            .targets
+                            .iter()
+                            .filter(|target| {
+                                self.slot(target.id)
+                                    .is_some_and(|slot| slot.side != human.slot.side)
+                            })
+                            .filter_map(|target| {
+                                own.sensors
+                                    .observation(target.id)
+                                    .map(|o| (target.id, o.position))
+                            })
+                            .collect::<Vec<_>>(),
+                        own.missile_threats.records().any(|r| {
+                            r.missile_id == projectile.id && r.targeting_receiver && !r.stale
+                        }),
+                    )
+                } else {
+                    let actor = actor.unwrap();
+                    (
+                        actor
+                            .awareness()
+                            .current_observations()
+                            .filter(|o| o.target.side != actor.identity().side)
+                            .map(|o| (o.target.id, o.target.position))
+                            .collect::<Vec<_>>(),
+                        actor.missile_threats().any(|r| {
+                            r.missile_id == projectile.id && r.targeting_receiver && !r.stale
+                        }),
+                    )
+                };
                 let mut launch_sources = possible_shooters.into_iter().filter(|(_, shooter)| {
                     missiles::length(missiles::sub(*shooter, projectile.previous)) <= 1000.
                         && pilot_sees(*shooter)
@@ -2482,8 +2553,7 @@ impl AiWings {
                     continue;
                 }
                 let gun_incoming = if gun && !humans.iter().any(|h| h.slot.id == receiver) {
-                    self.mission
-                        .actor(receiver)
+                    actor
                         .and_then(AiActor::incoming_fire_cue)
                         .is_some_and(|cue| {
                             cue.round == Some(projectile.id)
@@ -2520,10 +2590,7 @@ impl AiWings {
                 ));
             }
         }
-        for (receiver, report, bearing, event_id) in reports {
-            self.mission
-                .report_attack_evidence(receiver, report, bearing, event_id);
-        }
+        reports
     }
 
     /// [`advance_on_surface`](Self::advance_on_surface) over terrain only,
@@ -2553,6 +2620,21 @@ impl AiWings {
         terrain: &(dyn Fn(f64, f64) -> f64 + Sync),
         surface: &(dyn Fn(f64, f64) -> tore_sim::research::Surface + Sync),
     ) -> WorldResult<tore_sim::ai::mission::MissionOutput> {
+        self.advance_on_ground(humans, targets, terrain, surface, &|x, z| {
+            surface(x, z).height
+        })
+    }
+
+    /// [`Self::advance_on_surface`] with the host's height-only query,
+    /// exactly `surface(x, z).height` ([`Terrain::surface_height`]).
+    pub fn advance_on_ground(
+        &mut self,
+        humans: Vec<WorldObject>,
+        targets: &mut [live::Target],
+        terrain: &(dyn Fn(f64, f64) -> f64 + Sync),
+        surface: &(dyn Fn(f64, f64) -> tore_sim::research::Surface + Sync),
+        height: &(dyn Fn(f64, f64) -> f64 + Sync),
+    ) -> WorldResult<tore_sim::ai::mission::MissionOutput> {
         self.mirror_damage_in(targets);
         let escaped: Vec<_> = self
             .mission
@@ -2569,7 +2651,7 @@ impl AiWings {
         let now = TimeOfDay(self.mission.tick());
         let output = self
             .mission
-            .step_with_surface(&objects, terrain, surface, now)
+            .step_on_ground(&objects, terrain, surface, height, now)
             .map_err(|e| e.to_string())?;
 
         for slot in &self.slots {
@@ -3482,6 +3564,10 @@ impl AiWings {
             .collect()
     }
 }
+
+#[cfg(test)]
+#[path = "ai_wings/perceived_reference.rs"]
+mod perceived_reference;
 
 #[cfg(test)]
 mod tests {

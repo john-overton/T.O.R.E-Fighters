@@ -936,6 +936,20 @@ pub struct Scene<'a> {
     /// Clear, cloudy, dawn or sunset: a blind SA-2 or SA-3 battery may use its
     /// optical backup.
     pub daylight: bool,
+    /// The highest `ground` reaches over each square, when the host has it:
+    /// a sight line wholly above it is clear without sampling.
+    pub ceiling: Option<&'a tore_sim::ground_ceiling::GroundCeiling>,
+}
+
+impl Scene<'_> {
+    /// [`line_of_sight`] over the scene's ground, answered from the ground
+    /// ceiling when the whole line is above it (the samples could only
+    /// agree).
+    pub fn line_of_sight(&self, from: Vector, to: Vector) -> bool {
+        self.ceiling
+            .is_some_and(|ceiling| ceiling.clear_above(from, to))
+            || line_of_sight(from, to, self.ground)
+    }
 }
 
 /// One line of the surface trace (`--surface-trace`): what the controllers
@@ -1113,8 +1127,7 @@ impl Look<'_> {
             in_range = true;
             if !self.band.contains(distance, d[1])
                 || self.search_limit.is_some_and(|limit| distance > limit)
-                || (self.line_of_sight_needed
-                    && !line_of_sight(self.from, contact.position, scene.ground))
+                || (self.line_of_sight_needed && !scene.line_of_sight(self.from, contact.position))
             {
                 continue;
             }
@@ -1332,7 +1345,7 @@ pub fn step(
                     let d = sub(aircraft.position, from);
                     let distance = length(d);
                     (launch.contains(distance, d[1])
-                        && line_of_sight(from, aircraft.position, scene.ground))
+                        && scene.line_of_sight(from, aircraft.position))
                     .then_some((distance, arms.unit, rail))
                 })
                 .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
@@ -1402,13 +1415,13 @@ pub fn step(
                     let position = radar.map_or(own, |r| state.place(r).eye);
                     let sees = aircraft_by_id.get(&target).is_some_and(|a| {
                         length(sub(a.position, position)) <= weapon.detection.max_range
-                            && line_of_sight(position, a.position, scene.ground)
+                            && scene.line_of_sight(position, a.position)
                     });
                     (position, true, sees)
                 } else if optical {
                     let sees = aircraft_by_id.get(&target).is_some_and(|a| {
                         length(sub(a.position, own)) <= launch.max_range
-                            && line_of_sight(own, a.position, scene.ground)
+                            && scene.line_of_sight(own, a.position)
                     });
                     (own, false, sees)
                 } else {
@@ -1585,7 +1598,7 @@ fn step_weapon(
             rail = state.rail_for(arms, weapon, aircraft.position);
             rail.is_some()
                 && weapon.launch.contains(length(d), d[1])
-                && line_of_sight(muzzle, aircraft.position, scene.ground)
+                && scene.line_of_sight(muzzle, aircraft.position)
         }
         (Some(aircraft), Kind::Gun { .. }) => {
             let d = sub(aircraft.position, muzzle);
@@ -1594,7 +1607,7 @@ fn step_weapon(
             weapon.launch.contains(length(d), d[1])
                 && arc.covers_heading((bearing - place.heading).to_degrees())
                 && arc.covers_elevation(elevation)
-                && line_of_sight(muzzle, aircraft.position, scene.ground)
+                && scene.line_of_sight(muzzle, aircraft.position)
         }
     };
     // A flak team holds its fire until it engages the target's group.
@@ -1735,7 +1748,7 @@ fn step_weapon(
                 continue;
             };
             let sees = length(sub(aircraft.position, muzzle)) <= weapon.detection.max_range
-                && line_of_sight(muzzle, aircraft.position, scene.ground);
+                && scene.line_of_sight(muzzle, aircraft.position);
             supports.push(ActorSupport {
                 owner: arms.unit.0,
                 observation: Some(seeker::Observation {

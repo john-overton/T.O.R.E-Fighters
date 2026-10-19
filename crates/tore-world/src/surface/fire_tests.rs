@@ -424,6 +424,9 @@ struct Fixture {
     others: Vec<Aircraft>,
     tick: u64,
     ridge: Option<Ridge>,
+    /// Whether the scene carries a ground ceiling built from the ridge (the
+    /// world's always does); every test runs with it unless it compares.
+    ceiling: bool,
     daylight: bool,
     fired: Vec<(u64, Trace)>,
     traces: Vec<(u64, Trace)>,
@@ -522,6 +525,7 @@ impl Fixture {
             others: Vec::new(),
             tick: 0,
             ridge: None,
+            ceiling: true,
             daylight: true,
             fired: Vec::new(),
             traces: Vec::new(),
@@ -537,11 +541,20 @@ impl Fixture {
         let aircraft: Vec<Aircraft> = std::iter::once(self.jet)
             .chain(self.others.iter().copied())
             .collect();
+        let ceiling = self.ceiling.then(|| {
+            let mut ceiling =
+                tore_sim::ground_ceiling::GroundCeiling::from_grid(64, 64, 4096., |_, _| 0.);
+            if let Some(r) = ridge {
+                ceiling.raise([r.x.0, r.z.0], [r.x.1, r.z.1], r.height);
+            }
+            ceiling
+        });
         let scene = Scene {
             tick: self.tick,
             aircraft: &aircraft,
             ground: &ground,
             daylight: self.daylight,
+            ceiling: ceiling.as_ref(),
         };
         // Resupply (a no-op without trucks), as the world runs it.
         let delivery = supply::step(
@@ -1638,4 +1651,56 @@ fn a_lone_guns_barrage_stays_on_a_single_target() {
         })
         .collect();
     assert_eq!(opening, vec![JET; 8]);
+}
+
+/// The ground ceiling only skips sampling: with and without it, a battery
+/// and a site under a moving jet and moving ridges do exactly the same.
+#[test]
+fn the_ground_ceiling_never_changes_what_the_surface_does() {
+    let ridges = [
+        None,
+        Some(Ridge {
+            x: (-1e9, 1e9),
+            z: (14_700., 15_300.),
+            height: 20_000.,
+        }),
+        Some(Ridge {
+            x: (600., 1_000.),
+            z: (1_000., 3_000.),
+            height: 3_000.,
+        }),
+        Some(Ridge {
+            x: (-2_000., 2_000.),
+            z: (8_000., 9_000.),
+            height: 6_000.,
+        }),
+    ];
+    let scenarios: [fn() -> Fixture; 3] = [
+        || battery(BatterySystem::Sa6),
+        || battery(BatterySystem::Sa2),
+        || Fixture::new(vec![sa6_site(1)], Vec::new()),
+    ];
+    for scenario in scenarios {
+        let mut with = scenario();
+        let mut without = scenario();
+        without.ceiling = false;
+        for step in 0..48u32 {
+            let ridge = ridges[(step / 6) as usize % ridges.len()];
+            let at = f64::from(step);
+            let position = [
+                (at * 0.7).sin() * 6_000.,
+                1_500. + (at * 0.3).cos().abs() * 18_000.,
+                5_000. + at * 900.,
+            ];
+            for f in [&mut with, &mut without] {
+                f.ridge = ridge;
+                f.jet.position = position;
+                f.run(5 * TPS);
+            }
+            assert_eq!(with.traces, without.traces, "step {step}");
+            assert_eq!(with.fired, without.fired);
+            assert_eq!(with.supports, without.supports);
+        }
+        assert!(with.rounds() > 0, "the scenario must fire");
+    }
 }
