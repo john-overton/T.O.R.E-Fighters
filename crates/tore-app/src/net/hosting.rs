@@ -195,6 +195,9 @@ pub enum Command {
     // (`follow_visibility`).
     #[cfg_attr(not(test), allow(dead_code))]
     SetListed(bool),
+    /// The Debug menu's AI test settings (observation rate, lean sensors):
+    /// the host's setting governs the simulation, from the next tick.
+    SetAiTest(tore_sim::ai::test_settings::AiTestSettings),
     /// Panic on the thread, for the tests of the panic rule.
     #[cfg(test)]
     Panic,
@@ -1204,6 +1207,7 @@ fn serve(
         loop {
             match commands.try_recv() {
                 Ok(Command::Stop) => stop = true,
+                Ok(Command::SetAiTest(settings)) => host.set_ai_test(settings),
                 Ok(Command::SetListed(listed)) => match listings.listing.as_mut() {
                     Some(listing) => listing.set_listed(listed, now),
                     None => log::info!(

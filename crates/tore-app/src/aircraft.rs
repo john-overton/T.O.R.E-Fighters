@@ -211,6 +211,7 @@ impl Airframe {
         // John requested all map categories with no Escape-menu filters.
         flight_menu.retain(|node| node.label != "Map");
         crate::flight_ui::add_authored_rows(&mut flight_menu);
+        crate::flight_ui::add_debug_tab(&mut flight_menu);
 
         let engine_material = if crate::engine_material::outlet_count(id) > 0 {
             crate::engine_material::Image::load()?

@@ -23,6 +23,33 @@ pub(super) struct Context {
     pub experience: Experience,
     pub receive_emitters: bool,
     pub seeker_eligible: bool,
+    /// The AI test settings' parts (slice S7b): how many ticks this
+    /// observation stands for, and whether the sensors are lean.
+    /// [`Context::NORMAL`] is today's one observation per tick.
+    pub test: ObservationTest,
+}
+
+/// How an observation differs from today's: see [`super::test_settings`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct ObservationTest {
+    /// Ticks since this actor's last observation, at most.
+    pub elapsed: u32,
+    /// Lean sensors: no visual channel, and received emitters on demand.
+    pub lean: bool,
+}
+
+impl ObservationTest {
+    pub const NORMAL: Self = Self {
+        elapsed: 1,
+        lean: false,
+    };
+
+    pub fn of(settings: crate::ai::test_settings::AiTestSettings) -> Self {
+        Self {
+            elapsed: settings.divisor(),
+            lean: settings.lean_sensors,
+        }
+    }
 }
 
 pub(super) struct Observed {
@@ -210,8 +237,18 @@ pub(super) fn observe(
             ground,
             obscured: &obscured,
         };
-        sensors.step(&observer, &observables, &environment);
-        emitters = if context.receive_emitters {
+        sensors.step_with(
+            &observer,
+            &observables,
+            &environment,
+            sensors::StepOptions {
+                elapsed: context.test.elapsed,
+                visual: !context.test.lean,
+            },
+        );
+        // Lean sensors build the list when a warning needs it
+        // ([`received_emitters_on_demand`]).
+        emitters = if context.receive_emitters && !context.test.lean {
             sensors::passive::emitters(&observer, &observables, sensors.contacts(), &environment)
         } else {
             Vec::new()
@@ -305,6 +342,37 @@ pub(super) fn observe(
         emitters,
         sources,
     }
+}
+
+/// The received emitters, worked out now for a warning that needs them: the
+/// list `observe` would have built this tick, from the same observer, the
+/// same world and the sensors' current contacts. Lean sensors build it only
+/// here.
+pub(super) fn received_emitters_on_demand(
+    context: Context,
+    sensors: &Option<Sensors>,
+    world: &[WorldObject],
+    sight: &SightLines<'_>,
+) -> Vec<sensors::passive::Emitter> {
+    let Some(sensors) = sensors.as_ref().filter(|_| context.receive_emitters) else {
+        return Vec::new();
+    };
+    let observables: Vec<Observable> = world
+        .iter()
+        .filter(|o| o.id != context.actor)
+        .filter_map(|o| o.observable.clone())
+        .collect();
+    let obscured = |from, to| sight.blocked(from, to);
+    let environment = sensors::Environment {
+        ground: sight.ground(),
+        obscured: &obscured,
+    };
+    sensors::passive::emitters(
+        &context.observer,
+        &observables,
+        sensors.contacts(),
+        &environment,
+    )
 }
 
 impl Context {

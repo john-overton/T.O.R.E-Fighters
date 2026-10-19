@@ -229,6 +229,8 @@ impl AiWings {
             decoy_rolls: _,
             // Setup: worked out from the world's terrain, which never changes.
             ground_ceiling: _,
+            // Setup: the AI test settings, set by the host.
+            ai_test: _,
             // Setup: the host sets it before every step (slice ST-T2).
             mission_height_ft: _,
             // Setup: the host sets it before every step (slice H4).
@@ -317,6 +319,8 @@ impl AiWings {
             last_output: _,
             decoy_rolls: _,
             ground_ceiling: _,
+            // Setup: the AI test settings, set by the host.
+            ai_test: _,
             // Setup: the host sets it before every step (slice ST-T2).
             mission_height_ft: _,
             // Setup: the host sets it before every step (slice H4).

@@ -178,6 +178,11 @@ pub struct HostConfig {
     /// the data folder (the dedicated server, the hosting game) may pass one
     /// it computed already, with the source read from the import report too.
     pub content: Option<std::sync::Arc<super::content::GameContent>>,
+    /// The AI test settings (observation rate, lean sensors), a local test
+    /// of the host's own: the host's setting governs the simulation, no
+    /// client is told, and no standby is appointed unless they are the
+    /// defaults. See [`tore_sim::ai::test_settings`].
+    pub ai_test: tore_sim::ai::test_settings::AiTestSettings,
 }
 
 impl HostConfig {
@@ -203,6 +208,7 @@ impl HostConfig {
             settings: Vec::new(),
             listable: false,
             content: None,
+            ai_test: Default::default(),
         }
     }
 

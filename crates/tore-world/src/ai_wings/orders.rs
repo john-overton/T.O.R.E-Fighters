@@ -586,6 +586,7 @@ impl AiWings {
             selected: designated,
             target,
         };
+        let lean_sensors = self.mission.test_settings().lean_sensors;
         let mut applied = 0;
         let mut rejected = 0;
         let mut no_motion = 0;
@@ -663,7 +664,17 @@ impl AiWings {
                 && !by_link
                 && actor.sensors().is_some_and(|s| {
                     !s.contacts().iter().any(|c| Some(c.id) == target)
-                        && !s.visual().iter().any(|c| Some(c.id) == target)
+                        && !if lean_sensors {
+                            // Lean sensors (AI test setting) keep no visual
+                            // channel list: the aircraft's picture of the
+                            // sky, which the eyes feed, answers instead.
+                            actor
+                                .awareness()
+                                .current_observations()
+                                .any(|record| Some(record.target.id) == target)
+                        } else {
+                            s.visual().iter().any(|c| Some(c.id) == target)
+                        }
                 })
             {
                 rejected += 1;
@@ -2105,6 +2116,31 @@ mod landing_tests {
             Ok((super::super::tests::aircraft(), Some(blind.clone())))
         })
         .unwrap()
+    }
+
+    #[test]
+    fn lean_sensors_answer_a_wing_order_from_the_awareness_memory() {
+        // Lean sensors keep no visual channel list, so the check for a
+        // wingman that sees the target asks the awareness memory; blind
+        // wingmen with an empty memory still refuse it, as with full sensors.
+        let mut wings = blind_wings();
+        wings.set_ai_test(
+            tore_sim::ai::test_settings::AiTestSettings::default().with_lean_sensors(true),
+        );
+        wings.mission.set_test_settings(wings.ai_test());
+        wings
+            .command(PLAYER_ID, PlayerOrder::EngageMyTarget, Some(3), None)
+            .unwrap();
+        let entry = order_entry(&mut wings);
+        let Outcome::Answered { answers, .. } = &entry.outcome else {
+            panic!("{:?}", entry.outcome);
+        };
+        assert_eq!(answers.len(), 2);
+        assert!(
+            answers
+                .iter()
+                .all(|a| a.result == Answered::CannotSeeTarget)
+        );
     }
 
     #[test]

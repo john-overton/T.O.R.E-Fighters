@@ -48,3 +48,4 @@ pub use host::{
     AfterEnd, BuildId, CommandError, CrownRule, Host, HostConfig, HostError, HostLog, HostStatus,
     LeaveReason, OpenPlanes, Phase, PlayerStatus, StartMode,
 };
+pub use tore_sim::ai::test_settings::AiTestSettings;
