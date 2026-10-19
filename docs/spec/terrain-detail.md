@@ -461,8 +461,10 @@ trees and canopy. Tufts retains the earlier five-blade cutout sprites, patch
 placement, ring density and uploads for direct comparisons.
 
 Blades are opaque three-triangle strips with five generated vertices. There
-are no alpha tests, blade instance buffers, CPU blade placement or grass chunk
-uploads. A world-cell integer hash controls position jitter, height, width,
+are no alpha tests, CPU blade placement or grass chunk uploads. Each frame a
+GPU pass decides every candidate cell once and lists the blades that grow; the
+strips are drawn from that list (S13b, 2026-10-19; the same pixels as deciding
+in every vertex, which remains the path for adapters without compute). A world-cell integer hash controls position jitter, height, width,
 heading, lean and colour. At High, four grids have 1, 2, 4 and 8 ft spacing.
 Every second cell in both axes belongs to the coarser grid, including inside
 the fine region. Each world cell has one persistent owner, without duplicates
