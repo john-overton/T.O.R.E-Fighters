@@ -85,7 +85,7 @@ Caching that layout on disk, per theater and import generation, would make a
 cold start look like the second build. It is not a small change: a stale file
 must not survive a placement-code change, the content manifest must still read
 the same resource names, and every machine in a multiplayer game must build
-the same city. Left as a proposal.
+the same city. Left as a proposal; built on 2026-10-19 (below).
 
 Reproduce one theater, and a second build in the same process:
 
@@ -103,3 +103,51 @@ For the requested display verification, measure event-loop service gaps,
 first-frame uploads, graphics preparation and recording initialization for
 Quick Mission, restart, host, join and Replay Watch. The headless heartbeat
 cannot establish compositor responsiveness or GPU driver behavior.
+
+## City layout cache, 2026-10-19
+
+Optimization slice S12, branch `opt-s12` from `optimization` 1e7055d9.
+Release build, Linux, Ryzen 9 7900X, `nice -n 10`, one run each, a private
+copy of the imported profile, John at the machine (not an isolated
+measurement). `tore-app --city-layout-digest` builds each theater's mission
+terrain once in a fresh process (the in-process layout memo never answers)
+and prints the full layout digest and the wall time of the whole terrain build,
+which includes the terrain, the light map, the kit and the per-mission height
+and hide pass as well as the placement.
+
+| Theater | Before, ms | Fresh after, ms | First load (writes the cache), ms | Cached, ms | Cache file, MB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| APA | 56.0 | 42.6 | 45.2 | 32.9 | 0.13 |
+| BAL | 850.7 | 288.7 | 265.2 | 152.2 | 3.35 |
+| CUB | 257.9 | 126.1 | 118.7 | 78.2 | 0.94 |
+| EGY | 615.9 | 177.9 | 166.5 | 74.6 | 2.75 |
+| FRA | 2764.0 | 485.1 | 480.7 | 134.4 | 7.46 |
+| GRE | 334.6 | 127.5 | 127.0 | 75.7 | 1.30 |
+| IRA | 1177.5 | 335.3 | 310.4 | 108.9 | 5.64 |
+| KURILE | 17.6 | 19.1 | 20.2 | 18.9 | 0.00 |
+| LFA | 21.2 | 19.3 | 23.7 | 17.5 | 0.03 |
+| NSK | 444.8 | 161.3 | 157.4 | 79.8 | 1.94 |
+| PGU | 831.6 | 238.2 | 242.9 | 79.9 | 4.06 |
+| SPA | 548.2 | 167.8 | 178.7 | 67.6 | 2.64 |
+| TVIET | 10883.9 | 1326.3 | 1341.6 | 149.3 | 6.96 |
+| UKR | 1544.6 | 331.7 | 342.8 | 94.4 | 6.58 |
+| VLA | 388.2 | 127.6 | 122.4 | 68.1 | 1.61 |
+| WTA | 482.2 | 166.3 | 183.0 | 90.8 | 2.05 |
+
+- Before is the unchanged generator. Fresh after has the exact rework of the
+  placement (`TORE_CITY_CACHE=0`): each lot's sort key drawn once instead of
+  once per comparison, the random stream's stem hashed once, each city's
+  building menu built once per kind of lot, the lot tests reading a per-tile
+  flag patch with summed street counts instead of 225 map lookups, and the
+  keep-outs found through a coarse index. Cached reads the placement back from
+  the profile's `city-cache/` (47 MB for all sixteen theaters).
+- Every run printed the same full digest for every theater as the unchanged
+  generator: every building's piece, position, heading, core flag and city,
+  every kit piece with its footprint and height, every city, the candidate
+  count and the resources read; the per-building ground heights and hidden
+  set matched too.
+- The placement stage alone on TVIET: 10,754 ms before, 1,272 ms fresh after,
+  13.7 ms from the cache (the light map, 64 to 87 ms, is built every load).
+- Dedicated server, `tore-server --check` on a TVIET mission: city fill
+  1,678 ms with the cache off, 173 ms reading the game's cache, with
+  identical output, content manifest digest included (517 resources).

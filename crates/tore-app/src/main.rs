@@ -10956,6 +10956,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
         vegetation_preview::run()?;
         return Ok(Outcome::Done);
     }
+    if std::env::args().nth(1).as_deref() == Some("--city-layout-digest") {
+        city_fill_dump::digests()?;
+        return Ok(Outcome::Done);
+    }
     if std::env::args().nth(1).as_deref() == Some("--city-fill-survey") {
         city_fill_dump::survey()?;
         return Ok(Outcome::Done);

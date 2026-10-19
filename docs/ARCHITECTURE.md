@@ -11222,6 +11222,25 @@ failure leaves the load working. Runtime retail derivatives stay local. The
 coast mask uses one bit per cell. Canopy pages store 128 by 256 samples in each
 256-square index page, using every row and halving their former padded storage. `TORE_VEG_CACHE=0` bypasses caching for timings.
 
+`tore_world::city::cache` keeps the city fill's placement (its cities, its
+buildings and the candidate count, 15 bytes a building, at most 7.5 MB) under
+the profile's `city-cache/`, one `<THEATER>-<key>.city` file per entry, at most
+four per theater, newest kept. The app configures it beside the vegetation cache
+and the dedicated server once it has loaded the import, so a server start reads
+the layout too. The key hashes every input of `fill::place`: the light map
+(tiles, quarter turns, picture names, classified flags, districts) and the kit,
+both still built from the import on every load and hashed by content, the layout
+name, keep-outs (layout objects and redrawn airports), named placements and the
+building budget, plus a hand-bumped generator version and a build-script hash of
+the `tore-world` and `tore-codec` sources. A file carries a magic, the key and an
+FNV-1a checksum; a missing, foreign, truncated, corrupt or inconsistent entry is
+placed again and rewritten through a temporary file and a rename. The resources
+a load reads, and so the content manifest, are the same on a hit. The
+in-process memo of built layouts holds its lock only to find a layout's slot;
+the build itself runs outside it. `TORE_CITY_CACHE=0` bypasses the disk cache,
+and `tore-app --city-layout-digest` prints each theater's full layout digest and
+build time ([measurements](baselines/loading-screen.md#city-layout-cache-2026-10-19)).
+
 `Placement` retains fixed geographic selections within configured quotas, with
 no distance-dependent repacking or budget squeeze. The bounded worker completes
 a guarded ring before publishing it. Near chunks precede velocity-prefetched
