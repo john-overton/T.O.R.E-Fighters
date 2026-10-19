@@ -574,11 +574,13 @@ impl Renderer {
         })
     }
     /// Submit before the primary pass writes the shared camera/vertex buffers.
-    /// GPU-only render-to-texture, every visible frame, with no rate timer/readback.
+    /// GPU-only render-to-texture, every visible frame, with no pixel readback.
+    /// With `timed` its GPU time joins the frame counter's GPU figure.
     fn render_mirrors(
         &mut self,
         world: &crate::terrain::Terrain,
         scenery: &crate::scenery::Scenery,
+        timed: bool,
     ) {
         if !self.mirrors_enabled || !self.cockpit.mirrors_visible {
             return;
@@ -587,6 +589,10 @@ impl Renderer {
             .update_aircraft_vertices(&self.queue, &self.mirror_vertices);
         let view = self.cockpit.mirror_target.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
+        let timed = timed && self.counter_shown();
+        if timed {
+            self.frame_gpu.begin(&mut encoder);
+        }
         self.sim.draw(
             &self.device,
             &self.queue,
@@ -597,9 +603,16 @@ impl Renderer {
             world,
             scenery,
         );
+        if timed {
+            self.frame_gpu.end(&mut encoder);
+        }
         self.queue.submit([encoder.finish()]);
         self.sim.hide_aircraft();
         self.mirror_frames += 1;
+    }
+    /// Whether the frame-rate counter is on for this run.
+    fn counter_shown(&self) -> bool {
+        crate::frame_rate::shown(self.graphics.show_frame_rate)
     }
     pub fn capture_sim(
         &mut self,
@@ -633,7 +646,8 @@ impl Renderer {
         height: u32,
         overlay: bool,
     ) -> AppResult<Vec<u8>> {
-        let pending = self.submit_readback(camera, world, scenery, width, height, overlay)?;
+        let pending =
+            self.submit_readback(camera, world, scenery, width, height, overlay, false)?;
         self.device.poll(wgpu::PollType::Wait {
             submission_index: None,
             timeout: Some(std::time::Duration::from_secs(30)),
@@ -671,12 +685,13 @@ impl Renderer {
             return Err("invalid camera instrument".into());
         }
         if !self.previews.contains_key(&page) {
-            let pending = self.submit_readback(camera, world, scenery, 138, 114, false)?;
+            let pending = self.submit_readback(camera, world, scenery, 138, 114, false, true)?;
             self.previews.insert(page, pending);
             return Ok(true);
         }
         Ok(false)
     }
+    #[allow(clippy::too_many_arguments)]
     fn submit_readback(
         &mut self,
         camera: &crate::camera::Camera,
@@ -685,6 +700,7 @@ impl Renderer {
         width: u32,
         height: u32,
         overlay: bool,
+        timed: bool,
     ) -> AppResult<Readback> {
         if width == 0 || height == 0 || width > 1920 || height > 1080 {
             return Err("capture dimensions outside bounds".into());
@@ -705,10 +721,15 @@ impl Renderer {
             view_formats: &[],
         });
         if overlay {
-            self.render_mirrors(world, scenery);
+            self.render_mirrors(world, scenery, false);
         }
         let view = texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
+        // Live camera panels are part of the frame's GPU work.
+        let timed = timed && self.counter_shown();
+        if timed {
+            self.frame_gpu.begin(&mut encoder);
+        }
         self.sim.draw(
             &self.device,
             &self.queue,
@@ -767,6 +788,9 @@ impl Renderer {
                 depth_or_array_layers: 1,
             },
         );
+        if timed {
+            self.frame_gpu.end(&mut encoder);
+        }
         self.queue.submit([encoder.finish()]);
         let (tx, rx) = std::sync::mpsc::channel();
         buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| {
@@ -969,12 +993,14 @@ impl Renderer {
         if flight_size.is_some()
             && let Some((_, world, scenery)) = scene
         {
-            self.render_mirrors(world, scenery);
+            self.render_mirrors(world, scenery, true);
         }
         let view = frame.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
         if show_counter {
             self.frame_gpu.begin(&mut encoder);
+        } else {
+            self.frame_gpu.cancel();
         }
         let console = self.console.take().filter(|_| flight_size.is_some());
         if let (Some((crt, overlay, overlay_size)), Some((camera, world, scenery))) =

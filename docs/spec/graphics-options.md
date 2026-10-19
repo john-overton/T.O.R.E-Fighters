@@ -295,11 +295,15 @@ frame over about the last half second. `low` is the slowest frame in the
 last second, written as a rate. Slow rendering frames, including frames longer
 than half a second, count. Disabling the counter resets its history. While enabled, presentation requests the next
 redraw continuously, including idle menus and paused flight/replay, so the line
-measures the actual render load. CPU milliseconds include main-thread frame
-preparation and encoding, excluding surface acquisition waits. GPU milliseconds
-are asynchronous timestamps around the main window command encoder, including
-scene and interface passes, excluding separately submitted mirrors, queued staging
-uploads, CPU time and presentation waits. CPU/GPU values average up to 30 recent samples. Three
+measures the actual render load. CPU milliseconds are the main thread's wall-clock time
+for frame preparation and encoding, excluding surface acquisition waits; they are
+not the CPU seconds summed over worker threads. GPU milliseconds
+are asynchronous timestamps over all of the frame's GPU work: each live camera
+panel picture, the cockpit mirrors, and the window pass (scene, cockpit, interface
+and the counter). Each submission is timed on its own and the figure is the sum, so
+GPU idle time between submissions is not counted. Queued staging
+uploads, CPU time and presentation waits are excluded. Offscreen captures and
+screenshots are not timed. CPU/GPU values average up to 30 recent samples. Three
 readback slots never wait on the GPU. Adapters without both timestamp features
 show `gpu --`, never an estimate. GPU/CPU timings overlap and need not sum to the
 frame interval. These measurement choices are agent decisions.

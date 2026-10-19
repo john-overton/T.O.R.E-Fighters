@@ -27,7 +27,9 @@ pub struct Meter {
 }
 
 impl Meter {
-    /// Render preparation and encoding, excluding swapchain waits. GPU samples
+    /// Main-thread wall time for render preparation and encoding, excluding
+    /// swapchain waits (not CPU seconds summed over workers). The GPU figure
+    /// is the frame's whole GPU work, panels and mirrors included; samples
     /// arrive asynchronously and never block presentation.
     pub fn work(&mut self, cpu_ms: f64, gpu_ms: Option<f64>) {
         fn add(samples: &mut VecDeque<f64>, value: f64) {
