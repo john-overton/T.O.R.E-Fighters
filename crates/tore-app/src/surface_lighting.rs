@@ -141,6 +141,12 @@ pub struct SurfaceLighting {
     views: Vec<wgpu::TextureView>,
     pipeline: wgpu::RenderPipeline,
     terrain_pipeline: wgpu::RenderPipeline,
+    /// Terrain whose texture has no cut-out texel: depth only, no fragment
+    /// stage (optimization S13a).
+    opaque_terrain_pipeline: wgpu::RenderPipeline,
+    /// Each cascade's projection rows from the last [`Self::prepare`], for
+    /// culling casters.
+    cascades: [[f32; 16]; 3],
 }
 
 impl SurfaceLighting {
@@ -257,9 +263,9 @@ impl SurfaceLighting {
             bind_group_layouts: &[material, &caster_layout],
             push_constant_ranges: &[],
         });
-        let make = |entry, terrain| {
+        let make = |entry: Option<&str>, terrain| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(entry),
+                label: Some(entry.unwrap_or("opaque terrain shadow")),
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: shader,
@@ -275,7 +281,7 @@ impl SurfaceLighting {
                         attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x2,2=>Float32,3=>Float32x3,4=>Float32],
                     }],
                 },
-                fragment: Some(wgpu::FragmentState {
+                fragment: entry.map(|entry| wgpu::FragmentState {
                     module: shader,
                     entry_point: Some(entry),
                     compilation_options: Default::default(),
@@ -305,13 +311,15 @@ impl SurfaceLighting {
             caster_layout: pipeline_layout.clone(),
             uniform,
             views,
-            pipeline: make("shadow_fragment", false),
-            terrain_pipeline: make("terrain_shadow_fragment", true),
+            pipeline: make(Some("shadow_fragment"), false),
+            terrain_pipeline: make(Some("terrain_shadow_fragment"), true),
+            opaque_terrain_pipeline: make(None, true),
+            cascades: [[0.; 16]; 3],
         }
     }
 
     pub fn prepare(
-        &self,
+        &mut self,
         queue: &wgpu::Queue,
         camera: &Camera,
         world: &Terrain,
@@ -335,8 +343,9 @@ impl SurfaceLighting {
         let (light, strength) = visible_sun(sun, radius);
         let active = scenery.smooth_weather && strength > 0.;
         let mut values = Vec::with_capacity(64);
-        for extent in EXTENTS {
-            values.extend(projection(camera.position.map(|v| v as f32), light, extent));
+        for (cascade, extent) in EXTENTS.into_iter().enumerate() {
+            self.cascades[cascade] = projection(camera.position.map(|v| v as f32), light, extent);
+            values.extend(self.cascades[cascade]);
         }
         values.extend([
             camera.position[0] as f32,
@@ -361,18 +370,27 @@ impl SurfaceLighting {
             0.,
         );
         debug_assert_eq!(values.len() * 4, UNIFORM_BYTES);
-        let bytes: Vec<_> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
-        queue.write_buffer(&self.uniform, 0, &bytes);
+        crate::sim_renderer::write_floats(queue, &self.uniform, 0, &values);
         active
     }
 
+    /// Draws the shadow casters into the three cascades. Each cascade
+    /// draws only the terrain chunks and object batches inside its volume
+    /// (exact: the rest are wholly clipped), and the terrain whose texture
+    /// cannot cut out without a fragment stage. A depth-only pass keeps the
+    /// nearest caster in any order, so the ranges' order does not matter.
     pub fn draw(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        terrain: (&wgpu::BindGroup, &wgpu::Buffer, u32),
-        objects: &[(&wgpu::BindGroup, &wgpu::Buffer, u32)],
+        terrain: TerrainCasters<'_>,
+        objects: &[Caster<'_>],
     ) {
+        let (mut opaque, mut cutout) = (Vec::new(), Vec::new());
         for (cascade, view) in self.views.iter().enumerate() {
+            let clip = crate::terrain_chunks::Clip::orthographic(&self.cascades[cascade]);
+            terrain
+                .chunks
+                .casters(terrain.eye, &clip, &mut opaque, &mut cutout);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("World geometry shadow pass"),
                 color_attachments: &[],
@@ -386,19 +404,47 @@ impl SurfaceLighting {
                 }),
                 ..Default::default()
             });
-            pass.set_pipeline(&self.terrain_pipeline);
+            let instance = cascade as u32..cascade as u32 + 1;
             pass.set_bind_group(1, &self.caster_bind, &[]);
-            pass.set_bind_group(0, terrain.0, &[]);
-            pass.set_vertex_buffer(0, terrain.1.slice(..));
-            pass.draw(0..terrain.2, cascade as u32..cascade as u32 + 1);
+            pass.set_bind_group(0, terrain.bind, &[]);
+            pass.set_vertex_buffer(0, terrain.buffer.slice(..));
+            pass.set_pipeline(&self.opaque_terrain_pipeline);
+            for range in &opaque {
+                pass.draw(range.clone(), instance.clone());
+            }
+            pass.set_pipeline(&self.terrain_pipeline);
+            for range in &cutout {
+                pass.draw(range.clone(), instance.clone());
+            }
             pass.set_pipeline(&self.pipeline);
-            for (bind, buffer, count) in objects {
-                pass.set_bind_group(0, *bind, &[]);
-                pass.set_vertex_buffer(0, buffer.slice(..));
-                pass.draw(0..*count, cascade as u32..cascade as u32 + 1);
+            for object in objects {
+                if object.count == 0 || clip.rejects(&object.bounds) {
+                    continue;
+                }
+                pass.set_bind_group(0, object.bind, &[]);
+                pass.set_vertex_buffer(0, object.buffer.slice(..));
+                pass.draw(0..object.count, instance.clone());
             }
         }
     }
+}
+
+/// The terrain for [`SurfaceLighting::draw`]: its chunked buffer and the
+/// eye its world-space vertices are taken relative to.
+pub struct TerrainCasters<'a> {
+    pub bind: &'a wgpu::BindGroup,
+    pub buffer: &'a wgpu::Buffer,
+    pub chunks: &'a crate::terrain_chunks::Chunks,
+    pub eye: [f64; 3],
+}
+
+/// One object batch for [`SurfaceLighting::draw`], with the box of its
+/// vertices relative to the eye as `shadow_object_vertex` places them.
+pub struct Caster<'a> {
+    pub bind: &'a wgpu::BindGroup,
+    pub buffer: &'a wgpu::Buffer,
+    pub count: u32,
+    pub bounds: crate::terrain_chunks::Bounds,
 }
 
 impl SurfaceLighting {
@@ -428,6 +474,12 @@ impl SurfaceLighting {
             cast(&mut pass, cascade);
         }
     }
+}
+
+/// A cascade projection for the culling tests in `terrain_chunks`.
+#[cfg(test)]
+pub(crate) fn test_projection(sun: [f32; 3], extent: f32) -> [f32; 16] {
+    projection([1_000.; 3], sun, extent)
 }
 
 #[cfg(test)]

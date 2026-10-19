@@ -125,6 +125,29 @@ cast solid shadows; ordinary cutout surfaces cast only their opaque texels. Step
 mode retains palette lighting and camera face rejection. See the
 [surface specification](spec/surface-lighting.md) for fitted limits.
 
+The terrain buffer is split into square chunks of 65,536 feet
+(`terrain_chunks.rs`, optimization S13a). Each triangle goes to the chunk
+under its centroid and keeps its source order there, so the pieces a runway
+recess cuts from one cell stay together; normals are summed in the source
+order first and then follow their triangles. A chunk holds its shadow-opaque
+triangles first (untextured, or on a texture page with no cut-out texel),
+then the rest. The world pass draws the chunks inside the view's frustum and
+2,200,000-foot far plane, nearest first, so nearer hills hide farther ground
+before it is shaded. Each shadow cascade draws only the chunks inside its
+orthographic volume, the shadow-opaque ranges through a depth-only pipeline
+with no fragment stage and the rest through the cut-out test, and skips any
+object batch (airports, surface units, the flown aircraft, combat geometry,
+each formation model) whose vertex box lies outside it; the boxes are
+measured when the batches are uploaded. A chunk or batch is skipped only when
+its box, widened by 64 feet, is wholly outside one clip plane, so culling
+removes nothing that could draw. Fully fogged terrain is not culled: it still
+draws the fog colour over the sky. The only order-dependent pixels are samples
+where triangles of two chunks tie at exactly the same depth, such as a ridge
+folded along a chunk edge; the S13a captures found 13 such pixels (at most
+2 of 255) in one of 171 scenes. Vertex and uniform uploads go through
+`sim_renderer::write_floats`, which writes the floats little-endian straight
+into the queue's staging memory instead of building a byte vector.
+
 
 
 `flight_views.rs` resolves manual-described camera relations from read-only flight,
@@ -162,7 +185,14 @@ World camera depth uses `Depth32Float`, storing the near plane at depth 1 and
 the far plane at depth 0. Using the near and far distances, the vertex shader computes clip Z as
 `near * (far - view_z) / (far - near)`, then perspective division yields depth.
 Depth clears to zero and nearer fragments compare greater. The existing near
-plane and 2,200,000-foot far limit remain. Aircraft, terrain, static objects,
+plane and 2,200,000-foot far limit remain. The full-screen sky and the
+celestial sprites sit at depth 0 and are drawn after the city fill and the
+terrain with a greater-or-equal test, so they fill only samples nothing opaque
+wrote and covered pixels skip the sky shader. Each sample takes the same
+colour it took when the sky went first and was drawn over: everything before
+the sky writes colour only together with depth and without blending, and
+vegetation, aircraft, canopies, clouds and the blended effects all come after
+it. Aircraft, terrain, static objects,
 clouds, smoke, vapor, chaff, flares, flare glare and the spotting aid use
 this same mapping. The separate
 orthographic shadow maps keep their existing depth convention. This is an

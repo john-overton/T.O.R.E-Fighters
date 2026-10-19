@@ -1,4 +1,5 @@
 //! Extensible 3D pass. World data/camera are independent of wgpu; UI composites afterward.
+use crate::terrain_chunks::Bounds;
 pub use crate::vegetation_renderer::ViewKind;
 use crate::{
     camera::Camera,
@@ -53,9 +54,98 @@ pub(crate) fn thermal_reference(palette: &[[u8; 3]; 256]) -> f32 {
         .sum();
     (sum / 256.).max(1e-4)
 }
+/// `values` as little-endian bytes, as the GPU reads them.
 pub(crate) fn bytes(values: &[f32]) -> Vec<u8> {
-    values.iter().flat_map(|v| v.to_le_bytes()).collect()
+    let mut out = vec![0; values.len() * 4];
+    put_floats(&mut out, values);
+    out
 }
+/// Writes `values` little-endian into `out`, which holds exactly four bytes
+/// each. A plain loop over fixed-size pieces, which the compiler turns into
+/// a straight copy on little-endian targets (no per-byte iterator).
+pub(crate) fn put_floats(out: &mut [u8], values: &[f32]) {
+    assert_eq!(out.len(), values.len() * 4);
+    for (to, value) in out.chunks_exact_mut(4).zip(values) {
+        to.copy_from_slice(&value.to_le_bytes());
+    }
+}
+/// Uploads `values` at `offset` of `buffer` straight into the queue's
+/// staging memory, without building a byte vector first.
+pub(crate) fn write_floats(
+    queue: &wgpu::Queue,
+    buffer: &wgpu::Buffer,
+    offset: u64,
+    values: &[f32],
+) {
+    let Some(size) = wgpu::BufferSize::new(values.len() as u64 * 4) else {
+        return;
+    };
+    match queue.write_buffer_with(buffer, offset, size) {
+        Some(mut view) => put_floats(&mut view, values),
+        // Validation failed (already reported by wgpu); fall back to the
+        // checked path so the error matches `write_buffer`.
+        None => queue.write_buffer(buffer, offset, &bytes(values)),
+    }
+}
+#[cfg(test)]
+mod upload_tests {
+    /// The sky and the celestial sprites are drawn after the opaque world
+    /// at depth 0, so they reach exactly the samples nothing opaque wrote
+    /// (reversed Z clears to 0 and every opaque write passed `Greater` or
+    /// `GreaterEqual` against it, so it is above 0).
+    #[test]
+    fn sky_fills_only_samples_still_at_the_clear_depth() {
+        let shader = include_str!("terrain.wgsl");
+        assert!(shader.contains("out.clip=vec4<f32>(p[i],0.0,1.0)"));
+        assert!(shader.contains("dot(position,scene.up.xyz)*f,0.0,z)"));
+        let passes = |fragment: f32, stored: f32| match super::SKY_DEPTH_COMPARE {
+            wgpu::CompareFunction::GreaterEqual => fragment >= stored,
+            wgpu::CompareFunction::Equal => fragment == stored,
+            other => panic!("unexpected sky depth test {other:?}"),
+        };
+        assert!(passes(0., 0.));
+        for covered in [f32::from_bits(1), 1e-9, 0.5, 1.] {
+            assert!(!passes(0., covered));
+        }
+    }
+    /// The copy helper gives exactly the bytes of the per-byte iterator it
+    /// replaced, for every kind of value (signed zero, infinities, NaN
+    /// payloads, subnormals) and every length.
+    #[test]
+    fn float_bytes_match_the_old_per_byte_copy() {
+        let mut values = vec![
+            0.,
+            -0.,
+            1.,
+            -1.5,
+            f32::MAX,
+            f32::MIN_POSITIVE,
+            f32::from_bits(1),
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::from_bits(0x7fc0_1234),
+            f32::from_bits(0xffa0_0001),
+        ];
+        let mut state = 0x1234_5678_u32;
+        for _ in 0..4099 {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            values.push(f32::from_bits(state));
+        }
+        for len in [0, 1, 2, 3, 7, 10, 30, values.len()] {
+            let slice = &values[..len];
+            let old: Vec<u8> = slice.iter().flat_map(|v| v.to_le_bytes()).collect();
+            assert_eq!(super::bytes(slice), old);
+            let mut out = vec![0xaa; len * 4];
+            super::put_floats(&mut out, slice);
+            assert_eq!(out, old);
+        }
+    }
+}
+/// The sky and the celestial sprites sit at depth 0 and are drawn after the
+/// opaque world: they pass only where the depth is still the clear value.
+const SKY_DEPTH_COMPARE: wgpu::CompareFunction = wgpu::CompareFunction::GreaterEqual;
+/// The world pass's far plane (`world_depth_clip` in terrain.wgsl).
+const WORLD_FAR_FEET: f32 = 2_200_000.;
 /// The shared `Scene` uniform, ending with the graphics `quality` and
 /// `viewport` vectors.
 const UNIFORM_BYTES: u64 = 1488;
@@ -142,6 +232,7 @@ pub struct SimRenderer {
         tore_formats::aircraft::AircraftId,
         AircraftBatch,
         Vec<Contact>,
+        Bounds,
     )>,
     spot_instances: wgpu::Buffer,
     vapor: Option<(wgpu::Buffer, u32)>,
@@ -166,7 +257,13 @@ pub struct SimRenderer {
     uniform: wgpu::Buffer,
     vertices: wgpu::Buffer,
     terrain_normals: wgpu::Buffer,
-    count: u32,
+    /// The terrain buffer's spatial chunks (optimization S13a).
+    chunks: crate::terrain_chunks::Chunks,
+    /// This view's visible terrain chunks, nearest first (reused).
+    chunk_order: Vec<std::ops::Range<u32>>,
+    /// Vertex boxes of the shadow-casting object batches, in the space each
+    /// batch's vertices are uploaded in.
+    bounds: CasterBounds,
     targets: Vec<Targets>,
     resample: wgpu::RenderPipeline,
     options: crate::graphics::Options,
@@ -190,6 +287,37 @@ pub struct SimRenderer {
     /// developer aid like `TORE_CITY_FILL=0`; the stress measurement flips
     /// it).
     city_fires_on: bool,
+}
+/// The vertex boxes of the object batches, kept beside their buffers so a
+/// shadow cascade can skip a batch wholly outside it.
+#[derive(Clone, Copy)]
+struct CasterBounds {
+    aircraft: Bounds,
+    battle: Bounds,
+    airports: Bounds,
+    surface_units: Bounds,
+}
+impl Default for CasterBounds {
+    /// Never culled until an upload measures the batch.
+    fn default() -> Self {
+        Self {
+            aircraft: Bounds::ALL,
+            battle: Bounds::ALL,
+            airports: Bounds::ALL,
+            surface_units: Bounds::ALL,
+        }
+    }
+}
+/// Whether a terrain triangle on texture `layer` always casts its whole
+/// shadow: untextured terrain, or a page with no cut-out (255) texel, so
+/// `terrain_shadow_fragment` could never discard. Anything else, including a
+/// layer past the ground pages, keeps the cut-out test.
+fn opaque_caster_layers(texture_indices: &[u8]) -> impl Fn(f32) -> bool + '_ {
+    let pages: Vec<bool> = texture_indices
+        .chunks_exact(65536)
+        .map(|page| !page.contains(&255))
+        .collect();
+    move |layer| layer < 0. || pages.get(layer as usize).copied().unwrap_or(false)
 }
 /// World-pass attachments for one output size. The main view, mirrors and
 /// instrument previews alternate sizes within a frame, so a few are cached.
@@ -526,10 +654,12 @@ impl Pipelines {
                 })],
             }),
             primitive: Default::default(),
+            // Drawn after the opaque world at depth 0, so it fills only the
+            // samples still at the clear depth (reversed Z clears to 0).
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: false,
-                depth_compare: wgpu::CompareFunction::Always,
+                depth_compare: SKY_DEPTH_COMPARE,
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
@@ -542,7 +672,7 @@ impl Pipelines {
             vertex: wgpu::VertexState { module:shader,entry_point:Some("celestial_vertex"),compilation_options:Default::default(),
                 buffers:&[wgpu::VertexBufferLayout {array_stride:40,step_mode:wgpu::VertexStepMode::Vertex,attributes:&wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x2,2=>Float32,3=>Float32x3,4=>Float32]}]},
             fragment:Some(wgpu::FragmentState {module:shader,entry_point:Some("celestial_fragment"),compilation_options:Default::default(),targets:&[Some(wgpu::ColorTargetState {format,blend:Some(wgpu::BlendState::ALPHA_BLENDING),write_mask:wgpu::ColorWrites::ALL})]}),
-            primitive:Default::default(),depth_stencil:Some(wgpu::DepthStencilState {format:wgpu::TextureFormat::Depth32Float,depth_write_enabled:false,depth_compare:wgpu::CompareFunction::Always,stencil:Default::default(),bias:Default::default()}),multisample,multiview:None,cache:None,
+            primitive:Default::default(),depth_stencil:Some(wgpu::DepthStencilState {format:wgpu::TextureFormat::Depth32Float,depth_write_enabled:false,depth_compare:SKY_DEPTH_COMPARE,stencil:Default::default(),bias:Default::default()}),multisample,multiview:None,cache:None,
         });
         let cloud_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label:Some("Original cloud sheets"),layout:Some(&sky_layout),
@@ -990,17 +1120,27 @@ impl SimRenderer {
                 },
             ],
         });
+        // Normals from the source order (their sums are order-dependent),
+        // then both streams regrouped into chunks.
+        let (terrain, normals, chunks) = crate::terrain_chunks::build(
+            &scenery.vertices,
+            &crate::surface_lighting::terrain_normals(&scenery.vertices),
+            opaque_caster_layers(&scenery.texture_indices),
+        );
         let vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Retail T2 terrain mesh"),
-            contents: &bytes(&scenery.vertices),
+            contents: &bytes(&terrain),
             usage: wgpu::BufferUsages::VERTEX,
         });
         let terrain_normals = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Shared terrain lighting normals"),
-            contents: &bytes(&crate::surface_lighting::terrain_normals(&scenery.vertices)),
+            contents: &bytes(&normals),
             usage: wgpu::BufferUsages::VERTEX,
         });
         Self {
+            chunks,
+            chunk_order: Vec::new(),
+            bounds: CasterBounds::default(),
             terrain_normals,
             lighting,
             escapees: None,
@@ -1039,7 +1179,6 @@ impl SimRenderer {
             bind,
             uniform,
             vertices,
-            count: (scenery.vertices.len() / 10) as u32,
             targets: Vec::new(),
             resample: Self::resample_pipeline(device, format),
             options,
@@ -1144,9 +1283,10 @@ impl SimRenderer {
         if let Some((buffer, count)) = &mut self.battle {
             let length = vertices.len().min((8 * 1024 * 1024 / 4 / 30) * 30);
             if length > 0 {
-                queue.write_buffer(buffer, 0, &bytes(&vertices[..length]));
+                write_floats(queue, buffer, 0, &vertices[..length]);
             }
             *count = (length / 10) as u32;
+            self.bounds.battle = Bounds::of_vertices(&vertices[..length]);
             // Aircraft cut off by the buffer budget are not drawn at all.
             let drawn = *count;
             self.battle_contacts.clear();
@@ -1197,9 +1337,10 @@ impl SimRenderer {
         }
         let (buffer, count) = self.surface_units.as_mut().unwrap();
         if !vertices.is_empty() {
-            queue.write_buffer(buffer, 0, &bytes(vertices));
+            write_floats(queue, buffer, 0, vertices);
         }
         *count = (vertices.len() / 10) as u32;
+        self.bounds.surface_units = Bounds::of_vertices(vertices);
     }
     fn airport_vertices(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
         if self.airports.is_none() {
@@ -1220,9 +1361,10 @@ impl SimRenderer {
             );
             let length = vertices.len();
             if length > 0 {
-                queue.write_buffer(buffer, 0, &bytes(&vertices[..length]));
+                write_floats(queue, buffer, 0, &vertices[..length]);
             }
             *count = (length / 10) as u32;
+            self.bounds.airports = Bounds::of_vertices(vertices);
         }
     }
     fn airport_lines(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
@@ -1244,7 +1386,7 @@ impl SimRenderer {
         }
         let (buffer, count) = self.airport_lines.as_mut().unwrap();
         if !vertices.is_empty() {
-            queue.write_buffer(buffer, 0, &bytes(vertices));
+            write_floats(queue, buffer, 0, vertices);
         }
         *count = (vertices.len() / 10) as u32;
     }
@@ -1264,7 +1406,7 @@ impl SimRenderer {
         if let Some((buffer, count)) = &mut self.vapor {
             let length = vertices.len().min((64 * 1024 / 4 / 14) * 14);
             if length > 0 {
-                queue.write_buffer(buffer, 0, &bytes(&vertices[..length]));
+                write_floats(queue, buffer, 0, &vertices[..length]);
             }
             *count = (length / 7) as u32;
         }
@@ -1277,19 +1419,25 @@ impl SimRenderer {
         geometry: Vec<(&crate::aircraft::Airframe, Vec<f32>, Vec<Contact>)>,
     ) {
         let ownship = self.aircraft.take();
+        let ownship_bounds = self.bounds.aircraft;
         let visible = self.aircraft_visible;
         let canopy = self.canopy_visible;
         let mut old = std::mem::take(&mut self.dummies);
         for (model, vertices, contacts) in geometry {
             self.aircraft = old
                 .iter()
-                .position(|(id, _, _)| *id == model.profile.id)
+                .position(|(id, _, _, _)| *id == model.profile.id)
                 .map(|i| old.swap_remove(i).1);
             self.aircraft(device, queue, model, &vertices);
-            self.dummies
-                .push((model.profile.id, self.aircraft.take().unwrap(), contacts));
+            self.dummies.push((
+                model.profile.id,
+                self.aircraft.take().unwrap(),
+                contacts,
+                self.bounds.aircraft,
+            ));
         }
         self.aircraft = ownship;
+        self.bounds.aircraft = ownship_bounds;
         self.aircraft_visible = visible;
         self.canopy_visible = canopy;
     }
@@ -1321,12 +1469,14 @@ impl SimRenderer {
         vertices: &[f32],
     ) {
         let ownship = self.aircraft.take();
+        let ownship_bounds = self.bounds.aircraft;
         let visible = self.aircraft_visible;
         let canopy = self.canopy_visible;
         self.aircraft = self.escapees.take();
         self.textured_model(device, queue, &art.atlas, None, vertices);
         self.escapees = self.aircraft.take();
         self.aircraft = ownship;
+        self.bounds.aircraft = ownship_bounds;
         self.aircraft_visible = visible;
         self.canopy_visible = canopy;
     }
@@ -1460,10 +1610,11 @@ impl SimRenderer {
                 });
             }
             if !vertices.is_empty() {
-                queue.write_buffer(buffer, 0, &bytes(vertices));
+                write_floats(queue, buffer, 0, vertices);
             }
             *count = (vertices.len() / 10) as u32;
             self.canopy_visible = vertices.chunks_exact(10).any(|v| v[5] == -5.);
+            self.bounds.aircraft = Bounds::of_vertices(vertices);
         }
     }
     pub fn update_aircraft_vertices(&mut self, queue: &wgpu::Queue, vertices: &[f32]) {
@@ -1471,10 +1622,11 @@ impl SimRenderer {
         assert!(vertices.len() * 4 <= 2 * 1024 * 1024);
         if let Some((_, buffer, count)) = &mut self.aircraft {
             if !vertices.is_empty() {
-                queue.write_buffer(buffer, 0, &bytes(vertices));
+                write_floats(queue, buffer, 0, vertices);
             }
             *count = (vertices.len() / 10) as u32;
             self.canopy_visible = vertices.chunks_exact(10).any(|v| v[5] == -5.);
+            self.bounds.aircraft = Bounds::of_vertices(vertices);
         }
     }
     pub fn hide_aircraft(&mut self) {
@@ -1750,7 +1902,7 @@ impl SimRenderer {
             assert!(data.len() * 4 <= 256 * 1024);
             celestial_count = (data.len() / 10) as u32;
             if !data.is_empty() {
-                queue.write_buffer(&self.celestial_vertices, 0, &bytes(&data));
+                write_floats(queue, &self.celestial_vertices, 0, &data);
             }
             uniform[27] = celestial.sun_remap as f32;
             if let Some(layer) = world.weather.sample(camera.position[1]) {
@@ -1903,6 +2055,15 @@ impl SimRenderer {
             scenery.seams[2],
         ]);
         debug_assert_eq!(uniform.len() * 4, UNIFORM_BYTES as usize);
+        let view_clip = crate::terrain_chunks::Clip::perspective(
+            [uniform[4], uniform[5], uniform[6]],
+            [uniform[8], uniform[9], uniform[10]],
+            [uniform[12], uniform[13], uniform[14]],
+            uniform[11],
+            uniform[3],
+            camera.near_clip,
+            WORLD_FAR_FEET,
+        );
         // The burning city fill buildings: the nearest fires and columns of
         // the camera, replaced every draw (`crate::city_fires`).
         match world.city_fill.as_ref().filter(|_| self.city_fires_on) {
@@ -1999,7 +2160,7 @@ impl SimRenderer {
         assert!(cloud_data.len() * 4 <= 256 * 1024);
         let cloud_count = (cloud_data.len() / 10) as u32;
         if cloud_count > 0 {
-            queue.write_buffer(&self.cloud_vertices, 0, &bytes(&cloud_data));
+            write_floats(queue, &self.cloud_vertices, 0, &cloud_data);
         }
         let linear = |v: u8| ((v as f64 / 255.0 + 0.055) / 1.055).powf(2.4);
         // A thermal picture has no lens flare: the sun is just a hot spot. No
@@ -2037,31 +2198,55 @@ impl SimRenderer {
             uniform[end - 6] = vegetation.draw_reach().max(1.);
             uniform[end - 4] = vegetation.detail_reach();
         }
-        queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
+        write_floats(queue, &self.uniform, 0, &uniform);
+        // Terrain vertices are in world feet and the shader takes them
+        // relative to the eye; object batches are relative to the render
+        // origin and the shader subtracts the eye's local position.
+        let local_eye = scenery.local(camera.position).map(f64::from);
         if self
             .lighting
             .prepare(queue, camera, world, scenery, &lights)
         {
+            use crate::surface_lighting::Caster;
+            let caster = |bind, buffer, count, bounds: Bounds| Caster {
+                bind,
+                buffer,
+                count,
+                bounds: bounds.relative(local_eye),
+            };
             let mut objects = Vec::new();
             if let Some((buffer, count)) = &self.airports {
-                objects.push((&self.bind, buffer, *count));
+                objects.push(caster(&self.bind, buffer, *count, self.bounds.airports));
             }
             if let Some((buffer, count)) = &self.surface_units
                 && *count > 0
             {
-                objects.push((&self.bind, buffer, *count));
+                objects.push(caster(
+                    &self.bind,
+                    buffer,
+                    *count,
+                    self.bounds.surface_units,
+                ));
             }
             if let Some((bind, buffer, count)) = &self.aircraft {
-                objects.push((bind, buffer, *count));
+                objects.push(caster(bind, buffer, *count, self.bounds.aircraft));
                 if let Some((buffer, count)) = &self.battle {
-                    objects.push((bind, buffer, *count));
+                    objects.push(caster(bind, buffer, *count, self.bounds.battle));
                 }
             }
-            for (_, (bind, buffer, count), _) in &self.dummies {
-                objects.push((bind, buffer, *count));
+            for (_, (bind, buffer, count), _, bounds) in &self.dummies {
+                objects.push(caster(bind, buffer, *count, *bounds));
             }
-            self.lighting
-                .draw(encoder, (&self.bind, &self.vertices, self.count), &objects);
+            self.lighting.draw(
+                encoder,
+                crate::surface_lighting::TerrainCasters {
+                    bind: &self.bind,
+                    buffer: &self.vertices,
+                    chunks: &self.chunks,
+                    eye: camera.position,
+                },
+                &objects,
+            );
             if let Some(fill) = &self.fill {
                 fill.draw_shadows(&self.lighting, encoder, &self.bind);
             }
@@ -2078,7 +2263,7 @@ impl SimRenderer {
             if let (Some((bind, _, _)), Some((buffer, _))) = (&self.aircraft, &self.battle) {
                 others.push((bind, buffer, &self.battle_contacts));
             }
-            for (_, (bind, buffer, _), contacts) in &self.dummies {
+            for (_, (bind, buffer, _), contacts, _) in &self.dummies {
                 others.push((bind, buffer, contacts));
             }
             others.retain(|(_, _, contacts)| !contacts.is_empty());
@@ -2090,7 +2275,7 @@ impl SimRenderer {
                 self.spot_instances =
                     Self::spot_buffer(device, (contacts.len() as u64).next_power_of_two());
             }
-            queue.write_buffer(&self.spot_instances, 0, &bytes(&spot_instances(&contacts)));
+            write_floats(queue, &self.spot_instances, 0, &spot_instances(&contacts));
         }
         let destination = flare_target.as_ref().unwrap_or(target);
         let targets = &self.targets[slot];
@@ -2144,25 +2329,36 @@ impl SimRenderer {
             0.,
             1.,
         );
-        pass.set_pipeline(&self.p.sky_pipeline);
         pass.set_bind_group(1, &self.lighting.bind, &[]);
+        // City fill buildings go before the terrain, so the depth test
+        // spares the terrain's costly texture filtering behind them.
+        if let Some(fill) = &self.fill {
+            fill.draw(&mut pass, &self.bind);
+        }
+        // The terrain chunks in view, nearest first, so nearer hills hide
+        // farther ground before it is shaded.
+        self.chunks
+            .front_to_back(camera.position, &view_clip, &mut self.chunk_order);
+        pass.set_pipeline(&self.p.terrain_pipeline);
         pass.set_bind_group(0, &self.bind, &[]);
+        pass.set_vertex_buffer(0, self.vertices.slice(..));
+        pass.set_vertex_buffer(1, self.terrain_normals.slice(..));
+        for range in &self.chunk_order {
+            pass.draw(range.clone(), 0..1);
+        }
+        // The sky after the opaque fill and terrain, only where neither
+        // wrote depth (the clear value 0): each sample takes exactly the
+        // colour it took when the sky went first and was drawn over, but
+        // covered samples skip its shader. The sun, moon and stars blend
+        // onto the sky under the same test. Everything before here writes
+        // colour only with depth, without blending.
+        pass.set_pipeline(&self.p.sky_pipeline);
         pass.draw(0..3, 0..1);
         if celestial_count > 0 {
             pass.set_pipeline(&self.p.celestial_pipeline);
             pass.set_vertex_buffer(0, self.celestial_vertices.slice(..));
             pass.draw(0..celestial_count, 0..1);
         }
-        // City fill buildings go before the terrain, so the depth test
-        // spares the terrain's costly texture filtering behind them.
-        if let Some(fill) = &self.fill {
-            fill.draw(&mut pass, &self.bind);
-        }
-        pass.set_pipeline(&self.p.terrain_pipeline);
-        pass.set_bind_group(0, &self.bind, &[]);
-        pass.set_vertex_buffer(0, self.vertices.slice(..));
-        pass.set_vertex_buffer(1, self.terrain_normals.slice(..));
-        pass.draw(0..self.count, 0..1);
         if let Some(vegetation) = &self.vegetation {
             vegetation.draw(&mut pass, &self.bind);
         }
@@ -2208,7 +2404,7 @@ impl SimRenderer {
                 pass.draw(0..*count, 0..1);
             }
         }
-        for (_, (bind, vertices, count), _) in &self.dummies {
+        for (_, (bind, vertices, count), _, _) in &self.dummies {
             pass.set_pipeline(&self.p.pipeline);
             pass.set_bind_group(0, bind, &[]);
             pass.set_vertex_buffer(0, vertices.slice(..));
@@ -3033,6 +3229,7 @@ mod lighting_tests {
                     });
                     renderer.aircraft =
                         Some((renderer.bind.clone(), buffer, (object.len() / 10) as u32));
+                    renderer.bounds.aircraft = Bounds::of_vertices(&object);
                 }
                 if !terrain_caster {
                     renderer.hide_aircraft();
@@ -3086,7 +3283,7 @@ mod lighting_tests {
                         128,
                         &bytes(&[axis, axis, 0., 1., 0.1, 100., 1., 0.]),
                     );
-                    queue.write_buffer(&renderer.uniform, 1324, &bytes(&[1.]));
+                    write_floats(&queue, &renderer.uniform, 1324, &[1.]);
                     queue.write_texture(
                         wgpu::TexelCopyTextureInfo {
                             texture: &renderer.palette,

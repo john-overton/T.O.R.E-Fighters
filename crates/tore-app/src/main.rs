@@ -155,6 +155,7 @@ mod tape_file;
 mod target_info;
 mod target_preview;
 mod terrain_audit;
+mod terrain_chunks;
 mod terrain_colors;
 mod terrain_seams;
 mod ui_text;
