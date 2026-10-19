@@ -43,11 +43,11 @@ as fitted estimates pending separate measurements. The resulting boundaries are 
 78.9, 84.1 and 100 percent. The label explicitly says Estimated. Elapsed time
 advances within a stage asymptotically toward its next boundary; only worker
 completion reaches 100 percent. Progress never resets within a load; duplicate or late stage notifications
-cannot move it backward. Elapsed seconds remain visible. There is no moving
+cannot move it backward. No seconds counter is shown (John, 2026-10-19). There is no moving
 activity strip or moving bar highlight, requested by John on 2026-10-17.
 [Measurement and limits](../baselines/loading-screen.md) give the source of the
 weights. Checking game content, Connecting to the host and Waiting for the host use a
-stationary bar and elapsed time without a percentage because their durations
+stationary bar, with no percentage, because their durations
 are externally determined. The same photo continues into mission preparation.
 
 ## Scheduling and cancellation

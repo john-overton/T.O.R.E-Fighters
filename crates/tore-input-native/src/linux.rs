@@ -56,6 +56,12 @@ pub struct Platform {
     devices: BTreeMap<PathBuf, OpenDevice>,
     scan: Instant,
     warned: BTreeSet<String>,
+    /// Event nodes known not to be controllers (keyboards, mice, switches,
+    /// touchpads). Their capabilities cannot change, so the once-a-second
+    /// scan does not read their sysfs files or open them again. A node that
+    /// leaves `/dev/input` is forgotten, so a new device on the same name is
+    /// looked at afresh.
+    ignored: BTreeSet<PathBuf>,
 }
 use std::collections::BTreeSet;
 impl Platform {
@@ -64,7 +70,17 @@ impl Platform {
             devices: BTreeMap::new(),
             scan: Instant::now() - Duration::from_secs(2),
             warned: BTreeSet::new(),
+            ignored: BTreeSet::new(),
         })
+    }
+    /// Forgets the ignored nodes that are no longer listed.
+    fn forget_gone(&mut self, listed: &BTreeSet<PathBuf>) {
+        self.ignored.retain(|path| listed.contains(path));
+    }
+    /// Whether the scan should look at `path`: not open already, and not
+    /// known to be something other than a controller.
+    fn worth_probing(&self, path: &PathBuf) -> bool {
+        !self.devices.contains_key(path) && !self.ignored.contains(path)
     }
     fn open(path: &PathBuf) -> io::Result<OpenDevice> {
         let file = OpenOptions::new()
@@ -196,8 +212,9 @@ impl Platform {
                     false
                 }
             });
+            self.forget_gone(&paths);
             for path in paths {
-                if self.devices.contains_key(&path) {
+                if !self.worth_probing(&path) {
                     continue;
                 }
                 let sys = PathBuf::from("/sys/class/input")
@@ -208,6 +225,7 @@ impl Platform {
                     fs::read_to_string(sys.join("abs")),
                 ) && !controller(&capability_bits(&keys), &capability_bits(&axes))
                 {
+                    self.ignored.insert(path);
                     continue;
                 }
                 match Self::open(&path) {
@@ -223,6 +241,9 @@ impl Platform {
                         if self.warned.insert(message.clone()) {
                             out.push(Notification::Warning(message));
                         }
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::Unsupported => {
+                        self.ignored.insert(path);
                     }
                     _ => {}
                 }
@@ -448,6 +469,22 @@ fn capability_bits(text: &str) -> [u8; 128] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_node_that_is_not_a_controller_is_remembered_until_it_goes() {
+        let mut platform = Platform::new().unwrap();
+        let keyboard = PathBuf::from("/dev/input/event3");
+        let pad = PathBuf::from("/dev/input/event7");
+        assert!(platform.worth_probing(&keyboard), "unknown nodes are read");
+        platform.ignored.insert(keyboard.clone());
+        let listing: BTreeSet<_> = [keyboard.clone(), pad.clone()].into();
+        platform.forget_gone(&listing);
+        assert!(!platform.worth_probing(&keyboard), "not read again");
+        assert!(platform.worth_probing(&pad), "a new node is looked at");
+        // Unplugged: forgotten, so the next device on that name is read.
+        let listing: BTreeSet<_> = [pad].into();
+        platform.forget_gone(&listing);
+        assert!(platform.worth_probing(&keyboard));
+    }
     #[test]
     fn keyboard_collections_are_not_controllers() {
         let mut k = [0u8; 128];

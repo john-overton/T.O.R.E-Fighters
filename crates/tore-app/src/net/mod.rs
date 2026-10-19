@@ -22,6 +22,7 @@ pub mod lobby_chat;
 pub mod lookup;
 pub mod observe;
 pub mod options;
+pub mod pace;
 pub mod play;
 pub mod rejoin_store;
 pub mod respawn;
