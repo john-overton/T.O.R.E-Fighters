@@ -48,7 +48,8 @@ struct Readback {
     bgra: bool,
 }
 impl Readback {
-    fn pixels(self) -> Vec<u8> {
+    /// The pixels, and the unmapped buffer for reuse.
+    fn pixels(self) -> (Vec<u8>, wgpu::Buffer) {
         let data = self.buffer.slice(..).get_mapped_range();
         let mut pixels = Vec::with_capacity((self.width * self.height * 4) as usize);
         for row in data.chunks_exact(self.stride as usize) {
@@ -62,11 +63,79 @@ impl Readback {
         }
         drop(data);
         self.buffer.unmap();
+        (pixels, self.buffer)
+    }
+}
+/// Readback textures and buffers kept for reuse, by size: the camera panels
+/// ask for the same small picture several times a second.
+#[derive(Default)]
+struct ReadbackPool {
+    textures: Vec<([u32; 2], wgpu::TextureFormat, wgpu::Texture)>,
+    buffers: Vec<(u64, wgpu::Buffer)>,
+}
+impl ReadbackPool {
+    const TEXTURES: usize = 4;
+    const BUFFERS: usize = 6;
+    /// A render target of this size. Reusing one is safe: each use is a
+    /// later submission that clears and redraws all of it.
+    fn texture(
+        &mut self,
+        device: &wgpu::Device,
+        size: [u32; 2],
+        format: wgpu::TextureFormat,
+    ) -> wgpu::Texture {
+        if let Some((_, _, texture)) = self
+            .textures
+            .iter()
+            .find(|(s, f, _)| *s == size && *f == format)
+        {
+            return texture.clone();
+        }
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Terrain validation capture"),
+            size: wgpu::Extent3d {
+                width: size[0],
+                height: size[1],
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        if self.textures.len() >= Self::TEXTURES {
+            self.textures.remove(0);
+        }
+        self.textures.push((size, format, texture.clone()));
+        texture
+    }
+    /// An unmapped readback buffer of `size` bytes, taken out of the pool.
+    fn buffer(&mut self, device: &wgpu::Device, size: u64) -> wgpu::Buffer {
+        if let Some(i) = self.buffers.iter().position(|(s, _)| *s == size) {
+            return self.buffers.swap_remove(i).1;
+        }
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Terrain capture readback"),
+            size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        })
+    }
+    /// The pixels of a finished readback; its buffer goes back to the pool.
+    fn finish(&mut self, readback: Readback) -> Vec<u8> {
+        let (pixels, buffer) = readback.pixels();
+        if self.buffers.len() >= Self::BUFFERS {
+            self.buffers.remove(0);
+        }
+        self.buffers.push((buffer.size(), buffer));
         pixels
     }
 }
 pub struct Renderer {
     previews: std::collections::BTreeMap<u8, Readback>,
+    readbacks: ReadbackPool,
     first_frame: crate::startup::FirstFrame,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -599,6 +668,7 @@ impl Renderer {
             frame_gpu: crate::frame_gpu::Timer::new(&device, &queue),
             frame_cpu: None,
             previews: Default::default(),
+            readbacks: Default::default(),
             sim,
             window,
             surface,
@@ -691,7 +761,7 @@ impl Renderer {
             timeout: Some(std::time::Duration::from_secs(30)),
         })?;
         pending.receiver.recv()??;
-        Ok(pending.pixels())
+        Ok(self.readbacks.finish(pending))
     }
     /// Live panels consume a previous completed frame; never wait for GPU completion.
     pub fn poll_previews(&mut self) -> AppResult<Vec<(u8, Vec<u8>)>> {
@@ -709,7 +779,10 @@ impl Renderer {
         }
         Ok(ready
             .into_iter()
-            .map(|page| (page, self.previews.remove(&page).unwrap().pixels()))
+            .map(|page| {
+                let pending = self.previews.remove(&page).unwrap();
+                (page, self.readbacks.finish(pending))
+            })
             .collect())
     }
     pub fn request_preview(
@@ -743,21 +816,9 @@ impl Renderer {
         if width == 0 || height == 0 || width > 1920 || height > 1080 {
             return Err("capture dimensions outside bounds".into());
         }
-
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Terrain validation capture"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: self.config.format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        let texture = self
+            .readbacks
+            .texture(&self.device, [width, height], self.config.format);
         if overlay {
             self.render_mirrors(world, scenery, false);
         }
@@ -780,7 +841,6 @@ impl Renderer {
         );
         self.write_veil(overlay);
         if overlay {
-            self.cockpit.draw(&mut encoder, &view);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Flight UI capture"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -794,17 +854,16 @@ impl Renderer {
                 })],
                 ..Default::default()
             });
+            // The cockpit, then the canvas, in one pass.
+            self.cockpit.draw_in(&mut pass, [width, height]);
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
         let stride = (width * 4).div_ceil(256) * 256;
-        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Terrain capture readback"),
-            size: (stride * height) as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let buffer = self
+            .readbacks
+            .buffer(&self.device, u64::from(stride) * u64::from(height));
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture,
@@ -1085,9 +1144,25 @@ impl Renderer {
                 scenery,
             );
         }
-        if flight_size.is_some() && console.is_none() {
-            self.cockpit.draw(&mut encoder, &view);
+        // The frame rate's glyphs are uploaded before the one pass that draws
+        // the cockpit, the canvas and them.
+        if show_counter {
+            self.frame_rate.tick();
+        } else {
+            self.frame_rate = Default::default();
         }
+        let counter = if show_counter && let Some(line) = self.frame_rate.line() {
+            let place = crate::frame_rate::anchor([s.width, s.height], readout);
+            let glyphs = crate::frame_rate::quads(&line, place, self.ui_text.linear());
+            self.ui_text.prepare_window(
+                &self.device,
+                &self.queue,
+                &glyphs,
+                [s.width as f32, s.height as f32],
+            )
+        } else {
+            None
+        };
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Main menu"),
@@ -1106,6 +1181,10 @@ impl Renderer {
                 })],
                 ..Default::default()
             });
+            // Without a scene the pass clears, so a cockpit would not show.
+            if flight_size.is_some() && console.is_none() && scene.is_some() {
+                self.cockpit.draw_in(&mut pass, [s.width, s.height]);
+            }
             if flight_size.is_none() {
                 let v = self.viewport();
                 pass.set_viewport(v.x, v.y, v.width, v.height, 0., 1.);
@@ -1116,25 +1195,12 @@ impl Renderer {
             if flight_size.is_none() && self.menu_text_visible {
                 self.ui_text.draw(&mut pass);
             }
-        }
-        // After every other layer, and only on the window. Captures read the
-        // scene or the CPU canvas and never this pass.
-        if show_counter {
-            self.frame_rate.tick();
-        } else {
-            self.frame_rate = Default::default();
-        }
-        if show_counter && let Some(line) = self.frame_rate.line() {
-            let place = crate::frame_rate::anchor([s.width, s.height], readout);
-            let glyphs = crate::frame_rate::quads(&line, place, self.ui_text.linear());
-            self.ui_text.draw_window(
-                &self.device,
-                &self.queue,
-                &mut encoder,
-                &view,
-                &glyphs,
-                [s.width as f32, s.height as f32],
-            );
+            // After every other layer, over the whole window, and only on the
+            // window. Captures read the scene or the CPU canvas and never this.
+            if let Some(glyphs) = counter {
+                pass.set_viewport(0., 0., s.width as f32, s.height as f32, 0., 1.);
+                self.ui_text.draw_window_in(&mut pass, glyphs);
+            }
         }
         if frame_started.elapsed() > std::time::Duration::from_millis(100) {
             log::info!(

@@ -145,7 +145,7 @@ impl Gpu {
             world,
             scenery,
         );
-        self.cockpit.draw(&mut encoder, &view);
+        self.cockpit.draw(&mut encoder, &view, [WIDTH, HEIGHT]);
         self.read(encoder, false)
     }
     /// The world drawn thermally and shown through the sensor console's CRT
@@ -252,7 +252,7 @@ impl Gpu {
             })],
             ..Default::default()
         });
-        self.cockpit.draw(&mut encoder, &view);
+        self.cockpit.draw(&mut encoder, &view, [WIDTH, HEIGHT]);
         self.read(encoder, true)
     }
     fn read(&mut self, mut encoder: wgpu::CommandEncoder, symbols: bool) -> AppResult<Vec<u8>> {

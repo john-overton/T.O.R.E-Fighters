@@ -617,8 +617,13 @@ impl Renderer {
             (camera.position[2] - origin[2]) as f32,
         ];
         if self.grass_mode == crate::graphics::Grass::Blades {
-            self.blades
-                .prepare(queue, world, self.grass_density, self.grass_radius);
+            self.blades.prepare(
+                queue,
+                world,
+                self.grass_density,
+                self.grass_radius,
+                camera.position,
+            );
         } else if self.grass_mode == crate::graphics::Grass::Tufts {
             self.prepare_grass(
                 queue,

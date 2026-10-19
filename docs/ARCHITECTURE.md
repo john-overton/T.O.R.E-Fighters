@@ -11136,7 +11136,9 @@ cells keep the same hash as the camera moves. Coarse levels own disjoint subsets
 through the inner disk too, avoiding LOD identity changes. The default path sends
 zero radius to the legacy worker and bypasses grass patch selection/packing.
 Each frame writes one 64-byte stack uniform for grid budget, time and mission
-wind. Legacy tufts remain intact and selectable. Numerical rules and limits live
+wind. The draw is skipped when the eye is more than the radius plus 64 ft above
+the highest terrain vertex under the grass radius, where every blade root
+already fails the shader's distance test (same pixels). Legacy tufts remain intact and selectable. Numerical rules and limits live
 in [the grass spec](spec/terrain-detail.md#grass).
 
 Nothing enters simulation, replays, checkpoints or networking.
