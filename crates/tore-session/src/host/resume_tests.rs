@@ -1154,6 +1154,43 @@ fn a_cold_standby_takes_over_at_the_same_world() {
     }
 }
 
+/// Slice S11: a host whose world makes no contrail puffs (as a dedicated
+/// server's makes none) is cut off; the standby that takes over holds the
+/// old host's world exactly (the switch is in the checkpoint), makes no
+/// puffs either, and keeps the contrail sortie number, so every player's
+/// own contrails go on at the same heights with no gap: they never came
+/// from the host's puffs.
+#[test]
+fn a_host_without_contrail_puffs_is_taken_over_with_the_same_contrails() {
+    let mut rig = Rig::new(crowd_spec(20));
+    rig.host_mut().config.contrail_puffs = false;
+    rig.host_mut().world.combat.set_contrail_puffs(false);
+    for (callsign, plane) in [("Viper", 1), ("Cobra", 2), ("Hawk", 3)] {
+        rig.join(callsign, plane, true);
+    }
+    rig.fly();
+    let (first, _) = rig.standbys();
+    assert!(!rig.host().world.combat.contrail_puffs());
+    let sortie = rig.host().world.combat.contrail_sortie();
+    rig.run(Duration::from_secs(3));
+    rig.record_from = Some(rig.host().world.tick());
+    rig.run(Duration::from_millis(500));
+    rig.cut(0);
+    assert!(rig.run_until(Duration::from_secs(3), |r| !r.takeovers.is_empty()));
+    rig.record_from = None;
+    let (game, _, tick, coded) = rig.takeovers[0].clone();
+    assert_eq!(game, first);
+    assert!(
+        rig.checkpoints.get(&tick) == Some(&coded),
+        "the new host's world at T differs from the old host's"
+    );
+    rig.back_after_cut(Duration::from_secs(5));
+    let world = &rig.host_of(game).world;
+    assert!(!world.combat.contrail_puffs(), "the new host makes none");
+    assert!(world.combat.contrails.puffs.is_empty());
+    assert_eq!(world.combat.contrail_sortie(), sortie, "the same sortie");
+}
+
 /// Slice B6: the crowd fight in two-seaters. An AI two-seater shot down
 /// ejects both its crew; the standbys, appointed again so their copy holds
 /// it, restore a checkpoint taken mid-descent and the warm one's Checks stay

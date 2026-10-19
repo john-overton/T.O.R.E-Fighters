@@ -219,6 +219,9 @@ pub struct FlightRecord {
     pub spec_hash: u64,
     /// The fresh world's [`World::mission_identity`].
     pub identity: u64,
+    /// The world makes contrail puffs (a dedicated server's makes none,
+    /// optimization slice S11): the standby's copy steps the same way.
+    pub contrail_puffs: bool,
 }
 
 /// A checkpoint's first record: the chunks follow, between other records.
@@ -678,11 +681,13 @@ impl StreamWriter {
                     mission,
                     spec_hash,
                     identity,
+                    contrail_puffs,
                 } = flight;
                 let w = s.writer();
                 w.write_varint(u64::from(*mission));
                 let _ = w.write_bits(*spec_hash, 64);
                 let _ = w.write_bits(*identity, 64);
+                w.write_bool(*contrail_puffs);
                 baselines = Baselines::default();
             }
             Record::CheckpointBegin(begin) => {
@@ -814,6 +819,7 @@ impl StreamReader {
                     mission: read_u32(r)?,
                     spec_hash: r.read_bits(64)?,
                     identity: r.read_bits(64)?,
+                    contrail_puffs: r.read_bool()?,
                 };
                 baselines = Baselines::default();
                 Record::Flight(flight)

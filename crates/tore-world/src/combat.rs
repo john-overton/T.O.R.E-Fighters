@@ -207,6 +207,11 @@ pub struct Combat {
     contrail_offsets: Vec<Vector>,
     contrail_sortie: u64,
     pub contrails: tore_sim::combat::smoke::Smoke,
+    /// Contrail puffs are made: off on a dedicated server, whose world no
+    /// screen draws (optimization slice S11; John, 2026-10-19). The sortie
+    /// number still sets every client's contrails, which each client makes
+    /// for itself.
+    contrail_puffs: bool,
     /// Each ownship's trigger, made on first use.
     triggers: BTreeMap<u32, Trigger>,
     /// The engine outlets of the ownships other than the first, by aircraft.
@@ -390,6 +395,20 @@ impl Combat {
     /// heights.
     pub fn contrail_sortie(&self) -> u64 {
         self.contrail_sortie
+    }
+    /// Whether the step makes contrail puffs ([`Self::contrails`]).
+    pub fn contrail_puffs(&self) -> bool {
+        self.contrail_puffs
+    }
+    /// Makes contrail puffs, or stops and drops them: a dedicated server,
+    /// whose world no screen draws, makes none. The sortie number, which sets
+    /// where every client draws its own, is kept either way. A checkpoint
+    /// carries the switch, so a standby's copy steps as the host's does.
+    pub fn set_contrail_puffs(&mut self, on: bool) {
+        self.contrail_puffs = on;
+        if !on {
+            self.contrails = Default::default();
+        }
     }
     /// The aircraft a host with one flight flies: its first ownship. For free
     /// flight, the range, the AI probe and the loadout screen, which always
@@ -752,6 +771,7 @@ impl Combat {
             contrail_offsets,
             contrail_sortie: 0,
             contrails: Default::default(),
+            contrail_puffs: true,
             state,
             dummies: Vec::new(),
             mission_spawns: None,
@@ -1788,100 +1808,16 @@ impl Combat {
     ) -> WorldResult<Stepped> {
         self.step_all_rewound(flights, &[], world)
     }
-    /// [`Self::step_all`] with lag compensation: `rewinds` gives, by
-    /// aircraft, the rewind in ticks ([`gun_rewind`]) of the gun rounds its
-    /// seat fires this tick. An aircraft not listed fires rounds with none.
-    pub fn step_all_rewound(
+    /// The contrail puffs of the step: each engine outlet of every aircraft
+    /// flying at or above its contrail height, then the puffs moved on.
+    fn step_contrails(
         &mut self,
-        flights: &mut [(u32, &mut flight::State)],
-        rewinds: &[(u32, u16)],
         world: &Terrain,
-    ) -> WorldResult<Stepped> {
-        flights.sort_by_key(|(aircraft, _)| *aircraft);
-        let first = self.host_plane();
-        let mut inputs = Vec::new();
-        let mut events = Vec::new();
-        for (aircraft, s) in flights.iter() {
-            let aircraft = *aircraft;
-            if self.state.ownship(aircraft).is_none() {
-                continue;
-            }
-            let l = launcher(s);
-            let held = self.triggers.get(&aircraft).is_some_and(Trigger::held);
-            if Some(aircraft) == first {
-                self.last_launcher = Some(l);
-                self.record_tape(if held { "fire" } else { "tick" }, l);
-            }
-            if let Some(own) = self.state.ownship_mut(aircraft) {
-                own.note_loaded();
-            }
-            if s.airburst()
-                && let Some(event) = self.state.ownship_airburst(aircraft, s.position)
-            {
-                events.push(event);
-            }
-            if s.ground_impact()
-                && let Some(event) = self.state.ownship_ground_impact(
-                    aircraft,
-                    s.position,
-                    world.over_water(s.position[0], s.position[2]),
-                )
-            {
-                events.push(event);
-            }
-            inputs.push(OwnshipInput {
-                aircraft,
-                held,
-                launcher: l,
-            });
-        }
-        self.state.smoke.wind = world.wind();
-        self.state.devices.wind = world.wind();
-        self.contrails.wind = world.wind();
-        let ceiling = self.ground_ceiling(world);
-        self.state.set_ground_ceiling(Some(ceiling));
-        // Stop wreck emissions before advancing smoke on the impact/airburst tick.
-        events.extend(self.state.step_rewound(
-            &inputs,
-            rewinds,
-            |x, z| f64::from(world.height(x as f32, z as f32)),
-            |x, z| world.over_water(x, z),
-        ));
-        // The city fill's buildings within a ground burst's flattening reach
-        // fall (scenery only: nothing is scored).
-        for burst in self.state.ground_bursts.drain(..) {
-            if let Some(fill) = &world.city_fill {
-                fill.flatten(
-                    burst.position,
-                    crate::city::flatten_radius(burst.radius, burst.percent),
-                );
-            }
-        }
-        for (aircraft, s) in flights.iter_mut() {
-            let aircraft = *aircraft;
-            let Some(own) = self.state.ownship(aircraft) else {
-                continue;
-            };
-            plane::take_system_hits(
-                s,
-                &OwnshipTerms::of(own, self.state.tick()),
-                own.configuration(),
-            );
-            let mut uncredited = false;
-            if s.crashed
-                && let Some(event) = self.state.systems_destroyed(aircraft)
-            {
-                events.push(event);
-                // Lost to its own structure (overspeed, the map edge).
-                uncredited = s.systems.structure.cause.is_some();
-            }
-            // A loss with no shooter credits nobody, even after an earlier hit,
-            // as for an AI aircraft (lead's decision, 2026-09-29).
-            if uncredited {
-                self.state.ledger.lose_without_credit(aircraft);
-            }
-        }
+        first: Option<u32>,
+        flights: &[(u32, &mut flight::State)],
+    ) {
         use tore_sim::combat::smoke::contrail_altitude_ft;
+        self.contrails.wind = world.wind();
         let sortie = self.contrail_sortie;
         let mut outlets = Vec::new();
         let mut add = |id: u32, position: Vector, basis: Basis, offsets: &[Vector]| {
@@ -1947,6 +1883,102 @@ impl Combat {
         }
         self.contrails.step([]);
         self.contrails.contrails(outlets);
+    }
+    /// [`Self::step_all`] with lag compensation: `rewinds` gives, by
+    /// aircraft, the rewind in ticks ([`gun_rewind`]) of the gun rounds its
+    /// seat fires this tick. An aircraft not listed fires rounds with none.
+    pub fn step_all_rewound(
+        &mut self,
+        flights: &mut [(u32, &mut flight::State)],
+        rewinds: &[(u32, u16)],
+        world: &Terrain,
+    ) -> WorldResult<Stepped> {
+        flights.sort_by_key(|(aircraft, _)| *aircraft);
+        let first = self.host_plane();
+        let mut inputs = Vec::new();
+        let mut events = Vec::new();
+        for (aircraft, s) in flights.iter() {
+            let aircraft = *aircraft;
+            if self.state.ownship(aircraft).is_none() {
+                continue;
+            }
+            let l = launcher(s);
+            let held = self.triggers.get(&aircraft).is_some_and(Trigger::held);
+            if Some(aircraft) == first {
+                self.last_launcher = Some(l);
+                self.record_tape(if held { "fire" } else { "tick" }, l);
+            }
+            if let Some(own) = self.state.ownship_mut(aircraft) {
+                own.note_loaded();
+            }
+            if s.airburst()
+                && let Some(event) = self.state.ownship_airburst(aircraft, s.position)
+            {
+                events.push(event);
+            }
+            if s.ground_impact()
+                && let Some(event) = self.state.ownship_ground_impact(
+                    aircraft,
+                    s.position,
+                    world.over_water(s.position[0], s.position[2]),
+                )
+            {
+                events.push(event);
+            }
+            inputs.push(OwnshipInput {
+                aircraft,
+                held,
+                launcher: l,
+            });
+        }
+        self.state.smoke.wind = world.wind();
+        self.state.devices.wind = world.wind();
+        let ceiling = self.ground_ceiling(world);
+        self.state.set_ground_ceiling(Some(ceiling));
+        // Stop wreck emissions before advancing smoke on the impact/airburst tick.
+        events.extend(self.state.step_rewound(
+            &inputs,
+            rewinds,
+            |x, z| f64::from(world.height(x as f32, z as f32)),
+            |x, z| world.over_water(x, z),
+        ));
+        // The city fill's buildings within a ground burst's flattening reach
+        // fall (scenery only: nothing is scored).
+        for burst in self.state.ground_bursts.drain(..) {
+            if let Some(fill) = &world.city_fill {
+                fill.flatten(
+                    burst.position,
+                    crate::city::flatten_radius(burst.radius, burst.percent),
+                );
+            }
+        }
+        for (aircraft, s) in flights.iter_mut() {
+            let aircraft = *aircraft;
+            let Some(own) = self.state.ownship(aircraft) else {
+                continue;
+            };
+            plane::take_system_hits(
+                s,
+                &OwnshipTerms::of(own, self.state.tick()),
+                own.configuration(),
+            );
+            let mut uncredited = false;
+            if s.crashed
+                && let Some(event) = self.state.systems_destroyed(aircraft)
+            {
+                events.push(event);
+                // Lost to its own structure (overspeed, the map edge).
+                uncredited = s.systems.structure.cause.is_some();
+            }
+            // A loss with no shooter credits nobody, even after an earlier hit,
+            // as for an AI aircraft (lead's decision, 2026-09-29).
+            if uncredited {
+                self.state.ledger.lose_without_credit(aircraft);
+            }
+        }
+        if self.contrail_puffs {
+            self.step_contrails(world, first, flights);
+        }
         let mut terms = Vec::with_capacity(flights.len());
         for (aircraft, s) in flights.iter_mut() {
             let aircraft = *aircraft;
@@ -2433,6 +2465,7 @@ pub mod fixtures {
             contrail_offsets: Vec::new(),
             contrail_sortie: 0,
             contrails: Default::default(),
+            contrail_puffs: true,
             triggers: BTreeMap::new(),
             ownship_contrails: BTreeMap::new(),
             poses: BTreeMap::new(),
@@ -3039,3 +3072,8 @@ pub mod fixtures {
 // Exact checkpoints (docs/formats/checkpoint.md).
 #[path = "combat_checkpoint.rs"]
 mod checkpoint;
+
+// The seats' shared network picture (optimization slice S11).
+#[path = "combat_wire.rs"]
+mod wire;
+pub use wire::{WirePicture, WirePilot};

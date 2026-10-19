@@ -1790,3 +1790,6 @@ mod min_players_tests;
 
 #[path = "force_start_tests.rs"]
 mod force_start_tests;
+
+#[path = "picture_tests.rs"]
+mod picture_tests;

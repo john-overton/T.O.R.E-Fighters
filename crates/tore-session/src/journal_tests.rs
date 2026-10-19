@@ -122,6 +122,7 @@ fn stream(spec: &MissionSpec, world: &World, journal: &[Tick]) -> Vec<Vec<u8>> {
         mission: 1,
         spec_hash: tore_codec::fnv1a64(spec.to_text().as_bytes()),
         identity: world.mission_identity(),
+        contrail_puffs: world.combat.contrail_puffs(),
     })];
     for chunk in journal.chunks(4) {
         records.push(Record::Ticks(Ticks {

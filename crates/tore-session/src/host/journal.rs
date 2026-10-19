@@ -245,6 +245,7 @@ impl Host {
             mission: self.number,
             spec_hash: tore_codec::fnv1a64(self.spec_text.as_bytes()),
             identity: self.world.mission_identity(),
+            contrail_puffs: self.world.combat.contrail_puffs(),
         };
         self.journal.push(JournalRecord::Flight(record));
     }

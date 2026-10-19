@@ -444,13 +444,12 @@ impl Connection {
             ack_bits,
             ack_delay,
         };
-        let mut all: Vec<(u8, &[u8])> = sections.to_vec();
-        let (message_body, message_ids) = match &messages {
-            Some((body, ids)) => (body.as_slice(), ids.clone()),
-            None => (&[][..], Vec::new()),
-        };
-        if messages.is_some() {
-            all.push((SECTION_MESSAGES, message_body));
+        let mut all: Vec<(u8, &[u8])> = Vec::with_capacity(sections.len() + 1);
+        all.extend_from_slice(sections);
+        let carries_messages = messages.is_some();
+        let (message_body, message_ids) = messages.unwrap_or_default();
+        if carries_messages {
+            all.push((SECTION_MESSAGES, &message_body));
         }
         let datagram = packet::write_payload(self.version, &header, &all)
             .map_err(|_| SendError::PacketTooLarge)?;

@@ -125,6 +125,9 @@ pub fn start_host_with(
         tore_session::CrownRule::None
     };
     config.mission_locked = c.king_mission_locked;
+    // No screen draws a dedicated server's world: its contrails are the
+    // clients' own (optimization slice S11; John, 2026-10-19).
+    config.contrail_puffs = false;
     config.listable = false;
     config.entropy = Entropy::System;
     // The program has already refused the switch; the host refuses it too.
@@ -612,10 +615,12 @@ impl SessionHost {
             self.events
                 .push_back(Event::Note(format!("send failed: {error}")));
         }
-        let master = self.listing.master_text();
+        // The master's text is written only when there is news to say.
+        let mut master: Option<String> = None;
         while let Some(event) = self.listing.poll_event() {
+            let master = master.get_or_insert_with(|| self.listing.master_text());
             self.events
-                .push_back(Event::Note(listing_text(event, &master)));
+                .push_back(Event::Note(listing_text(event, master)));
         }
     }
 }

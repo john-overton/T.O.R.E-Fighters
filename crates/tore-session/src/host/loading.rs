@@ -109,7 +109,7 @@ impl Host {
             },
             _ => None,
         };
-        let built = build_world(spec, &self.resources);
+        let built = build_world(spec, &self.resources, self.config.contrail_puffs);
         if let Some(delay) = self.loader.slow_build {
             std::thread::sleep(delay.saturating_sub(started.elapsed()));
         }

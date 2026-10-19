@@ -3483,7 +3483,13 @@ difference is refused with the names of the files that differ.
 **What a joining client also needs.** The host tick, from which the weather
 clock's reading follows (its seconds of day and ticks are a function of the
 tick and the mission's start time), and the combat's contrail sortie number,
-which sets each aircraft's contrail height. Both travel in the Mission message.
+which sets each aircraft's contrail height. Both travel in the Mission message. A
+dedicated server's world makes no contrail puffs of its own (optimization slice
+S11, John, 2026-10-19): no screen draws its world, and every client makes its
+own contrails from the aircraft it draws and the sortie number. The switch is
+in the combat checkpoint and the standby stream's Flight record, so a standby's
+copy steps the same way and a takeover keeps the sortie; the players' contrails
+never came from the host, so they go on without a gap.
 
 ### One step for a human's plane
 
@@ -7568,11 +7574,14 @@ otherwise.
   as it stands (the destroyed ground objects in Observing, the craters, fires
   and effects as events), as a seated player is.
 - **The delay** applies to every observer of a PvP mission whose
-  `observer-delay` is set (co-op has none). The ring records from the mission's
-  first tick whenever the mission flies with a delay, watched or not, so an
-  observer who starts sees the battle as it was a delay ago at once: one frame
-  each snapshot interval, at the ticks whose number is a multiple of the ticks
-  per snapshot, and every mission-wide event with the tick it became known.
+  `observer-delay` is set (co-op has none). The ring records only while some
+  connection watches or asks to (John, 2026-10-19, optimization slice S11;
+  until then it recorded from the mission's first tick, watched or not): the
+  first observer to ask starts it at its asking, so it is shown the battle from
+  that moment once the delay has passed, and when the last observer stops the
+  ring is dropped and the next one starts afresh. It holds one frame each
+  snapshot interval, at the ticks whose number is a multiple of the ticks per
+  snapshot, and every mission-wide event with the tick it became known.
   **Every delayed observer's snapshot ticks are the ring's** (a correction to
   the wire's lobby-id phase, which holds without a delay): the host sends the
   frame of its tick less the delay, and with it the events that became known by
@@ -9771,6 +9780,33 @@ the code it replaced):
   renders six seconds of a scripted scene at 48 kHz through the offline mixer
   twice, once with the old per-sample math kept test-only, and compares the
   samples.
+
+Host and network (optimization run S11; every change but the last keeps the
+wire bytes, each guarded by a test against the code it replaced):
+
+- The seats' pictures share one picture a tick. `Combat::wire_picture` gives
+  the part of every seat's picture that does not depend on the seat, as a seat
+  flying none of the human-flown planes would draw it, holding only what the
+  wire reads (no stores, gun rounds, effects, marks or models);
+  `from_world::SharedPicture` quantizes its aircraft and rounds once; each due
+  seat adds its own plane (`SeatOwn`: the debris of its own plane drawn as its
+  type in its cockpit's damage variant, its own pilot and second crew member
+  from its cockpit) in `from_world::seat_entities`. A seat keeps of its last
+  picture only the sorted places of the debris, pilots and surface units
+  (`PictureMemory`), so a velocity is a binary search, not a walk. The readout
+  stays per seat. Where combat draws every target over the player's state (no
+  target models) the seats take whole pictures as before. Compared tick by
+  tick against the per-seat pictures in a fight with missiles, debris and
+  ejections, and packet by packet in the host with 0, 15 and 30 humans.
+- `EntitySender::select` finds the entities by key in a sorted list instead of
+  a hash map and moves the chosen records out; the lobby state is built once
+  per pass; the session part of the journal is coded once a tick; CRC-32 takes
+  eight bytes a step (slice-by-8, the same checksums).
+- The PvP observers' ring is kept only while someone watches (see
+  [the observer view](#the-observer-view)).
+- A dedicated server's world makes no contrail puffs (see
+  [a mission with no window](#a-mission-with-no-window)).
+  This one changes checkpoint and standby-stream bytes.
 
 The tick presenter reuses an identical camera scene instead of rebuilding it
 between unchanged simulation inputs. GPU and window work never moves to workers.

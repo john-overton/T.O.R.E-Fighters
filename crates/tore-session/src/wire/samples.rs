@@ -2268,6 +2268,7 @@ pub fn standby_records() -> Vec<journal::Record> {
             mission: 7,
             spec_hash: 0x1122_3344_5566_7788,
             identity: 0x99AA_BBCC_DDEE_FF00,
+            contrail_puffs: false,
         }),
         Record::Ticks(Ticks {
             first: 1_200,

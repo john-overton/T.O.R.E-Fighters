@@ -163,7 +163,9 @@ fn write_body(w: &mut BitWriter, body: &Body<'_>) -> WireResult<()> {
     Ok(())
 }
 
-fn id_bits_at_most(id: u32) -> usize {
+/// The bits of an id, as [`EntitySender::select_scan`] worked them out.
+#[cfg(test)]
+fn old_id_bits_at_most(id: u32) -> usize {
     let mut w = BitWriter::new();
     write_uladder(&mut w, u64::from(id), &ID_LADDER);
     w.bit_len()
@@ -196,12 +198,12 @@ pub(crate) fn entity_bits(records: &[(EntityKey, BitWriter)]) -> WireResult<usiz
 
 fn write_entities(w: &mut BitWriter, records: &[(EntityKey, BitWriter)]) -> WireResult<()> {
     for kind in EntityKind::ALL {
-        let of_kind: Vec<&(EntityKey, BitWriter)> =
-            records.iter().filter(|(key, _)| key.kind == kind).collect();
-        entity::check_count(kind, of_kind.len())?;
-        bits::write_count(w, of_kind.len());
+        let of_kind = || records.iter().filter(move |(key, _)| key.kind == kind);
+        let count = of_kind().count();
+        entity::check_count(kind, count)?;
+        bits::write_count(w, count);
         let mut previous: Option<u32> = None;
-        for (key, body) in of_kind {
+        for (key, body) in of_kind() {
             let delta = match previous {
                 None => u64::from(key.id),
                 Some(p) if key.id > p => u64::from(key.id - p - 1),
@@ -365,6 +367,168 @@ impl EntitySender {
     ) -> WireResult<(Vec<(EntityKey, BitWriter)>, EntityReport)> {
         self.discard();
         let tick = header.tick;
+        // The entities by key, sorted for lookup (each key's entity and
+        // relevance at its index in `entities`).
+        let mut present: Vec<(EntityKey, usize)> = entities
+            .iter()
+            .enumerate()
+            .map(|(index, (entity, _))| (entity.key(), index))
+            .collect();
+        present.sort_unstable_by_key(|(key, _)| *key);
+        if present.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+            return Err(WireError::Invalid("two entities with one key"));
+        }
+        let index_of = |key: &EntityKey| {
+            present
+                .binary_search_by_key(key, |(k, _)| *k)
+                .ok()
+                .map(|at| present[at].1)
+        };
+        let is_present = |key: &EntityKey| index_of(key).is_some();
+        // Whatever the client may know that is gone is removed until the
+        // removal is acknowledged; whatever came back is sent in full.
+        for key in self.known.iter() {
+            if !is_present(key) {
+                self.removals.insert(*key);
+            }
+        }
+        for key in &self.removals {
+            self.acked.remove(key);
+            self.priority.remove(key);
+        }
+        self.removals.retain(|key| !is_present(key));
+        self.priority.retain(|key, _| is_present(key));
+
+        // Priorities grow by each band's weight; a new entity is due at once.
+        let threshold = self.snapshot_rate;
+        let mut forced: Vec<EntityKey> = Vec::new();
+        let mut due: Vec<(u32, EntityKey)> = Vec::new();
+        let mut not_due = 0;
+        for (key, index) in &present {
+            let relevance = &entities[*index].1;
+            let weight = relevance.weight(key.kind, threshold);
+            let priority = *self
+                .priority
+                .entry(*key)
+                .and_modify(|p| *p = p.saturating_add(weight))
+                .or_insert(threshold);
+            if relevance.forced(key.kind) {
+                forced.push(*key);
+            } else if priority >= threshold {
+                due.push((priority, *key));
+            } else {
+                not_due += 1;
+            }
+        }
+        forced.sort();
+        due.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+
+        // Choose records until the share is full: the counts' bytes first.
+        let mut left = budget
+            .saturating_mul(8)
+            .saturating_sub(EntityKind::ALL.len() * 16);
+        let mut chosen: Vec<(EntityKey, BitWriter, Option<EntityState>, bool)> = Vec::new();
+        let mut counts = [0usize; EntityKind::ALL.len()];
+        let mut waiting = 0;
+        let order = forced
+            .iter()
+            .map(|key| (*key, false))
+            .chain(self.removals.iter().map(|key| (*key, true)))
+            .chain(due.iter().map(|(_, key)| (*key, false)))
+            .collect::<Vec<_>>();
+        for (key, removal) in order {
+            let kind = usize::from(key.kind.code());
+            if counts[kind] >= key.kind.limit() {
+                waiting += 1;
+                continue;
+            }
+            let mut w = BitWriter::new();
+            let (state, full) = if removal {
+                write_body(&mut w, &Body::Removed)?;
+                (None, false)
+            } else {
+                let state = &entities[index_of(&key).expect("a present entity")].0.state;
+                let base = self.acked.get(&key).and_then(|(base_tick, base)| {
+                    let ticks = tick.checked_sub(*base_tick)?;
+                    let back = ticks / self.ticks_per_snapshot;
+                    (ticks > 0
+                        && ticks % self.ticks_per_snapshot == 0
+                        && back <= MAX_BASELINE_BACK
+                        && base.same_identity(state))
+                    .then_some((back as u8, base, ticks))
+                });
+                match base {
+                    Some((back, base, ticks)) => {
+                        write_body(
+                            &mut w,
+                            &Body::Delta {
+                                back,
+                                state,
+                                base,
+                                ticks,
+                            },
+                        )?;
+                        (Some(*state), false)
+                    }
+                    None => {
+                        write_body(&mut w, &Body::Full(state))?;
+                        (Some(*state), true)
+                    }
+                }
+            };
+            let size = bits::uladder_bits(u64::from(key.id), &ID_LADDER) + w.bit_len();
+            if size > left {
+                waiting += 1;
+                continue;
+            }
+            left -= size;
+            counts[kind] += 1;
+            chosen.push((key, w, state, full));
+        }
+        chosen.sort_by_key(|(key, ..)| *key);
+        let mut records: Vec<(EntityKey, BitWriter)> = Vec::with_capacity(chosen.len());
+        let mut report = EntityReport {
+            waiting,
+            not_due,
+            ..EntityReport::default()
+        };
+        let mut sent = Vec::with_capacity(chosen.len());
+        for (key, w, state, full) in chosen {
+            records.push((key, w));
+            match state {
+                Some(state) => {
+                    report.sent += 1;
+                    report.full += usize::from(full);
+                    self.priority.insert(key, 0);
+                    self.known.insert(key);
+                    sent.push((key, Some(state)));
+                }
+                None => {
+                    report.removed += 1;
+                    sent.push((key, None));
+                }
+            }
+        }
+        self.packets.push_back(SentPacket {
+            sequence: None,
+            tick,
+            records: sent,
+        });
+        Ok((records, report))
+    }
+
+    /// [`Self::select`] as it was before slice S11 (a hash map of the
+    /// entities, the chosen writers cloned): kept for the test that
+    /// compares the two.
+    #[cfg(test)]
+    pub(crate) fn select_scan(
+        &mut self,
+        header: &SnapshotHeader,
+        entities: &[(Entity, Relevance)],
+        budget: usize,
+    ) -> WireResult<(Vec<(EntityKey, BitWriter)>, EntityReport)> {
+        self.discard();
+        let tick = header.tick;
         let mut present: HashMap<EntityKey, (&EntityState, &Relevance)> = HashMap::new();
         for (entity, relevance) in entities {
             if present
@@ -466,7 +630,7 @@ impl EntitySender {
                     }
                 }
             };
-            let size = id_bits_at_most(key.id) + w.bit_len();
+            let size = old_id_bits_at_most(key.id) + w.bit_len();
             if size > left {
                 waiting += 1;
                 continue;
@@ -726,3 +890,7 @@ impl EntityReceiver {
             .flat_map(|track| track.states.iter().map(|(tick, state)| (*tick, state)))
     }
 }
+
+#[cfg(test)]
+#[path = "select_tests.rs"]
+mod select_tests;
