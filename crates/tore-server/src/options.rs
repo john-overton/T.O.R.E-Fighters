@@ -14,6 +14,12 @@ pub struct Options {
     pub check: bool,
     /// The game's developer switch, which a server refuses.
     pub retail_stall_speeds: bool,
+    /// AI test setting: how often AI aircraft observe, in hertz (120, 60,
+    /// 40, 30 or 20); `None` is today's 120.
+    pub ai_observe_hz: Option<u32>,
+    /// AI test setting: AI aircraft skip the visual channel and build the
+    /// received-radar list only when a warning needs it.
+    pub ai_lean_sensors: bool,
     pub help: bool,
     pub version: bool,
 }
@@ -30,6 +36,10 @@ Usage: tore-server [options]
   --mission FILE       Fly this mission file instead of the configuration file's
   --check              Load the import and the mission, print its aircraft, the theater's
                        runways and the content manifest, then exit without opening the port
+  --ai-observe-hz N    Test setting: AI aircraft observe N times a second, 120 (default),
+                       60, 40, 30 or 20, staggered across ticks; the flight stays at 120
+  --ai-lean-sensors    Test setting: AI aircraft skip the visual channel and build the
+                       received-radar list only when a warning needs it
   --version            Print the version and exit
   --help               Print this text and exit
 
@@ -37,6 +47,13 @@ The configuration file, the mission file and the console commands are described 
 docs/DEDICATED-SERVER.md.";
 
 impl Options {
+    /// The AI test settings the command line asked for: today's behaviour
+    /// without the flags.
+    pub fn ai_test(&self) -> tore_session::AiTestSettings {
+        tore_session::AiTestSettings::from_flags(self.ai_observe_hz, self.ai_lean_sensors)
+            .unwrap_or_default()
+    }
+
     /// Reads the arguments after the program name.
     pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Self, String> {
         let mut options = Self::default();
@@ -77,6 +94,24 @@ impl Options {
                 "--mission" => options.mission = Some(PathBuf::from(value("a file")?)),
                 "--check" => options.check = true,
                 "--retail-stall-speeds" => options.retail_stall_speeds = true,
+                "--ai-observe-hz" => {
+                    let text = value("a rate: 120, 60, 40, 30 or 20")?;
+                    options.ai_observe_hz = Some(
+                        text.parse::<u32>()
+                            .ok()
+                            .filter(|hz| {
+                                tore_session::AiTestSettings::default()
+                                    .with_observation_hz(*hz)
+                                    .is_some()
+                            })
+                            .ok_or_else(|| {
+                                format!(
+                                    "--ai-observe-hz must be 120, 60, 40, 30 or 20, not `{text}`"
+                                )
+                            })?,
+                    );
+                }
+                "--ai-lean-sensors" => options.ai_lean_sensors = true,
                 "--help" | "-h" => options.help = true,
                 "--version" | "-V" => options.version = true,
                 _ => return Err(format!("unknown option `{arg}`; --help lists the options")),
@@ -92,6 +127,29 @@ mod tests {
 
     fn parse(args: &[&str]) -> Result<Options, String> {
         Options::parse(args.iter().map(|a| a.to_string()))
+    }
+
+    #[test]
+    fn the_ai_test_flags_set_the_rate_and_lean_sensors() {
+        let none = parse(&[]).unwrap();
+        assert!(none.ai_test().is_default());
+        let slow = parse(&["--ai-observe-hz", "30", "--ai-lean-sensors"]).unwrap();
+        assert_eq!(slow.ai_test().observation_hz(), 30);
+        assert!(slow.ai_test().lean_sensors);
+        assert_eq!(
+            parse(&["--ai-observe-hz=20"]).unwrap().ai_test().divisor(),
+            6
+        );
+        assert!(
+            parse(&["--ai-observe-hz", "25"])
+                .unwrap_err()
+                .contains("`25`")
+        );
+        assert!(
+            parse(&["--ai-observe-hz"])
+                .unwrap_err()
+                .contains("needs a rate")
+        );
     }
 
     #[test]

@@ -43,6 +43,7 @@ use super::controller::{
 use super::experience::ResolvedExperience;
 use super::fitted::Fallback;
 use super::steering_adapter::{ControlAdapter, ai_g_limits};
+use super::test_settings::AiTestSettings;
 use super::thought::{
     self, ActorPath, ActorTrace, AirfieldExit, DropReason, EjectionTrace, EngagementTrace,
     ExpiryReason, FlyTrace, IgnoreReason, JournalEntry, Message, Outcome, Receipt, RejoinReason,
@@ -67,6 +68,10 @@ mod leads;
 #[cfg(test)]
 #[path = "mission_observation_tests.rs"]
 mod observation_tests;
+
+#[cfg(test)]
+#[path = "mission_test_settings_tests.rs"]
+mod test_settings_tests;
 
 #[cfg(test)]
 #[path = "link_tests.rs"]
@@ -426,6 +431,10 @@ pub struct AiActor {
     trace: ActorTrace,
     /// Write-only memory of what the journal already said about this actor.
     journal_memory: JournalMemory,
+    /// The lookout's verdicts of the last observation, shown again in the
+    /// trace of the ticks between observations (AI test settings). A
+    /// why-record: no decision reads it and a checkpoint leaves it out.
+    last_visual: Vec<awareness::VisualTrace>,
 }
 
 /// What the journal already said about one actor, so a state that holds for
@@ -499,6 +508,7 @@ impl AiActor {
             jet_lift: super::jet_lift::JetLift::new(),
             trace: ActorTrace::default(),
             journal_memory: JournalMemory::default(),
+            last_visual: Vec::new(),
         })
     }
 
@@ -1621,6 +1631,10 @@ pub struct AiMission {
     /// host knows it: a shortcut for sight lines above it, never a change to
     /// any answer.
     ground_ceiling: Option<std::sync::Arc<crate::ground_ceiling::GroundCeiling>>,
+    /// The AI test settings (observation rate, lean sensors), set by the host
+    /// before every step and not part of a checkpoint. See
+    /// [`super::test_settings`].
+    test: AiTestSettings,
     /// The mission assignment of each human-flown aircraft, by aircraft id.
     human_assignments: std::collections::BTreeMap<u32, engagement::Assignment>,
     /// The aircraft each human-flown aircraft must keep alive, by aircraft id.
@@ -1678,6 +1692,7 @@ impl AiMission {
             missiles: Vec::new(),
             gun_rounds: Vec::new(),
             ground_ceiling: None,
+            test: AiTestSettings::default(),
             human_assignments: Default::default(),
             must_survive: Default::default(),
             pending_attack_reports: Vec::new(),
@@ -1912,6 +1927,24 @@ impl AiMission {
     /// receiver. The observation service, not the controller, reads this data.
     pub fn set_gun_rounds(&mut self, rounds: Vec<incoming_fire::Round>) {
         self.gun_rounds = rounds;
+    }
+
+    /// Sets the AI test settings; they apply from the next step.
+    pub fn set_test_settings(&mut self, settings: AiTestSettings) {
+        self.test = settings;
+    }
+
+    /// The AI test settings in force.
+    pub fn test_settings(&self) -> AiTestSettings {
+        self.test
+    }
+
+    /// Whether actor `index` observes at this tick of the mission: always at
+    /// the default rate, otherwise every `divisor` ticks, the aircraft
+    /// staggered by their place so each tick carries the same share.
+    fn observation_due(&self, index: usize, tick: u64) -> bool {
+        let divisor = u64::from(self.test.divisor());
+        divisor <= 1 || (tick + index as u64).is_multiple_of(divisor)
     }
 
     /// The highest the ground the steps are given can reach over each part of
@@ -3054,13 +3087,21 @@ impl AiMission {
         if !workers.should_dispatch(self.actors.len(), MIN_PARALLEL_OBSERVATIONS) {
             return Vec::new();
         }
+        let test = observation::ObservationTest::of(self.test);
+        // Only the actors whose turn it is observe this tick; the others hold
+        // what they last observed (see `AiActor::hold_observation`).
         let inputs: Vec<_> = self
             .actors
             .iter()
             .enumerate()
+            .filter(|(index, _)| self.observation_due(*index, self.tick))
             .filter_map(|(index, actor)| actor.observation_input(index))
             .map(|input| observation::Input {
                 ceiling: self.ground_ceiling.as_deref(),
+                context: observation::Context {
+                    test,
+                    ..input.context
+                },
                 ..input
             })
             .collect();
@@ -3098,6 +3139,8 @@ impl AiMission {
             terrain
         };
         let actor_id = self.actors[index].id();
+        let test = self.test;
+        let observation_due = self.observation_due(index, tick);
         // The host's strike inputs are this step's only (slice ST-T).
         let strike_inputs = self.actors[index].take_strike_inputs();
         let strike_mates = self.strike_mates(index);
@@ -3314,9 +3357,14 @@ impl AiMission {
                 actor.apply_observation(prepared.observed),
                 Some(prepared.terrain_blocked),
             )
+        } else if observation_due {
+            (actor.observe_sighted_with(tick, world, &sight, test), None)
         } else {
-            (actor.observe_sighted(tick, world, &sight), None)
+            (actor.hold_observation(tick, world), None)
         };
+        if observation_due && test.divisor() > 1 {
+            actor.last_visual.clone_from(&actor.trace.visual);
+        }
 
         // 2. Own state from the actor's own flight model.
         let own = actor.own_state(ground);
@@ -3379,11 +3427,10 @@ impl AiMission {
                 (attack, reason)
             })
             .collect();
-        let emitter_ids: Vec<_> = actor
-            .received_emitters
-            .iter()
-            .map(|emitter| emitter.id)
-            .collect();
+        // The ids of the emitters heard, asked for by the first warning that
+        // needs them: the list of the last observation, or with lean sensors
+        // one worked out now.
+        let mut emitter_ids: Option<Vec<u32>> = None;
         let incoming: Vec<_> = actor
             .missile_threats
             .records()
@@ -3394,12 +3441,14 @@ impl AiMission {
             let attacker_id =
                 if record.source == crate::combat::threats::EvidenceSource::ElectronicSupported {
                     record.radar_bearing_deg.and_then(|bearing| {
+                        let heard = emitter_ids
+                            .get_or_insert_with(|| actor.emitter_ids(world, &sight, test));
                         engagement::identify_supporting_attacker(
                             own.position,
                             own.heading_deg,
                             bearing,
                             &targets,
-                            &emitter_ids,
+                            heard,
                             identity.side,
                         )
                     })
@@ -4417,6 +4466,7 @@ impl AiActor {
             experience: self.controller.experience().level,
             receive_emitters: self.flight.systems.counts[32] <= 1,
             seeker_eligible: self.seeker_eligible(true),
+            test: observation::ObservationTest::NORMAL,
         }
     }
 
@@ -4434,13 +4484,28 @@ impl AiActor {
     }
 
     /// Observation with the tick's shared sight lines from this actor.
+    #[cfg(test)]
     fn observe_sighted(
         &mut self,
         tick: u64,
         world: &[WorldObject],
         sight: &observation::SightLines<'_>,
     ) -> Vec<TargetView> {
-        let context = self.observation_context();
+        self.observe_sighted_with(tick, world, sight, AiTestSettings::default())
+    }
+
+    /// [`Self::observe_sighted`] under the AI test settings.
+    fn observe_sighted_with(
+        &mut self,
+        tick: u64,
+        world: &[WorldObject],
+        sight: &observation::SightLines<'_>,
+        test: AiTestSettings,
+    ) -> Vec<TargetView> {
+        let context = observation::Context {
+            test: observation::ObservationTest::of(test),
+            ..self.observation_context()
+        };
         let observed = observation::observe(
             context,
             &mut self.sensors,
@@ -4451,6 +4516,64 @@ impl AiActor {
             sight,
         );
         self.apply_observation(observed)
+    }
+
+    /// A tick between two observations (AI observation rate below 120 Hz).
+    /// The awareness memory, the sensors and the received emitters stay as
+    /// the last observation left them, so the targets are the ones it
+    /// admitted, less any that have been destroyed since. The lookout is
+    /// refreshed (the aircraft's own pose and this tick's scan sector, with
+    /// the last observation's attention point), because the missile threat
+    /// and incoming fire services see through it every tick.
+    fn hold_observation(&mut self, tick: u64, world: &[WorldObject]) -> Vec<TargetView> {
+        let observer = self.observation_context().observer;
+        let attention = self.lookout.and_then(|lookout| lookout.attention);
+        let lookout = awareness::Lookout::new(tick, observer.position, observer.basis, attention);
+        self.lookout = Some(lookout);
+        self.trace.lookout = Some(lookout);
+        self.trace.visual.clone_from(&self.last_visual);
+        self.trace.observation_sources = self
+            .awareness
+            .current_observations()
+            .take(32)
+            .map(|s| (s.target.id, s.source_ticks))
+            .collect();
+        self.awareness
+            .current_observations()
+            .map(|snapshot| snapshot.target)
+            .filter(|target| {
+                world
+                    .iter()
+                    .any(|o| o.id == target.id && o.alive && !o.destroyed)
+            })
+            .collect()
+    }
+
+    /// The ids of the emitters this aircraft hears, for naming the launcher
+    /// of an electronically supported missile warning: the list the last
+    /// observation built, or with lean sensors the list built now.
+    fn emitter_ids(
+        &self,
+        world: &[WorldObject],
+        sight: &observation::SightLines<'_>,
+        test: AiTestSettings,
+    ) -> Vec<u32> {
+        if test.lean_sensors {
+            observation::received_emitters_on_demand(
+                self.observation_context(),
+                &self.sensors,
+                world,
+                sight,
+            )
+            .iter()
+            .map(|emitter| emitter.id)
+            .collect()
+        } else {
+            self.received_emitters
+                .iter()
+                .map(|emitter| emitter.id)
+                .collect()
+        }
     }
 
     fn apply_observation(&mut self, observed: observation::Observed) -> Vec<TargetView> {

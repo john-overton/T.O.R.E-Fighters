@@ -32,6 +32,16 @@ use tore_net::{Entropy, Pace, Platform, ServerSocket};
 use tore_session::wire::chat::receiver_label;
 use tore_session::{BuildId, HostConfig, HostLog, LeaveReason, Phase};
 
+/// The AI test settings the command line asked for (`--ai-observe-hz`,
+/// `--ai-lean-sensors`), kept for the host the program builds. Unset, which a
+/// test build always is, they are today's behaviour.
+static AI_TEST: std::sync::OnceLock<tore_session::AiTestSettings> = std::sync::OnceLock::new();
+
+/// Records the command line's AI test settings; only the first call counts.
+pub fn set_ai_test(settings: tore_session::AiTestSettings) {
+    let _ = AI_TEST.set(settings);
+}
+
 /// The mapper the configuration asks for: the real router when
 /// `port-mapping` is on (and `TORE_NO_PORT_MAPPING` is not set), never in a
 /// test build.
@@ -119,6 +129,7 @@ pub fn start_host_with(
     config.entropy = Entropy::System;
     // The program has already refused the switch; the host refuses it too.
     config.retail_stall_speeds = false;
+    config.ai_test = AI_TEST.get().copied().unwrap_or_default();
     let mut host = tore_session::Host::new(spec, resources, config)
         .map_err(|error| format!("The host session cannot start: {error}"))?;
     let rotation = rotation.map(|r| std::sync::Arc::new(std::sync::Mutex::new(r)));

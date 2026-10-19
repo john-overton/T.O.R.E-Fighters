@@ -319,6 +319,27 @@ impl Host {
         self.standbys.enabled = on;
     }
 
+    /// Sets the host's AI test settings (observation rate, lean sensors):
+    /// they apply from the next tick, and any standby is dismissed while they
+    /// differ from the defaults (see [`Self::standbys_on`]).
+    pub fn set_ai_test(&mut self, settings: tore_sim::ai::test_settings::AiTestSettings) {
+        self.config.ai_test = settings;
+    }
+
+    /// The host's AI test settings.
+    pub fn ai_test(&self) -> tore_sim::ai::test_settings::AiTestSettings {
+        self.config.ai_test
+    }
+
+    /// Whether standbys are appointed now: switched on, and the AI test
+    /// settings at their defaults. A standby replays the host's journal with
+    /// the defaults, which the journal does not say otherwise, so a host
+    /// running a slow AI observation rate or lean sensors (slice S7b) would
+    /// only part from it; it keeps none.
+    fn standbys_on(&self) -> bool {
+        self.standbys.enabled && self.config.ai_test.is_default()
+    }
+
     /// A standby's status (message 47): kept, and acted on at the next
     /// update. A status from a game that is not a standby is ignored.
     pub(super) fn standby_status(
@@ -561,7 +582,7 @@ impl Host {
         let Some(peer) = self.peers.get(&connection) else {
             return false;
         };
-        self.standbys.enabled
+        self.standbys_on()
             && !matches!(self.life, Life::Stopped)
             && !peer.house
             && !matches!(peer.stage, Stage::Closing { .. })
@@ -578,7 +599,7 @@ impl Host {
         let Some(peer) = self.peers.get(&connection) else {
             return false;
         };
-        self.standbys.enabled
+        self.standbys_on()
             && !matches!(self.life, Life::Stopped)
             && !matches!(peer.stage, Stage::Closing { .. })
             && peer.goodbye.is_none()
@@ -601,7 +622,7 @@ impl Host {
     /// free roles from the ranking. The journal records while any standby
     /// is appointed.
     fn appoint_standbys(&mut self) {
-        let ranked = if self.standbys.enabled {
+        let ranked = if self.standbys_on() {
             self.ranked_candidates()
         } else {
             Vec::new()
@@ -650,7 +671,7 @@ impl Host {
     /// not yet); false when the standbys are off, the game is not in its
     /// lobby, or the player may not stand by.
     pub(super) fn make_first_standby(&mut self, order: u64) -> bool {
-        if !self.standbys.enabled || !matches!(self.life, Life::Lobby) {
+        if !self.standbys_on() || !matches!(self.life, Life::Lobby) {
             return false;
         }
         let Some(connection) = self

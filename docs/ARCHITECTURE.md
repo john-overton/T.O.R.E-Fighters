@@ -9478,6 +9478,68 @@ flight bytes, outputs and bounded journal contents, including new damage
 recovery, shared airports, cancelled landings, ejection, late leaders, human
 handoff and error partial state.
 
+### AI test settings: observation rate and lean sensors
+
+Two settings for trying how much CPU the AI's observation takes and how the AI
+fights without part of it (optimization run, slice S7b; John, 2026-10-19). They
+are for testing, off by default, and with the defaults a run is bit for bit the
+run of a build without them. `tore_sim::ai::test_settings::AiTestSettings`
+holds them; `AiWings::set_ai_test` hands them to the mission before every step.
+They are host setup like the ground ceiling, not state: no checkpoint codes
+them, the host sets them wherever it steps the world, and a restored world
+starts with the defaults until it does.
+
+Where they are set:
+
+| Where | How |
+| --- | --- |
+| Flight menu, Debug tab (Escape, then Debug) | Two rows and Back to defaults. Single player applies them at the next tick; a game the player hosts sends them to its host thread (`Command::SetAiTest`); a joined game shows them dimmed with the host's governing |
+| `tore-app` | `--ai-observe-hz N`, `--ai-lean-sensors`: the AI probe's settings, and the starting values of a windowed flight's Debug tab |
+| `tore-server` | `--ai-observe-hz N`, `--ai-lean-sensors` (`HostConfig::ai_test`) |
+
+**Observation rate.** 120 (today), 60, 40, 30 or 20 Hz: an AI aircraft's
+observation, which is its sensors, its lookout over the world, its received
+emitters and the awareness memory they feed, runs once every 1, 2, 3, 4 or 6
+ticks. Aircraft are staggered by their place in the mission,
+`(tick + index) % divisor == 0` (`AiMission::observation_due`), so every tick
+carries the same share of the work. The controller, the flight model, the
+missile threat service and the incoming fire service stay at 120 Hz.
+
+| Between two observations the aircraft | |
+| --- | --- |
+| holds | the awareness memory (the targets the controller and the engagement policy choose from, at the positions they were seen), the sensors' contacts, selection and track, the received emitters |
+| refreshes | the lookout (its own pose and this tick's scan sector, with the attention point of the last observation), so missile warnings and incoming fire still react at 120 Hz; the decision frame's terrain flag for each held target (it depends on the aircraft's own position); the wing attackers count; held targets that have died are dropped |
+| counts as | `divisor` ticks for the sensors: a radar track still takes half a second to acquire, a lost plot goes stale after a second and a trail is sampled every half second (`Sensors::step_with`, `StepOptions::elapsed`) |
+
+Everything held is already coded by the checkpoint (memory, sensors, lookout,
+emitters), and the phase is a function of the mission tick and the aircraft's
+place, so a checkpoint taken between two observations resumes exactly while
+the host keeps the setting; serial and worker steps agree (both prepare only
+the aircraft whose turn it is). Aircraft leaving or joining the mission move
+the later ones' phases by one place once.
+
+**Lean sensors.** Reads, by search of the code (2026-10-19): the AI never reads
+its own sensors' visual channel list or its map list, except that a player's
+wing order that needs a target ("Engage my target" and the like) asks whether
+the wingman's sensors hold it, in the radar contacts or the visual list
+(`ai_wings/orders.rs`); the decision frame, the recorder and the debug
+explanation read the awareness memory and the lookout, not those lists; the
+network snapshots and the replay recorder read the human ownships' sensors,
+never an AI aircraft's. The received emitters (`received_emitters`) are read in
+one place, `step_actor`, to name the launcher of a missile warning whose source
+is `ElectronicSupported`. With lean sensors the sensors skip the visual channel
+and the map list, the wing order asks the awareness memory instead (which holds
+what the eyes and the radar showed the pilot), and the emitters are built when
+such a warning needs them, from the same inputs as the observation would
+(`received_emitters_on_demand`). A lean run flies, decides and journals exactly
+as a full one at the same rate (tested over a 30-aircraft mission); its
+checkpoints hold an empty visual list, map list and emitter list.
+
+A host with either setting off its default appoints no standby: a standby
+replays the journal with the defaults, which the journal does not say
+otherwise. Nothing is told to joined players, and no wire message carries the
+settings (no protocol change).
+
 ### Ownships and host pictures
 
 In combat, each active ownship's sensors, selection, emitters, mounted seeker,

@@ -795,6 +795,9 @@ pub struct AiWings {
     /// The highest the world's ground reaches over each square, worked out
     /// at the first step: the mission's shortcut for sight lines above it.
     ground_ceiling: Option<std::sync::Arc<tore_sim::ground_ceiling::GroundCeiling>>,
+    /// The AI test settings (observation rate, lean sensors): host setup the
+    /// step hands to the mission. A checkpoint leaves them out.
+    ai_test: tore_sim::ai::test_settings::AiTestSettings,
     /// The mission's airborne height, feet (the Quick Mission altitude
     /// setting): a heavy striker's release floor (slice ST-T2). The host sets
     /// it before every step; `None` lets a striker use the height it was
@@ -1416,6 +1419,7 @@ impl AiWings {
             last_output: tore_sim::ai::mission::MissionOutput::default(),
             decoy_rolls: Vec::new(),
             ground_ceiling: None,
+            ai_test: Default::default(),
             mission_height_ft: None,
             painting: Vec::new(),
         })
@@ -2062,6 +2066,19 @@ impl AiWings {
         self.take_line()
     }
 
+    /// Sets the AI test settings for the steps from now on. Defaults are
+    /// today's behaviour; see [`tore_sim::ai::test_settings`]. The host sets
+    /// them wherever it steps the world, and a restored world starts with the
+    /// defaults until it does.
+    pub fn set_ai_test(&mut self, settings: tore_sim::ai::test_settings::AiTestSettings) {
+        self.ai_test = settings;
+    }
+
+    /// The AI test settings in force.
+    pub fn ai_test(&self) -> tore_sim::ai::test_settings::AiTestSettings {
+        self.ai_test
+    }
+
     /// One 120 Hz tick of AI, run immediately after `Combat::step`.
     ///
     /// The order matters: combat has already flown the player, the projectiles
@@ -2124,6 +2141,7 @@ impl AiWings {
             .ground_ceiling
             .get_or_insert_with(|| std::sync::Arc::new(world.ground_ceiling()));
         self.mission.set_ground_ceiling(Some(ceiling.clone()));
+        self.mission.set_test_settings(self.ai_test);
         self.mission.set_gun_rounds(
             state
                 .projectiles

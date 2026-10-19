@@ -109,6 +109,9 @@ pub struct NetFlight {
     )>,
     /// The AI flies the plane while the player is away (slice F2-A).
     pub(crate) idle: crate::net::away::Idle,
+    /// The AI test settings last sent to the game this player hosts, so a
+    /// change in the Debug menu is sent once.
+    ai_test_sent: tore_sim::ai::test_settings::AiTestSettings,
     /// The surface units' states last put into the game's copy of the
     /// mission (protocol 22).
     surface_units: std::collections::BTreeMap<u32, tore_session::wire::events::SurfaceUnitView>,
@@ -857,12 +860,30 @@ impl App {
             respawn_seen: false,
             respawn_choice: None,
             idle: Default::default(),
+            ai_test_sent: Default::default(),
             surface_units: Default::default(),
         });
     }
 
+    /// The Debug menu's AI test settings reach the game this player hosts,
+    /// where the host's setting governs the simulation; in a joined game the
+    /// rows are locked. Nothing about it travels to other players.
+    fn sync_ai_test(&mut self) {
+        let hosting = self.net.as_ref().and_then(|net| net.hosting.as_ref());
+        self.flight_ui.lock_ai_test(hosting.is_none());
+        let (Some(hosting), Some(flight)) = (hosting, self.net_flight.as_mut()) else {
+            return;
+        };
+        let wanted = self.flight_ui.ai_test;
+        if flight.ai_test_sent != wanted && hosting.send(super::hosting::Command::SetAiTest(wanted))
+        {
+            flight.ai_test_sent = wanted;
+        }
+    }
+
     /// This frame's client frame, its effects, and everything it presents.
     fn net_present(&mut self) {
+        self.sync_ai_test();
         let Some(session) = self.net.as_mut() else {
             return;
         };

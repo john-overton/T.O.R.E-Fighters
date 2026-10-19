@@ -96,6 +96,7 @@ tore-server --config server.conf
 | `--import FOLDER` | Import the game, then exit |
 | `--port N`, `--mission FILE` | Override those two settings of the configuration file |
 | `--check` | Validate the configuration and import; with rotation, build every entry and report its summary/settings. Print the selected mission's aircraft, runways, manifest and import content. Exit without opening the port |
+| `--ai-observe-hz N`, `--ai-lean-sensors` | AI test settings (slice S7b), for measuring and trying, not for play: `N` is how often AI aircraft observe, 120 (default), 60, 40, 30 or 20, staggered across ticks, and lean sensors have them skip the visual channel and build the received-radar list only when a warning needs it. The server's setting governs the simulation and no player is told; a server running them appoints no standby. See [AI test settings](ARCHITECTURE.md#ai-test-settings-observation-rate-and-lean-sensors) |
 | `--help`, `--version` | Print the options, or the version and commit, and exit |
 
 *Built (D7b).* *Agent decisions:* with no `server.conf` in the data folder the

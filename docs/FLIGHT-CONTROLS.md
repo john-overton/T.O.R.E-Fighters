@@ -253,6 +253,21 @@ opinionated, requested by John on 2026-09-26 (the label and messages are agent
 choices). `--debug-panels` starts a launch with it on, and `--flight-panels
 thought,telemetry,guidance,comms,menu` also opens those panels, for captures.
 
+**Escape → Debug** is a tab after the retail ones with two AI test settings and
+a Back to defaults row, for measuring what the AI's observation costs and how it
+fights without part of it. *AI observation rate* cycles 120 Hz (today's
+behaviour), 60, 40, 30 and 20: AI aircraft observe that often, staggered across
+ticks, while their controllers and flight stay at 120 Hz. *Lean AI sensors*
+turns off the visual channel list and builds the received-radar list only when a
+missile warning needs it. Both are off by default, change what the AI does only
+when on, apply at the next tick, are not saved, and are kept across a restart of
+the flight. In a game the player hosts they govern that game's AI; in a joined
+game the rows are dimmed (they read Host) and do nothing. The tab is an authored
+addition, not part of `FMENUD.MNU`; opinionated, requested by John on
+2026-10-19 (the labels are agent choices). `--ai-observe-hz` and
+`--ai-lean-sensors` start a launch with them set. Details:
+[AI test settings](ARCHITECTURE.md#ai-test-settings-observation-rate-and-lean-sensors).
+
 Working menu actions include views, instrument windows, time/pause, cockpit, pitch ladder, weapon diagnostics, debug panels, HUD brightness, ending flight and exiting. Sound currently toggles effects; the original volume mixer is not implemented. Working cheats are listed under [cheats](#cheats). Other preferences, cheats, multiplayer and position commands are navigable placeholders with feedback. The bottom Resume / Restart / Keyboard Shortcuts actions are documented development additions. Menus do not silently enable unsupported cheats or alter the aircraft when an unrelated modifier shortcut is pressed.
 
 With multiplayer `respawn revive`, the running-flight aircraft/loadout selector

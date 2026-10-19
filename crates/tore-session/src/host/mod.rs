@@ -3692,6 +3692,8 @@ impl Host {
         // Stage K: the seats of players not yet back fly on (slice K4).
         self.resume_absent_inputs(tick, &mut journal);
 
+        // The host's AI test settings govern the simulation (slice S7b).
+        self.world.set_ai_test(self.config.ai_test);
         // One door into the world: the host steps through the journal's
         // driver, which adds the changes made since the last step and drains
         // the world after it, as a standby replays it.

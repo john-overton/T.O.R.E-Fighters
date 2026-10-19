@@ -309,6 +309,26 @@ pub struct MapContact {
 const FORWARD_VIEW_HALF_HEIGHT: f64 = std::f64::consts::FRAC_PI_6;
 const FORWARD_VIEW_HALF_WIDTH: f64 = 0.656_053; // atan(4/3 * tan 30 degrees)
 
+/// How one [`Sensors::step_with`] differs from the plain 120 Hz step. Only the
+/// AI test settings use anything but [`StepOptions::NORMAL`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StepOptions {
+    /// How many 120 Hz ticks this step stands for: 1 for a step every tick.
+    pub elapsed: u32,
+    /// Whether the visual channel and the map list are worked out. An AI
+    /// aircraft's visual list is read only by the player's wing orders,
+    /// which the lean setting answers another way.
+    pub visual: bool,
+}
+
+impl StepOptions {
+    /// One step per tick with every channel: what [`Sensors::step`] does.
+    pub const NORMAL: Self = Self {
+        elapsed: 1,
+        visual: true,
+    };
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Sensors {
     pub profiles: SensorProfiles,
@@ -650,6 +670,22 @@ impl Sensors {
         targets: &[Observable],
         environment: &Environment<'_>,
     ) -> Vec<Event> {
+        self.step_with(observer, targets, environment, StepOptions::NORMAL)
+    }
+
+    /// [`Self::step`] with the AI test settings' options: one step standing
+    /// for several 120 Hz ticks (every count below advances by that many, so
+    /// a track takes the same time to acquire, a plot to go stale and a
+    /// trail sample to be taken), and no visual channel for an aircraft whose
+    /// visual list nothing reads. [`StepOptions::NORMAL`] is exactly `step`.
+    pub fn step_with(
+        &mut self,
+        observer: &Observer,
+        targets: &[Observable],
+        environment: &Environment<'_>,
+        options: StepOptions,
+    ) -> Vec<Event> {
+        let elapsed = options.elapsed.max(1);
         let mut events = Vec::new();
         self.radar_powered = observer.radar_powered;
         self.radar_failed = observer.radar_failed;
@@ -708,14 +744,14 @@ impl Sensors {
             if live.contains(&strobe.id) {
                 return true;
             }
-            *age += 1;
+            *age += elapsed;
             emitting && *age <= NOISE_FADE_STEPS
         });
         let mut sorted: Vec<&Observable> = targets.iter().collect();
         sorted.sort_by_key(|t| t.id);
         self.visual.clear();
         self.map_contacts.clear();
-        let visual = !observer.visual_failed;
+        let visual = !observer.visual_failed && options.visual;
         for target in &sorted {
             // Channels share a result only for the same ordered endpoint bits.
             // The local cache never crosses a tick, observer or worker.
@@ -734,7 +770,9 @@ impl Sensors {
             let seen = visual
                 .then(|| self.observe(observer, target, Channel::Visual, &sighting, environment))
                 .flatten();
-            if let Some(contact) = seen.as_ref().or(sensed.as_ref()) {
+            if options.visual
+                && let Some(contact) = seen.as_ref().or(sensed.as_ref())
+            {
                 self.map_contacts.push(MapContact {
                     contact: *contact,
                     identified: seen.is_some(),
@@ -775,7 +813,7 @@ impl Sensors {
                 && self.contact(id).is_some_and(|c| c.track_eligible)
         });
         if eligible {
-            self.acquisition = self.acquisition.saturating_add(1);
+            self.acquisition = self.acquisition.saturating_add(elapsed);
             if self.acquisition >= ACQUISITION_STEPS && self.acquired != self.selected {
                 self.acquired = self.selected;
                 events.push(Event::TrackAcquired(self.selected.expect("selected")));
@@ -806,21 +844,23 @@ impl Sensors {
             });
         }
         for plot in &mut self.plots {
-            plot.age += 1;
+            plot.age += elapsed;
         }
         self.plots
             .retain(|p| p.age <= STALE_STEPS && !self.contacts.iter().any(|c| c.id == p.id));
-        self.record_history(channel);
-        self.tick += 1;
+        self.record_history(channel, elapsed);
+        self.tick += u64::from(elapsed);
         events
     }
-    fn record_history(&mut self, channel: Option<Channel>) {
+    fn record_history(&mut self, channel: Option<Channel>, elapsed: u32) {
         // History is collected whether or not it is displayed, so enabling it
-        // shows the recent observations immediately.
+        // shows the recent observations immediately. A step standing for
+        // several ticks takes the sample of the interval mark it passed.
+        let mark = (self.tick..self.tick + u64::from(elapsed))
+            .find(|tick| tick.is_multiple_of(HISTORY_INTERVAL_STEPS));
         if let Some(channel) = channel
-            && self.tick.is_multiple_of(HISTORY_INTERVAL_STEPS)
+            && let Some(tick) = mark
         {
-            let tick = self.tick;
             for contact in &self.contacts {
                 let trail = match self
                     .history

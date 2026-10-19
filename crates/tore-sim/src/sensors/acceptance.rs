@@ -14,7 +14,7 @@ use super::signature::{Configuration, SignatureProfile};
 use super::track::{
     ACQUISITION_STEPS, Channel, Contact, Environment, Event, HISTORY_AGE_STEPS,
     HISTORY_INTERVAL_STEPS, HISTORY_SAMPLES, Mode, Observable, Observer, STALE_STEPS, Sample,
-    Sensors, Support,
+    Sensors, StepOptions, Support,
 };
 use crate::attitude::{Basis, Vector};
 use tore_formats::aircraft::AircraftId;
@@ -1110,4 +1110,135 @@ fn map_identity_requires_visual_and_lost_contacts_disappear() {
     assert!(!sensors.map_contacts()[0].identified);
     sensors.step(&observer(), &[], &clear_air());
     assert!(sensors.map_contacts().is_empty());
+}
+
+// ---- the AI test settings' step options -----------------------------------
+
+/// A target that drifts and weaves, so the sequence has contacts coming and
+/// going, a lost plot and a changing range.
+fn weaving(step: u64) -> Vec<Observable> {
+    let t = step as f64;
+    vec![
+        object(
+            1,
+            [
+                (t * 0.37).sin() * 20_000.,
+                OWNSHIP_ALTITUDE_FT,
+                40. * NMI - t * 900.,
+            ],
+        ),
+        object(
+            2,
+            [
+                30_000. * (t * 0.011).cos(),
+                OWNSHIP_ALTITUDE_FT - 3_000.,
+                95. * NMI - t * 400.,
+            ],
+        ),
+    ]
+}
+
+#[test]
+fn normal_step_options_are_exactly_the_plain_step() {
+    let air = clear_air();
+    let o = observer();
+    let mut plain = Sensors::new(with_visual(profiles(Some(radar(90., 50.)), None), 10.));
+    let mut with = plain.clone();
+    let mut contacts = 0;
+    for step in 0..400 {
+        let targets = weaving(step);
+        let left = plain.step(&o, &targets, &air);
+        let right = with.step_with(&o, &targets, &air, StepOptions::NORMAL);
+        assert_eq!(left, right);
+        if step == 3 {
+            assert_eq!(plain.designate(1), with.designate(1));
+        }
+        contacts += plain.contacts().len();
+        assert_eq!(plain, with, "step {step}");
+    }
+    assert!(contacts > 0, "the sequence has contacts to compare");
+}
+
+#[test]
+fn a_step_for_several_ticks_keeps_the_acquisition_time() {
+    let air = clear_air();
+    let o = observer();
+    let near = [ahead(1, 30.)];
+    let steps = StepOptions {
+        elapsed: 4,
+        visual: true,
+    };
+    let mut s = hornet();
+    s.step_with(&o, &near, &air, steps);
+    assert!(s.designate(1));
+    // Half a second is 60 ticks, 15 steps of 4.
+    for _ in 0..14 {
+        s.step_with(&o, &near, &air, steps);
+    }
+    assert_eq!(s.acquired(), None);
+    s.step_with(&o, &near, &air, steps);
+    assert_eq!(s.acquired(), Some(1));
+    assert_eq!(s.tick(), 16 * 4, "the clock counts ticks, not steps");
+}
+
+#[test]
+fn a_step_for_several_ticks_ages_plots_and_history_on_the_tick_clock() {
+    let air = clear_air();
+    let o = observer();
+    let near = [ahead(1, 30.)];
+    let far = [ahead(1, 100.)];
+    let steps = StepOptions {
+        elapsed: 3,
+        visual: true,
+    };
+    let mut s = hornet();
+    s.step_with(&o, &near, &air, steps);
+    assert!(s.designate(1));
+    s.step_with(&o, &far, &air, steps);
+    assert_eq!(s.plots()[0].age, 3);
+    // 120 ticks is 40 steps of 3: the plot is still there at its 120th.
+    for _ in 0..39 {
+        s.step_with(&o, &far, &air, steps);
+    }
+    assert_eq!(s.plots()[0].age, STALE_STEPS);
+    s.step_with(&o, &far, &air, steps);
+    assert!(s.plots().is_empty());
+
+    // A sample every 60 ticks: steps of 3 take the one they pass.
+    let mut s = hornet();
+    for _ in 0..41 {
+        s.step_with(&o, &near, &air, steps);
+    }
+    assert_eq!(ticks(s.trail(1)), [0, 60, 120]);
+}
+
+#[test]
+fn without_the_visual_channel_the_other_channels_are_unchanged() {
+    let air = clear_air();
+    let o = observer();
+    let mut full = Sensors::new(with_visual(
+        profiles(Some(radar(90., 50.)), Some(passive("TESTI.SEE", 20., 20.))),
+        10.,
+    ));
+    let mut lean = full.clone();
+    let lean_steps = StepOptions {
+        elapsed: 1,
+        visual: false,
+    };
+    let mut saw_visual = false;
+    for step in 0..300 {
+        let targets = weaving(step);
+        full.step(&o, &targets, &air);
+        lean.step_with(&o, &targets, &air, lean_steps);
+        saw_visual |= !full.visual().is_empty();
+        assert!(lean.visual().is_empty());
+        assert!(lean.map_contacts().is_empty());
+        assert_eq!(full.contacts(), lean.contacts(), "step {step}");
+        assert_eq!(full.plots(), lean.plots());
+        assert_eq!(full.strobes(), lean.strobes());
+        assert_eq!(full.selected(), lean.selected());
+        assert_eq!(full.acquired(), lean.acquired());
+        assert_eq!(full.tick(), lean.tick());
+    }
+    assert!(saw_visual, "the full sensors do see something to leave out");
 }
