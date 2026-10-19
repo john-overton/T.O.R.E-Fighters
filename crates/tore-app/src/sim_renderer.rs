@@ -1585,8 +1585,7 @@ impl SimRenderer {
     }
     /// The cached attachments for an output size, created on first use.
     fn targets(&mut self, device: &wgpu::Device, output: [u32; 2]) -> usize {
-        let scale = self.options.scale();
-        let size = output.map(|v| ((v as f32 * scale).round() as u32).clamp(1, 8192));
+        let size = self.options.scaled_size(output);
         if let Some(i) = self
             .targets
             .iter()

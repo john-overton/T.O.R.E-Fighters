@@ -86,6 +86,12 @@ impl SpottingAid {
 
 /// Render scale steps, in percent of the window's pixel size.
 pub const RENDER_SCALES: [u32; 5] = [75, 100, 125, 150, 200];
+/// The size the 3D view is drawn at for an `output` size and a render scale
+/// in percent. The renderer and the Graphics screen both use it.
+pub fn scaled_size(output: [u32; 2], percent: u32) -> [u32; 2] {
+    let scale = percent as f32 / 100.;
+    output.map(|v| ((v as f32 * scale).round() as u32).clamp(1, 8192))
+}
 
 /// City fill building draw distance steps, nautical miles (CF0 prototype;
 /// John, 2026-10-10).
@@ -386,6 +392,12 @@ impl Options {
     }
     pub fn scale(&self) -> f32 {
         self.render_scale as f32 / 100.
+    }
+    /// The size the 3D view is drawn at for an `output` (window) size in
+    /// physical pixels: the render scale applied, rounded, and kept within
+    /// the 8192 pixel texture limit.
+    pub fn scaled_size(&self, output: [u32; 2]) -> [u32; 2] {
+        scaled_size(output, self.render_scale)
     }
     /// The settings file. The city fill building distances are written only
     /// when they differ from the defaults, so a default file is unchanged.

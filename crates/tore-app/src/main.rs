@@ -2523,7 +2523,12 @@ impl App {
             .renderer
             .as_ref()
             .map_or(self.graphics, |r| r.graphics());
-        self.graphics_screen = Some(graphics_screen::Editor::new(current, supported, context));
+        let mut editor = graphics_screen::Editor::new(current, supported, context);
+        if let Some(renderer) = &self.renderer {
+            let size = renderer.window.inner_size();
+            editor.set_window(Some([size.width, size.height]));
+        }
+        self.graphics_screen = Some(editor);
         self.mouse_look = None;
     }
     /// Pref > Sound... in the main menu, or over the paused flight menu.
@@ -2572,18 +2577,12 @@ impl App {
             ResultAction::None => Action::None,
             ResultAction::Changed => Action::Click,
             ResultAction::Save => {
-                if let Some(editor) = &mut self.graphics_screen {
-                    // Applied at once; renderers created later start from
-                    // `self.graphics`, and the world rebuild on entering
-                    // flight keeps the renderer's copy.
-                    self.graphics = editor.apply(self.graphics_path.as_deref());
-                    if let Some(renderer) = &mut self.renderer {
-                        renderer.set_graphics(self.graphics);
-                    }
-                }
+                self.settle_graphics(true);
                 Action::Click
             }
             ResultAction::Close => {
+                // Anything still settling is applied and saved on the way out.
+                self.settle_graphics(true);
                 self.graphics_screen = None;
                 // Back to the paused flight's menu, as the Sound screen
                 // returns.
@@ -2593,6 +2592,35 @@ impl App {
                 self.menu.state.cancel();
                 Action::Click
             }
+        }
+    }
+    /// Applies the Graphics screen's pending changes and saves them, once
+    /// they have settled (`graphics_screen::SETTLE` after the last one) or
+    /// at once with `now`. Every change on the screen comes through here, so
+    /// stepping quickly through anti-aliasing or vegetation choices rebuilds
+    /// the renderer's pipelines and buffers once, for the value kept.
+    /// Renderers created later start from `self.graphics`, and the world
+    /// rebuild on entering flight keeps the renderer's copy.
+    fn settle_graphics(&mut self, now: bool) {
+        let Some(editor) = &mut self.graphics_screen else {
+            return;
+        };
+        if let Some(renderer) = &self.renderer {
+            let size = renderer.window.inner_size();
+            editor.set_window(Some([size.width, size.height]));
+        }
+        let due = if now {
+            editor.dirty()
+        } else {
+            editor.apply_due(Instant::now())
+        };
+        if !due {
+            return;
+        }
+        self.graphics = editor.apply(self.graphics_path.as_deref());
+        if let Some(renderer) = &mut self.renderer {
+            renderer.set_graphics(self.graphics);
+            renderer.window.request_redraw();
         }
     }
     /// Opens the Replays screen on the recordings folder. Recording may be
@@ -4035,8 +4063,14 @@ impl ApplicationHandler for App {
                 {
                     return;
                 }
+                if let Some(editor) = &mut self.graphics_screen {
+                    // A held scroll bar thumb follows the pointer.
+                    if editor.moved(point) {
+                        renderer.window.request_redraw();
+                    }
+                    return;
+                }
                 if self.controls.is_some()
-                    || self.graphics_screen.is_some()
                     || (self.screen == Screen::Main && self.replays_screen.is_some())
                 {
                     return;
@@ -6158,6 +6192,8 @@ impl ApplicationHandler for App {
         if self.world.0.is_some() {
             self.finish_replay_recording("exit");
         }
+        // Graphics changes still settling are saved before the game closes.
+        self.settle_graphics(true);
         self.save_preferences();
         if let Some(recording) = &mut self.input_recording {
             use std::io::Write;
@@ -6173,6 +6209,9 @@ impl ApplicationHandler for App {
         self.renderer = None;
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // The Graphics screen's changes apply once they settle; this also
+        // keeps its window size current after a resize.
+        self.settle_graphics(false);
         // Measure event-loop service, not the arrival of window events: a
         // minimized or untouched window can legitimately receive none.
         let preparing = self.loading.is_some()
@@ -6504,6 +6543,10 @@ impl ApplicationHandler for App {
         }
         if self.script.is_some() {
             next = next.min(Instant::now() + Duration::from_millis(10));
+        }
+        // Wake when the Graphics screen's pending changes are due.
+        if let Some(at) = self.graphics_screen.as_ref().and_then(|e| e.apply_at()) {
+            next = next.min(at);
         }
         event_loop.set_control_flow(ControlFlow::WaitUntil(next));
     }
@@ -13806,14 +13849,27 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             for p in menu.pixels.chunks_exact(4) {
                 f.write_all(&p[..3])?;
             }
-        } else if snapshot_state == "graphics" {
+        } else if let Some(scroll) = match snapshot_state.as_str() {
+            "graphics" | "graphics-scale" => Some(0),
+            "graphics-middle" => Some(-4),
+            "graphics-bottom" => Some(-100),
+            _ => None,
+        } {
             // No GPU here: a fixed support list stands in for the adapter,
-            // with 8x unavailable so the struck-through style is visible.
-            let editor = graphics_screen::Editor::new(
+            // with 8x unavailable so the struck-through style is visible, and
+            // a 3840x2160 window for the render scale's resolution line. The
+            // middle and bottom states scroll the list.
+            let mut editor = graphics_screen::Editor::new(
                 graphics::Options::default(),
                 [true, true, true, false],
                 "Main menu",
             );
+            editor.set_window(Some([3840, 2160]));
+            editor.wheel(scroll);
+            if snapshot_state == "graphics-scale" {
+                // The render scale row focused, its About note showing the sizes.
+                editor.key("ArrowDown", false);
+            }
             menu.preview_state("normal")?;
             menu.render();
             editor.draw(&mut menu.pixels, &hornet.font);

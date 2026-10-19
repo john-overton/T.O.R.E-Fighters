@@ -16,7 +16,8 @@ AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su2
 NORMAL_STATES = [
     "loading", "loading-thunderbirds",
     "normal", "hover", "pressed", "help", "pref", "multi", "notice", "controls", "controls-keyboard",
-    "controls-mouse", "controls-head", "controls-search", "controls-search-keys", "graphics", "sound",
+    "controls-mouse", "controls-head", "controls-search", "controls-search-keys", "graphics", "graphics-middle",
+    "graphics-bottom", "graphics-scale", "sound",
     "replays", "replays-settings", "replays-delete", "locate", "locate-importing", "locate-done",
     "direct", "direct-games", "direct-trying", "direct-refused", "direct-options",
     "internet", "internet-games", "internet-joining", "internet-options", "internet-unreachable",

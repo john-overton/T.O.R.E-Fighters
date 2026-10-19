@@ -19,12 +19,38 @@ look.
 ## The Graphics screen
 
 Main menu Pref > Graphics... opens a screen in the same style as the controls
-screen. It edits a draft; **Apply** puts it into effect at once and saves it,
-**Defaults** loads the recommended settings into the draft, **Cancel** or
-Escape throws away anything not applied. Up/Down move between rows, Left/Right
-change a value, Enter or Space cycles it, Tab walks every control, and the
-mouse picks a choice directly. A one-line description of the focused row is
-shown below the options.
+screen. Every change takes effect on its own and is saved: there is no Apply
+button. **Defaults** puts the recommended settings back, applied and saved the
+same way, and **Close** or Escape leaves the screen, which has nothing left to
+undo. Up/Down move between rows, Left/Right change a value, Enter or Space
+cycles it, Tab walks every control, and the mouse picks a choice directly. A
+one-line description of the focused row is shown below the options. The top
+right of the settings panel reads IN USE AND SAVED, APPLYING while a change is
+settling, or IN USE, NOT SAVED when the file could not be written.
+
+A change is applied 150 ms after the last one (*agent decision*, 2026-10-19).
+Holding an arrow key or clicking quickly through choices therefore applies only
+the value the player stops on, so anti-aliasing (which rebuilds the 3D
+pipelines) and the vegetation and building settings (which resize or refill
+their buffers) are rebuilt once, not once per step. A change still settling is
+applied and saved when the screen closes or the game quits.
+
+The rows sit under four headings in a list that scrolls: **Display**
+(anti-aliasing, render scale, spotting aid), **Terrain and scenery** (terrain
+filtering, ground detail and its distance, building distance and detail),
+**Vegetation and grass** (vegetation distance, detail, density and cards,
+grass, grass density and distance) and **Performance** (the frame-rate
+counter). The scroll bar is the map's arrow bar, the one the multiplayer
+lobby's settings pages use: the wheel scrolls a line a notch, the arrows a
+line, the track a page, and the thumb drags. Moving the focus with the keys
+scrolls the focused row into view with its heading. Under the render scale
+row a line shows the window's size in physical pixels (for example
+`Window 3840x2160`) and, under each percentage, the size the 3D view is drawn
+at with it; the About panel spells out the chosen one, for example
+`75%: the 3D view is drawn at 2880x1620 and upscaled to the 3840x2160 window.`
+The sizes follow the window when it is resized. Requested by John on
+2026-10-19 (auto-apply, Close, the scroll bar, the groups and the
+resolutions); the group names and wording are agent decisions.
 
 | Option | Choices | Default |
 | --- | --- | --- |
@@ -219,7 +245,7 @@ previous High grid, the multipliers are 0.2, 0.4, 0.7 and 1.0.
 | High | 131,072 |
 | Ultra | 262,144 |
 
-**Grass** selects Blades (branch default), Tufts or Off, live on Apply.
+**Grass** selects Blades (branch default), Tufts or Off, live as it is chosen.
 `TORE_GRASS=blades|tufts|off` overrides it for the run. **Grass density** is
 Off, Low, Med, High or Ultra, independent of trees, default High. **Grass
 distance** is 250, 500, 750 or 1,000 ft, default 500 ft. John requested these
@@ -255,8 +281,8 @@ and habitat rules.
 The nine values are saved in `graphics-v1.conf` only when they differ
 from the defaults (`vegetation-texture`, `vegetation-texture-distance`,
 `vegetation-distance`, `vegetation-detail`, `vegetation-density`, `vegetation-cards`, `grass`, `grass-density`, `grass-distance`). An
-older file that has none of them reads as the defaults. Apply puts them
-into effect at once, the same way as the building settings. Original
+older file that has none of them reads as the defaults. A change on the
+screen puts them into effect at once, the same way as the building settings. Original
 graphics turns the texture off and leaves the object distances at the
 defaults, as it does for buildings.
 
@@ -306,7 +332,7 @@ For one run, without saving: `--anti-aliasing off|2x|4x|8x`,
 and `--original-graphics` for everything off
 at 100%. `TORE_SHOW_FPS=1` shows the frame-rate counter for that run without
 writing it into the file. Flags apply in order, so `--original-graphics --spotting-aid strong`
-turns on only the outline. Pressing Apply on the Graphics screen saves whatever
+turns on only the outline. Any change on the Graphics screen saves everything
 the screen shows, including a flag's value.
 
 ## Cost

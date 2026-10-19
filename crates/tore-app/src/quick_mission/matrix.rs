@@ -1320,6 +1320,8 @@ pub fn fuzz_screens(
             [true, true, true, seed % 2 == 0],
             "Main menu",
         );
+        // Half the runs know the window, so the resolution line draws too.
+        graphics.set_window((seed % 2 == 1).then_some([3840, 2160]));
         for step in 0..3000 {
             events += 1;
             let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1332,7 +1334,9 @@ pub fn fuzz_screens(
                     }
                     _ => {
                         let down = rng.below(2) == 0;
-                        graphics.pointer(point(&mut rng), down);
+                        let at = point(&mut rng);
+                        graphics.moved(at);
+                        graphics.pointer(at, down);
                     }
                 }
                 if step % 30 == 0 {
