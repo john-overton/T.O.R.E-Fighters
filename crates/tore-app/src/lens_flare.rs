@@ -244,8 +244,7 @@ impl LensFlare {
         ];
         values.extend(circles.into_iter().flatten());
         values.resize(68, 0.);
-        let bytes: Vec<u8> = values.into_iter().flat_map(f32::to_le_bytes).collect();
-        queue.write_buffer(&self.uniform, 0, &bytes);
+        crate::sim_renderer::write_floats(queue, &self.uniform, 0, &values);
         let pixels: Vec<u8> = palette
             .iter()
             .flat_map(|c| [c[0], c[1], c[2], 255])

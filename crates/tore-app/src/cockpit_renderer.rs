@@ -447,8 +447,7 @@ impl CockpitRenderer {
         for rect in self.mirror_rects {
             values.extend_from_slice(&rect);
         }
-        let bytes: Vec<u8> = values.into_iter().flat_map(f32::to_le_bytes).collect();
-        queue.write_buffer(&self.uniform, 0, &bytes);
+        crate::sim_renderer::write_floats(queue, &self.uniform, 0, &values);
         if hud {
             upload_changed_rows(queue, &self.hud, &mut self.hud_held, pixels);
         }

@@ -606,14 +606,7 @@ impl Crt {
         frame: &Frame,
     ) {
         let values = frame.uniform(size, overlay.is_some());
-        queue.write_buffer(
-            &self.uniform,
-            0,
-            &values
-                .iter()
-                .flat_map(|v| v.to_le_bytes())
-                .collect::<Vec<_>>(),
-        );
+        crate::sim_renderer::write_floats(queue, &self.uniform, 0, &values);
         let empty = self.empty.create_view(&Default::default());
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("CRT look"),

@@ -1162,17 +1162,13 @@ impl EffectRenderer {
         }
         let visible = visible(base.iter().chain(&self.city), eye);
         self.flat_count = visible.iter().take_while(|s| s.mode == Mode::Flat).count() as u32;
-        let mut instances = Vec::with_capacity(visible.len().min(MAX_INSTANCES) * INSTANCE_BYTES);
+        let mut instances: Vec<f32> =
+            Vec::with_capacity(visible.len().min(MAX_INSTANCES) * INSTANCE_BYTES / 4);
         for s in visible {
-            let values = instance_values(s, eye, &|x, z| ground_height(world, x, z));
-            for value in values {
-                instances.extend(value.to_le_bytes());
-            }
+            instances.extend(instance_values(s, eye, &|x, z| ground_height(world, x, z)));
         }
-        self.count = (instances.len() / INSTANCE_BYTES) as u32;
-        if !instances.is_empty() {
-            queue.write_buffer(&self.buffer, 0, &instances);
-        }
+        self.count = (instances.len() * 4 / INSTANCE_BYTES) as u32;
+        crate::sim_renderer::write_floats(queue, &self.buffer, 0, &instances);
     }
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
         if self.count == 0 {

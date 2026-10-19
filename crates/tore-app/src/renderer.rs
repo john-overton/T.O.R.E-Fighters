@@ -1009,11 +1009,7 @@ impl Renderer {
     }
     fn write_veil(&self, flight: bool) {
         let [redout, blackout] = if flight { self.veil_levels } else { [0.; 2] };
-        let bytes: Vec<u8> = [redout, blackout, 0., 0.]
-            .into_iter()
-            .flat_map(f32::to_le_bytes)
-            .collect();
-        self.queue.write_buffer(&self.veil, 0, &bytes);
+        crate::sim_renderer::write_floats(&self.queue, &self.veil, 0, &[redout, blackout, 0., 0.]);
     }
     /// The sharp text to draw over the menu canvas from now on (none for no
     /// text), and whether it is shown: the app turns it on only while a screen
