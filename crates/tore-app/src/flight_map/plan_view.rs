@@ -472,6 +472,7 @@ impl PlanView {
             &projection,
             sprites.get(&world.theater.map),
             |_| [118, 114, 98],
+            &mut None,
         );
         let mut labels = Vec::new();
         let mut markers = Vec::new();

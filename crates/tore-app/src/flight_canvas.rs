@@ -76,6 +76,28 @@ pub struct FlightCanvas {
     pub pending: RowSet,
     /// Scratch for the filter in `blit`.
     premultiplied: Vec<[f64; 4]>,
+    /// The layers `legacy_layer` drew last, oldest first.
+    layers: Vec<LayerCache>,
+    /// How often `legacy_layer` copied a kept result.
+    #[cfg(test)]
+    layer_hits: usize,
+}
+/// A 640 by 480 layer `legacy_layer` drew and what came of it.
+#[derive(Default)]
+struct LayerCache {
+    /// The canvas size and scale it was drawn at.
+    key: Option<([u32; 2], u64)>,
+    layer: Vec<u8>,
+    /// Where the layer has anything drawn: left, top, right, bottom.
+    bounds: Option<(usize, usize, usize, usize)>,
+    /// Drawn on before, so worth keeping a copy of its surroundings.
+    seen: bool,
+    /// `before` and `after` hold the canvas rows `region` (columns, rows)
+    /// either side of drawing the layer, one row after another.
+    valid: bool,
+    region: (std::ops::Range<usize>, std::ops::Range<usize>),
+    before: Vec<u8>,
+    after: Vec<u8>,
 }
 impl FlightCanvas {
     pub fn begin(&mut self, size: [u32; 2], h: &Airframe, s: &State, panels: &Instruments) {
@@ -601,26 +623,107 @@ impl FlightCanvas {
         zoom / HUD_SCALE as f32 * (h as f32 / (480. * (w as f32 / 640.).min(h as f32 / 480.)))
     }
     pub fn legacy_layer(&mut self, pixels: &[u8], factor: f64) {
-        let (mut left, mut top, mut right, mut bottom) = (640usize, 480usize, 0usize, 0usize);
-        for (i, p) in pixels.chunks_exact(4).enumerate() {
-            if p[3] != 0 {
-                left = left.min(i % 640);
-                right = right.max(i % 640 + 1);
-                top = top.min(i / 640);
-                bottom = bottom.max(i / 640 + 1);
+        let key = (self.size, factor.to_bits());
+        // The two layers drawn most recently (the map, the menus over it)
+        // keep their scaled result while neither they nor what lies under
+        // them change.
+        let mut cache = match self
+            .layers
+            .iter()
+            .position(|c| c.key == Some(key) && c.layer == pixels)
+        {
+            Some(found) => self.layers.remove(found),
+            None => {
+                let mut fresh = if self.layers.len() >= 2 {
+                    self.layers.remove(0)
+                } else {
+                    LayerCache::default()
+                };
+                fresh.key = Some(key);
+                fresh.layer.clear();
+                fresh.layer.extend_from_slice(pixels);
+                fresh.valid = false;
+                fresh.seen = false;
+                fresh.bounds = None;
+                fresh
             }
-        }
+        };
+        let seen = std::mem::replace(&mut cache.seen, true);
+        let (left, top, right, bottom) = *cache.bounds.get_or_insert_with(|| {
+            let (mut left, mut top, mut right, mut bottom) = (640usize, 480usize, 0usize, 0usize);
+            for (i, p) in pixels.chunks_exact(4).enumerate() {
+                if p[3] != 0 {
+                    left = left.min(i % 640);
+                    right = right.max(i % 640 + 1);
+                    top = top.min(i / 640);
+                    bottom = bottom.max(i / 640 + 1);
+                }
+            }
+            (left, top, right, bottom)
+        });
         if right == 0 {
+            self.layers.push(cache);
             return;
         }
         let width = right - left;
         let height = bottom - top;
+        let (w, h) = (self.size[0] as f64, self.size[1] as f64);
+        let scale = (w / 640.).min(h / 480.) * factor;
+        let rect = (
+            (w - 640. * scale) / 2. + left as f64 * scale,
+            (h - 480. * scale) / 2. + top as f64 * scale,
+            width as f64 * scale,
+            height as f64 * scale,
+        );
+        // The destination pixels `blit` can touch.
+        let columns =
+            (rect.0.floor().max(0.) as usize)..((rect.0 + rect.2).ceil().clamp(0., w) as usize);
+        let rows =
+            (rect.1.floor().max(0.) as usize)..((rect.1 + rect.3).ceil().clamp(0., h) as usize);
+        let stride = self.size[0] as usize * 4;
+        let region = |rows: &std::ops::Range<usize>| {
+            rows.clone()
+                .map(|row| row * stride + columns.start * 4..row * stride + columns.end * 4)
+        };
+        if columns.start < columns.end && rows.start < rows.end {
+            // Under the same layer, the same picture beneath gives the same
+            // result: copy the one kept from last time.
+            let mut at = 0;
+            let same_beneath = cache.valid
+                && cache.region == (columns.clone(), rows.clone())
+                && region(&rows).all(|range| {
+                    let len = range.len();
+                    let same = self.pixels[range] == cache.before[at..at + len];
+                    at += len;
+                    same
+                });
+            if same_beneath {
+                let mut at = 0;
+                for range in region(&rows) {
+                    let len = range.len();
+                    self.pixels[range].copy_from_slice(&cache.after[at..at + len]);
+                    at += len;
+                }
+                self.touched.mark(rows.start, rows.end);
+                #[cfg(test)]
+                {
+                    self.layer_hits += 1;
+                }
+                self.layers.push(cache);
+                return;
+            }
+            // Keep the picture beneath only for a layer seen twice running.
+            if seen {
+                cache.before.clear();
+                for range in region(&rows) {
+                    cache.before.extend_from_slice(&self.pixels[range]);
+                }
+            }
+        }
         let mut rgba = Vec::with_capacity(width * height * 4);
         for y in top..bottom {
             rgba.extend_from_slice(&pixels[(y * 640 + left) * 4..(y * 640 + right) * 4]);
         }
-        let (w, h) = (self.size[0] as f64, self.size[1] as f64);
-        let scale = (w / 640.).min(h / 480.) * factor;
         self.blit(
             &Sprite {
                 width,
@@ -628,13 +731,18 @@ impl FlightCanvas {
                 rgba,
                 glyphs: vec![],
             },
-            (
-                (w - 640. * scale) / 2. + left as f64 * scale,
-                (h - 480. * scale) / 2. + top as f64 * scale,
-                width as f64 * scale,
-                height as f64 * scale,
-            ),
+            rect,
         );
+        cache.valid = false;
+        if seen && columns.start < columns.end && rows.start < rows.end {
+            cache.after.clear();
+            for range in region(&rows) {
+                cache.after.extend_from_slice(&self.pixels[range]);
+            }
+            cache.region = (columns, rows);
+            cache.valid = true;
+        }
+        self.layers.push(cache);
     }
     fn blit(&mut self, s: &Sprite, (x, y, w, h): (f64, f64, f64, f64)) {
         let dw = self.size[0] as usize;
@@ -1469,5 +1577,128 @@ mod tests {
             filtered_reference(&mut expected, &source, rect);
             assert_eq!(actual.pixels, expected.pixels, "case {case} {rect:?}");
         }
+    }
+
+    /// `legacy_layer` as it was before it kept its results.
+    fn legacy_layer_reference(canvas: &mut FlightCanvas, pixels: &[u8], factor: f64) {
+        let (mut left, mut top, mut right, mut bottom) = (640usize, 480usize, 0usize, 0usize);
+        for (i, p) in pixels.chunks_exact(4).enumerate() {
+            if p[3] != 0 {
+                left = left.min(i % 640);
+                right = right.max(i % 640 + 1);
+                top = top.min(i / 640);
+                bottom = bottom.max(i / 640 + 1);
+            }
+        }
+        if right == 0 {
+            return;
+        }
+        let (width, height) = (right - left, bottom - top);
+        let mut rgba = Vec::new();
+        for y in top..bottom {
+            rgba.extend_from_slice(&pixels[(y * 640 + left) * 4..(y * 640 + right) * 4]);
+        }
+        let (w, h) = (canvas.size[0] as f64, canvas.size[1] as f64);
+        let scale = (w / 640.).min(h / 480.) * factor;
+        canvas.blit(
+            &Sprite {
+                width,
+                height,
+                rgba,
+                glyphs: vec![],
+            },
+            (
+                (w - 640. * scale) / 2. + left as f64 * scale,
+                (h - 480. * scale) / 2. + top as f64 * scale,
+                width as f64 * scale,
+                height as f64 * scale,
+            ),
+        );
+    }
+
+    #[test]
+    fn a_layer_drawn_again_gives_the_pixels_a_fresh_scaling_would() {
+        let mut dice = Dice(31);
+        let layer = |dice: &mut Dice, lit: usize| {
+            let mut layer = vec![0u8; 640 * 480 * 4];
+            for _ in 0..lit {
+                let at = (60 + dice.next() % 500 + 640 * (50 + dice.next() % 350)) * 4;
+                layer[at..at + 4].copy_from_slice(&[
+                    (dice.next() % 256) as u8,
+                    90,
+                    10,
+                    [255, 128, 40][dice.next() % 3],
+                ]);
+            }
+            layer
+        };
+        let (a, b) = (layer(&mut dice, 800), layer(&mut dice, 800));
+        let empty = vec![0u8; 640 * 480 * 4];
+        let base = |dice: &mut Dice, size: [u32; 2]| {
+            let mut canvas = FlightCanvas::default();
+            canvas.blank(size);
+            for p in canvas.pixels.chunks_exact_mut(4) {
+                p.copy_from_slice(&[
+                    (dice.next() % 256) as u8,
+                    40,
+                    50,
+                    [0, 255, 200][dice.next() % 3],
+                ]);
+            }
+            canvas.pixels
+        };
+        let mut cached = FlightCanvas::default();
+        let other = base(&mut dice, [160, 120]);
+        // The sequence: stills, a change underneath, alternating layers (the
+        // map, then a menu), a new size, an empty layer, a new factor.
+        let steps: Vec<(&[u8], f64, [u32; 2], usize)> = vec![
+            (&a, 1., [160, 120], 0),
+            (&a, 1., [160, 120], 0),
+            (&a, 1., [160, 120], 0),
+            (&a, 1., [160, 120], 1),
+            (&a, 1., [160, 120], 1),
+            (&b, 1., [160, 120], 1),
+            (&a, 1., [160, 120], 1),
+            (&b, 1., [160, 120], 1),
+            (&a, 1., [160, 120], 1),
+            (&b, 1., [160, 120], 1),
+            (&a, 1., [200, 90], 2),
+            (&a, 1., [200, 90], 2),
+            (&empty, 1., [200, 90], 2),
+            (&a, 0.5, [200, 90], 2),
+            (&a, 0.5, [200, 90], 2),
+            (&a, 1., [200, 90], 2),
+        ];
+        let mut hits = Vec::new();
+        let bases: Vec<Vec<u8>> = vec![
+            base(&mut dice, [160, 120]),
+            other,
+            base(&mut dice, [200, 90]),
+        ];
+        for (n, (layer, factor, size, which)) in steps.into_iter().enumerate() {
+            let under = bases[which].clone();
+            let mut expected = FlightCanvas::default();
+            expected.blank(size);
+            expected.pixels = under.clone();
+            legacy_layer_reference(&mut expected, layer, factor);
+            cached.blank(size);
+            cached.pixels = under;
+            cached.legacy_layer(layer, factor);
+            assert_eq!(cached.pixels, expected.pixels, "step {n}");
+            // The rows it drew on are noted, hit or miss.
+            for row in 0..size[1] as usize {
+                let stride = size[0] as usize * 4;
+                if cached.pixels[row * stride..(row + 1) * stride]
+                    != bases[which][row * stride..(row + 1) * stride]
+                {
+                    assert!(cached.touched.contains(row), "step {n} row {row}");
+                }
+            }
+            hits.push(cached.layer_hits);
+        }
+        // Stills hit; so do two layers taking turns over an unchanged canvas.
+        assert_eq!(hits[2], 1, "{hits:?}");
+        assert!(hits[4] > hits[3], "{hits:?}");
+        assert!(hits[9] >= hits[5] + 2, "{hits:?}");
     }
 }

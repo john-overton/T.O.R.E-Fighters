@@ -1155,40 +1155,71 @@ pub fn draw_messages<'a>(
     let bottom = h - (NOTICE_MARGIN + raise) * layer + scale;
     let top = (bottom - lines.len() as f64 * line_height).round();
     // Glyph pixels become boxes; each screen pixel takes the area covered.
-    let (columns, rows) = (canvas.size[0] as usize, (bottom - top).ceil() as usize + 1);
-    let mut cover = vec![0f64; columns * rows];
-    for (i, line) in lines.iter().enumerate() {
-        let mut x = ((w - text_width(font, line) as f64 * scale) / 2.).round();
-        let y = i as f64 * line_height;
-        for ch in line.glyph_codes() {
-            let glyph = &font.glyphs[ch as usize];
-            for &(gx, gy) in &glyph.pixels {
-                let (left, up) = (x + gx as f64 * scale, y + gy as f64 * scale);
-                let (right, down) = (left + scale, up + scale);
+    // The areas are summed in a buffer only as wide as the text, kept from
+    // one frame to the next.
+    let rows = (bottom - top).ceil() as usize + 1;
+    let canvas_columns = canvas.size[0] as usize;
+    let glyph_boxes = |lines: &[String], mut each: Box<dyn FnMut(f64, f64, f64, f64) + '_>| {
+        for (i, line) in lines.iter().enumerate() {
+            let mut x = ((w - text_width(font, line) as f64 * scale) / 2.).round();
+            let y = i as f64 * line_height;
+            for ch in line.glyph_codes() {
+                let glyph = &font.glyphs[ch as usize];
+                for &(gx, gy) in &glyph.pixels {
+                    let (left, up) = (x + gx as f64 * scale, y + gy as f64 * scale);
+                    each(left, up, left + scale, up + scale);
+                }
+                x += glyph.advance as f64 * scale;
+            }
+        }
+    };
+    let (mut first, mut last) = (canvas_columns, 0);
+    glyph_boxes(
+        lines,
+        Box::new(|left, _, right, _| {
+            first = first.min(left.max(0.).floor() as usize);
+            last = last.max((right.ceil().max(0.) as usize).min(canvas_columns));
+        }),
+    );
+    if first >= last {
+        return;
+    }
+    let columns = last - first;
+    COVER.with(|cover| {
+        let mut cover = cover.borrow_mut();
+        cover.clear();
+        cover.resize(columns * rows, 0.);
+        glyph_boxes(
+            lines,
+            Box::new(|left, up, right, down| {
                 for row in up.floor() as usize..(down.ceil() as usize).min(rows) {
                     let dy = down.min(row as f64 + 1.) - up.max(row as f64);
-                    for column in
-                        left.max(0.).floor() as usize..(right.ceil().max(0.) as usize).min(columns)
+                    for column in left.max(0.).floor() as usize
+                        ..(right.ceil().max(0.) as usize).min(canvas_columns)
                     {
                         let dx = right.min(column as f64 + 1.) - left.max(column as f64);
-                        cover[row * columns + column] += dx * dy;
+                        cover[row * columns + column - first] += dx * dy;
                     }
                 }
+            }),
+        );
+        for (at, &amount) in cover.iter().enumerate() {
+            if amount > 0. {
+                let (column, row) = (at % columns + first, at / columns);
+                canvas.blend(
+                    column as i32,
+                    top as i32 + row as i32,
+                    hud_color,
+                    amount.min(1.),
+                );
             }
-            x += glyph.advance as f64 * scale;
         }
-    }
-    for (at, amount) in cover.into_iter().enumerate() {
-        if amount > 0. {
-            let (column, row) = (at % columns, at / columns);
-            canvas.blend(
-                column as i32,
-                top as i32 + row as i32,
-                hud_color,
-                amount.min(1.),
-            );
-        }
-    }
+    });
+}
+thread_local! {
+    /// Coverage areas for `draw_messages`, kept to avoid a large clear
+    /// buffer every frame.
+    static COVER: std::cell::RefCell<Vec<f64>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 fn text_width(font: &Font, text: &str) -> usize {
     text.glyph_codes()
@@ -1310,6 +1341,118 @@ mod tests {
         assert!(lit.iter().all(|p| p[..3] == [0, 255, 0]));
         let alpha: f64 = lit.iter().map(|p| f64::from(p[3]) / 255.).sum();
         assert!((alpha - 3. * 1.445f64.powi(2)).abs() < 0.05);
+    }
+    /// `draw_messages` with the canvas-wide buffer it used to have.
+    fn draw_messages_reference<'a>(
+        canvas: &mut crate::flight_canvas::FlightCanvas,
+        font: &Font,
+        hud_color: [u8; 3],
+        messages: impl IntoIterator<Item = &'a str>,
+        raise: f64,
+    ) {
+        let [w, h] = canvas.size.map(f64::from);
+        let layer = (w / 640.).min(h / 480.);
+        let scale = layer * crate::flight_canvas::HUD_SCALE;
+        let lines: Vec<String> = messages
+            .into_iter()
+            .flat_map(|text| wrap(font, text, (600. * layer / scale) as usize))
+            .collect();
+        let lines = &lines[lines.len().saturating_sub(NOTICE_LINES)..];
+        if lines.is_empty() {
+            return;
+        }
+        let line_height = (font.height + 1) as f64 * scale;
+        let bottom = h - (NOTICE_MARGIN + raise) * layer + scale;
+        let top = (bottom - lines.len() as f64 * line_height).round();
+        let (columns, rows) = (canvas.size[0] as usize, (bottom - top).ceil() as usize + 1);
+        let mut cover = vec![0f64; columns * rows];
+        for (i, line) in lines.iter().enumerate() {
+            let mut x = ((w - text_width(font, line) as f64 * scale) / 2.).round();
+            let y = i as f64 * line_height;
+            for ch in line.glyph_codes() {
+                let glyph = &font.glyphs[ch as usize];
+                for &(gx, gy) in &glyph.pixels {
+                    let (left, up) = (x + gx as f64 * scale, y + gy as f64 * scale);
+                    let (right, down) = (left + scale, up + scale);
+                    for row in up.floor() as usize..(down.ceil() as usize).min(rows) {
+                        let dy = down.min(row as f64 + 1.) - up.max(row as f64);
+                        for column in left.max(0.).floor() as usize
+                            ..(right.ceil().max(0.) as usize).min(columns)
+                        {
+                            let dx = right.min(column as f64 + 1.) - left.max(column as f64);
+                            cover[row * columns + column] += dx * dy;
+                        }
+                    }
+                }
+                x += glyph.advance as f64 * scale;
+            }
+        }
+        for (at, amount) in cover.into_iter().enumerate() {
+            if amount > 0. {
+                let (column, row) = (at % columns, at / columns);
+                canvas.blend(
+                    column as i32,
+                    top as i32 + row as i32,
+                    hud_color,
+                    amount.min(1.),
+                );
+            }
+        }
+    }
+    #[test]
+    fn messages_in_a_text_sized_buffer_match_the_canvas_wide_original() {
+        let font = Font {
+            height: 7,
+            glyphs: (0..256)
+                .map(|c| tore_formats::font::Glyph {
+                    advance: 4 + c % 3,
+                    pixels: (0..(c % 5))
+                        .map(|k| ((k * 2 + c) % 6, (k + c / 3) % 7))
+                        .collect(),
+                })
+                .collect(),
+        };
+        let texts = [
+            vec!["Hello there"],
+            vec![
+                "A",
+                "Bb Cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss tt uu vv ww xx yy zz 0123456789 and so on for a good while to wrap lines",
+            ],
+            vec![],
+            vec!["", "x"],
+        ];
+        for size in [[640, 480], [1280, 960], [1920, 1080], [300, 700]] {
+            for (n, messages) in texts.iter().enumerate() {
+                for raise in [0., 31.5] {
+                    let mut actual = crate::flight_canvas::FlightCanvas::default();
+                    actual.blank(size);
+                    for (i, p) in actual.pixels.chunks_exact_mut(4).enumerate() {
+                        p.copy_from_slice(&[(i % 251) as u8, 40, 90, [0, 255, 77][i % 3]]);
+                    }
+                    let mut expected = crate::flight_canvas::FlightCanvas::default();
+                    expected.blank(size);
+                    expected.pixels.clone_from(&actual.pixels);
+                    draw_messages(
+                        &mut actual,
+                        &font,
+                        [10, 255, 10],
+                        messages.iter().copied(),
+                        raise,
+                    );
+                    draw_messages_reference(
+                        &mut expected,
+                        &font,
+                        [10, 255, 10],
+                        messages.iter().copied(),
+                        raise,
+                    );
+                    assert!(
+                        actual.pixels == expected.pixels,
+                        "{size:?} text {n} raise {raise}"
+                    );
+                }
+            }
+        }
     }
     #[test]
     fn messages_can_sit_higher_and_fill_a_known_band() {
