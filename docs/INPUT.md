@@ -762,8 +762,11 @@ actuator audio follows actual state changes. Existing aircraft response and
 configuration remain separate. Camera look resolution cannot acquire flight-axis
 or throttle ownership.
 
-Native discovery/polling runs on a dedicated worker (4 ms service interval), with
-bounded messages to the app (8 ms wake deadline when idle). Linux delivers ordered
+Native discovery/polling runs on a dedicated worker (4 ms service interval with a
+controller connected and the game in flight, 16 ms with a controller in a menu,
+50 ms with none), with bounded messages to the app (polled every 8 ms in flight,
+the replay viewer and the controls screen, 16 ms in menus with a controller, 33 ms
+without). Linux delivers ordered
 evdev transitions at report boundaries; macOS generic devices use HID queues.
 Windows raw controllers and Apple GameController profiles sample native current
 state, so a complete pulse between samples can be missed. Once captured, short command press/release pairs survive until their
