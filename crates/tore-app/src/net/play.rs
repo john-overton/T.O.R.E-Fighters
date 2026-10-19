@@ -1010,6 +1010,8 @@ impl App {
             flight_music: &mut self.flight_music,
             rwr_warnings: &mut self.rwr_warnings,
             launch_watch: &mut self.launch_watch,
+            engine_sounds: &mut self.engine_sounds,
+            spatial: &mut self.spatial_steps,
         };
         let mut state = Seen {
             was_dead: flight.was_dead,
@@ -1462,20 +1464,15 @@ impl TickPresenter<'_> {
                 f64::from(listener_camera.pitch),
                 -f64::from(listener_camera.roll),
             );
-            let models: Vec<_> = self
-                .combat_view
-                .models
-                .iter()
-                .map(|model| &*model.kind)
-                .chain([&**self.hornet])
-                .map(|model| {
-                    (
-                        model.profile.id,
-                        crate::audio::EngineSounds::of(&model.profile),
-                    )
-                })
-                .collect();
-            let loops = crate::audio::loop_sources(frame.picture, &models);
+            let loops = crate::audio::loop_sources(
+                frame.picture,
+                self.engine_sounds.of(self
+                    .combat_view
+                    .models
+                    .iter()
+                    .map(|model| &*model.kind)
+                    .chain([&**self.hornet])),
+            );
             let sources = crate::audio::snapshot_sources(frame.picture);
             // The player's own release names the recording only: it fades
             // over the default distance. Another aircraft's launch names

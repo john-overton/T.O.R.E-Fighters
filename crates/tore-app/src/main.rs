@@ -364,6 +364,12 @@ struct App {
     rwr_warnings: rwr_tone::Warnings,
     /// The other aircraft's launches already sounded.
     launch_watch: audio::LaunchWatch,
+    /// Each loaded aircraft type's engine recordings, found once per set of
+    /// types for the tick presenter's loop sources.
+    engine_sounds: audio::EngineSoundsCache,
+    /// The spatial sound the ticks of this frame asked for, until the frame's
+    /// last tick is presented.
+    spatial_steps: Vec<audio::SpatialStep>,
     vapor: tore_sim::vapor::Vapor,
     /// Player blackout and redout, stepped with the simulation.
     g_effects: tore_sim::g_effects::GEffects,
@@ -656,6 +662,9 @@ struct TickPresenter<'a> {
     flight_music: &'a mut flight_music::Observer,
     rwr_warnings: &'a mut rwr_tone::Warnings,
     launch_watch: &'a mut audio::LaunchWatch,
+    engine_sounds: &'a mut audio::EngineSoundsCache,
+    /// The spatial sound the frame's ticks asked for so far.
+    spatial: &'a mut Vec<audio::SpatialStep>,
 }
 
 impl TickPresenter<'_> {
@@ -787,11 +796,13 @@ impl TickPresenter<'_> {
         }
         let frame = shared_tick_frame(self.world, input.seat, &out.cues, &shared);
         let (plane, flight) = (frame.plane.0, frame.flight);
-        let danger = tore_sim::ejection::assess(flight, |x, z| {
-            f64::from(self.world.terrain.height(x as f32, z as f32))
-        })
-        .is_some();
+        // The danger is the ejection warning's alone, so it is worked out
+        // only for a mixer that sounds it.
         if let Some(audio) = self.audio {
+            let danger = tore_sim::ejection::assess(flight, |x, z| {
+                f64::from(self.world.terrain.height(x as f32, z as f32))
+            })
+            .is_some();
             audio.ejection(frame.previous, flight, danger);
         }
         if let Some(audio) = self.audio {
@@ -813,14 +824,20 @@ impl TickPresenter<'_> {
             }
         }
         // Audio observes authoritative poses and consumes each emission once.
-        if let Some(audio) = self.audio {
-            let scene = flight_views::Scene::new(
-                &frame,
-                flight,
-                &self.world.combat,
-                self.world.ai_wings.as_ref(),
-                None,
-            );
+        if self.audio.is_some() {
+            // The listener's camera needs the other aircraft only for a view
+            // that looks at one.
+            let scene = if self.view_rig.needs_bodies(*self.flight_view) {
+                flight_views::Scene::new(
+                    &frame,
+                    flight,
+                    &self.world.combat,
+                    self.world.ai_wings.as_ref(),
+                    None,
+                )
+            } else {
+                flight_views::Scene::lean(&frame, flight, &self.world.combat)
+            };
             let listener_camera = self
                 .view_rig
                 .clone()
@@ -845,17 +862,19 @@ impl TickPresenter<'_> {
             // Every other aircraft's launches this tick (AI wings, enemies,
             // other players), heard from where they were fired.
             let others = self.launch_watch.fresh(&self.world.combat.state, plane);
-            audio.spatial_tick(
-                tore_sim::acoustics::Listener {
+            // The tick's own part of the spatial sound is kept for the end of
+            // the frame, when the sources and loops of its last tick are
+            // worked out once for all the ticks ([`audio::Audio::spatial_frame`]).
+            self.spatial.push(audio::SpatialStep {
+                listener: tore_sim::acoustics::Listener {
                     position: listener_camera.position,
                     right: basis.right,
                     view: *self.flight_view,
                     external: !self.view_rig.cockpit(*self.flight_view),
                     own: Some(plane),
                 },
-                &audio::spatial_sources(&self.world.combat.state, plane, flight),
-                &out.emissions,
-                &seat_releases(self.world, input.seat, &out.releases)
+                emissions: out.emissions.clone(),
+                launches: seat_releases(self.world, input.seat, &out.releases)
                     .into_iter()
                     .map(|(sound, weapon)| {
                         audio::Launch::new(sound, weapon.effects.max_sound_distance)
@@ -869,22 +888,11 @@ impl TickPresenter<'_> {
                         )
                         .with_gun(launch.gun)
                     }))
-                    .collect::<Vec<_>>(),
-                flight.position,
-                Some((flight.position, flight.velocity)),
-                &audio::loop_sources(
-                    frame.picture,
-                    &self
-                        .world
-                        .combat
-                        .dummy_types()
-                        .iter()
-                        .map(|kind| &**kind)
-                        .chain([&**self.hornet])
-                        .map(|model| (model.profile.id, audio::EngineSounds::of(&model.profile)))
-                        .collect::<Vec<_>>(),
-                ),
-            );
+                    .map(|launch| audio::OwnedLaunch::of(&launch))
+                    .collect(),
+                player_position: flight.position,
+                player_velocity: flight.velocity,
+            });
         }
         if let Some(recording) = &mut self.recorder {
             let releases = seat_releases(self.world, input.seat, &out.releases);
@@ -927,13 +935,17 @@ impl TickPresenter<'_> {
         let frame = shared_tick_frame(self.world, seat, &[], shared);
         let flight = frame.flight;
         let speed = flight.speed;
-        let scene = flight_views::Scene::new(
-            &frame,
-            flight,
-            &self.world.combat,
-            self.world.ai_wings.as_ref(),
-            None,
-        );
+        let scene = if self.view_rig.needs_bodies(*self.flight_view) {
+            flight_views::Scene::new(
+                &frame,
+                flight,
+                &self.world.combat,
+                self.world.ai_wings.as_ref(),
+                None,
+            )
+        } else {
+            flight_views::Scene::lean(&frame, flight, &self.world.combat)
+        };
         let weather_view = self
             .view_rig
             .camera(
@@ -4844,12 +4856,40 @@ impl ApplicationHandler for App {
                                 flight_music: &mut self.flight_music,
                                 rwr_warnings: &mut self.rwr_warnings,
                                 launch_watch: &mut self.launch_watch,
+                                engine_sounds: &mut self.engine_sounds,
+                                spatial: &mut self.spatial_steps,
                             }
                             .present(&input, &output);
                             if !presented {
                                 break;
                             }
                         }
+                        // The ticks' spatial sound, on the sources and loops
+                        // of the last of them.
+                        if let Some(audio) = &self.audio
+                            && !self.spatial_steps.is_empty()
+                        {
+                            let own = seat_cockpit(&self.world, SEAT);
+                            audio.spatial_frame(
+                                &self.spatial_steps,
+                                &audio::spatial_sources(
+                                    &self.world.combat.state,
+                                    own.plane.0,
+                                    &own.flight,
+                                ),
+                                &audio::loop_sources(
+                                    self.world.combat.render_snapshot(),
+                                    self.engine_sounds.of(self
+                                        .world
+                                        .combat
+                                        .dummy_types()
+                                        .iter()
+                                        .map(|kind| &**kind)
+                                        .chain([&*self.hornet])),
+                                ),
+                            );
+                        }
+                        self.spatial_steps.clear();
                         self.performance.ticks(steps, self.flight_ui.time_scale);
                         self.input.feedback_flush();
                         // In the sensor console the look keys and axes fly
@@ -15231,6 +15271,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         flight_music: Default::default(),
         rwr_warnings: Default::default(),
         launch_watch: Default::default(),
+        engine_sounds: Default::default(),
+        spatial_steps: Vec::new(),
         vapor: probe_vapor,
         g_effects: Default::default(),
         flight_view,
