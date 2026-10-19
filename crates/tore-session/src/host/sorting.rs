@@ -187,7 +187,10 @@ impl Tracker {
             .filter(|p| !self.known_projectiles.contains(&p.id))
             .collect();
         fresh.sort_by_key(|p| p.id);
-        self.known_projectiles = state.projectiles.iter().map(|p| p.id).collect();
+        // The set is refilled in place, keeping its room from tick to tick.
+        self.known_projectiles.clear();
+        self.known_projectiles
+            .extend(state.projectiles.iter().map(|p| p.id));
         // A surface gun's rounds of this tick, by unit and hardpoint.
         let mut surface_rounds: BTreeMap<(u32, usize), u32> = BTreeMap::new();
         for projectile in fresh {

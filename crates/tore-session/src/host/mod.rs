@@ -3261,9 +3261,23 @@ impl Host {
             })
             .map(|(id, peer)| (*id, peer.lobby.id))
             .collect();
+        // The lobby is built once and differs only in whom it is for: a
+        // send changes nothing it is built from.
+        let mut lobby: Option<Box<LobbyState>> = None;
         for (id, you) in to {
-            let message = Message::Lobby(Box::new(self.lobby(you)));
+            let state = match lobby.take() {
+                Some(mut state) => {
+                    state.you = you;
+                    state
+                }
+                None => Box::new(self.lobby(you)),
+            };
+            let message = Message::Lobby(state);
             self.send(id, &message);
+            let Message::Lobby(state) = message else {
+                unreachable!("the lobby message")
+            };
+            lobby = Some(state);
             if let Some(peer) = self.peers.get_mut(&id) {
                 peer.lobby_stale = false;
                 peer.lobby_sent = Some(now);

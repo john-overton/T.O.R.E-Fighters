@@ -601,10 +601,12 @@ impl SessionHost {
             self.events
                 .push_back(Event::Note(format!("send failed: {error}")));
         }
-        let master = self.listing.master_text();
+        // The master's text is written only when there is news to say.
+        let mut master: Option<String> = None;
         while let Some(event) = self.listing.poll_event() {
+            let master = master.get_or_insert_with(|| self.listing.master_text());
             self.events
-                .push_back(Event::Note(listing_text(event, &master)));
+                .push_back(Event::Note(listing_text(event, master)));
         }
     }
 }
