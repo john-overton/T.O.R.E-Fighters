@@ -33,7 +33,55 @@ pub(super) struct Placed {
     filtered: f32,
     pitch: f64,
     target_pitch: f64,
+    smoothing: Smoothing,
 }
+
+/// The smoothing coefficients of a [`Placed`] sound at one sample rate: they
+/// depend on the rate (and the treble filter's on the cutoff) alone, so they
+/// are worked out when either changes instead of at every sample, which is
+/// up to three `exp` per sample per voice. Each is the very expression the
+/// per-sample code evaluated, so the sound is the same bit for bit.
+#[derive(Clone, Copy)]
+struct Smoothing {
+    rate: f64,
+    /// Gains glide over about 50 ms.
+    glide: f32,
+    /// Pitch glides over 100 ms.
+    pitch: f64,
+    /// The treble filter for the cutoff whose bits are held, at `rate`.
+    filter: Option<(u32, f32)>,
+}
+impl Smoothing {
+    fn at(rate: f64) -> Self {
+        Self {
+            rate,
+            glide: 1. - (-1. / (0.05 * rate)).exp() as f32,
+            pitch: 1. - (-1. / (0.1 * rate)).exp(),
+            filter: None,
+        }
+    }
+    /// The one-pole filter coefficient for `cutoff` hertz.
+    fn alpha(&mut self, cutoff: f32) -> f32 {
+        let bits = cutoff.to_bits();
+        match self.filter {
+            Some((held, alpha)) if held == bits => alpha,
+            _ => {
+                let alpha =
+                    1. - (-std::f64::consts::TAU * f64::from(cutoff) / self.rate).exp() as f32;
+                self.filter = Some((bits, alpha));
+                alpha
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests only: sound is worked out the way it was before the
+    /// coefficients were cached, to hold the cached sound to it.
+    pub(super) static REFERENCE_MATH: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 impl Placed {
     /// Heard from inside the aircraft: centered, full and unfiltered.
     pub fn inside() -> Self {
@@ -44,6 +92,7 @@ impl Placed {
             filtered: 0.,
             pitch: 1.,
             target_pitch: 1.,
+            smoothing: Smoothing::at(f64::NAN),
         }
     }
     pub fn aim(&mut self, mix: Option<Mix>, pitch: f64, stereo: Stereo) {
@@ -69,6 +118,31 @@ impl Placed {
     /// One sample placed in stereo. Gains glide over about 50 ms, so a view
     /// change crossfades instead of stepping, and pitch over 100 ms.
     pub fn apply(&mut self, sample: f32, rate: f64) -> [f32; 2] {
+        #[cfg(test)]
+        if REFERENCE_MATH.get() {
+            return self.apply_reference(sample, rate);
+        }
+        if self.smoothing.rate != rate {
+            self.smoothing = Smoothing::at(rate);
+        }
+        let glide = self.smoothing.glide;
+        for (gain, target) in self.gain.iter_mut().zip(self.target) {
+            *gain += glide * (target - *gain);
+        }
+        self.pitch += self.smoothing.pitch * (self.target_pitch - self.pitch);
+        let value = if self.cutoff >= 12000. {
+            sample
+        } else {
+            let alpha = self.smoothing.alpha(self.cutoff);
+            self.filtered += alpha * (sample - self.filtered);
+            self.filtered
+        };
+        [value * self.gain[0], value * self.gain[1]]
+    }
+    /// [`Self::apply`] as it was, every coefficient worked out at every
+    /// sample (tests only).
+    #[cfg(test)]
+    fn apply_reference(&mut self, sample: f32, rate: f64) -> [f32; 2] {
         let glide = 1. - (-1. / (0.05 * rate)).exp() as f32;
         for (gain, target) in self.gain.iter_mut().zip(self.target) {
             *gain += glide * (target - *gain);
@@ -151,6 +225,7 @@ impl Scene {
         listener: Listener,
         listener_velocity: [f64; 3],
         sources: &[super::LoopSource],
+        engine: f32,
         enabled: bool,
     ) {
         for voice in self.loops.values_mut() {
@@ -160,12 +235,19 @@ impl Scene {
             let mut heard: Vec<_> = sources
                 .iter()
                 .map(|s| {
+                    // Other aircraft's engines follow the Engine level;
+                    // fires do not.
+                    let gain = if matches!(s.key.0, 1 | 2) {
+                        s.gain * engine
+                    } else {
+                        s.gain
+                    };
                     let mix = acoustics::loop_mix(
                         s.position,
                         listener,
                         s.reference,
                         s.maximum,
-                        f64::from(s.gain),
+                        f64::from(gain),
                     );
                     (mix, s)
                 })
@@ -573,7 +655,7 @@ mod tests {
                 external,
                 ..listener()
             };
-            scene.loops(&clips, l, [0.; 3], &[fire(x)], true);
+            scene.loops(&clips, l, [0.; 3], &[fire(x)], 1., true);
             let mut out = [0.; 2];
             for _ in 0..4000 {
                 out = scene.sample(8000.);
@@ -591,12 +673,63 @@ mod tests {
         assert!(beyond.loops.is_empty());
         // A fire that goes out fades, then its loop is dropped.
         let (mut scene, _) = level(true, 50.);
-        scene.loops(&clips, listener(), [0.; 3], &[], true);
+        scene.loops(&clips, listener(), [0.; 3], &[], 1., true);
         for _ in 0..8000 {
             scene.sample(8000.);
         }
-        scene.loops(&clips, listener(), [0.; 3], &[], true);
+        scene.loops(&clips, listener(), [0.; 3], &[], 1., true);
         assert!(scene.loops.is_empty());
+    }
+
+    /// The Engine level scales other aircraft's engines (kinds 1 and 2) and
+    /// not fires, as it did when the mixer scaled a copy of the sources.
+    #[test]
+    fn the_engine_level_scales_engines_and_not_fires() {
+        let clips = BTreeMap::from([(
+            "LOOP".to_string(),
+            Arc::new(Clip {
+                samples: (0..400).map(|i| (128 + (i % 40) * 3) as u8).collect(),
+                rate: 8000.,
+            }),
+        )]);
+        let source = |kind: u8, x: f64| super::super::LoopSource {
+            key: (kind, u64::from(kind) * 10),
+            clip: "LOOP".into(),
+            position: [x, 0., 100.],
+            velocity: [10., 0., 0.],
+            gain: 0.6,
+            reference: 100.,
+            maximum: 4000.,
+            pitch: 1.,
+        };
+        let sources = [
+            source(0, 300.),
+            source(1, 700.),
+            source(2, 1_100.),
+            source(3, 1_500.),
+        ];
+        let engine = 0.37f32;
+        let scaled: Vec<_> = sources
+            .iter()
+            .map(|s| super::super::LoopSource {
+                gain: if matches!(s.key.0, 1 | 2) {
+                    s.gain * engine
+                } else {
+                    s.gain
+                },
+                ..s.clone()
+            })
+            .collect();
+        let (mut by_level, mut by_copy) = (Scene::default(), Scene::default());
+        let l = Listener {
+            external: true,
+            ..listener()
+        };
+        by_level.loops(&clips, l, [0.; 3], &sources, engine, true);
+        by_copy.loops(&clips, l, [0.; 3], &scaled, 1., true);
+        for _ in 0..3000 {
+            assert_eq!(by_level.sample(8000.), by_copy.sample(8000.));
+        }
     }
 
     #[test]

@@ -1164,8 +1164,13 @@ impl Audio {
         if steps.is_empty() {
             return;
         }
+        // The launches each tick sounds, laid out before the lock is taken.
+        let launches: Vec<Vec<Launch>> = steps
+            .iter()
+            .map(|step| step.launches.iter().map(OwnedLaunch::launch).collect())
+            .collect();
         if let Ok(mut mixer) = self.mixer.lock() {
-            mixer.spatial_steps(&self.clips, steps, sources, loops);
+            mixer.spatial_steps(&self.clips, steps, &launches, sources, loops);
         }
     }
     pub fn controls(&self, before: &crate::flight::State, after: &crate::flight::State) {
@@ -1640,45 +1645,28 @@ impl Mixer {
             self.radio.extend(voices);
         }
     }
-    /// `loops` as the spatial scene hears them: other aircraft's engines
-    /// follow the Engine level; fires do not.
-    fn loops_heard(&self, loops: &[LoopSource]) -> Vec<LoopSource> {
-        let engine = self.volumes.engine;
-        loops
-            .iter()
-            .map(|l| LoopSource {
-                gain: if matches!(l.key.0, 1 | 2) {
-                    l.gain * engine
-                } else {
-                    l.gain
-                },
-                ..l.clone()
-            })
-            .collect()
-    }
     /// The ticks of [`Audio::spatial_frame`].
     fn spatial_steps(
         &mut self,
         clips: &BTreeMap<String, Arc<Clip>>,
         steps: &[SpatialStep],
+        launches: &[Vec<Launch>],
         sources: &[tore_sim::acoustics::Source],
         loops: &[LoopSource],
     ) {
         if self.flight_paused {
             return;
         }
-        let loops = self.loops_heard(loops);
-        for step in steps {
-            let launches: Vec<Launch> = step.launches.iter().map(OwnedLaunch::launch).collect();
+        for (step, launches) in steps.iter().zip(launches) {
             self.spatial_step(
                 clips,
                 step.listener,
                 sources,
                 &step.emissions,
-                &launches,
+                launches,
                 step.player_position,
                 Some((step.player_position, step.player_velocity)),
-                &loops,
+                loops,
             );
         }
     }
@@ -1699,7 +1687,6 @@ impl Mixer {
         if self.flight_paused {
             return;
         }
-        let loops = self.loops_heard(loops);
         self.spatial_step(
             clips,
             listener,
@@ -1708,12 +1695,11 @@ impl Mixer {
             releases,
             player_position,
             engine,
-            &loops,
+            loops,
         );
     }
-    /// [`Self::spatial_tick`] with `loops` already heard
-    /// ([`Self::loops_heard`]), which a caller stepping several ticks on one
-    /// set of loops works out once.
+    /// One tick of [`Self::spatial_tick`], for a caller stepping several
+    /// ticks on one set of loops and sources.
     #[allow(clippy::too_many_arguments)]
     fn spatial_step(
         &mut self,
@@ -1757,8 +1743,14 @@ impl Mixer {
             }
             None => self.engine_place.aim(None, 1., self.spatial.stereo),
         }
-        self.spatial
-            .loops(clips, listener, velocity, loops, enabled);
+        self.spatial.loops(
+            clips,
+            listener,
+            velocity,
+            loops,
+            self.volumes.engine,
+            enabled,
+        );
         if enabled {
             let sounds = one_sound_per_release(releases);
             for launch in sounds.iter().filter(|l| l.shooter.is_none()) {
@@ -2318,7 +2310,11 @@ mod tests {
                 &loops,
             );
         }
-        together.spatial_steps(&clips, &steps, &[], &loops);
+        let launches: Vec<Vec<Launch>> = steps
+            .iter()
+            .map(|step| step.launches.iter().map(OwnedLaunch::launch).collect())
+            .collect();
+        together.spatial_steps(&clips, &steps, &launches, &[], &loops);
         let mut heard = false;
         for sample in 0..6000 {
             let (a, b) = (one_by_one.frame(8000.), together.frame(8000.));
@@ -2330,6 +2326,183 @@ mod tests {
             one_by_one.spatial.voice_count(),
             together.spatial.voice_count()
         );
+    }
+
+    /// A looping or one-shot recording of a wave, so that filters and
+    /// pitch have something to do.
+    fn wave_clip(period: f64, length: usize, rate: f64) -> Arc<Clip> {
+        Arc::new(Clip {
+            samples: (0..length)
+                .map(|i| {
+                    let t = i as f64 / period * std::f64::consts::TAU;
+                    (128. + 90. * t.sin() + 30. * (t * 3.7).sin()) as u8
+                })
+                .collect(),
+            rate,
+        })
+    }
+
+    /// Renders a scripted scene for `seconds` at 48 kHz, the way a reel's
+    /// offline capture does (a mixer, no device), one simulation tick of
+    /// spatial sound for every 400 frames: a listener that flies and changes
+    /// views, engines and fires near and far that come and go, an explosion,
+    /// weapon launches (the player's and another aircraft's), a fly-by, the
+    /// engine and afterburner placed from outside, and the seeker tone
+    /// ramping, locking and stopping.
+    fn render_scripted_scene(seconds: usize) -> Vec<[f32; 2]> {
+        use tore_sim::acoustics::{Emission, Kind, Listener, Source, SourceId};
+        let clips: BTreeMap<String, Arc<Clip>> = [
+            ("&EXPL12.5K".to_string(), wave_clip(90., 24_000, 11_025.)),
+            ("&EXPL3.5K".to_string(), wave_clip(70., 9_000, 11_025.)),
+            ("&ASHVMIS.11K".to_string(), wave_clip(55., 30_000, 11_025.)),
+            ("&AIRPASS.11K".to_string(), wave_clip(40., 30_000, 11_025.)),
+            ("&MPASS.5K".to_string(), wave_clip(33., 20_000, 5_512.)),
+            ("FIRE".to_string(), wave_clip(61., 4_000, 11_025.)),
+            ("JET".to_string(), wave_clip(47., 6_000, 22_050.)),
+        ]
+        .into();
+        let mut mixer = test_mixer();
+        mixer.engine = Some(Voice {
+            clip: clips["JET"].clone(),
+            position: 0.,
+        });
+        mixer.burner = Some(Voice {
+            clip: clips["FIRE"].clone(),
+            position: 17.,
+        });
+        mixer.engine_gain = 0.7;
+        mixer.burner_gain = 0.4;
+        mixer.volumes.engine = 0.8;
+        let ticks = seconds * 120;
+        let mut out = Vec::with_capacity(ticks * 400);
+        for tick in 0..ticks {
+            let t = tick as f64;
+            let me = [t * 2.2, 3_000. + (t * 0.01).sin() * 400., t * 1.3];
+            let view = (tick / 90 % 4) as u8;
+            // Inside the cockpit in view 0, outside in the others.
+            let listener = Listener {
+                position: me,
+                right: [1., 0., 0.],
+                view,
+                external: view != 0,
+                own: Some(0),
+            };
+            // Fires and other aircraft's engines, closing and drawing off.
+            let loops: Vec<LoopSource> = (0..14u64)
+                .filter(|i| (tick as u64 + i * 37) % 700 > 90)
+                .map(|i| {
+                    let a = i as f64 * 0.9 + t * 0.002 * (1. + i as f64 * 0.1);
+                    let range = 300. + (i as f64) * 1_300. + (t * 0.8).sin() * 900.;
+                    LoopSource {
+                        key: (if i % 3 == 0 { 0 } else { 1 + (i % 2) as u8 }, i),
+                        clip: if i % 3 == 0 { "FIRE" } else { "JET" }.into(),
+                        position: [
+                            me[0] + a.cos() * range,
+                            me[1] - 200.,
+                            me[2] + a.sin() * range,
+                        ],
+                        velocity: [a.sin() * 400., 0., a.cos() * 400.],
+                        gain: 0.3 + 0.05 * i as f32,
+                        reference: ENGINE_REFERENCE_FT,
+                        maximum: ENGINE_MAXIMUM_FT,
+                        pitch: 1. + (i % 4) as f64 * 0.05,
+                    }
+                })
+                .collect();
+            let sources = [
+                Source {
+                    id: SourceId::Aircraft(3),
+                    position: [me[0] + 2_000. - t * 5., me[1], me[2] + 300.],
+                    velocity: [-600., 0., 0.],
+                },
+                Source {
+                    id: SourceId::Missile(4),
+                    position: [me[0] - 9_000. + t * 9., me[1] + 100., me[2] - 500.],
+                    velocity: [1_100., 0., 0.],
+                },
+            ];
+            let emissions = if tick == 150 || tick == 400 {
+                vec![Emission {
+                    kind: if tick == 150 {
+                        Kind::Explosion
+                    } else {
+                        Kind::Impact
+                    },
+                    position: [me[0] + 1_800., 0., me[2] + 900.],
+                    arrived: false,
+                    own: false,
+                }]
+            } else {
+                Vec::new()
+            };
+            let launches = match tick {
+                200 => vec![Launch::new("&ASHVMIS.11K", 7_000)],
+                260 => vec![Launch::by(
+                    9,
+                    [me[0] + 700., me[1], me[2] + 400.],
+                    "&ASHVMIS.11K",
+                    7_000,
+                )],
+                _ => Vec::new(),
+            };
+            // The seeker tone: ramps up, locks, drops, changes kind.
+            match tick {
+                60 => mixer.seeker.target = 1.,
+                180 => mixer.seeker.locked = true,
+                240 => mixer.seeker.radar = true,
+                300 => mixer.seeker.target = 0.,
+                380 => {
+                    mixer.seeker.locked = false;
+                    mixer.seeker.radar = false;
+                    mixer.seeker.ground = true;
+                    mixer.seeker.target = 0.5;
+                }
+                _ => {}
+            }
+            mixer.spatial_tick(
+                &clips,
+                listener,
+                &sources,
+                &emissions,
+                &launches,
+                me,
+                Some((me, [300., 0., 180.])),
+                &loops,
+            );
+            for _ in 0..400 {
+                out.push(mixer.frame(48_000.));
+            }
+        }
+        out
+    }
+
+    /// The offline mix of a scripted scene is the same, sample for sample,
+    /// whether the smoothing coefficients are cached per rate or worked out
+    /// at every sample as they were before, and the silent seeker tone
+    /// skips its waves.
+    #[test]
+    fn cached_smoothing_and_a_silent_seeker_render_the_pcm_the_uncached_math_did() {
+        spatial::REFERENCE_MATH.set(true);
+        let reference = render_scripted_scene(6);
+        spatial::REFERENCE_MATH.set(false);
+        let cached = render_scripted_scene(6);
+        assert_eq!(reference.len(), cached.len());
+        let heard = reference.iter().filter(|s| **s != [0.; 2]).count();
+        assert!(
+            heard > reference.len() / 2,
+            "{heard} of {} samples",
+            reference.len()
+        );
+        for (index, (a, b)) in reference.iter().zip(&cached).enumerate() {
+            // Equal as numbers: a tone at zero gain is +0.0 where its
+            // wave's sign once made it -0.0.
+            assert_eq!(a, b, "sample {index}");
+            for side in 0..2 {
+                if a[side] != 0. {
+                    assert_eq!(a[side].to_bits(), b[side].to_bits(), "sample {index}");
+                }
+            }
+        }
     }
 
     #[test]
