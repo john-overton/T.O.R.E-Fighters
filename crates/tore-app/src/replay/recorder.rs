@@ -55,7 +55,7 @@ use crate::{
 };
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{SyncSender, TrySendError};
+use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
 use std::thread::JoinHandle;
 use tore_formats::flight_model::departure::DepartureMode;
 use tore_replay::{
@@ -84,10 +84,20 @@ enum Message {
 /// The writer thread: it returns the finished recording's path.
 type WriterThread = JoinHandle<Result<PathBuf, String>>;
 
+/// Frames the recorder keeps emptied and ready, and the most the writer
+/// hands back at once. A tick builds in one of them, so its lists keep the
+/// room the last ticks grew them to.
+const SPARE_FRAMES: usize = 8;
+
 /// Starts the writer thread. It owns the file; when the game drops the
-/// recorder without finishing, the writer keeps its `.partial` file.
-fn spawn(writer: replay::Writer) -> std::io::Result<(SyncSender<Message>, WriterThread)> {
+/// recorder without finishing, the writer keeps its `.partial` file. Each
+/// frame it has written goes back emptied, through the receiver, for the
+/// recorder to build a later tick in.
+fn spawn(
+    writer: replay::Writer,
+) -> std::io::Result<(SyncSender<Message>, Receiver<Frame>, WriterThread)> {
     let (sender, receiver) = std::sync::mpsc::sync_channel(QUEUE_FRAMES);
+    let (give_back, returned) = std::sync::mpsc::sync_channel(SPARE_FRAMES);
     let thread = std::thread::Builder::new()
         .name("tore-recorder".into())
         .spawn(move || {
@@ -98,7 +108,14 @@ fn spawn(writer: replay::Writer) -> std::io::Result<(SyncSender<Message>, Writer
                     Message::Aircraft(info) => writer.register_aircraft(&info),
                     Message::Weapon(info) => writer.register_weapon(&info),
                     Message::Surface(info) => writer.register_surface_unit(&info),
-                    Message::Frame(frame) => writer.push(&frame),
+                    Message::Frame(frame) => {
+                        let mut frame = *frame;
+                        let result = writer.push(&frame);
+                        frame.clear();
+                        // Full, or the recorder gone: this one is dropped.
+                        let _ = give_back.try_send(frame);
+                        result
+                    }
                     Message::Finish(footer) => {
                         if refused > 0 {
                             log::info!("Recording: {refused} items were refused while writing");
@@ -115,7 +132,7 @@ fn spawn(writer: replay::Writer) -> std::io::Result<(SyncSender<Message>, Writer
             }
             Err("the recording was not finished; its .partial file keeps what was written".into())
         })?;
-    Ok((sender, thread))
+    Ok((sender, returned, thread))
 }
 
 /// Everything [`Recorder::begin`] reads for one tick.
@@ -354,6 +371,9 @@ pub struct Recorder {
     path: PathBuf,
     sender: Option<SyncSender<Message>>,
     thread: Option<WriterThread>,
+    /// Frames the writer has written and emptied, to build ticks in.
+    returned: Option<Receiver<Frame>>,
+    spare: Vec<Frame>,
     /// Messages the queue could not take, sent before the next frame.
     backlog: VecDeque<Message>,
     /// The frame being built between `begin` and `end`.
@@ -443,9 +463,10 @@ impl Recorder {
         let writer = replay::Writer::create(&path, header).map_err(|e| e.to_string())?;
         let partial = writer.partial_path().to_path_buf();
         let surface = writer.version() >= 3;
-        let (sender, thread) = spawn(writer).map_err(|e| e.to_string())?;
+        let (sender, returned, thread) = spawn(writer).map_err(|e| e.to_string())?;
         log::info!("Recording to {}", partial.display());
         let mut recorder = Self::with(path, sender, Some(thread), roster);
+        recorder.returned = Some(returned);
         recorder.surface_watch = surface::Watch::new(surface);
         Ok(recorder)
     }
@@ -470,6 +491,8 @@ impl Recorder {
             path,
             sender: Some(sender),
             thread,
+            returned: None,
+            spare: Vec::new(),
             backlog: VecDeque::new(),
             frame: None,
             held: None,
@@ -916,6 +939,18 @@ impl Recorder {
         self.weapon_id(weapon)
     }
 
+    /// An empty frame: one the writer has handed back when there is one.
+    fn fresh_frame(&mut self) -> Frame {
+        if let Some(returned) = &self.returned {
+            while let Ok(frame) = returned.try_recv() {
+                if self.spare.len() < SPARE_FRAMES {
+                    self.spare.push(frame);
+                }
+            }
+        }
+        self.spare.pop().unwrap_or_default()
+    }
+
     /// Records the tick. See the module documentation.
     pub fn begin(&mut self, tick: Tick<'_>) {
         // A frame left open, or one held from the last tick, goes first.
@@ -933,11 +968,9 @@ impl Recorder {
         }
         self.last_tick = Some(number);
         self.state_clock = Some(ground::impact_clock(&tick.combat.state));
-        let mut frame = Frame {
-            tick: number,
-            events: std::mem::take(&mut self.early),
-            ..Frame::default()
-        };
+        let mut frame = self.fresh_frame();
+        frame.tick = number;
+        frame.events = std::mem::take(&mut self.early);
         let targets = ById::new(
             &tick.combat.state.targets,
             |t| t.id,
@@ -1021,7 +1054,9 @@ impl Recorder {
         // map sorts; a repeated id keeps its last row, as inserting did.
         let mut shots: BTreeMap<u32, Shot> = laid.into_iter().collect();
         frame.debris = convert::debris_states(&snapshot.debris);
-        frame.escapees = snapshot.pilots.iter().map(convert::escapee_state).collect();
+        frame
+            .escapees
+            .extend(snapshot.pilots.iter().map(convert::escapee_state));
         frame.new_effects = self.effects.started(&snapshot.effects);
         for mark in &tick.combat.state.marks {
             if mark.serial >= self.marks {
@@ -1029,7 +1064,7 @@ impl Recorder {
                 self.marks = mark.serial + 1;
             }
         }
-        frame.new_puffs = new_puffs(tick.combat);
+        new_puffs(tick.combat, &mut frame.new_puffs);
         self.city_changes(tick.world, &mut frame);
 
         // The stores each aircraft carries (B3): its layout the first time,
@@ -2279,9 +2314,9 @@ fn flight_data(
 
 /// Smoke and contrail puffs released this tick: the newest puffs, which
 /// have not aged yet.
-fn new_puffs(combat: &combat::Combat) -> Vec<replay::PuffSpawn> {
+fn new_puffs(combat: &combat::Combat, out: &mut Vec<replay::PuffSpawn>) {
     use tore_sim::combat::smoke::Kind;
-    let mut out = Vec::new();
+    out.clear();
     for (layer, smoke) in [
         (replay::LAYER_SMOKE, &combat.state.smoke),
         (replay::LAYER_CONTRAILS, &combat.contrails),
@@ -2303,7 +2338,6 @@ fn new_puffs(combat: &combat::Combat) -> Vec<replay::PuffSpawn> {
         out[start..].reverse();
     }
     out.truncate(tore_replay::limits::MAX_PUFFS_PER_TICK);
-    out
 }
 
 /// An identity for an aircraft that appeared after the recording started.
@@ -2891,6 +2925,79 @@ mod tests {
         drop(recorder);
         let ticks = writer.join().unwrap();
         assert_eq!(ticks, (0..11).collect::<Vec<u64>>());
+    }
+
+    /// A cleared frame is the empty one, with the room it had.
+    #[test]
+    fn a_cleared_frame_is_an_empty_one_that_keeps_its_room() {
+        let mut frame = crate::replay::fixture::frame(300);
+        frame.checksum = Some(7);
+        frame.city_stood = true;
+        frame.city_fell.push([1, 2]);
+        frame.surface_hp.push((3, 4));
+        assert!(!frame.aircraft.is_empty());
+        let room = frame.aircraft.capacity();
+        frame.clear();
+        assert_eq!(frame, Frame::default());
+        assert_eq!(frame.aircraft.capacity(), room);
+    }
+
+    /// Records `ticks` ticks of a scripted scene into a real file, building
+    /// ticks in the frames the writer hands back or not, and reads the
+    /// recording back: the frames, and how many ticks reused one.
+    fn recorded(
+        dir: &crate::replay::tests::TempDir,
+        name: &str,
+        pooled: bool,
+    ) -> (Vec<Frame>, u32) {
+        let roster = [replay::AircraftInfo {
+            id: 0,
+            label: "You".into(),
+            human: true,
+            ..Default::default()
+        }];
+        let mut recorder = Recorder::start(
+            dir.path().join(format!("{name}.tore-replay")),
+            &replay::Header::default(),
+            &roster,
+        )
+        .unwrap();
+        recorder.wait_for_writer();
+        if !pooled {
+            recorder.returned = None;
+        }
+        let mut combat = fixture::combat(Vec::new(), Vec::new());
+        let player = fixture::player();
+        combat.restart_render(combat.own_id(), &player, None);
+        let snapshot = combat.render_snapshot().clone();
+        let mut ui = flight_ui::FlightUi::default();
+        let mut reused = 0;
+        for number in 0..400 {
+            reused += u32::from(!recorder.spare.is_empty());
+            tick(&mut recorder, &mut combat, &snapshot, number, &mut ui);
+            // Let the writer thread hand frames back, as it does between
+            // real ticks.
+            if number % 50 == 49 {
+                std::thread::sleep(std::time::Duration::from_millis(30));
+            }
+        }
+        let path = recorder.finish(&replay::Footer::default()).unwrap();
+        let recording = replay::Recording::open(path).unwrap();
+        let frames = recording.frames(0, 399).map(Result::unwrap).collect();
+        (frames, reused)
+    }
+
+    /// The writer hands written frames back and the recorder builds later
+    /// ticks in them: the recording is the one it makes without.
+    #[test]
+    fn building_ticks_in_the_frames_the_writer_hands_back_records_the_same_frames() {
+        let dir = crate::replay::tests::TempDir::new("recorder-pool");
+        let (pooled, reused) = recorded(&dir, "pooled", true);
+        let (plain, none) = recorded(&dir, "plain", false);
+        assert_eq!(none, 0);
+        assert!(reused > 100, "{reused} ticks found a frame handed back");
+        assert_eq!(pooled.len(), 400);
+        assert_eq!(pooled, plain);
     }
 
     #[test]
