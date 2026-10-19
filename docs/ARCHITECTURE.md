@@ -9655,11 +9655,48 @@ compared before and after):
   and its smooth target. A frame's spatial sound is
   one call: each tick keeps its own listener, emissions, launches and player
   (`audio::SpatialStep`) and `Audio::spatial_frame` steps them all on the
-  sources and loops of the frame's last tick, with one lock and one copy of the
-  loops. With one tick in a frame this is the sound it always was.
+  sources and loops of the frame's last tick, with one lock and no copy of the
+  loops (the Engine level is applied while they are heard, and the launches of
+  the frame's ticks are laid out before the lock is taken). With one tick in a
+  frame this is the sound it always was.
   What stays per tick is whatever carries state across ticks: the recorder, the
   cues, the weather presentations (a seeded step each tick), the music and
   warning tones, the vapor, and the propagation of sound.
+
+Replay playback and audio (optimization run S14; replay bytes, the pictures the
+viewer draws and the mixed sound are unchanged, each guarded by a test against
+the code it replaced):
+
+- The viewer's smoke and contrails (`replay::playback`, `SmokeTrack`) keep the
+  puffs alive at the tick drawn and, playing forward, add only those released
+  since (`Recording::spawns` over the ticks crossed, found by bisection in a
+  chunk's sparse spawn list) and drop the expired; the two layers are refilled
+  in place. Each puff's position, drift and age are worked out from its release
+  as before, so nothing accumulates. A seek, reverse play or a jump of a puff
+  lifetime or more reads the whole window again, and so does a tick the
+  recording cannot read.
+- The player's wing vapor (`VaporTrack`) is stepped through the poses crossed
+  when playing forward up to 250 ticks, instead of rebuilt from 250 poses at
+  every displayed tick. That is the same history because the commits follow one
+  schedule from launch and a history that has stepped over 250 ticks of it holds
+  only the last ten commits. It is used only when the history began on that
+  schedule (not at a recording's first pose, whose commits follow a schedule of
+  their own), every pose was found, and the poses' devices were all animated or
+  all not; anything else rebuilds. A pose is placed on the scratch state
+  without cloning it.
+- The recorder builds a tick in a frame the writer thread has written, emptied
+  (`Frame::clear`) and handed back through a small channel, so the aircraft,
+  round and puff lists keep their room. Frames the channel cannot take, or that
+  were dropped for a full queue, are simply freed. The file is the same.
+- A placed sound (other aircraft's engines, fires, the player's engine heard
+  from outside) works out its gain and pitch glide coefficients when the sample
+  rate changes and its treble filter's when the cutoff does, instead of up to
+  three `exp` per sample per voice. A seeker tone at zero gain skips its sines
+  (its output is then zero, `+0.0` where the wave's sign once made it `-0.0`).
+  The test `cached_smoothing_and_a_silent_seeker_render_the_pcm_the_uncached_math_did`
+  renders six seconds of a scripted scene at 48 kHz through the offline mixer
+  twice, once with the old per-sample math kept test-only, and compares the
+  samples.
 
 The tick presenter reuses an identical camera scene instead of rebuilding it
 between unchanged simulation inputs. GPU and window work never moves to workers.

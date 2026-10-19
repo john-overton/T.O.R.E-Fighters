@@ -1755,7 +1755,10 @@ under the playhead:
   A wreck's smoke starts on the tick the unit died, wherever the playhead was
   put.
 - Smoke and contrails rebuilt from their release ticks with the
-  simulation's lifetimes, rise and caps; effects from their start ticks.
+  simulation's lifetimes, rise and caps (playing forward, only the puffs
+  released since the last tick drawn are read and the expired dropped; a seek
+  or reverse play reads the whole window, and the result is the same); effects
+  from their start ticks.
   Craters and crash-site fires, which can last the whole mission, are read
   once when the recording opens and kept to the simulation's caps.
 - The city fill as the recording left it at the tick shown (nr-fx3): its
@@ -1778,7 +1781,8 @@ under the playhead:
 - The player's wing vapor, rebuilt by stepping the vapor history over the
   last 250 ticks of recorded poses from one of live flight's own commit
   ticks, so it matches live flight exactly once two seconds of history
-  exist. Recordings keep attitudes, not turn rates, so the roll rate that
+  exist (playing forward it is stepped on pose by pose instead, to the same
+  history; a seek or reverse play rebuilds it). Recordings keep attitudes, not turn rates, so the roll rate that
   shortens the vapor is worked out from the attitudes a tick apart
   (fitted).
 - The weather, re-stepped one tick at a time as live flight steps it, with
