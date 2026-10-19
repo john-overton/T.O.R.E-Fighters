@@ -300,6 +300,7 @@ impl Assets {
         let imported =
             tore_import::import_with_progress(source, destination, progress, &Self::decode)?;
         crate::vegetation::cache::configure(destination);
+        tore_world::city::cache::configure(destination);
         Ok(ImportOutcome {
             assets: imported.value,
             summary: imported.summary,
@@ -308,6 +309,7 @@ impl Assets {
     pub fn load(directory: &Path) -> AppResult<Self> {
         let loaded = tore_import::load_with(directory, &Self::decode)?;
         crate::vegetation::cache::configure(directory);
+        tore_world::city::cache::configure(directory);
         Ok(loaded.value)
     }
 }

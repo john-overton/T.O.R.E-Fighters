@@ -547,7 +547,7 @@ impl LightMap {
         }
     }
 
-    fn flags_in(tile: &PlacedTile, key: (i32, i32), x: i64, z: i64) -> u8 {
+    pub(crate) fn flags_in(tile: &PlacedTile, key: (i32, i32), x: i64, z: i64) -> u8 {
         let cell = TILE_FT / 4;
         let tu = ((x - i64::from(key.0) * cell) / TEXEL_FT).clamp(0, 255) as usize;
         let tv = ((z - i64::from(key.1) * cell) / TEXEL_FT).clamp(0, 255) as usize;

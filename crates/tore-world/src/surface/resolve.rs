@@ -155,7 +155,15 @@ pub struct Stream(u64);
 
 impl Stream {
     pub fn new(seed: u32, stem: &str, ordinal: u32, purpose: Purpose) -> Self {
-        let stem = tore_codec::fnv1a64(stem.to_ascii_uppercase().as_bytes());
+        Self::with_stem(seed, Self::stem(stem), ordinal, purpose)
+    }
+    /// The hash [`Stream::new`] takes of its stem, for a caller drawing many
+    /// streams from one stem.
+    pub fn stem(stem: &str) -> u64 {
+        tore_codec::fnv1a64(stem.to_ascii_uppercase().as_bytes())
+    }
+    /// [`Stream::new`] with the stem already hashed by [`Stream::stem`].
+    pub fn with_stem(seed: u32, stem: u64, ordinal: u32, purpose: Purpose) -> Self {
         let key = (u64::from(seed) << 32 | u64::from(ordinal))
             ^ stem.rotate_left(17)
             ^ (purpose as u64).wrapping_mul(0xD6E8_FEB8_6659_FD93);

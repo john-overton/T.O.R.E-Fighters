@@ -212,20 +212,153 @@ fn cities(
     (out, of)
 }
 
+/// Texels past a tile's edge a lot's tests read: the street window's seven
+/// and the roof run's eight.
+const APRON: i64 = 8;
+/// Texels a side of a [`Patch`].
+const SIDE: usize = mask::TEXELS + 2 * APRON as usize;
+/// Half the street window, texels.
+const STREET_REACH: i64 = 7;
+
+/// One city tile and an [`APRON`] of its neighbours, world oriented: every
+/// texel's flags as [`LightMap::flags_at`] reads them, and running sums of
+/// the three street flags. A lot's samples are then plain reads, and its 15
+/// by 15 street window four reads per flag instead of 225 map lookups. A
+/// sample anywhere inside a texel reads that texel's flags (city tiles start
+/// on whole texels), so this gives exactly what the map lookups gave.
+struct Patch {
+    /// The world texel (feet over [`mask::TEXEL_FT`]) of the first entry.
+    origin: [i64; 2],
+    flags: Vec<u8>,
+    /// Summed-area tables of the axis, D1 and D2 street flags, `SIDE + 1`
+    /// a row, with a zero first row and column.
+    sums: [Vec<u32>; 3],
+}
+
+impl Patch {
+    fn new(map: &LightMap, key: (i32, i32), tile: &mask::PlacedTile) -> Self {
+        let t = mask::TEXEL_FT;
+        let first = |k: i32| i64::from(k) * (mask::TILE_FT / 4) / t - APRON;
+        let origin = [first(key.0), first(key.1)];
+        let outside = map.lookup();
+        let mut flags = vec![0u8; SIDE * SIDE];
+        let inner = APRON as usize..APRON as usize + mask::TEXELS;
+        for r in 0..SIDE {
+            let z = (origin[1] + r as i64) * t + t / 2;
+            for c in 0..SIDE {
+                let x = (origin[0] + c as i64) * t + t / 2;
+                flags[r * SIDE + c] = if inner.contains(&r) && inner.contains(&c) {
+                    LightMap::flags_in(tile, key, x, z)
+                } else {
+                    outside(x, z)
+                };
+            }
+        }
+        let w = SIDE + 1;
+        let sums = [mask::STREET_AXIS, mask::STREET_D1, mask::STREET_D2].map(|bit| {
+            let mut sum = vec![0u32; w * w];
+            for r in 0..SIDE {
+                let mut row = 0;
+                for c in 0..SIDE {
+                    row += u32::from(flags[r * SIDE + c] & bit != 0);
+                    sum[(r + 1) * w + c + 1] = sum[r * w + c + 1] + row;
+                }
+            }
+            sum
+        });
+        Self {
+            origin,
+            flags,
+            sums,
+        }
+    }
+
+    /// The patch column and row of world point `x`, `z`.
+    fn cell(&self, x: i64, z: i64) -> (usize, usize) {
+        let c = x.div_euclid(mask::TEXEL_FT) - self.origin[0];
+        let r = z.div_euclid(mask::TEXEL_FT) - self.origin[1];
+        debug_assert!((0..SIDE as i64).contains(&c) && (0..SIDE as i64).contains(&r));
+        (c as usize, r as usize)
+    }
+
+    fn at(&self, x: i64, z: i64) -> u8 {
+        let (c, r) = self.cell(x, z);
+        self.flags[r * SIDE + c]
+    }
+
+    /// The axis, D1 and D2 street texels among the 15 by 15 round the texel
+    /// under `x`, `z`.
+    fn streets(&self, x: i64, z: i64) -> [i32; 3] {
+        let (c, r) = self.cell(x, z);
+        let w = SIDE + 1;
+        let reach = STREET_REACH as usize;
+        let (c0, c1, r0, r1) = (c - reach, c + reach + 1, r - reach, r + reach + 1);
+        self.sums
+            .each_ref()
+            .map(|s| (s[r1 * w + c1] + s[r0 * w + c0] - s[r0 * w + c1] - s[r1 * w + c0]) as i32)
+    }
+}
+
+/// The keep-outs near each 4,096 ft square, so a lot tests only those that
+/// can reach it. A keep-out reaches a circle of radius `r` only where its
+/// box, clearance and `r` reach in the box's frame; the integer turn scales
+/// a distance by at least [`trig::ONE`] over the square root of two (checked
+/// for every heading in the tests), so nothing past twice that reach in
+/// either world axis can pass. `any` does not depend on order, so testing
+/// the near ones gives what testing them all gave.
+struct Keepouts<'a> {
+    all: &'a [Keepout],
+    near: BTreeMap<(i64, i64), Vec<u32>>,
+}
+
+impl<'a> Keepouts<'a> {
+    const CELL: i64 = 4_096;
+
+    /// `radius` is the largest the lots ask about.
+    fn new(all: &'a [Keepout], radius: i64) -> Self {
+        let mut near = BTreeMap::<(i64, i64), Vec<u32>>::new();
+        for (n, k) in all.iter().enumerate() {
+            let reach = 2 * (k.half[0].max(k.half[1]) + k.clearance + radius) + 2;
+            let lo = [k.center[0] - reach, k.center[1] - reach];
+            let hi = [k.center[0] + reach, k.center[1] + reach];
+            for cz in lo[1].div_euclid(Self::CELL)..=hi[1].div_euclid(Self::CELL) {
+                for cx in lo[0].div_euclid(Self::CELL)..=hi[0].div_euclid(Self::CELL) {
+                    near.entry((cx, cz)).or_default().push(n as u32);
+                }
+            }
+        }
+        Self { all, near }
+    }
+
+    fn reach(&self, point: [i64; 2], radius: i64) -> bool {
+        let cell = (
+            point[0].div_euclid(Self::CELL),
+            point[1].div_euclid(Self::CELL),
+        );
+        self.near.get(&cell).is_some_and(|list| {
+            list.iter()
+                .any(|&n| self.all[n as usize].reaches(point, radius))
+        })
+    }
+}
+
 fn lots(map: &LightMap, city_of: &BTreeMap<(i32, i32), usize>, keepouts: &[Keepout]) -> Vec<Lot> {
-    let cell = mask::TILE_FT / 4;
     let t = mask::TEXEL_FT;
-    let flags_at = map.lookup();
+    let keepouts = Keepouts::new(keepouts, BLOCK_FT / CORE_LOTS / 2);
     let mut out = Vec::new();
     let mut ordinal = 0u32;
     // The 204.8 ft grid's taken cells, which house lots keep off.
     let big_cell = |v: i64| (v * CORE_LOTS).div_euclid(BLOCK_FT);
-    let mut big_lots = std::collections::BTreeSet::<(i64, i64)>::new();
+    // Only asked whether it holds a cell, never walked, so its order
+    // does not matter.
+    let mut big_lots = std::collections::HashSet::<(i64, i64)>::new();
     for houses in [false, true] {
         let k = if houses { HOUSE_LOTS } else { CORE_LOTS };
         let pitch = BLOCK_FT / k;
         let step = if houses { t } else { BLOCK_FT / (3 * k) };
-        for &key in map.tiles.keys() {
+        for (&key, tile) in &map.tiles {
+            let patch = Patch::new(map, key, tile);
+            let cell = mask::TILE_FT / 4;
             let origin = [i64::from(key.0) * cell, i64::from(key.1) * cell];
             for bz in 0..mask::TILE_FT / BLOCK_FT {
                 for bx in 0..mask::TILE_FT / BLOCK_FT {
@@ -234,13 +367,13 @@ fn lots(map: &LightMap, city_of: &BTreeMap<(i32, i32), usize>, keepouts: &[Keepo
                         for i in 0..k {
                             let x = o[0] + (2 * i + 1) * BLOCK_FT / (2 * k);
                             let z = o[1] + (2 * j + 1) * BLOCK_FT / (2 * k);
-                            if flags_at(x, z) & mask::SITE == 0 {
+                            if patch.at(x, z) & mask::SITE == 0 {
                                 continue;
                             }
                             let (mut hits, mut solid) = (0, 0);
                             for sz in -1..=1 {
                                 for sx in -1..=1 {
-                                    let f = flags_at(x + sx * step, z + sz * step);
+                                    let f = patch.at(x + sx * step, z + sz * step);
                                     hits += u32::from(f & mask::SITE != 0);
                                     solid += u32::from(f & mask::SOLID != 0);
                                 }
@@ -256,7 +389,7 @@ fn lots(map: &LightMap, city_of: &BTreeMap<(i32, i32), usize>, keepouts: &[Keepo
                             } else {
                                 core || hits >= ROOF_HITS
                             };
-                            if !pass || keepouts.iter().any(|k| k.reaches([x, z], pitch / 2)) {
+                            if !pass || keepouts.reach([x, z], pitch / 2) {
                                 continue;
                             }
                             if !houses {
@@ -268,7 +401,7 @@ fn lots(map: &LightMap, city_of: &BTreeMap<(i32, i32), usize>, keepouts: &[Keepo
                                 for s in [-1, 1] {
                                     for step in 1..=8 {
                                         let f =
-                                            flags_at(x + s * step * dx * t, z + s * step * dz * t);
+                                            patch.at(x + s * step * dx * t, z + s * step * dz * t);
                                         if f & mask::SITE == 0 {
                                             break;
                                         }
@@ -279,15 +412,7 @@ fn lots(map: &LightMap, city_of: &BTreeMap<(i32, i32), usize>, keepouts: &[Keepo
                             };
                             // Streets around the lot: along the axes or a
                             // diagonal.
-                            let (mut axis, mut d1, mut d2) = (0, 0, 0);
-                            for wz in -7..=7 {
-                                for wx in -7..=7 {
-                                    let f = flags_at(x + wx * t, z + wz * t);
-                                    axis += i32::from(f & mask::STREET_AXIS != 0);
-                                    d1 += i32::from(f & mask::STREET_D1 != 0);
-                                    d2 += i32::from(f & mask::STREET_D2 != 0);
-                                }
-                            }
+                            let [axis, d1, d2] = patch.streets(x, z);
                             // D1 runs east and south in the picture: a line
                             // at bearing 135; D2 at bearing 45.
                             let diagonal = (d1 + d2 > axis && d1.max(d2) >= 8)
@@ -397,75 +522,94 @@ pub fn place(
         cities[lot.city].candidates += 1;
     }
     let stem = format!("CITYFILL:{}", layout.trim_end_matches(".MM"));
+    let stem_hash = Stream::stem(&stem);
     if lots.len() > cap {
         let share = shares(&cities, cap);
-        let key = |lot: &Lot| {
-            let city = &cities[lot.city];
-            let rank = if lot.house {
-                // A fixed shuffle: thinned houses stay spread out.
-                Stream::new(0, &stem, lot.ordinal, Purpose::CityFill).next_u64() >> 1
-            } else {
-                let d = trig::isqrt(
-                    ((lot.x - city.center[0]).pow(2) + (lot.z - city.center[1]).pow(2)) as u128,
-                ) as u64;
-                d * 1_000 / city.radius as u64
-            };
-            (lot.city, lot.house, rank, lot.ordinal)
-        };
-        lots.sort_by_key(key);
+        // Each lot's key once (a house's rank is a draw), not once per
+        // comparison. The ordinal makes every key distinct, so any sort
+        // orders them as the stable sort by key did.
+        let mut keyed: Vec<((usize, bool, u64, u32), u32)> = lots
+            .iter()
+            .enumerate()
+            .map(|(n, lot)| {
+                let city = &cities[lot.city];
+                let rank = if lot.house {
+                    // A fixed shuffle: thinned houses stay spread out.
+                    Stream::with_stem(0, stem_hash, lot.ordinal, Purpose::CityFill).next_u64() >> 1
+                } else {
+                    let d = trig::isqrt(
+                        ((lot.x - city.center[0]).pow(2) + (lot.z - city.center[1]).pow(2)) as u128,
+                    ) as u64;
+                    d * 1_000 / city.radius as u64
+                };
+                ((lot.city, lot.house, rank, lot.ordinal), n as u32)
+            })
+            .collect();
+        keyed.sort_unstable_by_key(|k| k.0);
         let mut taken = vec![0usize; cities.len()];
-        lots.retain(|lot| {
-            taken[lot.city] += 1;
-            taken[lot.city] <= share[lot.city]
+        keyed.retain(|&((city, ..), _)| {
+            taken[city] += 1;
+            taken[city] <= share[city]
         });
-        lots.sort_by_key(|lot| lot.ordinal);
+        // Back in lot order: the lots are in ordinal order already.
+        let mut kept: Vec<u32> = keyed.into_iter().map(|(_, n)| n).collect();
+        kept.sort_unstable();
+        lots = kept.into_iter().map(|n| lots[n as usize]).collect();
     }
-    let variety = format!("{stem}:VARIETY");
+    let variety = Stream::stem(&format!("{stem}:VARIETY"));
+    // What a lot may build depends only on its city, its kind, whether it
+    // is downtown and its pitch (one per kind): each such list is made once.
+    let mut menus = BTreeMap::<(usize, bool, bool, bool), Vec<(Vec<usize>, u64)>>::new();
     let mut out = Vec::with_capacity(lots.len());
     for lot in &lots {
-        let mut stream = Stream::new(0, &stem, lot.ordinal, Purpose::CityFill);
+        let mut stream = Stream::with_stem(0, stem_hash, lot.ordinal, Purpose::CityFill);
         let fit = lot.pitch / 2 - LOT_MARGIN_FT;
-        let min_side = if lot.core { CORE_MIN_SIDE_FT } else { 0 };
-        let fits = |class: Class| -> Vec<usize> {
-            kit.pieces
-                .iter()
-                .enumerate()
-                .filter(|(_, p)| {
-                    p.class == class
-                        && radius(p.half) <= fit
-                        && 2 * p.half[0].min(p.half[1]) >= min_side
-                })
-                .map(|(i, _)| i)
-                .collect()
-        };
         let city = &cities[lot.city];
         let d = trig::isqrt(
             ((lot.x - city.center[0]).pow(2) + (lot.z - city.center[1]).pow(2)) as u128,
         ) as i64;
         let downtown = d * 1_000 / city.radius < DOWNTOWN;
-        // Per-city variety: each city builds its towers and apartments from
-        // its own seeded half of the kit's, so cities on the same art differ.
-        let own = |class: Class, pieces: Vec<usize>| -> Vec<usize> {
-            if !matches!(class, Class::Tower | Class::Apartment) {
-                return pieces;
-            }
-            let kept: Vec<usize> = pieces
-                .iter()
-                .copied()
-                .filter(|&p| {
-                    let key = (lot.city as u32).wrapping_mul(1_000_003) ^ p as u32;
-                    Stream::new(0, &variety, key, Purpose::CityFill)
-                        .next_u64()
-                        .is_multiple_of(2)
-                })
-                .collect();
-            if kept.is_empty() { pieces } else { kept }
-        };
-        let choices: Vec<(Vec<usize>, u64)> = weights(lot, downtown)
-            .iter()
-            .map(|&(class, w)| (own(class, fits(class)), w))
-            .filter(|(pieces, _)| !pieces.is_empty())
-            .collect();
+        let choices = menus
+            .entry((lot.city, lot.core, downtown, lot.house))
+            .or_insert_with(|| {
+                let min_side = if lot.core { CORE_MIN_SIDE_FT } else { 0 };
+                let fits = |class: Class| -> Vec<usize> {
+                    kit.pieces
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, p)| {
+                            p.class == class
+                                && radius(p.half) <= fit
+                                && 2 * p.half[0].min(p.half[1]) >= min_side
+                        })
+                        .map(|(i, _)| i)
+                        .collect()
+                };
+                // Per-city variety: each city builds its towers and
+                // apartments from its own seeded half of the kit's, so
+                // cities on the same art differ.
+                let own = |class: Class, pieces: Vec<usize>| -> Vec<usize> {
+                    if !matches!(class, Class::Tower | Class::Apartment) {
+                        return pieces;
+                    }
+                    let kept: Vec<usize> = pieces
+                        .iter()
+                        .copied()
+                        .filter(|&p| {
+                            let key = (lot.city as u32).wrapping_mul(1_000_003) ^ p as u32;
+                            Stream::with_stem(0, variety, key, Purpose::CityFill)
+                                .next_u64()
+                                .is_multiple_of(2)
+                        })
+                        .collect();
+                    if kept.is_empty() { pieces } else { kept }
+                };
+                weights(lot, downtown)
+                    .iter()
+                    .map(|&(class, w)| (own(class, fits(class)), w))
+                    .filter(|(pieces, _)| !pieces.is_empty())
+                    .collect()
+            });
         let total: u64 = choices.iter().map(|c| c.1).sum();
         if total == 0 {
             continue;
@@ -628,6 +772,198 @@ mod tests {
             let f = map.flags_at(i64::from(i.x), i64::from(i.z));
             assert_eq!(f & mask::STREET, 0);
             assert!((0..mask::TILE_FT).contains(&i64::from(i.x)));
+        }
+    }
+
+    /// A small fixed generator for the exactness tests.
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = self.0;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^ (z >> 31)
+        }
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+    }
+
+    /// A city picture of 8 by 8 texel patches: light roofs, dark ground,
+    /// light and dark street lines (along the axes and the diagonals),
+    /// painted house dots, parks and water.
+    fn picture(rng: &mut Rng) -> Vec<u8> {
+        let n = mask::TEXELS;
+        let mut p = vec![206u8; n * n];
+        for br in 0..n / 8 {
+            for bc in 0..n / 8 {
+                let kind = rng.below(9);
+                for r in br * 8..br * 8 + 8 {
+                    for c in bc * 8..bc * 8 + 8 {
+                        let (lr, lc) = (r % 8, c % 8);
+                        p[r * n + c] = match kind {
+                            0 | 1 => 199,
+                            2 if lr == 3 => 201,
+                            3 if lc == 4 || lc == 5 => 205,
+                            4 if lr == lc => 201,
+                            5 if lr + lc == 7 => 206,
+                            6 if (lr + lc) % 2 == 0 => 200,
+                            7 => 194,
+                            8 if lr < 4 => 255,
+                            _ => 206,
+                        };
+                    }
+                }
+            }
+        }
+        // Long streets right across, so runs reach their minimum.
+        for _ in 0..6 {
+            let at = rng.below(n as u64) as usize;
+            for c in 0..n {
+                p[at * n + c] = 201;
+            }
+            let at = rng.below(n as u64) as usize;
+            for r in 0..n {
+                p[r * n + at] = 204;
+            }
+        }
+        p
+    }
+
+    /// A theater of touching and separate city tiles in every quarter turn,
+    /// classified pictures and raw random flags, some tiles sharing a mask.
+    fn random_map(rng: &mut Rng) -> LightMap {
+        let classes = mask::Classes::ukraine();
+        let shared = Arc::new(mask::TileMask::classify(&picture(rng), &classes));
+        let mut map = LightMap::default();
+        for (n, key) in [(0, 0), (4, 0), (0, 4), (4, 4), (12, -4), (-8, 8), (16, 16)]
+            .into_iter()
+            .enumerate()
+        {
+            let mask = match n % 3 {
+                0 => Arc::clone(&shared),
+                1 => Arc::new(mask::TileMask::classify(&picture(rng), &classes)),
+                _ => Arc::new(mask::TileMask {
+                    flags: (0..mask::TEXELS * mask::TEXELS)
+                        .map(|_| {
+                            let f = rng.below(128) as u8;
+                            // Mostly sites, so lots pass.
+                            if rng.below(3) == 0 {
+                                f
+                            } else {
+                                f | mask::SITE | mask::SOLID
+                            }
+                        })
+                        .collect(),
+                }),
+            };
+            map.tiles.insert(
+                key,
+                mask::PlacedTile {
+                    texture: format!("T{n}.PIC"),
+                    rotation: rng.below(4) as u8,
+                    mask,
+                },
+            );
+        }
+        map
+    }
+
+    fn random_kit(rng: &mut Rng) -> Kit {
+        let classes = [
+            Class::House,
+            Class::Industrial,
+            Class::LowRise,
+            Class::Apartment,
+            Class::Tower,
+        ];
+        Kit {
+            pieces: (0..24)
+                .map(|n| {
+                    piece(
+                        [12 + rng.below(70) as i64, 12 + rng.below(70) as i64],
+                        20 + rng.below(300) as i64,
+                        classes[n % 5],
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    /// The reworked placement gives exactly what the old one gave: every
+    /// building, every city and the candidate count, with and without the
+    /// budget thinning, keep-outs at any heading, and named placements.
+    #[test]
+    fn the_placement_is_the_one_it_was_before_s12() {
+        for seed in 0..6 {
+            let mut rng = Rng(seed);
+            let (map, kit) = (random_map(&mut rng), random_kit(&mut rng));
+            let keepouts: Vec<Keepout> = (0..40)
+                .map(|_| Keepout {
+                    center: [
+                        rng.below(6 * mask::TILE_FT as u64) as i64 - 2 * mask::TILE_FT,
+                        rng.below(6 * mask::TILE_FT as u64) as i64 - 2 * mask::TILE_FT,
+                    ],
+                    half: [rng.below(3_000) as i64, rng.below(600) as i64],
+                    heading: rng.below(360) as i32,
+                    clearance: [OBJECT_CLEARANCE_FT, RUNWAY_CLEARANCE_FT][rng.below(2) as usize],
+                })
+                .collect();
+            let names = vec![
+                ([10_000, 10_000], "Alpha".to_owned()),
+                ([40_000, 40_000], "Alpha".to_owned()),
+                ([500_000, 0], "Far".to_owned()),
+            ];
+            let full = place(&map, &kit, "TEST.MM", &keepouts, &names, MAX_INSTANCES);
+            let lots = full.2;
+            assert!(
+                full.1.len() > 1_000,
+                "seed {seed}: {} buildings",
+                full.1.len()
+            );
+            for cap in [MAX_INSTANCES, lots, lots - 1, lots / 2, lots / 7, 100, 0] {
+                let new = place(&map, &kit, "TEST.MM", &keepouts, &names, cap);
+                let old = super::super::fill_reference::place(
+                    &map, &kit, "TEST.MM", &keepouts, &names, cap,
+                );
+                assert_eq!(new, old, "seed {seed} cap {cap}");
+            }
+        }
+    }
+
+    /// The keep-out index finds every keep-out a lot reaches.
+    #[test]
+    fn the_keepout_index_misses_nothing() {
+        // The integer turn never shrinks a distance below a half.
+        for d in 0..360 {
+            let (s, c) = (trig::sin(d), trig::cos(d));
+            assert!(2 * (s * s + c * c) >= trig::ONE * trig::ONE, "{d}");
+        }
+        let mut rng = Rng(9);
+        let keepouts: Vec<Keepout> = (0..200)
+            .map(|_| Keepout {
+                center: [
+                    rng.below(40_000) as i64 - 20_000,
+                    rng.below(40_000) as i64 - 20_000,
+                ],
+                half: [rng.below(2_000) as i64, rng.below(2_000) as i64],
+                heading: rng.below(360) as i32,
+                clearance: rng.below(400) as i64,
+            })
+            .collect();
+        let index = Keepouts::new(&keepouts, 102);
+        for _ in 0..20_000 {
+            let point = [
+                rng.below(50_000) as i64 - 25_000,
+                rng.below(50_000) as i64 - 25_000,
+            ];
+            let r = [64, 102][rng.below(2) as usize];
+            assert_eq!(
+                index.reach(point, r),
+                keepouts.iter().any(|k| k.reaches(point, r)),
+                "{point:?} {r}"
+            );
         }
     }
 

@@ -149,6 +149,8 @@ pub fn prepare(options: &Options, data_dir: &Path) -> Result<Prepared, String> {
     let config = load_config(options, data_dir)?;
     let mut resources = load_resources(data_dir)?;
     add_source(data_dir, &mut resources);
+    // City layouts placed once are read back on the next start.
+    tore_world::city::cache::configure(data_dir);
     if config.rotation.is_some() {
         let mut rotation = crate::rotation::Rotation::read(&config)?;
         let seed = std::time::SystemTime::now()

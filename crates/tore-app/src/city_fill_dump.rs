@@ -216,6 +216,50 @@ pub fn fires() -> AppResult<()> {
     Ok(())
 }
 
+/// `--city-layout-digest [THEATER ...]` (optimization S12): per theater
+/// (every one by default), builds the mission terrain with the fill as a
+/// launch does and prints one line: the theater, the building and candidate
+/// counts, the layout's full digest
+/// ([`tore_world::city::Layout::full_digest`]), the fill's ground heights
+/// and hidden set digest, and the wall time of the terrain build. Each
+/// theater builds once per process, so the in-process layout memo never
+/// answers; the on-disk layout cache does unless `TORE_CITY_CACHE=0`.
+pub fn digests() -> AppResult<()> {
+    let wanted: Vec<String> = std::env::args().skip(2).collect();
+    let assets = crate::reel::load_assets()?;
+    let resources = assets.theater_resources;
+    for theater in tore_formats::quick_template::tables::THEATERS {
+        if !wanted.is_empty() && !wanted.iter().any(|w| w.eq_ignore_ascii_case(theater)) {
+            continue;
+        }
+        let started = Instant::now();
+        let world = Terrain::for_mission(&resources, theater, Some(0), &overrides(true)?)?;
+        let elapsed = started.elapsed();
+        let Some(fill) = world.city_fill.as_ref() else {
+            println!(
+                "{theater} instances=0 time_ms={:.1}",
+                elapsed.as_secs_f64() * 1000.
+            );
+            continue;
+        };
+        let mut placed = tore_codec::Fnv1a64::new();
+        for (base, hidden) in fill.base.iter().zip(&fill.hidden) {
+            placed.update(&base.to_bits().to_le_bytes());
+            placed.update(&[u8::from(*hidden)]);
+        }
+        println!(
+            "{theater} instances={} candidates={} layout={:016x} short={:016x} ground={:016x} time_ms={:.1}",
+            fill.layout.instances.len(),
+            fill.layout.candidates,
+            fill.layout.full_digest(),
+            fill.layout.digest(),
+            placed.finish(),
+            elapsed.as_secs_f64() * 1000.
+        );
+    }
+    Ok(())
+}
+
 /// `--city-fill-survey [THEATER ...]`: per theater, the reference palette's
 /// city-relevant colours and, per ground picture, the shares the classifier
 /// could use, and whether a retail city cluster stands on it.

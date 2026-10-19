@@ -83,6 +83,12 @@ changes it), so on a machine that already has the game imported the server
 needs no import at all. Loading prunes older import generations in that folder,
 as the game does ([import cache](spec/import-cache.md)).
 
+The server keeps each theater's city fill layout in `city-cache/` in the data
+folder, shared with the game, so after the first start on a theater the city
+loads in a fraction of a second instead of up to about two seconds. The files
+are disposable: delete the folder at any time, or set `TORE_CITY_CACHE=0` to
+skip it ([layout cache](ARCHITECTURE.md#exploratory-vegetation-rendering)).
+
 ## Running it
 
 ```sh
