@@ -507,6 +507,7 @@ fn darken(canvas: &mut FlightCanvas, (left, top, right, bottom): (f64, f64, f64,
     if a == 0 {
         return;
     }
+    canvas.touch_rows(y0 as usize, y1 as usize);
     for y in y0..y1 {
         let row = (y * w) as usize * 4;
         for pixel in canvas.pixels[row + x0 as usize * 4..row + x1 as usize * 4].chunks_exact_mut(4)
@@ -787,8 +788,7 @@ mod tests {
 
     fn canvas() -> FlightCanvas {
         let mut canvas = FlightCanvas::default();
-        canvas.size = [1280, 960];
-        canvas.pixels = vec![0; 1280 * 960 * 4];
+        canvas.blank([1280, 960]);
         canvas
     }
 
@@ -814,6 +814,7 @@ mod tests {
         chat.system("No one hears you.", t0);
         let mut c = canvas();
         chat.draw(&mut c, &font, t0 + Duration::from_secs(1), Layout::Small);
+        c.assert_drawn_rows_noted();
         let drawn = colours_drawn(&c);
         for want in [tone::OWN_SIDE, tone::ALL, tone::ENEMY, tone::SYSTEM] {
             assert!(drawn.contains(&want), "{want:?} in {drawn:?}");

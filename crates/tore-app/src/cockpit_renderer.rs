@@ -10,6 +10,9 @@ pub struct CockpitRenderer {
     pipeline: wgpu::RenderPipeline,
     bind: Option<wgpu::BindGroup>,
     hud: wgpu::Texture,
+    /// What the HUD texture holds, so an update sends only the rows that
+    /// changed (the HUD fills a fraction of its 640 by 480 layer).
+    hud_held: Option<Vec<u8>>,
     palette: wgpu::Texture,
     /// The palette last uploaded, so an unchanged one is not sent again.
     palette_uploaded: Option<[[u8; 3]; 256]>,
@@ -52,6 +55,57 @@ fn upload(queue: &wgpu::Queue, texture: &wgpu::Texture, pixels: &[u8]) {
         },
         texture.size(),
     );
+}
+
+/// Uploads the rows of `pixels` that differ from `held`, which is what the
+/// texture holds (nothing known: the whole layer), and brings `held` up to
+/// date.
+fn upload_changed_rows(
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    held: &mut Option<Vec<u8>>,
+    pixels: &[u8],
+) {
+    let (width, height) = (texture.width() as usize, texture.height() as usize);
+    let stride = width * 4;
+    let Some(held_pixels) = held.as_mut().filter(|h| h.len() == pixels.len()) else {
+        upload(queue, texture, pixels);
+        *held = Some(pixels.to_vec());
+        return;
+    };
+    let mut all = crate::canvas_rows::RowSet::default();
+    all.reset_all(height);
+    for band in crate::canvas_rows::changed_bands(
+        pixels,
+        held_pixels,
+        stride,
+        &all,
+        crate::canvas_rows::GAP,
+    ) {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x: 0,
+                    y: band.start as u32,
+                    z: 0,
+                },
+                aspect: wgpu::TextureAspect::All,
+            },
+            &pixels[band.start * stride..band.end * stride],
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(stride as u32),
+                rows_per_image: Some((band.end - band.start) as u32),
+            },
+            wgpu::Extent3d {
+                width: width as u32,
+                height: (band.end - band.start) as u32,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
 }
 
 /// Local camera axes expressed in aircraft coordinates, independent of aircraft attitude.
@@ -157,6 +211,7 @@ impl CockpitRenderer {
             pipeline,
             bind: None,
             hud,
+            hud_held: Some(vec![0; 640 * 480 * 4]),
             palette: texture(device, 256, 1),
             palette_uploaded: None,
             uniform,
@@ -395,7 +450,7 @@ impl CockpitRenderer {
         let bytes: Vec<u8> = values.into_iter().flat_map(f32::to_le_bytes).collect();
         queue.write_buffer(&self.uniform, 0, &bytes);
         if hud {
-            upload(queue, &self.hud, pixels);
+            upload_changed_rows(queue, &self.hud, &mut self.hud_held, pixels);
         }
     }
     /// Promo reel: the next draw emits only the visible HUD symbols, for a

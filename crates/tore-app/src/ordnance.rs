@@ -1435,7 +1435,7 @@ impl Ordnance {
             (248, 388, 48, 15),
         );
         for (rocker, at) in self.rockers.iter().zip([(260, 408), (547, 356)]) {
-            let sprite = &self.sprites[&rocker.sprite()];
+            let sprite = &self.sprites[rocker.sprite()];
             c.blit(sprite, at, 0, sprite.width, 1.);
         }
         self.controls.extend([

@@ -213,11 +213,7 @@ fn darken(canvas: &mut FlightCanvas, (left, top, right, bottom): (f64, f64, f64,
         (top.floor() as i32).clamp(0, h),
         (bottom.ceil() as i32).clamp(0, h),
     );
-    for y in y0..y1 {
-        for x in x0..x1 {
-            canvas.blend(x, y, [0, 0, 0], BACKING);
-        }
-    }
+    canvas.blend_rect((x0, y0, x1, y1), [0, 0, 0], BACKING);
 }
 
 #[cfg(test)]
@@ -331,8 +327,7 @@ mod tests {
     #[test]
     fn a_headless_render_draws_the_board_in_the_middle_in_its_colours() {
         let mut canvas = FlightCanvas::default();
-        canvas.size = [1280, 960];
-        canvas.pixels = vec![0; 1280 * 960 * 4];
+        canvas.blank([1280, 960]);
         let font = font();
         let scores = scores();
         draw_lines(
@@ -340,6 +335,7 @@ mod tests {
             &font,
             &lines(Some(&scores), Some(0), Some(545)),
         );
+        canvas.assert_drawn_rows_noted();
         let mut colours = Vec::new();
         let (mut left, mut right, mut top) = (1280, 0, 960);
         for (i, p) in canvas.pixels.chunks_exact(4).enumerate() {

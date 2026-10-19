@@ -268,6 +268,8 @@ pub struct Map {
     view: Option<PlanView>,
     /// Keys pressed before the first draw (the previews), kept for it.
     pending: Vec<String>,
+    /// The theater picture as last drawn, while the view holds still.
+    ground: Option<Ground>,
 }
 impl Map {
     /// A click of the left button at `point`: the scroll bars and the zoom
@@ -404,13 +406,16 @@ impl Map {
         let projection = view.projection();
         let scale_nmi = view.scale_nmi();
         let icons = sprites.get("MCICONS.PIC");
+        let mut ground = self.ground.take();
         draw_ground(
             pixels,
             world,
             &projection,
             sprites.get(&world.theater.map),
             |color| scenery.palette[usize::from(color)],
+            &mut ground,
         );
+        self.ground = ground;
         let mut labels = Vec::new();
         let mut markers = Vec::new();
         let player = projection.locate(state.position);
@@ -664,16 +669,70 @@ impl Map {
         );
     }
 }
+/// Everything the theater picture under the plot is made from.
+#[derive(Default, PartialEq)]
+struct GroundKey {
+    center: [u64; 2],
+    feet_per_pixel: u64,
+    area: (i32, i32, i32, i32),
+    bounds: [u64; 2],
+    /// The theater: its names, size, and where its cells are held.
+    theater: (String, String, usize, usize, usize, usize),
+    /// The imported picture, when there is one: its size and where it is held.
+    background: Option<(usize, usize, usize)>,
+    palette: Vec<[u8; 3]>,
+}
+
+/// The theater picture as last drawn: the same while its key is.
+struct Ground {
+    key: GroundKey,
+    /// The plot's rows, one after another.
+    picture: Vec<u8>,
+}
+
 /// The theater under the plot: the imported map picture when there is one,
 /// else each terrain cell's colour (`palette` for the land, the sea blue).
+/// `kept` holds the last picture, which is copied back when nothing it is
+/// made from changed.
 fn draw_ground(
     pixels: &mut [u8],
     world: &Terrain,
     projection: &Projection,
     background: Option<&Sprite>,
     palette: impl Fn(u8) -> [u8; 3],
+    kept: &mut Option<Ground>,
 ) {
     let area = projection.area;
+    let theater = &world.theater;
+    let key = GroundKey {
+        center: projection.center.map(f64::to_bits),
+        feet_per_pixel: projection.feet_per_pixel.to_bits(),
+        area,
+        bounds: projection.bounds.map(f64::to_bits),
+        theater: (
+            theater.name.clone(),
+            theater.map.clone(),
+            theater.cols,
+            theater.rows,
+            theater.cells.as_ptr() as usize,
+            theater.coarse.as_ptr() as usize,
+        ),
+        background: background.map(|map| (map.width, map.height, map.rgba.as_ptr() as usize)),
+        palette: (0..=255).map(&palette).collect(),
+    };
+    let span = area.0.max(0) as usize * 4..(area.0 + area.2).max(0) as usize * 4;
+    let rows = area.1.max(0) as usize..(area.1 + area.3).max(0) as usize;
+    let mut ground = kept.take().unwrap_or_else(|| Ground {
+        key: GroundKey::default(),
+        picture: Vec::new(),
+    });
+    if ground.key == key && ground.picture.len() == rows.len() * span.len() {
+        for (row, picture) in rows.zip(ground.picture.chunks_exact(span.len())) {
+            pixels[row * 640 * 4 + span.start..row * 640 * 4 + span.end].copy_from_slice(picture);
+        }
+        *kept = Some(ground);
+        return;
+    }
     for y in area.1..area.1 + area.3 {
         for x in area.0..area.0 + area.2 {
             let [mut east, mut north] = projection.world(x, y);
@@ -720,6 +779,14 @@ fn draw_ground(
             pixels[at..at + 4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
         }
     }
+    ground.picture.clear();
+    for row in rows {
+        ground
+            .picture
+            .extend_from_slice(&pixels[row * 640 * 4 + span.start..row * 640 * 4 + span.end]);
+    }
+    ground.key = key;
+    *kept = Some(ground);
 }
 
 /// Which side a planning map marker belongs to.
@@ -1479,6 +1546,64 @@ mod tests {
             area: AREA,
             bounds: [300. * NMI, 300. * NMI],
         }
+    }
+    #[test]
+    fn a_kept_theater_picture_is_the_one_drawn_afresh_while_nothing_it_is_made_from_changes() {
+        let world = tore_world::test_support::terrain();
+        let sprite = Sprite {
+            width: 2,
+            height: 2,
+            rgba: vec![
+                200, 10, 10, 255, 10, 200, 10, 255, 10, 10, 200, 255, 90, 90, 90, 255,
+            ],
+            glyphs: vec![],
+        };
+        let flat = |color: u8| [color, 100u8.wrapping_add(color), 50];
+        let mut kept = None;
+        let mut hits_possible = 0;
+        // (centre, width in nautical miles, palette tweak, imported picture)
+        let steps = [
+            ([30_000., 30_000.], 100., 0, false),
+            ([30_000., 30_000.], 100., 0, false),
+            ([30_000., 30_000.], 100., 0, false),
+            ([30_000., 30_001.], 100., 0, false),
+            ([30_000., 30_001.], 100., 0, false),
+            ([30_000., 30_001.], 100., 7, false),
+            ([30_000., 30_001.], 100., 7, false),
+            ([30_000., 30_001.], 50., 7, false),
+            ([30_000., 30_001.], 50., 7, true),
+            ([30_000., 30_001.], 50., 7, true),
+            ([-4_000., 90_000.], 50., 7, true),
+            ([-4_000., 90_000.], 50., 7, false),
+        ];
+        for (n, (center, width, tweak, imported)) in steps.into_iter().enumerate() {
+            let projection = projection(center, width);
+            let background = imported.then_some(&sprite);
+            let palette = |color: u8| flat(color.wrapping_add(tweak));
+            let mut expected = vec![72u8; 640 * 480 * 4];
+            draw_ground(
+                &mut expected,
+                &world,
+                &projection,
+                background,
+                palette,
+                &mut None,
+            );
+            let mut actual = vec![72u8; 640 * 480 * 4];
+            if kept.is_some() {
+                hits_possible += 1;
+            }
+            draw_ground(
+                &mut actual,
+                &world,
+                &projection,
+                background,
+                palette,
+                &mut kept,
+            );
+            assert!(actual == expected, "step {n}");
+        }
+        assert!(hits_possible > 5);
     }
     #[test]
     fn north_up_projection_scale_and_edges() {

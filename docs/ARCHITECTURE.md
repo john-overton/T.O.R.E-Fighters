@@ -9481,6 +9481,34 @@ Unshown cache entries remain available.
 Already-sized images with transparent corners have an exact integer-coordinate
 composition path. The original filter remains for scaling, fractional placement
 and clipping. Independent pixel tests cover every source/destination alpha pair.
+
+CPU-drawn interface cost (optimization run S6; every change keeps the pixels,
+each guarded by a test against the path it replaced):
+
+- `FlightCanvas` notes the rows each drawing call writes (`touched`). The next
+  frame clears only those rows (the rest are zero), and the rows possibly
+  different from the GPU copy (`pending`) are compared with a CPU copy the
+  renderer keeps of the texture (`canvas_rows::changed_bands`); only changed
+  bands are written, nothing when the picture is the same. A call that fails
+  to present leaves its rows pending for the next upload, and any other
+  picture in the texture (menus, loading, the replay) drops the CPU copy so
+  the next flight frame goes up whole. Code that writes `pixels` directly
+  must call `touch_rows`, `blend_rect` or `fill_opaque`.
+- The cockpit's 640 by 480 HUD texture is updated the same way against its own
+  copy.
+- `legacy_layer` keeps its last two layers, and the canvas rows under them
+  before and after drawing, and copies the result back when neither changed. The
+  four-tap filter in `blit` works out each row's and column's taps and each
+  source pixel's premultiplied colour once, with the same arithmetic order.
+  The pause and map layer is only scanned or drawn when something drew on it.
+- The map keeps its theater picture while the view, palette and theater hold.
+- The AC-130 sensor console outline is two sliding window counts instead of a
+  search of up to 25 cells per pixel; its mask and overlay buffers are reused
+  (the renderer hands the uploaded overlay back).
+- Notices sum their coverage in a text-wide reused buffer; the scoreboard band
+  takes the clear-pixel result directly; menu text uses a 256-entry sRGB
+  table, reused scratch vectors and static sprite names.
+
 The tick presenter reuses an identical camera scene instead of rebuilding it
 between unchanged simulation inputs. GPU and window work never moves to workers.
 
