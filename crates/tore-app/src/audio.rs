@@ -2319,13 +2319,13 @@ mod tests {
             );
         }
         together.spatial_steps(&clips, &steps, &[], &loops);
+        let mut heard = false;
         for sample in 0..6000 {
-            assert_eq!(
-                one_by_one.frame(8000.),
-                together.frame(8000.),
-                "sample {sample}"
-            );
+            let (a, b) = (one_by_one.frame(8000.), together.frame(8000.));
+            assert_eq!(a, b, "sample {sample}");
+            heard |= a != [0.; 2];
         }
+        assert!(heard, "the ticks made some sound");
         assert_eq!(
             one_by_one.spatial.voice_count(),
             together.spatial.voice_count()
