@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tore_net::{RealClock, Sleep};
 use tore_realtime_native::{Activity, real_time_thread, summary};
 
-pub use tore_net::{MAX_NAP, SPIN_MARGIN, wait_until};
+pub use tore_net::{SPIN_MARGIN, plan_wake, wait_until};
 
 /// Time, sleeping and the wall clock, so tests can fake all three.
 pub trait Timer: Sleep {

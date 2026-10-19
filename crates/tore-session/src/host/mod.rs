@@ -1093,6 +1093,16 @@ impl Host {
         }
     }
 
+    /// What the host's loop is doing, for choosing how to nap between
+    /// polls: whether a mission is flying (tick deadlines) and whether any
+    /// connection is open (packets and keepalives to read).
+    pub fn wake_pace(&self) -> tore_net::Pace {
+        tore_net::Pace {
+            flying: matches!(self.life, Life::Flying),
+            connections: !self.peers.is_empty() || self.server.connections().next().is_some(),
+        }
+    }
+
     /// The next entry for the console and the log, oldest first.
     pub fn poll_log(&mut self) -> Option<HostLog> {
         self.logs.pop_front()

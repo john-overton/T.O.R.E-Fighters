@@ -73,8 +73,11 @@ import, and nothing derived from retail media ever reaches it.
   Linode shared 2 GB plan with 1 TB of transfer a month.
 - Very little else. One thread; well under one core even while relaying the
   plan's 64 channels at their full rate (at most about 8 MB/s in and out); a
-  few tens of megabytes of memory with every table full. Idle, its loop
-  sleeps a millisecond between turns: a debug build took 0.7 percent of one
+  few tens of megabytes of memory with every table full. Its loop
+  sleeps a millisecond between turns while busy (a datagram or an open relay
+  channel within the last second) and ten milliseconds, with its timers every
+  25, when idle (optimization run S2). Before that it slept a millisecond
+  always: a debug build took 0.7 percent of one
   core of the development machine (Ryzen 9 7900X) over 10 idle seconds, and
   answered a 10-second flood of 2,000 datagrams a second with every limit
   holding (I2, 2026-10-05).
