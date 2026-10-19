@@ -488,6 +488,103 @@ mod tests {
         assert!(stats.selected as usize <= request.capacity);
     }
 
+    /// What the production renderer does for one view: take a finished
+    /// result if there is one, then ask for the view's eye. The worker is
+    /// waited for after each ask, which is the kindest timing there is.
+    /// Returns whether the request was sent and the work it cost.
+    fn view(worker: &mut Worker, eye: [f64; 2], ahead: [f64; 2]) -> (bool, u64, Option<Ready>) {
+        let request = Request {
+            epoch: 0,
+            eye,
+            ahead,
+            full: 3000.,
+            draw: 6000.,
+            density: 0.7,
+            capacity: 2048,
+            grass_radius: 0.,
+            settle: false,
+        };
+        let was_busy = worker.busy;
+        worker.request(request);
+        let sent = !was_busy && worker.busy;
+        let ready = worker.poll(true);
+        let builds = ready.as_ref().map_or(0, |r| r.cache.object_chunks);
+        (sent, builds, ready)
+    }
+
+    /// Optimization slice S0 finding, kept as a CPU-only characterization.
+    /// Every camera view (main, mirrors, camera panels) asks this one worker
+    /// for its own eye. The worker keeps only the chunks near the latest eye,
+    /// so an eye far from the main one throws the main view's chunks away, and
+    /// an eye a few feet off defeats the "same request, nothing to do" check.
+    #[test]
+    fn extra_views_with_other_eyes_make_the_stream_redo_work() {
+        let mut world = tore_world::test_support::terrain();
+        for cell in &mut world.theater.cells {
+            cell.elevation = 0;
+        }
+        let atlas = Arc::new(Atlas::synthetic(vec![10; 256 * 256], 0));
+        let main = [4000., 4000.];
+        let mut worker = Worker::new(atlas, library(), &world);
+        // The main view alone settles, then asks for nothing more.
+        let mut settled = false;
+        for _ in 0..300 {
+            let (_, _, ready) = view(&mut worker, main, [0.; 2]);
+            if ready.is_some_and(|r| r.done) {
+                settled = true;
+                break;
+            }
+        }
+        assert!(settled, "the main view should converge by itself");
+        let (sent, builds, _) = view(&mut worker, main, [0.; 2]);
+        assert!(
+            !sent && builds == 0,
+            "a settled still camera asks for nothing"
+        );
+        let (sent, ..) = view(&mut worker, main, [0.; 2]);
+        assert!(!sent);
+
+        // Mirror: about 12 ft from the head. The eye differs, so the request
+        // is never the same as the last one, and `ahead` (taken from the
+        // previous view's eye) points the opposite way on alternate views.
+        let mirror = [4012., 4000.];
+        let mut sent_count = 0;
+        let mut mirror_builds = 0u64;
+        for _ in 0..20 {
+            let (sent, builds, _) = view(&mut worker, mirror, [4096., 0.]);
+            sent_count += usize::from(sent);
+            mirror_builds += builds;
+            let (sent, builds, _) = view(&mut worker, main, [-4096., 0.]);
+            sent_count += usize::from(sent);
+            mirror_builds += builds;
+        }
+        assert_eq!(sent_count, 40, "every view re-runs the worker");
+        eprintln!(
+            "mirror-like eye: {sent_count} worker runs in 40 views, {mirror_builds} chunk builds"
+        );
+
+        // A camera panel looking at a target 100,000 ft away. One panel view
+        // is enough to drop the main view's chunks; the main view then has
+        // to rebuild them, bounded by the per-request build budget.
+        let target = [104_000., 4000.];
+        let (_, far_builds, _) = view(&mut worker, target, [0.; 2]);
+        assert!(far_builds > 0);
+        let mut rebuilt = 0u64;
+        let mut requests = 0;
+        loop {
+            let (_, builds, ready) = view(&mut worker, main, [0.; 2]);
+            rebuilt += builds;
+            requests += 1;
+            if ready.is_some_and(|r| r.done) || requests > 300 {
+                break;
+            }
+        }
+        eprintln!(
+            "after one far panel view the main view needed {requests} requests to rebuild {rebuilt} chunks"
+        );
+        assert!(rebuilt > 0 && requests > 1);
+    }
+
     fn chunk(n: usize, value: u8) -> Arc<Vec<u8>> {
         Arc::new(vec![value; n * INST_STRIDE as usize])
     }
