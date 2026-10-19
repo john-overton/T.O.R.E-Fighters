@@ -600,15 +600,30 @@ impl Combat {
     /// the scene have no hit box and do not move. Does nothing in a mission
     /// with no routes.
     pub fn step_surface(&mut self, terrain: &Terrain) {
-        for (id, course) in &terrain.surface.courses {
+        let courses = &terrain.surface.courses;
+        if courses.is_empty() {
+            return;
+        }
+        // Each course's first combat row, found in one pass over the rows
+        // (the rows' ids and order do not change in this tick).
+        let ids: Vec<u32> = courses.keys().map(|id| id.0).collect();
+        let mut rows: Vec<Option<usize>> = vec![None; ids.len()];
+        for (index, target) in self.state.targets.iter().enumerate() {
+            if let Ok(at) = ids.binary_search(&target.id) {
+                rows[at].get_or_insert(index);
+            }
+        }
+        #[cfg(test)]
+        for ((id, _), row) in courses.iter().zip(&rows) {
+            assert_eq!(
+                *row,
+                self.state.targets.iter().position(|t| t.id == id.0),
+                "the course rows must be the first rows of their ids"
+            );
+        }
+        for ((id, course), row) in courses.iter().zip(rows) {
             let Some(rig) = course.rig else { continue };
-            let Some(alive) = self
-                .state
-                .targets
-                .iter()
-                .find(|target| target.id == id.0)
-                .map(|target| target.hp > 0)
-            else {
+            let Some(alive) = row.map(|index| self.state.targets[index].hp > 0) else {
                 continue;
             };
             let Some(slot) = self.surface.unit_mut(*id) else {

@@ -1205,6 +1205,7 @@ impl AiActor {
         order: super::airfield::LandingOrder,
         own: &OwnState,
         surface: &dyn Fn(f64, f64) -> Surface,
+        height: &dyn Fn(f64, f64) -> f64,
     ) {
         if self.flight.research.is_none() {
             let seed = (self.identity.actor.0 as i32).wrapping_mul(7919) | 1;
@@ -1241,7 +1242,7 @@ impl AiActor {
             max_takeoff_lbs,
             route,
         );
-        sequence.prefer_clear_approach(wind, max_takeoff_lbs, &|x, z| surface(x, z).height);
+        sequence.prefer_clear_approach(wind, max_takeoff_lbs, &|x, z| height(x, z));
         // Helicopters, the V-22 and a hovering jet land vertically (slice
         // H2; John 2026-10-12: vertical for all three VTOL types).
         self.airfield = Some(sequence.with_lift(self.airfield_lift()));
@@ -1257,6 +1258,7 @@ impl AiActor {
         tick: u64,
         ground: &dyn Fn(f64, f64) -> f64,
         surface: &dyn Fn(f64, f64) -> Surface,
+        height: &dyn Fn(f64, f64) -> f64,
         output: &mut MissionOutput,
     ) -> Result<bool> {
         use super::airfield::{Control, LandingReason, Phase, Situation};
@@ -1268,7 +1270,7 @@ impl AiActor {
             && !defending
             && !warned
         {
-            self.begin_landing(order, own, surface);
+            self.begin_landing(order, own, surface, height);
             trace.began_landing = self.airfield.is_some();
         }
         let Some(phase) = self.airfield.as_ref().map(|s| s.phase()) else {
@@ -1499,7 +1501,7 @@ impl AiActor {
                     input
                 }
             }
-            Control::Hover(guidance) => self.fly_hover(&guidance, own, surface, &mut fly),
+            Control::Hover(guidance) => self.fly_hover(&guidance, own, surface, height, &mut fly),
         };
         input.commands = vec![
             tore_input::PilotCommand::Set(tore_input::Switch::Burner, command.afterburner),
@@ -2390,14 +2392,49 @@ impl AiMission {
         surface: &(dyn Fn(f64, f64) -> Surface + Sync),
         now: TimeOfDay,
     ) -> Result<MissionOutput> {
-        self.step_using(world, terrain, surface, now, tore_workers::shared())
+        self.step_on_ground(world, terrain, surface, &|x, z| surface(x, z).height, now)
     }
 
+    /// [`Self::step_with_surface`] with the host's height-only query,
+    /// `height(x, z)` being exactly `surface(x, z).height`. The AI's ground
+    /// samples and sight lines read only the height, so a host that can
+    /// answer it without the wind, water and slope saves that work.
+    pub fn step_on_ground(
+        &mut self,
+        world: &[WorldObject],
+        terrain: &(dyn Fn(f64, f64) -> f64 + Sync),
+        surface: &(dyn Fn(f64, f64) -> Surface + Sync),
+        height: &(dyn Fn(f64, f64) -> f64 + Sync),
+        now: TimeOfDay,
+    ) -> Result<MissionOutput> {
+        self.step_ground_using(world, terrain, surface, height, now, tore_workers::shared())
+    }
+
+    #[cfg(test)]
     fn step_using(
         &mut self,
         world: &[WorldObject],
         terrain: &(dyn Fn(f64, f64) -> f64 + Sync),
         surface: &(dyn Fn(f64, f64) -> Surface + Sync),
+        now: TimeOfDay,
+        workers: &tore_workers::Executor,
+    ) -> Result<MissionOutput> {
+        self.step_ground_using(
+            world,
+            terrain,
+            surface,
+            &|x, z| surface(x, z).height,
+            now,
+            workers,
+        )
+    }
+
+    fn step_ground_using(
+        &mut self,
+        world: &[WorldObject],
+        terrain: &(dyn Fn(f64, f64) -> f64 + Sync),
+        surface: &(dyn Fn(f64, f64) -> Surface + Sync),
+        height: &(dyn Fn(f64, f64) -> f64 + Sync),
         now: TimeOfDay,
         workers: &tore_workers::Executor,
     ) -> Result<MissionOutput> {
@@ -2439,29 +2476,27 @@ impl AiMission {
         self.refresh_leaders(world, &mut output);
         self.fly_opportunities(world);
 
-        let traffic: Vec<_> = world
+        // One table for the tick, shared by every controller.
+        let traffic: std::sync::Arc<[super::formation::Traffic]> = world
             .iter()
             .filter(|o| o.alive && !o.destroyed && o.is_aircraft)
-            .map(|o| super::formation::Traffic {
-                id: o.id,
-                position: o.position,
-                velocity: o.velocity,
-                planned_velocity: self
+            .map(|o| {
+                let trace = self
                     .actors
                     .iter()
                     .find(|a| a.id() == o.id)
-                    .and_then(|a| a.controller().formation_trace())
-                    .and_then(|t| t.planned_velocity),
-                phase: self
-                    .actors
-                    .iter()
-                    .find(|a| a.id() == o.id)
-                    .and_then(|a| a.controller().formation_trace())
-                    .map(|t| t.phase),
+                    .and_then(|a| a.controller().formation_trace());
+                super::formation::Traffic {
+                    id: o.id,
+                    position: o.position,
+                    velocity: o.velocity,
+                    planned_velocity: trace.and_then(|t| t.planned_velocity),
+                    phase: trace.map(|t| t.phase),
+                }
             })
             .collect();
         let mut observations = self
-            .prepare_observations(world, terrain, surface, workers)
+            .prepare_observations(world, terrain, height, workers)
             .into_iter()
             .peekable();
         // Who attacks what, in decision order (slice G1): each actor's row is
@@ -2472,6 +2507,11 @@ impl AiMission {
             super::link::Engagements::new(&self.actors).with_humans(&self.humans, &link);
         // The AI leads that took a new target this tick (slice G4).
         let mut commits = Vec::new();
+        // The tick's gun rounds, indexed once for every actor's incoming
+        // fire, then handed back as the host set them.
+        let gun_rounds = std::mem::take(&mut self.gun_rounds);
+        let rounds = incoming_fire::Rounds::new(&gun_rounds);
+        let mut failed = None;
         for index in 0..self.actors.len() {
             let observed = if observations.peek().is_some_and(|(at, _)| *at == index) {
                 observations.next().map(|(_, observed)| observed)
@@ -2479,25 +2519,35 @@ impl AiMission {
                 None
             };
             let before = self.actors[index].controller.target();
-            self.step_actor(
+            if let Err(error) = self.step_actor(
                 index,
                 world,
                 &traffic,
                 terrain,
                 surface,
+                height,
+                &rounds,
                 now,
                 tick,
                 observed,
                 &engagements,
                 &link,
                 &mut output,
-            )?;
+            ) {
+                failed = Some(error);
+                break;
+            }
             engagements.decided(index, &self.actors[index]);
             let after = self.actors[index].controller.target();
             if self.actors[index].identity.is_leader() && after.is_some() && after != before {
                 commits.push(index);
             }
             self.journal_actor(index, tick);
+        }
+        drop(rounds);
+        self.gun_rounds = gun_rounds;
+        if let Some(error) = failed {
+            return Err(error);
         }
 
         // Share only evidence produced this tick, after all controllers have
@@ -2998,7 +3048,7 @@ impl AiMission {
         &self,
         world: &[WorldObject],
         terrain: &(dyn Fn(f64, f64) -> f64 + Sync),
-        surface: &(dyn Fn(f64, f64) -> Surface + Sync),
+        height: &(dyn Fn(f64, f64) -> f64 + Sync),
         workers: &tore_workers::Executor,
     ) -> Vec<(usize, observation::Prepared)> {
         if !workers.should_dispatch(self.actors.len(), MIN_PARALLEL_OBSERVATIONS) {
@@ -3009,13 +3059,17 @@ impl AiMission {
             .iter()
             .enumerate()
             .filter_map(|(index, actor)| actor.observation_input(index))
+            .map(|input| observation::Input {
+                ceiling: self.ground_ceiling.as_deref(),
+                ..input
+            })
             .collect();
         if !workers.should_dispatch(inputs.len(), MIN_PARALLEL_OBSERVATIONS) {
             return Vec::new();
         }
         let tick = self.tick;
         workers.ordered_map(&inputs, MIN_PARALLEL_OBSERVATIONS, |_, input| {
-            (input.index, input.prepare(tick, world, terrain, surface))
+            (input.index, input.prepare(tick, world, terrain, height))
         })
     }
 
@@ -3024,9 +3078,11 @@ impl AiMission {
         &mut self,
         index: usize,
         world: &[WorldObject],
-        traffic: &[super::formation::Traffic],
+        traffic: &std::sync::Arc<[super::formation::Traffic]>,
         terrain: &dyn Fn(f64, f64) -> f64,
         surface: &dyn Fn(f64, f64) -> Surface,
+        height: &dyn Fn(f64, f64) -> f64,
+        rounds: &incoming_fire::Rounds<'_>,
         now: TimeOfDay,
         tick: u64,
         observed: Option<observation::Prepared>,
@@ -3035,10 +3091,9 @@ impl AiMission {
         output: &mut MissionOutput,
     ) -> Result<()> {
         // Researched aircraft stand on runways, so their ground is the full
-        // surface; legacy aircraft keep the terrain-only height.
-        let runway_height = |x, z| surface(x, z).height;
+        // surface's height; legacy aircraft keep the terrain-only height.
         let ground: &dyn Fn(f64, f64) -> f64 = if self.actors[index].flight.research.is_some() {
-            &runway_height
+            height
         } else {
             terrain
         };
@@ -3075,7 +3130,8 @@ impl AiMission {
             .set_strike_handling(super::strike::Handling::PLAIN);
         actor.trace.clearance = clearance;
         actor.route_random.clear_log();
-        actor.controller.set_formation_observation(traffic.to_vec());
+        // Every controller shares the tick's one traffic list.
+        actor.controller.set_formation_observation(traffic.clone());
         if !actor.dummy {
             if actor.flight.escape.is_some() {
                 actor.flight.step_escape(ground);
@@ -3243,6 +3299,13 @@ impl AiMission {
         }
 
         // 1. The actor's own sensors, stepped with the actor as observer.
+        // Observation and the decision frame below share one answer per
+        // sight line from the actor this tick.
+        let sight = observation::SightLines::new(
+            actor.flight.position,
+            ground,
+            self.ground_ceiling.as_deref(),
+        );
         let (mut targets, terrain_blocked) = if let Some(prepared) = observed {
             actor.sensors = prepared.sensors;
             actor.awareness = prepared.memory;
@@ -3252,7 +3315,7 @@ impl AiMission {
                 Some(prepared.terrain_blocked),
             )
         } else {
-            (actor.observe(tick, world, ground), None)
+            (actor.observe_sighted(tick, world, &sight), None)
         };
 
         // 2. Own state from the actor's own flight model.
@@ -3260,7 +3323,7 @@ impl AiMission {
         actor.update_defense(
             tick,
             &self.missiles,
-            &self.gun_rounds,
+            rounds,
             self.ground_ceiling.as_deref(),
             &own,
             ground,
@@ -3273,7 +3336,7 @@ impl AiMission {
             actor.landing_order = Some(order);
             actor.trace.join_landing = Some(order);
         }
-        if actor.airfield_tick(&clearance, &own, tick, ground, surface, output)? {
+        if actor.airfield_tick(&clearance, &own, tick, ground, surface, height, output)? {
             actor.trace.path = ActorPath::Airfield;
             return Ok(());
         }
@@ -3288,12 +3351,7 @@ impl AiMission {
             // observer. The preamble paths that move it returned before here.
             // Publish this only to the decision frame, never awareness memory.
             target.terrain_blocked = terrain_blocked.as_ref().map_or_else(
-                || {
-                    crate::combat::live::terrain_hit(own.position, target.position, &|x, z| {
-                        ground(x, z)
-                    })
-                    .is_some()
-                },
+                || sight.blocked(own.position, target.position),
                 |blocked| blocked[index],
             );
         }
@@ -3442,12 +3500,13 @@ impl AiMission {
             .copied()
             .collect();
         let current = actor.controller.target();
-        let mut choice: &[TargetView] = &targets;
-        let mut kept = current;
-        let mut selection = None;
+        // The selection and its explanation come from one pass over the
+        // list the selection was made from (the explanation reads the leash
+        // state that selection just updated).
+        let mut chosen = None;
         if !yielded.is_empty() {
             let leaving = current.filter(|id| !yielded.contains(id));
-            selection = actor.mission_policy.select(
+            let (selection, explanation) = actor.mission_policy.select_explained(
                 actor_id,
                 identity.side,
                 own.position,
@@ -3459,12 +3518,12 @@ impl AiMission {
                 2,
             );
             if selection.is_some() {
-                choice = &others;
-                kept = leaving;
+                chosen = Some((selection, explanation));
             }
         }
-        if selection.is_none() {
-            selection = actor.mission_policy.select(
+        let (selection, explanation) = match chosen {
+            Some(chosen) => chosen,
+            None => actor.mission_policy.select_explained(
                 actor_id,
                 identity.side,
                 own.position,
@@ -3474,20 +3533,8 @@ impl AiMission {
                 &reports,
                 current,
                 2,
-            );
-        }
-        // The explanation reads the leash state `select` just updated.
-        let explanation = actor.mission_policy.explain(
-            actor_id,
-            identity.side,
-            own.position,
-            permission,
-            choice,
-            &protected,
-            &reports,
-            kept,
-            2,
-        );
+            ),
+        };
         let must_rejoin = actor.mission_policy.must_rejoin();
         actor.trace.engagement = Some(EngagementTrace {
             neutral: actor.neutral,
@@ -4344,6 +4391,7 @@ impl AiActor {
             sensors: self.sensors.as_ref(),
             memory: &self.awareness,
             use_surface: self.flight.research.is_some(),
+            ceiling: None,
         })
     }
 
@@ -4374,11 +4422,23 @@ impl AiActor {
 
     /// Collect fresh measurements, then update frozen aircraft memory. The
     /// inline path borrows existing state directly, without speculative clones.
+    #[cfg(test)]
     fn observe(
         &mut self,
         tick: u64,
         world: &[WorldObject],
         ground: &dyn Fn(f64, f64) -> f64,
+    ) -> Vec<TargetView> {
+        let sight = observation::SightLines::new(self.flight.position, ground, None);
+        self.observe_sighted(tick, world, &sight)
+    }
+
+    /// Observation with the tick's shared sight lines from this actor.
+    fn observe_sighted(
+        &mut self,
+        tick: u64,
+        world: &[WorldObject],
+        sight: &observation::SightLines<'_>,
     ) -> Vec<TargetView> {
         let context = self.observation_context();
         let observed = observation::observe(
@@ -4388,7 +4448,7 @@ impl AiActor {
             &mut self.trace.visual,
             tick,
             world,
-            ground,
+            sight,
         );
         self.apply_observation(observed)
     }
@@ -4452,7 +4512,7 @@ impl AiActor {
         &mut self,
         tick: u64,
         missiles: &[MissileSnapshot],
-        rounds: &[incoming_fire::Round],
+        rounds: &incoming_fire::Rounds<'_>,
         ground_ceiling: Option<&crate::ground_ceiling::GroundCeiling>,
         own: &OwnState,
         ground: &dyn Fn(f64, f64) -> f64,
@@ -4483,7 +4543,10 @@ impl AiActor {
                 lookout.check(self.controller.experience().level, point, None, true)
                     == awareness::VisualResult::Visible
             },
-            |from, to| crate::combat::live::terrain_hit(from, to, &ground).is_none(),
+            |from, to| {
+                ground_ceiling.is_some_and(|ceiling| ceiling.clear_above(from, to))
+                    || crate::combat::live::terrain_hit(from, to, &ground).is_none()
+            },
         );
         let speed = own.speed.0.max(125.0);
         let g = own
@@ -4520,17 +4583,36 @@ impl AiActor {
             ground_ceiling.is_some_and(|ceiling| ceiling.clear_above(own.position, point))
                 || crate::combat::live::terrain_hit(own.position, point, &ground).is_none()
         };
-        self.incoming_fire.observe(
+        // A round beyond the lookout's visual range is never seen.
+        let sight = incoming_fire::SightReach {
+            center: lookout.position,
+            radius: awareness::visual_range_feet(self.controller.experience().level),
+        };
+        let visible = |point| {
+            lookout.check(self.controller.experience().level, point, None, true)
+                == awareness::VisualResult::Visible
+                && clear(point)
+        };
+        // Every test that steps the AI checks the indexed visit against
+        // visiting every round.
+        #[cfg(test)]
+        let mut every_round = self.incoming_fire.clone();
+        #[cfg(test)]
+        every_round.observe(tick, self.id(), defense_own, rounds.all(), visible, clear);
+        self.incoming_fire.observe_near(
             tick,
             self.id(),
             defense_own,
             rounds,
-            |point| {
-                lookout.check(self.controller.experience().level, point, None, true)
-                    == awareness::VisualResult::Visible
-                    && clear(point)
-            },
+            sight,
+            visible,
             clear,
+        );
+        #[cfg(test)]
+        assert_eq!(
+            format!("{every_round:?}"),
+            format!("{:?}", self.incoming_fire),
+            "the indexed rounds changed what the aircraft saw"
         );
         let fire_motion = self
             .incoming_fire
@@ -5228,6 +5310,7 @@ impl AiActor {
         guidance: &super::rotor_adapter::HoverGuidance,
         own: &OwnState,
         surface: &dyn Fn(f64, f64) -> Surface,
+        height: &dyn Fn(f64, f64) -> f64,
         fly: &mut FlyTrace,
     ) -> PilotInput {
         if super::rotor_adapter::flies(&self.flight) {
@@ -5240,9 +5323,7 @@ impl AiActor {
         }
         let [x, _, z] = self.flight.position;
         if super::jet_lift::flies(&self.flight) {
-            let (input, command) =
-                self.jet_lift
-                    .controls(&self.flight, guidance, surface(x, z).height);
+            let (input, command) = self.jet_lift.controls(&self.flight, guidance, height(x, z));
             fly.jet_lift = Some(command);
             return input;
         }

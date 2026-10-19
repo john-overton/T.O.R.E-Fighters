@@ -631,6 +631,8 @@ impl Checkpoint for State {
             ground_listing,
             airfield,
             sensor_weather,
+            // Host setup, not state: the host sets it from its terrain.
+            ground_ceiling: _,
         } = self;
         weapon_rules.save(s, None)?;
         ownships.save(s, None)?;
@@ -742,6 +744,7 @@ impl Checkpoint for State {
             ground_listing: Checkpoint::load(l, None)?,
             airfield: Checkpoint::load(l, None)?,
             sensor_weather: Checkpoint::load(l, None)?,
+            ground_ceiling: None,
         })
     }
 }

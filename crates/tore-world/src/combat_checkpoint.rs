@@ -142,6 +142,8 @@ impl Combat {
             terrain_tti: _,
             // Local: the mission recorder's notes, which no tick reads.
             notes: _,
+            // Setup: built from the world on the first step.
+            ground_ceiling: _,
         } = self;
         contrail_sortie.save(s, None)?;
         contrails.save(s, None)?;
@@ -199,6 +201,7 @@ impl Combat {
             last_launcher: _,
             terrain_tti: terrain_tti_slot,
             notes: _,
+            ground_ceiling: _,
         } = self;
         terrain_tti_slot.clear();
         *contrail_sortie_slot = contrail_sortie;

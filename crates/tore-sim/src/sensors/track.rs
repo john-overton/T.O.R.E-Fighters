@@ -3,9 +3,9 @@
 //! history and the received interference used by both detection and the scope.
 //! Timings are the authored values in docs/radar.md at the fixed 120 Hz cadence.
 use super::detection::{
-    Sighting, angular_coupling, clutter_exposure, effective_range_ft, infrared_range_ft,
-    interference_quotient, jammer_factor, look_down_factor, notch_factor, notch_speed_fps,
-    received,
+    LazySighting, Sighting, angular_coupling, clutter_exposure, effective_range_ft,
+    infrared_range_ft, interference_quotient, jammer_factor, look_down_factor, notch_factor,
+    notch_speed_fps, received,
 };
 use super::profile::{
     DEFAULT_RANGE_INDEX, JammerProfile, RANGE_LADDER_NMI, RadarProfile, SensorProfiles,
@@ -725,11 +725,14 @@ impl Sensors {
                 obscured: &obscured,
             };
             let environment = &query;
-            let sensed = channel
-                .filter(|_| air_picture)
-                .and_then(|channel| self.observe(observer, target, channel, environment));
+            // Both channels read one sighting, worked out only if a range
+            // test leaves the target in reach.
+            let sighting = LazySighting::new(observer.position, &observer.basis, target.position);
+            let sensed = channel.filter(|_| air_picture).and_then(|channel| {
+                self.observe(observer, target, channel, &sighting, environment)
+            });
             let seen = visual
-                .then(|| self.observe(observer, target, Channel::Visual, environment))
+                .then(|| self.observe(observer, target, Channel::Visual, &sighting, environment))
                 .flatten();
             if let Some(contact) = seen.as_ref().or(sensed.as_ref()) {
                 self.map_contacts.push(MapContact {
@@ -856,15 +859,27 @@ impl Sensors {
         observer: &Observer,
         target: &Observable,
         channel: Channel,
+        sighting: &LazySighting<'_>,
         environment: &Environment<'_>,
     ) -> Option<Contact> {
-        let sighting = Sighting::new(observer.position, &observer.basis, target.position);
-        if !sighting.distance_ft.is_finite() {
+        let distance_ft = sighting.distance_ft;
+        if !distance_ft.is_finite() {
             return None;
         }
+        // Every effective range is at most its volume's nominal maximum (or
+        // zero), and a contact needs the distance within the search or the
+        // track range: a target beyond both maxima is never a contact, and
+        // nothing below would change that, so the angles are not worked out.
+        let beyond = |search: &super::profile::Volume, track: &super::profile::Volume| {
+            distance_ft > search.maximum_ft.max(0.) && distance_ft > track.maximum_ft.max(0.)
+        };
         let (search, track) = match channel {
             Channel::Radar => {
                 let radar = self.profiles.radar.as_ref()?;
+                if beyond(&radar.search, &radar.track) {
+                    return None;
+                }
+                let sighting = sighting.get();
                 let to_observer: Vector =
                     std::array::from_fn(|i| observer.position[i] - target.position[i]);
                 let effective = target.signature.effective_radar(
@@ -878,12 +893,12 @@ impl Sensors {
                 let relative = effective / 100.;
                 let height = target.position[1]
                     - (environment.ground)(target.position[0], target.position[2]);
-                let clutter = clutter_exposure(&sighting, height);
+                let clutter = clutter_exposure(sighting, height);
                 let look_down = look_down_factor(radar.look_down, clutter);
                 let notch = notch_factor(
                     &radar.notch,
                     clutter,
-                    notch_speed_fps(&sighting, target.velocity),
+                    notch_speed_fps(sighting, target.velocity),
                 );
                 let coupled: f64 = self
                     .strobes
@@ -929,6 +944,9 @@ impl Sensors {
             }
             Channel::Infrared => {
                 let infrared = self.profiles.infrared.as_ref()?;
+                if beyond(&infrared.search, &infrared.track) {
+                    return None;
+                }
                 let signature = target.signature.infrared;
                 (
                     (
@@ -945,6 +963,9 @@ impl Sensors {
             // signature scaling, no interference and no weapon support.
             Channel::Visual => {
                 let visual = self.profiles.visual.as_ref()?;
+                if beyond(&visual.search, &visual.track) {
+                    return None;
+                }
                 (
                     (&visual.search, visual.search.maximum_ft),
                     (&visual.track, visual.track.maximum_ft),
@@ -953,6 +974,7 @@ impl Sensors {
             // The HARM page lists its emitters in the ground list.
             Channel::Harm => return None,
         };
+        let sighting = sighting.get();
         let admits = |(volume, effective): (&super::profile::Volume, f64)| {
             volume.admits_geometry(
                 sighting.azimuth_rad,

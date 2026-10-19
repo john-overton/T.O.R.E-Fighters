@@ -1732,6 +1732,16 @@ impl Terrain {
         surface
     }
 
+    /// Exactly `self.surface(x, z).height`, without the wind, water and
+    /// slope the full surface also works out. The AI reads only the height
+    /// for its ground samples and sight lines.
+    pub fn surface_height(&self, x: f64, z: f64) -> f64 {
+        if let Some((_, height)) = self.airport_scene.runway_surface(x, z) {
+            return height;
+        }
+        f64::from(self.height(x as f32, z as f32))
+    }
+
     /// The surface under `(x, z)` for an aircraft whose lowest point is at
     /// `bottom` (feet): [`Self::surface`], or, when a standing object's flat
     /// top (`alive` ids: a building roof, a hangar, a bunker, a deck) or a
@@ -2467,5 +2477,114 @@ mod tests {
             cleared > 1_000,
             "too few lines cleared to mean anything: {cleared}"
         );
+    }
+
+    /// The AI's height-only ground answers exactly what the full surface
+    /// does, bit for bit: on and off the grid, on a sloped runway, along its
+    /// edges and beyond the map.
+    #[test]
+    fn the_surface_height_is_the_full_surface_height_bit_for_bit() {
+        use tore_formats::theater::TerrainCell;
+        use tore_sim::airport::{OrientedBox, Runway};
+        let mut seed = 0x2f6b_93d1_04c7_e851_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let mut w = world();
+        let (cols, rows) = (10, 8);
+        w.theater.cols = cols;
+        w.theater.rows = rows;
+        w.theater.cells = (0..cols * rows)
+            .map(|_| TerrainCell {
+                color: 100,
+                class: if next() % 5 == 0 { 1 } else { 2 },
+                elevation: (next() % 40) as u8,
+            })
+            .collect();
+        let surface = OrientedBox {
+            center: [
+                3.7 * f64::from(CELL_FEET),
+                2_000.,
+                4.2 * f64::from(CELL_FEET),
+            ],
+            half: [150., 20., 6_000.],
+            heading: 0.6,
+            pitch: 0.03,
+            bank: 0.01,
+        };
+        w.airport_scene.runways.push(Runway {
+            object: 1,
+            airport: 1,
+            name: "R".into(),
+            surface,
+            approach_center: surface.center,
+            elevation_ft: 2_000.,
+            heading: 0.6,
+            length_ft: 12_000.,
+        });
+        let same = |x: f64, z: f64| {
+            assert_eq!(
+                w.surface_height(x, z).to_bits(),
+                w.surface(x, z).height.to_bits(),
+                "{x} {z}"
+            );
+        };
+        let span = f64::from(CELL_FEET) * 12.;
+        let mut on_runway = 0;
+        for k in 0..40_000 {
+            let unit = |value: u64| (value % 1_000_000) as f64 / 1e6;
+            // Half over the whole map, half around the runway.
+            let (x, z) = if k % 2 == 0 {
+                (
+                    unit(next()) * span - f64::from(CELL_FEET),
+                    unit(next()) * span - f64::from(CELL_FEET),
+                )
+            } else {
+                (
+                    surface.center[0] + (unit(next()) - 0.5) * 14_000.,
+                    surface.center[2] + (unit(next()) - 0.5) * 14_000.,
+                )
+            };
+            same(x, z);
+            on_runway += usize::from(w.airport_scene.runway_surface(x, z).is_some());
+        }
+        assert!(on_runway > 20, "too few samples on the runway: {on_runway}");
+        // Grid points, cell edges and points just either side of them.
+        for col in 0..=cols + 1 {
+            for row in 0..=rows + 1 {
+                let (x, z) = (
+                    col as f64 * f64::from(CELL_FEET),
+                    row as f64 * f64::from(CELL_FEET),
+                );
+                for (dx, dz) in [(0., 0.), (-1e-6, 0.), (0., 1e-6), (0.5, -0.5)] {
+                    same(x + dx, z + dz);
+                }
+            }
+        }
+        // Along and across the runway's edges, a little inside and outside.
+        let (sin, cos) = surface.heading.sin_cos();
+        for step in -70..=70 {
+            let along = f64::from(step) * 100.;
+            for across in [-150.01, -150., -149.99, 0., 149.99, 150., 150.01] {
+                for end in [0_f64, 5_999.99, 6_000., 6_000.01] {
+                    let a = if end == 0. {
+                        along
+                    } else {
+                        end.copysign(along)
+                    };
+                    same(
+                        surface.center[0] + a * sin + across * cos,
+                        surface.center[2] + a * cos - across * sin,
+                    );
+                }
+            }
+        }
+        // Far beyond the map and odd values.
+        for (x, z) in [(-1e7, -1e7), (1e7, 3e6), (f64::MAX, 0.), (0., -0.)] {
+            same(x, z);
+        }
     }
 }

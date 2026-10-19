@@ -1804,6 +1804,10 @@ pub struct State {
     airfield: std::collections::BTreeSet<u32>,
     /// The weather's sensor effects ([`State::set_sensor_weather`]).
     sensor_weather: sensors::Weather,
+    /// Host setup, not state: the highest the step's `ground` reaches over
+    /// each square ([`State::set_ground_ceiling`]). A segment wholly above it
+    /// is not sampled.
+    ground_ceiling: Option<std::sync::Arc<crate::ground_ceiling::GroundCeiling>>,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct GunCadence {
@@ -3158,6 +3162,7 @@ impl State {
             ground_listing: BTreeMap::new(),
             airfield: Default::default(),
             sensor_weather: Default::default(),
+            ground_ceiling: None,
             parked: BTreeMap::new(),
         }
     }
@@ -4494,7 +4499,10 @@ impl State {
                     .map(|input| (k, *input))
             })
             .collect();
-        let obscured = |from: Vector, to: Vector| terrain_hit(from, to, &ground).is_some();
+        let ceiling = self.ground_ceiling.clone();
+        let obscured = |from: Vector, to: Vector| {
+            terrain_hit_below(from, to, &ground, ceiling.as_deref()).is_some()
+        };
         for &(k, input) in &active {
             let own = &mut ships[k];
             own.enforce_guns_only(self.cheats.guns_only);
@@ -5739,7 +5747,7 @@ impl State {
             }
             // Sample the whole segment, then bisect the first crossing; bounded
             // contact approximation prevents fast rounds tunneling through terrain.
-            if let Some(at) = terrain_hit(p.previous, p.position, &ground)
+            if let Some(at) = terrain_hit_below(p.previous, p.position, &ground, ceiling.as_deref())
                 && first.is_none_or(|f| at < f.0)
             {
                 first = Some((at, None));
@@ -6782,6 +6790,22 @@ pub fn segment_sphere(a: Vector, b: Vector, radius: f64) -> Option<f64> {
     let t = (-bb - disc.sqrt()) / aa;
     (0. ..=1.).contains(&t).then_some(t)
 }
+/// [`terrain_hit`], answering `None` without sampling when `ceiling`
+/// proves the whole segment above the ground. The ceiling must be built
+/// from the same ground (`GroundCeiling` never clears a segment that
+/// touches it), so the answer is always the one sampling gives.
+pub fn terrain_hit_below(
+    a: Vector,
+    b: Vector,
+    ground: &impl Fn(f64, f64) -> f64,
+    ceiling: Option<&crate::ground_ceiling::GroundCeiling>,
+) -> Option<f64> {
+    if ceiling.is_some_and(|ceiling| ceiling.clear_above(a, b)) {
+        return None;
+    }
+    terrain_hit(a, b, ground)
+}
+
 pub fn terrain_hit(a: Vector, b: Vector, ground: &impl Fn(f64, f64) -> f64) -> Option<f64> {
     let below = |t: f64| {
         let p: Vector = std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t);

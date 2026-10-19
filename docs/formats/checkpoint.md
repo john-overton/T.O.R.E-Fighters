@@ -502,8 +502,13 @@ as combat's hit records and the sensors' map contacts, are coded: a standby
 that becomes a hosting game shows them. Setup: `World::{setup, phrases}`, `Terrain` but the weather,
 `Environment::configuration`, `Combat::{dummy_types, dummy_configs,
 airport_objects, mission_spawns, mission_layout, contrail_offsets, dummies,
-initial_ammo, range, open, clean_recording}`, `AiWings::{airfields,
-flight_model, mission_preset}` and `Watch::{names, seats}`. Local:
+initial_ammo, range, open, clean_recording, ground_ceiling}`, the ground
+ceiling the world hands `live::State` and `AiMission` every step
+(`live::State::ground_ceiling`, `AiMission::ground_ceiling`), `AiWings::{airfields,
+flight_model, mission_preset, ground_ceiling}` and `Watch::{names, seats}`.
+Scratch since optimization run S7: `SurfaceState::static_places` and the spare
+list of an AI aircraft's incoming fire samples (the samples themselves are coded
+exactly as the map they replaced). Local:
 `Combat::{tape, notes, last_launcher, terrain_tti}` (the last the readout's kept
 fly-out times, cleared on a load). Everything else is coded.
 

@@ -87,6 +87,18 @@ impl Lookout {
         visibility_limit_ft: Option<f64>,
         terrain_clear: bool,
     ) -> VisualResult {
+        self.check_with(skill, target, visibility_limit_ft, || terrain_clear)
+    }
+
+    /// [`Self::check`] asking `terrain_clear` only for a target in visual
+    /// range, the one case whose answer depends on it.
+    pub fn check_with(
+        self,
+        skill: Experience,
+        target: [f64; 3],
+        visibility_limit_ft: Option<f64>,
+        terrain_clear: impl FnOnce() -> bool,
+    ) -> VisualResult {
         let delta: [f64; 3] = std::array::from_fn(|i| target[i] - self.position[i]);
         let distance = crate::attitude::dot(delta, delta).sqrt();
         let limit = visibility_limit_ft.unwrap_or(f64::INFINITY);
@@ -96,7 +108,7 @@ impl Lookout {
         {
             return VisualResult::OutOfRange;
         }
-        if !terrain_clear {
+        if !terrain_clear() {
             return VisualResult::Terrain;
         }
         let in_cone = |axis: [f64; 3]| {

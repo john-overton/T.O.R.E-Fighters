@@ -11,6 +11,7 @@ use crate::ai::controller::TargetView;
 use crate::ai::engagement::{StrikeObjective, StrikeRole};
 use crate::ai::targeting::Side;
 use crate::attitude::Vector;
+use crate::ground_ceiling::GroundCeiling;
 use crate::sensors::{self, GroundObject, Mode, Observable, Observer, Sensors, track};
 
 #[derive(Clone, Copy, Debug)]
@@ -40,6 +41,78 @@ pub(super) struct Input<'a> {
     pub sensors: Option<&'a Sensors>,
     pub memory: &'a Memory,
     pub use_surface: bool,
+    pub ceiling: Option<&'a GroundCeiling>,
+}
+
+/// One terrain answer per sight line for one observer in one tick, shared by
+/// the sensors, the received emitters, the lookout and the decision frame's
+/// `terrain_blocked`. A line is known by the exact bits of its ends, in a
+/// plain list (no hashing); a line from anywhere but the observer, or one
+/// not yet asked, is sampled. `terrain_hit` is a pure query, so every answer
+/// is the one sampling would give, and the ground ceiling only skips lines
+/// it proves clear.
+pub(super) struct SightLines<'a> {
+    ground: &'a dyn Fn(f64, f64) -> f64,
+    ceiling: Option<&'a GroundCeiling>,
+    from: [u64; 3],
+    known: std::cell::RefCell<Known>,
+}
+
+#[derive(Default)]
+struct Known {
+    ends: Vec<([u64; 3], bool)>,
+    /// Where the next lookup starts: the passes ask in the same order, so
+    /// the next line is usually the one after the last found.
+    next: usize,
+}
+
+impl<'a> SightLines<'a> {
+    pub fn new(
+        observer: Vector,
+        ground: &'a dyn Fn(f64, f64) -> f64,
+        ceiling: Option<&'a GroundCeiling>,
+    ) -> Self {
+        Self {
+            ground,
+            ceiling,
+            from: observer.map(f64::to_bits),
+            known: Default::default(),
+        }
+    }
+
+    /// The ground the lines are sampled against.
+    pub fn ground(&self) -> &'a dyn Fn(f64, f64) -> f64 {
+        self.ground
+    }
+
+    /// Whether the ground cuts the line from `from` to `to`: exactly
+    /// `terrain_hit(from, to, ground).is_some()`.
+    pub fn blocked(&self, from: Vector, to: Vector) -> bool {
+        if from.map(f64::to_bits) != self.from {
+            return self.sample(from, to);
+        }
+        let key = to.map(f64::to_bits);
+        let mut known = self.known.borrow_mut();
+        let count = known.ends.len();
+        for step in 0..count {
+            let at = (known.next + step) % count;
+            if known.ends[at].0 == key {
+                known.next = at + 1;
+                return known.ends[at].1;
+            }
+        }
+        let blocked = self.sample(from, to);
+        known.ends.push((key, blocked));
+        known.next = 0;
+        blocked
+    }
+
+    fn sample(&self, from: Vector, to: Vector) -> bool {
+        !self
+            .ceiling
+            .is_some_and(|ceiling| ceiling.clear_above(from, to))
+            && crate::combat::live::terrain_hit(from, to, &self.ground).is_some()
+    }
 }
 
 pub(super) struct Prepared {
@@ -58,18 +131,16 @@ impl Input<'_> {
         tick: u64,
         world: &[WorldObject],
         terrain: &(dyn Fn(f64, f64) -> f64 + Sync),
-        surface: &(dyn Fn(f64, f64) -> crate::research::Surface + Sync),
+        height: &(dyn Fn(f64, f64) -> f64 + Sync),
     ) -> Prepared {
-        let runway_height = |x, z| surface(x, z).height;
-        let ground: &dyn Fn(f64, f64) -> f64 = if self.use_surface {
-            &runway_height
-        } else {
-            terrain
-        };
+        // `height` is the full surface's height, the ground of researched
+        // aircraft, which stand on runways.
+        let ground: &dyn Fn(f64, f64) -> f64 = if self.use_surface { height } else { terrain };
         let mut sensors = self.sensors.cloned();
         let mut memory = self.memory.clone();
         // The serial actor preamble begins a new trace before observation.
         let mut visual = Vec::new();
+        let sight = SightLines::new(self.context.observer.position, ground, self.ceiling);
         let observed = observe(
             self.context,
             &mut sensors,
@@ -77,19 +148,12 @@ impl Input<'_> {
             &mut visual,
             tick,
             world,
-            ground,
+            &sight,
         );
         let terrain_blocked = observed
             .targets
             .iter()
-            .map(|target| {
-                crate::combat::live::terrain_hit(
-                    self.context.observer.position,
-                    target.position,
-                    &ground,
-                )
-                .is_some()
-            })
+            .map(|target| sight.blocked(self.context.observer.position, target.position))
             .collect();
         Prepared {
             sensors,
@@ -109,8 +173,9 @@ pub(super) fn observe(
     visual: &mut Vec<awareness::VisualTrace>,
     tick: u64,
     world: &[WorldObject],
-    ground: &dyn Fn(f64, f64) -> f64,
+    sight: &SightLines<'_>,
 ) -> Observed {
+    let ground = sight.ground();
     let live: Vec<u32> = world
         .iter()
         .filter(|o| o.alive && !o.destroyed)
@@ -140,7 +205,7 @@ pub(super) fn observe(
             .filter(|o| o.id != context.actor)
             .filter_map(|o| o.observable.clone())
             .collect();
-        let obscured = |from, to| crate::combat::live::terrain_hit(from, to, &ground).is_some();
+        let obscured = |from, to| sight.blocked(from, to);
         let environment = sensors::Environment {
             ground,
             obscured: &obscured,
@@ -166,17 +231,9 @@ pub(super) fn observe(
                 .filter(|c| c.id == object.id && !c.destroyed)
             {
                 if contact.channel == sensors::Channel::Visual
-                    && lookout.check(
-                        context.experience,
-                        contact.position,
-                        None,
-                        crate::combat::live::terrain_hit(
-                            observer.position,
-                            contact.position,
-                            &ground,
-                        )
-                        .is_none(),
-                    ) != awareness::VisualResult::Visible
+                    && lookout.check_with(context.experience, contact.position, None, || {
+                        !sight.blocked(observer.position, contact.position)
+                    }) != awareness::VisualResult::Visible
                 {
                     continue;
                 }
@@ -202,17 +259,10 @@ pub(super) fn observe(
                 && !observable.destroyed
                 && observable.airborne
             {
-                let result = lookout.check(
-                    context.experience,
-                    observable.position,
-                    None,
-                    crate::combat::live::terrain_hit(
-                        observer.position,
-                        observable.position,
-                        &ground,
-                    )
-                    .is_none(),
-                );
+                let result =
+                    lookout.check_with(context.experience, observable.position, None, || {
+                        !sight.blocked(observer.position, observable.position)
+                    });
                 if visual.len() < 32 {
                     visual.push(awareness::VisualTrace {
                         id: object.id,
@@ -501,8 +551,10 @@ impl super::AiMission {
             .filter(|s| s.side != crate::combat::live::NO_SIDE)
             .map(|s| s.object.clone())
             .collect();
+        let ceiling = self.ground_ceiling.as_deref();
         let obscured = |from: Vector, to: Vector| {
-            crate::combat::live::terrain_hit(from, to, &ground).is_some()
+            !ceiling.is_some_and(|ceiling| ceiling.clear_above(from, to))
+                && crate::combat::live::terrain_hit(from, to, &ground).is_some()
         };
         let environment = sensors::Environment {
             ground,

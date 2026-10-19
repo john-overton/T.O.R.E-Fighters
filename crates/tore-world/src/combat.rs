@@ -267,6 +267,11 @@ pub struct Combat {
     /// Player commands since the mission recorder last looked. Nothing in
     /// flight reads them.
     notes: std::collections::VecDeque<CommandNote>,
+    /// The highest the terrain reaches over each square, built from the
+    /// world on the first step and handed to the state every step, so a
+    /// round's or a missile's sight line far above the ground is not
+    /// sampled. Setup, never checkpointed.
+    ground_ceiling: Option<Arc<tore_sim::ground_ceiling::GroundCeiling>>,
 }
 
 /// What one combat tick did for the human-flown aircraft.
@@ -773,6 +778,7 @@ impl Combat {
             last_launcher: None,
             terrain_tti: Default::default(),
             notes: Default::default(),
+            ground_ceiling: None,
         }
     }
     /// Everything combat draws for this tick, as plain data, for the screen
@@ -1753,6 +1759,17 @@ impl Combat {
     }
     /// One combat tick for the first ownship's aircraft, as a host with one
     /// flight steps it.
+    /// The highest `world`'s terrain reaches over each square, built on
+    /// first use and kept: the world's terrain never changes in a mission.
+    pub(crate) fn ground_ceiling(
+        &mut self,
+        world: &Terrain,
+    ) -> Arc<tore_sim::ground_ceiling::GroundCeiling> {
+        self.ground_ceiling
+            .get_or_insert_with(|| Arc::new(world.ground_ceiling()))
+            .clone()
+    }
+
     pub fn step(&mut self, s: &mut flight::State, world: &Terrain) -> WorldResult<Vec<Event>> {
         let aircraft = self.own_id();
         Ok(self.step_all(&mut [(aircraft, s)], world)?.events)
@@ -1821,6 +1838,8 @@ impl Combat {
         self.state.smoke.wind = world.wind();
         self.state.devices.wind = world.wind();
         self.contrails.wind = world.wind();
+        let ceiling = self.ground_ceiling(world);
+        self.state.set_ground_ceiling(Some(ceiling));
         // Stop wreck emissions before advancing smoke on the impact/airburst tick.
         events.extend(self.state.step_rewound(
             &inputs,
@@ -2439,6 +2458,7 @@ pub mod fixtures {
             last_launcher: None,
             terrain_tti: Default::default(),
             notes: Default::default(),
+            ground_ceiling: None,
         }
     }
     /// Synthetic types for the three other aircraft the scene draws, in the

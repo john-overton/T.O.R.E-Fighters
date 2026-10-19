@@ -9434,6 +9434,44 @@ endpoint bits match. A query with different endpoints calls the terrain service
 again without replacing the first entry. This keeps repeated channel checks
 cheap without making future callers depend on an implicit endpoint assumption.
 
+Exact AI work (optimization run S7; each change gives the same decisions and
+simulation bits, guarded by a test against the path it replaced):
+
+- The AI's ground is `Terrain::surface_height`, exactly `surface(x, z).height`
+  without the wind, water and slope, through `AiMission::step_on_ground` and
+  `AiWings::advance_on_ground`. The flight model step keeps the full surface.
+- One observer's sight lines for one tick are a plain list keyed by the exact
+  bits of the far end (`SightLines` in `mission_observation.rs`, no hashing);
+  a line from anywhere but the observer is sampled. The sensors, received
+  emitters, lookout and decision frame's `terrain_blocked` share it, serial or
+  prepared on a worker. The lookout asks for the terrain answer only inside
+  visual range (`Lookout::check_with`), where the result depends on it.
+- The ground ceiling (below) also skips sampling for those sight lines,
+  missile threat sight lines, the strike ground picture, the projectile terrain
+  test and missile obscuration (`live::terrain_hit_below`, the ceiling held by
+  the world's `Combat` and handed to `live::State` every step, never coded) and
+  surface fire line of sight (`fire::Scene::line_of_sight`). One ceiling serves
+  combat and the AI wings.
+- Both sensor channels read one sighting per target, worked out only when the
+  distance is inside a volume's maximum; received emitters test range before
+  any angle and work out the heading once.
+- Incoming fire indexes the tick's gun rounds by x once (`incoming_fire::Rounds`)
+  and each aircraft visits only rounds within a close pass of it or within its
+  lookout's visual range, in the original order. Visible tracer samples live in
+  reused id-sorted lists coded exactly as the map they replaced.
+- `report_perceived_attacks` tests range, then terrain, then builds the possible
+  shooters; the engagement policy's selection and its debug explanation share
+  one pass (`Policy::select_explained`); every controller shares the tick's one
+  traffic table (`Arc<[Traffic]>`).
+- Surface fire looks only at the contacts a weapon can aim at by kind, keeps
+  each unit's place while it stands still, and checks a projectile's own fields
+  before the surface round lookup; moving units find their combat rows in one
+  pass.
+
+Test builds compare the indexed incoming fire, the perceived-attack search,
+the shared selection pass, the surface fire contact lists, kept places and
+course rows with the replaced code on every AI and surface test.
+
 A test-only copy of the unsplit observation code independently validates the
 serial extraction. Worker comparisons cover complete actor/mission state,
 flight bytes, outputs and bounded journal contents, including new damage
@@ -9581,12 +9619,15 @@ affordable, each an agent decision that changes no answer:
   keeps are tested exactly as before, in the same order.
 - **The AI's sight lines to tracers** skip sampling the ground when the whole
   line is above the highest ground under it (`tore_sim::ground_ceiling`, built
-  once from the terrain grid and runways by `Terrain::ground_ceiling`).
+  once from the terrain grid and runways by `Terrain::ground_ceiling`). Since
+  optimization run S7 the same ceiling also serves the rounds' own terrain test,
+  missile obscuration, AI observation and surface fire line of sight.
 - **The runway lookup** skips the trigonometry for runways nowhere near the
   point (`OrientedBox::contains_horizontal`).
 
-What remains grows with the AI aircraft times the rounds: each AI aircraft
-still looks at every round for incoming fire. The
+What remains grows with the AI aircraft times the rounds near them: since
+optimization run S7 each AI aircraft looks only at the rounds that could pass
+close or that its lookout could see (`incoming_fire::Rounds`). The
 [baseline](baselines/projectile-cap-2026-10-09.md) has the numbers.
 
 ### Measurement rules
