@@ -15,7 +15,7 @@ use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
 };
-use tore_formats::aircraft::AircraftId;
+use tore_formats::{aircraft::AircraftId, theater::CELL_FEET};
 use tore_sim::flight;
 use tore_sim::{
     attitude::{Basis, Vector},
@@ -1388,6 +1388,47 @@ impl Combat {
             self.state.aircraft_crashed(id, position, water);
         }
     }
+    /// Developer preview (`TORE_EFFECT_PREVIEW=hill`): the open ground
+    /// nearest `from` that is one even slope of 12 to 20 degrees across 2,400
+    /// feet (a plane within 25 ft, on land), as its centre and the heading
+    /// that faces uphill. The preview then starts 2,600 feet short of it, so
+    /// its craters lie on the hillside.
+    pub fn preview_hillside(world: &Terrain, from: [f64; 2]) -> Option<([f64; 3], f64)> {
+        const STEP: f64 = 250.;
+        const REACH: f64 = 600.;
+        let height = |x: f64, z: f64| f64::from(world.height(x as f32, z as f32));
+        let size = [
+            world.theater.cols as f64 * f64::from(CELL_FEET),
+            world.theater.rows as f64 * f64::from(CELL_FEET),
+        ];
+        let mut best: Option<(f64, [f64; 3], f64)> = None;
+        let mut x = REACH * 2.;
+        while x < size[0] - REACH * 2. {
+            let mut z = REACH * 2.;
+            while z < size[1] - REACH * 2. {
+                let distance = (x - from[0]).hypot(z - from[1]);
+                if distance < best.map_or(f64::MAX, |b| b.0) && !world.over_water(x, z) {
+                    let centre = height(x, z);
+                    let gx = (height(x + REACH, z) - height(x - REACH, z)) / (2. * REACH);
+                    let gz = (height(x, z + REACH) - height(x, z - REACH)) / (2. * REACH);
+                    let angle = gx.hypot(gz).atan().to_degrees();
+                    let flat = (12. ..=20.).contains(&angle)
+                        && [-2., -1., 0., 1., 2.].iter().all(|&i| {
+                            [-2., -1., 0., 1., 2.].iter().all(|&j| {
+                                let (dx, dz) = (i * REACH, j * REACH);
+                                (height(x + dx, z + dz) - (centre + gx * dx + gz * dz)).abs() < 25.
+                            })
+                        });
+                    if flat {
+                        best = Some((distance, [x, centre, z], gx.atan2(gz)));
+                    }
+                }
+                z += STEP;
+            }
+            x += STEP;
+        }
+        best.map(|(_, site, yaw)| (site, yaw))
+    }
     /// Developer preview (`TORE_EFFECT_PREVIEW=1`): every explosion type
     /// 15 to 38 halfway through its animation in a row 2,500 feet ahead,
     /// surface types on the ground, and a burning crash site with its
@@ -1401,6 +1442,31 @@ impl Combat {
             let z = s.position[2] + forward[2] * ahead + right[2] * across;
             [x, f64::from(world.height(x as f32, z as f32)), z]
         };
+        // `hill` shows craters alone: six of them in two rows on the slope.
+        let hill = std::env::var_os("TORE_EFFECT_PREVIEW").is_some_and(|mode| mode == "hill");
+        if hill {
+            for (n, (ahead, across, size)) in [
+                (2200., -220., 18),
+                (2600., -220., 9),
+                (3000., -220., 18),
+                (2200., 220., 18),
+                (2600., 220., 3),
+                (3000., 220., 9),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                self.state.marks.push(blast::Mark {
+                    position: at(ahead, across),
+                    kind: blast::MarkKind::Crater(size),
+                    ticks: blast::FOREVER,
+                    born: 0,
+                    scale: tore_sim::combat::blast_scale::FULL,
+                    serial: u64::MAX - n as u64,
+                });
+            }
+            return;
+        }
         for kind in blast::FIRST..=blast::LAST {
             let row = blast::explosion(kind).expect("table type");
             let mut position = at(2500., (f64::from(kind) - 26.5) * 120.);
