@@ -6,7 +6,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 // CPU weights measured on the private UKR/F18 profile probe (2026-10-16).
@@ -140,10 +140,17 @@ impl Progress {
         (current.0, current.1.elapsed().as_secs_f64())
     }
 }
+/// How long a load that continues from a menu page may run before the
+/// loading photograph replaces that page (`Job::continue_from_menu`). A short
+/// load shows the page it was started from until the next page is ready, not a
+/// photograph for a handful of frames.
+pub(crate) const MENU_GRACE: Duration = Duration::from_millis(250);
 pub(crate) struct Job<T> {
     receive: mpsc::Receiver<Result<T, String>>,
     pub progress: Progress,
     photo: usize,
+    /// Until this time the screen the load started from stays up.
+    quiet_until: Option<Instant>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 impl<T: Send + 'static> Job<T> {
@@ -160,6 +167,24 @@ impl<T: Send + 'static> Job<T> {
         complete: bool,
         work: impl FnOnce(Progress) -> Result<T, String> + Send + 'static,
     ) -> Result<Self, String> {
+        Self::start(progress, complete, false, work)
+    }
+    /// A load that opens the next menu page, started from a menu page: that
+    /// page stays up for [`MENU_GRACE`] and the loading photograph comes only
+    /// if the load runs longer (`screen_kept`). The photographs decode beside
+    /// the work, not before it, so a short load is not held up by them.
+    pub fn continue_from_menu(
+        work: impl FnOnce(Progress) -> Result<T, String> + Send + 'static,
+    ) -> Result<Self, String> {
+        request_background_decode();
+        Self::start(None, false, true, work)
+    }
+    fn start(
+        progress: Option<Progress>,
+        complete: bool,
+        from_menu: bool,
+        work: impl FnOnce(Progress) -> Result<T, String> + Send + 'static,
+    ) -> Result<Self, String> {
         let (send, receive) = mpsc::channel();
         let progress = progress.unwrap_or_else(Progress::new);
         let photo = progress.1;
@@ -168,7 +193,9 @@ impl<T: Send + 'static> Job<T> {
             .name("flight-loader".into())
             .spawn(move || {
                 // Decode before mission work, on this thread, not the window thread.
-                prepare_photos();
+                if !from_menu {
+                    prepare_photos();
+                }
                 let result = work(status.clone());
                 // A failed load is not completion: leave the last real stage up.
                 if complete && result.is_ok() {
@@ -181,8 +208,14 @@ impl<T: Send + 'static> Job<T> {
             receive,
             progress,
             photo,
+            quiet_until: from_menu.then(|| Instant::now() + MENU_GRACE),
             thread: Some(thread),
         })
+    }
+    /// Whether the screen the load started from is still the one to show at
+    /// `now`.
+    pub fn screen_kept(&self, now: Instant) -> bool {
+        self.quiet_until.is_some_and(|until| now < until)
     }
     /// The worker, still running or finished. Dropping the job discards its
     /// result; the caller joins this handle after the window closes.
@@ -646,6 +679,21 @@ pub(crate) enum Prepared {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_load_from_a_menu_page_keeps_that_page_up_for_the_grace_time() {
+        // A plain load shows the loading photograph at once.
+        let plain = Job::continue_load(None, false, |_| Ok(())).unwrap();
+        assert!(!plain.screen_kept(Instant::now()));
+        // One started from a menu page keeps the page for MENU_GRACE, then
+        // lets the photograph come (it is not hidden for good).
+        let from_menu = Job::continue_from_menu(|_| Ok(())).unwrap();
+        let started = Instant::now();
+        assert!(from_menu.screen_kept(started));
+        assert!(from_menu.screen_kept(started + MENU_GRACE / 2));
+        assert!(!from_menu.screen_kept(started + MENU_GRACE + Duration::from_millis(5)));
+        // The grace is short enough that a slow load still shows its bar.
+        assert!(MENU_GRACE <= Duration::from_millis(300));
+    }
     #[test]
     fn one_photo_and_monotonic_progress_across_selection_and_mission() {
         let progress = Progress::new();
