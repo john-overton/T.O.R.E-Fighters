@@ -3159,7 +3159,11 @@ again with an observer; the capture format did not change for it.
   55 since the F-15C wing pylons (slice v2-f15): the F-15C gains a fifth
   weapon station (its wing row takes a tank or one air-to-air missile), so its
   configuration in the world checkpoint and its lobby loadout carry one more
-  station, and an older game must not join.
+  station, and an older game must not join;
+  56 since the F-15C shoulder rails (slice v2-f15 follow-up): its twin
+  shoulder Sidewinders sit and release 0.85 ft either side of the pylon
+  instead of 1.75 ft, which changes where those rounds start, so an older game
+  must not join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
