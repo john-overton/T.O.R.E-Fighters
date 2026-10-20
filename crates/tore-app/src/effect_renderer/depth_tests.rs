@@ -13,14 +13,17 @@ fn shader(before: bool, hillside: bool) -> String {
         .split("\n}")
         .next()
         .unwrap();
+    // Only the production struct and vertex function: the glow helpers that
+    // follow them in terrain.wgsl pull in the weather and haze bindings,
+    // which this fixture does not declare and the vertex stage never calls.
     let effect = source
         .split("struct EffectOut")
         .nth(1)
         .unwrap()
-        .split("@fragment fn effect_fragment")
+        .split("\n}\n")
         .next()
         .unwrap();
-    let mut effect = format!("struct EffectOut{effect}");
+    let mut effect = format!("struct EffectOut{effect}\n}}");
     if before {
         // The hillside baseline is the first fix: horizontal, no pull,
         // with the same 16-unit raster bias. The level baseline predates it.

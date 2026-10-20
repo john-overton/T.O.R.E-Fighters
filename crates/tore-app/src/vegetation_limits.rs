@@ -255,10 +255,16 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires TORE_DATA_DIR pointing to a private full import"]
+    #[ignore = "requires TORE_DATA_DIR (a private full import) and TORE_VEG_LIMITS_OUT (output directory)"]
     fn every_imported_theater_and_variant_loads_and_fits_gpu_limits() {
+        let Some(out) = std::env::var_os("TORE_VEG_LIMITS_OUT") else {
+            eprintln!(
+                "skipped: set TORE_VEG_LIMITS_OUT to a private output directory \
+                 (with TORE_DATA_DIR at a full import) to run this audit"
+            );
+            return;
+        };
         let assets = crate::reel::load_assets().unwrap();
-        let out = std::env::var_os("TORE_VEG_LIMITS_OUT").expect("private audit output directory");
         crate::vegetation_preview::limits_check(
             &assets.theater_resources,
             std::path::Path::new(&out),
