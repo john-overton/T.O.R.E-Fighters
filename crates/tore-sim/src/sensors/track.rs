@@ -685,6 +685,29 @@ impl Sensors {
         environment: &Environment<'_>,
         options: StepOptions,
     ) -> Vec<Event> {
+        self.step_targets(observer, targets, environment, options)
+    }
+
+    /// [`Self::step_with`] over references to the observables, for a caller
+    /// that holds them elsewhere (the AI reads its world's observables
+    /// without copying them).
+    pub fn step_with_refs(
+        &mut self,
+        observer: &Observer,
+        targets: &[&Observable],
+        environment: &Environment<'_>,
+        options: StepOptions,
+    ) -> Vec<Event> {
+        self.step_targets(observer, targets, environment, options)
+    }
+
+    fn step_targets(
+        &mut self,
+        observer: &Observer,
+        targets: &[impl std::borrow::Borrow<Observable>],
+        environment: &Environment<'_>,
+        options: StepOptions,
+    ) -> Vec<Event> {
         let elapsed = options.elapsed.max(1);
         let mut events = Vec::new();
         self.radar_powered = observer.radar_powered;
@@ -747,7 +770,7 @@ impl Sensors {
             *age += elapsed;
             emitting && *age <= NOISE_FADE_STEPS
         });
-        let mut sorted: Vec<&Observable> = targets.iter().collect();
+        let mut sorted: Vec<&Observable> = targets.iter().map(|t| t.borrow()).collect();
         sorted.sort_by_key(|t| t.id);
         self.visual.clear();
         self.map_contacts.clear();
@@ -787,8 +810,13 @@ impl Sensors {
         }
         // Selection survives only while the radar or infrared scope still
         // holds the contact; seeing it no longer keeps it (John, 2026-09-23).
-        let kept =
-            |id: u32| self.keep_selection && targets.iter().any(|t| t.id == id && t.airborne);
+        let kept = |id: u32| {
+            self.keep_selection
+                && targets
+                    .iter()
+                    .map(|t| t.borrow())
+                    .any(|t| t.id == id && t.airborne)
+        };
         // The ground rules (the page list, the sight's track, a ground object
         // in view) keep a ground selection; `step_ground` decides them.
         let ground_kept = |id: u32| {
@@ -1054,11 +1082,11 @@ impl Sensors {
 /// still interferes; nothing here requires the emitter to be a known target.
 fn strobes(
     observer: &Observer,
-    targets: &[Observable],
+    targets: &[impl std::borrow::Borrow<Observable>],
     radar: &RadarProfile,
     environment: &Environment<'_>,
 ) -> Vec<Strobe> {
-    let mut sorted: Vec<&Observable> = targets.iter().collect();
+    let mut sorted: Vec<&Observable> = targets.iter().map(|t| t.borrow()).collect();
     sorted.sort_by_key(|t| t.id);
     let mut strobes = Vec::new();
     for target in sorted {

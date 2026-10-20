@@ -227,17 +227,18 @@ pub(super) fn observe(
     let lookout = awareness::Lookout::new(tick, observer.position, observer.basis, attention);
     let mut emitters = Vec::new();
     let contacts = if let Some(sensors) = sensors.as_mut() {
-        let observables: Vec<Observable> = world
+        // The world's observables, not copies of them.
+        let observables: Vec<&Observable> = world
             .iter()
             .filter(|o| o.id != context.actor)
-            .filter_map(|o| o.observable.clone())
+            .filter_map(|o| o.observable.as_ref())
             .collect();
         let obscured = |from, to| sight.blocked(from, to);
         let environment = sensors::Environment {
             ground,
             obscured: &obscured,
         };
-        sensors.step_with(
+        sensors.step_with_refs(
             &observer,
             &observables,
             &environment,
@@ -357,10 +358,10 @@ pub(super) fn received_emitters_on_demand(
     let Some(sensors) = sensors.as_ref().filter(|_| context.receive_emitters) else {
         return Vec::new();
     };
-    let observables: Vec<Observable> = world
+    let observables: Vec<&Observable> = world
         .iter()
         .filter(|o| o.id != context.actor)
-        .filter_map(|o| o.observable.clone())
+        .filter_map(|o| o.observable.as_ref())
         .collect();
     let obscured = |from, to| sight.blocked(from, to);
     let environment = sensors::Environment {
