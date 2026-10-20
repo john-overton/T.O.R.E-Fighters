@@ -3155,7 +3155,11 @@ again with an observer; the capture format did not change for it.
   54 since optimization round 2 (slice r2-prof): AI aircraft observe at 60 Hz
   by default (staggered, held observations carried forward at their velocity),
   so a standby replaying the journal at an older default would part from the
-  host, and an older game must not join.
+  host, and an older game must not join;
+  55 since the F-15C wing pylons (slice v2-f15): the F-15C gains a fifth
+  weapon station (its wing row takes a tank or one air-to-air missile), so its
+  configuration in the world checkpoint and its lobby loadout carry one more
+  station, and an older game must not join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
