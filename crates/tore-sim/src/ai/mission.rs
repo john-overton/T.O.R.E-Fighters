@@ -4988,24 +4988,20 @@ impl AiActor {
     }
 
     /// The hybrid model's loaded low-speed positive G ceiling at `speed` with
-    /// the current flaps, as the control adapter computes it; `None` above
-    /// the ramp or for an aircraft without a 1 G envelope here.
-    fn hybrid_ramp_g(&self, speed: f64) -> Option<f64> {
+    /// the current flaps, as the control adapter computes it, from the rows'
+    /// bands at the current altitude; `None` above the ramp or for an
+    /// aircraft without a 1 G envelope here.
+    fn hybrid_ramp_g_with(&self, rows: &crate::flight::RowSpeeds, speed: f64) -> Option<f64> {
         let config = self.flight.model().configuration();
-        let altitude = self.flight.position[1];
-        let (clean_stall, _) = config
-            .aerodynamics
-            .envelopes
-            .iter()
-            .find(|e| e.g == 1)?
-            .speeds(altitude)?;
+        let (clean_stall, _) = rows.one_g()?;
         let stall = clean_stall * (1.0 - 0.25 * self.flight.flaps);
         let loading = 1.0
             + (self.flight.fuel + self.flight.carried_lbs()) / config.mass.empty_lbs
                 * config.aerodynamics.loaded_elevator_percent
                 / 100.0;
-        crate::flight::low_speed_positive_g_ceiling(config, altitude, speed, stall, false)
-            .map(|g| g / loading)
+        let next = crate::flight::low_speed_ramp_end(rows.bands(), stall)?;
+        crate::flight::low_speed_ceiling_on(next, speed, stall, false)
+            .map(|ceiling| ceiling.limit_g / loading)
     }
 
     /// Fitted (agent decision, 2026-09-29): the slowest speed at which the
@@ -5032,9 +5028,21 @@ impl AiActor {
             + (self.flight.fuel + self.flight.carried_lbs()) / config.mass.empty_lbs
                 * config.aerodynamics.loaded_elevator_percent
                 / 100.0;
+        // Where the ramp ends does not depend on the speed: found once.
+        let next = crate::flight::low_speed_ramp_end(
+            config
+                .aerodynamics
+                .envelopes
+                .iter()
+                .filter(|envelope| envelope.g > 1)
+                .map(|envelope| (envelope.g, envelope.speeds(altitude))),
+            stall,
+        );
         let mut speed = stall;
         while speed < maximum {
-            match crate::flight::low_speed_positive_g_ceiling(config, altitude, speed, stall, false)
+            match next
+                .and_then(|next| crate::flight::low_speed_ceiling_on(next, speed, stall, false))
+                .map(|ceiling| ceiling.limit_g)
             {
                 Some(g) if g / loading < APPROACH_G_MARGIN => speed += 5.0,
                 _ => return speed,
@@ -5049,9 +5057,11 @@ impl AiActor {
         let envelopes = &self.flight.model().configuration().aerodynamics.envelopes;
         let altitude = self.flight.position[1];
         let speed = self.flight.speed;
+        // Every row's band once: the passes below all read them.
+        let rows = crate::flight::RowSpeeds::new(envelopes, altitude);
         let mut available = 1;
-        for envelope in envelopes {
-            if let Some((low, high)) = envelope.speeds(altitude)
+        for (envelope, speeds) in rows.rows() {
+            if let Some((low, high)) = speeds
                 && speed >= low
                 && speed <= high
                 && envelope.g > available
@@ -5070,13 +5080,11 @@ impl AiActor {
         // already assumes. Before this a loaded aircraft slowing on final was
         // held below 1 G, could not hold its path and sank into the ground.
         if self.flight.research.is_some() {
-            if let Some(ramp) = self.hybrid_ramp_g(speed) {
+            if let Some(ramp) = self.hybrid_ramp_g_with(&rows, speed) {
                 loaded = loaded.max(ramp);
             }
-            if envelopes.iter().any(|e| {
-                e.g == 1
-                    && e.speeds(altitude)
-                        .is_some_and(|(low, high)| speed >= low && speed <= high)
+            if rows.rows().any(|(e, speeds)| {
+                e.g == 1 && speeds.is_some_and(|(low, high)| speed >= low && speed <= high)
             }) {
                 loaded = loaded.max(1.0);
             }
@@ -8138,6 +8146,9 @@ mod engagement_integration_tests;
 #[cfg(test)]
 #[path = "airfield_integration_tests.rs"]
 mod airfield_integration_tests;
+#[cfg(test)]
+#[path = "envelope_rows_tests.rs"]
+mod envelope_rows_tests;
 
 #[cfg(test)]
 #[path = "vertical_field_tests.rs"]
@@ -8158,12 +8169,14 @@ mod checkpoint;
 pub fn speed_limits_of(flight: &crate::flight::State) -> SpeedLimits {
     let envelopes = &flight.model().configuration().aerodynamics.envelopes;
     let altitude = flight.position[1];
+    // Every row's band once: the passes below all read them.
+    let rows = crate::flight::RowSpeeds::new(envelopes, altitude);
     let mut minimum = f64::INFINITY;
     let mut maximum = f64::NEG_INFINITY;
     let mut corner = f64::NAN;
     let mut best_g = i32::MIN;
-    for envelope in envelopes {
-        let Some((low, high)) = envelope.speeds(altitude) else {
+    for (envelope, speeds) in rows.rows() {
+        let Some((low, high)) = speeds else {
             continue;
         };
         minimum = minimum.min(low);
@@ -8189,7 +8202,7 @@ pub fn speed_limits_of(flight: &crate::flight::State) -> SpeedLimits {
     // current flap setting (`flight::State::minimum_level_speed`); on the
     // F/A-18D the rows alone gave 114 kt against the 140 kt it needs, and
     // finals built on it sank into the ground.
-    let level = flight.minimum_level_speed(altitude, flight.flaps);
+    let level = flight.minimum_level_speed_with(&rows, flight.flaps);
     if level < maximum {
         minimum = minimum.max(level);
     }
@@ -8205,10 +8218,10 @@ pub fn speed_limits_of(flight: &crate::flight::State) -> SpeedLimits {
         + (flight.fuel + flight.payload_lbs) / config.mass.empty_lbs
             * config.aerodynamics.loaded_elevator_percent
             / 100.0;
-    let manoeuvring = envelopes
-        .iter()
-        .filter(|e| f64::from(e.g) / load >= TOP_SPEED_G_MARGIN)
-        .filter_map(|e| e.speeds(altitude).map(|(_, high)| high))
+    let manoeuvring = rows
+        .rows()
+        .filter(|(e, _)| f64::from(e.g) / load >= TOP_SPEED_G_MARGIN)
+        .filter_map(|(_, speeds)| speeds.map(|(_, high)| high))
         .fold(f64::NEG_INFINITY, f64::max);
     if manoeuvring > minimum {
         maximum = maximum.min(manoeuvring);

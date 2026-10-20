@@ -1,5 +1,7 @@
 //! Deterministic gun-pipper ballistics, independent of rendering and live contact.
-use super::{FallState, axial_speed, commanded_speed, engine_phase, launch_speed};
+use super::{
+    FALL_SPEED_CAP_F8, FallState, axial_speed, commanded_speed, engine_phase, launch_speed,
+};
 use crate::{attitude::Vector, combat::live::Launcher};
 use tore_formats::{Result, weapons::Weapon};
 
@@ -78,6 +80,15 @@ pub fn solve_observed(
     let initial_height_f8 = (muzzle[1] * 256.) as i32;
     let mut height_f8 = initial_height_f8;
     let ticks = (u64::from(movement.remove_t) * 30).min(MAX_TICKS);
+    if let Some(target) = radar_target
+        && weapon.flags & 0x40 == 0
+        && beyond_reach(target, muzzle, speed_f8, ticks)
+    {
+        return Ok(None);
+    }
+    // A tick whose crossing cannot be non-negative needs no crossing worked
+    // out until the next tick needs it as the previous one (see `apart`).
+    let apart = radar_target.map(|target| Apart::new(target, muzzle));
     let mut service_remainder = 0u16;
     let mut distance = 0.;
     let mut previous = Sample {
@@ -85,6 +96,7 @@ pub fn solve_observed(
         distance: 0.,
         drop: 0.,
         crossing: crossing(radar_target, muzzle, 0., 0., 0.),
+        pending: false,
     };
     for tick in 0..ticks {
         service_remainder += SERVICE_RATE;
@@ -100,12 +112,34 @@ pub fn solve_observed(
         height_f8 = fall.advance(weapon.flags & 4 != 0, phase, service, height_f8)?;
         let drop = f64::from(initial_height_f8 - height_f8) / 256.;
         let seconds = (tick + 1) as f64 * DT;
+        if apart.is_some_and(|apart| apart.surely(seconds, distance, drop)) {
+            // Not reached: the crossing is negative. Kept without it.
+            previous = Sample {
+                seconds,
+                distance,
+                drop,
+                crossing: 0.,
+                pending: true,
+            };
+            continue;
+        }
         let current = Sample {
             seconds,
             distance,
             drop,
             crossing: crossing(radar_target, muzzle, seconds, distance, drop),
+            pending: false,
         };
+        if previous.pending {
+            // Exactly what that tick would have worked out.
+            previous.crossing = crossing(
+                radar_target,
+                muzzle,
+                previous.seconds,
+                previous.distance,
+                previous.drop,
+            );
+        }
         let reached = if radar {
             current.crossing >= 0. && previous.crossing < 0.
         } else {
@@ -152,12 +186,69 @@ pub fn solve_observed(
     Ok(None)
 }
 
+/// Whether an unpowered round can never reach `target` within its `ticks`
+/// of flight, so the trajectory below could only run out and say no.
+///
+/// Without a motor the round keeps its launch speed, so it covers exactly
+/// `speed_f8` times the service ticks it is given (the sum below is the
+/// same sum of multiples of 2^-16 the loop adds, which f64 holds exactly);
+/// its drop never exceeds the capped fall speed for those service ticks; and
+/// the target is never closer than its distance now less what it can fly in
+/// that time. When even all of that leaves a gap (with a foot and a
+/// relative 1e-9 to spare for rounding in the distances), no tick's crossing
+/// can turn non-negative.
+fn beyond_reach(target: TargetObservation, muzzle: Vector, speed_f8: i32, ticks: u64) -> bool {
+    if speed_f8 < 0 {
+        return false;
+    }
+    let service = (ticks * u64::from(SERVICE_RATE) / 120) as f64;
+    let reach = f64::from(speed_f8) * service / 65536.;
+    let drop = f64::from(FALL_SPEED_CAP_F8) * service / 65536.;
+    let gap = (0..3)
+        .map(|i| (target.position[i] - muzzle[i]).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    let closing = target.velocity.iter().map(|v| v * v).sum::<f64>().sqrt() * ticks as f64 * DT;
+    let slack = 1. + 1e-9 * (gap + reach + drop + closing);
+    reach + drop + closing + slack < gap
+}
+
+/// A bound on how near a round and the target can be: the target is never
+/// nearer than its distance from the muzzle now less how far it can fly and
+/// how far the round has dropped. While the round has flown less than that
+/// (with a foot and a relative 1e-9 to spare for rounding), its crossing is
+/// negative.
+#[derive(Clone, Copy)]
+struct Apart {
+    gap: f64,
+    target_speed: f64,
+}
+impl Apart {
+    fn new(target: TargetObservation, muzzle: Vector) -> Self {
+        Self {
+            gap: (0..3)
+                .map(|i| (target.position[i] - muzzle[i]).powi(2))
+                .sum::<f64>()
+                .sqrt(),
+            target_speed: target.velocity.iter().map(|v| v * v).sum::<f64>().sqrt(),
+        }
+    }
+    /// Whether the crossing at this sample is surely negative.
+    fn surely(self, seconds: f64, distance: f64, drop: f64) -> bool {
+        let closing = self.target_speed * seconds;
+        let near = distance.abs() + closing + drop.abs();
+        near + 1. + 1e-9 * (self.gap + near) < self.gap
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Sample {
     seconds: f64,
     distance: f64,
     drop: f64,
     crossing: f64,
+    /// The crossing is not worked out yet (it is surely negative).
+    pending: bool,
 }
 
 fn crossing(
@@ -458,6 +549,178 @@ pub(crate) mod tests {
             .unwrap()
             .unwrap();
         assert!(fast.seconds < slow.seconds);
+    }
+
+    /// [`solve_observed`] as it was before the out-of-reach shortcut.
+    fn solve_observed_reference(
+        weapon: &Weapon,
+        launcher: &Launcher,
+        mount: Vector,
+        target: Option<TargetObservation>,
+    ) -> Result<Option<Solution>> {
+        if !launcher
+            .position
+            .iter()
+            .chain(&launcher.velocity)
+            .all(|v| v.is_finite())
+            || !mount.iter().all(|v| v.is_finite())
+            || !launcher.speed_fps.is_finite()
+            || target.is_some_and(|t| !t.position.iter().chain(&t.velocity).all(|v| v.is_finite()))
+        {
+            return Err(crate::combat::invalid("nonfinite gunsight input"));
+        }
+        let maximum = f64::from(weapon.seeker.zones[1].maximum_range.max(0));
+        if maximum <= 0. {
+            return Ok(None);
+        }
+        let muzzle = std::array::from_fn(|i| {
+            launcher.position[i]
+                + launcher.basis.right[i] * mount[0]
+                + launcher.basis.up[i] * mount[1]
+                + launcher.basis.forward[i] * mount[2]
+        });
+        let radar_target = target;
+        let radar = radar_target.is_some();
+        let movement = &weapon.movement;
+        let mut speed_f8 = launch_speed(movement, (launcher.speed_fps * 256.) as i32)? * 256;
+        let mut fall = FallState::default();
+        let initial_height_f8 = (muzzle[1] * 256.) as i32;
+        let mut height_f8 = initial_height_f8;
+        let ticks = (u64::from(movement.remove_t) * 30).min(MAX_TICKS);
+        let mut service_remainder = 0u16;
+        let mut distance = 0.;
+        let mut previous = Sample {
+            seconds: 0.,
+            distance: 0.,
+            drop: 0.,
+            crossing: crossing(radar_target, muzzle, 0., 0., 0.),
+            pending: false,
+        };
+        for tick in 0..ticks {
+            service_remainder += SERVICE_RATE;
+            let service = (service_remainder / 120) as i16;
+            service_remainder %= 120;
+            let now = (tick / 30) as u16;
+            let phase = engine_phase(movement, now, 0);
+            if weapon.flags & 0x40 != 0 {
+                let target_speed = commanded_speed(movement, phase, speed_f8, height_f8) as i16;
+                speed_f8 = axial_speed(movement, speed_f8, target_speed, false, service)?;
+            }
+            distance += f64::from(speed_f8) * f64::from(service) / 65536.;
+            height_f8 = fall.advance(weapon.flags & 4 != 0, phase, service, height_f8)?;
+            let drop = f64::from(initial_height_f8 - height_f8) / 256.;
+            let seconds = (tick + 1) as f64 * DT;
+            let current = Sample {
+                seconds,
+                distance,
+                drop,
+                crossing: crossing(radar_target, muzzle, seconds, distance, drop),
+                pending: false,
+            };
+            let reached = if radar {
+                current.crossing >= 0. && previous.crossing < 0.
+            } else {
+                current.distance >= VISUAL_RANGE_FT
+            };
+            if reached {
+                let fraction = if radar {
+                    (-previous.crossing / (current.crossing - previous.crossing)).clamp(0., 1.)
+                } else {
+                    ((VISUAL_RANGE_FT - previous.distance)
+                        / (current.distance - previous.distance).max(f64::EPSILON))
+                    .clamp(0., 1.)
+                };
+                let seconds = lerp(previous.seconds, current.seconds, fraction);
+                let range = lerp(previous.distance, current.distance, fraction);
+                let drop = lerp(previous.drop, current.drop, fraction);
+                let target_velocity = radar_target.map_or([0.; 3], |t| t.velocity);
+                let point = std::array::from_fn(|i| {
+                    muzzle[i] + launcher.basis.forward[i] * range
+                        - if i == 1 { drop } else { 0. }
+                        - target_velocity[i] * seconds
+                });
+                let indicated_range = radar_target.map_or(range, |target| {
+                    (0..3)
+                        .map(|i| (target.position[i] - launcher.position[i]).powi(2))
+                        .sum::<f64>()
+                        .sqrt()
+                });
+                return Ok(Some(Solution {
+                    point,
+                    seconds,
+                    range_ft: indicated_range,
+                    maximum_range_ft: maximum,
+                    radar,
+                    travel_ft: range,
+                    drop_ft: drop,
+                    flight_speed_fps: f64::from(speed_f8) / 256.,
+                    fall_speed_fps: f64::from(fall.velocity_f8) / 256.,
+                    arc_fraction: range_arc_fraction(indicated_range, maximum),
+                }));
+            }
+            previous = current;
+        }
+        Ok(None)
+    }
+
+    #[test]
+    fn the_out_of_reach_shortcuts_give_what_the_full_trajectory_gave() {
+        let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1_u64 << 53) as f64
+        };
+        let mut shortcut = 0;
+        let mut found = 0;
+        for case in 0..6000 {
+            let mut weapon = weapon();
+            weapon.flags = [0, 4, 4, 0x44, 0x40][case % 5];
+            weapon.movement.remove_t = [1, 10, 40, 200, 0][(case / 5) % 5];
+            weapon.movement.initial_speed = (next() * 3000.) as i16;
+            weapon.movement.minimum_speed = (next() * 200.) as i16 - 50;
+            weapon.movement.maximum_speed = weapon.movement.minimum_speed + (next() * 4000.) as i16;
+            weapon.movement.launch_retard = [0, 50, 100][case % 3];
+            weapon.seeker.zones[1].maximum_range = [2000, 0, 7500][case % 3];
+            let mut launcher = launcher();
+            launcher.position = [next() * 1e5, next() * 30_000., next() * 1e5];
+            launcher.basis = Basis::new(next() * 6.3, next() * 3. - 1.5, next() * 6.3);
+            launcher.speed_fps = next() * 2000.;
+            launcher.velocity = launcher.basis.forward.map(|v| v * launcher.speed_fps);
+            let mount = [next() * 6. - 3., next() * 2. - 1., next() * 10.];
+            // Ranges from touching to tens of miles, many near the reach.
+            let range = if case % 4 == 0 {
+                f64::from(weapon.movement.initial_speed.max(0))
+                    * f64::from(weapon.movement.remove_t)
+                    * (0.8 + next() * 0.6)
+            } else {
+                10f64.powf(next() * 5.5)
+            };
+            let direction = Basis::new(next() * 6.3, next() * 3. - 1.5, 0.).forward;
+            let speed = [0., 300., 1500., 4000.][case % 4] * next();
+            let velocity = Basis::new(next() * 6.3, next() * 3. - 1.5, 0.)
+                .forward
+                .map(|v| v * speed);
+            let target = TargetObservation {
+                position: std::array::from_fn(|i| launcher.position[i] + direction[i] * range),
+                velocity,
+            };
+            let new = solve_observed(&weapon, &launcher, mount, Some(target));
+            let old = solve_observed_reference(&weapon, &launcher, mount, Some(target));
+            assert_eq!(format!("{new:?}"), format!("{old:?}"), "case {case}");
+            if let Ok(Some(_)) = new {
+                found += 1;
+            }
+            if let Ok(None) = new
+                && weapon.flags & 0x40 == 0
+                && weapon.seeker.zones[1].maximum_range > 0
+            {
+                shortcut += 1;
+            }
+        }
+        assert!(shortcut > 1000, "{shortcut}");
+        assert!(found > 500, "{found}");
     }
 
     #[test]
