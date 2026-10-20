@@ -1,18 +1,34 @@
 //! Aspect-responsive flight composition; menus keep their original 640x480 canvas.
 use crate::canvas_rows::RowSet;
-use crate::{aim_box, aircraft::Airframe, flight::State, instruments::Instruments, menu::Sprite};
+use crate::{
+    aim_box,
+    aircraft::Airframe,
+    flight::State,
+    instruments::{Instruments, PageKey},
+    menu::Sprite,
+};
+use std::ops::Range;
 use std::sync::Arc;
 use tore_formats::text::GlyphCodes;
 #[cfg(test)]
 mod benchmark;
 #[cfg(test)]
+mod key_tests;
+mod partial;
+#[cfg(test)]
 mod worker_tests;
 // Fifteen percent smaller than the prior 0.85 layout. Angular cues retain world alignment.
 pub const HUD_SCALE: f64 = 0.85 * 0.85;
 struct PanelCache {
-    source: Vec<u8>,
+    /// What the page drew from ([`crate::instruments::PageKey`]); `None`
+    /// for a page that always redraws.
+    key: Option<PageKey>,
+    source: Arc<Vec<u8>>,
     size: [u32; 2],
-    image: Sprite,
+    image: Arc<Sprite>,
+    /// Every clear pixel of `image` is all zero, so composing it over a
+    /// clear canvas is a plain copy.
+    clear_is_zero: bool,
 }
 struct PanelJob {
     page: u8,
@@ -24,6 +40,27 @@ struct PanelJob {
 // dirty-page scaling belong to each job, while composition remains ordered.
 const MIN_PANEL_JOBS: usize = 2;
 
+/// Debug builds, and release builds run with `TORE_PAGE_KEY_CHECK` set, draw
+/// a page whose key is unchanged anyway and compare it with the kept pixels.
+fn page_key_check() -> bool {
+    static CHECK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    cfg!(debug_assertions)
+        || *CHECK.get_or_init(|| std::env::var_os("TORE_PAGE_KEY_CHECK").is_some())
+}
+/// Pages kept by key, kept pages drawn again to check, and checks that
+/// found different pixels.
+static PAGE_KEY_STATS: [std::sync::atomic::AtomicU64; 3] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 3];
+/// `(kept, checked, differing)` since the process started.
+pub fn page_key_stats() -> [u64; 3] {
+    PAGE_KEY_STATS
+        .each_ref()
+        .map(|n| n.load(std::sync::atomic::Ordering::Relaxed))
+}
+fn count_page_key(stat: usize) -> u64 {
+    PAGE_KEY_STATS[stat].fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+}
+
 fn prepare_panel(
     cached: Option<&Arc<PanelCache>>,
     page: u8,
@@ -32,35 +69,154 @@ fn prepare_panel(
     s: &State,
     panels: &Instruments,
 ) -> Arc<PanelCache> {
-    let raster = panels.page(page, h, s);
+    let key = panels.page_key(page, s);
     if let Some(cached) = cached
         && cached.size == size
-        && cached.source == raster.pixels
+        && key.is_some()
+        && cached.key == key
     {
-        return Arc::clone(cached);
+        count_page_key(0);
+        if !page_key_check() {
+            return Arc::clone(cached);
+        }
+        let raster = panels.page(page, h, s);
+        let checked = count_page_key(1);
+        if raster.pixels == *cached.source {
+            if checked.is_multiple_of(5000) && !cfg!(test) {
+                let [kept, checked, differing] = page_key_stats();
+                eprintln!("Page keys: {kept} pages kept, {checked} checked, {differing} differed");
+            }
+            return Arc::clone(cached);
+        }
+        count_page_key(2);
+        assert!(
+            !cfg!(debug_assertions),
+            "page {page}: its key is unchanged but a redraw differs from the kept pixels"
+        );
+        eprintln!("Page keys: page {page} kept pixels that a redraw changes; drawing it");
+        return scaled_panel(Some(cached), key, size, raster.pixels);
     }
-    let mut canvas = FlightCanvas {
-        size,
-        pixels: vec![0; size[0] as usize * size[1] as usize * 4],
-        ..Default::default()
-    };
-    let source = Sprite {
-        width: crate::instruments::WIDTH,
-        height: crate::instruments::HEIGHT,
-        rgba: raster.pixels,
+    scaled_panel(cached, key, size, panels.page(page, h, s).pixels)
+}
+
+/// The page raster `source` scaled to `size`. A kept image of the same size
+/// is reused where the source is unchanged: only the pixels whose filter
+/// taps read a changed source pixel are worked out again.
+fn scaled_panel(
+    cached: Option<&Arc<PanelCache>>,
+    key: Option<PageKey>,
+    size: [u32; 2],
+    source: Vec<u8>,
+) -> Arc<PanelCache> {
+    let (width, height) = (crate::instruments::WIDTH, crate::instruments::HEIGHT);
+    let rect = (0., 0., size[0] as f64, size[1] as f64);
+    let cached = cached.filter(|cached| cached.size == size && cached.source.len() == source.len());
+    if let Some(cached) = cached
+        && *cached.source == source
+    {
+        if cached.key == key {
+            return Arc::clone(cached);
+        }
+        return Arc::new(PanelCache {
+            key,
+            source: Arc::clone(&cached.source),
+            size,
+            image: Arc::clone(&cached.image),
+            clear_is_zero: cached.clear_is_zero,
+        });
+    }
+    let sprite = Sprite {
+        width,
+        height,
+        rgba: source,
         glyphs: vec![],
     };
-    canvas.blit(&source, (0., 0., size[0] as f64, size[1] as f64));
-    Arc::new(PanelCache {
-        source: source.rgba,
+    let mut canvas = FlightCanvas {
         size,
-        image: Sprite {
+        ..Default::default()
+    };
+    let clear_is_zero = |pixels: &[u8]| pixels.chunks_exact(4).all(|p| p[3] != 0 || p == [0; 4]);
+    let partial = cached.and_then(|cached| {
+        let spans = partial::changed_spans(&cached.source, &sprite.rgba, width);
+        let segments = partial::reach(size, [width, height], rect, &spans);
+        let area: usize = segments.iter().map(|(_, columns)| columns.len()).sum();
+        (area * 2 < size[0] as usize * size[1] as usize).then_some((cached, segments))
+    });
+    let clear_is_zero = if let Some((cached, segments)) = partial {
+        canvas.pixels = cached.image.rgba.clone();
+        let stride = size[0] as usize * 4;
+        for (row, columns) in &segments {
+            canvas.pixels[row * stride + columns.start * 4..row * stride + columns.end * 4].fill(0);
+        }
+        canvas.blit_within(&sprite, rect, Some(&segments));
+        cached.clear_is_zero
+            && segments.iter().all(|(row, columns)| {
+                clear_is_zero(
+                    &canvas.pixels
+                        [row * stride + columns.start * 4..row * stride + columns.end * 4],
+                )
+            })
+    } else {
+        canvas.pixels = vec![0; size[0] as usize * size[1] as usize * 4];
+        canvas.blit(&sprite, rect);
+        clear_is_zero(&canvas.pixels)
+    };
+    Arc::new(PanelCache {
+        key,
+        source: Arc::new(sprite.rgba),
+        size,
+        image: Arc::new(Sprite {
             width: size[0] as usize,
             height: size[1] as usize,
             rgba: canvas.pixels,
             glyphs: vec![],
-        },
+        }),
+        clear_is_zero,
     })
+}
+
+/// What every page draws from the airframe: its window frame picture, its
+/// instrument font and its HUD colours. Kept pages are dropped when these
+/// change, since page keys leave them out.
+struct AirframeStamp {
+    font_height: usize,
+    glyphs: Vec<(usize, Vec<(usize, usize)>)>,
+    panel: (usize, usize, Vec<u8>, Vec<bool>),
+    hud: tore_formats::hud::Hud,
+}
+impl AirframeStamp {
+    fn of(h: &Airframe) -> Self {
+        Self {
+            font_height: h.font.height,
+            glyphs: h
+                .font
+                .glyphs
+                .iter()
+                .map(|g| (g.advance, g.pixels.clone()))
+                .collect(),
+            panel: (
+                h.panel.width,
+                h.panel.height,
+                h.panel.pixels.clone(),
+                h.panel.mask.clone(),
+            ),
+            hud: h.hud.clone(),
+        }
+    }
+    fn matches(&self, h: &Airframe) -> bool {
+        self.font_height == h.font.height
+            && self.glyphs.len() == h.font.glyphs.len()
+            && self
+                .glyphs
+                .iter()
+                .zip(&h.font.glyphs)
+                .all(|((advance, pixels), g)| *advance == g.advance && *pixels == g.pixels)
+            && self.panel.0 == h.panel.width
+            && self.panel.1 == h.panel.height
+            && self.panel.2 == h.panel.pixels
+            && self.panel.3 == h.panel.mask
+            && self.hud == h.hud
+    }
 }
 
 #[derive(Default)]
@@ -68,6 +224,8 @@ pub struct FlightCanvas {
     pub pixels: Vec<u8>,
     pub size: [u32; 2],
     panels: std::collections::BTreeMap<u8, Arc<PanelCache>>,
+    /// The airframe the kept panels were drawn for.
+    stamp: Option<AirframeStamp>,
     /// Rows drawn on since the canvas was last cleared. Every row outside
     /// this set is all zero, so the next frame clears only these.
     touched: RowSet,
@@ -81,6 +239,9 @@ pub struct FlightCanvas {
     /// How often `legacy_layer` copied a kept result.
     #[cfg(test)]
     layer_hits: usize,
+    /// How often `legacy_layer` drew only what a change reached.
+    #[cfg(test)]
+    layer_redraws: usize,
 }
 /// A 640 by 480 layer `legacy_layer` drew and what came of it.
 #[derive(Default)]
@@ -113,6 +274,10 @@ impl FlightCanvas {
         panels: &Instruments,
     ) {
         self.clear_for(size);
+        if !self.stamp.as_ref().is_some_and(|stamp| stamp.matches(h)) {
+            self.panels.clear();
+            self.stamp = Some(AirframeStamp::of(h));
+        }
         let (w, height) = (size[0] as f64, size[1] as f64);
         let distinct = panels
             .pages
@@ -189,6 +354,11 @@ impl FlightCanvas {
         self.touched.reset(height);
         self.pending.reset_all(height);
     }
+    /// A clear canvas of `size` with no panels: what `begin` gives before
+    /// the panels go on, for frames that cover or wipe all of them.
+    pub fn clear(&mut self, size: [u32; 2]) {
+        self.clear_for(size);
+    }
     /// Panics if a row holds a pixel but is not noted as drawn on, which
     /// would leave it uncleared and unsent.
     #[cfg(test)]
@@ -217,15 +387,41 @@ impl FlightCanvas {
         self.touched.mark_all();
     }
     fn compose_panel(&mut self, page: u8, rect: (f64, f64, f64, f64), cached: Arc<PanelCache>) {
-        self.blit(
-            &cached.image,
-            (
-                rect.0.round(),
-                rect.1.round(),
-                cached.size[0] as f64,
-                cached.size[1] as f64,
-            ),
-        );
+        let (x, y) = (rect.0.round(), rect.1.round());
+        let [w, h] = cached.size.map(|n| n as usize);
+        let rect = (x, y, w as f64, h as f64);
+        // Over a clear canvas a panel whose clear pixels are all zero is its
+        // own pixels: `blit`'s whole-pixel paths leave a clear source pixel
+        // alone and give any other the source pixel itself over a clear one
+        // (see the test of every colour and alpha). A row with anything
+        // under it goes through `blit`.
+        let fits = cached.clear_is_zero
+            && x >= 0.
+            && y >= 0.
+            && x + w as f64 <= self.size[0] as f64
+            && y + h as f64 <= self.size[1] as f64
+            && self.size.iter().all(|&dimension| dimension <= 1 << 24);
+        if !fits {
+            self.blit(&cached.image, rect);
+            self.panels.insert(page, cached);
+            return;
+        }
+        let (x0, y0) = (x as usize, y as usize);
+        let stride = self.size[0] as usize * 4;
+        let mut under = Vec::new();
+        for row in 0..h {
+            let at = (y0 + row) * stride + x0 * 4;
+            let destination = &mut self.pixels[at..at + w * 4];
+            if destination.iter().fold(0, |any, &b| any | b) == 0 {
+                destination.copy_from_slice(&cached.image.rgba[row * w * 4..(row + 1) * w * 4]);
+            } else {
+                under.push((y0 + row, x0..x0 + w));
+            }
+        }
+        self.touched.mark(y0, y0 + h);
+        if !under.is_empty() {
+            self.blit_within(&cached.image, rect, Some(&under));
+        }
         self.panels.insert(page, cached);
     }
     /// Blend `color` at `alpha` over one screen pixel; outside the view is ignored.
@@ -634,6 +830,21 @@ impl FlightCanvas {
         {
             Some(found) => self.layers.remove(found),
             None => {
+                let bounds = layer_bounds(pixels);
+                // A layer that changed in place (the map as aircraft move)
+                // starts from its last result over the same picture beneath.
+                if let Some(base) = self
+                    .layers
+                    .iter()
+                    .rposition(|c| c.key == Some(key) && c.valid && c.bounds == Some(bounds))
+                    && self.redraw_changed(base, pixels, factor)
+                {
+                    return;
+                }
+                let same_place = self
+                    .layers
+                    .iter()
+                    .any(|c| c.key == Some(key) && c.bounds == Some(bounds));
                 let mut fresh = if self.layers.len() >= 2 {
                     self.layers.remove(0)
                 } else {
@@ -643,43 +854,20 @@ impl FlightCanvas {
                 fresh.layer.clear();
                 fresh.layer.extend_from_slice(pixels);
                 fresh.valid = false;
-                fresh.seen = false;
-                fresh.bounds = None;
+                // A layer drawn where the last one was is worth keeping a
+                // copy of its surroundings for, as one seen before is.
+                fresh.seen = same_place;
+                fresh.bounds = Some(bounds);
                 fresh
             }
         };
         let seen = std::mem::replace(&mut cache.seen, true);
-        let (left, top, right, bottom) = *cache.bounds.get_or_insert_with(|| {
-            let (mut left, mut top, mut right, mut bottom) = (640usize, 480usize, 0usize, 0usize);
-            for (i, p) in pixels.chunks_exact(4).enumerate() {
-                if p[3] != 0 {
-                    left = left.min(i % 640);
-                    right = right.max(i % 640 + 1);
-                    top = top.min(i / 640);
-                    bottom = bottom.max(i / 640 + 1);
-                }
-            }
-            (left, top, right, bottom)
-        });
+        let (left, top, right, bottom) = *cache.bounds.get_or_insert_with(|| layer_bounds(pixels));
         if right == 0 {
             self.layers.push(cache);
             return;
         }
-        let width = right - left;
-        let height = bottom - top;
-        let (w, h) = (self.size[0] as f64, self.size[1] as f64);
-        let scale = (w / 640.).min(h / 480.) * factor;
-        let rect = (
-            (w - 640. * scale) / 2. + left as f64 * scale,
-            (h - 480. * scale) / 2. + top as f64 * scale,
-            width as f64 * scale,
-            height as f64 * scale,
-        );
-        // The destination pixels `blit` can touch.
-        let columns =
-            (rect.0.floor().max(0.) as usize)..((rect.0 + rect.2).ceil().clamp(0., w) as usize);
-        let rows =
-            (rect.1.floor().max(0.) as usize)..((rect.1 + rect.3).ceil().clamp(0., h) as usize);
+        let (rect, columns, rows) = self.layer_geometry((left, top, right, bottom), factor);
         let stride = self.size[0] as usize * 4;
         let region = |rows: &std::ops::Range<usize>| {
             rows.clone()
@@ -720,19 +908,7 @@ impl FlightCanvas {
                 }
             }
         }
-        let mut rgba = Vec::with_capacity(width * height * 4);
-        for y in top..bottom {
-            rgba.extend_from_slice(&pixels[(y * 640 + left) * 4..(y * 640 + right) * 4]);
-        }
-        self.blit(
-            &Sprite {
-                width,
-                height,
-                rgba,
-                glyphs: vec![],
-            },
-            rect,
-        );
+        self.blit(&crop(pixels, (left, top, right, bottom)), rect);
         cache.valid = false;
         if seen && columns.start < columns.end && rows.start < rows.end {
             cache.after.clear();
@@ -744,7 +920,110 @@ impl FlightCanvas {
         }
         self.layers.push(cache);
     }
-    fn blit(&mut self, s: &Sprite, (x, y, w, h): (f64, f64, f64, f64)) {
+    /// Where `legacy_layer` puts a layer drawn within `bounds` (left, top,
+    /// right, bottom), and the destination columns and rows `blit` can touch.
+    fn layer_geometry(
+        &self,
+        (left, top, right, bottom): (usize, usize, usize, usize),
+        factor: f64,
+    ) -> ((f64, f64, f64, f64), Range<usize>, Range<usize>) {
+        let (w, h) = (self.size[0] as f64, self.size[1] as f64);
+        let scale = (w / 640.).min(h / 480.) * factor;
+        let rect = (
+            (w - 640. * scale) / 2. + left as f64 * scale,
+            (h - 480. * scale) / 2. + top as f64 * scale,
+            (right - left) as f64 * scale,
+            (bottom - top) as f64 * scale,
+        );
+        let columns =
+            (rect.0.floor().max(0.) as usize)..((rect.0 + rect.2).ceil().clamp(0., w) as usize);
+        let rows =
+            (rect.1.floor().max(0.) as usize)..((rect.1 + rect.3).ceil().clamp(0., h) as usize);
+        (rect, columns, rows)
+    }
+    /// Draws `pixels` from the kept layer `base` (same scale, same bounds):
+    /// when the picture beneath is the one it was drawn over, its kept
+    /// result is copied and only the pixels a changed layer pixel reaches
+    /// are drawn again, over the picture beneath. False, with nothing drawn,
+    /// when that does not apply or would not save work.
+    fn redraw_changed(&mut self, base: usize, pixels: &[u8], factor: f64) -> bool {
+        let Some(bounds @ (left, top, right, bottom)) = self.layers[base].bounds else {
+            return false;
+        };
+        if right == 0 {
+            return false;
+        }
+        let (rect, columns, rows) = self.layer_geometry(bounds, factor);
+        let cache = &self.layers[base];
+        if columns.start >= columns.end
+            || rows.start >= rows.end
+            || cache.region != (columns.clone(), rows.clone())
+        {
+            return false;
+        }
+        let stride = self.size[0] as usize * 4;
+        let span = columns.len() * 4;
+        let region = |row: usize| row * stride + columns.start * 4..row * stride + columns.end * 4;
+        let kept = |row: usize| (row - rows.start) * span..(row - rows.start + 1) * span;
+        if !rows
+            .clone()
+            .all(|row| self.pixels[region(row)] == cache.before[kept(row)])
+        {
+            return false;
+        }
+        let width = right - left;
+        let changed: Vec<_> = (top..bottom)
+            .map(|y| {
+                let at = (y * 640 + left) * 4..(y * 640 + right) * 4;
+                partial::changed_spans(&cache.layer[at.clone()], &pixels[at], width)
+                    .pop()
+                    .flatten()
+            })
+            .collect();
+        let segments = partial::reach(self.size, [width, bottom - top], rect, &changed);
+        let area: usize = segments.iter().map(|(_, c)| c.len()).sum();
+        if area * 2 >= columns.len() * rows.len() {
+            return false;
+        }
+        let mut cache = self.layers.remove(base);
+        for row in rows.clone() {
+            self.pixels[region(row)].copy_from_slice(&cache.after[kept(row)]);
+        }
+        let offset = |row: usize, c: &Range<usize>| {
+            let at = (row - rows.start) * span + (c.start - columns.start) * 4;
+            (row * stride + c.start * 4, at, c.len() * 4)
+        };
+        for (row, c) in &segments {
+            let (to, from, len) = offset(*row, c);
+            self.pixels[to..to + len].copy_from_slice(&cache.before[from..from + len]);
+        }
+        self.blit_within(&crop(pixels, bounds), rect, Some(&segments));
+        for (row, c) in &segments {
+            let (from, to, len) = offset(*row, c);
+            cache.after[to..to + len].copy_from_slice(&self.pixels[from..from + len]);
+        }
+        cache.layer.clear();
+        cache.layer.extend_from_slice(pixels);
+        cache.seen = true;
+        self.touched.mark(rows.start, rows.end);
+        #[cfg(test)]
+        {
+            self.layer_redraws += 1;
+        }
+        self.layers.push(cache);
+        true
+    }
+    fn blit(&mut self, s: &Sprite, rect: (f64, f64, f64, f64)) {
+        self.blit_within(s, rect, None);
+    }
+    /// `blit`, writing only the destination pixels in `only` (row, columns)
+    /// when it is given. Each pixel written is the one `blit` writes.
+    fn blit_within(
+        &mut self,
+        s: &Sprite,
+        (x, y, w, h): (f64, f64, f64, f64),
+        only: Option<&[partial::Segment]>,
+    ) {
         let dw = self.size[0] as usize;
         let touched =
             (y.floor().max(0.) as usize)..((y + h).ceil().clamp(0., self.size[1] as f64) as usize);
@@ -757,49 +1036,53 @@ impl FlightCanvas {
             && y.fract() == 0.
             && x + w <= self.size[0] as f64
             && y + h <= self.size[1] as f64;
-        // Retain the row-copy path for completely opaque cached panels.
-        if whole_pixels && s.rgba.chunks_exact(4).all(|p| p[3] == 255) {
-            for row in 0..s.height {
-                let at = ((y as usize + row) * dw + x as usize) * 4;
-                self.pixels[at..at + s.width * 4]
-                    .copy_from_slice(&s.rgba[row * s.width * 4..(row + 1) * s.width * 4]);
+        // The segments to draw: every row whole, or the ones asked for, cut
+        // to `rows` by `columns`.
+        let segments = |rows: Range<usize>, columns: Range<usize>| -> Vec<partial::Segment> {
+            match only {
+                None => rows.map(|row| (row, columns.clone())).collect(),
+                Some(only) => only
+                    .iter()
+                    .filter(|(row, _)| rows.contains(row))
+                    .map(|(row, c)| (*row, c.start.max(columns.start)..c.end.min(columns.end)))
+                    .filter(|(_, c)| c.start < c.end)
+                    .collect(),
             }
-            return;
-        }
-
-        // Transparent bezel corners must not make an already-sized panel run
-        // through the four-tap filter again. Below this coordinate bound its
-        // intermediate products are half-integers below 2^48, exactly stored
-        // in f64, so the old filter's weights are exactly [1, 0, 0, 0]. The
-        // bound also keeps its signed pixel-loop coordinates in range.
-        if whole_pixels && self.size.iter().all(|&dimension| dimension <= 1 << 24) {
-            for row in 0..s.height {
-                let at = ((y as usize + row) * dw + x as usize) * 4;
-                let source = &s.rgba[row * s.width * 4..(row + 1) * s.width * 4];
-                let destination = &mut self.pixels[at..at + s.width * 4];
-                for (source, destination) in
-                    source.chunks_exact(4).zip(destination.chunks_exact_mut(4))
-                {
-                    match source[3] {
-                        0 => continue,
-                        255 => destination.copy_from_slice(source),
-                        _ => {
-                            let source_alpha = f64::from(source[3]) / 255.;
-                            let old = f64::from(destination[3]) / 255.;
-                            let alpha = source_alpha + old * (1. - source_alpha);
-                            for c in 0..3 {
-                                let value = f64::from(source[c]) * source_alpha;
-                                destination[c] = ((value
-                                    + f64::from(destination[c]) * old * (1. - source_alpha))
-                                    / alpha)
-                                    .round() as u8;
-                            }
-                            destination[3] = (alpha * 255.).round() as u8;
-                        }
+        };
+        if whole_pixels {
+            let (x0, y0) = (x as usize, y as usize);
+            let runs = segments(y0..y0 + s.height, x0..x0 + s.width);
+            // Retain the row-copy path for completely opaque cached panels.
+            if s.rgba.chunks_exact(4).all(|p| p[3] == 255) {
+                for (row, columns) in runs {
+                    let at = (row * dw + columns.start) * 4;
+                    let from = ((row - y0) * s.width + columns.start - x0) * 4;
+                    let len = columns.len() * 4;
+                    self.pixels[at..at + len].copy_from_slice(&s.rgba[from..from + len]);
+                }
+                return;
+            }
+            // Transparent bezel corners must not make an already-sized panel
+            // run through the four-tap filter again. Below this coordinate
+            // bound its intermediate products are half-integers below 2^48,
+            // exactly stored in f64, so the old filter's weights are exactly
+            // [1, 0, 0, 0]. The bound also keeps its signed pixel-loop
+            // coordinates in range.
+            if self.size.iter().all(|&dimension| dimension <= 1 << 24) {
+                for (row, columns) in runs {
+                    let at = (row * dw + columns.start) * 4;
+                    let from = ((row - y0) * s.width + columns.start - x0) * 4;
+                    let len = columns.len() * 4;
+                    let source = &s.rgba[from..from + len];
+                    let destination = &mut self.pixels[at..at + len];
+                    for (source, destination) in
+                        source.chunks_exact(4).zip(destination.chunks_exact_mut(4))
+                    {
+                        over_whole(source, destination);
                     }
                 }
+                return;
             }
-            return;
         }
 
         // The four-tap filter. What each destination column and row takes
@@ -808,27 +1091,16 @@ impl FlightCanvas {
         // out once, and each source pixel's colour times its alpha is too.
         // Every product and sum below is the same as the per-pixel original,
         // in the same order.
-        let rows: Vec<(usize, usize, usize, f64)> = ((y.floor() as i32).max(0)
-            ..((y + h).ceil() as i32).min(self.size[1] as i32))
-            .map(|yy| {
-                let v = ((yy as f64 + 0.5 - y) * s.height as f64 / h - 0.5)
-                    .clamp(0., (s.height - 1) as f64);
-                let sy = v.floor() as usize;
-                (yy as usize, sy, (sy + 1).min(s.height - 1), v - sy as f64)
-            })
-            .collect();
-        let columns: Vec<(usize, usize, usize, f64)> = ((x.floor() as i32).max(0)
-            ..((x + w).ceil() as i32).min(self.size[0] as i32))
-            .map(|xx| {
-                let u = ((xx as f64 + 0.5 - x) * s.width as f64 / w - 0.5)
-                    .clamp(0., (s.width - 1) as f64);
-                let sx = u.floor() as usize;
-                (xx as usize, sx, (sx + 1).min(s.width - 1), u - sx as f64)
-            })
-            .collect();
-        let mut premultiplied = std::mem::take(&mut self.premultiplied);
-        premultiplied.clear();
-        premultiplied.extend(s.rgba.chunks_exact(4).map(|p| {
+        let rows = partial::filter_taps(y, h, s.height, self.size[1]);
+        let columns = partial::filter_taps(x, w, s.width, self.size[0]);
+        let (Some(first_row), Some(first_column)) = (rows.first(), columns.first()) else {
+            return;
+        };
+        let runs = segments(
+            first_row.0..first_row.0 + rows.len(),
+            first_column.0..first_column.0 + columns.len(),
+        );
+        let premultiply = |p: &[u8]| {
             let alpha = p[3] as f64 / 255.;
             [
                 p[0] as f64 * alpha,
@@ -836,9 +1108,36 @@ impl FlightCanvas {
                 p[2] as f64 * alpha,
                 alpha,
             ]
-        }));
-        for &(yy, sy, sy1, fy) in &rows {
-            for &(xx, sx, sx1, fx) in &columns {
+        };
+        let mut premultiplied = std::mem::take(&mut self.premultiplied);
+        if only.is_none() {
+            premultiplied.clear();
+            premultiplied.extend(s.rgba.chunks_exact(4).map(premultiply));
+        } else {
+            // Only the source rows the segments read; the rest are never
+            // looked at.
+            premultiplied.resize(s.width * s.height, [0.; 4]);
+            let mut needed = vec![false; s.height];
+            for (row, _) in &runs {
+                let (_, sy, sy1, _) = rows[row - first_row.0];
+                needed[sy] = true;
+                needed[sy1] = true;
+            }
+            for (row, _) in needed.iter().enumerate().filter(|(_, n)| **n) {
+                let stride = s.width * 4;
+                for (to, p) in premultiplied[row * s.width..(row + 1) * s.width]
+                    .iter_mut()
+                    .zip(s.rgba[row * stride..(row + 1) * stride].chunks_exact(4))
+                {
+                    *to = premultiply(p);
+                }
+            }
+        }
+        for (row, span) in runs {
+            let (yy, sy, sy1, fy) = rows[row - first_row.0];
+            for &(xx, sx, sx1, fx) in
+                &columns[span.start - first_column.0..span.end - first_column.0]
+            {
                 let taps = [
                     (&premultiplied[sy * s.width + sx], (1. - fx) * (1. - fy)),
                     (&premultiplied[sy * s.width + sx1], fx * (1. - fy)),
@@ -874,6 +1173,54 @@ impl FlightCanvas {
             }
         }
         self.premultiplied = premultiplied;
+    }
+}
+
+/// Where a 640x480 layer has anything drawn: left, top, right, bottom
+/// (right 0 when nothing is).
+fn layer_bounds(pixels: &[u8]) -> (usize, usize, usize, usize) {
+    let (mut left, mut top, mut right, mut bottom) = (640usize, 480usize, 0usize, 0usize);
+    for (i, p) in pixels.chunks_exact(4).enumerate() {
+        if p[3] != 0 {
+            left = left.min(i % 640);
+            right = right.max(i % 640 + 1);
+            top = top.min(i / 640);
+            bottom = bottom.max(i / 640 + 1);
+        }
+    }
+    (left, top, right, bottom)
+}
+/// The part of a 640x480 layer within `bounds`, as a sprite.
+fn crop(pixels: &[u8], (left, top, right, bottom): (usize, usize, usize, usize)) -> Sprite {
+    let mut rgba = Vec::with_capacity((right - left) * (bottom - top) * 4);
+    for y in top..bottom {
+        rgba.extend_from_slice(&pixels[(y * 640 + left) * 4..(y * 640 + right) * 4]);
+    }
+    Sprite {
+        width: right - left,
+        height: bottom - top,
+        rgba,
+        glyphs: vec![],
+    }
+}
+/// One source pixel over one destination pixel, as `blit` draws a sprite
+/// at its own size.
+fn over_whole(source: &[u8], destination: &mut [u8]) {
+    match source[3] {
+        0 => {}
+        255 => destination.copy_from_slice(source),
+        _ => {
+            let source_alpha = f64::from(source[3]) / 255.;
+            let old = f64::from(destination[3]) / 255.;
+            let alpha = source_alpha + old * (1. - source_alpha);
+            for c in 0..3 {
+                let value = f64::from(source[c]) * source_alpha;
+                destination[c] = ((value + f64::from(destination[c]) * old * (1. - source_alpha))
+                    / alpha)
+                    .round() as u8;
+            }
+            destination[3] = (alpha * 255.).round() as u8;
+        }
     }
 }
 
@@ -1700,5 +2047,214 @@ mod tests {
         assert_eq!(hits[2], 1, "{hits:?}");
         assert!(hits[4] > hits[3], "{hits:?}");
         assert!(hits[9] >= hits[5] + 2, "{hits:?}");
+    }
+
+    #[test]
+    fn a_layer_changing_in_place_gives_the_pixels_a_fresh_scaling_would() {
+        let mut dice = Dice(77);
+        // A map-like layer: an opaque field with a few marks that move.
+        let mut layer = vec![0u8; 640 * 480 * 4];
+        for y in 30..450 {
+            for x in 40..600 {
+                let at = (y * 640 + x) * 4;
+                layer[at..at + 4].copy_from_slice(&[(x % 251) as u8, (y % 13) as u8 * 9, 70, 255]);
+            }
+        }
+        let mark = |layer: &mut Vec<u8>, dice: &mut Dice| {
+            let (x, y) = (45 + dice.next() % 540, 35 + dice.next() % 400);
+            let alpha = [255, 128, 3][dice.next() % 3];
+            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (2, 2)] {
+                let at = ((y + dy) * 640 + x + dx) * 4;
+                layer[at..at + 4].copy_from_slice(&[255, (dice.next() % 256) as u8, 0, alpha]);
+            }
+        };
+        for (size, factor) in [
+            ([1920, 1080], 1.),
+            ([700, 500], 1.),
+            ([640, 480], 1.),
+            ([900, 700], 0.75),
+        ] {
+            let mut under = vec![0u8; size[0] as usize * size[1] as usize * 4];
+            for p in under.chunks_exact_mut(4) {
+                p.copy_from_slice(&[72, 72, 72, 255]);
+            }
+            let mut cached = FlightCanvas::default();
+            let mut current = layer.clone();
+            for step in 0..14 {
+                match step {
+                    // Still, then small moves, a change beneath, a big change.
+                    0 | 1 => {}
+                    7 => under[size[0] as usize * 4 * 3 + 40] ^= 1,
+                    10 => {
+                        for p in current.chunks_exact_mut(4).step_by(3) {
+                            p[0] = p[0].wrapping_add(1);
+                        }
+                    }
+                    _ => {
+                        for _ in 0..3 {
+                            mark(&mut current, &mut dice);
+                        }
+                    }
+                }
+                let mut expected = FlightCanvas::default();
+                expected.blank(size);
+                expected.pixels = under.clone();
+                legacy_layer_reference(&mut expected, &current, factor);
+                cached.blank(size);
+                cached.pixels = under.clone();
+                cached.legacy_layer(&current, factor);
+                assert!(
+                    cached.pixels == expected.pixels,
+                    "{size:?} step {step}: first difference {:?}",
+                    cached
+                        .pixels
+                        .iter()
+                        .zip(&expected.pixels)
+                        .position(|(a, b)| a != b)
+                );
+            }
+            assert!(
+                cached.layer_redraws >= 5,
+                "{size:?} {}",
+                cached.layer_redraws
+            );
+        }
+    }
+
+    #[test]
+    fn a_page_scaled_again_from_its_last_image_matches_scaling_it_whole() {
+        let mut dice = Dice(5);
+        let (width, height) = (crate::instruments::WIDTH, crate::instruments::HEIGHT);
+        for size in [[364, 360], [162, 160], [97, 95], [729, 720], [250, 400]] {
+            let mut source = sprite(&mut dice, width, height).rgba;
+            let mut kept: Option<Arc<PanelCache>> = None;
+            let mut partial_frames = 0;
+            for frame in 0..12 {
+                // A few changed pixels (a number, a blink), sometimes a row,
+                // once the whole page.
+                let changes = if frame == 6 {
+                    width * height
+                } else {
+                    frame % 4 * 3
+                };
+                for _ in 0..changes {
+                    let at = (dice.next() % (width * height)) * 4;
+                    source[at..at + 4].copy_from_slice(&[
+                        (dice.next() % 256) as u8,
+                        9,
+                        (dice.next() % 256) as u8,
+                        [0, 255, 128, 1][dice.next() % 4],
+                    ]);
+                }
+                if frame == 9 {
+                    let row = dice.next() % height;
+                    source[row * width * 4..(row + 1) * width * 4].fill(200);
+                }
+                let next = scaled_panel(kept.as_ref(), None, size, source.clone());
+                let whole = scaled_panel(None, None, size, source.clone());
+                assert!(
+                    next.image.rgba == whole.image.rgba,
+                    "{size:?} frame {frame}: first difference {:?}",
+                    next.image
+                        .rgba
+                        .iter()
+                        .zip(&whole.image.rgba)
+                        .position(|(a, b)| a != b)
+                );
+                assert_eq!(
+                    next.clear_is_zero, whole.clear_is_zero,
+                    "{size:?} frame {frame}"
+                );
+                if kept.as_ref().is_some_and(|kept| *kept.source != source) && changes < 100 {
+                    partial_frames += 1;
+                }
+                kept = Some(next);
+            }
+            assert!(partial_frames > 0);
+        }
+    }
+
+    #[test]
+    fn a_whole_pixel_blit_over_a_clear_pixel_is_the_source_pixel() {
+        // What lets a panel go onto a clear canvas as a copy.
+        for alpha in 1..=255u8 {
+            for value in 0..=255u8 {
+                let mut destination = [0u8; 4];
+                over_whole(&[value, 255 - value, value / 3, alpha], &mut destination);
+                assert_eq!(destination, [value, 255 - value, value / 3, alpha]);
+            }
+        }
+        let mut destination = [0u8; 4];
+        over_whole(&[0, 0, 0, 0], &mut destination);
+        assert_eq!(destination, [0; 4]);
+    }
+
+    #[test]
+    fn composing_a_panel_matches_blitting_it_over_anything_beneath() {
+        let mut dice = Dice(19);
+        for size in [[640, 480], [300, 200]] {
+            for clear_pixels in [false, true] {
+                let mut image = sprite(&mut dice, 120, 90);
+                if clear_pixels {
+                    // Clear pixels with colour in them must not be copied.
+                    for p in image.rgba.chunks_exact_mut(4).filter(|p| p[3] == 0) {
+                        p[0] = 7;
+                    }
+                }
+                let cache = Arc::new(PanelCache {
+                    key: None,
+                    source: Arc::new(Vec::new()),
+                    size: [120, 90],
+                    clear_is_zero: image.rgba.chunks_exact(4).all(|p| p[3] != 0 || p == [0; 4]),
+                    image: Arc::new(image),
+                });
+                for (rect, mark) in [
+                    ((10.2, 20.6, 120., 90.), None),
+                    ((0., 0., 120., 90.), Some((5, 3))),
+                    (
+                        (size[0] as f64 - 120., size[1] as f64 - 90., 120., 90.),
+                        Some((300, 1)),
+                    ),
+                    ((-4., 30., 120., 90.), None),
+                ] {
+                    let mut actual = FlightCanvas::default();
+                    actual.blank(size);
+                    if let Some((x, y)) = mark {
+                        actual.blend(x.min(size[0] as i32 - 1), y + 25, [9, 9, 9], 0.5);
+                    }
+                    let mut expected = FlightCanvas::default();
+                    expected.blank(size);
+                    expected.pixels = actual.pixels.clone();
+                    actual.compose_panel(1, rect, Arc::clone(&cache));
+                    expected.blit(&cache.image, (rect.0.round(), rect.1.round(), 120., 90.));
+                    assert!(
+                        actual.pixels == expected.pixels,
+                        "{size:?} {rect:?} {clear_pixels}"
+                    );
+                    actual.assert_drawn_rows_noted();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_frame_covered_whole_starts_from_the_same_clear_canvas() {
+        let (airframe, state, panels) = benchmark::fixture(true);
+        let mut with_panels = FlightCanvas::default();
+        let mut without = FlightCanvas::default();
+        for _ in 0..2 {
+            with_panels.begin([960, 720], &airframe, &state, &panels);
+            without.clear([960, 720]);
+            // The map's letterbox.
+            with_panels.fill_opaque([72, 72, 72]);
+            without.fill_opaque([72, 72, 72]);
+            assert!(with_panels.pixels == without.pixels);
+            // The console's wipe.
+            with_panels.begin([960, 720], &airframe, &state, &panels);
+            with_panels.blank([960, 720]);
+            without.clear([960, 720]);
+            without.clear([960, 720]);
+            assert!(with_panels.pixels == without.pixels);
+        }
     }
 }

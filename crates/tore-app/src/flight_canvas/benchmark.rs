@@ -41,7 +41,7 @@ fn staged(
         let cached = canvas.panels.remove(page);
         let reuse = cached
             .as_ref()
-            .is_some_and(|cached| cached.size == size && cached.source == raster.pixels);
+            .is_some_and(|cached| cached.size == size && *cached.source == raster.pixels);
         cost.micros[2] += started.elapsed().as_secs_f64() * 1e6;
 
         let cached = if reuse {
@@ -63,14 +63,16 @@ fn staged(
             };
             scaled.blit(&source, (0., 0., f64::from(size[0]), f64::from(size[1])));
             let result = PanelCache {
-                source: source.rgba,
+                key: None,
+                source: Arc::new(source.rgba),
                 size,
-                image: Sprite {
+                image: Arc::new(Sprite {
                     width: size[0] as usize,
                     height: size[1] as usize,
                     rgba: scaled.pixels,
                     glyphs: vec![],
-                },
+                }),
+                clear_is_zero: false,
             };
             cost.micros[3] += started.elapsed().as_secs_f64() * 1e6;
             Arc::new(result)
