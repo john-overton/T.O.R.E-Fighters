@@ -83,14 +83,84 @@ fn about_pole(v: [f32; 3], latitude: f64, angle: f64) -> [f32; 3] {
     rotate(v.map(f64::from), [0., phi.sin(), phi.cos()], angle).map(|v| v as f32)
 }
 
-/// How visible the stars are from the sun alone: none until it is two
-/// degrees below the horizon, all by six. The sky's own brightness and the
-/// weather's star flag dim them further.
+/// How visible the stars are from the sun alone: none while it is above the
+/// horizon, all by five degrees below it. The weather's star flag (which
+/// rises as the high cloud deck fades out at dusk), the sky's own brightness
+/// and each star's brightness order then decide which stars show
+/// (`starfield` in terrain.wgsl).
 pub fn twilight(sun_sine: f32) -> f32 {
     let elevation = sun_sine.clamp(-1., 1.).asin().to_degrees();
-    let t = ((-2. - elevation) / 4.).clamp(0., 1.);
+    let t = (-elevation / 5.).clamp(0., 1.);
     t * t * (3. - 2. * t)
 }
+
+// The starfield's pixel art as the sky shader draws it (`starfield` in
+// terrain.wgsl), for the tests; a test checks the constants match.
+#[cfg(test)]
+mod star_art {
+    /// A star square's side is the image height over this, and at least a pixel.
+    pub const STAR_ROWS: f32 = 1080.;
+    /// Every star's brightness scale (John, 2026-10-20: 5 percent down).
+    pub const STAR_INTENSITY: f32 = 0.95;
+    /// A cross arm's brightness against its star's.
+    pub const STAR_ARM: f32 = 0.35;
+    /// The sky darkness at which the faintest star starts to show; brighter
+    /// stars start proportionally earlier, the brightest at once.
+    pub const STAR_FIRST: f32 = 0.55;
+    /// The darkness over which each star fades in.
+    pub const STAR_RAMP: f32 = 0.35;
+
+    /// A star square's side in pixels for an image `height` pixels tall.
+    pub fn star_block(height: f32) -> f32 {
+        (height / STAR_ROWS).max(1.)
+    }
+
+    /// The share of the pixel centred on `pixel` that a star square of side
+    /// `block` centred on `center` covers (pixel units).
+    pub fn star_cover(center: [f32; 2], pixel: [f32; 2], block: f32) -> f32 {
+        let overlap = |i: usize| {
+            let low = (center[i] - 0.5 * block).max(pixel[i] - 0.5);
+            let high = (center[i] + 0.5 * block).min(pixel[i] + 0.5);
+            (high - low).max(0.)
+        };
+        overlap(0) * overlap(1)
+    }
+
+    /// The light one pixel of `sky` shows with a star of `level` (0..1)
+    /// whose square sits at `center`, with the four arms of a cross when
+    /// `cross`: a whole pixel adds the level (up to white), a partly covered
+    /// one its share. The sky shader works in linear light, so the star's
+    /// light and centre stay the same wherever it sits.
+    pub fn star_pixel(
+        center: [f32; 2],
+        pixel: [f32; 2],
+        block: f32,
+        (level, cross): (f32, bool),
+        sky: f32,
+    ) -> f32 {
+        let level = level * STAR_INTENSITY;
+        let added = |level: f32| (sky + level).min(1.) - sky;
+        let mut light = added(level) * star_cover(center, pixel, block);
+        if cross {
+            let arms: f32 = [[block, 0.], [-block, 0.], [0., block], [0., -block]]
+                .iter()
+                .map(|d| star_cover([center[0] + d[0], center[1] + d[1]], pixel, block))
+                .sum();
+            light += added(level * STAR_ARM) * arms;
+        }
+        sky + light
+    }
+
+    /// How much of a star of brightness `rank` (0 faintest, 1 brightest, uniform
+    /// over the stars) shows where the sky's darkness is `dark` (0..1).
+    pub fn star_seen(rank: f32, dark: f32) -> f32 {
+        let first = STAR_FIRST * (1. - rank);
+        let t = ((dark - first) / STAR_RAMP).clamp(0., 1.);
+        t * t * (3. - 2. * t)
+    }
+}
+#[cfg(test)]
+use star_art::*;
 
 impl NightSky {
     /// `night` is the weather records' star-flag weight (`SkyMix::night`),
@@ -237,9 +307,9 @@ mod tests {
 
     #[test]
     fn stars_fade_through_twilight_without_a_step() {
+        assert_eq!(twilight(0.01), 0.);
         assert_eq!(twilight(0.), 0.);
-        assert_eq!(twilight(-2_f32.to_radians().sin()), 0.);
-        assert!((twilight(-6_f32.to_radians().sin()) - 1.).abs() < 1e-6);
+        assert!((twilight(-5_f32.to_radians().sin()) - 1.).abs() < 1e-6);
         assert_eq!(twilight(-1.), 1.);
         let mut previous = twilight(0.1);
         for i in 0..=20_000 {
@@ -248,6 +318,181 @@ mod tests {
             let now = twilight(degrees.to_radians().sin() as f32);
             assert!((now - previous).abs() < 0.001);
             previous = now;
+        }
+    }
+
+    /// The night sky's grey behind the stars in the shader's linear light
+    /// (sRGB 72 on screen).
+    const SKY: f32 = 0.065;
+
+    /// The light a star at `center` adds to each pixel around it, over `sky`.
+    fn spread(center: [f32; 2], block: f32, star: (f32, bool), sky: f32) -> Vec<f32> {
+        let mut pixels = Vec::new();
+        for y in -8..=8 {
+            for x in -8..=8 {
+                let pixel = [x as f32 + 0.5, y as f32 + 0.5];
+                let shown = star_pixel(center, pixel, block, star, sky);
+                pixels.push(shown - sky);
+            }
+        }
+        pixels
+    }
+
+    #[test]
+    fn a_star_footprint_keeps_its_light_wherever_it_sits() {
+        for sky in [0., SKY, 0.6] {
+            for block in [1., 4. / 3., 2.] {
+                for cross in [false, true] {
+                    let added = |level: f32| (sky + level).min(1.) - sky;
+                    let whole = |level: f32| {
+                        let l = level * STAR_INTENSITY;
+                        let arms = if cross { 4. * added(l * STAR_ARM) } else { 0. };
+                        block * block * (added(l) + arms)
+                    };
+                    for i in 0..200 {
+                        let center = [0.5 + i as f32 * 0.0137, 0.31 + i as f32 * 0.0071];
+                        for level in [1., 0.4] {
+                            let sum: f32 = spread(center, block, (level, cross), sky).iter().sum();
+                            assert!(
+                                (sum - whole(level)).abs() < 2e-4,
+                                "{sky} {block} {cross} {center:?} {sum}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        // Aligned to the pixels, a star adds its level to whole pixels.
+        let shown = star_pixel([0.5, 0.5], [0.5, 0.5], 1., (0.6, false), SKY);
+        assert!((shown - SKY - 0.6 * STAR_INTENSITY).abs() < 1e-5);
+        // and stops at white, as the display would clip it.
+        let shown = star_pixel([0.5, 0.5], [0.5, 0.5], 1., (1., false), SKY);
+        assert!((shown - 1.).abs() < 1e-6);
+        let star =
+            |pixel: [f32; 2], cross: bool| star_pixel([0.5, 0.5], pixel, 1., (1., cross), SKY);
+        assert!((star([1.5, 0.5], false) - SKY).abs() < 1e-6);
+        assert!((star([1.5, 0.5], true) - SKY - STAR_INTENSITY * STAR_ARM).abs() < 1e-5);
+        // Five percent down from before (a whole block added the full level).
+        assert!((STAR_INTENSITY - 0.95).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_star_moves_continuously_across_pixels() {
+        // A slow pan: 1/1000 of a pixel a frame never jumps any pixel's light
+        // by more than the distance allows (no snapping to a grid).
+        for block in [1., 2.] {
+            let mut previous = spread([0.2, 0.7], block, (1., true), SKY);
+            for i in 1..=3000 {
+                let t = i as f32 * 0.001;
+                let now = spread([0.2 + t, 0.7 + 0.5 * t], block, (1., true), SKY);
+                let step = now
+                    .iter()
+                    .zip(&previous)
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0., f32::max);
+                assert!(step < 0.005, "{block} {t} {step}");
+                previous = now;
+            }
+        }
+        // The light's centre follows the star exactly.
+        for block in [1., 2.] {
+            for i in 0..50 {
+                let center = [0.5 + i as f32 * 0.043, 0.5 - i as f32 * 0.029];
+                let pixels = spread(center, block, (0.6, true), SKY);
+                let (mut sum, mut x, mut y) = (0., 0., 0.);
+                for (n, light) in pixels.iter().enumerate() {
+                    sum += light;
+                    x += light * ((n % 17) as f32 - 8. + 0.5);
+                    y += light * ((n / 17) as f32 - 8. + 0.5);
+                }
+                assert!(
+                    (x / sum - center[0]).abs() < 1e-3 && (y / sum - center[1]).abs() < 1e-3,
+                    "{block} {center:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn star_squares_are_a_quarter_of_the_old_blocks() {
+        // Formerly 1/540 of the height: 2 pixels at 1080p, 4 at 2160p.
+        assert_eq!(star_block(1080.), 1.);
+        assert_eq!(star_block(2160.), 2.);
+        assert_eq!(star_block(720.), 1.);
+        assert!((star_block(1440.) - 4. / 3.).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_brightest_stars_show_first_and_go_last() {
+        // Darkening sky: each star appears at its own darkness, brightest first.
+        let appears = |rank: f32| {
+            (0..=1000)
+                .map(|i| i as f32 / 1000.)
+                .find(|dark| star_seen(rank, *dark) > 0.)
+                .unwrap()
+        };
+        let ranks: Vec<f32> = (0..=20).map(|i| i as f32 / 20.).collect();
+        for pair in ranks.windows(2) {
+            assert!(appears(pair[1]) < appears(pair[0]));
+        }
+        assert!(appears(1.) < 0.01);
+        for i in 0..=100 {
+            let dark = i as f32 / 100.;
+            for pair in ranks.windows(2) {
+                assert!(star_seen(pair[1], dark) >= star_seen(pair[0], dark));
+            }
+        }
+        // A full night shows every star at full strength.
+        for rank in ranks {
+            assert_eq!(star_seen(rank, 0.9), 1.);
+            assert_eq!(star_seen(rank, 0.), 0.);
+        }
+    }
+
+    #[test]
+    fn stars_come_in_with_the_dusk_without_a_step() {
+        // DAY2's dusk: sunset 19:00 then the sun sinks 0.25 degrees a minute;
+        // the star-flag share (the night record, as the high cloud deck fades
+        // out) rises over its 19:05 to 19:08 overlap. Step every 1/60 s.
+        let dark_at = |seconds: f64| {
+            let since = seconds - 19. * 3600.;
+            let sun = (-since / 240.).to_radians().sin() as f32;
+            let night = ((since - 300.) / 180.).clamp(0., 1.) as f32;
+            night * twilight(sun)
+        };
+        let ranks = [0., 0.5, 0.9, 0.99, 1.];
+        let mut previous = ranks.map(|r| star_seen(r, dark_at(18. * 3600.)));
+        assert_eq!(previous, [0.; 5]);
+        let mut first_seen = [f64::NAN; 5];
+        for frame in 0..(90 * 60 * 60) {
+            let seconds = 18.5 * 3600. + f64::from(frame) / 60.;
+            let now = ranks.map(|r| star_seen(r, dark_at(seconds)));
+            for (i, (a, b)) in now.iter().zip(&previous).enumerate() {
+                assert!((a - b).abs() < 0.002, "{seconds} {i}");
+                if *a > 0. && first_seen[i].is_nan() {
+                    first_seen[i] = seconds;
+                }
+            }
+            previous = now;
+        }
+        // The brightest show while the high cloud is still fading (by 19:08),
+        // the faintest follow, and all are in by full night.
+        assert!(first_seen[4] < 19. * 3600. + 8. * 60.);
+        assert!(first_seen.windows(2).all(|w| w[1] < w[0]));
+        assert_eq!(previous, [1.; 5]);
+    }
+
+    #[test]
+    fn the_shader_draws_the_same_stars() {
+        let shader = include_str!("terrain.wgsl");
+        for line in [
+            format!("const STAR_ROWS:f32={STAR_ROWS:.1};"),
+            format!("const STAR_INTENSITY:f32={STAR_INTENSITY:.2};"),
+            format!("const STAR_ARM:f32={STAR_ARM:.2};"),
+            format!("const STAR_FIRST:f32={STAR_FIRST:.2};"),
+            format!("const STAR_RAMP:f32={STAR_RAMP:.2};"),
+        ] {
+            assert!(shader.contains(&line), "{line}");
         }
     }
 

@@ -164,17 +164,31 @@ along a brighter band within about 9 degrees of its centre line), about 15,000
 stars over the whole sky.
 Brightness follows a steep power law in five levels, so most stars are faint
 and a few are bright; the brightest 5 percent draw as a small cross. About a
-third are tinted blue, yellow or orange. Each star lights one block of
-pixels, 1/540 of the image height (2 pixels at 1080p, 4 at 2160p), snapped to
-the screen grid, so stars stay crisp retro points with no blur at any
-resolution.
+third are tinted blue, yellow or orange. Each star is a square 1/1080 of the
+image height (1 pixel at 1080p, 2 at 2160p, never under a pixel; the cross
+arms are squares beside it) placed at its exact sub-pixel position: every
+pixel takes the share of the square it covers, added in linear light and
+stopping at white. A star therefore keeps its crisp footprint at rest, and
+glides with no stepping or flicker as the sky turns or the camera turns or
+moves; its light and centre stay the same wherever it sits. A whole pixel of
+star adds 95 percent of its level (John, 2026-10-20: "intensity needs to be
+down by 5 percent" and "quadruple the resolution"; before that, a star lit a
+block of 1/540 of the height snapped to the screen grid, so it moved two
+pixels at a time at 1080p).
 
-Star visibility is the star-flag share times a twilight fade (none until the
-sun is 2 degrees below the horizon, full by 6 degrees), then per pixel: hidden
-by bright sky (they fade as the sky brightens toward the horizon at dawn),
-thinned within 5 degrees of the horizon, dimmed up to 85 percent within about
-10 degrees of the moon, and covered by sky decks and clouds, which draw over
-them. The original STARS.SH points are not drawn in smooth weather.
+Star visibility follows how dark the sky is at each pixel: the star-flag
+share (which rises as dusk's high cloud deck fades out, and falls as dawn's
+fades in) times a twilight fade (none while the sun is above the horizon,
+full by 5 degrees below it), then hidden by bright sky (toward the sun's glow
+and the bright horizon at dusk and dawn), thinned within 5 degrees of the
+horizon and dimmed within about 10 degrees of the moon. Stars come in in
+order of brightness: the brightest show as soon as the sky starts to darken,
+each fainter star needs a darker sky (the faintest need 55 percent of full
+darkness) and fades in over the next 35 percent, so all are at full strength
+by 90 percent. On DAY2 the brightest appear at about 19:06 as the high cloud
+fades, the faint ones follow over the next ten minutes, and at dawn they go
+in reverse, the brightest last at about 07:00. Sky decks and clouds draw over
+the stars. The original STARS.SH points are not drawn in smooth weather.
 
 The moon keeps its weather record's direction at the mission's nearest
 midnight and turns about the same pole once a lunar day (89,428 s), so it
