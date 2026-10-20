@@ -30,6 +30,9 @@ pub struct ViewWeather {
     pub fog: [f32; 4],
     pub haze: [u8; 3],
     pub visual_bands: Vec<tore_formats::weather::Layer>,
+    /// What the sky draws of each deck and horizon gradient
+    /// ([`crate::sky_mix`]): weighted through dawn and dusk in smooth weather.
+    pub sky: crate::sky_mix::SkyMix,
 }
 
 /// One immutable standing airport batch. Its shared identity lets each renderer
@@ -1158,6 +1161,19 @@ impl Scenery {
             fog: self.fog,
             haze: self.haze,
             visual_bands: Vec::new(),
+            sky: crate::sky_mix::SkyMix {
+                decks: std::array::from_fn(|_| crate::sky_mix::DeckMix {
+                    deck: None,
+                    texture: -1.,
+                    second: -1.,
+                    mix: 0.,
+                    opacity: 0.,
+                }),
+                upper_band: 1.,
+                lower_band: 1.,
+                night: 0.,
+                shades: Vec::new(),
+            },
         };
         let visual = self
             .smooth_weather
@@ -1176,8 +1192,24 @@ impl Scenery {
                 0.,
             ]
         });
-        // Texture selection and draw flags retain native scheduling. Only the
-        // color/fog parameters below use fractional-time presentation samples.
+        // Stepped weather keeps native deck and gradient scheduling; smooth
+        // weather weights them by the records' fractional-time shares.
+        out.sky = crate::sky_mix::SkyMix::stepped(&layer, &self.deck_textures, altitude_ft);
+        let records = terrain.weather.configuration().layers();
+        let shares = if visual.is_some() {
+            crate::sky_mix::shares(
+                records,
+                terrain.weather.visual_seconds_of_day(),
+                altitude_ft,
+            )
+        } else {
+            Vec::new()
+        };
+        if !shares.is_empty() {
+            out.sky =
+                crate::sky_mix::SkyMix::new(records, &shares, &self.deck_textures, altitude_ft);
+            out.decks = std::array::from_fn(|slot| out.sky.decks[slot].uniform());
+        }
         let layer = visual.as_ref().map_or(layer.clone(), |s| s.layer.clone());
         out.palette = tore_formats::weather::expand_effects(
             terrain.weather.configuration().base_palette(),
@@ -1208,6 +1240,14 @@ impl Scenery {
             .iter()
             .map(|indices| indices.map(|index| out.palette[usize::from(index)]))
             .collect();
+        // Smooth weather mixes each record's own haze table and colour, so
+        // the haze does not jump between the fixed tables mid-crossing.
+        let mixed = crate::sky_mix::haze(
+            records,
+            &shares,
+            terrain.weather.configuration(),
+            &out.palette,
+        );
         let feet = |v: i32| (f64::from(v) * tore_formats::weather::DISTANCE_FEET) as f32;
         out.fog = [
             feet(layer.fog_near),
@@ -1217,6 +1257,10 @@ impl Scenery {
         ];
         // Six-bit source components, the same expansion the palette ramps use.
         out.haze = layer.shade.map(|c| ((u16::from(c) * 255 + 31) / 63) as u8);
+        if let Some((haze, fog)) = mixed {
+            out.haze = haze.map(|c| (c * 255. / 63.).round().clamp(0., 255.) as u8);
+            out.fog_palette = fog;
+        }
         out
     }
 }

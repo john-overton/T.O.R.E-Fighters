@@ -109,6 +109,82 @@ The trial orange-rim disc grading is removed at John's request. The sun uses
 its preceding color treatment, retaining the earlier atmospheric glow and
 continuous visual arc at the smaller size.
 
+## Continuous dawn and dusk
+
+Implementation mode, requested by John on 2026-10-19 ("the high level clouds
+just pop in"). **Opinionated** presentation; the rule below is an agent
+decision. Smooth weather only; stepped mode and the simulation are unchanged.
+
+The weather crosses dawn and dusk through records that overlap in time (DAY2:
+night 00:00 to 07:05, dawn 07:00 to 07:10, day 07:06 to 19:04, dusk 19:00 to
+19:08, night from 19:05). Colours already blended across each overlap. The
+rest switched: the native blend takes a record's sky and ocean decks whole as
+soon as it counts (the high SKY deck at 75,000 feet appeared at 07:06:04,
+about five minutes into a dawn mission, and stayed through dusk until 19:08),
+the horizon gradients switch with the decks, the haze resolves through the
+nearest of a few fixed shade tables, and the star flag follows whichever record
+is nearer. Each of these showed as a single-frame pop.
+
+Now every record that counts at an instant has a share: across an overlap the
+later record's share rises linearly from 0 to 1 over the overlap's span, the
+same rule the colours use. Each deck is drawn at the total share of the records
+that name it, so the high clouds fade in over the four-minute dawn overlap and
+out over the three-minute dusk one. When two records name different textures
+for the same deck (each record picks its own SKY or OCEAN variant), the
+textures cross-fade by share. The upper and lower horizon gradients are
+weighted the same way: a gradient at weight w draws its index ramp compressed
+toward the flat middle by w. The haze colour, the fog palette levels and the
+shade remap rows of the weather art are each a share-weighted mix of the
+records' own tables. The stars and moon follow the share of records carrying
+the star flag. Nothing jumps between frames: a unit test steps a whole DAY2 day
+at 1/60 second through every transition and finds no step larger than the
+share's own rate.
+
+The simulation, sensors, visibility effects and native weather records are
+untouched; only what is drawn reads the shares. The overlap spans are the
+original records' own. They are short at dusk (three minutes from pink to
+night), so the change is quick but continuous.
+
+## Night sky
+
+Implementation mode, requested by John on 2026-10-19 ("the moon doesn't move,
+and we also need more stars ... a realistic pixelated starfield"). Smooth
+weather only; **opinionated**, constants chosen by the agent.
+
+The sky turns once a sidereal day (86,164 s) about the celestial pole, which
+stands at the theater's latitude above the north horizon (the replay export's
+theater anchors; 40 degrees for an unknown map). The turn runs on the mission
+clock without the daily wrap, so it continues smoothly through midnight and a
+replay shows the same sky.
+
+The starfield is drawn by the sky shader, procedurally from a fixed hash: the
+celestial sphere is split into a cube of 96 by 96 angle-even cells a face, and
+each cell holds at most one star (20 percent of cells, rising to 75 percent
+along a brighter band within about 9 degrees of its centre line), about 15,000
+stars over the whole sky.
+Brightness follows a steep power law in five levels, so most stars are faint
+and a few are bright; the brightest 5 percent draw as a small cross. About a
+third are tinted blue, yellow or orange. Each star lights one block of
+pixels, 1/540 of the image height (2 pixels at 1080p, 4 at 2160p), snapped to
+the screen grid, so stars stay crisp retro points with no blur at any
+resolution.
+
+Star visibility is the star-flag share times a twilight fade (none until the
+sun is 2 degrees below the horizon, full by 6 degrees), then per pixel: hidden
+by bright sky (they fade as the sky brightens toward the horizon at dawn),
+thinned within 5 degrees of the horizon, dimmed up to 85 percent within about
+10 degrees of the moon, and covered by sky decks and clouds, which draw over
+them. The original STARS.SH points are not drawn in smooth weather.
+
+The moon keeps its weather record's direction at the mission's nearest
+midnight and turns about the same pole once a lunar day (89,428 s), so it
+rises in the east and sets in the west and drifts slowly against the stars.
+Its opacity is the star-flag share, so it fades through dawn and dusk rather
+than vanishing with the flag. It sets behind the high sky deck's clouds instead
+of drawing over them. Its light on terrain and aircraft follows its direction
+and fades out as it sets, so nothing is lit from below the horizon. The moon
+has no phase.
+
 ## Horizon glare
 
 John requested gentler sunset glare with a rapid drop below the horizon on

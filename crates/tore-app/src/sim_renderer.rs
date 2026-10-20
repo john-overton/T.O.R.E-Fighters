@@ -148,7 +148,7 @@ const SKY_DEPTH_COMPARE: wgpu::CompareFunction = wgpu::CompareFunction::GreaterE
 const WORLD_FAR_FEET: f32 = 2_200_000.;
 /// The shared `Scene` uniform, ending with the graphics `quality` and
 /// `viewport` vectors.
-const UNIFORM_BYTES: u64 = 1488;
+const UNIFORM_BYTES: u64 = 1568;
 type AircraftBatch = (wgpu::BindGroup, wgpu::Buffer, u32);
 /// One other aircraft inside a geometry batch, for the spotting aid: its
 /// vertex range, presented position and airframe extent in feet.
@@ -1917,9 +1917,25 @@ impl SimRenderer {
         uniform[7] = (scenery.texture_indices.len() / (256 * 256)) as f32;
         uniform[15] = weather.fog_palette.len() as f32;
         uniform.extend(weather.decks.into_iter().flatten());
+        // Smooth weather's turning night sky: starfield and moving moon.
+        let night_sky = scenery
+            .smooth_weather
+            .then(|| {
+                crate::night_sky::NightSky::for_view(
+                    world,
+                    weather.sky.night,
+                    camera.position[1],
+                    scenery
+                        .celestial
+                        .as_ref()
+                        .map_or([0., 0., 1.], |c| c.moon_center()),
+                )
+            })
+            .flatten();
         let mut celestial_count = 0;
+        let mut haze_rows = [-1., 0., 0., 0.];
         if let Some(celestial) = &scenery.celestial {
-            let data = celestial.vertices(world, camera, size[1]);
+            let data = celestial.vertices(world, camera, size[1], night_sky.as_ref());
             assert!(data.len() * 4 <= 256 * 1024);
             celestial_count = (data.len() / 10) as u32;
             if !data.is_empty() {
@@ -1929,6 +1945,23 @@ impl SimRenderer {
             if let Some(layer) = world.weather.sample(camera.position[1]) {
                 let shade = world.weather.configuration().shade_remap(layer.shade);
                 uniform[31] = celestial.shade_rows[&shade.color] as f32;
+            }
+            // Smooth weather: the two heaviest records' own rows, crossed.
+            let mut rows: Vec<(usize, f32)> = Vec::new();
+            for (shade, weight) in weather.sky.shades.iter().filter(|_| scenery.smooth_weather) {
+                let row =
+                    celestial.shade_rows[&world.weather.configuration().shade_remap(*shade).color];
+                match rows.iter_mut().find(|(r, _)| *r == row) {
+                    Some(entry) => entry.1 += weight,
+                    None => rows.push((row, *weight)),
+                }
+            }
+            rows.sort_by(|a, b| b.1.total_cmp(&a.1));
+            if let Some(&(row, weight)) = rows.first() {
+                uniform[31] = row as f32;
+                if let Some(&(other, share)) = rows.get(1) {
+                    haze_rows = [other as f32, share / (weight + share), 0., 0.];
+                }
             }
             uniform.extend(celestial.sun_uniform(world, scenery, camera.position[1]));
         } else {
@@ -1972,10 +2005,7 @@ impl SimRenderer {
                     size, roll,
                 )) / 32767.;
         }
-        let ocean = world.weather.sample(camera.position[1]);
-        let ocean_decks = ocean.as_ref().map_or([false; 2], |layer| {
-            std::array::from_fn(|i| layer.decks[i].name.starts_with("OCEAN"))
-        });
+        let ocean_decks: [bool; 2] = std::array::from_fn(|i| weather.sky.decks[i].is_ocean());
         // Approximate angular width of a pixel, shared by the surface filtering.
         let pixel_angle = 2. / (1.732_050_8 * camera.zoom * size[1].max(1) as f32);
         uniform.extend(scenery.ocean_motion.uniform(
@@ -2055,6 +2085,9 @@ impl SimRenderer {
             crate::vegetation::climate_id(&world.layout) as f32,
         ]);
         uniform.extend(scenery.canopy.area);
+        // The canopy vector and the detail reach after it, which the
+        // vegetation hand-off below fills in from this frame's stream.
+        let canopy_slot = uniform.len();
         let visible = self.vegetation.as_ref().is_some_and(|v| !v.suppressed());
         uniform.extend([
             scenery.canopy.first as f32,
@@ -2075,6 +2108,11 @@ impl SimRenderer {
             scenery.seams[1],
             scenery.seams[2],
         ]);
+        uniform.extend(weather.sky.uniform());
+        let (stars, moon) = night_sky.map_or(([0.; 4], [0., 1., 0., 0.]), |n| (n.stars, n.moon));
+        uniform.extend(stars);
+        uniform.extend(moon);
+        uniform.extend(haze_rows);
         debug_assert_eq!(uniform.len() * 4, UNIFORM_BYTES as usize);
         let view_clip = crate::terrain_chunks::Clip::perspective(
             [uniform[4], uniform[5], uniform[6]],
@@ -2219,9 +2257,8 @@ impl SimRenderer {
                 size,
             );
             // Use this frame's uploaded circle for the terrain hand-off too.
-            let end = uniform.len();
-            uniform[end - 6] = vegetation.draw_reach().max(1.);
-            uniform[end - 4] = vegetation.detail_reach();
+            uniform[canopy_slot + 2] = vegetation.draw_reach().max(1.);
+            uniform[canopy_slot + 4] = vegetation.detail_reach();
             // The grass candidate pass reads this view's world uniform,
             // written below before the submission runs.
             vegetation.encode_blades(encoder, &self.bind);

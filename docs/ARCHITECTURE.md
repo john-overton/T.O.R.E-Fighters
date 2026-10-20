@@ -115,7 +115,11 @@ continuous blocker weights. The bounded penumbra filter combines caster
 distance with smooth camera-distance antialiasing. Terrain has a separate
 stream of area-weighted shared normals for lighting; shadow depth still uses
 actual triangles. Smooth sky, glare and shadow directions share fractional
-weather-clock time. Sun-disc strength and geometric visibility are independent
+weather-clock time. `sky_mix.rs` weights the weather records that overlap at
+dawn and dusk, so the sky fades decks, horizon gradients, haze tables and the
+star flag instead of switching them, and `night_sky.rs` turns the sky about the
+theater's pole for the shader's procedural starfield and a moving moon
+([continuous dawn and dusk, night sky](spec/sun-glow.md#continuous-dawn-and-dusk)). Sun-disc strength and geometric visibility are independent
 of the sunglare toggle. Terrain alone reduces low-sun ambient fill on unexposed
 slopes; exposed ridges, aircraft and water retain their existing response. Smooth aircraft geometry is complete,
 including faces hidden from the camera, and hiding the player in cockpit view
