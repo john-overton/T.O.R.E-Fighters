@@ -247,6 +247,7 @@ pub fn replay(
             fingerprint(data)
         ),
         |x, z| f64::from(world.height(x as f32, z as f32)),
+        Some(std::sync::Arc::new(world.ground_ceiling())),
         Some(&world.airport_scene),
         world.wind(),
     )
@@ -271,6 +272,7 @@ pub fn replay_without_airports(
             fingerprint(data)
         ),
         |x, z| f64::from(world.height(x as f32, z as f32)),
+        Some(std::sync::Arc::new(world.ground_ceiling())),
         None,
         world.wind(),
     )
@@ -280,6 +282,10 @@ fn replay_reader(
     config: Configuration,
     header: &str,
     ground: impl Fn(f64, f64) -> f64 + Sync,
+    // The highest `ground` reaches over each square, as the host's combat
+    // sets it before every step (`tore_world::combat`): host setup, not
+    // recorded, so the replayed state matches the live one.
+    ground_ceiling: Option<std::sync::Arc<tore_sim::ground_ceiling::GroundCeiling>>,
     airport_scene: Option<&tore_sim::airport::Scene>,
     wind: [f64; 3],
 ) -> AppResult<State> {
@@ -410,6 +416,7 @@ fn replay_reader(
                 // not record it, so the replay is given the same wind.
                 s.smoke.wind = wind;
                 s.devices.wind = wind;
+                s.set_ground_ceiling(ground_ceiling.clone());
                 let events = s.step(
                     &[OwnshipInput {
                         aircraft: 0,
@@ -575,6 +582,52 @@ mod tests {
             std::fs::read(dir.join("drained")).unwrap()
         );
         std::fs::remove_dir_all(dir).unwrap();
+    }
+    /// A replay gives its state the ground ceiling the host's combat sets
+    /// before every step, so the replayed state is the live one; the ceiling
+    /// only skips samples, so the rest of the state is the same without it.
+    #[test]
+    fn replay_sets_the_hosts_ground_ceiling() {
+        let dir = std::env::temp_dir().join(format!("tore-tape-ceiling-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("tape");
+        let config = tore_world::test_support::combat_fixture(false)
+            .own()
+            .configuration()
+            .clone();
+        let data = BTreeMap::new();
+        let world = tore_world::test_support::terrain();
+        let mut recorder = Recorder::new(&path, &data, &config, "UKR").unwrap();
+        recorder.record("reset", launcher(0.));
+        for i in 0..40 {
+            recorder.record(if i < 20 { "fire" } else { "tick" }, launcher(0.));
+        }
+        recorder.flush().unwrap();
+        let replayed = format!(
+            "{:?}",
+            replay_without_airports(&path, &data, config.clone(), "UKR", &world).unwrap()
+        );
+        let without = format!(
+            "{:?}",
+            replay_reader(
+                std::io::BufReader::new(std::fs::File::open(&path).unwrap()),
+                config.clone(),
+                &format!(
+                    "tore-combat {VERSION} {:?} UKR {:016x}",
+                    config.aircraft,
+                    fingerprint(&data)
+                ),
+                |x, z| f64::from(world.height(x as f32, z as f32)),
+                None,
+                None,
+                world.wind(),
+            )
+            .unwrap()
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+        let (kept, ceiling) = replayed.split_once("ground_ceiling: ").unwrap();
+        assert!(ceiling.starts_with("Some("));
+        assert_eq!(without.split_once("ground_ceiling: ").unwrap().0, kept);
     }
     #[test]
     fn version_seven_distinguishes_falling_wreck_from_absent_body() {
