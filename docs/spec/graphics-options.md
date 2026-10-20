@@ -324,8 +324,9 @@ Ultra grows to a 344-square grid at 1,000 ft, with a hard maximum of 2,366,720
 vertices. Low grows to 136 at 1,000 ft; Medium and High retain their grid side. These limits include rejected
 candidates in every direction; actual visible counts are lower. Since S13b
 (2026-10-19) a GPU pass evaluates each submitted slot once and only grown
-blades reach the vertex stage, five vertices each; the slot list costs up to
-64 bytes per slot of GPU memory (about 17 MB at High, 500 ft). Geometry stays
+blades reach the vertex stage, five vertices each; the grown list costs 64
+bytes per blade the circles can hold (since round 2 of the optimization, about
+9.4 MB at High, 500 ft, down from 16.8 MB for every slot). Geometry stays
 opaque, with no CPU placement. See [grass rules](terrain-detail.md#grass).
 Grass-only GPU cost and final appearance require measurement on a GPU host.
 

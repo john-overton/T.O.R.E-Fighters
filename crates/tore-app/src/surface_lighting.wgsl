@@ -8,6 +8,8 @@ struct SurfaceLight { maps:array<ShadowProjection,3>, origin:vec4<f32>, sun:vec4
 @group(1) @binding(0) var<uniform> surface:SurfaceLight;
 @group(1) @binding(1) var shadows:texture_depth_2d_array;
 @group(1) @binding(2) var shadow_sampler:sampler_comparison;
+// For textureGather in shadow_tap: the four stored depths, unfiltered.
+@group(1) @binding(3) var shadow_point:sampler;
 // 0 in full daylight, 1 at night. CPU night_glow::night_factor supplies
 // scene.view.z so group-0-only sprite pipelines need no surface binding.
 fn device_night()->f32 {
@@ -54,11 +56,16 @@ fn shadow_tap(uv:vec2<f32>,depth:f32,gradient:vec2<f32>,cascade:i32)->vec2<f32> 
  let base=vec2<i32>(floor(pixel));let f=fract(pixel);
  let tolerance=max(0.125,m.scale.x*0.002);
  var result=vec2<f32>(0.0);
+ // One gather reads the four texels base..base+1 (the exact stored values).
+ // Its point is the shared corner, so the footprint is base whatever the
+ // sub-texel rounding; edge texels it clamps are skipped below as before.
+ let quad=textureGather(shadows,shadow_point,(vec2<f32>(base)+vec2<f32>(1.0))/2048.0,cascade);
+ let texels=array<f32,4>(quad.w,quad.z,quad.x,quad.y);
  for(var y=0;y<2;y++) {for(var x=0;x<2;x++) {
   let at=base+vec2<i32>(x,y);
   if any(at<vec2<i32>(0)) || any(at>=vec2<i32>(2048)) {continue;}
   let sample_uv=(vec2<f32>(at)+vec2<f32>(0.5))/2048.0;
-  let stored=textureLoad(shadows,at,cascade,0);
+  let stored=texels[y*2+x];
   let gap=(depth+dot(gradient,sample_uv-uv)-stored)*2.0*m.scale.z;
   let weight=select(1.0-f.x,f.x,x==1)*select(1.0-f.y,f.y,y==1);
   let blocked=smoothstep(tolerance,2.0*tolerance,gap)*select(1.0,0.0,stored>=1.0);

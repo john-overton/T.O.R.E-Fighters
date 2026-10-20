@@ -198,6 +198,12 @@ impl SurfaceLighting {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
+        // Gathers the four depths around a shadow tap (round 2): nearest,
+        // clamped, so it returns stored values unfiltered.
+        let point = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Shadow depth gather"),
+            ..Default::default()
+        });
         let uniform_entry = wgpu::BindGroupLayoutEntry {
             binding: 0,
             visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -228,6 +234,12 @@ impl SurfaceLighting {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
             ],
         });
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -245,6 +257,10 @@ impl SurfaceLighting {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&point),
                 },
             ],
         });

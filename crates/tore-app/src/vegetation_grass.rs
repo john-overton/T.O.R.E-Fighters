@@ -47,7 +47,7 @@ const GROWN_MARGIN: f64 = 4.;
 /// inside that level's circle, less the cells a coarser level owns
 /// (`blade_candidate` in grass_blades.wgsl), and never more than the
 /// level's candidates. The grown list is sized to this instead of every
-/// candidate (round 2: the circle leaves out about 40% at High).
+/// candidate (round 2: about half the slots at High and 500 ft).
 pub fn grown_bound(density: VegDensity, radius: f32, eye: [f64; 2]) -> u32 {
     let side = side(density, radius);
     let s0 = f64::from(spacing(density));
@@ -456,7 +456,7 @@ mod tests {
                 }
             }
         }
-        // At High and the default 500 ft, about 40% fewer slots than candidates.
+        // At High and the default 500 ft, about half the candidates.
         let bound = grown_bound(VegDensity::High, 500., [1000.5, 2000.5]);
         let all = candidates(VegDensity::High, 500.);
         assert!(bound * 10 < all * 7, "{bound} of {all}");

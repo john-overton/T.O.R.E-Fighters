@@ -140,8 +140,21 @@ object batch (airports, surface units, the flown aircraft, combat geometry,
 each formation model) whose vertex box lies outside it; the boxes are
 measured when the batches are uploaded. A chunk or batch is skipped only when
 its box, widened by 64 feet, is wholly outside one clip plane, so culling
-removes nothing that could draw. Fully fogged terrain is not culled: it still
-draws the fog colour over the sky. The only order-dependent pixels are samples
+removes nothing that could draw. The same upload splits each object batch
+(`terrain_chunks::CasterShape`, optimization round 2) into runs of triangles
+whose three vertices carry no layer `shadow_fragment` tests (glass, flame
+sheets, emissive effects and the cut-out object texture: -2, -5 to -8), drawn
+through a depth-only object pipeline, and the rest, drawn with the test; only
+the eight longest runs of at least 32 triangles go depth-only, to bound the
+draw calls. A depth-only pass keeps the nearest depth in any order, so no
+shadow texel changes. Each shadow tap reads its four stored depths with one
+`textureGather` (a non-filtering sampler at group 1, binding 3) instead of four
+loads; the gather point is the four texels' shared corner, so it reads exactly
+the texels the loads read, and the captures are identical. Fully fogged
+terrain is not culled: it still draws the fog colour over the sky. A round 2
+experiment that skipped chunks wholly beyond the far haze distance changed 17
+of 22 scenes (the distant hills and horizon band, up to 111 of 255), so it is
+not done. The only order-dependent pixels are samples
 where triangles of two chunks tie at exactly the same depth, such as a ridge
 folded along a chunk edge; the S13a captures found 13 such pixels (at most
 2 of 255) in one of 171 scenes. Vertex and uniform uploads go through
@@ -11449,6 +11462,21 @@ optimization S10 every view asked the one worker for its own eye: a mirror
 defeated the "same request" check on every frame and a far panel evicted the
 main view's chunks.
 
+Tree pages are culled per view before the cull pass (`vegetation_pages.rs`,
+optimization round 2). When a chunk's bytes are staged, each of its pages gets
+the box of its objects' cull points (base plus half the height) and the largest
+cull radius (`max(radius, height / 2)`); the stream publishes them with its page
+table. Each view keeps only the pages that could hold a drawn object, writes that
+list over the stream's page table buffer (each view culls in its own submission)
+and dispatches one workgroup per kept page. A page is dropped only when its
+whole box fails one of `vegetation_cull.wgsl`'s own tests with the largest
+radius: beyond the draw distance, behind the eye, or outside one side of the
+view, with 16 ft plus 0.01% of the distance as slack for the shader's f32
+maths. The objects the pass keeps are therefore the same; only their list order,
+already atomic, can differ. `TORE_VEG_PAGE_CULL=0` dispatches every page, as a
+comparison aid. Trees cast no geometric shadows (the cull's caster binding is
+unused), so there is nothing to cull per cascade.
+
 The 64-byte candidate record is unchanged. The culled record is 96 bytes and the
 mesh table is 48 bytes, with top-card page, height and opaque half extents. Facing/cross/top
 modes use 6/12/18 vertices in the same indirect draw. At new High the output is
@@ -11532,7 +11560,15 @@ Cache identity includes source, palette, terrain and exclusion changes.
 `grass_blades.wgsl` generates five-vertex strips from vertex and instance indices.
 A compute pass (`blade_cull`) evaluates each candidate once with the same
 `blade_candidate` function and appends grown blades (64 bytes each) to a list
-whose count feeds an indirect draw (`blade_list_vertex`), so per-candidate
+whose count feeds an indirect draw (`blade_list_vertex`). The list is sized
+(`vegetation_grass::grown_bound`, round 2) to the cells whose blade square can
+reach inside each level's circle (plus 4 ft), less the cells a coarser level
+owns, plus an eighth spare, instead of every candidate: 9.4 MB instead of
+16.8 MB at High and 500 ft (36% to 69% less across densities and distances).
+The pass hands out slots from its own counter and raises the draw count only up
+to the list's capacity, so an overflow would drop blades rather than draw past
+the list; the bound is checked against the shader's selection in a test. So
+per-candidate
 hashing, habitat, ground, canopy and wind work runs once instead of in each of
 five vertices. `SimRenderer::draw_view` records the pass after the vegetation
 prepare, before the world pass. Adapters without compute limits (and
