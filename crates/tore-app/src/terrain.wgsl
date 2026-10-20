@@ -1,12 +1,20 @@
 struct Band { info:vec4<f32>, ramp:vec4<f32> }
 // scene.view.z is the shared CPU night factor (night_glow::night_factor).
-struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32>, ocean:vec4<f32>, cloud_reflection:vec4<f32>, view:vec4<f32>, quality:vec4<f32>, viewport:vec4<f32>, origin:vec4<f32>, local_eye:vec4<f32>, veg:vec4<f32>, canopy_area:vec4<f32>, canopy:vec4<f32>, canopy_detail:vec4<f32> }
+struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32>, ocean:vec4<f32>, cloud_reflection:vec4<f32>, view:vec4<f32>, quality:vec4<f32>, viewport:vec4<f32>, origin:vec4<f32>, local_eye:vec4<f32>, veg:vec4<f32>, canopy_area:vec4<f32>, canopy:vec4<f32>, canopy_detail:vec4<f32>, sky_mix:vec4<f32>, sky_mix_b:vec4<f32>, stars:vec4<f32>, moon:vec4<f32>, haze_rows:vec4<f32> }
 // veg: ground-detail mode (0 off, 1 on, 2 fine), detail distance in feet,
 // unused, climate (0 temperate, 1 desert, 2 arctic, 3 tropical).
 // quality: spotting aid strength (0 off), terrain filtering (0/1), thermal
 // sensor picture (0/1, see "Thermal sensor picture" at the end), the thermal
 // picture's reference brightness (sim_renderer.rs `thermal_reference`). viewport: world image width and height in pixels, MSAA
 // samples, render scale. See graphics.rs.
+// sky_mix / sky_mix_b: per deck slot (high sky, low ocean) the drawn
+// opacity, a second texture it crosses into (-1 none) and that texture's
+// share, then the upper / lower horizon gradient weight (sky_mix.rs; smooth
+// weather fades decks and gradients through dawn and dusk instead of switching).
+// stars: sine and cosine of the theater latitude, the sky's rotation angle and
+// the starfield's visibility; moon: its direction and visibility (night_sky.rs).
+// haze_rows: a second shade remap row for weather art (deck_b.w is the first)
+// and its share, so the haze tables cross over instead of switching.
 // origin: the frame's render origin, a whole-foot point near the camera that
 // moving objects' vertices are relative to; local_eye: the camera relative to
 // it, exact, since 32-bit world coordinates step 1/8 foot in a theater.
@@ -219,13 +227,21 @@ fn texel(at:vec2<i32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec2<f32>
    var index=original;
    var palette_row=row;
    if sun_passes<0 && core>=0 { index=weather_index(vec2<i32>(i32(index),core),i32(scene.deck_a.w)); }
+   var second=-1;
    if sun_passes>=0 {
+    if scene.haze_rows.y>0.0 && scene.haze_rows.x>=0.0 {
+     var other=read_tile(vec2<i32>(i32(index),i32(scene.haze_rows.x)+row-1),i32(scene.deck_a.w));
+     for(var n=0;n<sun_passes;n++){ other=read_tile(vec2<i32>(i32(other),0),i32(scene.deck_a.w)); }
+     if core>=0 {other=u32(core);}
+     second=i32(other);
+    }
     index=read_tile(vec2<i32>(i32(index),i32(scene.deck_b.w)+row-1),i32(scene.deck_a.w));
     for(var n=0;n<sun_passes;n++){ index=read_tile(vec2<i32>(i32(index),0),i32(scene.deck_a.w)); }
     if core>=0 {index=u32(core);}
     palette_row=0;
    }
    var c=shade(index,palette_row);
+   if second>=0 {c=mix(c,shade(u32(second),0),scene.haze_rows.y);}
    if remaps.x>=0 {c=vec4<f32>(remap_color(index,remaps),1.0);}
    // Cutout belongs to the original texel, before any shade remap.
    c.a=select(1.0,0.0,original==255u);
@@ -1373,13 +1389,15 @@ fn horizon_height(ray:vec3<f32>)->f32 {
  if length(head)<0.0001 {head=scene.up.xz;}
  return ray.y*1024.0/max(0.0001,dot(ray.xz,normalize(head)));
 }
-fn horizon_index(ray:vec3<f32>)->f32 {
+fn horizon_index(ray:vec3<f32>)->f32 {return horizon_index_weighted(ray,scene.sky_mix.w);}
+// Smooth weather weights each gradient instead of switching it: a weight
+// below one draws the gradient compressed toward its flat 240 middle.
+fn horizon_index_weighted(ray:vec3<f32>,upper:f32)->f32 {
  let y=horizon_height(ray);
  let flags=i32(scene.ray.w);
  if smooth_weather() {
-  if y>=0.0 && (flags&1)!=0 {return mix(240.0,229.0,smoothstep(0.0,130.0,y));}
-  if y<0.0 && (flags&2)!=0 {return mix(240.0,252.0,smoothstep(0.0,max(scene.ray.z,1.0),-y));}
-  return 240.0;
+  if y>=0.0 {return mix(240.0,mix(240.0,229.0,smoothstep(0.0,130.0,y)),upper);}
+  return mix(240.0,mix(240.0,252.0,smoothstep(0.0,max(scene.ray.z,1.0),-y)),scene.sky_mix_b.w);
  }
  if (flags&2)!=0 && y<=5.0 {return clamp(mix(237.0,252.0,clamp((5.0-y)/(5.0+scene.ray.z),0.0,1.0)),0.0,254.0);}
  if (flags&1)!=0 && y>=0.0 {return mix(236.0,229.0,clamp(y/130.0,0.0,1.0));}
@@ -1583,7 +1601,8 @@ fn ocean_surface(hit:vec3<f32>,deck:vec4<f32>,distance:f32,passes:i32,core:i32)-
   let sky_hit=hit+reflected*((scene.deck_a.x-hit.y)/reflected.y);
   let sky_uv=fract(vec2<f32>(sky_hit.x,-sky_hit.z)/scene.deck_a.y);
   let sky_tex=ocean_sample(sky_uv,i32(scene.deck_a.z),distance,0,-1).rgb;
-  sky_color=mix(sky_color,sky_tex,smoothstep(0.15,0.45,reflected.y));
+  let cover=select(1.0,scene.sky_mix.x,smooth_weather());
+  sky_color=mix(sky_color,sky_tex,smoothstep(0.15,0.45,reflected.y)*cover);
  }
  let facing=clamp(dot(normal,-ray),0.0,1.0);
  let fresnel=0.02+0.98*pow(1.0-facing,5.0);
@@ -1643,6 +1662,107 @@ fn cloud_solar_glow(color:vec3<f32>,ray:vec3<f32>,visibility:f32)->vec3<f32> {
  let emission=color*tint*strength;
  return color+(vec3<f32>(1.0)-color)*(vec3<f32>(1.0)-exp(-emission));
 }
+// One smooth-weather deck texel, interpolated across the haze rows.
+fn deck_tile(uv:vec2<f32>,layer:f32,distance:f32,passes:i32,core:i32)->vec4<f32>{
+ let row=1.0+clamp(haze(distance)*scene.forward.w,0.0,scene.forward.w-1.0);
+ let a=weather_tile(uv,i32(layer),i32(floor(row)),passes,core,vec2<f32>(-1.0));
+ let b=weather_tile(uv,i32(layer),i32(ceil(row)),passes,core,vec2<f32>(-1.0));
+ return mix(a,b,fract(row));
+}
+// Crossfade two cutout texels by coverage, so a cut texel lends no colour.
+fn crossfade(a:vec4<f32>,b:vec4<f32>,t:f32)->vec4<f32>{
+ let alpha=mix(a.a,b.a,t);
+ if alpha<=0.0 {return vec4<f32>(a.rgb,0.0);}
+ return vec4<f32>((a.rgb*a.a*(1.0-t)+b.rgb*b.a*t)/alpha,alpha);
+}
+// How much of the high sky deck covers a direction in smooth weather: the
+// moon sets behind its clouds rather than drawing over them.
+fn sky_deck_cover(ray:vec3<f32>)->f32 {
+ let deck=scene.deck_a;
+ if !smooth_weather() || deck.z<0.0 || scene.sky_mix.x<=0.0 || ray.y<=0.000001 || scene.eye.y>=deck.x || scene.ocean.y>0.0 {return 0.0;}
+ let distance=(deck.x-scene.eye.y)/ray.y;
+ let hit=scene.eye.xyz+ray*distance;
+ let uv=fract(vec2<f32>(hit.x,-hit.z)/deck.y);
+ var tex=weather_tile(uv,i32(deck.z),0,-1,-1,vec2<f32>(-1.0));
+ if scene.sky_mix.y>=0.0 && scene.sky_mix.z>0.0 {tex=crossfade(tex,weather_tile(uv,i32(scene.sky_mix.y),0,-1,-1,vec2<f32>(-1.0)),scene.sky_mix.z);}
+ let fade=smoothstep(264000.0,2000000.0,length(hit.xz-scene.eye.xz));
+ return tex.a*scene.sky_mix.x*(1.0-fade);
+}
+// Night sky (night_sky.rs): a procedural starfield fixed to the celestial
+// sphere, turning with the mission clock about the theater's pole. Each cell
+// of a cube over the sphere may hold one star, placed and coloured by a fixed
+// hash; a star lights one block of 1/540-of-height pixels (a cross for the
+// brightest), so it stays a crisp retro point at any resolution.
+fn star_hash(p:vec3<u32>)->vec4<f32> {
+ // PCG3D (Jarzynski and Olano 2020), plus a fourth lane from the mix.
+ var v=p*1664525u+1013904223u;
+ v.x+=v.y*v.z;v.y+=v.z*v.x;v.z+=v.x*v.y;
+ v=v^(v>>vec3<u32>(16u));
+ v.x+=v.y*v.z;v.y+=v.z*v.x;v.z+=v.x*v.y;
+ let w=(v.x^(v.y>>5u)^(v.z<<3u))*747796405u;
+ return vec4<f32>(vec4<u32>(v,w^(w>>16u))>>vec4<u32>(8u))/16777216.0;
+}
+const STAR_CELLS:f32=96.0;
+fn starfield(color:vec3<f32>,ray:vec3<f32>,pixel:vec2<f32>,screen:vec2<f32>)->vec3<f32> {
+ // Derivatives first, in uniform control flow: pixels per NDC unit.
+ let per_ndc=vec2<f32>(1.0/dpdx(screen.x),1.0/dpdy(screen.y));
+ if !smooth_weather() || scene.stars.w<=0.0 || ray.y<=0.0 || thermal_on() {return color;}
+ // World (x east, y up, z north) into the turning celestial frame.
+ let pole=vec3<f32>(0.0,scene.stars.x,scene.stars.y);
+ let meridian=vec3<f32>(0.0,scene.stars.y,-scene.stars.x);
+ let c=vec3<f32>(ray.x,dot(ray,meridian),dot(ray,pole));
+ let s=sin(scene.stars.z);let k=cos(scene.stars.z);
+ let sky=vec3<f32>(c.x*k+c.y*s,c.y*k-c.x*s,c.z);
+ // Cube face and an angle-even grid on it.
+ let m=abs(sky);
+ var face=0u;var uv=sky.yz/m.x;var major=sky.x;
+ if m.y>=m.x && m.y>=m.z {face=2u;uv=sky.xz/m.y;major=sky.y;}
+ else if m.z>=m.x && m.z>=m.y {face=4u;uv=sky.xy/m.z;major=sky.z;}
+ if major<0.0 {face+=1u;}
+ let even=atan(uv)*(4.0/3.14159265)*0.5+0.5;
+ let cell=min(floor(even*STAR_CELLS),vec2<f32>(STAR_CELLS-1.0));
+ let h=star_hash(vec3<u32>(vec2<u32>(cell),face*977u+31u));
+ // Fewer stars where the even grid's cells are small, more in the band.
+ let galactic=dot(normalize(vec3<f32>(-0.87,-0.20,0.45)),sky);
+ let chance=0.20+0.55*exp(-galactic*galactic/0.025);
+ if h.x>=chance {return color;}
+ let h2=star_hash(vec3<u32>(vec2<u32>(cell)+vec2<u32>(4099u,7919u),face*613u+5u));
+ let at=(cell+vec2<f32>(0.18)+0.64*h2.xy)/STAR_CELLS;
+ let face_uv=tan((at-0.5)*2.0*(3.14159265/4.0));
+ var local=vec3<f32>(sign(major),face_uv.x,face_uv.y);
+ if face>=4u {local=vec3<f32>(face_uv.x,face_uv.y,sign(major));}
+ else if face>=2u {local=vec3<f32>(face_uv.x,sign(major),face_uv.y);}
+ let d=normalize(local);
+ // Back to the world, then onto the screen.
+ let w0=vec3<f32>(d.x*k-d.y*s,d.x*s+d.y*k,d.z);
+ let star=vec3<f32>(w0.x,0.0,0.0)+meridian*w0.y+pole*w0.z;
+ let depth=dot(star,scene.forward.xyz);
+ if depth<=0.0 || star.y<=0.0 {return color;}
+ let ndc=vec2<f32>(dot(star,scene.right.xyz)/depth*1.7320508*scene.up.w/scene.eye.w,dot(star,scene.up.xyz)/depth*1.7320508*scene.up.w);
+ let star_pixel=pixel+(ndc-screen)*per_ndc;
+ let block=max(1.0,round(scene.viewport.y/540.0));
+ let offset=floor(star_pixel/block)-floor(pixel/block);
+ // Brightness: most stars faint, a few bright; five retro levels.
+ let magnitude=pow(h2.z,9.0);
+ let level=floor((0.18+0.82*magnitude)*5.0+0.5)/5.0;
+ var lit=0.0;
+ if all(offset==vec2<f32>(0.0)) {lit=level;}
+ else if magnitude>0.6 && abs(offset.x)+abs(offset.y)==1.0 {lit=level*0.35;}
+ if lit<=0.0 {return color;}
+ // Tint by a few stellar colours.
+ var tint=vec3<f32>(1.0);
+ if h2.w<0.18 {tint=vec3<f32>(0.75,0.85,1.0);}
+ else if h2.w<0.32 {tint=vec3<f32>(1.0,0.93,0.78);}
+ else if h2.w<0.37 {tint=vec3<f32>(1.0,0.72,0.55);}
+ // Hidden by a bright sky, low near the horizon, washed out near the moon.
+ let sky_light=dot(color,vec3<f32>(0.2126,0.7152,0.0722));
+ var seen=scene.stars.w*(1.0-smoothstep(0.15,0.4,sky_light))*smoothstep(0.0,0.09,ray.y);
+ if scene.moon.w>0.0 {
+  let apart=acos(clamp(dot(ray,scene.moon.xyz),-1.0,1.0));
+  seen*=1.0-0.85*scene.moon.w*exp(-apart*apart/0.03);
+ }
+ return color+tint*lit*seen;
+}
 @fragment fn sky_fragment(in:SkyOut)->@location(0) vec4<f32>{
  let ray=normalize(scene.forward.xyz+scene.right.xyz*in.screen.x*scene.eye.w/(1.7320508*scene.up.w)+scene.up.xyz*in.screen.y/(1.7320508*scene.up.w));
  // Source deck planes: world feet, power-of-two tiling, reversed north axis.
@@ -1676,11 +1796,13 @@ fn cloud_solar_glow(color:vec3<f32>,ray:vec3<f32>,visibility:f32)->vec3<f32> {
   if index>=0 && !smooth_weather() {background=index;}
  }
  var color=solar_glow(horizon_color(background,passes,core),ray);
+ color=starfield(color,ray,in.clip.xy,in.screen);
  let decks=array<vec4<f32>,2>(scene.deck_a,scene.deck_b);
+ let deck_fades=array<vec4<f32>,2>(scene.sky_mix,scene.sky_mix_b);
  var nearest=1e30;
  for(var i=0;i<2;i++){
   let deck=decks[i];
-  if deck.z<0.0 || abs(ray.y)<0.000001 || (i==1 && scene.eye.y<=deck.x) { continue; }
+  if deck.z<0.0 || (smooth_weather() && deck_fades[i].x<=0.0) || abs(ray.y)<0.000001 || (i==1 && scene.eye.y<=deck.x) { continue; }
   let distance=(deck.x-scene.eye.y)/ray.y;
   var head=scene.forward.xz;
   if length(head)<0.0001 {head=scene.up.xz;}
@@ -1688,20 +1810,23 @@ fn cloud_solar_glow(color:vec3<f32>,ray:vec3<f32>,visibility:f32)->vec3<f32> {
   if distance<=0.0 || distance>=nearest || scanline_distance>=2000000.0 { continue; }
   let hit=scene.eye.xyz+ray*distance;
   let uv=fract(vec2<f32>(hit.x,-hit.z)/deck.y);
+  let fade=deck_fades[i];
   var tex:vec4<f32>;
   if scene.ocean[i+1]>0.0 {
    tex=ocean_surface(hit,deck,distance,passes,core);
+   if fade.y>=0.0 && fade.z>0.0 {
+    tex=crossfade(tex,ocean_surface(hit,vec4<f32>(deck.xy,fade.y,deck.w),distance,passes,core),fade.z);
+   }
    tex=vec4<f32>(aerial_perspective(tex.rgb,ray*distance,deck.x),tex.a);
    tex=vec4<f32>(water_flares(water_shadow(water_sun(tex.rgb,ray,hit,distance),hit),ray,hit),tex.a);
   } else {
   tex=weather_tile(uv,i32(deck.z),fog_row(distance),passes,core,vec2<f32>(-1.0));
   if smooth_weather() {
-   let row=1.0+clamp(haze(distance)*scene.forward.w,0.0,scene.forward.w-1.0);
-   let a=weather_tile(uv,i32(deck.z),i32(floor(row)),passes,core,vec2<f32>(-1.0));
-   let b=weather_tile(uv,i32(deck.z),i32(ceil(row)),passes,core,vec2<f32>(-1.0));
-   tex=mix(a,b,fract(row));
+   tex=deck_tile(uv,deck.z,distance,passes,core);
+   if fade.y>=0.0 && fade.z>0.0 {tex=crossfade(tex,deck_tile(uv,fade.y,distance,passes,core),fade.z);}
   }
   }
+  if smooth_weather() {tex.a*=fade.x;}
   if scene.ocean[i+1]<=0.0 {tex=vec4<f32>(solar_glow(cloud_solar_glow(tex.rgb,ray,1.0),ray),tex.a);}
   // Fade to the actual backdrop before the source plane cutoff. Using the
   // same destination for RGB and coverage avoids a separate blue horizon seam.
@@ -1715,8 +1840,14 @@ fn cloud_solar_glow(color:vec3<f32>,ray:vec3<f32>,visibility:f32)->vec3<f32> {
  }
  // Source lower Gouraud is drawn after the sky and celestial primitives when
  // there is no visible ocean plane. Its upper edge may cover sky texture too.
- if (i32(scene.ray.w)&2)!=0 && horizon_height(ray)<=5.0 {color=horizon_color(horizon_index(ray),0,-1);}
- if scene.deck_a.z<0.0 && scene.deck_b.z<0.0 {
+ if smooth_weather() {
+  if scene.sky_mix_b.w>0.0 && horizon_height(ray)<=5.0 {color=mix(color,horizon_color(horizon_index_weighted(ray,1.0),0,-1),scene.sky_mix_b.w);}
+ } else if (i32(scene.ray.w)&2)!=0 && horizon_height(ray)<=5.0 {color=horizon_color(horizon_index(ray),0,-1);}
+ // Smooth weather: as much of the open water as neither deck covers.
+ var open=select(0.0,1.0,scene.deck_a.z<0.0 && scene.deck_b.z<0.0);
+ if smooth_weather() {open=(1.0-select(scene.sky_mix.x,0.0,scene.deck_a.z<0.0))*(1.0-select(scene.sky_mix_b.x,0.0,scene.deck_b.z<0.0));}
+ if open>0.0 {
+  let plain=color;
   color=overcast_water(color,ray);
   if scene.cloud_reflection.z>0.0 && ray.y< -0.000001 && scene.eye.y>0.0 {
    let distance=-scene.eye.y/ray.y;
@@ -1726,6 +1857,7 @@ fn cloud_solar_glow(color:vec3<f32>,ray:vec3<f32>,visibility:f32)->vec3<f32> {
     color=mix(reflected,color,smoothstep(1800000.0,2000000.0,distance));
    }
   }
+  color=mix(plain,color,open);
  }
  var cloud_distance=2000000.0;
  if ray.y< -0.000001 {cloud_distance=min(cloud_distance,max(scene.eye.y,0.0)/(-ray.y));}
@@ -1753,11 +1885,17 @@ struct VaporOut { @builtin(position) clip:vec4<f32>, @location(0) color:vec4<f32
  let z=dot(position,scene.forward.xyz);let f=1.7320508*scene.up.w;
  var out:VertexOut;
  out.clip=vec4<f32>(dot(position,scene.right.xyz)*f/scene.eye.w,dot(position,scene.up.xyz)*f,0.0,z);
- out.light_row=-1;out.fog_enabled=0u;out.uv=uv;out.layer=layer;out.color=shade(u32(index),0).rgb;out.distance=position.y;out.own_color=0.;out.altitude=position.y;out.direction=position;return out;
+ // Textured quads (the moon) carry their opacity in the first colour slot.
+ out.light_row=-1;out.fog_enabled=0u;out.uv=uv;out.layer=layer;out.color=select(shade(u32(index),0).rgb,color,layer>=0.0);out.distance=position.y;out.own_color=0.;out.altitude=position.y;out.direction=position;return out;
 }
 @fragment fn celestial_fragment(in:VertexOut)->@location(0) vec4<f32>{
  if celestial_occluded(normalize(in.direction)) || thermal_on() {discard;}
- if in.layer>=0.0 {let tex=weather_tile(in.uv,i32(in.layer),0,-1,-1,vec2<f32>(-1.0));if tex.a<0.01 {discard;}return tex;}
+ if in.layer>=0.0 {
+  let tex=weather_tile(in.uv,i32(in.layer),0,-1,-1,vec2<f32>(-1.0));
+  let alpha=tex.a*in.color.x*(1.0-sky_deck_cover(normalize(in.direction)));
+  if alpha<0.01 {discard;}
+  return vec4<f32>(tex.rgb,alpha);
+ }
  return vec4<f32>(in.color,1.0);
 }
 

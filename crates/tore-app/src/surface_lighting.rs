@@ -331,10 +331,24 @@ impl SurfaceLighting {
             .as_ref()
             .and_then(|l| crate::celestial::visual_sun_direction(l, &world.weather))
             .unwrap_or([0., -1., 0.]);
-        let moon = layer
-            .as_ref()
-            .map(|l| crate::celestial::rotate([0., 0., 1.], [l.moon_azimuth, l.moon_elevation]))
-            .unwrap_or([0., 1., 0.]);
+        // Smooth weather's moon moves across the sky; its light follows it
+        // and fades as it sets ([`crate::night_sky`]).
+        let moon = match scenery.smooth_weather {
+            true => crate::night_sky::NightSky::for_view(
+                world,
+                1.,
+                camera.position[1],
+                scenery
+                    .celestial
+                    .as_ref()
+                    .map_or([0., 0., 1.], |c| c.moon_center()),
+            )
+            .map(|sky| sky.moon_light()),
+            false => layer.as_ref().map(|l| {
+                crate::celestial::rotate([0., 0., 1.], [l.moon_azimuth, l.moon_elevation])
+            }),
+        }
+        .unwrap_or([0., 1., 0.]);
         let radius = scenery
             .celestial
             .as_ref()

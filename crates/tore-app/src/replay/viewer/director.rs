@@ -60,7 +60,10 @@ impl Viewer {
         self.weather
             .seek(&mut self.world, &mut self.scenery, &self.tracks, tick);
         self.follow_city(tick);
-        if let Some(minutes) = frame.time_minutes {
+        if let Some(time) = frame.time_minutes {
+            // Whole minutes start the clock; a fraction runs it on that many
+            // ticks, for frame-by-frame sky sweeps.
+            let minutes = (time.floor() as i32).rem_euclid(24 * 60);
             let config = self.world.weather.configuration();
             let resources = crate::reel::visual_weather_module(&self.world)?;
             self.world.weather =
@@ -71,6 +74,9 @@ impl Viewer {
                     config.parameter(),
                     crate::replay::identity::recorded(&self.recording.header().world)?.wind,
                 )?);
+            for _ in 0..((time - time.floor()) * 60. * 120.).round() as u32 {
+                self.world.weather.step();
+            }
         }
         let player = self.player_state(&picture, tick);
         // u32::MAX is the recipe's static first-runway camera anchor.

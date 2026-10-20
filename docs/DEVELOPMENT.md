@@ -1182,6 +1182,9 @@ and per-pixel angular lighting on sky-deck textures and cloud sheets. Its visual
 sun arc runs continuously through the day, with symmetric dawn/dusk twilight
 gradients rather than a 19:00 drawing cutoff. The Sunset preset remains 19:01.
 The sun and moon use half their previous apparent diameter (shared scale 2).
+Decks, horizon gradients, haze tables, stars and moon fade through the dawn
+and dusk record overlaps; the night sky turns, with a procedural starfield and
+a moon that rises and sets ([spec](spec/sun-glow.md#night-sky)).
 The trial orange-rim grade is removed; the earlier atmospheric glow remains. Smooth-mode glare
 is gentler near the horizon and drops rapidly to zero by 0.5 degrees below it.
 See [sun glow specification](spec/sun-glow.md).
@@ -1959,7 +1962,7 @@ TORE_DATA_DIR=.local/dev-profile target/debug/tore-app --surface-objective UKR Q
 recording's frames offscreen through the replay viewer, as PNG files
 (`still-NN-tTICK.png`), with no window, no audio written and no ffmpeg. The
 plan is the reel director's (`--reel-render`, one frame a line: tick,
-anchor, eye, target, field of view, visual time in minutes or -1, view,
+anchor, eye, target, field of view, visual time in minutes of the day (a fraction steps the clock on to the second) or -1, view,
 rate, fixed-eye tick or -1); anchor 4294967294 puts the eye and target in
 world feet. A plan's rows may jump backwards, which is how the stills check a
 seek. When the city fill has burning buildings a frame also prints a `Replay

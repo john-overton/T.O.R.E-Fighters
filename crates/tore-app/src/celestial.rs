@@ -140,6 +140,20 @@ impl Celestial {
             light_rows,
         })
     }
+    /// The unit direction of the moon art's centre before the sky turns it.
+    pub fn moon_center(&self) -> [f32; 3] {
+        self.moon
+            .primitives
+            .iter()
+            .find_map(|p| match p {
+                Primitive::Billboard { center, .. } => {
+                    let length = center.iter().map(|v| v * v).sum::<f32>().sqrt();
+                    (length > 0.).then(|| center.map(|v| v / length))
+                }
+                _ => None,
+            })
+            .unwrap_or([0., 0., 1.])
+    }
     pub(crate) fn solid_sun_radius(&self) -> Option<f32> {
         self.sun
             .primitives
@@ -190,10 +204,28 @@ impl Celestial {
         }
         out
     }
-    pub fn vertices(&self, world: &Terrain, camera: &Camera, height: u32) -> Vec<f32> {
+    /// The stars and moon. Smooth weather passes its `night` sky: the
+    /// starfield is then drawn by the sky shader instead of these points,
+    /// and the moon moves and fades rather than following the record flag.
+    pub fn vertices(
+        &self,
+        world: &Terrain,
+        camera: &Camera,
+        height: u32,
+        night: Option<&crate::night_sky::NightSky>,
+    ) -> Vec<f32> {
         let Some(layer) = world.weather.sample(camera.position[1]) else {
             return Vec::new();
         };
+        if let Some(night) = night {
+            let alpha = night.moon[3];
+            if alpha <= 0. {
+                return Vec::new();
+            }
+            let mut vertices = Vec::new();
+            self.moon_quads(&mut vertices, |p| night.place_moon(p), alpha);
+            return vertices;
+        }
         if layer.flags & 16 == 0 {
             return Vec::new();
         }
@@ -214,30 +246,35 @@ impl Celestial {
                     -1.,
                     *fill as f32,
                     [0., 0., 1., 1.],
+                    0.,
                 );
             }
         }
         let angle = [layer.moon_azimuth, layer.moon_elevation];
-
+        self.moon_quads(&mut vertices, |p| rotate(p, angle), 1.);
+        vertices
+    }
+    /// The moon billboards turned into the sky by `turn`, at `alpha`.
+    fn moon_quads(&self, vertices: &mut Vec<f32>, turn: impl Fn([f32; 3]) -> [f32; 3], alpha: f32) {
         for p in &self.moon.primitives {
             if let Primitive::Billboard { center, size, .. } = p {
-                let center = rotate(*center, angle);
+                let center = turn(*center);
                 // The lunar texture basis belongs to the sky, not aircraft bank.
                 // Mixing a rolled camera right with a world vertical shears it.
-                let horizontal = rotate([1., 0., 0.], angle);
-                let vertical = rotate([0., 1., 0.], angle);
+                let horizontal = turn([1., 0., 0.]);
+                let vertical = turn([0., 1., 0.]);
                 quad(
-                    &mut vertices,
+                    vertices,
                     center,
                     horizontal.map(|v| v * size[0] as f32 * 0.5 * CELESTIAL_SCALE),
                     vertical.map(|v| v * size[1] as f32 * 0.5 * CELESTIAL_SCALE),
                     self.moon_texture as f32,
                     0.,
                     self.moon_uv,
+                    alpha,
                 );
             }
         }
-        vertices
     }
 }
 pub(crate) fn glare_strength(
@@ -328,6 +365,7 @@ fn quad(
     texture: f32,
     index: f32,
     uv: [f32; 4],
+    alpha: f32,
 ) {
     for [x, y] in [
         [-1., -1.],
@@ -342,7 +380,7 @@ fn quad(
             if x < 0. { uv[0] } else { uv[2] },
             if y < 0. { uv[3] } else { uv[1] },
             texture,
-            0.,
+            alpha,
             0.,
             0.,
             index,
@@ -463,13 +501,13 @@ mod tests {
         };
         let mut camera = Camera::new();
         camera.position[1] = 0.;
-        let expected = celestial.vertices(&world, &camera, 720);
+        let expected = celestial.vertices(&world, &camera, 720, None);
         assert_eq!(expected.len(), 60);
         for roll in [-2., -1., 0., 1., 2.] {
             camera.roll = roll;
             camera.position[0] += 100.;
             camera.position[2] -= 300.;
-            assert_eq!(celestial.vertices(&world, &camera, 720), expected);
+            assert_eq!(celestial.vertices(&world, &camera, 720, None), expected);
         }
         // Project the actual quad through the camera basis used by WGSL.
         // Equal pixel width/height and height-relative diameter survive aspect
