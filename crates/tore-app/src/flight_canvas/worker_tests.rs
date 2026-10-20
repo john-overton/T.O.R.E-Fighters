@@ -24,7 +24,7 @@ impl ReferenceCanvas {
             let size = [rect.2.round() as u32, rect.3.round() as u32];
             let cached = self.panels.remove(page);
             let cached = match cached {
-                Some(cached) if cached.size == size && cached.source == raster.pixels => cached,
+                Some(cached) if cached.size == size && *cached.source == raster.pixels => cached,
                 _ => {
                     let mut canvas = FlightCanvas {
                         size,
@@ -39,14 +39,16 @@ impl ReferenceCanvas {
                     };
                     canvas.blit(&source, (0., 0., size[0] as f64, size[1] as f64));
                     PanelCache {
-                        source: source.rgba,
+                        key: None,
+                        source: Arc::new(source.rgba),
                         size,
-                        image: Sprite {
+                        image: Arc::new(Sprite {
                             width: size[0] as usize,
                             height: size[1] as usize,
                             rgba: canvas.pixels,
                             glyphs: vec![],
-                        },
+                        }),
+                        clear_is_zero: false,
                     }
                 }
             };

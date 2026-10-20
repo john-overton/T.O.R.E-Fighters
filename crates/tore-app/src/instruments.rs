@@ -3,6 +3,8 @@
 mod aim_marks;
 mod envelope;
 pub mod front_view;
+mod page_key;
+pub use page_key::PageKey;
 pub mod gunsight;
 pub mod targeting;
 use crate::{aircraft::Airframe, flight::State, menu::Sprite, scope};

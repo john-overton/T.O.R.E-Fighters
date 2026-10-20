@@ -5788,12 +5788,26 @@ impl ApplicationHandler for App {
                         self.instruments.hud_color =
                             cockpit_palette[usize::from(self.hornet.hud.primary_color)];
                         self.instruments.palette = cockpit_palette;
-                        self.flight_canvas.begin(
-                            renderer.flight_size(),
-                            &self.hornet,
-                            presented,
-                            &self.instruments,
-                        );
+                        // The map's opaque letterbox and the sensor console's
+                        // blank canvas, both below, cover every instrument window:
+                        // those frames start from a clear canvas without them.
+                        let map_open = self.flight_ui.map.open;
+                        let console_blank = console_on
+                            && self
+                                .instruments
+                                .combat
+                                .as_ref()
+                                .is_some_and(|c| c.gunsight.is_some());
+                        if map_open || console_blank {
+                            self.flight_canvas.clear(renderer.flight_size());
+                        } else {
+                            self.flight_canvas.begin(
+                                renderer.flight_size(),
+                                &self.hornet,
+                                presented,
+                                &self.instruments,
+                            );
+                        }
                         self.menu.pixels.fill(0);
                         let gyro_bank = self.flight_ui.bank_gyro.follow(
                             presented.bank,
@@ -5990,7 +6004,7 @@ impl ApplicationHandler for App {
                         // The sensor console replaces the cockpit, the HUD and the
                         // instrument windows with its own symbology; the map,
                         // menus and messages still draw over it below.
-                        if console_on
+                        if console_blank
                             && let Some(page) = self
                                 .instruments
                                 .combat
@@ -6028,7 +6042,8 @@ impl ApplicationHandler for App {
                                 overlay,
                                 size,
                             );
-                            self.flight_canvas.blank(size);
+                            // Only rows drawn on since the clear hold anything.
+                            self.flight_canvas.clear(size);
                         }
                         use tore_sim::g_effects::GEffects;
                         // The canvas shader veils the finished frame on the GPU.
@@ -6050,7 +6065,7 @@ impl ApplicationHandler for App {
                                 }
                             }
                         }
-                        if self.flight_ui.map.open {
+                        if map_open {
                             self.flight_ui.map.draw(
                                 &mut self.menu.pixels,
                                 &self.world.terrain,
