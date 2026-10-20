@@ -9825,7 +9825,11 @@ affordable, each an agent decision that changes no answer:
 - **The contact search** (`combat/live/broad.rs`) first skips the targets a
   round's swept segment cannot reach this tick: each target's box over its
   move, widened by its largest volume, kept in order along x. The targets it
-  keeps are tested exactly as before, in the same order.
+  keeps are tested exactly as before, in the same order. A human's gun round,
+  tested against the aircraft as the shooter saw them, keeps every aircraft
+  but still skips the ground objects' solid boxes it cannot reach, since those
+  are met by its own segment whatever the rewind (optimization round 2; before
+  it every such round tested every ground object of the mission each tick).
 - **The AI's sight lines to tracers** skip sampling the ground when the whole
   line is above the highest ground under it (`tore_sim::ground_ceiling`, built
   once from the terrain grid and runways by `Terrain::ground_ceiling`). Since

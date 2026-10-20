@@ -5624,13 +5624,14 @@ impl State {
             let spares =
                 |side: Side| friendly_fire_off && shooter_side != NO_SIDE && side == shooter_side;
             // The round's swept segment widened by its fuze, for the first
-            // pass; a round tested against past volumes skips it.
-            let reach = if rewind.is_none() {
-                let fuze = f64::from(w.damage.fuze_radius.max(0));
-                broad::Bounds::segment(p.previous, p.position, fuze)
-            } else {
-                None
-            };
+            // pass; a round tested against past volumes keeps it for the
+            // ground objects' solid boxes alone.
+            let segment = broad::Bounds::segment(
+                p.previous,
+                p.position,
+                f64::from(w.damage.fuze_radius.max(0)),
+            );
+            let reach = if rewind.is_none() { segment } else { None };
             // One search over every aircraft row and every ownship. A gun round
             // can hit any aircraft but the one that fired it; a missile or bomb
             // can hit any aircraft once its fuze has armed, even its launcher.
@@ -5678,7 +5679,11 @@ impl State {
                 }
             }
             if armed {
-                target_broad.candidates(reach, &mut candidates);
+                if rewind.is_none() {
+                    target_broad.candidates(reach, &mut candidates);
+                } else {
+                    target_broad.candidates_rewound(segment, &mut candidates);
+                }
                 for &i in &candidates {
                     let t = &self.targets[i];
                     // A surface round strikes aircraft and the other side's

@@ -103,6 +103,12 @@ pub(super) struct Broad {
     widest: f64,
     /// Targets every round tests.
     always: Vec<usize>,
+    /// In ascending order, every target that is not a bounded solid box: what
+    /// a round tested against past volumes keeps whatever its segment
+    /// ([`Self::candidates_rewound`]).
+    unsolid: Vec<usize>,
+    /// Whether each box in `boxes` is a ground object's solid box.
+    solid: Vec<bool>,
     count: usize,
 }
 
@@ -111,17 +117,28 @@ impl Broad {
         let mut broad = Self::default();
         for (index, body) in bodies.into_iter().enumerate() {
             broad.count += 1;
-            match body.bounds() {
+            let bounds = body.bounds();
+            let solid = body.solid.is_some();
+            if bounds.is_none() || !solid {
+                broad.unsolid.push(index);
+            }
+            match bounds {
                 Some(bounds) => {
                     broad.widest = broad.widest.max(bounds.hi[0] - bounds.lo[0]);
                     broad.boxes.push((bounds, index));
+                    broad.solid.push(solid);
                 }
                 None => broad.always.push(index),
             }
         }
-        broad
-            .boxes
-            .sort_by(|a, b| a.0.lo[0].total_cmp(&b.0.lo[0]).then(a.1.cmp(&b.1)));
+        // The solid flags follow their boxes through the sort.
+        let mut order: Vec<usize> = (0..broad.boxes.len()).collect();
+        order.sort_by(|&a, &b| {
+            let (a, b) = (&broad.boxes[a], &broad.boxes[b]);
+            a.0.lo[0].total_cmp(&b.0.lo[0]).then(a.1.cmp(&b.1))
+        });
+        broad.boxes = order.iter().map(|&i| broad.boxes[i]).collect();
+        broad.solid = order.iter().map(|&i| broad.solid[i]).collect();
         broad
     }
 
@@ -143,6 +160,34 @@ impl Broad {
                 break;
             }
             if bounds.overlaps(&segment) {
+                out.push(*index);
+            }
+        }
+        out.sort_unstable();
+    }
+
+    /// The targets a gun round tested against past volumes may touch, in
+    /// ascending index order: every target but the bounded solid boxes, and
+    /// the solid boxes its segment may reach. A ground object's solid box is
+    /// tested against the round's own segment whatever the rewind, so the box
+    /// pass holds for it as for any round; the other targets are tested
+    /// against volumes the boxes do not describe. With `None` every target is
+    /// returned.
+    pub fn candidates_rewound(&self, segment: Option<Bounds>, out: &mut Vec<usize>) {
+        out.clear();
+        let Some(segment) = segment else {
+            out.extend(0..self.count);
+            return;
+        };
+        out.extend_from_slice(&self.unsolid);
+        let start = self
+            .boxes
+            .partition_point(|(b, _)| b.lo[0] < segment.lo[0] - self.widest);
+        for ((bounds, index), solid) in self.boxes[start..].iter().zip(&self.solid[start..]) {
+            if bounds.lo[0] > segment.hi[0] {
+                break;
+            }
+            if *solid && bounds.overlaps(&segment) {
                 out.push(*index);
             }
         }
@@ -295,6 +340,75 @@ mod tests {
         assert!(
             checked > 100,
             "too few contacts to mean anything: {checked}"
+        );
+    }
+    /// A round tested against past volumes keeps every target but the solid
+    /// boxes it cannot reach, in index order, and every box it touches.
+    #[test]
+    fn a_rewound_round_skips_only_the_ground_boxes_it_cannot_reach() {
+        let mut seed = 0x51ed_270b_u64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % 20_000) as f64 / 10. - 1_000.
+        };
+        let mut skipped = 0;
+        let mut touched = 0;
+        for _ in 0..400 {
+            let mut boxes = Vec::new();
+            let mut bodies = Vec::new();
+            for n in 0..24 {
+                let mut target = body([next(), next(), next()], next().abs() / 40.);
+                if n % 3 != 0 {
+                    let solid = crate::airport::OrientedBox {
+                        center: [next(), next() / 10., next()],
+                        half: [
+                            next().abs() / 8. + 1.,
+                            next().abs() / 40. + 1.,
+                            next().abs() / 8. + 1.,
+                        ],
+                        heading: next(),
+                        pitch: next() / 5_000.,
+                        bank: next() / 5_000.,
+                    };
+                    target.solid = Some((solid.center, solid.half));
+                    boxes.push(Some(solid));
+                } else {
+                    if n == 9 {
+                        // One that cannot be bounded.
+                        target.radius = f64::NAN;
+                    }
+                    boxes.push(None);
+                }
+                bodies.push(target);
+            }
+            let broad = Broad::new(bodies);
+            for _ in 0..20 {
+                let from = [next(), next() / 10., next()];
+                let to = [next(), next() / 10., next()];
+                let fuze = next().abs() / 50.;
+                let mut kept = Vec::new();
+                broad.candidates_rewound(Bounds::segment(from, to, fuze), &mut kept);
+                assert!(kept.windows(2).all(|w| w[0] < w[1]));
+                for (index, solid) in boxes.iter().enumerate() {
+                    match solid {
+                        None => assert!(kept.contains(&index)),
+                        Some(solid) if solid.segment_fraction(from, to).is_some() => {
+                            touched += 1;
+                            assert!(kept.contains(&index), "{solid:?} {from:?} {to:?}");
+                        }
+                        Some(_) => skipped += usize::from(!kept.contains(&index)),
+                    }
+                }
+                // A round the pass cannot bound tests everything.
+                broad.candidates_rewound(Bounds::segment([f64::NAN; 3], to, fuze), &mut kept);
+                assert_eq!(kept, (0..24).collect::<Vec<_>>());
+            }
+        }
+        assert!(
+            touched > 50 && skipped > 10_000,
+            "{touched} touched, {skipped} skipped"
         );
     }
 }
