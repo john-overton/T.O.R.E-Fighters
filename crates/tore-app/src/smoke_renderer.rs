@@ -396,8 +396,11 @@ mod tests {
             camera.yaw = 0.;
             camera.pitch = 0.;
             let mut values = camera.uniform(1., [0., 1000000., 0., 0.], [0; 3]);
-            values.resize(356, 0.);
+            values.resize((crate::sim_renderer::UNIFORM_BYTES / 4) as usize, 0.);
             values[336] = 1.;
+            // Tinted puffs (blast dust) dim after dark by the sun's height
+            // (scene.sun.y, float 33); this fixture checks the daylight colour.
+            values[33] = 1.;
             let raw: Vec<_> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
             let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: None,

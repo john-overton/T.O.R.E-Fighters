@@ -148,7 +148,7 @@ const SKY_DEPTH_COMPARE: wgpu::CompareFunction = wgpu::CompareFunction::GreaterE
 const WORLD_FAR_FEET: f32 = 2_200_000.;
 /// The shared `Scene` uniform, ending with the graphics `quality` and
 /// `viewport` vectors.
-const UNIFORM_BYTES: u64 = 1568;
+pub(crate) const UNIFORM_BYTES: u64 = 1568;
 type AircraftBatch = (wgpu::BindGroup, wgpu::Buffer, u32);
 /// One other aircraft inside a geometry batch, for the spotting aid: its
 /// vertex range, presented position and airframe extent in feet.
