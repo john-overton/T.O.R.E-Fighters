@@ -861,7 +861,13 @@ owns the fitted parameters and limits.
 
 Smooth lens flare is a continuous optical-light composite over the completed
 world, so the sky gradient is not quantized inside flare circles. Stepped mode
-keeps indexed remapping. Water's solar glint tests geometric light visibility
+keeps indexed remapping. The circles scale with how much of the sun's disc is
+in view: after the world pass a one-workgroup compute pass
+(`sun_visibility.wgsl`) samples the world depth at 64 points over the disc,
+eases the fraction per camera slot into a small storage buffer, and the
+composition reads it the same frame (no readback); points off the view take the
+share of five terrain rays (`lens_flare::terrain_clear`) that the whiteout also
+uses, and the world pass keeps its depth when a flare is drawn. Water's solar glint tests geometric light visibility
 before adding reflected sunlight; ordinary water shadow tint is a separate
 operation. See [glare](spec/sun-glow.md#continuous-lens-flare-composition) and
 [water reflection](spec/ocean.md#separate-sun-and-environment-reflection-trial).

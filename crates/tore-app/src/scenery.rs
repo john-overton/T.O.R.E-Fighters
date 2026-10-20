@@ -1066,6 +1066,21 @@ impl Scenery {
             None
         };
         let facing = camera.facing();
+        // The share of the sun's disc the terrain leaves open, worked out
+        // only for a sun the camera faces (the only one that whitens).
+        let open = |sun: [f32; 3]| -> f64 {
+            let alignment: f32 = (0..3).map(|i| sun[i] * facing[i]).sum();
+            if alignment > crate::lens_flare::WHITEOUT_FACING {
+                f64::from(crate::lens_flare::terrain_open(
+                    terrain,
+                    self,
+                    camera.position,
+                    sun,
+                ))
+            } else {
+                1.
+            }
+        };
         let alignment = if glare {
             layer
                 .as_ref()
@@ -1074,9 +1089,11 @@ impl Scenery {
                 })
                 .map_or(-1., |a| {
                     let sun = crate::celestial::rotate([0., 0., 1.], a);
-                    (0..3)
+                    let alignment: f64 = (0..3)
                         .map(|i| f64::from(sun[i]) * f64::from(facing[i]))
-                        .sum()
+                        .sum();
+                    // A sun behind terrain does not whiten the picture.
+                    if open(sun) <= 0. { -1. } else { alignment }
                 })
         } else {
             -1.
@@ -1098,6 +1115,7 @@ impl Scenery {
                         * f64::from(crate::celestial::glare_strength(
                             terrain, self, altitude, sun,
                         ))
+                        * if response > 0. { open(sun) } else { 1. }
                 })
         } else {
             0.

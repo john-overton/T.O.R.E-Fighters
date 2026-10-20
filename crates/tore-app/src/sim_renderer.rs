@@ -553,8 +553,9 @@ impl Pipelines {
             label: Some("Spotting aid world depth"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: u32::from(samples > 1),
-                // Flare glare tests its core against depth per vertex.
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                // Flare glare tests its core against depth per vertex, and
+                // the lens flare measures the sun's disc against it.
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT | wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Texture {
                     sample_type: wgpu::TextureSampleType::Depth,
                     view_dimension: wgpu::TextureViewDimension::D2,
@@ -1155,7 +1156,12 @@ impl SimRenderer {
             lighting,
             escapees: None,
             aircraft_visible: true,
-            lens_flare: crate::lens_flare::LensFlare::new(device, format),
+            lens_flare: crate::lens_flare::LensFlare::new(
+                device,
+                format,
+                &pipelines.rim_depth_layout,
+                samples,
+            ),
             smoke: crate::smoke_renderer::SmokeRenderer::new(device, format, &shader, samples),
             effects: crate::effect_renderer::EffectRenderer::new(device, format, &shader, samples),
             climate: scenery.climate,
@@ -1638,6 +1644,11 @@ impl SimRenderer {
             self.canopy_visible = vertices.chunks_exact(10).any(|v| v[5] == -5.);
             self.bounds.aircraft = Bounds::of_vertices(vertices);
         }
+    }
+    /// The next view of each camera takes the sun's measured visibility at
+    /// once instead of easing toward it (a still capture).
+    pub fn snap_sun_visibility(&mut self) {
+        self.lens_flare.snap();
     }
     pub fn hide_aircraft(&mut self) {
         self.canopy_visible = false;
@@ -2185,6 +2196,10 @@ impl SimRenderer {
                 scenery,
                 camera,
                 output,
+                [
+                    size[0] as f32 / output[0] as f32,
+                    size[1] as f32 / output[1] as f32,
+                ],
                 &weather.palette,
             )
         };
@@ -2302,12 +2317,15 @@ impl SimRenderer {
             Some(color) => (color, Some(direct)),
             None => (direct, None),
         };
-        // Flare glare and the spotting aid are the only later readers of the
-        // world depth; both are decided before the pass.
+        // Flare glare, the spotting aid and the lens flare's sun measurement
+        // are the only later readers of the world depth; all are decided
+        // before the pass.
         let flares = self.countermeasures.has_flares();
         let spotting = rim && !contacts.is_empty();
-        let (color_store, depth_store) =
-            world_store_ops(resolve_target.is_some(), flares || spotting);
+        let (color_store, depth_store) = world_store_ops(
+            resolve_target.is_some(),
+            flares || spotting || flare_target.is_some(),
+        );
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Simulation world"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -2564,6 +2582,7 @@ impl SimRenderer {
             }
         }
         if flare_target.is_some() {
+            self.lens_flare.measure(encoder, &targets.rim_depth);
             self.lens_flare.draw(encoder, target);
         }
     }

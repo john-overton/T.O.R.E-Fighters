@@ -135,3 +135,49 @@ The underlying sky remains continuous through each circle, without palette
 lookup boundaries or wedges. Stepped mode retains original palette remapping.
 
 See the [gradient-composition GPU check](../baselines/aircraft-lighting.md).
+
+## Sun hidden behind terrain or objects
+
+John requested on 2026-10-19 that sun glare and lens flare be suppressed when
+the sun is behind an object or terrain. This is **opinionated** presentation
+with agent-chosen constants; it changes no simulation, wire, checkpoint or
+replay byte.
+
+The lens flare circles are scaled by the share of the sun's disc that is in
+view. After the world pass a compute pass samples the world depth at 64 points
+spread evenly over the disc (a golden-angle spiral). The sky and the sun are
+drawn only where nothing opaque wrote depth, so a point counts as open exactly
+when its depth is still the cleared value. Terrain, the city fill, trees and
+other vegetation, aircraft (the flown one in outside views included), other
+vehicles, airports and the canopy structure all write depth and hide the sun.
+The disc radius is the sun's solid circle, at least 8 output pixels, so a sun
+passing behind a ridge or a tree fades over about two disc widths of travel
+rather than switching.
+
+The share is eased over time per view (the main view, the mirror and each
+camera panel keep their own): each frame it moves toward the measured value by
+`1 - exp(-dt / 0.12 s)`, so the flare fades in about a third of a second as the
+sun goes behind trees, and returns the same way. A view that was not drawn for
+half a second, and a still capture, start from the measured value. The measurement stays on the GPU
+and the flare composition reads it the same frame, so nothing is read back.
+
+The flare's gates are unchanged: it still shows with the sun up to 9/16 of the
+view's size from the centre, which is a little beyond the edge. Disc points
+that fall off the view cannot be read from the depth; they count by the
+terrain instead: five rays (the sun's direction and four on a ring of 0.7 of
+the disc's radius) are walked over the height grid from the eye in quarter-cell
+steps to 800,000 ft, and the open share of those rays stands in for every
+off-view point. A sun that is just off the view and behind a hill therefore
+draws no ghosts. Only terrain is known off the view: a tree or an aircraft
+beyond the edge does not hide the sun there.
+
+The whiteout (the palette moving toward white when the camera faces the sun,
+both the stepped palette and the smooth one) is eased by the same terrain
+rays, worked out only while the view is within about 20 degrees of the sun: a
+sun the terrain hides does not whiten the picture, and the existing 1.9 second
+whiteout ramp makes the change gradual. Objects and trees do not dim the
+whiteout, because it is part of the CPU palette and the depth is read on the
+GPU. The cockpit frame is flat art drawn after the flare, so it covers ghost
+circles where it is opaque, but does not count in the sun's share. Clouds
+already dim both through the dense-band rule above; the sky's cloud deck draws
+no depth and does not enter the sun's share beyond that.

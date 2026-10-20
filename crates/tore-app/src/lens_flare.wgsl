@@ -3,11 +3,16 @@ struct Flare { settings:vec4<f32>, circles:array<vec4<f32>,16> }
 @group(0) @binding(1) var palette:texture_2d<f32>;
 @group(0) @binding(2) var maps:texture_2d<u32>;
 @group(0) @binding(3) var<uniform> flare:Flare;
+// How much of the sun's disc is in view, per camera slot (the compute pass
+// in sun_visibility.wgsl, this frame); settings.w is this view's slot.
+@group(0) @binding(4) var<storage,read> sun_seen:array<f32,8>;
 @vertex fn vertex(@builtin(vertex_index) i:u32)->@builtin(position) vec4<f32>{
  let p=array<vec2<f32>,3>(vec2(-1.,-1.),vec2(3.,-1.),vec2(-1.,3.));return vec4(p[i],0.,1.);
 }
 @fragment fn fragment(@builtin(position) p:vec4<f32>)->@location(0) vec4<f32>{
  let color=textureLoad(source,vec2<i32>(p.xy),0);
+ let seen=clamp(sun_seen[u32(flare.settings.w)],0.0,1.0);
+ if seen<=0.0 {return color;}
  // Continuous optical emission in smooth mode. Never quantize the background.
  if flare.settings.z>0.0 {
   var emission=vec3<f32>(0.0);
@@ -16,7 +21,7 @@ struct Flare { settings:vec4<f32>, circles:array<vec4<f32>,16> }
    let coverage=1.0-smoothstep(max(c.z-1.5,0.0),c.z,distance(p.xy,c.xy));
    let tint=select(vec3<f32>(1.0,0.55,0.22),vec3<f32>(1.0,0.32,0.18),c.w>0.5);
    let strength=select(0.12,0.08,c.w>0.5);
-   emission+=tint*strength*coverage*flare.settings.y;
+   emission+=tint*strength*coverage*flare.settings.y*seen;
   }
   return vec4<f32>(color.rgb+(vec3<f32>(1.0)-color.rgb)*(vec3<f32>(1.0)-exp(-emission)),color.a);
  }
@@ -33,5 +38,5 @@ struct Flare { settings:vec4<f32>, circles:array<vec4<f32>,16> }
   let remap=textureLoad(maps,vec2(index,0),0).rg;index=i32(remap[i32(c.w)]);
  }
  if index<0 {return color;}
- return vec4(mix(color.rgb,textureLoad(palette,vec2(index,0),0).rgb,flare.settings.y),color.a);
+ return vec4(mix(color.rgb,textureLoad(palette,vec2(index,0),0).rgb,flare.settings.y*seen),color.a);
 }
