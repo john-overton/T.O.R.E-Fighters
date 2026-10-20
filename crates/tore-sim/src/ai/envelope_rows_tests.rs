@@ -306,3 +306,55 @@ fn envelope_readings_from_row_bands_match_asking_every_row_again() {
     // adapter scales the others from them).
     assert!(random >= 30, "{random}");
 }
+
+#[test]
+fn kept_row_bands_follow_a_replaced_configuration_at_the_same_altitude() {
+    let mut seed = 0x0dd1_5eed_c0ff_ee11_u64;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 11) as f64 / (1_u64 << 53) as f64
+    };
+    let position = [0., 15_000., 0.];
+    let mut state = flight::State::new(&synthetic_profile(AircraftId::F18), position).unwrap();
+    for round in 0..300 {
+        // Asked at one altitude, then the configuration is replaced (its
+        // old allocation freed and perhaps used again) and asked again there.
+        let fresh = |state: &flight::State| {
+            flight::RowSpeeds::new(
+                &state.model().configuration().aerodynamics.envelopes,
+                state.position[1],
+            )
+            .bands()
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            format!(
+                "{:?}",
+                flight::RowSpeeds::of(&state).bands().collect::<Vec<_>>()
+            ),
+            format!("{:?}", fresh(&state)),
+            "round {round}"
+        );
+        let mut configuration = state.model().configuration().clone();
+        configuration.aerodynamics.envelopes = random_envelopes(&mut next);
+        state.model_mut().set_configuration(configuration).unwrap();
+        assert_eq!(
+            format!(
+                "{:?}",
+                flight::RowSpeeds::of(&state).bands().collect::<Vec<_>>()
+            ),
+            format!("{:?}", fresh(&state)),
+            "round {round}"
+        );
+        assert_eq!(
+            format!("{:?}", speed_limits_of(&state)),
+            format!("{:?}", speed_limits_reference(&state)),
+            "round {round}"
+        );
+        if round % 7 == 0 {
+            state.position[1] = (next() * 12.).round() * 5_000.;
+        }
+    }
+}

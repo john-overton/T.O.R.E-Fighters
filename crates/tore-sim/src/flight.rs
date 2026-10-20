@@ -2168,7 +2168,71 @@ pub struct RowSpeeds<'a> {
 }
 /// Rows kept without an allocation; the importer allows 51 (-20 G to 30 G).
 const ROW_SPEEDS_KEPT: usize = 51;
+/// Bands kept per thread by [`RowSpeeds::of`]: enough for every aircraft
+/// of a large fight to ask several times in its step.
+const ROW_BANDS_KEPT: usize = 64;
+/// Each kept entry: the configuration (held, so its allocation is not used
+/// again for another while it is kept), the altitude's bits and the bands.
+type KeptBands = (
+    std::sync::Arc<crate::models::config::Configuration>,
+    u64,
+    Box<[Option<(f64, f64)>]>,
+);
+thread_local! {
+    static ROW_BANDS: std::cell::RefCell<(Vec<KeptBands>, usize)> =
+        const { std::cell::RefCell::new((Vec::new(), 0)) };
+}
 impl<'a> RowSpeeds<'a> {
+    /// The bands of `flight`'s envelope rows at its altitude, as
+    /// [`Self::new`] works them out, kept per thread for the next ask with
+    /// the same configuration at the same altitude, bit for bit (the AI
+    /// reads them several times in an aircraft's step).
+    pub fn of(flight: &'a State) -> Self {
+        let configuration = flight.model().configuration_arc();
+        let envelopes = &configuration.aerodynamics.envelopes;
+        let altitude = flight.position[1];
+        let bits = altitude.to_bits();
+        ROW_BANDS.with(|kept| {
+            let mut kept = kept.borrow_mut();
+            let (entries, next) = &mut *kept;
+            // The newest first: the last aircraft to ask asks again.
+            let newest = next
+                .checked_sub(1)
+                .unwrap_or(entries.len().saturating_sub(1));
+            let found = (0..entries.len())
+                .map(|back| (newest + entries.len() - back) % entries.len())
+                .find(|&at| {
+                    entries[at].1 == bits && std::sync::Arc::ptr_eq(&entries[at].0, configuration)
+                });
+            if let Some(at) = found {
+                return Self::from_bands(envelopes, &entries[at].2);
+            }
+            let rows = Self::new(envelopes, altitude);
+            let bands: Box<[Option<(f64, f64)>]> = rows.bands().map(|(_, band)| band).collect();
+            let entry = (configuration.clone(), bits, bands);
+            if entries.len() < ROW_BANDS_KEPT {
+                entries.push(entry);
+                *next = entries.len() % ROW_BANDS_KEPT;
+            } else {
+                entries[*next] = entry;
+                *next = (*next + 1) % ROW_BANDS_KEPT;
+            }
+            rows
+        })
+    }
+    fn from_bands(
+        envelopes: &'a [tore_formats::aircraft::Envelope],
+        bands: &[Option<(f64, f64)>],
+    ) -> Self {
+        let mut kept = [None; ROW_SPEEDS_KEPT];
+        let split = bands.len().min(ROW_SPEEDS_KEPT);
+        kept[..split].copy_from_slice(&bands[..split]);
+        Self {
+            envelopes,
+            kept,
+            more: bands[split..].to_vec(),
+        }
+    }
     pub fn new(envelopes: &'a [tore_formats::aircraft::Envelope], altitude_ft: f64) -> Self {
         let mut kept = [None; ROW_SPEEDS_KEPT];
         let mut more = Vec::new();

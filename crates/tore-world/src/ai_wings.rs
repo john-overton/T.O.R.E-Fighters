@@ -67,7 +67,6 @@ use tore_sim::{
         live::{self, MAX_PROJECTILES},
         missiles::{self, Flight, LaunchMode, Motion, Rules, seeker},
     },
-    models::FlightModel,
     sensors::{self, Observable, Sensors},
 };
 
@@ -852,11 +851,10 @@ fn side_of(side: launch::Side) -> Side {
 /// `speed_limits` read, and falls back to the AI module's documented fixture
 /// value when no envelope covers the altitude.
 fn maximum_speed(state: &flight::State) -> ScalarSpeed {
-    let envelopes = &state.model().configuration().aerodynamics.envelopes;
-    let altitude = state.position[1];
-    let best = envelopes
-        .iter()
-        .filter_map(|e| e.speeds(altitude))
+    // The rows' bands the AI's own speed limits read at this altitude.
+    let best = flight::RowSpeeds::of(state)
+        .bands()
+        .filter_map(|(_, speeds)| speeds)
         .map(|(_, maximum)| maximum)
         .fold(f64::NEG_INFINITY, f64::max);
     if best.is_finite() {

@@ -5057,11 +5057,9 @@ impl AiActor {
     /// The loaded G limits, already carrying the AI-only experience
     /// adjustment. A human-flown aircraft is exempt and never reaches here.
     fn g_limits(&self) -> (f64, f64) {
-        let envelopes = &self.flight.model().configuration().aerodynamics.envelopes;
-        let altitude = self.flight.position[1];
         let speed = self.flight.speed;
         // Every row's band once: the passes below all read them.
-        let rows = crate::flight::RowSpeeds::new(envelopes, altitude);
+        let rows = crate::flight::RowSpeeds::of(&self.flight);
         let mut available = 1;
         for (envelope, speeds) in rows.rows() {
             if let Some((low, high)) = speeds
@@ -8170,10 +8168,8 @@ mod checkpoint;
 /// altitude. The AC-130's orbit hold plans with the same numbers as the AI
 /// gunship (docs/spec/ac130-linked-guns.md, "The orbit").
 pub fn speed_limits_of(flight: &crate::flight::State) -> SpeedLimits {
-    let envelopes = &flight.model().configuration().aerodynamics.envelopes;
-    let altitude = flight.position[1];
     // Every row's band once: the passes below all read them.
-    let rows = crate::flight::RowSpeeds::new(envelopes, altitude);
+    let rows = crate::flight::RowSpeeds::of(flight);
     let mut minimum = f64::INFINITY;
     let mut maximum = f64::NEG_INFINITY;
     let mut corner = f64::NAN;

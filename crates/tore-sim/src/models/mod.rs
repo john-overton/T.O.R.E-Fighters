@@ -200,6 +200,26 @@ impl AircraftModel {
         c.tuning = tuning;
         self.set_configuration(c)
     }
+    /// The configuration's shared allocation. A configuration is never
+    /// changed in place ([`Self::set_configuration`] installs a new one), so
+    /// while one is held its allocation is that configuration.
+    pub fn configuration_arc(&self) -> &std::sync::Arc<config::Configuration> {
+        match self {
+            Self::F18(m) => &m.configuration,
+            Self::RafaleC(m) => &m.configuration,
+            Self::F14D(m) => &m.configuration,
+            Self::A4E(m) => &m.configuration,
+            Self::X31(m) => &m.configuration,
+            Self::Mig29(m) => &m.configuration,
+            Self::Su27(m) => &m.configuration,
+            Self::Mig21(m) => &m.configuration,
+            Self::Su25(m) => &m.configuration,
+            Self::Mig23(m) => &m.configuration,
+            Self::Su35(m) => &m.configuration,
+            Self::F22(m) => &m.configuration,
+            Self::Variety(m) => &m.configuration,
+        }
+    }
     /// Validate before replacing; clones and other aircraft retain their configuration.
     pub fn set_configuration(
         &mut self,
