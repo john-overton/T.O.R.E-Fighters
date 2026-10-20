@@ -16,7 +16,8 @@
 //!
 //! Every shot's camera is written to `cameras.txt`; `TORE_VEG_PREVIEW_CAMERAS`
 //! renders such a file's cameras instead, so another build can take the
-//! same pictures.
+//! same pictures; with `TORE_VEG_PREVIEW_STATIC=1` those pictures include
+//! the theater's static ground objects, and `=list` prints each one's box.
 
 use crate::{AppResult, camera::Camera, scenery::Scenery, terrain::Terrain};
 use std::{io::Write, path::Path, time::Instant};
