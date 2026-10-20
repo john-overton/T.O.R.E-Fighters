@@ -437,6 +437,29 @@ pub struct AiActor {
     last_visual: Vec<awareness::VisualTrace>,
 }
 
+/// Places by id, sorted: of a repeated id the first place answers, as a
+/// walk from the front finds it.
+#[derive(Clone, Debug, Default)]
+pub struct Places(Vec<(u32, usize)>);
+impl Places {
+    /// The places of `ids`, in order.
+    pub fn of(ids: impl Iterator<Item = u32>) -> Self {
+        let mut places: Vec<(u32, usize)> = ids.enumerate().map(|(at, id)| (id, at)).collect();
+        // Sorted by id and then place, so the first of each id is its first
+        // place.
+        places.sort_unstable();
+        places.dedup_by_key(|(id, _)| *id);
+        Self(places)
+    }
+    /// The first place of `id`.
+    pub fn get(&self, id: u32) -> Option<usize> {
+        self.0
+            .binary_search_by_key(&id, |(id, _)| *id)
+            .ok()
+            .map(|at| self.0[at].1)
+    }
+}
+
 /// What the journal already said about one actor, so a state that holds for
 /// many ticks is journaled once. Never read by a decision.
 #[derive(Clone, Copy, Debug, Default)]
@@ -2384,6 +2407,12 @@ impl AiMission {
 
     pub fn actor_mut(&mut self, id: u32) -> Option<&mut AiActor> {
         self.actors.iter_mut().find(|a| a.id() == id)
+    }
+
+    /// Each actor's place in [`Self::actors`] by id, for many lookups in a
+    /// row while no actor joins or leaves: the place [`Self::actor`] finds.
+    pub fn actor_places(&self) -> Places {
+        Places::of(self.actors.iter().map(AiActor::id))
     }
 
     pub fn tick(&self) -> u64 {

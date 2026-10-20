@@ -2163,11 +2163,8 @@ pub(crate) fn low_speed_ceiling_on(
 /// altitude. Each band is exactly `Envelope::speeds` at that altitude.
 pub struct RowSpeeds<'a> {
     envelopes: &'a [tore_formats::aircraft::Envelope],
-    kept: [Option<(f64, f64)>; ROW_SPEEDS_KEPT],
-    more: Vec<Option<(f64, f64)>>,
+    bands: std::rc::Rc<[Option<(f64, f64)>]>,
 }
-/// Rows kept without an allocation; the importer allows 51 (-20 G to 30 G).
-const ROW_SPEEDS_KEPT: usize = 51;
 /// Bands kept per thread by [`RowSpeeds::of`]: enough for every aircraft
 /// of a large fight to ask several times in its step.
 const ROW_BANDS_KEPT: usize = 64;
@@ -2176,13 +2173,22 @@ const ROW_BANDS_KEPT: usize = 64;
 type KeptBands = (
     std::sync::Arc<crate::models::config::Configuration>,
     u64,
-    Box<[Option<(f64, f64)>]>,
+    std::rc::Rc<[Option<(f64, f64)>]>,
 );
 thread_local! {
     static ROW_BANDS: std::cell::RefCell<(Vec<KeptBands>, usize)> =
         const { std::cell::RefCell::new((Vec::new(), 0)) };
 }
 impl<'a> RowSpeeds<'a> {
+    pub fn new(envelopes: &'a [tore_formats::aircraft::Envelope], altitude_ft: f64) -> Self {
+        Self {
+            envelopes,
+            bands: envelopes
+                .iter()
+                .map(|envelope| envelope.speeds(altitude_ft))
+                .collect(),
+        }
+    }
     /// The bands of `flight`'s envelope rows at its altitude, as
     /// [`Self::new`] works them out, kept per thread for the next ask with
     /// the same configuration at the same altitude, bit for bit (the AI
@@ -2205,11 +2211,13 @@ impl<'a> RowSpeeds<'a> {
                     entries[at].1 == bits && std::sync::Arc::ptr_eq(&entries[at].0, configuration)
                 });
             if let Some(at) = found {
-                return Self::from_bands(envelopes, &entries[at].2);
+                return Self {
+                    envelopes,
+                    bands: entries[at].2.clone(),
+                };
             }
             let rows = Self::new(envelopes, altitude);
-            let bands: Box<[Option<(f64, f64)>]> = rows.bands().map(|(_, band)| band).collect();
-            let entry = (configuration.clone(), bits, bands);
+            let entry = (configuration.clone(), bits, rows.bands.clone());
             if entries.len() < ROW_BANDS_KEPT {
                 entries.push(entry);
                 *next = entries.len() % ROW_BANDS_KEPT;
@@ -2220,48 +2228,12 @@ impl<'a> RowSpeeds<'a> {
             rows
         })
     }
-    fn from_bands(
-        envelopes: &'a [tore_formats::aircraft::Envelope],
-        bands: &[Option<(f64, f64)>],
-    ) -> Self {
-        let mut kept = [None; ROW_SPEEDS_KEPT];
-        let split = bands.len().min(ROW_SPEEDS_KEPT);
-        kept[..split].copy_from_slice(&bands[..split]);
-        Self {
-            envelopes,
-            kept,
-            more: bands[split..].to_vec(),
-        }
-    }
-    pub fn new(envelopes: &'a [tore_formats::aircraft::Envelope], altitude_ft: f64) -> Self {
-        let mut kept = [None; ROW_SPEEDS_KEPT];
-        let mut more = Vec::new();
-        for (index, envelope) in envelopes.iter().enumerate() {
-            let speeds = envelope.speeds(altitude_ft);
-            match kept.get_mut(index) {
-                Some(slot) => *slot = speeds,
-                None => more.push(speeds),
-            }
-        }
-        Self {
-            envelopes,
-            kept,
-            more,
-        }
-    }
     /// Each row with its band, in row order.
     pub fn rows(
         &self,
     ) -> impl Iterator<Item = (&'a tore_formats::aircraft::Envelope, Option<(f64, f64)>)> + Clone + '_
     {
-        let envelopes = self.envelopes;
-        envelopes.iter().enumerate().map(move |(index, envelope)| {
-            let speeds = match self.kept.get(index) {
-                Some(speeds) => *speeds,
-                None => self.more[index - ROW_SPEEDS_KEPT],
-            };
-            (envelope, speeds)
-        })
+        self.envelopes.iter().zip(self.bands.iter().copied())
     }
     /// Each row's G with its band, in row order.
     pub fn bands(&self) -> impl Iterator<Item = (i32, Option<(f64, f64)>)> + Clone + '_ {

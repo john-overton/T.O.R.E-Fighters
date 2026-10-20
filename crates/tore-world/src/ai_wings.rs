@@ -52,8 +52,8 @@ use tore_sim::{
         },
         launch::{self, WingLaunch},
         mission::{
-            ActorSetup, AiActor, AiMission, EquipmentFaults, HumanMember, LaunchEvent, WorldObject,
-            simple_dispensers, simple_stations,
+            ActorSetup, AiActor, AiMission, EquipmentFaults, HumanMember, LaunchEvent, Places,
+            WorldObject, simple_dispensers, simple_stations,
         },
         route,
         targeting::Side,
@@ -842,6 +842,29 @@ fn side_of(side: launch::Side) -> Side {
         ENEMY_SIDE
     } else {
         FRIENDLY_SIDE
+    }
+}
+
+/// Where each target row is by id, for a walk of the AI slots: sorted when
+/// there are enough slots to repay the sort, otherwise found by a walk of the
+/// rows. Either way the first row of an id answers.
+enum Rows {
+    Sorted(Places),
+    Walk,
+}
+impl Rows {
+    fn of(targets: &[live::Target], lookups: usize) -> Self {
+        if lookups > 4 {
+            Self::Sorted(Places::of(targets.iter().map(|t| t.id)))
+        } else {
+            Self::Walk
+        }
+    }
+    fn get(&self, targets: &[live::Target], id: u32) -> Option<usize> {
+        match self {
+            Self::Sorted(places) => places.get(id),
+            Self::Walk => targets.iter().position(|t| t.id == id),
+        }
     }
 }
 
@@ -2664,7 +2687,10 @@ impl AiWings {
         surface: &(dyn Fn(f64, f64) -> tore_sim::research::Surface + Sync),
         height: &(dyn Fn(f64, f64) -> f64 + Sync),
     ) -> WorldResult<tore_sim::ai::mission::MissionOutput> {
-        self.mirror_damage_in(targets);
+        // Each target row and AI actor by id, found once for the walks below
+        // (no row or actor joins or leaves until the mission step).
+        let rows = Rows::of(targets, self.slots.len());
+        self.mirror_damage_in_with(targets, &rows);
         let escaped: Vec<_> = self
             .mission
             .actors()
@@ -2673,7 +2699,7 @@ impl AiWings {
             .map(AiActor::id)
             .collect();
 
-        let objects = self.snapshot(humans, targets);
+        let objects = self.snapshot_with(humans, targets, &rows);
         // `fitted`: `TimeOfDay` is an opaque host clock the AI only orders
         // against a mission hold time, so the mission tick is used directly. It
         // is monotonic and deterministic, which is all the ordering needs.
@@ -2683,8 +2709,9 @@ impl AiWings {
             .step_on_ground(&objects, terrain, surface, height, now)
             .map_err(|e| e.to_string())?;
 
+        let places = self.mission.actor_places();
         for slot in &self.slots {
-            let Some(actor) = self.mission.actor(slot.id) else {
+            let Some(actor) = places.get(slot.id).map(|at| &self.mission.actors()[at]) else {
                 continue;
             };
             if actor.flight().escape.is_some() && !escaped.contains(&slot.id) {
@@ -2693,7 +2720,7 @@ impl AiWings {
                     format!("{} pilot ejected", slot.label()),
                     slot.side == launch::Side::Friendly,
                 ));
-                if let Some(target) = targets.iter_mut().find(|t| t.id == slot.id) {
+                if let Some(target) = rows.get(targets, slot.id).map(|at| &mut targets[at]) {
                     target.hp = 0;
                     target.radar_emitting = false;
                     target.jammer_active = false;
@@ -2704,7 +2731,7 @@ impl AiWings {
             // lost; combat takes over its wreck and its last attacker gets
             // the kill.
             if actor.flight().crashed
-                && let Some(target) = targets.iter_mut().find(|t| t.id == slot.id)
+                && let Some(target) = rows.get(targets, slot.id).map(|at| &mut targets[at])
                 && target.hp > 0
             {
                 // Lost to the aircraft's own structure (overspeed, the map
@@ -2719,7 +2746,7 @@ impl AiWings {
         }
         self.record_formation_trace();
         self.formation_reports();
-        self.mirror_pose_out(targets);
+        self.mirror_pose_out_with(targets, &rows);
         self.announce(&output.activities);
         Ok(output)
     }
@@ -2875,13 +2902,16 @@ impl AiWings {
     /// Damage and death flow from the combat world into the actors: an actor
     /// whose target row lost hit points is told it was hit, and one whose row
     /// reached zero stops flying.
-    fn mirror_damage_in(&mut self, targets: &mut [live::Target]) {
+    /// `rows` holds each target row's place by id.
+    fn mirror_damage_in_with(&mut self, targets: &mut [live::Target], rows: &Rows) {
+        let places = self.mission.actor_places();
         for slot in &self.slots {
-            let Some(target) = targets.iter().find(|t| t.id == slot.id) else {
+            let Some(target) = rows.get(targets, slot.id).map(|at| &targets[at]) else {
                 continue;
             };
-            let was_alive = self.mission.actor(slot.id).is_some_and(AiActor::alive);
-            if let Some(actor) = self.mission.actor_mut(slot.id) {
+            let place = places.get(slot.id);
+            let was_alive = place.is_some_and(|at| self.mission.actors()[at].alive());
+            if let Some(actor) = place.map(|at| &mut self.mission.actors_mut()[at]) {
                 let flight = actor.flight_mut();
                 flight.damage_regions = target.localized_damage.fractions(target.initial_hp);
                 if target.hp <= 0 {
@@ -2907,13 +2937,13 @@ impl AiWings {
             }
             let previous = *self.last_hp.entry(slot.id).or_insert(target.hp);
             if target.hp < previous
-                && let Some(actor) = self.mission.actor_mut(slot.id)
+                && let Some(actor) = place.map(|at| &mut self.mission.actors_mut()[at])
             {
                 actor.report_damage();
             }
             self.last_hp.insert(slot.id, target.hp);
             if target.hp <= 0 && was_alive {
-                if let Some(actor) = self.mission.actor_mut(slot.id) {
+                if let Some(actor) = place.map(|at| &mut self.mission.actors_mut()[at]) {
                     actor.set_alive(false);
                 }
                 for other in self.mission.actors_mut() {
@@ -2922,7 +2952,7 @@ impl AiWings {
             }
         }
         for target in targets.iter_mut().filter(|t| t.hp > 0) {
-            self.deliver_faults(target);
+            self.deliver_faults(target, places.get(target.id));
         }
     }
 
@@ -2930,9 +2960,10 @@ impl AiWings {
     /// Realistic damage whatever the player's Damage cheat says. Its flight
     /// systems take each fault, and a hardpoint fault takes out what that
     /// hardpoint carries, as on the player's aircraft.
-    fn deliver_faults(&mut self, target: &mut live::Target) {
+    /// `place` is the target's actor's place in the mission, if it has one.
+    fn deliver_faults(&mut self, target: &mut live::Target, place: Option<usize>) {
         use tore_sim::combat::systems::EcmLoss;
-        let Some(actor) = self.mission.actor_mut(target.id) else {
+        let Some(actor) = place.map(|at| &mut self.mission.actors_mut()[at]) else {
             return;
         };
         let mut hardpoints = Vec::new();
@@ -3004,15 +3035,27 @@ impl AiWings {
 
     /// One world snapshot: the human-flown aircraft first, in id order, then
     /// every AI aircraft.
+    #[cfg(test)]
     fn snapshot(&self, humans: Vec<WorldObject>, targets: &[live::Target]) -> Vec<WorldObject> {
+        self.snapshot_with(humans, targets, &Rows::of(targets, self.slots.len()))
+    }
+
+    /// [`Self::snapshot`] with each target row's place by id.
+    fn snapshot_with(
+        &self,
+        humans: Vec<WorldObject>,
+        targets: &[live::Target],
+        rows: &Rows,
+    ) -> Vec<WorldObject> {
         let mut objects = Vec::with_capacity(self.slots.len() + humans.len());
         objects.extend(humans);
+        let places = self.mission.actor_places();
         for slot in &self.slots {
-            let Some(actor) = self.mission.actor(slot.id) else {
+            let Some(actor) = places.get(slot.id).map(|at| &self.mission.actors()[at]) else {
                 continue;
             };
             let f = actor.flight();
-            let target = targets.iter().find(|t| t.id == slot.id);
+            let target = rows.get(targets, slot.id).map(|at| &targets[at]);
             let on_ground = f.research.as_ref().is_some_and(|r| r.on_ground);
             objects.push(WorldObject {
                 id: slot.id,
@@ -3069,11 +3112,18 @@ impl AiWings {
     /// sensors, the missile collision sweep and the damage model all see one
     /// world with one authority per aircraft.
     pub fn mirror_pose_out(&self, targets: &mut [live::Target]) {
+        let rows = Rows::of(targets, self.slots.len());
+        self.mirror_pose_out_with(targets, &rows);
+    }
+
+    /// [`Self::mirror_pose_out`] with each target row's place by id.
+    fn mirror_pose_out_with(&self, targets: &mut [live::Target], rows: &Rows) {
+        let places = self.mission.actor_places();
         for slot in &self.slots {
-            let Some(actor) = self.mission.actor(slot.id) else {
+            let Some(actor) = places.get(slot.id).map(|at| &self.mission.actors()[at]) else {
                 continue;
             };
-            let Some(target) = targets.iter_mut().find(|t| t.id == slot.id) else {
+            let Some(target) = rows.get(targets, slot.id).map(|at| &mut targets[at]) else {
                 continue;
             };
             // Combat owns falling wrecks after destruction.
