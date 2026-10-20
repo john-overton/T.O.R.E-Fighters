@@ -16,6 +16,8 @@ pub(crate) mod popin;
 
 const INST_STRIDE: u64 = 64;
 const DRAWN_STRIDE: u64 = 96;
+/// A tree's shadow caster is its first card: one quad.
+const SHADOW_CARD_VERTICES: u32 = 6;
 const PATCH_STRIDE: u64 = 64;
 /// Grass distance rings: outer edge as a share of the grass radius, and
 /// the share of a patch's full tufts drawn in it.
@@ -114,6 +116,12 @@ pub struct Renderer {
     /// with its object count, page count and reach.
     view: (Option<u8>, u32, u32, f32),
     depth_pipeline: wgpu::RenderPipeline,
+    /// The tree shadow casters, one pipeline per cascade (the cascade is
+    /// the vertex entry, since the instance index is the tree).
+    shadow: [wgpu::RenderPipeline; 3],
+    /// Trees nearer than this cast shadows, feet (0 none), from the shadow
+    /// quality.
+    trees_ft: f32,
     library: Arc<Library>,
     vertices: wgpu::Buffer,
     drawn: wgpu::Buffer,
@@ -316,6 +324,7 @@ impl Renderer {
             &lighting.layout,
             grass_map,
         );
+        let shadow = shadow_pipelines(device, shader, lighting);
         Self {
             atlas,
             epoch: 0,
@@ -323,6 +332,8 @@ impl Renderer {
             panels: Vec::new(),
             view: (None, 0, 0, 0.),
             depth_pipeline,
+            shadow,
+            trees_ft: 0.,
             library,
             vertices,
             drawn,
@@ -395,6 +406,17 @@ impl Renderer {
         } else {
             0.
         };
+    }
+
+    /// Takes the shadow quality's tree shadow distance
+    /// (`TORE_TREE_SHADOW_FT` overrides it while shadows are on, a measuring
+    /// aid).
+    pub fn set_shadows(&mut self, shadows: &crate::surface_lighting::Settings) {
+        let feet = std::env::var("TORE_TREE_SHADOW_FT")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(shadows.trees_ft);
+        self.trees_ft = if shadows.enabled { feet.max(0.) } else { 0. };
     }
 
     /// The before picture: objects and grass are not drawn. Ground detail
@@ -640,6 +662,9 @@ impl Renderer {
         if self.mesh_dirty {
             self.upload_meshes(queue);
             queue.write_buffer(&self.args, 0, &self.cards.vertices().to_le_bytes());
+            // The casters draw one card each.
+            let casters = self.library.meshes.len() as u64 * 16;
+            queue.write_buffer(&self.args, casters, &SHADOW_CARD_VERTICES.to_le_bytes());
             self.mesh_dirty = false;
         }
         let (fx, rx, ux) = basis(camera);
@@ -714,7 +739,7 @@ impl Renderer {
             height * f * 0.5,
             camera.position[1] as f32,
         ]);
-        params.extend([full_drawn, draw, 0., 1.5]);
+        params.extend([full_drawn, draw, self.trees_ft, 1.5]);
         params.extend(u32s(&[self.view.1, mesh_count as u32, self.view.2, 0]));
         queue.write_buffer(&self.params, 0, &bytes_of_f32(&params));
         self.encode_cull(encoder);
@@ -922,6 +947,27 @@ impl Renderer {
         }
     }
 
+    /// Casts the prepared view's near trees into the shadow maps, when the
+    /// shadow quality has trees cast.
+    pub fn draw_shadows(
+        &self,
+        lighting: &crate::surface_lighting::SurfaceLighting,
+        encoder: &mut wgpu::CommandEncoder,
+        bind: &wgpu::BindGroup,
+    ) {
+        if !self.prepared || self.suppressed || self.trees_ft <= 0. || self.view.1 == 0 {
+            return;
+        }
+        let offset = self.library.meshes.len() as u64 * 16;
+        lighting.draw_more(encoder, |pass, cascade| {
+            pass.set_pipeline(&self.shadow[cascade]);
+            pass.set_bind_group(0, bind, &[]);
+            pass.set_vertex_buffer(0, self.vertices.slice(..));
+            pass.set_vertex_buffer(1, self.shadow_drawn.slice(..));
+            pass.draw_indirect(&self.args, offset);
+        });
+    }
+
     pub fn draw<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>, bind: &'a wgpu::BindGroup) {
         if !self.prepared {
             return;
@@ -1004,8 +1050,8 @@ fn drawn_buffers(device: &wgpu::Device, capacity: usize) -> (wgpu::Buffer, wgpu:
             mapped_at_creation: false,
         }),
         device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Unused vegetation caster binding"),
-            size: DRAWN_STRIDE,
+            label: Some("Vegetation shadow casters"),
+            size: capacity as u64 * DRAWN_STRIDE,
             usage: listed,
             mapped_at_creation: false,
         }),
@@ -1244,8 +1290,71 @@ fn render_pipelines(
     )
 }
 
-/// The object shadow casters, one pipeline per cascade (the cascade is the
-/// vertex entry, since the instance index is the object).
+/// The tree shadow casters: a sun-facing card per tree, cut out by its
+/// sprite (`veg_shadow_vertex0` to `2` in terrain.wgsl), with the object
+/// casters' bias (surface_lighting.rs).
+fn shadow_pipelines(
+    device: &wgpu::Device,
+    shader: &wgpu::ShaderModule,
+    lighting: &crate::surface_lighting::SurfaceLighting,
+) -> [wgpu::RenderPipeline; 3] {
+    let buffers = [
+        wgpu::VertexBufferLayout {
+            array_stride: (FLOATS * 4) as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2],
+        },
+        wgpu::VertexBufferLayout {
+            array_stride: DRAWN_STRIDE,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &wgpu::vertex_attr_array![
+                5 => Float32x4,
+                6 => Float32x4,
+                7 => Float32x4,
+                8 => Float32x4,
+                9 => Float32x4
+            ],
+        },
+    ];
+    std::array::from_fn(|cascade| {
+        let entry = format!("veg_shadow_vertex{cascade}");
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Vegetation shadow casters"),
+            layout: Some(&lighting.caster_layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: Some(&entry),
+                compilation_options: Default::default(),
+                buffers: &buffers,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: Some("terrain_shadow_fragment"),
+                compilation_options: Default::default(),
+                targets: &[],
+            }),
+            primitive: wgpu::PrimitiveState {
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: Default::default(),
+                bias: wgpu::DepthBiasState {
+                    constant: 1,
+                    slope_scale: 1.,
+                    clamp: 0.,
+                },
+            }),
+            multisample: Default::default(),
+            multiview: None,
+            cache: None,
+        })
+    })
+}
+
 fn storage_entry(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,

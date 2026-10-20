@@ -225,6 +225,10 @@ pub struct SimRenderer {
     /// The immutable batch currently in both static buffers. Fresh renderers
     /// have no batch, even if their scenery already has cached geometry.
     airport_geometry: Option<Arc<StaticGeometry>>,
+    /// The static ground objects' shadow casters, in chunks
+    /// ([`crate::terrain_chunks::placements`]): a copy of the static batch
+    /// without the triangles that cannot cast.
+    static_casters: Option<(wgpu::Buffer, crate::terrain_chunks::Chunks)>,
     /// The surface units drawn every frame, relative to the render origin.
     surface_units: Option<(wgpu::Buffer, u32)>,
     /// Per-model formation batches, with each aircraft's vertex range.
@@ -296,7 +300,6 @@ pub struct SimRenderer {
 struct CasterBounds {
     aircraft: CasterShape,
     battle: CasterShape,
-    airports: CasterShape,
     surface_units: CasterShape,
 }
 /// Whether a terrain triangle on texture `layer` always casts its whole
@@ -866,8 +869,12 @@ impl SimRenderer {
                 },
             ],
         });
-        let lighting =
-            crate::surface_lighting::SurfaceLighting::new(device, &material_layout, &shader);
+        let lighting = crate::surface_lighting::SurfaceLighting::new(
+            device,
+            &material_layout,
+            &shader,
+            crate::surface_lighting::Settings::of(options.shadow_quality.effective()),
+        );
         let pipelines = Pipelines::new(
             device,
             &shader,
@@ -890,6 +897,7 @@ impl SimRenderer {
         let mut fill = fill;
         if let Some(fill) = &mut fill {
             fill.set_options(&options);
+            fill.set_shadows(&lighting.settings());
         }
         let vegetation = scenery
             .vegetation
@@ -909,6 +917,7 @@ impl SimRenderer {
                     &scenery.grass,
                 );
                 vegetation.set_options(device, &options);
+                vegetation.set_shadows(&lighting.settings());
                 vegetation
             });
         let celestial_vertices = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1164,6 +1173,7 @@ impl SimRenderer {
             airports: None,
             airport_lines: None,
             airport_geometry: None,
+            static_casters: None,
             surface_units: None,
             vapor: None,
             p: pipelines,
@@ -1320,6 +1330,18 @@ impl SimRenderer {
         }
         self.airport_vertices(device, queue, &geometry.vertices);
         self.airport_lines(device, queue, &geometry.lines);
+        let (casters, chunks) =
+            crate::terrain_chunks::placements(&geometry.vertices, &geometry.placements);
+        self.static_casters = (!casters.is_empty()).then(|| {
+            (
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Static ground object shadow casters"),
+                    contents: &crate::vegetation_renderer::bytes_of_f32(&casters),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }),
+                chunks,
+            )
+        });
         self.airport_geometry = Some(Arc::clone(geometry));
     }
     /// This frame's moving surface geometry
@@ -1371,7 +1393,6 @@ impl SimRenderer {
                 write_floats(queue, buffer, 0, &vertices[..length]);
             }
             *count = (length / 10) as u32;
-            self.bounds.airports = CasterShape::of(vertices);
         }
     }
     fn airport_lines(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
@@ -1654,11 +1675,15 @@ impl SimRenderer {
         samples: u32,
     ) {
         self.options = options;
+        let shadows = crate::surface_lighting::Settings::of(options.shadow_quality.effective());
+        self.lighting.set_settings(device, shadows);
         if let Some(fill) = &mut self.fill {
             fill.set_options(&options);
+            fill.set_shadows(&shadows);
         }
         if let Some(vegetation) = &mut self.vegetation {
             vegetation.set_options(device, &options);
+            vegetation.set_shadows(&shadows);
         }
         if samples == self.samples {
             return;
@@ -2282,9 +2307,6 @@ impl SimRenderer {
             }
             let caster = |bind, buffer, count, shape| caster(bind, buffer, count, shape, local_eye);
             let mut objects = Vec::new();
-            if let Some((buffer, count)) = &self.airports {
-                objects.push(caster(&self.bind, buffer, *count, &self.bounds.airports));
-            }
             if let Some((buffer, count)) = &self.surface_units
                 && *count > 0
             {
@@ -2312,10 +2334,21 @@ impl SimRenderer {
                     chunks: &self.chunks,
                     eye: camera.position,
                 },
+                self.static_casters.as_ref().map(|(buffer, chunks)| {
+                    crate::surface_lighting::TerrainCasters {
+                        bind: &self.bind,
+                        buffer,
+                        chunks,
+                        eye: camera.position,
+                    }
+                }),
                 &objects,
             );
             if let Some(fill) = &self.fill {
                 fill.draw_shadows(&self.lighting, encoder, &self.bind);
+            }
+            if let Some(vegetation) = &self.vegetation {
+                vegetation.draw_shadows(&self.lighting, encoder, &self.bind);
             }
         }
         // The spotting aid covers other aircraft in the main view and the

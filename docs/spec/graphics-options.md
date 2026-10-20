@@ -37,7 +37,8 @@ applied and saved when the screen closes or the game quits.
 
 The rows sit under four headings in a list that scrolls: **Display**
 (anti-aliasing, render scale, spotting aid, frame rate), **Terrain and scenery** (terrain
-filtering, ground detail and its distance, building distance and detail),
+filtering, ground detail and its distance, building distance and detail,
+shadows),
 **Vegetation and grass** (vegetation distance, detail, density and cards,
 grass, grass density and distance) and **Performance** (the frame-rate
 counter). The scroll bar is the map's arrow bar, the one the multiplayer
@@ -61,6 +62,7 @@ resolutions); the group names and wording are agent decisions.
 | Terrain filtering | Off, On | On |
 | Building distance (city fill) | 10 nm, 20 nm, 30 nm | 30 nm |
 | Building detail (city fill) | 1 nm, 2 nm, 5 nm, 10 nm, 20 nm | 5 nm |
+| Shadows | Off, Low, Med, High, Ultra | Med |
 | Ground detail | Off, On, Fine | On |
 | Ground detail distance | 1 nm, 2 nm, 4 nm | 2 nm |
 | Vegetation distance | 2 nm, 4 nm, 6 nm, 8 nm | 4 nm |
@@ -75,7 +77,9 @@ Smoke tests and captures ignore the saved file, like the other display
 preferences. The frame-rate line is written only when the counter is on
 (`frame-rate true`), so a default file is unchanged. The frame rate is
 written only when it is not V-sync (`frame-limit 60`, `100` or `200`); a file
-from before the choice existed reads as V-sync.
+from before the choice existed reads as V-sync. The shadow quality is written
+only when it is not Med (`shadows off`, `low`, `high` or `ultra`); a file
+from before the choice existed reads as Med.
 
 ## Frame rate
 
@@ -246,6 +250,50 @@ only when they differ from the defaults. Measured costs are in the city
 fill notes; at 4K the 5 nm default adds about 2 to 5 ms over Kiev, 1 nm
 about 1 ms. The fades cost about 0.1 to 0.4 ms more at 4K (2026-10-12).
 
+## Shadows
+
+Requested by John on 2026-10-20 ("maybe we add a shadow quality setting to
+the graphics menu", with every ground object casting); the levels, what each
+draws and the Med default are agent decisions. The row sets how detailed the
+sun's [geometric shadows](surface-lighting.md#geometry-shadows) are and what
+casts them. Every level but Off has the terrain, the aircraft and every
+ground object cast: airports, buildings, bridges, SAM and AAA sites, parked
+aircraft, vehicles, ships and men.
+
+| Level | Shadow maps | Reach | Soft edge samples | City buildings cast | Trees cast |
+| --- | --- | --- | --- | --- | --- |
+| Off | none | | | | |
+| Low | 1,024 texels | two maps, to 8,192 ft from the eye | 16 | no | no |
+| Med | 2,048 texels | three maps, to 131,072 ft | 32 | within 0.5 nm | no |
+| High | 2,048 texels | three maps, to 131,072 ft | 32 | within 0.5 nm | within about 3,000 ft |
+| Ultra | 4,096 texels | three maps, to 131,072 ft | 32 | within 1 nm | within about 6,000 ft |
+
+Med, the default, is the shadow look from before the setting existed, with
+the static ground objects added. Tree shadows are left to High and Ultra
+because they cost the most: the ground under woods then runs the full soft
+shadow filter. A change applies at once. `--shadows
+off|low|medium|high|ultra` sets it for one run from the command line and
+`TORE_SHADOWS` does the same for one run of any tool, offscreen captures
+included, without saving.
+
+GPU time of a still offscreen frame at 3840 by 2160 on an RTX 4070
+(2026-10-20, morning sun, `--vegetation-preview` cameras with the static
+ground objects loaded, best of two rounds of seven eight-frame means, in
+milliseconds; "before" is the build before this setting, where static ground
+objects did not cast):
+
+| Scene | Before | Off | Low | Med | High | Ultra |
+| --- | --- | --- | --- | --- | --- | --- |
+| Ukraine airfield | 11.3 | 7.0 | 10.8 | 11.4 | 12.0 | 13.2 |
+| Ukraine forest, 300 ft | 7.4 | 5.7 | 7.0 | 7.4 | 9.2 | 9.5 |
+| Ukraine open ground, 300 ft | 9.0 | 5.6 | 7.3 | 9.1 | 10.4 | 10.6 |
+| Hanoi, 300 ft | 12.2 | 3.3 | 8.2 | 12.4 | 12.4 | 12.5 |
+| Hanoi, 2,000 ft | 11.8 | 6.7 | 8.9 | 11.9 | 12.1 | 13.1 |
+
+The ground objects' shadows cost under 0.2 ms; tree shadows cost 0.3 ms over
+a city and up to 1.9 ms over woods, mostly the soft filter on the newly
+shaded ground. At 2560 by 1440 the same steps are about half as large.
+
 ## Vegetation texture and vegetation objects
 
 Shown when the exploratory vegetation is on, which it is on this branch
@@ -406,7 +454,7 @@ For one run, without saving: `--anti-aliasing off|2x|4x|8x`,
 `--building-detail 1|2|5|10|20`, `--vegetation-texture off|on|fine`,
 `--vegetation-texture-distance 1|2|4`, `--vegetation-distance 2|4|6|8`,
 `--vegetation-detail 1|2|3|4`, `--vegetation-density low|medium|high|ultra`,
-and `--original-graphics` for everything off
+`--shadows off|low|medium|high|ultra`, and `--original-graphics` for everything off
 at 100%. `TORE_SHOW_FPS=1` shows the frame-rate counter for that run without
 writing it into the file, and `TORE_FRAME_LIMIT=off|vsync|60|100|200` sets the
 [frame rate](#frame-rate) for that run. Flags apply in order, so `--original-graphics --spotting-aid strong`

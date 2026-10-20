@@ -18,8 +18,8 @@ use crate::controls_editor::{
 };
 use crate::graphics::{
     AntiAliasing, BUILDING_DETAILS, BUILDING_DISTANCES, FrameLimit, GRASS_DISTANCES,
-    GROUND_TEXTURE_DISTANCES, Grass, GroundTexture, Options, RENDER_SCALES, SpottingAid,
-    VEGETATION_DETAILS, VEGETATION_DISTANCES, VegCards, VegDensity, scaled_size,
+    GROUND_TEXTURE_DISTANCES, Grass, GroundTexture, Options, RENDER_SCALES, ShadowQuality,
+    SpottingAid, VEGETATION_DETAILS, VEGETATION_DISTANCES, VegCards, VegDensity, scaled_size,
 };
 use crate::menu::Canvas;
 use crate::widgets::{ArrowBar, ArrowRows, RowPress};
@@ -44,6 +44,7 @@ enum Row {
     FrameRate,
     BuildingDistance,
     BuildingDetail,
+    Shadows,
     GroundTexture,
     GroundTextureDistance,
     VegetationDistance,
@@ -56,7 +57,7 @@ enum Row {
 }
 
 /// Every row in display order, grouped.
-const ALL_ROWS: [Row; 17] = [
+const ALL_ROWS: [Row; 18] = [
     Row::AntiAliasing,
     Row::RenderScale,
     Row::SpottingAid,
@@ -66,6 +67,7 @@ const ALL_ROWS: [Row; 17] = [
     Row::GroundTextureDistance,
     Row::BuildingDistance,
     Row::BuildingDetail,
+    Row::Shadows,
     Row::VegetationDistance,
     Row::VegetationDetail,
     Row::VegetationDensity,
@@ -136,7 +138,8 @@ impl Row {
             | Row::GroundTexture
             | Row::GroundTextureDistance
             | Row::BuildingDistance
-            | Row::BuildingDetail => "TERRAIN AND SCENERY",
+            | Row::BuildingDetail
+            | Row::Shadows => "TERRAIN AND SCENERY",
             Row::VegetationDistance
             | Row::VegetationDetail
             | Row::VegetationDensity
@@ -157,6 +160,7 @@ impl Row {
             Row::FrameRate => "Frame rate counter",
             Row::BuildingDistance => "Building distance",
             Row::BuildingDetail => "Building detail",
+            Row::Shadows => "Shadows",
             Row::GroundTexture => "Ground detail",
             Row::GroundTextureDistance => "Ground detail distance",
             Row::VegetationDistance => "Vegetation distance",
@@ -189,6 +193,9 @@ impl Row {
             Row::BuildingDistance => "How far away city buildings are drawn.",
             Row::BuildingDetail => {
                 "City buildings inside this distance are drawn with full texture and detail, farther ones as plain blocks."
+            }
+            Row::Shadows => {
+                "Sun shadows. Low: terrain, aircraft and ground objects nearby. Med adds city buildings, High nearby trees, Ultra sharper and farther."
             }
             Row::GroundTexture => {
                 "Close-range field, grass, sand and rock detail on the ground. Fine is a tighter grain."
@@ -227,6 +234,7 @@ impl Row {
             Row::FrameRate => vec!["Off".into(), "On".into()],
             Row::BuildingDistance => BUILDING_DISTANCES.map(|n| format!("{n} nm")).to_vec(),
             Row::BuildingDetail => BUILDING_DETAILS.map(|n| format!("{n} nm")).to_vec(),
+            Row::Shadows => ShadowQuality::ALL.map(|q| q.label().to_owned()).to_vec(),
             Row::GroundTexture => GroundTexture::ALL.map(|a| a.label().to_owned()).to_vec(),
             Row::GroundTextureDistance => {
                 GROUND_TEXTURE_DISTANCES.map(|n| format!("{n} nm")).to_vec()
@@ -372,6 +380,10 @@ impl Editor {
                 .iter()
                 .position(|n| *n == d.building_distance_nm)
                 .unwrap_or(BUILDING_DISTANCES.len() - 1),
+            Row::Shadows => ShadowQuality::ALL
+                .iter()
+                .position(|q| *q == d.shadow_quality)
+                .unwrap_or(2),
             Row::BuildingDetail => BUILDING_DETAILS
                 .iter()
                 .position(|n| *n == d.building_detail_nm)
@@ -416,6 +428,7 @@ impl Editor {
             Row::FrameRate => d.show_frame_rate = i == 1,
             Row::BuildingDistance => d.building_distance_nm = BUILDING_DISTANCES[i],
             Row::BuildingDetail => d.building_detail_nm = BUILDING_DETAILS[i],
+            Row::Shadows => d.shadow_quality = ShadowQuality::ALL[i],
             Row::GroundTexture => d.ground_texture = GroundTexture::ALL[i],
             Row::GroundTextureDistance => {
                 d.ground_texture_distance_nm = GROUND_TEXTURE_DISTANCES[i]
@@ -1399,6 +1412,38 @@ mod tests {
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.contains("frame-rate"));
         assert!(!Options::load(&path).show_frame_rate);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+    #[test]
+    fn the_shadow_row_sits_in_terrain_and_saves() {
+        let row = row_of(Row::Shadows);
+        assert_eq!(Row::Shadows.group(), "TERRAIN AND SCENERY");
+        assert_eq!(Row::Shadows.label(), "Shadows");
+        assert_eq!(
+            Row::Shadows.choices(),
+            ["Off", "Low", "Med", "High", "Ultra"]
+        );
+        let mut e = editor();
+        // Med is the default.
+        assert_eq!(e.choice(row), 2);
+        let dir = temp("shadows");
+        let path = dir.join("graphics-v1.conf");
+        for (i, quality) in ShadowQuality::ALL.into_iter().enumerate() {
+            let r = choice(&e, row, i);
+            assert_eq!(click(&mut e, r), ResultAction::Changed);
+            assert_eq!(e.draft.shadow_quality, quality);
+            let applied = e.apply(Some(&path));
+            assert_eq!(applied.shadow_quality, quality);
+            assert_eq!(Options::load(&path).shadow_quality, quality);
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("shadows ultra"));
+        e.set_focus(Focus::Row(row));
+        press(&mut e, "ArrowLeft");
+        press(&mut e, "ArrowLeft");
+        e.apply(Some(&path));
+        // Back at Med the file leaves the line out.
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("shadows"));
         std::fs::remove_dir_all(&dir).unwrap();
     }
     #[test]
