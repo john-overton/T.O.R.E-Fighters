@@ -2647,13 +2647,29 @@ impl App {
     fn pace(&mut self, want: frame_pacing::Want) -> Option<Instant> {
         let renderer = self.renderer.as_ref()?;
         let limit = renderer.frame_limit();
-        let want = if renderer.counter_shown() && want != frame_pacing::Want::Nothing {
-            frame_pacing::Want::Live
-        } else {
-            want
-        };
+        let want = frame_pacing::counted(want, renderer.counter_shown());
         let window = self.pace_window();
         self.pacer.next(limit, want, window, Instant::now())
+    }
+    /// Whether the frame-rate counter is shown, which keeps every screen
+    /// drawing at the frame rate setting so it measures real frames.
+    fn counter_shown(&self) -> bool {
+        self.renderer.as_ref().is_some_and(|r| r.counter_shown())
+    }
+    /// Whether a redraw request arriving now waits for the frame timer
+    /// (`frame_pacing::too_soon`): with the counter shown under a capped rate,
+    /// events add no frames beyond the timer's.
+    fn redraw_too_soon(&self) -> bool {
+        let Some(renderer) = &self.renderer else {
+            return false;
+        };
+        frame_pacing::too_soon(
+            renderer.frame_limit(),
+            renderer.counter_shown(),
+            self.pace_window().automated,
+            self.next_frame,
+            Instant::now(),
+        )
     }
     /// What a flight wants after its frame: the next frame, or, while a
     /// single-player flight is stopped and its picture has settled, nothing
@@ -3907,6 +3923,11 @@ impl ApplicationHandler for App {
             return;
         }
         self.note_menu_input(&event);
+        // With the frame-rate counter under a capped rate, the timer draws
+        // the frames: a request from an event waits for the next slot.
+        if matches!(event, WindowEvent::RedrawRequested) && self.redraw_too_soon() {
+            return;
+        }
         if matches!(event, WindowEvent::RedrawRequested)
             && let Some(renderer) = &mut self.renderer
         {
@@ -3975,6 +3996,7 @@ impl ApplicationHandler for App {
                             self.error = Some(error);
                             event_loop.exit();
                         }
+                        self.loading_next_frame();
                     }
                     _ => {}
                 }
@@ -4084,7 +4106,9 @@ impl ApplicationHandler for App {
                         self.error = Some(error);
                         event_loop.exit();
                     }
-                    // The next frame is asked for by about_to_wait, at 20 Hz.
+                    // The next frame is asked for by about_to_wait, at 20 Hz,
+                    // or at the frame rate while the counter is shown.
+                    self.loading_next_frame();
                 }
                 return;
             }
@@ -6733,8 +6757,10 @@ impl ApplicationHandler for App {
         }
         // A menu with a session or a network screen is drawn when the pump
         // brought news, after input, and on a slow heartbeat (net::pace).
+        // The frame-rate counter draws every screen continuously instead.
         let paced = self.menu_paced();
         if paced
+            && !self.counter_shown()
             && self
                 .menu_pace
                 .redraw_due(Instant::now(), self.net_preparing())

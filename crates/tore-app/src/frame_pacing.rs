@@ -24,6 +24,12 @@
 //!   the menu does not offer. Scripted runs, performance measurements,
 //!   captures and smoke tests draw uncapped unless the variable is set.
 //!
+//! - **The frame-rate counter** (Graphics > Display, or `TORE_SHOW_FPS=1`)
+//!   measures real frames, so while it is shown every screen draws
+//!   continuously at the chosen rate, menus, the lobby, loading screens and a
+//!   paused flight included (John, 2026-10-19). Hidden, the low-power pacing
+//!   below applies unchanged. See [`counted`] and [`too_soon`].
+//!
 //! Throttles that need no choice (agent rules from the 2026-10-19
 //! optimization plan): a stopped single-player flight with a still camera
 //! draws only when something happens (input, a menu animation, a notice
@@ -128,6 +134,31 @@ pub enum Want {
     /// A live view (flight, the viewer, a replay): as often as the frame rate
     /// allows.
     Live,
+}
+
+/// What a screen wants after its frame once the frame-rate counter is
+/// considered: with the counter shown every screen is a live view, drawn as
+/// often as the frame rate allows, so the counter measures real continuous
+/// frames; hidden, the screen's own want stands. A hidden window still draws
+/// nothing (see [`Pacer::next`]).
+pub fn counted(want: Want, counter: bool) -> Want {
+    if counter { Want::Live } else { want }
+}
+
+/// Whether a redraw request that arrives at `now` should wait for the timer
+/// (`next_frame`) instead of drawing at once. With the counter shown and a
+/// capped rate, an event (a moving mouse, a key) must not add frames to the
+/// ones the timer draws, or the counter would read above the cap. V-sync is
+/// paced by presentation and the uncapped limit has no cap to keep. Automated
+/// runs are never held.
+pub fn too_soon(
+    limit: Limit,
+    counter: bool,
+    automated: bool,
+    next_frame: Option<Instant>,
+    now: Instant,
+) -> bool {
+    counter && !automated && limit.period().is_some() && next_frame.is_some_and(|at| now < at)
 }
 
 /// The window's state for pacing.
@@ -497,6 +528,101 @@ mod tests {
         );
         assert_eq!(pacer.soonest(Limit::Off, away, event), Some(event));
         assert_eq!(pacer.soonest(Limit::VSync, hidden, event), None);
+    }
+
+    #[test]
+    fn the_counter_makes_every_screen_a_live_view_at_the_frame_rate() {
+        let now = Instant::now();
+        let wants = [
+            Want::Nothing,
+            Want::At(now + ms(900)),
+            Want::Menu,
+            Want::Live,
+        ];
+        for limit in [
+            Limit::VSync,
+            Limit::Rate(60),
+            Limit::Rate(100),
+            Limit::Rate(200),
+        ] {
+            // Shown: an idle menu (Nothing) and every other want draw again
+            // as often as the limit allows, evenly on the timer grid.
+            let mut pacer = Pacer::default();
+            let mut at = now;
+            for want in wants {
+                let first = pacer.next(limit, counted(want, true), FOCUSED, at);
+                assert!(first.is_some(), "{limit:?} {want:?}");
+            }
+            if let Some(period) = limit.period() {
+                let mut pacer = Pacer::default();
+                at = pacer
+                    .next(limit, counted(Want::Nothing, true), FOCUSED, now)
+                    .unwrap();
+                for _ in 0..10 {
+                    let next = pacer
+                        .next(limit, counted(Want::Nothing, true), FOCUSED, at + ms(1))
+                        .unwrap();
+                    assert_eq!(next, at + period, "{limit:?}");
+                    at = next;
+                }
+            } else {
+                assert_eq!(
+                    Pacer::default().next(limit, counted(Want::Nothing, true), FOCUSED, now),
+                    Some(now)
+                );
+            }
+            // Hidden: the screen keeps its own low-power want.
+            let mut pacer = Pacer::default();
+            assert_eq!(counted(Want::Nothing, false), Want::Nothing);
+            assert_eq!(counted(Want::Menu, false), Want::Menu);
+            assert_eq!(counted(Want::At(now), false), Want::At(now));
+            assert_eq!(
+                pacer.next(limit, counted(Want::Nothing, false), FOCUSED, now),
+                None
+            );
+            assert_eq!(
+                pacer.next(limit, counted(Want::Menu, false), FOCUSED, now),
+                Some(now + MENU)
+            );
+        }
+        // A counted screen over an unfocused or hidden window still obeys
+        // those throttles.
+        let away = Window {
+            focused: false,
+            ..FOCUSED
+        };
+        let hidden = Window {
+            hidden: true,
+            ..FOCUSED
+        };
+        let mut pacer = Pacer::default();
+        assert_eq!(
+            pacer.next(Limit::VSync, counted(Want::Nothing, true), away, now),
+            Some(now + UNFOCUSED)
+        );
+        assert_eq!(
+            pacer.next(Limit::VSync, counted(Want::Nothing, true), hidden, now),
+            None
+        );
+    }
+
+    #[test]
+    fn a_redraw_request_waits_for_the_timer_only_under_a_cap_with_the_counter() {
+        let now = Instant::now();
+        let soon = Some(now + ms(5));
+        for rate in [60, 100, 200] {
+            let limit = Limit::Rate(rate);
+            assert!(too_soon(limit, true, false, soon, now));
+            // The slot has come, or nothing is scheduled: draw.
+            assert!(!too_soon(limit, true, false, soon, now + ms(5)));
+            assert!(!too_soon(limit, true, false, None, now));
+            // Hidden counter: requests are honoured as before.
+            assert!(!too_soon(limit, false, false, soon, now));
+            assert!(!too_soon(limit, true, true, soon, now));
+        }
+        for limit in [Limit::VSync, Limit::Off] {
+            assert!(!too_soon(limit, true, false, soon, now));
+        }
     }
 
     #[test]

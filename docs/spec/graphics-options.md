@@ -108,7 +108,7 @@ Throttles that need no setting:
   opened from it) draws only when something happens once its picture has
   settled: a key, the mouse, a controller button, a resize, a notice expiring,
   or an animation on the screen over it. Mouse look-around while paused, the
-  map and the frame-rate counter keep it drawing. The first running frame
+  map and the [frame-rate counter](#frame-rate-counter) keep it drawing. The first running frame
   after a stop turns at most 1/30 s of wall time into ticks; every resume
   already restarts the flight clock, so this only guards a missed one.
 - An unfocused window draws about ten frames a second.
@@ -355,9 +355,19 @@ the top right of the window, over the picture, in the bundled Noto face:
 frame over about the last half second. `low` is the slowest frame in the
 last second, written as a rate. Slow rendering frames, including frames longer
 than half a second, count. Disabling the counter resets its history. While enabled, every
-screen redraws continuously at the [frame rate](#frame-rate) in effect,
-including idle menus and paused flight/replay, so the line measures the actual
-render load. CPU milliseconds are the main thread's wall-clock time
+screen redraws continuously at the [frame rate](#frame-rate) in effect (John,
+2026-10-19: V-sync, or 60, 100 or 200 a second), including the main menu and
+every menu screen, the lobby and the network screens, loading screens, the
+paused flight's menu and the paused replay, so the line shows live, real
+numbers and measures the actual render load. Turning it on or off applies at
+once. Hidden, none of this applies: menus keep their low-power pacing (a menu
+draws on input or news, a lobby also on a 10 Hz heartbeat, a loading screen at
+20 Hz, a still paused flight on events only). With a capped rate, events such
+as mouse movement do not add frames beyond the timer's, so the line never reads
+above the cap; an unfocused window still draws about ten frames a second and
+the line reads that. A gap of more than a second between frames (the window
+was hidden, or the counter was off) restarts the history instead of counting
+as one slow frame. CPU milliseconds are the main thread's wall-clock time
 for frame preparation and encoding, excluding surface acquisition waits; they are
 not the CPU seconds summed over worker threads. GPU milliseconds
 are asynchronous timestamps over all of the frame's GPU work: each live camera

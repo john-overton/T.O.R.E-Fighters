@@ -358,16 +358,42 @@ impl App {
     /// pumped on its own wake.
     pub(crate) fn loading_wait(&mut self, event_loop: &ActiveEventLoop, now: bool) {
         let at = Instant::now();
-        if (self.menu_pace.loading_redraw_due(at) || now)
+        // With the frame-rate counter shown a loading screen draws at the
+        // frame rate setting (`loading_next_frame` schedules it); the 20 Hz
+        // pace is the fallback before the first frame and when hidden.
+        let timed = self.counter_shown() && self.next_frame.is_some();
+        let due = if timed {
+            self.next_frame.is_some_and(|next| at >= next)
+        } else {
+            self.menu_pace.loading_redraw_due(at)
+        };
+        if (due || now)
             && let Some(renderer) = &self.renderer
         {
             renderer.window.request_redraw();
+            if timed {
+                self.next_frame = None;
+            }
         }
         let mut next = at + Duration::from_millis(16);
+        if timed && let Some(frame) = self.next_frame {
+            next = next.min(frame);
+        }
         if self.net_pumped_in_wait() {
             next = next.min(self.menu_pace.next_pump());
         }
         event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(next));
+    }
+
+    /// After a loading screen's frame: the next one at the frame rate
+    /// setting while the frame-rate counter is shown; otherwise the 20 Hz pace
+    /// of `loading_wait` stands.
+    pub(crate) fn loading_next_frame(&mut self) {
+        self.next_frame = if self.counter_shown() {
+            self.pace(crate::frame_pacing::Want::Live)
+        } else {
+            None
+        };
     }
 
     /// The pilot's controls for this frame from the keyboard, the mouse and
