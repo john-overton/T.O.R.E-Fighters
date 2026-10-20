@@ -178,16 +178,21 @@ pixels at a time at 1080p).
 
 Star visibility follows how dark the sky is at each pixel: the star-flag
 share (which rises as dusk's high cloud deck fades out, and falls as dawn's
-fades in) times a twilight fade (none while the sun is above the horizon,
-full by 5 degrees below it), then hidden by bright sky (toward the sun's glow
+sky fills in) times a twilight fade, then hidden by bright sky (toward the sun's glow
 and the bright horizon at dusk and dawn), thinned within 5 degrees of the
 horizon and dimmed within about 10 degrees of the moon. Stars come in in
 order of brightness: the brightest show as soon as the sky starts to darken,
 each fainter star needs a darker sky (the faintest need 55 percent of full
 darkness) and fades in over the next 35 percent, so all are at full strength
 by 90 percent. On DAY2 the brightest appear at about 19:06 as the high cloud
-fades, the faint ones follow over the next ten minutes, and at dawn they go
-in reverse, the brightest last at about 07:00. Sky decks and clouds draw over
+fades, the faint ones follow over the next ten minutes. The twilight fade
+differs by time of day: in the evening none while the sun is above the
+horizon, full by 5 degrees below it; in the morning (after midnight, before
+noon) full until the sun is 2 degrees up, none by 10. So at dawn the stars
+stay through the end of the night and fade with the star-flag share as the
+dawn sky fills in, like the moon (John, 2026-10-20): on DAY2 all are still
+out at 07:00, the faintest go first and the brightest last, by 07:05. Both
+rules give full at midnight and none at noon, so nothing steps between them. Sky decks and clouds draw over
 the stars. The original STARS.SH points are not drawn in smooth weather.
 
 The moon keeps its weather record's direction at the mission's nearest
