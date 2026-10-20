@@ -5624,12 +5624,28 @@ impl State {
             let spares =
                 |side: Side| friendly_fire_off && shooter_side != NO_SIDE && side == shooter_side;
             // The round's swept segment widened by its fuze, for the first
-            // pass; a round tested against past volumes skips it.
-            let reach = if rewind.is_none() {
-                let fuze = f64::from(w.damage.fuze_radius.max(0));
-                broad::Bounds::segment(p.previous, p.position, fuze)
-            } else {
-                None
+            // pass; a round tested against past volumes keeps it for the
+            // ground objects' solid boxes alone.
+            let segment = broad::Bounds::segment(
+                p.previous,
+                p.position,
+                f64::from(w.damage.fuze_radius.max(0)),
+            );
+            let reach = if rewind.is_none() { segment } else { None };
+            // A rewound round meets an aircraft's past volume, which the
+            // first pass bounds as it bounds a volume now: the round's
+            // segment that misses the box cannot touch it.
+            let past_missed = |id: u32| {
+                past(id).is_some_and(|v| {
+                    let body = broad::Body {
+                        previous: v.previous,
+                        position: v.position,
+                        basis: v.basis,
+                        radius: v.radius,
+                        solid: None,
+                    };
+                    matches!((body.bounds(), segment), (Some(b), Some(s)) if !b.overlaps(&s))
+                })
             };
             // One search over every aircraft row and every ownship. A gun round
             // can hit any aircraft but the one that fired it; a missile or bomb
@@ -5642,6 +5658,9 @@ impl State {
                         continue;
                     }
                     let t = &r.target;
+                    if gun && past_missed(t.id) {
+                        continue;
+                    }
                     // Easy aiming widens the volume of the aircraft it shoots at,
                     // never the shooter's own.
                     let hitbox = if p.owner == t.id { 1. } else { hitbox };
@@ -5678,7 +5697,11 @@ impl State {
                 }
             }
             if armed {
-                target_broad.candidates(reach, &mut candidates);
+                if rewind.is_none() {
+                    target_broad.candidates(reach, &mut candidates);
+                } else {
+                    target_broad.candidates_rewound(segment, &mut candidates);
+                }
                 for &i in &candidates {
                     let t = &self.targets[i];
                     // A surface round strikes aircraft and the other side's
@@ -5698,6 +5721,13 @@ impl State {
                         continue;
                     }
                     if t.hp > 0 && p.guidance.as_ref().is_some_and(|f| !f.eligible(w, t)) {
+                        continue;
+                    }
+                    if gun
+                        && (t.role == TargetRole::Aircraft || self.parked.contains_key(&t.id))
+                        && !self.ground_bounds.contains_key(&t.id)
+                        && past_missed(t.id)
+                    {
                         continue;
                     }
                     let hitbox = if p.owner == t.id { 1. } else { hitbox };

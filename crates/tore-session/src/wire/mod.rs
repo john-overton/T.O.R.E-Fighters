@@ -50,6 +50,7 @@ pub mod space;
 
 pub(crate) mod bits;
 mod flat;
+mod row;
 
 #[cfg(test)]
 mod compat_tests;

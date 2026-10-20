@@ -14,6 +14,7 @@
 
 use super::bits::{self, STEP_LIMIT, angle_diff16, div_round, in_range, read_i32, read_u32};
 use super::names::NameIndex;
+use super::row::Row;
 use super::{WireError, WireResult, limits};
 use tore_codec::{BitReader, BitWriter, CodecError};
 use tore_formats::aircraft::AircraftId;
@@ -669,7 +670,61 @@ struct Flat {
     motion: Motion,
     angles: [u16; 3],
     fast: [i64; 1],
-    groups: Vec<Vec<i64>>,
+    groups: Groups,
+}
+
+/// The most groups a kind has: an aircraft's five.
+const MAX_GROUPS: usize = 5;
+
+/// A state's groups of numbers, kept inline (optimization round 2): the host
+/// flattens two states for every entity record it codes.
+#[derive(Clone, Default)]
+struct Groups {
+    len: usize,
+    rows: [Row; MAX_GROUPS],
+}
+
+impl Groups {
+    fn of<const N: usize>(rows: [Row; N]) -> Self {
+        let mut groups = Self::default();
+        for row in rows {
+            groups.push(row);
+        }
+        groups
+    }
+
+    fn push(&mut self, row: Row) {
+        self.rows[self.len] = row;
+        self.len += 1;
+    }
+}
+
+impl std::ops::Deref for Groups {
+    type Target = [Row];
+
+    fn deref(&self) -> &[Row] {
+        &self.rows[..self.len]
+    }
+}
+
+impl std::ops::DerefMut for Groups {
+    fn deref_mut(&mut self) -> &mut [Row] {
+        &mut self.rows[..self.len]
+    }
+}
+
+impl PartialEq for Groups {
+    fn eq(&self, other: &Self) -> bool {
+        **self == **other
+    }
+}
+
+impl Eq for Groups {}
+
+impl std::fmt::Debug for Groups {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&**self, f)
+    }
 }
 
 fn flag(value: bool) -> i64 {
@@ -729,7 +784,7 @@ impl EntityState {
         match *self {
             Self::Aircraft(s) => {
                 let d = s.devices.unwrap_or_default();
-                let mut devices = vec![flag(s.devices.is_some())];
+                let mut devices = Row::from([flag(s.devices.is_some())]);
                 devices.extend(d.levels.iter().map(|&v| i64::from(v)));
                 devices.extend(d.surfaces.iter().map(|&v| i64::from(v)));
                 devices.push(i64::from(d.throttle));
@@ -738,56 +793,56 @@ impl EntityState {
                 devices.extend(d.gun_aim.iter().map(|&v| i64::from(v)));
                 devices.push(i64::from(d.gun_group));
                 let e = s.engine;
-                let engine = vec![
+                let engine = Row::from([
                     flag(e.lit),
                     flag(e.afterburner),
                     flag(e.flame),
                     i64::from(e.rates[0]),
                     i64::from(e.rates[1]),
                     i64::from(e.rates[2]),
-                ];
+                ]);
                 let m = s.damage;
-                let mut damage = vec![i64::from(m.hp), i64::from(m.initial_hp)];
+                let mut damage = Row::from([i64::from(m.hp), i64::from(m.initial_hp)]);
                 damage.extend(m.sections.iter().map(|&v| i64::from(v)));
                 damage.push(section_code(m.structural));
-                let status = vec![
+                let status = Row::from([
                     flag(s.status.airborne),
                     flag(s.status.crashed),
                     wreck_code(s.status.wreck),
-                ];
+                ]);
                 let r = s.rotor.unwrap_or_default();
-                let mut rotor = vec![flag(s.rotor.is_some()), i64::from(r.speed)];
+                let mut rotor = Row::from([flag(s.rotor.is_some()), i64::from(r.speed)]);
                 rotor.extend(r.tilt.iter().flatten().map(|&v| i64::from(v)));
                 Flat {
                     motion: s.motion,
                     angles: s.attitude,
                     fast: [i64::from(d.speed)],
-                    groups: vec![devices, engine, damage, status, rotor],
+                    groups: Groups::of([devices, engine, damage, status, rotor]),
                 }
             }
             Self::Projectile(s) => Flat {
                 motion: s.motion,
                 angles: [s.direction[0], s.direction[1], 0],
                 fast: [0],
-                groups: Vec::new(),
+                groups: Groups::default(),
             },
             Self::Debris(s) => Flat {
                 motion: s.motion,
                 angles: s.attitude,
                 fast: [0],
-                groups: Vec::new(),
+                groups: Groups::default(),
             },
             Self::Pilot(s) => Flat {
                 motion: s.motion,
                 angles: [s.heading, 0, 0],
                 fast: [0],
-                groups: vec![vec![phase_code(s.phase)]],
+                groups: Groups::of([Row::from([phase_code(s.phase)])]),
             },
             Self::Surface(s) => Flat {
                 motion: s.motion,
                 angles: s.attitude,
                 fast: [0],
-                groups: vec![vec![flag(s.wrecked)]],
+                groups: Groups::of([Row::from([flag(s.wrecked)])]),
             },
         }
     }
@@ -981,9 +1036,9 @@ pub fn read_full(r: &mut BitReader<'_>, kind: EntityKind) -> WireResult<EntitySt
     for value in &mut fast[..schema.fast] {
         *value = i64::from(read_i32(r)?);
     }
-    let mut groups = Vec::with_capacity(schema.groups.len());
+    let mut groups = Groups::default();
     for group in schema.groups {
-        let mut values = vec![0; group.fields.len()];
+        let mut values = Row::zeros(group.fields.len());
         for (index, field) in group.fields.iter().enumerate() {
             values[index] = field.read(r)?;
             if group.gated && index == 0 && values[0] == 0 {
@@ -1066,7 +1121,7 @@ pub fn write_delta(
             w.write_bucketed(*v, &FAST_LADDER)?;
         }
     }
-    for ((values, before), group) in now.groups.iter().zip(&then.groups).zip(schema.groups) {
+    for ((values, before), group) in now.groups.iter().zip(then.groups.iter()).zip(schema.groups) {
         let changed = values != before;
         w.write_bool(changed);
         if changed {
@@ -1213,6 +1268,19 @@ pub fn check_count(kind: EntityKind, count: usize) -> WireResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_kinds_groups_fit_inline() {
+        // A state's groups are kept in a fixed array, each group's numbers
+        // inline (optimization round 2): every layout fits both.
+        for kind in EntityKind::ALL {
+            let groups = schema(kind).groups;
+            assert!(groups.len() <= MAX_GROUPS, "{kind:?}");
+            for group in groups {
+                assert!(group.fields.len() <= super::super::row::INLINE, "{kind:?}");
+            }
+        }
+    }
 
     #[test]
     fn prediction_uses_whole_steps_both_ways() {
