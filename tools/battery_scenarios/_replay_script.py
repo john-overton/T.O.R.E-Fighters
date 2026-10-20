@@ -407,6 +407,32 @@ def debrief_mouse_check(work: Path, output: str) -> list[str]:
     return problems
 
 
+def ordnance_flash_check(work: Path, output: str) -> list[str]:
+    """The creator opens Load Ordnance and Select Plane returns, twice, and the
+    window never presents the loading photograph between them."""
+    from battery_scenarios import _replay_tools as tools
+
+    shots = snapshots(work)
+    names = ["1-creator", "2-ordnance", "3-back-in-creator", "4-ordnance-again", "5-creator-again"]
+    problems = [f"no snapshot {n}" for n in names if n not in shots]
+    if problems:
+        return problems
+    for n in names:
+        problems += tools.ppm_problems(str(shots[n]), min_colors=8)
+    if shots["2-ordnance"].read_bytes() == shots["1-creator"].read_bytes():
+        problems.append("OK did not open Load Ordnance")
+    if shots["3-back-in-creator"].read_bytes() == shots["2-ordnance"].read_bytes():
+        problems.append("Select Plane did not return to the creator")
+    logs = sorted((work / "logs").glob("*.log"))
+    if not logs:
+        return problems + ["no diagnostics log to read the presented screens from"]
+    for log in logs:
+        for line in log.read_text(errors="replace").splitlines():
+            if "present:" in line and "now loading" in line:
+                problems.append(f"the loading photograph flashed between creator and ordnance: {line.strip()}")
+    return problems
+
+
 def replays_mouse_check(work: Path, output: str) -> list[str]:
     from battery_scenarios import _replay_tools as tools
 
@@ -463,6 +489,17 @@ def mouse_scenarios() -> list[Scenario]:
             timeout=240,
             env={"TORE_SCRIPT_OUT": "{work}/shots"},
             check_work=debrief_mouse_check,
+        )
+    )
+    out.append(
+        Scenario(
+            name="replay-script-ordnance-no-flash",
+            lane="replay",
+            args=["--quick-mission", "--no-audio", "--input-script", str(SCRIPTS / "ordnance-no-flash.txt")],
+            window=True,
+            timeout=240,
+            env={"TORE_SCRIPT_OUT": "{work}/shots", "TORE_TRACE_PRESENT": "1", "TORE_LOG_DIR": "{work}/logs"},
+            check_work=ordnance_flash_check,
         )
     )
     out.append(

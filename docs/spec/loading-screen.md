@@ -57,8 +57,12 @@ Quick Mission selection loads only the aircraft needed for the loadout page.
 It does not build a throwaway terrain, combat world, scenery or graphics set.
 Automatic launch continues the same progress and photograph into the single
 mission build. Custom loadout editing finishes selection on Preparing loadout,
-before user editing. Fly then starts its own load, which opens on Building
-the mission. Selection no longer builds terrain, scenery or graphics, so those
+before user editing. That load starts from the Quick Mission creator and only
+opens the next page, so the creator stays on screen for the first 250 ms and the
+photograph replaces it only if the load runs longer (opinionated, John
+2026-10-20: the page loaded in a few frames used to flash the photograph between
+the creator and Load Ordnance). Select Plane returns without a load. Fly then
+starts its own load, which opens on Building the mission. Selection no longer builds terrain, scenery or graphics, so those
 stages run only in the mission build.
 A multiplayer join keeps one progress from content check through mission
 preparation. A player who leaves a flight and takes a plane again continues

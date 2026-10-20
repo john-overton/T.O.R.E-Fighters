@@ -1,0 +1,24 @@
+# Quick Mission creator -> Load Ordnance -> Select Plane -> Load Ordnance again -> Select Plane.
+# Custom loadout, then OK; Select Plane is the page's button at 400,425 (menu layer).
+wait 3
+movemenu 200 375
+click
+wait 0.5
+snapshot 1-creator.ppm
+movemenu 420 430
+click
+wait 4
+snapshot 2-ordnance.ppm
+movemenu 400 425
+click
+wait 1.5
+snapshot 3-back-in-creator.ppm
+movemenu 420 430
+click
+wait 3
+snapshot 4-ordnance-again.ppm
+movemenu 400 425
+click
+wait 1.5
+snapshot 5-creator-again.ppm
+exit

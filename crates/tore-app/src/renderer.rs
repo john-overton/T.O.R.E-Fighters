@@ -1233,6 +1233,7 @@ impl Renderer {
             }
             Err(error) => return Err(error.into()),
         };
+        crate::frame_rate::trace_present(readout);
         let cpu_started = std::time::Instant::now();
         let show_counter = crate::frame_rate::shown(self.graphics.show_frame_rate);
         let gpu_ms = self.frame_gpu.poll(&self.device);

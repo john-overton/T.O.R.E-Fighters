@@ -3103,11 +3103,19 @@ impl App {
                     let automatic = self.quick.draft.values[18] == 0;
                     // Ready would say Starting flight. This load only prepares
                     // the loadout page, or hands the same bar to the mission.
-                    let job = loading::Job::continue_load(None, false, move |_| {
+                    let work = move |_: loading::Progress| {
                         aircraft::Airframe::load(&resources, id)
                             .map(|aircraft| loading::Prepared::Selection(Box::new(aircraft)))
                             .map_err(|e| e.to_string())
-                    });
+                    };
+                    // A custom loadout only opens the Load Ordnance page: the
+                    // creator stays up unless the load runs long, not a
+                    // photograph for a few frames.
+                    let job = if automatic {
+                        loading::Job::continue_load(None, false, work)
+                    } else {
+                        loading::Job::continue_from_menu(work)
+                    };
                     match job {
                         Ok(job) => {
                             self.mission_loading_progress = automatic.then(|| job.progress.clone());
@@ -3965,6 +3973,15 @@ impl ApplicationHandler for App {
                     WindowEvent::Focused(focused) => {
                         self.focused = focused;
                         self.input.context(true, focused);
+                    }
+                    WindowEvent::RedrawRequested
+                        if self
+                            .loading
+                            .as_ref()
+                            .is_some_and(|job| job.screen_kept(Instant::now())) =>
+                    {
+                        // The page the load started from stays on screen;
+                        // the photograph comes only if the load runs long.
                     }
                     WindowEvent::RedrawRequested => {
                         renderer.set_veil([0., 0.]);

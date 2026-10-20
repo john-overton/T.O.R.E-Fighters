@@ -263,6 +263,32 @@ pub fn shown_with(saved: bool, variable: Option<&str>) -> bool {
     }
 }
 
+/// `TORE_TRACE_PRESENT=1` logs every change of what the window presents (menu,
+/// loading photograph, flight, replay) with the frames drawn of the one before,
+/// to see a screen flash between two others. Development only.
+pub fn trace_present(surface: Surface) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    static LAST: std::sync::Mutex<Option<(&'static str, u32)>> = std::sync::Mutex::new(None);
+    if !*ON.get_or_init(|| std::env::var("TORE_TRACE_PRESENT").is_ok_and(|v| v == "1")) {
+        return;
+    }
+    let name = match surface {
+        Surface::Menu => "menu",
+        Surface::Loading => "loading",
+        Surface::Flight { .. } => "flight",
+        Surface::Replay { .. } => "replay",
+    };
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    match &mut *last {
+        Some((was, frames)) if *was == name => *frames += 1,
+        Some((was, frames)) => {
+            log::info!("present: {frames} {was} frames, now {name}");
+            *last = Some((name, 1));
+        }
+        None => *last = Some((name, 1)),
+    }
+}
+
 /// Glyphs for `text`, right-aligned on `anchor`, with a one-pixel shadow.
 /// Empty when `text` is empty: the off state draws nothing.
 pub fn quads(text: &str, anchor: Anchor, linear: bool) -> Vec<Quad> {
