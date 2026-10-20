@@ -144,6 +144,9 @@ pub struct SurfaceLighting {
     /// Terrain whose texture has no cut-out texel: depth only, no fragment
     /// stage (optimization S13a).
     opaque_terrain_pipeline: wgpu::RenderPipeline,
+    /// Object triangles whose layer no fragment test discards: depth only
+    /// (round 2).
+    opaque_object_pipeline: wgpu::RenderPipeline,
     /// Each cascade's projection rows from the last [`Self::prepare`], for
     /// culling casters.
     cascades: [[f32; 16]; 3],
@@ -195,6 +198,12 @@ impl SurfaceLighting {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
+        // Gathers the four depths around a shadow tap (round 2): nearest,
+        // clamped, so it returns stored values unfiltered.
+        let point = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Shadow depth gather"),
+            ..Default::default()
+        });
         let uniform_entry = wgpu::BindGroupLayoutEntry {
             binding: 0,
             visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -225,6 +234,12 @@ impl SurfaceLighting {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
             ],
         });
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -242,6 +257,10 @@ impl SurfaceLighting {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&point),
                 },
             ],
         });
@@ -265,7 +284,11 @@ impl SurfaceLighting {
         });
         let make = |entry: Option<&str>, terrain| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(entry.unwrap_or("opaque terrain shadow")),
+                label: Some(entry.unwrap_or(if terrain {
+                    "opaque terrain shadow"
+                } else {
+                    "opaque object shadow"
+                })),
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: shader,
@@ -314,6 +337,7 @@ impl SurfaceLighting {
             pipeline: make(Some("shadow_fragment"), false),
             terrain_pipeline: make(Some("terrain_shadow_fragment"), true),
             opaque_terrain_pipeline: make(None, true),
+            opaque_object_pipeline: make(None, false),
             cascades: [[0.; 16]; 3],
         }
     }
@@ -390,9 +414,10 @@ impl SurfaceLighting {
 
     /// Draws the shadow casters into the three cascades. Each cascade
     /// draws only the terrain chunks and object batches inside its volume
-    /// (exact: the rest are wholly clipped), and the terrain whose texture
-    /// cannot cut out without a fragment stage. A depth-only pass keeps the
-    /// nearest caster in any order, so the ranges' order does not matter.
+    /// (exact: the rest are wholly clipped), and the terrain and object
+    /// triangles that cannot cut out without a fragment stage. A depth-only
+    /// pass keeps the nearest caster in any order, so the ranges' order
+    /// does not matter.
     pub fn draw(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -430,14 +455,31 @@ impl SurfaceLighting {
             for range in &cutout {
                 pass.draw(range.clone(), instance.clone());
             }
-            pass.set_pipeline(&self.pipeline);
-            for object in objects {
-                if object.count == 0 || clip.rejects(&object.bounds) {
-                    continue;
+            let kept: Vec<&Caster<'_>> = objects
+                .iter()
+                .filter(|o| o.count > 0 && !clip.rejects(&o.bounds))
+                .collect();
+            for (pipeline, tested) in [
+                (&self.opaque_object_pipeline, false),
+                (&self.pipeline, true),
+            ] {
+                pass.set_pipeline(pipeline);
+                for object in &kept {
+                    let ranges = if tested { object.tested } else { object.opaque };
+                    let mut bound = false;
+                    for range in ranges {
+                        let range = range.start.min(object.count)..range.end.min(object.count);
+                        if range.is_empty() {
+                            continue;
+                        }
+                        if !bound {
+                            pass.set_bind_group(0, object.bind, &[]);
+                            pass.set_vertex_buffer(0, object.buffer.slice(..));
+                            bound = true;
+                        }
+                        pass.draw(range, instance.clone());
+                    }
                 }
-                pass.set_bind_group(0, object.bind, &[]);
-                pass.set_vertex_buffer(0, object.buffer.slice(..));
-                pass.draw(0..object.count, instance.clone());
             }
         }
     }
@@ -453,12 +495,16 @@ pub struct TerrainCasters<'a> {
 }
 
 /// One object batch for [`SurfaceLighting::draw`], with the box of its
-/// vertices relative to the eye as `shadow_object_vertex` places them.
+/// vertices relative to the eye as `shadow_object_vertex` places them, and
+/// its depth-only and tested vertex ranges
+/// ([`crate::terrain_chunks::CasterShape`], clipped to `count`).
 pub struct Caster<'a> {
     pub bind: &'a wgpu::BindGroup,
     pub buffer: &'a wgpu::Buffer,
     pub count: u32,
     pub bounds: crate::terrain_chunks::Bounds,
+    pub opaque: &'a [std::ops::Range<u32>],
+    pub tested: &'a [std::ops::Range<u32>],
 }
 
 impl SurfaceLighting {

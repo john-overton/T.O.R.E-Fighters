@@ -277,6 +277,90 @@ impl Chunks {
     }
 }
 
+/// Most depth-only runs kept per object batch, and the fewest triangles in
+/// one: each run is a draw call in each cascade.
+const OPAQUE_RUNS: usize = 8;
+const OPAQUE_RUN_TRIANGLES: usize = 32;
+
+/// Whether `shadow_fragment` (surface_lighting.wgsl) can discard a
+/// fragment of this layer: glass, flame sheets and emissive effects
+/// (-5 to -8) always, the cut-out object texture (-2) by texel.
+fn shadow_tested(layer: f32) -> bool {
+    layer == -2. || layer == -5. || layer == -6. || layer == -7. || layer == -8.
+}
+
+/// An object batch as a shadow caster (round 2): its vertex box, and its
+/// vertex ranges split into triangles `shadow_fragment` could never
+/// discard, which draw depth-only, and the rest, which keep the test.
+/// A depth-only pass keeps the nearest depth in any order, so the split
+/// changes no texel.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CasterShape {
+    pub bounds: Bounds,
+    pub opaque: Vec<Range<u32>>,
+    pub tested: Vec<Range<u32>>,
+}
+
+impl Default for CasterShape {
+    /// Never culled and every vertex tested, until an upload measures it.
+    fn default() -> Self {
+        Self {
+            bounds: Bounds::ALL,
+            opaque: Vec::new(),
+            tested: std::iter::once(0..u32::MAX).collect(),
+        }
+    }
+}
+
+impl CasterShape {
+    /// The shape of `vertices` (ten floats a vertex, whole triangles). A
+    /// triangle is depth-only when none of its three vertices has a layer
+    /// the fragment test could discard, whichever vertex the GPU takes the
+    /// flat layer from. Only the longest runs of at least
+    /// [`OPAQUE_RUN_TRIANGLES`] triangles, at most [`OPAQUE_RUNS`] of them,
+    /// go depth-only; everything else keeps the test.
+    pub fn of(vertices: &[f32]) -> Self {
+        let bounds = Bounds::of_vertices(vertices);
+        let count = (vertices.len() / FLOATS) as u32;
+        let mut runs: Vec<Range<u32>> = Vec::new();
+        let mut start = None;
+        let triangles = vertices.chunks_exact(TRIANGLE);
+        let whole = triangles.len();
+        for (t, v) in triangles.enumerate() {
+            let opaque = !(shadow_tested(v[5]) || shadow_tested(v[15]) || shadow_tested(v[25]));
+            match (opaque, start) {
+                (true, None) => start = Some(t),
+                (false, Some(s)) => {
+                    runs.push(s as u32 * 3..t as u32 * 3);
+                    start = None;
+                }
+                _ => {}
+            }
+        }
+        if let Some(s) = start {
+            runs.push(s as u32 * 3..whole as u32 * 3);
+        }
+        runs.retain(|r| r.len() >= OPAQUE_RUN_TRIANGLES * 3);
+        if runs.len() > OPAQUE_RUNS {
+            runs.sort_by(|a, b| b.len().cmp(&a.len()).then(a.start.cmp(&b.start)));
+            runs.truncate(OPAQUE_RUNS);
+            runs.sort_by_key(|r| r.start);
+        }
+        let mut tested = Vec::new();
+        let mut at = 0;
+        for r in &runs {
+            push_merged(&mut tested, at..r.start);
+            at = r.end;
+        }
+        push_merged(&mut tested, at..count);
+        Self {
+            bounds,
+            opaque: runs,
+            tested,
+        }
+    }
+}
+
 fn push_merged(ranges: &mut Vec<Range<u32>>, range: Range<u32>) {
     if range.is_empty() {
         return;
@@ -587,5 +671,75 @@ mod tests {
         let odd = [vertex(1., 2., 3., 0.), vertex(f32::NAN, 0., 0., 0.)].concat();
         let b = Bounds::of_vertices(&odd);
         assert!(!view(0., 0.).rejects(&b.relative([0.; 3])));
+    }
+    /// A batch of triangles with these layers, one layer per triangle
+    /// unless `mixed` puts a glass vertex in the middle of that triangle.
+    fn batch(layers: &[(f32, bool)]) -> Vec<f32> {
+        let mut v = Vec::new();
+        for &(layer, mixed) in layers {
+            v.extend(vertex(0., 0., 0., layer));
+            v.extend(vertex(1., 0., 0., if mixed { -5. } else { layer }));
+            v.extend(vertex(0., 1., 0., layer));
+        }
+        v
+    }
+
+    #[test]
+    fn object_casters_go_depth_only_only_where_no_test_can_discard() {
+        let mut rng = 0x2545_f491_4f6c_dd1du64;
+        let mut next = |n: u64| {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            rng % n
+        };
+        let choices = [0., 3., -1., -3., -4., -2., -5., -6., -7., -8., f32::NAN];
+        for case in 0..300 {
+            // Long runs of one layer, with mixed and special triangles.
+            let mut layers = Vec::new();
+            while layers.len() < 2_000 {
+                let layer = choices[next(choices.len() as u64) as usize];
+                let run = 1 + next(if case % 2 == 0 { 400 } else { 40 }) as usize;
+                for _ in 0..run {
+                    layers.push((layer, next(50) == 0));
+                }
+            }
+            let v = batch(&layers);
+            let shape = CasterShape::of(&v);
+            assert_eq!(shape.bounds, Bounds::of_vertices(&v));
+            // Every vertex is drawn exactly once, by one of the two.
+            let mut covered = vec![0u8; v.len() / FLOATS];
+            for r in shape.opaque.iter().chain(&shape.tested) {
+                for i in r.clone() {
+                    covered[i as usize] += 1;
+                }
+            }
+            assert!(covered.iter().all(|&c| c == 1), "case {case}");
+            assert!(shape.opaque.len() <= OPAQUE_RUNS);
+            // No depth-only triangle has a vertex the fragment test reads.
+            for r in &shape.opaque {
+                assert!(r.start % 3 == 0 && r.end % 3 == 0);
+                assert!(r.len() >= OPAQUE_RUN_TRIANGLES * 3);
+                for i in r.clone() {
+                    assert!(!shadow_tested(v[i as usize * FLOATS + 5]), "case {case}");
+                }
+            }
+        }
+        // A plain aircraft goes depth-only whole; glass keeps the test.
+        let plain = batch(&[(0., false); 100]);
+        assert_eq!(CasterShape::of(&plain).opaque, vec![0..300; 1]);
+        assert!(CasterShape::of(&plain).tested.is_empty());
+        let glass = batch(&[(-5., false); 100]);
+        assert_eq!(CasterShape::of(&glass).tested, vec![0..300; 1]);
+        // The fragment test's layers, matched to the shader's.
+        let shader = include_str!("surface_lighting.wgsl");
+        assert!(shader.contains(
+            "if in.layer == -5.0 || in.layer == -6.0 || in.layer == -7.0 || in.layer == -8.0 {discard;}"
+        ));
+        assert!(shader.contains("if in.layer == -2.0 {shadow_cutout(in.uv,0);}"));
+        // Unmeasured: everything tested, never culled.
+        let unmeasured = CasterShape::default();
+        assert_eq!(unmeasured.bounds, Bounds::ALL);
+        assert!(unmeasured.opaque.is_empty());
     }
 }

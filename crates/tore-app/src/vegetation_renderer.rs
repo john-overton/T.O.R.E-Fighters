@@ -136,6 +136,11 @@ pub struct Renderer {
     grass_density: crate::graphics::VegDensity,
     grass_suppressed: bool,
     repeat_frame: bool,
+    /// The page entries the last view sent to the cull pass.
+    visible_pages: Vec<u32>,
+    /// Coarse page culling per view (`TORE_VEG_PAGE_CULL=0` sends every
+    /// page, a comparison aid).
+    page_cull: bool,
     /// Per ring: patch range and tufts per patch.
     rings: Vec<(std::ops::Range<u32>, u32)>,
     prepared: bool,
@@ -339,6 +344,8 @@ impl Renderer {
             grass_density: crate::graphics::VegDensity::High,
             grass_suppressed: false,
             repeat_frame: false,
+            visible_pages: Vec::new(),
+            page_cull: std::env::var("TORE_VEG_PAGE_CULL").as_deref() != Ok("0"),
             rings: Vec::new(),
             prepared: false,
             suppressed: false,
@@ -580,18 +587,12 @@ impl Renderer {
             Route::Stream => {
                 let request = self.main.cpu.request(shape, eye2);
                 let (atlas, library) = (&self.atlas, &self.library);
-                let GpuStream {
-                    cpu,
-                    instances,
-                    chunks,
-                    ..
-                } = &mut self.main;
+                let GpuStream { cpu, instances, .. } = &mut self.main;
                 cpu.advance(
                     request,
                     || stream::Worker::new(atlas.clone(), library.clone(), world),
                     false,
                     |offset, bytes| queue.write_buffer(instances, offset, bytes),
-                    |table| queue.write_buffer(chunks, 0, &bytes_of_u32(table)),
                 );
                 // Panels that stopped asking give their memory back.
                 let now = std::time::Instant::now();
@@ -613,18 +614,12 @@ impl Renderer {
                     },
                     eye2,
                 );
-                let GpuStream {
-                    cpu,
-                    instances,
-                    chunks,
-                    ..
-                } = &mut panel.gpu;
+                let GpuStream { cpu, instances, .. } = &mut panel.gpu;
                 cpu.advance(
                     request,
                     || stream::Worker::new(atlas.clone(), library.clone(), world),
                     true,
                     |offset, bytes| queue.write_buffer(instances, offset, bytes),
-                    |table| queue.write_buffer(chunks, 0, &bytes_of_u32(table)),
                 );
                 // Until its circle is in, the panel draws whatever the main
                 // stream holds there.
@@ -685,6 +680,27 @@ impl Renderer {
             }
             return;
         }
+        // Only the pages this view may draw from go to the cull pass.
+        let mut visible = std::mem::take(&mut self.visible_pages);
+        let stream = self.stream(source);
+        if self.page_cull {
+            crate::vegetation_pages::PageView {
+                eye: camera.position,
+                forward: fx,
+                right: rx,
+                up: ux,
+                tangents: [aspect / f, 1. / f],
+                draw,
+            }
+            .visible(&stream.cpu.table, &stream.cpu.bounds, &mut visible);
+        } else {
+            visible.clone_from(&stream.cpu.table);
+        }
+        if !visible.is_empty() {
+            queue.write_buffer(&stream.chunks, 0, &bytes_of_u32(&visible));
+        }
+        self.view.2 = (visible.len() / 2) as u32;
+        self.visible_pages = visible;
         let mesh_count = self.library.meshes.len();
         let mut params = Vec::with_capacity(32);
         params.extend([origin[0] as f32, origin[1] as f32, origin[2] as f32, 0.]);

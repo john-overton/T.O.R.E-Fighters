@@ -1736,9 +1736,21 @@ fn replay_cameras(
         let (_, world, scenery, view) = current.as_mut().expect("built above");
         let camera = cam.camera();
         let ms = view.time(&camera, world, scenery)?;
+        // With TORE_VEG_GPU_TIMING=1, also the GPU's own time: the median
+        // of seven eight-frame means from timestamp queries.
+        let mut gpu = Vec::new();
+        if std::env::var("TORE_VEG_GPU_TIMING").as_deref() == Ok("1") {
+            for _ in 0..7 {
+                gpu.extend(view.gpu_time(&camera, world, scenery)?);
+            }
+            gpu.sort_by(f64::total_cmp);
+        }
         let pixels = view.pixels(&camera, world, scenery)?;
         write_png(out, &format!("{}.png", cam.name), size, &pixels)?;
-        println!("  {}: {ms:.2} ms", cam.name);
+        match gpu.get(gpu.len() / 2) {
+            Some(g) => println!("  {}: {ms:.2} ms, gpu {g:.3} ms", cam.name),
+            None => println!("  {}: {ms:.2} ms", cam.name),
+        }
     }
     Ok(())
 }

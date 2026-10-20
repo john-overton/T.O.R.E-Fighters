@@ -2,6 +2,7 @@
 //! runs on the worker; the render thread only copies changed pages.
 use super::{CacheFrame, INST_STRIDE, Library, Patch, Placement, Terrain, pack};
 use crate::vegetation::{Atlas, Inst};
+use crate::vegetation_pages::PageBounds;
 use std::{
     collections::BTreeMap,
     sync::{Arc, mpsc},
@@ -243,6 +244,10 @@ pub struct Stream {
     /// Objects and page-table entries published to the GPU.
     pub count: u32,
     pub page_count: u32,
+    /// The published page table (first object, count pairs) and each
+    /// page's cull bounds; each view uploads the pages it may draw from.
+    pub table: Vec<u32>,
+    pub bounds: Vec<PageBounds>,
     /// How far the drawn circle reaches, feet.
     pub visible_reach: f32,
     /// The eye of the last view that streamed.
@@ -273,6 +278,8 @@ impl Stream {
             pages: Slots::with_spare(capacity, spare),
             count: 0,
             page_count: 0,
+            table: Vec::new(),
+            bounds: Vec::new(),
             visible_reach: 0.,
             last_eye: None,
             last_prepare: std::time::Instant::now(),
@@ -299,6 +306,8 @@ impl Stream {
         self.pages = Slots::with_spare(capacity, spare);
         self.page_count = 0;
         self.count = 0;
+        self.table.clear();
+        self.bounds.clear();
     }
 
     /// The request for a view at `eye`, with `ahead` taken from this
@@ -329,7 +338,8 @@ impl Stream {
     }
 
     /// Takes the worker's finished result, uploads pages within the frame's
-    /// budget (`write`), publishes a complete selection (`table`), asks the
+    /// budget (`write`), publishes a complete selection (its page table and
+    /// bounds, which each view culls and uploads), asks the
     /// worker for `request` and moves the visible circle. `snap` sets the
     /// circle to everything available at once instead of growing it, as a
     /// small panel does.
@@ -339,7 +349,6 @@ impl Stream {
         spawn: impl FnOnce() -> Worker,
         snap: bool,
         mut write: impl FnMut(u64, &[u8]),
-        mut table: impl FnMut(&[u32]),
     ) {
         let settle = request.settle;
         self.cache = CacheFrame::default();
@@ -380,9 +389,9 @@ impl Stream {
             let (entries, count) = self.pages.table();
             self.count = count;
             self.page_count = (entries.len() / 2) as u32;
-            if !entries.is_empty() {
-                table(&entries);
-            }
+            self.bounds = self.pages.table_bounds();
+            debug_assert_eq!(self.bounds.len() * 2, entries.len());
+            self.table = entries;
         }
         if !self.pages.pending() && !settle {
             worker.request(request);
@@ -427,6 +436,8 @@ impl Stream {
 struct Resident {
     bytes: Arc<Vec<u8>>,
     pages: Vec<usize>,
+    /// Each page's coarse cull bounds (round 2 tree page culling).
+    bounds: Arc<Vec<PageBounds>>,
     uploaded: usize,
 }
 
@@ -471,6 +482,7 @@ impl Slots {
                 Resident {
                     bytes: bytes.clone(),
                     pages,
+                    bounds: Arc::new(PageBounds::pages(bytes, PAGE)),
                     uploaded: 0,
                 }
             };
@@ -550,6 +562,17 @@ impl Slots {
             }
         }
         (table, total)
+    }
+    /// The cull bounds of each entry of [`Self::table`], in its order.
+    pub fn table_bounds(&self) -> Vec<PageBounds> {
+        let mut bounds = Vec::new();
+        for key in &self.order {
+            let r = &self.residents[key];
+            if r.uploaded == r.bytes.len() {
+                bounds.extend(r.bounds.iter().copied());
+            }
+        }
+        bounds
     }
 }
 
@@ -719,7 +742,7 @@ mod tests {
         match route {
             super::super::Route::Stream => {
                 let request = main.request(shape, eye);
-                main.advance(request, spawn, false, |_, _| {}, |_| {});
+                main.advance(request, spawn, false, |_, _| {});
             }
             super::super::Route::Share => {}
             super::super::Route::Panel(_) => {
@@ -732,7 +755,7 @@ mod tests {
                     ..shape
                 };
                 let request = panel.request(shape, eye);
-                panel.advance(request, spawn, true, |_, _| {}, |_| {});
+                panel.advance(request, spawn, true, |_, _| {});
             }
         }
         route
@@ -899,8 +922,8 @@ mod tests {
                 || Worker::new(atlas.clone(), library(), &world),
                 true,
                 |_, _| {},
-                |_| {},
             );
+            assert_eq!(panel.bounds.len() * 2, panel.table.len());
             if panel.ready.as_ref().is_some_and(|r| r.done) {
                 break;
             }

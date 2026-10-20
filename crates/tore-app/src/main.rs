@@ -167,6 +167,7 @@ mod variety_animation;
 mod variety_rotors;
 mod vegetation;
 mod vegetation_limits;
+mod vegetation_pages;
 mod vegetation_preview;
 mod vegetation_renderer;
 mod vegetation_shapes;

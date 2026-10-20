@@ -1,5 +1,5 @@
 //! Extensible 3D pass. World data/camera are independent of wgpu; UI composites afterward.
-use crate::terrain_chunks::Bounds;
+use crate::terrain_chunks::CasterShape;
 pub use crate::vegetation_renderer::ViewKind;
 use crate::{
     camera::Camera,
@@ -232,7 +232,7 @@ pub struct SimRenderer {
         tore_formats::aircraft::AircraftId,
         AircraftBatch,
         Vec<Contact>,
-        Bounds,
+        CasterShape,
     )>,
     spot_instances: wgpu::Buffer,
     vapor: Option<(wgpu::Buffer, u32)>,
@@ -290,23 +290,14 @@ pub struct SimRenderer {
 }
 /// The vertex boxes of the object batches, kept beside their buffers so a
 /// shadow cascade can skip a batch wholly outside it.
-#[derive(Clone, Copy)]
+/// Each defaults to never culled and every triangle tested, until an
+/// upload measures the batch.
+#[derive(Clone, Default)]
 struct CasterBounds {
-    aircraft: Bounds,
-    battle: Bounds,
-    airports: Bounds,
-    surface_units: Bounds,
-}
-impl Default for CasterBounds {
-    /// Never culled until an upload measures the batch.
-    fn default() -> Self {
-        Self {
-            aircraft: Bounds::ALL,
-            battle: Bounds::ALL,
-            airports: Bounds::ALL,
-            surface_units: Bounds::ALL,
-        }
-    }
+    aircraft: CasterShape,
+    battle: CasterShape,
+    airports: CasterShape,
+    surface_units: CasterShape,
 }
 /// Whether a terrain triangle on texture `layer` always casts its whole
 /// shadow: untextured terrain, or a page with no cut-out (255) texel, so
@@ -1302,7 +1293,7 @@ impl SimRenderer {
                 write_floats(queue, buffer, 0, &vertices[..length]);
             }
             *count = (length / 10) as u32;
-            self.bounds.battle = Bounds::of_vertices(&vertices[..length]);
+            self.bounds.battle = CasterShape::of(&vertices[..length]);
             // Aircraft cut off by the buffer budget are not drawn at all.
             let drawn = *count;
             self.battle_contacts.clear();
@@ -1356,7 +1347,7 @@ impl SimRenderer {
             write_floats(queue, buffer, 0, vertices);
         }
         *count = (vertices.len() / 10) as u32;
-        self.bounds.surface_units = Bounds::of_vertices(vertices);
+        self.bounds.surface_units = CasterShape::of(vertices);
     }
     fn airport_vertices(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
         if self.airports.is_none() {
@@ -1380,7 +1371,7 @@ impl SimRenderer {
                 write_floats(queue, buffer, 0, &vertices[..length]);
             }
             *count = (length / 10) as u32;
-            self.bounds.airports = Bounds::of_vertices(vertices);
+            self.bounds.airports = CasterShape::of(vertices);
         }
     }
     fn airport_lines(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
@@ -1435,7 +1426,7 @@ impl SimRenderer {
         geometry: Vec<(&crate::aircraft::Airframe, Vec<f32>, Vec<Contact>)>,
     ) {
         let ownship = self.aircraft.take();
-        let ownship_bounds = self.bounds.aircraft;
+        let ownship_bounds = std::mem::take(&mut self.bounds.aircraft);
         let visible = self.aircraft_visible;
         let canopy = self.canopy_visible;
         let mut old = std::mem::take(&mut self.dummies);
@@ -1449,7 +1440,7 @@ impl SimRenderer {
                 model.profile.id,
                 self.aircraft.take().unwrap(),
                 contacts,
-                self.bounds.aircraft,
+                std::mem::take(&mut self.bounds.aircraft),
             ));
         }
         self.aircraft = ownship;
@@ -1485,7 +1476,7 @@ impl SimRenderer {
         vertices: &[f32],
     ) {
         let ownship = self.aircraft.take();
-        let ownship_bounds = self.bounds.aircraft;
+        let ownship_bounds = std::mem::take(&mut self.bounds.aircraft);
         let visible = self.aircraft_visible;
         let canopy = self.canopy_visible;
         self.aircraft = self.escapees.take();
@@ -1630,7 +1621,7 @@ impl SimRenderer {
             }
             *count = (vertices.len() / 10) as u32;
             self.canopy_visible = vertices.chunks_exact(10).any(|v| v[5] == -5.);
-            self.bounds.aircraft = Bounds::of_vertices(vertices);
+            self.bounds.aircraft = CasterShape::of(vertices);
         }
     }
     pub fn update_aircraft_vertices(&mut self, queue: &wgpu::Queue, vertices: &[f32]) {
@@ -1642,7 +1633,7 @@ impl SimRenderer {
             }
             *count = (vertices.len() / 10) as u32;
             self.canopy_visible = vertices.chunks_exact(10).any(|v| v[5] == -5.);
-            self.bounds.aircraft = Bounds::of_vertices(vertices);
+            self.bounds.aircraft = CasterShape::of(vertices);
         }
     }
     /// The next view of each camera takes the sun's measured visibility at
@@ -2273,15 +2264,26 @@ impl SimRenderer {
             .prepare(queue, camera, world, scenery, &lights)
         {
             use crate::surface_lighting::Caster;
-            let caster = |bind, buffer, count, bounds: Bounds| Caster {
-                bind,
-                buffer,
-                count,
-                bounds: bounds.relative(local_eye),
-            };
+            fn caster<'a>(
+                bind: &'a wgpu::BindGroup,
+                buffer: &'a wgpu::Buffer,
+                count: u32,
+                shape: &'a CasterShape,
+                eye: [f64; 3],
+            ) -> Caster<'a> {
+                Caster {
+                    bind,
+                    buffer,
+                    count,
+                    bounds: shape.bounds.relative(eye),
+                    opaque: &shape.opaque,
+                    tested: &shape.tested,
+                }
+            }
+            let caster = |bind, buffer, count, shape| caster(bind, buffer, count, shape, local_eye);
             let mut objects = Vec::new();
             if let Some((buffer, count)) = &self.airports {
-                objects.push(caster(&self.bind, buffer, *count, self.bounds.airports));
+                objects.push(caster(&self.bind, buffer, *count, &self.bounds.airports));
             }
             if let Some((buffer, count)) = &self.surface_units
                 && *count > 0
@@ -2290,17 +2292,17 @@ impl SimRenderer {
                     &self.bind,
                     buffer,
                     *count,
-                    self.bounds.surface_units,
+                    &self.bounds.surface_units,
                 ));
             }
             if let Some((bind, buffer, count)) = &self.aircraft {
-                objects.push(caster(bind, buffer, *count, self.bounds.aircraft));
+                objects.push(caster(bind, buffer, *count, &self.bounds.aircraft));
                 if let Some((buffer, count)) = &self.battle {
-                    objects.push(caster(bind, buffer, *count, self.bounds.battle));
+                    objects.push(caster(bind, buffer, *count, &self.bounds.battle));
                 }
             }
-            for (_, (bind, buffer, count), _, bounds) in &self.dummies {
-                objects.push(caster(bind, buffer, *count, *bounds));
+            for (_, (bind, buffer, count), _, shape) in &self.dummies {
+                objects.push(caster(bind, buffer, *count, shape));
             }
             self.lighting.draw(
                 encoder,
@@ -3298,7 +3300,7 @@ mod lighting_tests {
                     });
                     renderer.aircraft =
                         Some((renderer.bind.clone(), buffer, (object.len() / 10) as u32));
-                    renderer.bounds.aircraft = Bounds::of_vertices(&object);
+                    renderer.bounds.aircraft = CasterShape::of(&object);
                 }
                 if !terrain_caster {
                     renderer.hide_aircraft();
