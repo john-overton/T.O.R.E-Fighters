@@ -3713,8 +3713,10 @@ mod lighting_tests {
                 "low-sun back slope must darken from its preceding 20-level fill, got {}",
                 shaded_land[pixel]
             );
-            // Reference values from the unchanged response on this synthetic grey slope.
-            for (image, expected) in [(&morning, 90), (&noon_land, 56), (&night_land, 24)] {
+            // Reference values from the response on this synthetic grey slope. The
+            // morning value includes the low-sun ground lift (surface_lighting.wgsl
+            // `ground_facing`, 2026-10-20); noon and night are unchanged by it.
+            for (image, expected) in [(&morning, 144), (&noon_land, 56), (&night_land, 24)] {
                 assert!(
                     (i32::from(image[pixel]) - expected).abs() <= 2,
                     "preserve exposed/day/night land brightness: got {} expected {expected}",
