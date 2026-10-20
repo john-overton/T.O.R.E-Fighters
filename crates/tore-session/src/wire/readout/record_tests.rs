@@ -36,7 +36,7 @@ fn random(rng: &mut SplitMix64) -> QReadout {
         for _ in 0..below(rng, 14) {
             let id = below(rng, 60) as u32;
             let values = entry(rng, index);
-            q.lists[index].insert(id, values);
+            q.lists[index].insert(id, values.into());
         }
     }
     for _ in 0..below(rng, 6) {
@@ -76,7 +76,7 @@ fn changed(rng: &mut SplitMix64, base: &QReadout) -> QReadout {
         for _ in 0..below(rng, 4) {
             let id = below(rng, 60) as u32;
             let values = entry(rng, index);
-            q.lists[index].insert(id, values);
+            q.lists[index].insert(id, values.into());
         }
     }
     let ids: Vec<u32> = q.trails.keys().copied().collect();

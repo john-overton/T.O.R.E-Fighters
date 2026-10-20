@@ -37,6 +37,7 @@
 use super::bits::{self, read_u32};
 use super::entity::GUN_AIM_STEPS;
 use super::flat::{self, Kind, List, ListRaw, Schema, Slow};
+use super::row::Row;
 use super::snapshot::{BASELINE_BACK_BITS, HISTORY_SNAPSHOTS, MAX_BASELINE_BACK, PENDING_PACKETS};
 use super::{WireError, WireResult};
 use std::borrow::Cow;
@@ -760,10 +761,10 @@ fn coarse(p: Vector) -> [i64; 3] {
     p.map(|x| q(x, COARSE_FT))
 }
 
-fn contact_values(c: &Contact) -> Vec<i64> {
+fn contact_values(c: &Contact) -> Row {
     let [x, y, z] = coarse(c.position);
     let [vx, vy, vz] = c.velocity.map(|x| q(x, COARSE_FPS));
-    vec![
+    Row::from([
         channel_code(c.channel),
         x,
         y,
@@ -773,11 +774,11 @@ fn contact_values(c: &Contact) -> Vec<i64> {
         vz,
         flag(c.track_eligible),
         flag(c.destroyed),
-    ]
+    ])
 }
 
-fn row_values(row: &TargetRow) -> Vec<i64> {
-    let mut out = vec![aircraft_code(row.aircraft)];
+fn row_values(row: &TargetRow) -> Row {
+    let mut out = Row::from([aircraft_code(row.aircraft)]);
     out.extend(row.position.map(|x| q(x, FINE_FT)));
     out.extend(row.velocity.map(|x| q(x, FINE_FPS)));
     out.push(i64::from(row.damage.hp));
@@ -787,8 +788,8 @@ fn row_values(row: &TargetRow) -> Vec<i64> {
     out
 }
 
-fn observation_values(o: &seeker::Observation) -> Vec<i64> {
-    let mut out: Vec<i64> = o.position.map(|x| q(x, FINE_FT)).to_vec();
+fn observation_values(o: &seeker::Observation) -> Row {
+    let mut out = Row::from(o.position.map(|x| q(x, FINE_FT)));
     out.extend(o.velocity.map(|x| q(x, FINE_FPS)));
     out.push(q(o.quality, FRACTION));
     out.push(q(o.off_axis, SMALL_ANGLE));
@@ -1149,7 +1150,7 @@ impl QReadout {
         );
 
         let l = &mut out.lists;
-        let mut one = |index: usize, id: u32, values: Vec<i64>| {
+        let mut one = |index: usize, id: u32, values: Row| {
             l[index].insert(id, values);
         };
         if let Some(o) = &sk.observation {
@@ -1165,10 +1166,10 @@ impl QReadout {
             one(list::VIEW, row.id, row_values(row));
         }
         if let Some((id, position)) = music.designated_enemy {
-            one(list::ENEMY, id, coarse(position).to_vec());
+            one(list::ENEMY, id, Row::from(coarse(position)));
         }
         for m in &readout.rwr.inbound {
-            let mut values = coarse(m.position).to_vec();
+            let mut values = Row::from(coarse(m.position));
             values.extend([i64::from(m.seeker_class), flag(m.aim120)]);
             l[list::INBOUND].insert(m.id, values);
         }
@@ -1189,7 +1190,7 @@ impl QReadout {
             };
             l[list::THREATS].insert(
                 r.missile_id,
-                vec![
+                Row::from([
                     source,
                     r.observed_tick as i64 - readout.tick as i64,
                     q(r.bearing_deg, DEGREES),
@@ -1207,7 +1208,7 @@ impl QReadout {
                     flag(r.stale),
                     flag(r.radar_bearing_deg.is_some()),
                     r.radar_bearing_deg.map_or(0, |b| q(b, DEGREES)),
-                ],
+                ]),
             );
         }
         for em in &readout.rwr.emitters {
@@ -1218,13 +1219,13 @@ impl QReadout {
             };
             l[list::EMITTERS].insert(
                 em.id,
-                vec![
+                Row::from([
                     q(em.bearing_rad, DIAL),
                     flag(em.distance_nmi.is_some()),
                     em.distance_nmi.map_or(0, |d| q(d, EMITTER_NMI)),
                     symbol,
                     q(em.received, EMPHASIS),
-                ],
+                ]),
             );
         }
         for c in &se.contacts {
@@ -1238,20 +1239,20 @@ impl QReadout {
         for st in &se.strobes {
             l[list::STROBES].insert(
                 st.id,
-                vec![
+                Row::from([
                     q(st.bearing_rad, ANGLE),
                     q(st.elevation_rad, ANGLE),
                     q(st.received, FRACTION),
                     q(st.half_width_rad, SMALL_ANGLE),
                     q(st.sidelobe_floor, FRACTION),
-                ],
+                ]),
             );
         }
         for p in &se.plots {
             let [x, y, z] = coarse(p.position);
             l[list::PLOTS].insert(
                 p.id,
-                vec![
+                Row::from([
                     channel_code(p.channel),
                     q(p.bearing_rad, ANGLE),
                     q(p.elevation_rad, ANGLE),
@@ -1260,7 +1261,7 @@ impl QReadout {
                     y,
                     z,
                     i64::from(p.age),
-                ],
+                ]),
             );
         }
         for c in &readout.visual {
@@ -1280,29 +1281,32 @@ impl QReadout {
         for t in &link.tracks {
             let [x, y, z] = coarse(t.position);
             let [vx, vy, vz] = t.velocity.map(|x| q(x, COARSE_FPS));
-            l[list::LINK_TRACKS].insert(t.target, vec![source_code(t.source), x, y, z, vx, vy, vz]);
+            l[list::LINK_TRACKS].insert(
+                t.target,
+                Row::from([source_code(t.source), x, y, z, vx, vy, vz]),
+            );
         }
         for m in &link.marks {
             l[list::LINK_MARKS].insert(
                 m.target,
-                vec![
+                Row::from([
                     i64::from(m.lockers),
                     flag(m.net_lock.is_some()),
                     m.net_lock.map_or(0, |n| i64::from(n.flight)),
                     m.net_lock.map_or(0, |n| i64::from(n.member)),
                     i64::from(m.assigned_to),
-                ],
+                ]),
             );
         }
         for m in &link.mates {
             l[list::LINK_MATES].insert(
                 m.plane,
-                vec![
+                Row::from([
                     i64::from(m.member),
                     fuel_code(m.fuel),
                     weapons_code(m.weapons),
                     link_damage_code(m.damage),
-                ],
+                ]),
             );
         }
         for trail in &se.trails {

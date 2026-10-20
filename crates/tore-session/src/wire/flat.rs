@@ -11,6 +11,7 @@
 //! predicts it, on both ends). Every record parses without its baseline.
 
 use super::bits::{self, div_round, in_range, read_uladder, write_uladder};
+use super::row::Row;
 use super::{WireError, WireResult};
 use std::collections::BTreeMap;
 use tore_codec::{BitReader, BitWriter, CodecError};
@@ -47,8 +48,8 @@ fn moving(kind: Kind) -> bool {
 }
 
 /// `base` moved on by `ticks`: its predicted positions advance.
-pub(crate) fn advance(schema: Schema, base: &[i64], ticks: u32) -> Vec<i64> {
-    let mut out = base.to_vec();
+pub(crate) fn advance(schema: Schema, base: &[i64], ticks: u32) -> Row {
+    let mut out = Row::from(base);
     for (index, kind) in schema.iter().enumerate() {
         if let Kind::Pos { vel, divisor } = *kind {
             let moved = i128::from(base[index])
@@ -74,7 +75,7 @@ fn velocities_hold(schema: Schema) -> bool {
 }
 
 /// `values` moved on by `ticks` where they are, as [`advance`] gives.
-pub(crate) fn advance_in_place(schema: Schema, values: &mut Vec<i64>, ticks: u32) {
+pub(crate) fn advance_in_place(schema: Schema, values: &mut Row, ticks: u32) {
     if !velocities_hold(schema) {
         *values = advance(schema, values, ticks);
         return;
@@ -242,7 +243,7 @@ pub(crate) fn apply(schema: Schema, delta: &Delta, base: &[i64]) -> WireResult<V
 const ID_LADDER: [u32; 3] = [0, 4, 10];
 
 /// A list keyed by id.
-pub(crate) type List = BTreeMap<u32, Vec<i64>>;
+pub(crate) type List = BTreeMap<u32, Row>;
 
 /// Every entry of `base` advanced by `ticks`.
 #[cfg(test)]
@@ -544,12 +545,12 @@ pub(crate) fn apply_list(
     }
     for (id, entry) in &raw.entries {
         let values = match entry {
-            EntryRaw::Full(values) => values.clone(),
+            EntryRaw::Full(values) => Row::from(&values[..]),
             EntryRaw::Delta(delta) => {
                 let old = base
                     .get(id)
                     .ok_or(WireError::Invalid("readout entry without a baseline"))?;
-                apply(schema, delta, old)?
+                Row::from(apply(schema, delta, old)?)
             }
         };
         out.insert(*id, values);
@@ -581,15 +582,15 @@ mod tests {
     #[test]
     fn lists_round_trip_and_fill_in_over_several_records() {
         let mut base = List::new();
-        base.insert(3, vec![1, 1_000, 4_000, 480, -5]);
-        base.insert(9, vec![0, 0, 10, 0, 0]);
+        base.insert(3, vec![1, 1_000, 4_000, 480, -5].into());
+        base.insert(9, vec![0, 0, 10, 0, 0].into());
         let advanced = advance_list(SCHEMA, &base, 4);
         assert_eq!(advanced[&3][1], 1_004);
         let mut now = advanced.clone();
         now.remove(&9);
         now.get_mut(&3).unwrap()[2] = 4_098;
         for id in 10..40 {
-            now.insert(id, vec![2, i64::from(id) * 7, 1, -3, 1]);
+            now.insert(id, vec![2, i64::from(id) * 7, 1, -3, 1].into());
         }
         let mut have = advanced.clone();
         let mut rounds = 0;
