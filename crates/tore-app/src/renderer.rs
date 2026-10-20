@@ -805,6 +805,8 @@ impl Renderer {
         height: u32,
         overlay: bool,
     ) -> AppResult<Vec<u8>> {
+        // A still shows the sun as it is, not eased from an earlier frame.
+        self.sim.snap_sun_visibility();
         let pending =
             self.submit_readback(kind, camera, world, scenery, width, height, overlay, false)?;
         self.device.poll(wgpu::PollType::Wait {
