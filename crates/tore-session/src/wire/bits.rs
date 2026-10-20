@@ -231,6 +231,21 @@ pub fn append(destination: &mut BitWriter, source: &BitWriter) {
     }
 }
 
+/// Appends the `len` bits of `source` that start at bit `start`, as
+/// [`append`] appends a whole writer.
+pub fn append_range(destination: &mut BitWriter, source: &BitWriter, start: usize, len: usize) {
+    debug_assert!(start + len <= source.bit_len());
+    let mut r = BitReader::new(&source.as_bytes()[start / 8..]);
+    let _ = r.read_bits((start % 8) as u32);
+    let mut left = len;
+    while left > 0 {
+        let take = left.min(32) as u32;
+        let value = r.read_bits(take).unwrap_or(0);
+        let _ = destination.write_bits(value, take);
+        left -= take as usize;
+    }
+}
+
 /// The body's bytes: padded with zero bits to a whole byte.
 pub fn finish(mut w: BitWriter) -> Vec<u8> {
     w.align();
