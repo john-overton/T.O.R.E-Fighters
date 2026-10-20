@@ -3167,7 +3167,11 @@ again with an observer; the capture format did not change for it.
   57 since the F-15C wing pylons moved inboard (slice v2-f15 second follow-up):
   the shoulder rails are back at 1.75 ft either side of their pylon, and the
   whole wing pylon assembly sits 11 ft from the centreline instead of 16.7 ft,
-  which moves those stores' release points, so an older game must not join.
+  which moves those stores' release points, so an older game must not join;
+  58 since the F-15C wing pylons moved forward (slice v2-f15 forward pass): the
+  whole wing assembly sits 7 ft further forward, just behind the leading edge,
+  which moves those stores' release points again, so an older game must not
+  join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
