@@ -1767,8 +1767,10 @@ fn sky_deck_cover(ray:vec3<f32>)->f32 {
 // Night sky (night_sky.rs): a procedural starfield fixed to the celestial
 // sphere, turning with the mission clock about the theater's pole. Each cell
 // of a cube over the sphere may hold one star, placed and coloured by a fixed
-// hash; a star lights one block of 1/540-of-height pixels (a cross for the
-// brightest), so it stays a crisp retro point at any resolution.
+// hash. A star is a square of 1/1080 of the image height (a cross for the
+// brightest) placed at its exact sub-pixel position: each pixel takes the
+// share of the square it covers, in linear light, so the star keeps a crisp
+// retro footprint yet glides as the sky turns and the camera moves.
 fn star_hash(p:vec3<u32>)->vec4<f32> {
  // PCG3D (Jarzynski and Olano 2020), plus a fourth lane from the mix.
  var v=p*1664525u+1013904223u;
@@ -1779,6 +1781,19 @@ fn star_hash(p:vec3<u32>)->vec4<f32> {
  return vec4<f32>(vec4<u32>(v,w^(w>>16u))>>vec4<u32>(8u))/16777216.0;
 }
 const STAR_CELLS:f32=96.0;
+const STAR_ROWS:f32=1080.0;
+const STAR_INTENSITY:f32=0.95;
+const STAR_ARM:f32=0.35;
+const STAR_FIRST:f32=0.55;
+const STAR_RAMP:f32=0.35;
+// The share of the pixel centred on `pixel` that a star square of side
+// `block` centred on `center` covers (night_sky.rs `star_cover`).
+fn star_cover(center:vec2<f32>,pixel:vec2<f32>,block:f32)->f32 {
+ let low=max(center-vec2<f32>(0.5*block),pixel-vec2<f32>(0.5));
+ let high=min(center+vec2<f32>(0.5*block),pixel+vec2<f32>(0.5));
+ let overlap=max(high-low,vec2<f32>(0.0));
+ return overlap.x*overlap.y;
+}
 fn starfield(color:vec3<f32>,ray:vec3<f32>,pixel:vec2<f32>,screen:vec2<f32>)->vec3<f32> {
  // Derivatives first, in uniform control flow: pixels per NDC unit.
  let per_ndc=vec2<f32>(1.0/dpdx(screen.x),1.0/dpdy(screen.y));
@@ -1816,28 +1831,41 @@ fn starfield(color:vec3<f32>,ray:vec3<f32>,pixel:vec2<f32>,screen:vec2<f32>)->ve
  if depth<=0.0 || star.y<=0.0 {return color;}
  let ndc=vec2<f32>(dot(star,scene.right.xyz)/depth*1.7320508*scene.up.w/scene.eye.w,dot(star,scene.up.xyz)/depth*1.7320508*scene.up.w);
  let star_pixel=pixel+(ndc-screen)*per_ndc;
- let block=max(1.0,round(scene.viewport.y/540.0));
- let offset=floor(star_pixel/block)-floor(pixel/block);
- // Brightness: most stars faint, a few bright; five retro levels.
+ // The share of this pixel the star's square covers, and its cross arms'.
  let magnitude=pow(h2.z,9.0);
- let level=floor((0.18+0.82*magnitude)*5.0+0.5)/5.0;
- var lit=0.0;
- if all(offset==vec2<f32>(0.0)) {lit=level;}
- else if magnitude>0.6 && abs(offset.x)+abs(offset.y)==1.0 {lit=level*0.35;}
- if lit<=0.0 {return color;}
+ let block=max(1.0,scene.viewport.y/STAR_ROWS);
+ let core=star_cover(star_pixel,pixel,block);
+ var arms=0.0;
+ if magnitude>0.6 {
+  arms=star_cover(star_pixel+vec2<f32>(block,0.0),pixel,block)+star_cover(star_pixel-vec2<f32>(block,0.0),pixel,block)
+   +star_cover(star_pixel+vec2<f32>(0.0,block),pixel,block)+star_cover(star_pixel-vec2<f32>(0.0,block),pixel,block);
+ }
+ if core+arms<=0.0 {return color;}
+ // Brightness: most stars faint, a few bright; five retro levels.
+ let level=floor((0.18+0.82*magnitude)*5.0+0.5)/5.0*STAR_INTENSITY;
  // Tint by a few stellar colours.
  var tint=vec3<f32>(1.0);
  if h2.w<0.18 {tint=vec3<f32>(0.75,0.85,1.0);}
  else if h2.w<0.32 {tint=vec3<f32>(1.0,0.93,0.78);}
  else if h2.w<0.37 {tint=vec3<f32>(1.0,0.72,0.55);}
- // Hidden by a bright sky, low near the horizon, washed out near the moon.
+ // How dark the sky is here: the twilight and star-flag fade, bright sky
+ // (toward the sun and the horizon at dusk and dawn), the horizon itself and
+ // the moon's glow. The brightest stars show first as it darkens and go last.
  let sky_light=dot(color,vec3<f32>(0.2126,0.7152,0.0722));
- var seen=scene.stars.w*(1.0-smoothstep(0.15,0.4,sky_light))*smoothstep(0.0,0.09,ray.y);
+ var dark=scene.stars.w*(1.0-smoothstep(0.15,0.4,sky_light))*smoothstep(0.0,0.09,ray.y);
  if scene.moon.w>0.0 {
   let apart=acos(clamp(dot(ray,scene.moon.xyz),-1.0,1.0));
-  seen*=1.0-0.85*scene.moon.w*exp(-apart*apart/0.03);
+  dark*=1.0-0.85*scene.moon.w*exp(-apart*apart/0.03);
  }
- return color+tint*lit*seen;
+ let first=STAR_FIRST*(1.0-h2.z);
+ let seen=smoothstep(first,first+STAR_RAMP,dark);
+ // A whole pixel of star adds its level to the sky's (linear) light, up to
+ // white; a partly covered pixel takes that share, so the star's light and
+ // centre stay the same wherever it sits.
+ let under=clamp(color,vec3<f32>(0.0),vec3<f32>(1.0));
+ var light=(min(under+tint*level*seen,vec3<f32>(1.0))-under)*core;
+ if arms>0.0 {light+=(min(under+tint*level*STAR_ARM*seen,vec3<f32>(1.0))-under)*arms;}
+ return under+light;
 }
 @fragment fn sky_fragment(in:SkyOut)->@location(0) vec4<f32>{
  let ray=normalize(scene.forward.xyz+scene.right.xyz*in.screen.x*scene.eye.w/(1.7320508*scene.up.w)+scene.up.xyz*in.screen.y/(1.7320508*scene.up.w));
