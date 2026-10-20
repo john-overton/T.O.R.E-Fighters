@@ -437,6 +437,29 @@ pub struct AiActor {
     last_visual: Vec<awareness::VisualTrace>,
 }
 
+/// Places by id, sorted: of a repeated id the first place answers, as a
+/// walk from the front finds it.
+#[derive(Clone, Debug, Default)]
+pub struct Places(Vec<(u32, usize)>);
+impl Places {
+    /// The places of `ids`, in order.
+    pub fn of(ids: impl Iterator<Item = u32>) -> Self {
+        let mut places: Vec<(u32, usize)> = ids.enumerate().map(|(at, id)| (id, at)).collect();
+        // Sorted by id and then place, so the first of each id is its first
+        // place.
+        places.sort_unstable();
+        places.dedup_by_key(|(id, _)| *id);
+        Self(places)
+    }
+    /// The first place of `id`.
+    pub fn get(&self, id: u32) -> Option<usize> {
+        self.0
+            .binary_search_by_key(&id, |(id, _)| *id)
+            .ok()
+            .map(|at| self.0[at].1)
+    }
+}
+
 /// What the journal already said about one actor, so a state that holds for
 /// many ticks is journaled once. Never read by a decision.
 #[derive(Clone, Copy, Debug, Default)]
@@ -2386,6 +2409,12 @@ impl AiMission {
         self.actors.iter_mut().find(|a| a.id() == id)
     }
 
+    /// Each actor's place in [`Self::actors`] by id, for many lookups in a
+    /// row while no actor joins or leaves: the place [`Self::actor`] finds.
+    pub fn actor_places(&self) -> Places {
+        Places::of(self.actors.iter().map(AiActor::id))
+    }
+
     pub fn tick(&self) -> u64 {
         self.tick
     }
@@ -3668,7 +3697,7 @@ impl AiMission {
             })
             .map(|s| super::gunnery::Target {
                 id: s.target.id,
-                position: s.target.position,
+                position: awareness::held_position(s, tick),
                 velocity: s.velocity,
                 basis: world
                     .iter()
@@ -4541,7 +4570,10 @@ impl AiActor {
             .collect();
         self.awareness
             .current_observations()
-            .map(|snapshot| snapshot.target)
+            .map(|snapshot| TargetView {
+                position: awareness::held_position(snapshot, tick),
+                ..snapshot.target
+            })
             .filter(|target| {
                 world
                     .iter()
@@ -4988,24 +5020,20 @@ impl AiActor {
     }
 
     /// The hybrid model's loaded low-speed positive G ceiling at `speed` with
-    /// the current flaps, as the control adapter computes it; `None` above
-    /// the ramp or for an aircraft without a 1 G envelope here.
-    fn hybrid_ramp_g(&self, speed: f64) -> Option<f64> {
+    /// the current flaps, as the control adapter computes it, from the rows'
+    /// bands at the current altitude; `None` above the ramp or for an
+    /// aircraft without a 1 G envelope here.
+    fn hybrid_ramp_g_with(&self, rows: &crate::flight::RowSpeeds, speed: f64) -> Option<f64> {
         let config = self.flight.model().configuration();
-        let altitude = self.flight.position[1];
-        let (clean_stall, _) = config
-            .aerodynamics
-            .envelopes
-            .iter()
-            .find(|e| e.g == 1)?
-            .speeds(altitude)?;
+        let (clean_stall, _) = rows.one_g()?;
         let stall = clean_stall * (1.0 - 0.25 * self.flight.flaps);
         let loading = 1.0
             + (self.flight.fuel + self.flight.carried_lbs()) / config.mass.empty_lbs
                 * config.aerodynamics.loaded_elevator_percent
                 / 100.0;
-        crate::flight::low_speed_positive_g_ceiling(config, altitude, speed, stall, false)
-            .map(|g| g / loading)
+        let next = crate::flight::low_speed_ramp_end(rows.bands(), stall)?;
+        crate::flight::low_speed_ceiling_on(next, speed, stall, false)
+            .map(|ceiling| ceiling.limit_g / loading)
     }
 
     /// Fitted (agent decision, 2026-09-29): the slowest speed at which the
@@ -5032,9 +5060,21 @@ impl AiActor {
             + (self.flight.fuel + self.flight.carried_lbs()) / config.mass.empty_lbs
                 * config.aerodynamics.loaded_elevator_percent
                 / 100.0;
+        // Where the ramp ends does not depend on the speed: found once.
+        let next = crate::flight::low_speed_ramp_end(
+            config
+                .aerodynamics
+                .envelopes
+                .iter()
+                .filter(|envelope| envelope.g > 1)
+                .map(|envelope| (envelope.g, envelope.speeds(altitude))),
+            stall,
+        );
         let mut speed = stall;
         while speed < maximum {
-            match crate::flight::low_speed_positive_g_ceiling(config, altitude, speed, stall, false)
+            match next
+                .and_then(|next| crate::flight::low_speed_ceiling_on(next, speed, stall, false))
+                .map(|ceiling| ceiling.limit_g)
             {
                 Some(g) if g / loading < APPROACH_G_MARGIN => speed += 5.0,
                 _ => return speed,
@@ -5046,12 +5086,12 @@ impl AiActor {
     /// The loaded G limits, already carrying the AI-only experience
     /// adjustment. A human-flown aircraft is exempt and never reaches here.
     fn g_limits(&self) -> (f64, f64) {
-        let envelopes = &self.flight.model().configuration().aerodynamics.envelopes;
-        let altitude = self.flight.position[1];
         let speed = self.flight.speed;
+        // Every row's band once: the passes below all read them.
+        let rows = crate::flight::RowSpeeds::of(&self.flight);
         let mut available = 1;
-        for envelope in envelopes {
-            if let Some((low, high)) = envelope.speeds(altitude)
+        for (envelope, speeds) in rows.rows() {
+            if let Some((low, high)) = speeds
                 && speed >= low
                 && speed <= high
                 && envelope.g > available
@@ -5070,13 +5110,11 @@ impl AiActor {
         // already assumes. Before this a loaded aircraft slowing on final was
         // held below 1 G, could not hold its path and sank into the ground.
         if self.flight.research.is_some() {
-            if let Some(ramp) = self.hybrid_ramp_g(speed) {
+            if let Some(ramp) = self.hybrid_ramp_g_with(&rows, speed) {
                 loaded = loaded.max(ramp);
             }
-            if envelopes.iter().any(|e| {
-                e.g == 1
-                    && e.speeds(altitude)
-                        .is_some_and(|(low, high)| speed >= low && speed <= high)
+            if rows.rows().any(|(e, speeds)| {
+                e.g == 1 && speeds.is_some_and(|(low, high)| speed >= low && speed <= high)
             }) {
                 loaded = loaded.max(1.0);
             }
@@ -6312,6 +6350,8 @@ mod tests {
     #[test]
     fn lost_contact_inside_retention_distance_searches_without_firing_then_reacquires() {
         let mut mission = AiMission::new();
+        // Written for observation every tick.
+        mission.set_test_settings(AiTestSettings::every_tick());
         mission.push(perception_actor(Experience::Novice));
         let target = visible_object(mission.actor(1).unwrap(), 2, [0., 20000., 5000.]);
         mission
@@ -8138,6 +8178,9 @@ mod engagement_integration_tests;
 #[cfg(test)]
 #[path = "airfield_integration_tests.rs"]
 mod airfield_integration_tests;
+#[cfg(test)]
+#[path = "envelope_rows_tests.rs"]
+mod envelope_rows_tests;
 
 #[cfg(test)]
 #[path = "vertical_field_tests.rs"]
@@ -8156,14 +8199,14 @@ mod checkpoint;
 /// altitude. The AC-130's orbit hold plans with the same numbers as the AI
 /// gunship (docs/spec/ac130-linked-guns.md, "The orbit").
 pub fn speed_limits_of(flight: &crate::flight::State) -> SpeedLimits {
-    let envelopes = &flight.model().configuration().aerodynamics.envelopes;
-    let altitude = flight.position[1];
+    // Every row's band once: the passes below all read them.
+    let rows = crate::flight::RowSpeeds::of(flight);
     let mut minimum = f64::INFINITY;
     let mut maximum = f64::NEG_INFINITY;
     let mut corner = f64::NAN;
     let mut best_g = i32::MIN;
-    for envelope in envelopes {
-        let Some((low, high)) = envelope.speeds(altitude) else {
+    for (envelope, speeds) in rows.rows() {
+        let Some((low, high)) = speeds else {
             continue;
         };
         minimum = minimum.min(low);
@@ -8189,7 +8232,7 @@ pub fn speed_limits_of(flight: &crate::flight::State) -> SpeedLimits {
     // current flap setting (`flight::State::minimum_level_speed`); on the
     // F/A-18D the rows alone gave 114 kt against the 140 kt it needs, and
     // finals built on it sank into the ground.
-    let level = flight.minimum_level_speed(altitude, flight.flaps);
+    let level = flight.minimum_level_speed_with(&rows, flight.flaps);
     if level < maximum {
         minimum = minimum.max(level);
     }
@@ -8205,10 +8248,10 @@ pub fn speed_limits_of(flight: &crate::flight::State) -> SpeedLimits {
         + (flight.fuel + flight.payload_lbs) / config.mass.empty_lbs
             * config.aerodynamics.loaded_elevator_percent
             / 100.0;
-    let manoeuvring = envelopes
-        .iter()
-        .filter(|e| f64::from(e.g) / load >= TOP_SPEED_G_MARGIN)
-        .filter_map(|e| e.speeds(altitude).map(|(_, high)| high))
+    let manoeuvring = rows
+        .rows()
+        .filter(|(e, _)| f64::from(e.g) / load >= TOP_SPEED_G_MARGIN)
+        .filter_map(|(_, speeds)| speeds.map(|(_, high)| high))
         .fold(f64::NEG_INFINITY, f64::max);
     if manoeuvring > minimum {
         maximum = maximum.min(manoeuvring);

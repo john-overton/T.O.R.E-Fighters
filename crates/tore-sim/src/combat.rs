@@ -195,6 +195,8 @@ impl PlayerTrigger {
     }
 }
 
+/// The most [`FallState`] lets a round's fall speed grow to (f8 per tick).
+pub const FALL_SPEED_CAP_F8: u16 = 0x5000;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FallState {
     pub velocity_f8: u16,
@@ -218,7 +220,10 @@ impl FallState {
         }
         let ticks = i32::from(service_ticks);
         let delta = ticks.wrapping_shl(13) / 256;
-        self.velocity_f8 = self.velocity_f8.wrapping_add(delta as u16).min(0x5000);
+        self.velocity_f8 = self
+            .velocity_f8
+            .wrapping_add(delta as u16)
+            .min(FALL_SPEED_CAP_F8);
         let displacement = i32::from(self.velocity_f8 as i16).wrapping_mul(ticks) / 256;
         Ok(height_f8.wrapping_sub(displacement))
     }

@@ -37,8 +37,8 @@ Usage: tore-server [options]
   --mission FILE       Fly this mission file instead of the configuration file's
   --check              Load the import and the mission, print its aircraft, the theater's
                        runways and the content manifest, then exit without opening the port
-  --ai-observe-hz N    Test setting: AI aircraft observe N times a second, 120 (default),
-                       60, 40, 30 or 20, staggered across ticks; the flight stays at 120
+  --ai-observe-hz N    Test setting: AI aircraft observe N times a second, 120, 60
+                       (default), 40, 30 or 20, staggered across ticks; the flight stays at 120
   --ai-lean-sensors [on|off]
                        Test setting: AI aircraft skip the visual channel and build the
                        received-radar list only when a warning needs it (default: on)

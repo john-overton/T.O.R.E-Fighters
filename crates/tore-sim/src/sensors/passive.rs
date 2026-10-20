@@ -40,11 +40,11 @@ pub struct Emitter {
 /// emission, terrain visibility and the receiver limit above.
 pub fn emitters(
     observer: &Observer,
-    targets: &[Observable],
+    targets: &[impl std::borrow::Borrow<Observable>],
     contacts: &[Contact],
     environment: &Environment<'_>,
 ) -> Vec<Emitter> {
-    let mut sorted: Vec<&Observable> = targets.iter().collect();
+    let mut sorted: Vec<&Observable> = targets.iter().map(|t| t.borrow()).collect();
     sorted.sort_by_key(|t| t.id);
     let mut result = Vec::new();
     // The observer's heading, worked out once for every emitter it hears.

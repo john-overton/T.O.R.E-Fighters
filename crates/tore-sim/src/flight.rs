@@ -283,6 +283,11 @@ impl State {
         self.speed = speed;
         self.velocity = std::array::from_fn(|i| forward[i] * speed + wind[i]);
     }
+    /// The model, to change in tests.
+    #[cfg(test)]
+    pub(crate) fn model_mut(&mut self) -> &mut crate::models::AircraftModel {
+        &mut self.model
+    }
     pub fn model(&self) -> &crate::models::AircraftModel {
         &self.model
     }
@@ -917,15 +922,39 @@ impl State {
         let Some((clean, _)) = one.speeds(altitude_ft) else {
             return 0.;
         };
+        self.minimum_level_speed_from(
+            clean,
+            c.aerodynamics
+                .envelopes
+                .iter()
+                .filter(|e| e.g > 1)
+                .map(|e| (e.g, e.speeds(altitude_ft))),
+            flaps,
+        )
+    }
+    /// [`Self::minimum_level_speed`] from the rows' bands already worked out
+    /// at that altitude ([`RowSpeeds`] of this model's envelopes).
+    pub fn minimum_level_speed_with(&self, rows: &RowSpeeds, flaps: f64) -> f64 {
+        let Some((clean, _)) = rows.one_g() else {
+            return 0.;
+        };
+        self.minimum_level_speed_from(clean, rows.bands(), flaps)
+    }
+    /// The rule of [`Self::minimum_level_speed`] from the 1 G row's slow edge
+    /// (`clean`) and the rows' G and bands, in row order.
+    fn minimum_level_speed_from(
+        &self,
+        clean: f64,
+        bands: impl Iterator<Item = (i32, Option<(f64, f64)>)>,
+        flaps: f64,
+    ) -> f64 {
+        let c = self.model.configuration();
         let stall = clean * (1. - 0.25 * flaps);
         let loading = (self.fuel + self.carried_lbs()) / c.mass.empty_lbs;
         let divisor = 1. + loading * c.aerodynamics.loaded_elevator_percent / 100.;
-        let next = c
-            .aerodynamics
-            .envelopes
-            .iter()
-            .filter(|e| e.g > 1)
-            .filter_map(|e| e.speeds(altitude_ft).map(|speeds| (speeds.0, e.g)))
+        let next = bands
+            .filter(|(g, _)| *g > 1)
+            .filter_map(|(g, speeds)| speeds.map(|speeds| (speeds.0, g)))
             .filter(|(low, _)| *low > stall)
             .min_by(|a, b| a.0.total_cmp(&b.0));
         match next {
@@ -2077,18 +2106,39 @@ fn low_speed_ceiling(
     effective_stall_fps: f64,
     extra_g: bool,
 ) -> Option<trace::LowSpeedCeiling> {
-    let next = c
-        .aerodynamics
-        .envelopes
-        .iter()
-        .filter(|envelope| envelope.g > 1)
-        .filter_map(|envelope| {
-            envelope
-                .speeds(altitude_ft)
-                .map(|speeds| (speeds.0, envelope.g))
-        })
+    let next = low_speed_ramp_end(
+        c.aerodynamics
+            .envelopes
+            .iter()
+            .filter(|envelope| envelope.g > 1)
+            .map(|envelope| (envelope.g, envelope.speeds(altitude_ft))),
+        effective_stall_fps,
+    )?;
+    low_speed_ceiling_on(next, speed_fps, effective_stall_fps, extra_g)
+}
+
+/// Where the hybrid low-speed ramp ends: the slow edge and G of the envelope
+/// row above 1 G whose slow edge is the lowest one above
+/// `effective_stall_fps`, from each row's G and speed band (`rows`, in row
+/// order). The first such row on a tie.
+pub(crate) fn low_speed_ramp_end(
+    rows: impl Iterator<Item = (i32, Option<(f64, f64)>)>,
+    effective_stall_fps: f64,
+) -> Option<(f64, i32)> {
+    rows.filter(|(g, _)| *g > 1)
+        .filter_map(|(g, speeds)| speeds.map(|speeds| (speeds.0, g)))
         .filter(|(minimum, _)| *minimum > effective_stall_fps)
-        .min_by(|a, b| a.0.total_cmp(&b.0))?;
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+}
+
+/// [`low_speed_ceiling`] at `speed_fps`, given where its ramp ends
+/// ([`low_speed_ramp_end`]), which does not depend on the speed.
+pub(crate) fn low_speed_ceiling_on(
+    next: (f64, i32),
+    speed_fps: f64,
+    effective_stall_fps: f64,
+    extra_g: bool,
+) -> Option<trace::LowSpeedCeiling> {
     if speed_fps >= next.0 {
         return None;
     }
@@ -2106,6 +2156,93 @@ fn low_speed_ceiling(
         to_g: top,
         fraction,
     })
+}
+
+/// Every envelope row's speed band at one altitude, worked out once, in row
+/// order, for the code that reads several rows several times at the same
+/// altitude. Each band is exactly `Envelope::speeds` at that altitude.
+pub struct RowSpeeds<'a> {
+    envelopes: &'a [tore_formats::aircraft::Envelope],
+    bands: std::rc::Rc<[Option<(f64, f64)>]>,
+}
+/// Bands kept per thread by [`RowSpeeds::of`]: enough for every aircraft
+/// of a large fight to ask several times in its step.
+const ROW_BANDS_KEPT: usize = 64;
+/// Each kept entry: the configuration (held, so its allocation is not used
+/// again for another while it is kept), the altitude's bits and the bands.
+type KeptBands = (
+    std::sync::Arc<crate::models::config::Configuration>,
+    u64,
+    std::rc::Rc<[Option<(f64, f64)>]>,
+);
+thread_local! {
+    static ROW_BANDS: std::cell::RefCell<(Vec<KeptBands>, usize)> =
+        const { std::cell::RefCell::new((Vec::new(), 0)) };
+}
+impl<'a> RowSpeeds<'a> {
+    pub fn new(envelopes: &'a [tore_formats::aircraft::Envelope], altitude_ft: f64) -> Self {
+        Self {
+            envelopes,
+            bands: envelopes
+                .iter()
+                .map(|envelope| envelope.speeds(altitude_ft))
+                .collect(),
+        }
+    }
+    /// The bands of `flight`'s envelope rows at its altitude, as
+    /// [`Self::new`] works them out, kept per thread for the next ask with
+    /// the same configuration at the same altitude, bit for bit (the AI
+    /// reads them several times in an aircraft's step).
+    pub fn of(flight: &'a State) -> Self {
+        let configuration = flight.model().configuration_arc();
+        let envelopes = &configuration.aerodynamics.envelopes;
+        let altitude = flight.position[1];
+        let bits = altitude.to_bits();
+        ROW_BANDS.with(|kept| {
+            let mut kept = kept.borrow_mut();
+            let (entries, next) = &mut *kept;
+            // The newest first: the last aircraft to ask asks again.
+            let newest = next
+                .checked_sub(1)
+                .unwrap_or(entries.len().saturating_sub(1));
+            let found = (0..entries.len())
+                .map(|back| (newest + entries.len() - back) % entries.len())
+                .find(|&at| {
+                    entries[at].1 == bits && std::sync::Arc::ptr_eq(&entries[at].0, configuration)
+                });
+            if let Some(at) = found {
+                return Self {
+                    envelopes,
+                    bands: entries[at].2.clone(),
+                };
+            }
+            let rows = Self::new(envelopes, altitude);
+            let entry = (configuration.clone(), bits, rows.bands.clone());
+            if entries.len() < ROW_BANDS_KEPT {
+                entries.push(entry);
+                *next = entries.len() % ROW_BANDS_KEPT;
+            } else {
+                entries[*next] = entry;
+                *next = (*next + 1) % ROW_BANDS_KEPT;
+            }
+            rows
+        })
+    }
+    /// Each row with its band, in row order.
+    pub fn rows(
+        &self,
+    ) -> impl Iterator<Item = (&'a tore_formats::aircraft::Envelope, Option<(f64, f64)>)> + Clone + '_
+    {
+        self.envelopes.iter().zip(self.bands.iter().copied())
+    }
+    /// Each row's G with its band, in row order.
+    pub fn bands(&self) -> impl Iterator<Item = (i32, Option<(f64, f64)>)> + Clone + '_ {
+        self.rows().map(|(envelope, speeds)| (envelope.g, speeds))
+    }
+    /// The band of the first 1 G row, if there is one and it reaches here.
+    pub fn one_g(&self) -> Option<(f64, f64)> {
+        self.rows().find(|(envelope, _)| envelope.g == 1)?.1
+    }
 }
 
 fn low_speed_alignment_fraction(

@@ -158,6 +158,8 @@ fn nothing_is_shared_under_medium_control() {
 #[test]
 fn a_wingman_that_already_has_a_target_is_left_alone() {
     let mut mission = wing();
+    // Written for observation every tick.
+    mission.set_test_settings(AiTestSettings::every_tick());
     // Wingman two sees the bandit itself: it has a target when the lead takes
     // its own, so only wingman three is idle (and the allowance has room for
     // the one: the lead and wingman two are already on it, so it has none).

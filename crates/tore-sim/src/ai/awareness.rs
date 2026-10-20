@@ -177,6 +177,20 @@ pub struct Snapshot {
     pub source_ticks: SourceTimestamps,
 }
 
+/// Where a held observation's target is at `tick`: the observed position
+/// carried on at the observed velocity for the ticks since it was observed
+/// (a slower AI observation rate holds observations between its
+/// observations). An observation made at `tick` is its own position, bit
+/// for bit, so the default rate, which observes every tick, is unchanged.
+pub fn held_position(snapshot: &Snapshot, tick: u64) -> [f64; 3] {
+    let ticks = tick.saturating_sub(snapshot.last_observed_tick);
+    if ticks == 0 {
+        return snapshot.target.position;
+    }
+    let seconds = ticks as f64 / 120.;
+    std::array::from_fn(|i| snapshot.target.position[i] + snapshot.velocity[i] * seconds)
+}
+
 impl Snapshot {
     fn new(tick: u64, observation: Observation) -> Self {
         let mut source_ticks = SourceTimestamps::default();
@@ -432,6 +446,22 @@ mod tests {
             velocity: [1.0, 2.0, 3.0],
             source,
         }
+    }
+
+    #[test]
+    fn a_held_observation_is_carried_on_at_its_velocity() {
+        let mut snapshot = Snapshot::new(40, observation(7, 2, ObservationSource::Radar));
+        snapshot.target.position = [-0.0, 1e-300, 5_000.];
+        // Observed this tick: the observed position, bit for bit.
+        assert_eq!(
+            held_position(&snapshot, 40).map(f64::to_bits),
+            snapshot.target.position.map(f64::to_bits)
+        );
+        // Two ticks later at 1, 2 and 3 ft/s.
+        assert_eq!(
+            held_position(&snapshot, 42),
+            [2. / 120., 1e-300 + 4. / 120., 5_000. + 6. / 120.]
+        );
     }
 
     #[test]

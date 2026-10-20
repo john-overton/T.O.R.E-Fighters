@@ -191,13 +191,25 @@ impl Smoke {
         let rise = KINDS.map(|kind| kind.rise() / 120.);
         let lifetime = KINDS.map(Kind::lifetime);
         let mut expired = 0usize;
+        // Puffs laid in the same wind drift alike: a drift seen just before,
+        // bit for bit, gives the same quotients without the divisions.
+        let mut last: Option<([u64; 2], [f64; 2])> = None;
         let (head, tail) = self.puffs.as_mut_slices();
         for puff in head.iter_mut().chain(tail.iter_mut()) {
             let kind = puff.kind as usize;
             puff.age = puff.age.saturating_add(1);
             puff.position[1] += rise[kind];
-            puff.position[0] += puff.drift[0] / 120.;
-            puff.position[2] += puff.drift[1] / 120.;
+            let bits = puff.drift.map(f64::to_bits);
+            let step = match last {
+                Some((kept, step)) if kept == bits => step,
+                _ => {
+                    let step = [puff.drift[0] / 120., puff.drift[1] / 120.];
+                    last = Some((bits, step));
+                    step
+                }
+            };
+            puff.position[0] += step[0];
+            puff.position[2] += step[1];
             expired += usize::from(puff.age >= lifetime[kind]);
         }
         if expired == 0 {
@@ -370,6 +382,17 @@ mod tests {
             }
             if tick % 7000 < 5000 {
                 outlets.push((9, [-60., 33_000., 300. * t]));
+            }
+            // The wind shifts now and then, so puffs of several drifts mix
+            // (the kept quotient of the last drift must not carry over).
+            if tick % 1500 == 0 {
+                let wind = [
+                    (next() % 61) as f64 - 30.5,
+                    0.,
+                    (next() % 41) as f64 * 0.25 - 5.,
+                ];
+                fast.wind = wind;
+                slow.wind = wind;
             }
             fast.step(sources.clone());
             slow.ticks += 1;

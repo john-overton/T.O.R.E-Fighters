@@ -1,7 +1,10 @@
 //! The AI test settings (slice S7b of the optimization run): two switches
-//! for measuring CPU use and AI behaviour. The defaults (slice S9) are the
-//! 120 Hz observation rate and lean sensors, which decide exactly as full
-//! sensors do (S7b measured the same checksum at every rate). Nothing about
+//! for measuring CPU use and AI behaviour. The defaults are the 60 Hz
+//! observation rate (optimization round 2: a matrix of 240 fights behaved at
+//! 60 Hz as at 120 Hz within the fights' own chaos, see
+//! docs/baselines/performance-threads.md) and lean sensors (slice S9), which
+//! decide exactly as full sensors do (S7b measured the same checksum at every
+//! rate). Nothing about
 //! them is checkpointed, because they are host setup like the ground
 //! ceiling: the host sets them before every step.
 //!
@@ -9,8 +12,8 @@
 //!
 //! An AI aircraft's observation (its sensors, its lookout over the world, the
 //! received emitters and the awareness memory they feed) runs once every
-//! `divisor` ticks instead of every tick: 120 Hz is a divisor of 1 (today),
-//! 60 Hz of 2, 40 Hz of 3, 30 Hz of 4 and 20 Hz of 6. Aircraft are staggered
+//! `divisor` ticks instead of every tick: 120 Hz is a divisor of 1, 60 Hz
+//! (the default) of 2, 40 Hz of 3, 30 Hz of 4 and 20 Hz of 6. Aircraft are staggered
 //! by their place in the mission, `(tick + index) % divisor == 0`, so each
 //! tick carries the same share of the work whatever the aircraft count. The
 //! controller, the flight model, the missile threat service and the incoming
@@ -19,7 +22,8 @@
 //! What a tick between two observations holds and what it refreshes:
 //!
 //! - **Held:** the awareness memory (the targets the controller and the
-//!   engagement policy choose from, with the positions they were seen at),
+//!   engagement policy choose from, placed where their observed velocity has
+//!   carried them since they were seen),
 //!   the sensors' contacts, selection and track, and the received emitters.
 //!   All of them are already part of a checkpoint, and the phase is a pure
 //!   function of the mission tick and the actor's index, so a checkpoint
@@ -48,10 +52,12 @@
 //! Both are for testing: changing a default is a simulation change that
 //! needs new guard references and goldens.
 
-/// The observation rates the settings offer, in hertz. The first is today's.
+/// The observation rates the settings offer, in hertz. The default is the
+/// second, 60 Hz (optimization round 2); the first, 120 Hz, observes every
+/// tick.
 pub const OBSERVATION_RATES_HZ: [u32; 5] = [120, 60, 40, 30, 20];
 
-/// The AI test settings. [`Default`] is 120 Hz with lean sensors.
+/// The AI test settings. [`Default`] is 60 Hz with lean sensors.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AiTestSettings {
     divisor: u32,
@@ -63,18 +69,28 @@ pub struct AiTestSettings {
 impl Default for AiTestSettings {
     fn default() -> Self {
         Self {
-            divisor: 1,
+            divisor: 2,
             lean_sensors: true,
         }
     }
 }
 
 impl AiTestSettings {
+    /// 120 Hz with lean sensors: every aircraft observes every tick, as the
+    /// AI did before 60 Hz became the default (optimization round 2), and
+    /// what the AI's unit tests written for observation every tick run at.
+    pub fn every_tick() -> Self {
+        Self {
+            divisor: 1,
+            lean_sensors: true,
+        }
+    }
+
     /// 120 Hz with the full sensors (the visual channel, map list and
     /// received emitters worked out every observation): what the AI did
-    /// before lean sensors became the default.
+    /// before lean sensors and 60 Hz became the defaults.
     pub fn full() -> Self {
-        Self::default().with_lean_sensors(false)
+        Self::every_tick().with_lean_sensors(false)
     }
 
     /// Observation every `divisor` ticks, `divisor` being 1 to 6 (the rates
@@ -161,17 +177,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_default_is_120_hz_with_lean_sensors() {
+    fn the_default_is_60_hz_with_lean_sensors() {
         let settings = AiTestSettings::default();
-        assert_eq!(settings.divisor(), 1);
-        assert_eq!(settings.observation_hz(), 120);
+        assert_eq!(settings.divisor(), 2);
+        assert_eq!(settings.observation_hz(), 60);
         assert!(settings.lean_sensors);
         assert!(settings.is_default());
+        assert_eq!(settings.describe(), "60 Hz, lean sensors");
+        let every = AiTestSettings::every_tick();
+        assert_eq!((every.divisor(), every.observation_hz()), (1, 120));
+        assert!(every.lean_sensors && !every.is_default());
         let full = AiTestSettings::full();
         assert!(!full.lean_sensors && !full.is_default());
         assert_eq!(full.observation_hz(), 120);
         assert_eq!(full.describe(), "120 Hz, full sensors");
-        assert_eq!(settings.describe(), "120 Hz, lean sensors");
     }
 
     #[test]
@@ -182,12 +201,20 @@ mod tests {
         assert!(AiTestSettings::from_flags(None, None).unwrap().is_default());
         assert_eq!(
             AiTestSettings::from_flags(None, Some(false)),
+            Some(AiTestSettings::default().with_lean_sensors(false))
+        );
+        assert_eq!(
+            AiTestSettings::from_flags(Some(120), Some(false)),
             Some(AiTestSettings::full())
         );
         assert!(
-            AiTestSettings::from_flags(Some(120), Some(true))
+            AiTestSettings::from_flags(Some(60), Some(true))
                 .unwrap()
                 .is_default()
+        );
+        assert_eq!(
+            AiTestSettings::from_flags(Some(120), None),
+            Some(AiTestSettings::every_tick())
         );
     }
 
@@ -205,12 +232,13 @@ mod tests {
 
     #[test]
     fn the_rate_cycles_through_the_list_and_back() {
-        let mut settings = AiTestSettings::default();
+        let mut settings = AiTestSettings::every_tick();
         let mut seen = vec![settings.observation_hz()];
         for _ in 0..OBSERVATION_RATES_HZ.len() {
             settings = settings.next_rate();
             seen.push(settings.observation_hz());
         }
         assert_eq!(seen, [120, 60, 40, 30, 20, 120]);
+        assert_eq!(AiTestSettings::default().next_rate().observation_hz(), 40);
     }
 }

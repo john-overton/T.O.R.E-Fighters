@@ -9637,6 +9637,37 @@ Test builds compare the indexed incoming fire, the perceived-attack search,
 the shared selection pass, the surface fire contact lists, kept places and
 course rows with the replaced code on every AI and surface test.
 
+Exact AI and combat work for heavy fights (optimization round 2, 2026-10-19;
+same decisions and simulation bits, each guarded by a test against the code it
+replaced, kept test-only):
+
+- **The gun solve** (`combat/gunsight.rs`) returns at once for an unpowered
+  round that cannot reach the target in its flight time, and otherwise reads
+  the round's path from a per-thread list of kept paths
+  (`gunsight_trajectory.rs`, 16 kept). A path depends on the record, the
+  launch speed and, only while a motor drives the round, its 256-foot height
+  band (or its exact height when it falls before the motor lights), never on
+  the target. The first tick whose crossing could turn non-negative is found
+  by bisection over a running bound (the target is never nearer than its
+  distance less its own travel and the round's drop), and the crossings are
+  worked out from there as the old loop did. Every AI aircraft solves its guns
+  every tick at the same launch speed, so nearly every solve reads a kept path.
+- **Envelope bands** (`flight::RowSpeeds`): each envelope row's speed band at
+  one altitude is worked out once and read by every pass of the AI's speed
+  limits, G limits and approach floor; `RowSpeeds::of` keeps them per thread
+  (64 kept) by the configuration's shared allocation, which the entry holds so
+  it cannot be reused for another configuration, and the altitude's bits. A
+  configuration is never changed in place (`AircraftModel::configuration_arc`).
+- **The world bridge** finds actors and target rows by id from a sorted list
+  per walk (`AiMission::actor_places`, `Places`; the first place of a repeated
+  id answers, as a walk from the front did), and an AI aircraft's sensors read
+  the world's observables in place (`Sensors::step_with_refs`).
+- **The render snapshot** writes each target pose field by field into the
+  spare snapshot's slot and keeps each row's drawn attitude while its basis
+  bits stay the same (`RenderHistory::angles`, scratch like the stores cache).
+- **Smoke** keeps the quotients of the last drift, so puffs laid in one wind
+  skip the two divisions.
+
 A test-only copy of the unsplit observation code independently validates the
 serial extraction. Worker comparisons cover complete actor/mission state,
 flight bytes, outputs and bounded journal contents, including new damage
@@ -9647,12 +9678,17 @@ handoff and error partial state.
 
 Two settings for trying how much CPU the AI's observation takes and how the AI
 fights without part of it (optimization run, slice S7b; John, 2026-10-19).
-The observation rate defaults to 120 Hz and **lean sensors are on by
+The observation rate defaults to **60 Hz** since optimization round 2 (John,
+2026-10-19: lower if it behaves the same; a matrix of 240 fights behaved at
+60 Hz as at 120 Hz within the fights' own chaos and 40 Hz and below did not, see
+[the baseline](baselines/performance-threads.md#ai-observation-rate-matrix);
+`AiTestSettings::every_tick()` is 120 Hz, what the AI's unit tests written for
+observation every tick run at), and **lean sensors are on by
 default** since slice S9 (John, 2026-10-19: S7b measured the same decisions,
 journal and checksum with lean and full sensors at every rate, for about 2%
-less CPU). The 120 Hz default with either sensor setting is bit for bit the
-run of a build without the settings, apart from the values a checkpoint
-codes (see below). `tore_sim::ai::test_settings::AiTestSettings`
+less CPU). 120 Hz with either sensor setting is bit for bit the run of a
+build without the settings, apart from the values a checkpoint codes (see
+below). `tore_sim::ai::test_settings::AiTestSettings`
 holds them (`AiTestSettings::full()` is 120 Hz with full sensors, what tests
 compare against); `AiWings::set_ai_test` hands them to the mission before
 every step. They are host setup like the ground ceiling, not state: no
@@ -9667,7 +9703,7 @@ Where they are set:
 | `tore-app` | `--ai-observe-hz N`, `--ai-lean-sensors [on\|off]` (bare means on): the AI probe's settings, and the starting values of a windowed flight's Debug tab |
 | `tore-server` | `--ai-observe-hz N`, `--ai-lean-sensors [on\|off]` (`HostConfig::ai_test`) |
 
-**Observation rate.** 120 (the default), 60, 40, 30 or 20 Hz: an AI aircraft's
+**Observation rate.** 120, 60 (the default), 40, 30 or 20 Hz: an AI aircraft's
 observation, which is its sensors, its lookout over the world, its received
 emitters and the awareness memory they feed, runs once every 1, 2, 3, 4 or 6
 ticks. Aircraft are staggered by their place in the mission,
@@ -9677,7 +9713,7 @@ missile threat service and the incoming fire service stay at 120 Hz.
 
 | Between two observations the aircraft | |
 | --- | --- |
-| holds | the awareness memory (the targets the controller and the engagement policy choose from, at the positions they were seen), the sensors' contacts, selection and track, the received emitters |
+| holds | the awareness memory (the targets the controller and the engagement policy choose from), the sensors' contacts, selection and track, the received emitters. The held targets, and the target the guns track, are placed where their observed velocity has carried them since they were seen (`awareness::held_position`; optimization round 2: without it the gun tracking's aligned test flipped between the fresh and the one-tick-old picture, which showed as activity flapping in about 3% of 60 Hz fights and never at 120 Hz). An observation made this tick is used as it is, so 120 Hz is unchanged |
 | refreshes | the lookout (its own pose and this tick's scan sector, with the attention point of the last observation), so missile warnings and incoming fire still react at 120 Hz; the decision frame's terrain flag for each held target (it depends on the aircraft's own position); the wing attackers count; held targets that have died are dropped |
 | counts as | `divisor` ticks for the sensors: a radar track still takes half a second to acquire, a lost plot goes stale after a second and a trail is sampled every half second (`Sensors::step_with`, `StepOptions::elapsed`) |
 
@@ -9709,7 +9745,7 @@ build without the setting wrote and not byte for byte theirs; the layout is
 unchanged. `--ai-lean-sensors off` (or the Debug tab) runs the full sensors
 for comparison.
 
-A host with either setting off its default (a slower rate, or lean sensors
+A host with either setting off its default (another rate, or lean sensors
 turned off) appoints no standby: a standby replays the journal with the
 defaults, which the journal does not say otherwise. Nothing is told to joined players, and no wire message carries the
 settings (no protocol change).

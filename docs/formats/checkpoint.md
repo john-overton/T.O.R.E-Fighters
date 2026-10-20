@@ -514,8 +514,9 @@ step, and `AiActor::last_visual` is a why-record; none is coded. Lean sensors ar
 the default since slice S9, so a default AI aircraft's coded sensors hold an empty
 visual list, map list and received-emitter list (a build without the settings, or
 `--ai-lean-sensors off`, coded them filled): the same layout and the same decisions,
-different bytes. With a slower observation rate the coded values differ too (an AI
-aircraft's sensors clock counts ticks) but not the layout. Local:
+different bytes. With another observation rate the coded values differ too (an AI
+aircraft's sensors clock counts ticks; the default is 60 Hz since optimization
+round 2) but not the layout. Local:
 `Combat::{tape, notes, last_launcher, terrain_tti}` (the last the readout's kept
 fly-out times, cleared on a load). Everything else is coded.
 

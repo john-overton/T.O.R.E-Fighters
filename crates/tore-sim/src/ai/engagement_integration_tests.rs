@@ -93,6 +93,8 @@ fn neutral_ai_wings_release_on_mission_permitted_contact_and_keep_objectives() {
 #[test]
 fn directed_attack_order_releases_only_the_recipient() {
     let mut mission = neutral_wing_mission();
+    // Written for observation every tick.
+    mission.set_test_settings(AiTestSettings::every_tick());
     let outcomes = mission
         .order_wing_report(
             Side(1),
@@ -118,6 +120,8 @@ fn directed_attack_order_releases_only_the_recipient() {
 #[test]
 fn formation_recall_cancels_combat_without_erasing_objective_or_memory() {
     let mut mission = AiMission::new();
+    // Written for observation every tick.
+    mission.set_test_settings(AiTestSettings::every_tick());
     let mut actor = perception_actor(Experience::Ace);
     enable_test_radar(&mut actor);
     let mut intercept = assignment(
@@ -734,6 +738,8 @@ fn weapons_hold_preserves_missile_defense_and_blocks_offense() {
 #[test]
 fn cap_returns_to_region_and_assigned_distant_target_cannot_launch() {
     let mut mission = AiMission::new();
+    // Written for observation every tick.
+    mission.set_test_settings(AiTestSettings::every_tick());
     let mut actor = AiActor::new(setup(1, 1, 0, [101., 20_000., 0.], 0.)).unwrap();
     let mut cap = assignment(
         engagement::Role::CombatAirPatrol,
@@ -784,6 +790,8 @@ fn cap_exact_boundary_does_not_request_a_return() {
 #[test]
 fn remembered_investigation_stops_when_the_mission_role_forbids_it() {
     let mut mission = AiMission::new();
+    // Written for observation every tick.
+    mission.set_test_settings(AiTestSettings::every_tick());
     let mut actor = perception_actor(Experience::Ace);
     let mut intercept = assignment(
         engagement::Role::Intercept,

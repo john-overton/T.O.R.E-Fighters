@@ -2582,19 +2582,19 @@ mod tests {
         let rows: Vec<_> = t[1].children.iter().map(|n| n.label.as_str()).collect();
         assert_eq!(rows, DEBUG_ROWS);
 
-        // The defaults are 120 Hz with lean sensors and read so.
+        // The defaults are 60 Hz with lean sensors and read so.
         let mut ui = FlightUi::default();
         assert!(ui.ai_test.is_default());
-        assert_eq!(ui.cheat_state(AI_OBSERVATION_RATE), Some("120 Hz"));
+        assert_eq!(ui.cheat_state(AI_OBSERVATION_RATE), Some("60 Hz"));
         assert_eq!(ui.cheat_state(LEAN_AI_SENSORS), Some("On"));
 
         // Escape, Right to the tab, Enter on the rate row: the next rate.
         ui.key("Escape", false, false, false, &t);
         ui.key("ArrowRight", false, false, false, &t);
         assert_eq!(ui.key("Enter", false, false, false, &t), Command::Click);
-        assert_eq!(ui.ai_test.observation_hz(), 60);
-        assert_eq!(ui.cheat_state(AI_OBSERVATION_RATE), Some("60 Hz"));
-        for hz in [40, 30, 20, 120] {
+        assert_eq!(ui.ai_test.observation_hz(), 40);
+        assert_eq!(ui.cheat_state(AI_OBSERVATION_RATE), Some("40 Hz"));
+        for hz in [30, 20, 120, 60] {
             ui.activate(AI_OBSERVATION_RATE, "");
             assert_eq!(ui.ai_test.observation_hz(), hz);
             assert_eq!(
@@ -2608,7 +2608,7 @@ mod tests {
         // A restart keeps the test settings; Back to defaults clears them.
         ui.activate(AI_OBSERVATION_RATE, "");
         ui.reset_for_flight();
-        assert_eq!(ui.ai_test.observation_hz(), 60);
+        assert_eq!(ui.ai_test.observation_hz(), 40);
         assert!(!ui.ai_test.lean_sensors);
         ui.activate(DEBUG_DEFAULTS, "");
         assert_eq!(ui.ai_test, AiTestSettings::default());

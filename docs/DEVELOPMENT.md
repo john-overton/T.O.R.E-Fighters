@@ -1458,10 +1458,14 @@ with the AI test settings described under
 AI aircraft observe at that rate (staggered across ticks; their controllers and
 flight stay at 120 Hz), and with lean sensors (the default; a bare flag means
 on, `off` gives the full sensors) skip the visual channel and build the
-received-radar list only when a warning needs it. Without either flag the
-run, its stdout and its checksum are exactly those of a build without the
-settings (lean sensors decide as full ones do); with a setting off its default
-the probe adds an `AI probe test settings:` line. Compare
+received-radar list only when a warning needs it. The default rate is 60 Hz
+since optimization round 2 (a matrix of 240 fights behaved at 60 Hz as at
+120 Hz within the fights' own chaos; see
+[the baseline](baselines/performance-threads.md#ai-observation-rate-matrix)), so
+a run without either flag differs from a build before that change;
+`--ai-observe-hz 120` gives the earlier run, its stdout and its checksum (lean
+sensors decide as full ones do). With a setting off its default the probe adds
+an `AI probe test settings:` line. Compare
 runs by the probe's own outcome lines: `AI probe attack:` (`lost_friendly`,
 `lost_enemy`, `destroyed`, `decoys_used`), `AI probe encounter:`
 (`first_visual`, `first_engage`, `first_gun_defense` per aircraft), the
