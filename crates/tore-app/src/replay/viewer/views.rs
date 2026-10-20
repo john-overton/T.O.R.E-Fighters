@@ -6,6 +6,7 @@
 //! viewer hands them to the renderer's console pass, the offscreen director
 //! to its console pixels.
 use super::*;
+use crate::replay::tape_pacing;
 use crate::replay::tape_views::{self, HUD_CAMERA, SENSOR, Sight, Source};
 use crate::sensor_console;
 use tore_sim::combat::{gunship, sight::SightSensor};
@@ -17,6 +18,66 @@ pub(crate) struct Taped {
     pub overlay: Vec<u8>,
     pub overlay_size: [u32; 2],
     pub frame: crate::crt::Frame,
+}
+
+/// What the HUD camera keeps from one frame to the next: which frames make
+/// a new tape picture ([`crate::replay::tape_pacing`]), the last picture's
+/// camera, and the recorder's lines.
+#[derive(Default)]
+pub(crate) struct TapeState {
+    pacer: tape_pacing::Pacer,
+    held: Option<Held>,
+    pub captions: tape_views::Captions,
+}
+
+/// What a tape picture was made for: the picture's size, the aircraft taped,
+/// the zoom (as bits) and whether trails and marks were drawn. A picture is
+/// shown again only for the same.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Shape {
+    pub size: [u32; 2],
+    pub selected: u32,
+    pub zoom: u32,
+    pub options: [bool; 2],
+}
+
+/// The tape picture the renderer holds: what it was made for, its camera
+/// (the interface projects labels through it) and the moment it shows: the
+/// tick and the share of the next, as bits.
+struct Held {
+    camera: Camera,
+    shape: Shape,
+    moment: (u64, u64),
+}
+
+impl TapeState {
+    /// The next frame makes a new picture.
+    pub fn forget(&mut self) {
+        self.held = None;
+        self.pacer.restart();
+    }
+
+    /// Whether the frame at `now` shows the held picture again, for a view
+    /// of this `shape` at this `moment`. It does when a picture is held for
+    /// the same shape and either nothing has moved while `still`, or the
+    /// frame falls inside the 24 a second grid's last picture. Anything
+    /// else makes a new one.
+    pub fn shows_again(
+        &mut self,
+        shape: &Shape,
+        moment: (u64, f64),
+        still: bool,
+        now: Instant,
+    ) -> bool {
+        let Some(held) = self.held.as_ref().filter(|held| held.shape == *shape) else {
+            // The picture made now starts the grid.
+            self.forget();
+            self.pacer.due(now);
+            return false;
+        };
+        let unchanged = still && held.moment == (moment.0, moment.1.to_bits());
+        unchanged || !self.pacer.due(now)
+    }
 }
 
 /// The noise seed of the HUD camera's tape (any fixed number).
@@ -290,6 +351,62 @@ impl Viewer {
         )
     }
 
+    /// Whether this frame shows the HUD camera's last picture again, and the
+    /// camera it was made from: the tape makes [`tape_pacing::TAPE_FPS`]
+    /// pictures a second, so the frames between them keep the picture the
+    /// renderer already holds and draw only the interface, which stays at the
+    /// window's own rate. A paused replay (`still`: no menu or screen open)
+    /// whose moment has not changed holds its picture without making more.
+    /// This is presentation only: the replay clock has already moved by the
+    /// frame's real time.
+    pub(crate) fn tape_held(
+        &mut self,
+        renderer: &mut Renderer,
+        now: Instant,
+        moment: (u64, f64),
+        still: bool,
+    ) -> Option<Camera> {
+        if self.view != HUD_CAMERA || self.drone.is_some() {
+            self.tape.forget();
+            return None;
+        }
+        let shape = self.tape_shape(renderer.flight_size());
+        if !self.tape.shows_again(&shape, moment, still, now) {
+            return None;
+        }
+        // A renderer that lost its picture (a resize, new graphics settings)
+        // is asked for a new one.
+        if !renderer.repeat_console() {
+            self.tape.forget();
+            return None;
+        }
+        self.tape.held.as_ref().map(|held| copy(&held.camera))
+    }
+
+    /// What the tape picture made now would be made for.
+    fn tape_shape(&self, size: [u32; 2]) -> Shape {
+        Shape {
+            size,
+            selected: self.selected,
+            zoom: self.zoom.to_bits(),
+            options: [self.ui.trails, self.marks_drawn()],
+        }
+    }
+
+    /// Whether the view is one of the taped ones, drawn through the CRT pass.
+    pub fn taped(&self) -> bool {
+        matches!(self.view, HUD_CAMERA | SENSOR) && self.drone.is_none()
+    }
+
+    /// The renderer is given a new tape picture made from `camera`.
+    pub(crate) fn tape_made(&mut self, camera: &Camera, size: [u32; 2], moment: (u64, f64)) {
+        self.tape.held = Some(Held {
+            camera: copy(camera),
+            shape: self.tape_shape(size),
+            moment: (moment.0, moment.1.to_bits()),
+        });
+    }
+
     /// V and Shift+V, and the menus: the HUD camera or the Sensor View on
     /// the selected aircraft. The Sensor View says so and stays put on an
     /// aircraft without a sight.
@@ -531,10 +648,8 @@ impl Viewer {
         let mut overlay = tape_views::hud_tape_layer(&raster, overlay_size, camera.zoom);
         let kind = model.profile.id.label();
         let (lines, scale) = tape_views::recorder_lines(tick, &self.label(id), kind, overlay_size);
-        tape_views::over(
-            &mut overlay,
-            &sensor_console::captions(overlay_size, &lines, scale),
-        );
+        let (captions, rows) = self.tape.captions.layer(overlay_size, &lines, scale);
+        tape_views::over_rows(&mut overlay, captions, overlay_size[0] as usize, rows);
         Taped {
             camera,
             overlay,
@@ -1049,4 +1164,118 @@ fn state_kind(viewer: &Viewer, picture: &RenderSnapshot, id: u32) -> AircraftId 
     pose.and_then(|p| p.aircraft)
         .or_else(|| viewer.type_of(id))
         .unwrap_or(viewer.ownship.profile.id)
+}
+
+#[cfg(test)]
+mod tape_tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn shape() -> Shape {
+        Shape {
+            size: [1920, 1080],
+            selected: 4,
+            zoom: 1.0f32.to_bits(),
+            options: [true, true],
+        }
+    }
+
+    /// What the viewer does after `shows_again` said no: keeps the picture.
+    fn made(tape: &mut TapeState, shape: Shape, moment: (u64, f64)) {
+        tape.held = Some(Held {
+            camera: Camera::new(),
+            shape,
+            moment: (moment.0, moment.1.to_bits()),
+        });
+    }
+
+    /// A first frame at `now`, which makes the picture held after it.
+    fn first(tape: &mut TapeState, shape: Shape, moment: (u64, f64), now: Instant) {
+        assert!(!tape.shows_again(&shape, moment, false, now));
+        made(tape, shape, moment);
+    }
+
+    #[test]
+    fn nothing_is_held_until_a_picture_is_made() {
+        let mut tape = TapeState::default();
+        assert!(!tape.shows_again(&shape(), (10, 0.), true, Instant::now()));
+    }
+
+    #[test]
+    fn a_paused_unchanged_moment_shows_its_picture_for_as_long_as_it_stays() {
+        let t0 = Instant::now();
+        let mut tape = TapeState::default();
+        first(&mut tape, shape(), (600, 0.25), t0);
+        for n in 1..200 {
+            let now = t0 + Duration::from_millis(n * 17);
+            assert!(tape.shows_again(&shape(), (600, 0.25), true, now), "{n}");
+        }
+        // Not still (a menu is open): the 24 a second grid decides.
+        let later = t0 + Duration::from_secs(10);
+        assert!(!tape.shows_again(&shape(), (600, 0.25), false, later));
+    }
+
+    #[test]
+    fn playing_makes_twenty_four_pictures_a_second() {
+        let t0 = Instant::now();
+        let mut tape = TapeState::default();
+        first(&mut tape, shape(), (1000, 0.), t0);
+        let mut pictures = 1;
+        // Sixty frames a second for ten seconds, the replay moving on.
+        for n in 1..600u64 {
+            let now = t0 + Duration::from_nanos(n * 1_000_000_000 / 60);
+            let moment = (1000 + n * 2, 0.5);
+            if !tape.shows_again(&shape(), moment, false, now) {
+                made(&mut tape, shape(), moment);
+                pictures += 1;
+            }
+        }
+        assert_eq!(pictures, 240);
+    }
+
+    #[test]
+    fn a_new_aircraft_zoom_size_or_option_makes_a_new_picture() {
+        let t0 = Instant::now();
+        let mut tape = TapeState::default();
+        first(&mut tape, shape(), (600, 0.), t0);
+        let now = t0 + Duration::from_millis(1);
+        assert!(tape.shows_again(&shape(), (600, 0.), true, now));
+        for changed in [
+            Shape {
+                selected: 5,
+                ..shape()
+            },
+            Shape {
+                size: [1280, 720],
+                ..shape()
+            },
+            Shape {
+                zoom: 2.0f32.to_bits(),
+                ..shape()
+            },
+            Shape {
+                options: [false, true],
+                ..shape()
+            },
+        ] {
+            made(&mut tape, shape(), (600, 0.));
+            assert!(
+                !tape.shows_again(&changed, (600, 0.), true, now),
+                "{changed:?}"
+            );
+            assert!(tape.held.is_none(), "forgotten");
+        }
+    }
+
+    #[test]
+    fn a_moved_replay_waits_for_the_next_picture() {
+        let t0 = Instant::now();
+        let mut tape = TapeState::default();
+        first(&mut tape, shape(), (600, 0.), t0);
+        // Seeked while paused, 10 ms later: held until the grid's next slot.
+        let soon = t0 + Duration::from_millis(10);
+        assert!(tape.shows_again(&shape(), (6000, 0.), true, soon));
+        let next = t0 + Duration::from_millis(43);
+        assert!(!tape.shows_again(&shape(), (6000, 0.), true, next));
+    }
 }

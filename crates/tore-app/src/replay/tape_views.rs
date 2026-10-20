@@ -355,15 +355,29 @@ pub fn recorder_lines(
     (lines, scale)
 }
 
+/// Where a layer has anything drawn, per row: the first column and one past
+/// the last, or `(0, 0)` for a row with nothing.
+pub type Extents = Vec<(usize, usize)>;
+
 /// The HUD's 640 x 480 raster (straight-alpha RGBA) placed on a picture of
 /// `size` as the cockpit pass places it (`cockpit_renderer::hud_layout`):
 /// centred, scaled by [`crate::flight_canvas::HUD_SCALE`] and the camera's
 /// `zoom`, sampled smoothly. The result is straight-alpha RGBA of `size`.
-pub fn hud_overlay(raster: &[u8], size: [u32; 2], zoom: f32) -> Vec<u8> {
+#[cfg(test)]
+fn hud_overlay(raster: &[u8], size: [u32; 2], zoom: f32) -> Vec<u8> {
+    hud_overlay_rows(raster, size, zoom).0
+}
+
+/// [`hud_overlay`] and the extent of what it drew on each row. The HUD is
+/// mostly empty, so only the rows and columns whose four neighbouring raster
+/// pixels hold something are sampled (the rest are exactly what sampling
+/// would leave: nothing).
+fn hud_overlay_rows(raster: &[u8], size: [u32; 2], zoom: f32) -> (Vec<u8>, Extents) {
     let (w, h) = (size[0] as usize, size[1] as usize);
-    let mut out = vec![0u8; w * h * 4];
+    let mut out = crate::sensor_console::spare_overlay(w * h * 4);
+    let mut extents: Extents = vec![(0, 0); h];
     if raster.len() < 640 * 480 * 4 || w == 0 || h == 0 {
-        return out;
+        return (out, extents);
     }
     let scale = (size[0] as f64 / 640.).min(size[1] as f64 / 480.)
         * crate::flight_canvas::HUD_SCALE
@@ -374,49 +388,117 @@ pub fn hud_overlay(raster: &[u8], size: [u32; 2], zoom: f32) -> Vec<u8> {
     let x1 = ((cx + 320. * scale).ceil() as usize).min(w);
     let y0 = (cy - 240. * scale).floor().max(0.) as usize;
     let y1 = ((cy + 240. * scale).ceil() as usize).min(h);
+    // The raster premultiplied, and which eight-pixel blocks of each row
+    // hold anything. The table stays all zero between calls.
+    let mut texels = SCRATCH.with(|scratch| std::mem::take(&mut scratch.borrow_mut().texels));
+    texels.resize(640 * 480, [0f32; 4]);
+    let mut blocks = [0u128; 480];
+    for (row, held) in blocks.iter_mut().enumerate() {
+        for x in 0..640usize {
+            let at = (row * 640 + x) * 4;
+            if raster[at + 3] == 0 {
+                continue;
+            }
+            let a = f32::from(raster[at + 3]) / 255.;
+            texels[row * 640 + x] = [
+                f32::from(raster[at]) * a,
+                f32::from(raster[at + 1]) * a,
+                f32::from(raster[at + 2]) * a,
+                a,
+            ];
+            *held |= 1u128 << (x / 8);
+        }
+    }
     let texel = |x: i64, y: i64| -> [f32; 4] {
         if !(0..640).contains(&x) || !(0..480).contains(&y) {
             return [0.; 4];
         }
-        let at = (y as usize * 640 + x as usize) * 4;
-        let a = f32::from(raster[at + 3]) / 255.;
-        [
-            f32::from(raster[at]) * a,
-            f32::from(raster[at + 1]) * a,
-            f32::from(raster[at + 2]) * a,
-            a,
-        ]
+        texels[y as usize * 640 + x as usize]
     };
+    let held = |y: i64| -> u128 {
+        if (0..480).contains(&y) {
+            blocks[y as usize]
+        } else {
+            0
+        }
+    };
+    #[allow(clippy::needless_range_loop)]
     for y in y0..y1 {
         let ry = (y as f64 + 0.5 - cy) / scale + 240. - 0.5;
         let (fy, ty) = (ry.floor(), (ry - ry.floor()) as f32);
-        for x in x0..x1 {
-            let rx = (x as f64 + 0.5 - cx) / scale + 320. - 0.5;
-            let (fx, tx) = (rx.floor(), (rx - rx.floor()) as f32);
-            let (ix, iy) = (fx as i64, fy as i64);
-            let (a, b, c, d) = (
-                texel(ix, iy),
-                texel(ix + 1, iy),
-                texel(ix, iy + 1),
-                texel(ix + 1, iy + 1),
-            );
-            let mut p = [0f32; 4];
-            for k in 0..4 {
-                let top = a[k] + (b[k] - a[k]) * tx;
-                let bottom = c[k] + (d[k] - c[k]) * tx;
-                p[k] = top + (bottom - top) * ty;
+        let iy = fy as i64;
+        let (mut lo, mut hi) = (usize::MAX, 0usize);
+        // The blocks either raster row holds, in runs; each run's raster
+        // columns, widened by the one the interpolation reaches, as output
+        // columns.
+        let mut mask = held(iy) | held(iy + 1);
+        let mut done = x0;
+        while mask != 0 {
+            let first = mask.trailing_zeros();
+            let run = (!(mask >> first)).trailing_zeros();
+            mask = if first + run >= 128 {
+                0
+            } else {
+                mask & !((1u128 << (first + run)) - 1)
+            };
+            let from = cx - 0.5 + ((first * 8) as f64 - 320.5) * scale;
+            let to = cx - 0.5 + (((first + run) * 8 - 1) as f64 - 318.5) * scale;
+            let xa = ((from.floor() as i64 - 1).max(done as i64) as usize).max(x0);
+            let xb = ((to.ceil() as i64 + 1).max(0) as usize).min(x1);
+            for x in xa..xb {
+                let rx = (x as f64 + 0.5 - cx) / scale + 320. - 0.5;
+                let (fx, tx) = (rx.floor(), (rx - rx.floor()) as f32);
+                let ix = fx as i64;
+                let (a, b, c, d) = (
+                    texel(ix, iy),
+                    texel(ix + 1, iy),
+                    texel(ix, iy + 1),
+                    texel(ix + 1, iy + 1),
+                );
+                let mut p = [0f32; 4];
+                for k in 0..4 {
+                    let top = a[k] + (b[k] - a[k]) * tx;
+                    let bottom = c[k] + (d[k] - c[k]) * tx;
+                    p[k] = top + (bottom - top) * ty;
+                }
+                if p[3] <= 0.002 {
+                    continue;
+                }
+                let at = (y * w + x) * 4;
+                for k in 0..3 {
+                    out[at + k] = (p[k] / p[3]).round().clamp(0., 255.) as u8;
+                }
+                out[at + 3] = (p[3] * 255.).round().clamp(0., 255.) as u8;
+                lo = lo.min(x);
+                hi = x + 1;
             }
-            if p[3] <= 0.002 {
-                continue;
-            }
-            let at = (y * w + x) * 4;
-            for k in 0..3 {
-                out[at + k] = (p[k] / p[3]).round().clamp(0., 255.) as u8;
-            }
-            out[at + 3] = (p[3] * 255.).round().clamp(0., 255.) as u8;
+            done = done.max(xb);
+        }
+        if hi > lo {
+            extents[y] = (lo, hi);
         }
     }
-    out
+    // Back to zero, row by row where something was put.
+    for (row, held) in blocks.iter().enumerate() {
+        if *held != 0 {
+            texels[row * 640..(row + 1) * 640].fill([0f32; 4]);
+        }
+    }
+    SCRATCH.with(|scratch| scratch.borrow_mut().texels = texels);
+    (out, extents)
+}
+
+/// Work memory the tape layer keeps between pictures, so that making one
+/// does not ask the system for megabytes each time.
+#[derive(Default)]
+struct Scratch {
+    /// The HUD raster premultiplied, 640 x 480; all zero between uses.
+    texels: Vec<[f32; 4]>,
+    /// The halo's alpha blurred along the rows; all zero between uses.
+    across: Vec<f32>,
+}
+thread_local! {
+    static SCRATCH: std::cell::RefCell<Scratch> = std::cell::RefCell::new(Scratch::default());
 }
 
 /// How the HUD camera's recorder sees the HUD (agent decision, tuned on
@@ -434,9 +516,37 @@ pub const HUD_HALO: f32 = 0.62;
 /// The HUD raster as the tape records it ([`HUD_BOLD`] and [`HUD_WHITEN`]
 /// on the raster, then [`hud_overlay`], then the halo).
 pub fn hud_tape_layer(raster: &[u8], size: [u32; 2], zoom: f32) -> Vec<u8> {
+    let bold = bolder(raster);
+    let (mut layer, rows) = hud_overlay_rows(&bold, size, zoom);
+    halo(
+        &mut layer,
+        size,
+        HUD_HALO_PX * f64::from(size[1]) / 1080.,
+        HUD_HALO,
+        &rows,
+    );
+    layer
+}
+
+/// The raster with every symbol bolder and whiter ([`HUD_BOLD`],
+/// [`HUD_WHITEN`]).
+fn bolder(raster: &[u8]) -> Vec<u8> {
     let mut bold = raster.to_vec();
     if raster.len() >= 640 * 480 * 4 {
+        // Rows with something drawn in them; a pixel two rows from any has
+        // nothing to spread and no colour that is ever seen.
+        let drawn: Vec<bool> = (0..480usize)
+            .map(|y| {
+                raster[y * 640 * 4..(y + 1) * 640 * 4]
+                    .chunks_exact(4)
+                    .any(|p| p[3] != 0)
+            })
+            .collect();
         for y in 0..480usize {
+            let near = |y: usize| drawn[y.saturating_sub(1)..(y + 2).min(480)].contains(&true);
+            if !near(y) {
+                continue;
+            }
             for x in 0..640usize {
                 let at = (y * 640 + x) * 4;
                 // The strongest neighbour, at the bold share.
@@ -462,60 +572,95 @@ pub fn hud_tape_layer(raster: &[u8], size: [u32; 2], zoom: f32) -> Vec<u8> {
             }
         }
     }
-    let mut layer = hud_overlay(&bold, size, zoom);
-    halo(
-        &mut layer,
-        size,
-        HUD_HALO_PX * f64::from(size[1]) / 1080.,
-        HUD_HALO,
-    );
-    layer
+    bold
 }
 
 /// A soft dark halo under everything drawn on `layer` (straight-alpha RGBA
 /// of `size`): its alpha box-blurred over `radius` pixels, at `strength`.
-fn halo(layer: &mut [u8], size: [u32; 2], radius: f64, strength: f32) {
+/// `rows` is where the layer has anything on each row; the blur only works
+/// where that can reach, which is everything the halo can darken.
+fn halo(layer: &mut [u8], size: [u32; 2], radius: f64, strength: f32, rows: &[(usize, usize)]) {
     let (w, h) = (size[0] as usize, size[1] as usize);
     let r = radius.round().max(1.) as usize;
-    let alpha: Vec<f32> = layer
-        .chunks_exact(4)
-        .map(|p| f32::from(p[3]) / 255.)
-        .collect();
-    let blur = |src: &[f32], horizontal: bool| -> Vec<f32> {
-        let mut out = vec![0f32; src.len()];
-        let (outer, inner) = if horizontal { (h, w) } else { (w, h) };
-        let index = |o: usize, i: usize| if horizontal { o * w + i } else { i * w + o };
-        for o in 0..outer {
-            let mut sum = 0f32;
-            for i in 0..inner.min(r + 1) {
-                sum += src[index(o, i)];
-            }
-            for i in 0..inner {
-                out[index(o, i)] = sum / (2 * r + 1) as f32;
-                if i + r + 1 < inner {
-                    sum += src[index(o, i + r + 1)];
-                }
-                if i >= r {
-                    sum -= src[index(o, i - r)];
-                }
-            }
-        }
-        out
+    let width = (2 * r + 1) as f32;
+    let Some(first) = rows.iter().position(|&(lo, hi)| hi > lo) else {
+        return;
     };
-    let soft = blur(&blur(&alpha, true), false);
-    for (p, s) in layer.chunks_exact_mut(4).zip(soft) {
-        let shade = (s * 2.).min(1.) * strength;
-        let a = f32::from(p[3]) / 255.;
-        if shade <= a {
+    let last = rows.iter().rposition(|&(lo, hi)| hi > lo).unwrap_or(first);
+    // Across: each row's alpha, blurred along the row.
+    let mut across = SCRATCH.with(|scratch| std::mem::take(&mut scratch.borrow_mut().across));
+    across.resize(w * h, 0.);
+    let mut spans = vec![(0usize, 0usize); h];
+    let (mut left, mut right) = (w, 0usize);
+    for y in first..=last {
+        let (lo, hi) = rows[y];
+        if hi <= lo {
             continue;
         }
-        // The symbol over its halo: the halo is black.
-        let out = a + shade * (1. - a);
-        for c in &mut p[..3] {
-            *c = (f32::from(*c) * a / out).round() as u8;
+        let alpha = |x: usize| f32::from(layer[(y * w + x) * 4 + 3]) / 255.;
+        let (from, to) = (lo.saturating_sub(r), (hi + r).min(w));
+        let mut sum = 0f32;
+        for x in from.saturating_sub(r).max(lo)..(from + r + 1).min(hi) {
+            sum += alpha(x);
         }
-        p[3] = (out * 255.).round() as u8;
+        let row = &mut across[y * w..(y + 1) * w];
+        #[allow(clippy::needless_range_loop)]
+        for i in from..to {
+            row[i] = sum / width;
+            if i + r + 1 < hi {
+                sum += alpha(i + r + 1);
+            }
+            if i >= r && i - r >= lo && i - r < hi {
+                sum -= alpha(i - r);
+            }
+        }
+        spans[y] = (from, to);
+        left = left.min(from);
+        right = right.max(to);
     }
+    // Down: the columns blurred over the rows, the shade applied to the
+    // layer a row at a time as the sums slide.
+    let mut column = vec![0f32; w];
+    let add = |column: &mut [f32], y: usize, sign: f32| {
+        let (from, to) = spans[y];
+        for x in from..to {
+            column[x] += sign * across[y * w + x];
+        }
+    };
+    let (top, bottom) = (first.saturating_sub(r), (last + r + 1).min(h));
+    for y in top.saturating_sub(r)..(top + r + 1).min(h) {
+        add(&mut column, y, 1.);
+    }
+    for y in top..bottom {
+        let row = &mut layer[y * w * 4..(y + 1) * w * 4];
+        for (p, &sum) in row[left * 4..right * 4]
+            .chunks_exact_mut(4)
+            .zip(&column[left..right])
+        {
+            let shade = (sum / width * 2.).min(1.) * strength;
+            let a = f32::from(p[3]) / 255.;
+            if shade <= a {
+                continue;
+            }
+            // The symbol over its halo: the halo is black.
+            let out = a + shade * (1. - a);
+            for c in &mut p[..3] {
+                *c = (f32::from(*c) * a / out).round() as u8;
+            }
+            p[3] = (out * 255.).round() as u8;
+        }
+        if y + r + 1 < h {
+            add(&mut column, y + r + 1, 1.);
+        }
+        if y >= r {
+            add(&mut column, y - r, -1.);
+        }
+    }
+    // Back to zero, row by row where something was put.
+    for (y, &(from, to)) in spans.iter().enumerate() {
+        across[y * w + from..y * w + to].fill(0.);
+    }
+    SCRATCH.with(|scratch| scratch.borrow_mut().across = across);
 }
 
 /// Straight-alpha `top` over `under`, both RGBA of the same size.
@@ -534,6 +679,55 @@ pub fn over(under: &mut [u8], top: &[u8]) {
     }
 }
 
+/// [`over`] on the rows `rows` marks as holding anything.
+pub fn over_rows(under: &mut [u8], top: &[u8], width: usize, rows: &[bool]) {
+    for (y, _) in rows.iter().enumerate().filter(|(_, held)| **held) {
+        let range = y * width * 4..(y + 1) * width * 4;
+        over(&mut under[range.clone()], &top[range]);
+    }
+}
+
+/// What a layer of recorder lines was made for: size, scale, lines.
+type CaptionKey = ([u32; 2], i32, Vec<(String, i32, i32)>);
+
+/// The recorder's lines as a layer, kept while their words, places and size
+/// stay the same (the counter changes once a second, the record light twice
+/// in three): the tape layer is made 24 times a second and the lines are
+/// nearly always the ones it had.
+#[derive(Default)]
+pub struct Captions {
+    key: Option<CaptionKey>,
+    pixels: Vec<u8>,
+    rows: Vec<bool>,
+}
+
+impl Captions {
+    /// The layer of `lines` at `scale` on a picture of `size`, and which of
+    /// its rows hold anything.
+    pub fn layer(
+        &mut self,
+        size: [u32; 2],
+        lines: &[(String, i32, i32)],
+        scale: i32,
+    ) -> (&[u8], &[bool]) {
+        let current = self
+            .key
+            .as_ref()
+            .is_some_and(|(s, k, l)| *s == size && *k == scale && l == lines);
+        if !current {
+            self.pixels = crate::sensor_console::captions(size, lines, scale);
+            let width = size[0] as usize * 4;
+            self.rows = self
+                .pixels
+                .chunks_exact(width.max(4))
+                .map(|row| row.chunks_exact(4).any(|p| p[3] != 0))
+                .collect();
+            self.key = Some((size, scale, lines.to_vec()));
+        }
+        (&self.pixels, &self.rows)
+    }
+}
+
 /// The overlay's size for a view of `size`: the same shape, at most 1080
 /// rows (the tape keeps far less; drawing more costs time for nothing).
 pub fn overlay_size(size: [u32; 2]) -> [u32; 2] {
@@ -546,6 +740,198 @@ pub fn overlay_size(size: [u32; 2]) -> [u32; 2] {
 mod tests {
     use super::*;
     use crate::replay::ground_marks::{Designation, Impact, Mode, Spot, Weapon};
+
+    // The first, whole-picture versions of the HUD placement and the halo.
+    /// The first implementation, kept to check the faster one against: the HUD's 640 x 480 raster (straight-alpha RGBA) placed on a picture of
+    /// `size` as the cockpit pass places it (`cockpit_renderer::hud_layout`):
+    /// centred, scaled by [`crate::flight_canvas::HUD_SCALE`] and the camera's
+    /// `zoom`, sampled smoothly. The result is straight-alpha RGBA of `size`.
+    fn hud_overlay_reference(raster: &[u8], size: [u32; 2], zoom: f32) -> Vec<u8> {
+        let (w, h) = (size[0] as usize, size[1] as usize);
+        let mut out = vec![0u8; w * h * 4];
+        if raster.len() < 640 * 480 * 4 || w == 0 || h == 0 {
+            return out;
+        }
+        let scale = (size[0] as f64 / 640.).min(size[1] as f64 / 480.)
+            * crate::flight_canvas::HUD_SCALE
+            * f64::from(zoom);
+        let (cx, cy) = (w as f64 / 2., h as f64 / 2.);
+        // Only the rows and columns the raster covers.
+        let x0 = (cx - 320. * scale).floor().max(0.) as usize;
+        let x1 = ((cx + 320. * scale).ceil() as usize).min(w);
+        let y0 = (cy - 240. * scale).floor().max(0.) as usize;
+        let y1 = ((cy + 240. * scale).ceil() as usize).min(h);
+        let texel = |x: i64, y: i64| -> [f32; 4] {
+            if !(0..640).contains(&x) || !(0..480).contains(&y) {
+                return [0.; 4];
+            }
+            let at = (y as usize * 640 + x as usize) * 4;
+            let a = f32::from(raster[at + 3]) / 255.;
+            [
+                f32::from(raster[at]) * a,
+                f32::from(raster[at + 1]) * a,
+                f32::from(raster[at + 2]) * a,
+                a,
+            ]
+        };
+        for y in y0..y1 {
+            let ry = (y as f64 + 0.5 - cy) / scale + 240. - 0.5;
+            let (fy, ty) = (ry.floor(), (ry - ry.floor()) as f32);
+            for x in x0..x1 {
+                let rx = (x as f64 + 0.5 - cx) / scale + 320. - 0.5;
+                let (fx, tx) = (rx.floor(), (rx - rx.floor()) as f32);
+                let (ix, iy) = (fx as i64, fy as i64);
+                let (a, b, c, d) = (
+                    texel(ix, iy),
+                    texel(ix + 1, iy),
+                    texel(ix, iy + 1),
+                    texel(ix + 1, iy + 1),
+                );
+                let mut p = [0f32; 4];
+                for k in 0..4 {
+                    let top = a[k] + (b[k] - a[k]) * tx;
+                    let bottom = c[k] + (d[k] - c[k]) * tx;
+                    p[k] = top + (bottom - top) * ty;
+                }
+                if p[3] <= 0.002 {
+                    continue;
+                }
+                let at = (y * w + x) * 4;
+                for k in 0..3 {
+                    out[at + k] = (p[k] / p[3]).round().clamp(0., 255.) as u8;
+                }
+                out[at + 3] = (p[3] * 255.).round().clamp(0., 255.) as u8;
+            }
+        }
+        out
+    }
+
+    /// The first implementation, kept to check the faster one against: a soft dark halo under everything drawn on `layer` (straight-alpha RGBA
+    /// of `size`): its alpha box-blurred over `radius` pixels, at `strength`.
+    fn halo_reference(layer: &mut [u8], size: [u32; 2], radius: f64, strength: f32) {
+        let (w, h) = (size[0] as usize, size[1] as usize);
+        let r = radius.round().max(1.) as usize;
+        let alpha: Vec<f32> = layer
+            .chunks_exact(4)
+            .map(|p| f32::from(p[3]) / 255.)
+            .collect();
+        let blur = |src: &[f32], horizontal: bool| -> Vec<f32> {
+            let mut out = vec![0f32; src.len()];
+            let (outer, inner) = if horizontal { (h, w) } else { (w, h) };
+            let index = |o: usize, i: usize| if horizontal { o * w + i } else { i * w + o };
+            for o in 0..outer {
+                let mut sum = 0f32;
+                for i in 0..inner.min(r + 1) {
+                    sum += src[index(o, i)];
+                }
+                for i in 0..inner {
+                    out[index(o, i)] = sum / (2 * r + 1) as f32;
+                    if i + r + 1 < inner {
+                        sum += src[index(o, i + r + 1)];
+                    }
+                    if i >= r {
+                        sum -= src[index(o, i - r)];
+                    }
+                }
+            }
+            out
+        };
+        let soft = blur(&blur(&alpha, true), false);
+        for (p, s) in layer.chunks_exact_mut(4).zip(soft) {
+            let shade = (s * 2.).min(1.) * strength;
+            let a = f32::from(p[3]) / 255.;
+            if shade <= a {
+                continue;
+            }
+            // The symbol over its halo: the halo is black.
+            let out = a + shade * (1. - a);
+            for c in &mut p[..3] {
+                *c = (f32::from(*c) * a / out).round() as u8;
+            }
+            p[3] = (out * 255.).round() as u8;
+        }
+    }
+
+    /// A HUD-like raster: lines, boxes and a little text-like clutter, with
+    /// translucent edges, over the whole 640 x 480.
+    fn sample_raster() -> Vec<u8> {
+        let mut raster = vec![0u8; 640 * 480 * 4];
+        let mut put = |x: usize, y: usize, a: u8| {
+            let at = (y * 640 + x) * 4;
+            raster[at..at + 4].copy_from_slice(&[40, 255, 60, a]);
+        };
+        for x in 100..540 {
+            put(x, 100, 255);
+            put(x, 101, 90);
+        }
+        for y in 150..400 {
+            put(2, y, 200);
+            put(637, y, 255);
+            put(320, y, 255);
+        }
+        for k in 0..60 {
+            put(10 + k, 5, 255);
+            put(0, 0, 255);
+            put(639, 479, 255);
+            put(200 + k % 7, 300 + k / 7, 128);
+        }
+        raster
+    }
+
+    #[test]
+    fn the_faster_hud_placement_draws_the_same_pixels() {
+        let raster = sample_raster();
+        for (size, zoom) in [
+            ([1920, 1080], 1.6),
+            ([1920, 1080], 1.),
+            ([1280, 720], 2.4),
+            ([1440, 1080], 0.7),
+            ([800, 1200], 1.6),
+            ([1920, 1080], 5.),
+        ] {
+            let now = hud_overlay(&raster, size, zoom);
+            let then = hud_overlay_reference(&raster, size, zoom);
+            assert_eq!(now.len(), then.len());
+            let wrong = now.iter().zip(&then).filter(|(a, b)| a != b).count();
+            assert_eq!(wrong, 0, "{size:?} zoom {zoom}: {wrong} bytes differ");
+        }
+        // Nothing drawn, nothing placed.
+        let blank = vec![0u8; 640 * 480 * 4];
+        assert!(
+            hud_overlay(&blank, [1920, 1080], 1.6)
+                .iter()
+                .all(|b| *b == 0)
+        );
+    }
+
+    #[test]
+    fn the_faster_halo_matches_the_whole_picture_one() {
+        let raster = bolder(&sample_raster());
+        for (size, zoom) in [([1920, 1080], 1.6), ([1280, 720], 1.6), ([800, 1200], 2.)] {
+            let (mut now, rows) = hud_overlay_rows(&raster, size, zoom);
+            let mut then = now.clone();
+            let radius = HUD_HALO_PX * f64::from(size[1]) / 1080.;
+            halo(&mut now, size, radius, HUD_HALO, &rows);
+            halo_reference(&mut then, size, radius, HUD_HALO);
+            let worst = now
+                .iter()
+                .zip(&then)
+                .map(|(a, b)| a.abs_diff(*b))
+                .max()
+                .unwrap();
+            // The running sums add in another order: one step at most.
+            assert!(worst <= 1, "{size:?}: off by {worst}");
+            let far = now.iter().zip(&then).filter(|(a, b)| a != b).count();
+            assert!(far * 1000 < now.len(), "{size:?}: {far} bytes differ");
+        }
+    }
+
+    #[test]
+    fn a_blank_layer_gets_no_halo() {
+        let mut layer = vec![0u8; 64 * 32 * 4];
+        halo(&mut layer, [64, 32], 4., HUD_HALO, &vec![(0, 0); 32]);
+        assert!(layer.iter().all(|b| *b == 0));
+    }
 
     fn fixed() -> (String, SightSensor) {
         ("AAS-38".into(), {

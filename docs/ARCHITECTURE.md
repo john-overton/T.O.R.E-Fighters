@@ -1141,6 +1141,16 @@ the playhead from the recording (`replay/playback.rs`) and makes the same
 renderer calls as live flight, with the cockpit and mirrors switched off every
 frame and a blank flight canvas carrying only the viewer's interface. Nothing
 it draws feeds back into the simulation; see [replays](REPLAYS.md#viewer).
+The HUD camera view shows its tape layer at 24 pictures a second
+(`replay/tape_pacing.rs`, a presentation rate that leaves the replay clock
+alone): on the frames between pictures the viewer skips the scene hand-off and
+the CPU tape layer and asks the renderer to run only the CRT pass again over
+the world picture and overlay it kept (`Renderer::repeat_console`), then
+draws the interface at the window's rate. A paused, unchanged moment keeps its
+picture without making more. The tape layer's CPU work (`replay/tape_views.rs`)
+only visits the rows and blocks of the 640 x 480 HUD raster that hold symbols,
+keeps its scratch memory between pictures and keeps the recorder's lines until
+their words change.
 Its Esc menu (`replay/pause.rs`) is flight's paused menu widget
 (`pause_menu.rs`, which `flight_ui.rs` embeds) over a tree built from the
 imported one; the Graphics and Sound screens it opens stay the app's, drawn

@@ -478,6 +478,10 @@ impl App {
                         viewer.save_png(renderer, &request.path).map(|()| {
                             println!("Replay screenshot: {}", request.path.display());
                         })
+                    } else if viewer.taped()
+                        && renderer.capture_console(&request.path).unwrap_or(false)
+                    {
+                        Ok(())
                     } else {
                         renderer.capture_sim(
                             &request.path,

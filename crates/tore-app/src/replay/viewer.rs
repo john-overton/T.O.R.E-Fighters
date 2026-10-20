@@ -881,6 +881,8 @@ pub struct Viewer {
     display: tore_replay::display::Track,
     /// Weapons named by `aircraft.hud`, plus the AC-130's three guns.
     hud_weapons: BTreeMap<String, tore_formats::weapons::Weapon>,
+    /// The HUD camera's tape: which frames make a picture, and the last one.
+    tape: views::TapeState,
     /// One combat configuration per drawn aircraft type, for the HUD.
     hud_configs: Vec<(
         tore_formats::aircraft::AircraftId,
@@ -1174,6 +1176,7 @@ impl Viewer {
             ground_impacts: BTreeMap::new(),
             display: tore_replay::display::Track::default(),
             hud_weapons: BTreeMap::new(),
+            tape: Default::default(),
             hud_configs: Vec::new(),
         };
         viewer.read_events();
@@ -3314,11 +3317,25 @@ impl Viewer {
         let camera = self.frame_camera(&picture, tick, seconds, shift);
         // The HUD camera and the Sensor View: their own camera, and a
         // picture shown through the CRT pass with their overlay.
-        let taped = self.taped_view(&picture, tick, renderer.flight_size());
-        let camera = match &taped {
-            Some(t) => copy(&t.camera),
-            None => camera,
+        // The HUD camera shows the tape's last picture again between the 24
+        // a second it makes (replay::tape_pacing), and while nothing moves.
+        let held = self.tape_held(
+            renderer,
+            now,
+            (tick, self.clock.alpha()),
+            screen.is_none() && !self.pause.is_open(),
+        );
+        let taped = if held.is_some() {
+            None
+        } else {
+            self.taped_view(&picture, tick, renderer.flight_size())
         };
+        let camera = match (&taped, &held) {
+            (Some(t), _) => copy(&t.camera),
+            (None, Some(held)) => copy(held),
+            (None, None) => camera,
+        };
+        let held = held.is_some();
         // The back view from the player's seat draws its airframe but is
         // heard from the cockpit, as flight hears it.
         let seat = crate::mirrors::pilot_eye(
@@ -3344,145 +3361,10 @@ impl Viewer {
             selected: self.selected,
         };
         self.sound.frame(audio, &moment);
-        self.scenery
-            .resolve_palette(&self.world, camera.position[1]);
-        self.scenery.set_origin(camera.position);
-        let vapor = match self.playback.vapor(tick, &self.ownship, &mut self.scratch) {
-            Some(vapor) => crate::vapor_vertices(
-                &vapor,
-                &self.world,
-                &player,
-                self.ownship.streamer_points(&player),
-            ),
-            None => Vec::new(),
-        };
-        renderer.vapor(&vapor);
-        renderer.set_city_clock(self.city_clock(tick as f64 + self.clock.alpha()));
-        let [smoke, contrails] = self.playback.smoke(tick);
-        // Chaff and flares flown again from their releases, lit and lighting
-        // the scene with every lit afterburner, as live flight draws them.
-        let devices = self.devices.at(tick, &self.world);
-        renderer.smoke(&self.art.smoke, [smoke, contrails], devices);
-        renderer.effects(&self.art.effects, &picture.effects, &picture.marks);
-        let (player_outlets, model_outlets) = &self.outlets;
-        let mut glows = Vec::new();
-        if picture.player.engine.flame {
-            glows.extend(render_snapshot::afterburner_glow(
-                picture.player.position,
-                picture.player.attitude,
-                player_outlets,
-            ));
-        }
-        glows.extend(render_snapshot::target_glows(&picture, |pose| {
-            render_snapshot::engine_outlets(
-                pose.aircraft,
-                self.ownship.profile.id,
-                &self.models,
-                model_outlets,
-                player_outlets,
-            )
-        }));
-        // AC-130 muzzle flashes from the recorded rounds, on the recorded
-        // barrels, as live flight draws them.
-        let flash_now = tick as f64 + self.clock.alpha();
-        let mounts = crate::gun_flash::mounts(&picture, None);
-        self.gun_flash
-            .set_fire_widths(std::sync::Arc::clone(&self.scenery.fire_widths));
-        Self::observe_surface(
-            (&self.tracks, &self.recording),
-            &mut self.gun_flash,
-            &picture,
-            (tick, flash_now),
-            &mounts,
-        );
-        let guns = self.gun_flash.draw(flash_now, &mounts);
-        renderer.emitters(devices, &glows, &guns);
-        let destroyed = self.tracks.destroyed(tick);
-        let rails = self.rails(tick);
-        self.scenery.surface.step_aim(
-            &picture,
-            &self.world.surface,
-            &self.tracks.aim_tracks(tick),
-            Some(&rails),
-        );
-        renderer.airports(self.scenery.static_geometry_replay(&destroyed, &rails));
-        // Routed units on the move, the men, deck crew and parked aircraft
-        // pieces.
-        renderer.surface_units(&self.scenery.surface_vertices(
-            &picture,
-            &|id| !destroyed.contains(&id),
-            &camera,
-        ));
-        if let Some(art) = &self.art.escape {
-            renderer.escapees(
-                art,
-                &art.vertices_for(
-                    picture
-                        .pilots
-                        .iter()
-                        .map(|p| (p.position, p.heading, p.phase)),
-                    &self.ownship.palette,
-                    camera.position,
-                    self.scenery.origin,
-                ),
-            );
-        }
-        renderer.dummies(render_snapshot::aircraft_batches(
-            &picture,
-            &self.models,
-            &self.art,
-            &camera,
-            &self.world,
-            &self.scenery,
-        ));
-        let mut combat = render_snapshot::combat_geometry(
-            &picture,
-            &self.art,
-            &self.ownship,
-            &player,
-            &camera,
-            &self.world,
-            &self.scenery,
-        );
         let size = renderer.flight_size();
-        if self.ui.trails {
-            self.trails(
-                &picture,
-                tick,
-                &camera,
-                f64::from(size[1]),
-                &mut combat.vertices,
-            );
+        if !held {
+            self.feed_renderer(renderer, &picture, tick, &camera, &player, size);
         }
-        if self.marks_drawn() {
-            let prims = self.mark_prims(&picture, tick);
-            ground_marks::geometry(
-                &prims,
-                &camera,
-                self.scenery.origin,
-                f64::from(size[1]),
-                &mut combat.vertices,
-            );
-        }
-        renderer.combat(&combat);
-        renderer.aircraft(
-            &self.ownship,
-            &player,
-            &pylons::for_flown(
-                &picture.player.stores,
-                &player,
-                &self.ownship,
-                &self.art,
-                &self.scenery,
-            ),
-            self.player != convert::NO_PLAYER && camera.hidden_target != Some(self.player),
-            &camera,
-            &self.world,
-            &self.scenery,
-        );
-        // No cockpit, HUD or mirrors in a replay; the cockpit pass keeps its
-        // switches between frames, so they are turned off every frame.
-        renderer.cockpit(&player, &camera, false, false, &[], &self.scenery.palette);
         let composed = Instant::now();
         self.overlay(&picture, tick, &camera, size, canvas);
         if let Some(screen) = screen {
@@ -3490,7 +3372,12 @@ impl Viewer {
         }
         let drawn = Instant::now();
         if let Some(t) = taped {
+            self.tape_made(&t.camera, size, (tick, self.clock.alpha()));
             renderer.set_console(t.frame, t.overlay, t.overlay_size);
+        } else if held {
+            renderer.repeat_console();
+        } else {
+            self.tape.forget();
         }
         let presented = renderer.draw(
             &canvas.pixels,
@@ -3511,6 +3398,159 @@ impl Viewer {
             interface: ms(drawn - composed),
             present: ms(drawn.elapsed()),
         })
+    }
+
+    /// Hands the moment to the renderer: the sky, the weather, the smoke, the
+    /// effects, every aircraft and ground unit, the combat geometry and the
+    /// player's own aircraft, as seen from `camera`. A frame that shows the
+    /// HUD camera's last picture again does not do this.
+    fn feed_renderer(
+        &mut self,
+        renderer: &mut Renderer,
+        picture: &RenderSnapshot,
+        tick: u64,
+        camera: &Camera,
+        player: &flight::State,
+        size: [u32; 2],
+    ) {
+        self.scenery
+            .resolve_palette(&self.world, camera.position[1]);
+        self.scenery.set_origin(camera.position);
+        let vapor = match self.playback.vapor(tick, &self.ownship, &mut self.scratch) {
+            Some(vapor) => crate::vapor_vertices(
+                &vapor,
+                &self.world,
+                player,
+                self.ownship.streamer_points(player),
+            ),
+            None => Vec::new(),
+        };
+        renderer.vapor(&vapor);
+        renderer.set_city_clock(self.city_clock(tick as f64 + self.clock.alpha()));
+        let [smoke, contrails] = self.playback.smoke(tick);
+        // Chaff and flares flown again from their releases, lit and lighting
+        // the scene with every lit afterburner, as live flight draws them.
+        let devices = self.devices.at(tick, &self.world);
+        renderer.smoke(&self.art.smoke, [smoke, contrails], devices);
+        renderer.effects(&self.art.effects, &picture.effects, &picture.marks);
+        let (player_outlets, model_outlets) = &self.outlets;
+        let mut glows = Vec::new();
+        if picture.player.engine.flame {
+            glows.extend(render_snapshot::afterburner_glow(
+                picture.player.position,
+                picture.player.attitude,
+                player_outlets,
+            ));
+        }
+        glows.extend(render_snapshot::target_glows(picture, |pose| {
+            render_snapshot::engine_outlets(
+                pose.aircraft,
+                self.ownship.profile.id,
+                &self.models,
+                model_outlets,
+                player_outlets,
+            )
+        }));
+        // AC-130 muzzle flashes from the recorded rounds, on the recorded
+        // barrels, as live flight draws them.
+        let flash_now = tick as f64 + self.clock.alpha();
+        let mounts = crate::gun_flash::mounts(picture, None);
+        self.gun_flash
+            .set_fire_widths(std::sync::Arc::clone(&self.scenery.fire_widths));
+        Self::observe_surface(
+            (&self.tracks, &self.recording),
+            &mut self.gun_flash,
+            picture,
+            (tick, flash_now),
+            &mounts,
+        );
+        let guns = self.gun_flash.draw(flash_now, &mounts);
+        renderer.emitters(devices, &glows, &guns);
+        let destroyed = self.tracks.destroyed(tick);
+        let rails = self.rails(tick);
+        self.scenery.surface.step_aim(
+            picture,
+            &self.world.surface,
+            &self.tracks.aim_tracks(tick),
+            Some(&rails),
+        );
+        renderer.airports(self.scenery.static_geometry_replay(&destroyed, &rails));
+        // Routed units on the move, the men, deck crew and parked aircraft
+        // pieces.
+        renderer.surface_units(&self.scenery.surface_vertices(
+            picture,
+            &|id| !destroyed.contains(&id),
+            camera,
+        ));
+        if let Some(art) = &self.art.escape {
+            renderer.escapees(
+                art,
+                &art.vertices_for(
+                    picture
+                        .pilots
+                        .iter()
+                        .map(|p| (p.position, p.heading, p.phase)),
+                    &self.ownship.palette,
+                    camera.position,
+                    self.scenery.origin,
+                ),
+            );
+        }
+        renderer.dummies(render_snapshot::aircraft_batches(
+            picture,
+            &self.models,
+            &self.art,
+            camera,
+            &self.world,
+            &self.scenery,
+        ));
+        let mut combat = render_snapshot::combat_geometry(
+            picture,
+            &self.art,
+            &self.ownship,
+            player,
+            camera,
+            &self.world,
+            &self.scenery,
+        );
+        if self.ui.trails {
+            self.trails(
+                picture,
+                tick,
+                camera,
+                f64::from(size[1]),
+                &mut combat.vertices,
+            );
+        }
+        if self.marks_drawn() {
+            let prims = self.mark_prims(picture, tick);
+            ground_marks::geometry(
+                &prims,
+                camera,
+                self.scenery.origin,
+                f64::from(size[1]),
+                &mut combat.vertices,
+            );
+        }
+        renderer.combat(&combat);
+        renderer.aircraft(
+            &self.ownship,
+            player,
+            &pylons::for_flown(
+                &picture.player.stores,
+                player,
+                &self.ownship,
+                &self.art,
+                &self.scenery,
+            ),
+            self.player != convert::NO_PLAYER && camera.hidden_target != Some(self.player),
+            camera,
+            &self.world,
+            &self.scenery,
+        );
+        // No cockpit, HUD or mirrors in a replay; the cockpit pass keeps its
+        // switches between frames, so they are turned off every frame.
+        renderer.cockpit(player, camera, false, false, &[], &self.scenery.palette);
     }
 
     /// Draws the interface over the view: labels, the debug panels, the

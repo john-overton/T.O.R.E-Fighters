@@ -187,6 +187,10 @@ pub struct Renderer {
     console_scene: Option<(wgpu::Texture, [u32; 2])>,
     console_overlay: Option<(wgpu::Texture, [u32; 2])>,
     console: Option<(crate::crt::Frame, Vec<u8>, [u32; 2])>,
+    /// The look of the last console picture drawn, and whether the next draw
+    /// shows that picture again ([`Renderer::repeat_console`]).
+    console_last: Option<crate::crt::Frame>,
+    console_repeat: bool,
     // Fields drop in declaration order; keep the window alive through GPU cleanup.
     pub window: Arc<Window>,
 }
@@ -676,6 +680,8 @@ impl Renderer {
             console_scene: None,
             console_overlay: None,
             console: None,
+            console_last: None,
+            console_repeat: false,
             first_frame: Default::default(),
             mirror_camera: crate::camera::Camera::new(),
             mirror_vertices: Vec::new(),
@@ -763,6 +769,92 @@ impl Renderer {
         self.queue.submit([encoder.finish()]);
         self.sim.hide_aircraft();
         self.mirror_frames += 1;
+    }
+    /// Saves the console picture last drawn (the HUD camera's tape, the
+    /// Sensor View) without the interface, as a PPM; false when the renderer
+    /// has drawn none. For captures and the before-and-after checks of the
+    /// tape's look.
+    pub fn capture_console(&mut self, path: &std::path::Path) -> AppResult<bool> {
+        use std::io::Write;
+        let (Some(crt), Some((picture, size)), Some((layer, _))) = (
+            &self.console_last,
+            &self.console_scene,
+            &self.console_overlay,
+        ) else {
+            return Ok(false);
+        };
+        let [width, height] = *size;
+        let texture = self
+            .readbacks
+            .texture(&self.device, [width, height], self.config.format);
+        let view = texture.create_view(&Default::default());
+        let picture = picture.create_view(&Default::default());
+        let layer = layer.create_view(&Default::default());
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        self.crt.draw(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &picture,
+            Some(&layer),
+            &view,
+            [width, height],
+            crt,
+        );
+        let stride = (width * 4).div_ceil(256) * 256;
+        let buffer = self
+            .readbacks
+            .buffer(&self.device, u64::from(stride) * u64::from(height));
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(stride),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.queue.submit([encoder.finish()]);
+        let (tx, rx) = std::sync::mpsc::channel();
+        buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        let pending = Readback {
+            buffer,
+            receiver: rx,
+            width,
+            height,
+            stride,
+            bgra: matches!(
+                self.config.format,
+                wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+            ),
+        };
+        self.device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: Some(std::time::Duration::from_secs(30)),
+        })?;
+        pending.receiver.recv()??;
+        let pixels = self.readbacks.finish(pending);
+        let mut file = std::fs::File::create(path)?;
+        write!(file, "P6\n{width} {height}\n255\n")?;
+        for p in pixels.chunks_exact(4) {
+            file.write_all(&p[..3])?;
+        }
+        println!("Console capture: {}", path.display());
+        Ok(true)
     }
     pub fn capture_sim(
         &mut self,
@@ -977,6 +1069,20 @@ impl Renderer {
     /// world camera should be thermal. Taken by that draw.
     pub fn set_console(&mut self, frame: crate::crt::Frame, overlay: Vec<u8>, size: [u32; 2]) {
         self.console = Some((frame, overlay, size));
+    }
+    /// The next flight draw shows the console picture it last drew again, the
+    /// world and the overlay as they were, through the same CRT pass: the
+    /// HUD camera's tape holds a picture between its 24 a second. False, and
+    /// nothing changed, when the renderer has no such picture at the window's
+    /// size (the caller then draws a new one with [`Renderer::set_console`]).
+    pub fn repeat_console(&mut self) -> bool {
+        let window = self.window.inner_size();
+        let size = [window.width, window.height];
+        let held = self.console_last.is_some()
+            && self.console_overlay.is_some()
+            && self.console_scene.as_ref().is_some_and(|(_, s)| *s == size);
+        self.console_repeat = held;
+        held
     }
     /// The console's world picture and overlay textures at these sizes.
     fn console_targets(&mut self, scene: [u32; 2], overlay: [u32; 2]) {
@@ -1200,9 +1306,32 @@ impl Renderer {
             self.frame_gpu.cancel();
         }
         let console = self.console.take().filter(|_| flight_size.is_some());
-        if let (Some((crt, overlay, overlay_size)), Some((camera, world, scenery))) =
+        let repeat = std::mem::take(&mut self.console_repeat) && console.is_none();
+        if repeat
+            && scene.is_some()
+            && let (Some(crt), Some((picture, _)), Some((layer, _))) = (
+                &self.console_last,
+                &self.console_scene,
+                &self.console_overlay,
+            )
+        {
+            // The same picture again: only the CRT pass runs.
+            let picture = picture.create_view(&Default::default());
+            let layer = layer.create_view(&Default::default());
+            self.crt.draw(
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                &picture,
+                Some(&layer),
+                &view,
+                [s.width, s.height],
+                crt,
+            );
+        } else if let (Some((crt, overlay, overlay_size)), Some((camera, world, scenery))) =
             (&console, scene)
         {
+            self.console_last = Some(*crt);
             // The sensor console: the world into its own picture, then the
             // CRT pass with the symbology onto the frame.
             let size = [s.width, s.height];
@@ -1274,7 +1403,7 @@ impl Renderer {
         } else {
             None
         };
-        let console_shown = console.is_some();
+        let console_shown = console.is_some() || repeat;
         if let Some((_, overlay, _)) = console {
             // Uploaded above; the next overlay draws into the same buffer.
             crate::sensor_console::recycle(overlay);

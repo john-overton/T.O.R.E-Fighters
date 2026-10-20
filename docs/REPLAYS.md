@@ -1661,6 +1661,25 @@ are agent choices (2026-09-28).
   - Every part of the look comes from the replay tick, 60 fields a second,
     not the wall clock: a still or a paused picture is always the same, at
     any speed, while scrubbing and in `--replay-stills`.
+  - **24 pictures a second.** Opinionated, requested by John on 2026-10-19
+    ("it should run at 24 fps capped (because it's a VHS tape)"). The tape
+    layer (the world, the HUD, the recorder's lines and the tape effects) is
+    made 24 times a second on a fixed grid and shown again between those
+    pictures; the transport bar, labels, panels, cursor and menus are drawn
+    every frame at the window's own rate and stay responsive. Playback speed
+    and timing are unchanged: this is a presentation rate, not a playback
+    rate, and the other views keep the frame rate from the Graphics screen.
+    A paused replay whose moment, aircraft, zoom and trails and marks
+    choices have not changed makes no new picture at all, so a stopped tape
+    costs the interface and one CRT pass a frame (the picture is a function of
+    the tick, so a paused tape is a still). With the Escape menu or a screen
+    open the picture is still made at 24 a second, so a Graphics change shows.
+    Before this a frame spent about 40 ms of CPU at 4K placing the HUD on the
+    tape layer with a full-picture smoothing and blur; that now only works
+    where the HUD has symbols and the recorder's lines are kept until their
+    words change. The pictures are bit for bit the ones made before.
+    `crates/tore-app/src/replay/tape_pacing.rs` has the rule, the renderer
+    keeps the picture (`Renderer::repeat_console`).
 - <a id="sensor-view"></a>**Sensor View** (Shift+V; the right-click menu's
   **Sensor view** on an aircraft that has one). The [AC-130 sensor
   console](spec/target-window.md#sensor-console) from the selected
@@ -2034,6 +2053,10 @@ starts with the interface hidden, as H hides it. `--replay-look-at` starts
 in the [object view](#object-view) from the selected aircraft toward that
 aircraft, ground object or weapon (a weapon by its projectile id, as the
 debug log's launch events give it).
+`--flight-view 13` starts in the [HUD camera](#hud-camera) and `14` in the
+[Sensor View](#sensor-view); with `--capture-replay OUT.ppm` the capture then
+saves the tape's picture (the world, the HUD and the tape effects, without
+the transport bar and labels) instead of the plain 3D view.
 `--replay-speed S` starts playing at a ladder speed, negative for reverse,
 and with `TORE_PERF_FRAMES=N` the viewer reports frame timings like live
 flight. `--replay-panels thought,telemetry,guidance,comms,menu` opens

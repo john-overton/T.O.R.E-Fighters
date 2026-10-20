@@ -11857,7 +11857,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     .next()
                     .ok_or("--flight-view needs 0..11")?
                     .parse::<u8>().map_err(|e| bad_number(&arg, &e))?;
-                if flight_view > flight_views::MISSILE {
+                // 13 and 14 are the replay's HUD camera and Sensor View.
+                if flight_view > flight_views::MISSILE
+                    && !matches!(flight_view, replay::tape_views::HUD_CAMERA | replay::tape_views::SENSOR)
+                {
                     return Err("--flight-view needs 0..11".into());
                 }
             }
@@ -12368,6 +12371,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     if watch_replay.is_some() && std::env::args().any(|a| a == "--flight-view") {
         replay_options.view = Some(flight_view);
+    } else if flight_view > flight_views::MISSILE {
+        return Err("--flight-view 13 and 14 are replay views: use --watch-replay".into());
     }
     if fixture_wings
         && (ai_wings_enabled || enemy_skill.is_some() || ai_mission != ai_wings::Preset::Free)
