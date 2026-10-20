@@ -807,6 +807,77 @@ implementation: four guidance types, pitbull activation, launch velocity and ran
 motor burn, guidance lifetime, uncued seeker search and HUD/tone feedback, with
 delivery stages, [measured acceptance and remaining limits](baselines/missiles.md).
 
+#### Missile flight overhaul (later)
+
+Deferred at John's request on 2026-10-20. The time-to-impact cost work preserves
+existing answers; it does not change propulsion or launch policy. A later pass
+needs decisions on the current [fitted launch model](spec/missiles.md#launch-velocity-and-intercept-estimates).
+
+Current findings, checked after the cost commit `8d883e95`:
+
+- **Acceleration can end before the motor burns out.** `Motion::step` adds
+  `acceleration * DT` only until `gain` exhausts the budget
+  ([missiles.rs:609](../crates/tore-sim/src/combat/missiles.rs#L609)). `phase()`
+  remains Powered until launch age `fuel_t * 30` ticks
+  ([missiles.rs:355](../crates/tore-sim/src/combat/missiles.rs#L355)). Smoke,
+  flame, powered turn rate and the HUD's BURN label follow that phase, not
+  remaining thrust: [smoke, live.rs:5405](../crates/tore-sim/src/combat/live.rs#L5405),
+  [flame flag, combat.rs:1177](../crates/tore-world/src/combat.rs#L1177),
+  [flame drawing, render_snapshot.rs:434](../crates/tore-app/src/render_snapshot.rs#L434),
+  [turn rate, missiles.rs:715](../crates/tore-sim/src/combat/missiles.rs#L715),
+  [BURN, weapon_hud.rs:767](../crates/tore-app/src/weapon_hud.rs#L767).
+  The [AIM-120 record](formats/fa-weapons.csv#L25) burns for 66 seconds. Once
+  the budget is spent, [turn losses](../crates/tore-sim/src/combat/missiles.rs#L590)
+  are never recovered while lit. Existing [FA evidence](formats/missiles.md#compatibility-and-current-launch-adapters)
+  describes acceleration toward an absolute maximum, holding it and recovering
+  toward it after turns ([combat.rs:104](../crates/tore-sim/src/combat.rs#L104),
+  [combat.rs:119](../crates/tore-sim/src/combat.rs#L119)).
+- **There is no absolute speed cap.** The budget is
+  `max(0, altitude-adjusted maximum_speed - initial_speed)`, fixed at launch
+  altitude. Straight,
+  aligned flight can reach inherited launcher speed plus that budget, exceeding
+  `maximum_speed`; later altitude changes do not recalculate it
+  ([missiles.rs:533](../crates/tore-sim/src/combat/missiles.rs#L533)).
+- **There is no aerodynamic drag law.** After burnout, speed falls by fixed
+  deceleration toward the record's final speed. The separate fitted turn loss
+  remains ([coast, missiles.rs:619](../crates/tore-sim/src/combat/missiles.rs#L619)).
+
+Some range limits stay fixed even when launch speed changes:
+
+| Path | Current rule |
+| --- | --- |
+| IR, semi-active radar and emitter maximum-range estimate | The speed-aware search is capped at zone 0 seeker range. Active radar has no such cap. [missiles.rs:1085](../crates/tore-sim/src/combat/missiles.rs#L1085). |
+| Compatibility weapon rules | Readiness uses the fixed zone 1 range. [live.rs:2689](../crates/tore-sim/src/combat/live.rs#L2689), [live.rs:2798](../crates/tore-sim/src/combat/live.rs#L2798). |
+| Powered air-to-ground release bars | `reach_uncached` returns the geometric zone when `!glide`; it does not solve speed-dependent reach. [guided.rs:322](../crates/tore-sim/src/combat/guided.rs#L322). |
+| AI launch gate | Store setup copies zone 1 maximum into `spec.maximum_range_ft`; the controller checks that range and the fixed employment zone. [ai_wings.rs:607](../crates/tore-world/src/ai_wings.rs#L607), [controller.rs:417](../crates/tore-sim/src/ai/controller.rs#L417). Released AI missiles still inherit launch velocity and use the shared motion. [ai_wings.rs:3230](../crates/tore-world/src/ai_wings.rs#L3230), [ai_wings.rs:3314](../crates/tore-world/src/ai_wings.rs#L3314). |
+
+The release code also computes the compatibility `launch_speed` scalar, but a
+Spec missile's `Motion::launch` receives `launcher.velocity`. Live flight then
+sets the displayed projectile speed from `motion.velocity`. Changing the scalar
+helper alone will not change that flight model. See
+[cockpit.rs:845](../crates/tore-sim/src/combat/live/cockpit.rs#L845),
+[cockpit.rs:914](../crates/tore-sim/src/combat/live/cockpit.rs#L914),
+[cockpit.rs:917](../crates/tore-sim/src/combat/live/cockpit.rs#L917) and
+[live.rs:5578](../crates/tore-sim/src/combat/live.rs#L5578).
+
+Decisions for John before implementation: keep the FA accelerate-and-hold shape,
+or choose boost then coast with drag; clamp at `maximum_speed`, or retain the
+additive launch speed requested on 2026-09-17; retain or change the seeker-range
+cap; and decide whether AI launch gates should use the speed-aware estimate.
+These are deferred decisions, not changes authorized by the cost optimization.
+
+A new model changes simulation results. Update the behaviour spec first, then
+review guard references and golden fingerprints, including [CI on `macos-14`](../.github/workflows/ci.yml#L23).
+Plan a protocol bump from the current **54**
+([wire/mod.rs:255](../crates/tore-session/src/wire/mod.rs#L255)), and review the
+[missile checkpoint layout, missiles_checkpoint.rs:43](../crates/tore-sim/src/combat/missiles_checkpoint.rs#L43)
+and combat tape **VERSION 8** ([tape_file.rs:28](../crates/tore-app/src/tape_file.rs#L28)). Re-run the [missile reach cases](baselines/missiles.md)
+and `--missile-acceptance`. The TTI shortcut
+[`straight_seconds`, guided.rs:102](../crates/tore-sim/src/combat/guided.rs#L102)
+and the [conservative fly-out bounds](ARCHITECTURE.md#the-firing-estimate-and-its-exact-shortcuts)
+must follow the chosen model as well as live flight. No protocol, checkpoint
+or tape change is part of this backlog note.
+
 #### Weapon catalog update passes
 
 Requested by John on 2026-09-23: Load Ordnance hides weapons without connected
