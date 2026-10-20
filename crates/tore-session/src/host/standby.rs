@@ -10,10 +10,13 @@
 //! the ticks and the parts they changed. It drains the journal (slice K1)
 //! and gives each standby its records in order:
 //!
-//! - **Ticks** wait in each stream until a snapshot interval of them (four at
-//!   30 snapshots a second) is there, and go out as one Ticks record; any
-//!   other record sends the waiting ticks first, so the stream keeps the
-//!   journal's order.
+//! - **Ticks** stepped in an update go out at its end as one Ticks record
+//!   (at most [`TICKS_PER_RECORD`] a record), in the same send as the
+//!   snapshots of those ticks; any other record sends the waiting ticks
+//!   first, so the stream keeps the journal's order. (Until the battery
+//!   fixes of 2026-10-20 they waited for a snapshot interval of them, so a
+//!   host killed between two updates could take the last tick it stepped,
+//!   and showed its players, with it.)
 //! - **State, Flight and Ended** go out as they come. A Flight or an Ended
 //!   drops a checkpoint still going out: it belongs to the flight before.
 //! - **Checks** go to the warm standbys at the first update at or after each
@@ -220,7 +223,7 @@ struct Stream {
     role: StandbyMark,
     warm: bool,
     writer: StreamWriter,
-    /// Ticks waiting for a snapshot interval of them.
+    /// Ticks stepped in this update, waiting for its end.
     ticks: Vec<Tick>,
     outgoing: Option<Outgoing>,
     /// When the last checkpoint finished going out.
@@ -450,11 +453,12 @@ impl Host {
             self.checks_due();
             self.cold_checkpoints_due();
         }
-        let interval = self.ticks_per_snapshot() as usize;
         for index in 0..self.standbys.streams.len() {
-            if self.standbys.streams[index].ticks.len() >= interval {
-                self.flush_ticks(index);
-            }
+            // Every tick stepped in this update goes out in it, with the
+            // snapshots of those ticks: a standby never lacks a tick a
+            // player was shown, so a host killed between two updates loses
+            // none of its stepped ticks.
+            self.flush_ticks(index);
             self.pace(index);
             self.extra_packets(index);
         }

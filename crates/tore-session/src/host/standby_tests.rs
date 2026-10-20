@@ -179,6 +179,8 @@ struct Rig {
     /// When every player flew, and each standby's stream bytes then.
     flying_at: Option<Duration>,
     at_flight: BTreeMap<u8, StreamBytes>,
+    /// The host is gone (killed): it neither reads, updates nor sends.
+    host_down: bool,
 }
 
 impl Rig {
@@ -204,6 +206,7 @@ impl Rig {
             wire: Vec::new(),
             flying_at: None,
             at_flight: BTreeMap::new(),
+            host_down: false,
         }
     }
 
@@ -332,9 +335,11 @@ impl Rig {
         self.net.advance(MS);
         let now = self.net.now();
         let before = self.host.world.tick();
-        self.host.receive_from(now, &mut self.socket).unwrap();
-        self.host.update(now);
-        self.host.transmit(&mut self.socket).unwrap();
+        if !self.host_down {
+            self.host.receive_from(now, &mut self.socket).unwrap();
+            self.host.update(now);
+            self.host.transmit(&mut self.socket).unwrap();
+        }
         while let Some(log) = self.host.poll_log() {
             if matches!(log, HostLog::MissionEnded { .. } | HostLog::Fault { .. }) {
                 eprintln!("{now:?}: {log:?}");
@@ -748,6 +753,52 @@ fn warm_and_cold(seconds: u64) {
 #[test]
 fn a_warm_and_a_cold_standby_follow_the_crowd_fight() {
     warm_and_cold(30);
+}
+
+/// Battery fix (2026-10-20, `net-migrate-kill`): a host killed (SIGKILL)
+/// right after any update has already sent its standbys every tick it
+/// stepped, and so every tick its players were shown. The stream used to
+/// hold ticks back for a snapshot interval of them (two at 60 a second), so
+/// a host killed after an update that left one waiting took that tick with
+/// it and the new host's world started a tick behind the old host's last.
+/// Killed once after an even tick and once after an odd one.
+#[test]
+fn a_host_killed_after_any_update_leaves_its_standbys_every_tick_it_stepped() {
+    for parity in [0, 1] {
+        let mut rig = Rig::new();
+        rig.join("Viper", 0, Platform::current());
+        rig.join("Cobra", 1, other_platform());
+        rig.join("Hawk", 2, Platform::current());
+        rig.settle();
+        assert!(
+            rig.run_until(Duration::from_secs(3), |r| r.host.ready_standbys().len()
+                == 2),
+            "two ready standbys"
+        );
+        rig.fly();
+        rig.run(Duration::from_secs(2));
+        let killed = loop {
+            let before = rig.host.world.tick();
+            rig.step();
+            let tick = rig.host.world.tick();
+            if tick != before && tick % 2 == parity {
+                break tick;
+            }
+        };
+        // Killed: what it sent arrives, nothing more comes.
+        rig.host_down = true;
+        rig.run(Duration::from_millis(300));
+        for player in 0..2 {
+            let world = rig.players[player].standby.replica().unwrap();
+            assert_eq!(
+                world.tick(),
+                killed,
+                "player {player}'s standby holds the world at tick {}, the host's last \
+                 update ended at {killed}",
+                world.tick()
+            );
+        }
+    }
 }
 
 /// Slice S11: a host whose world makes no contrail puffs (as a dedicated
