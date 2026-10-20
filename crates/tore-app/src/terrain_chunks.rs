@@ -307,7 +307,7 @@ impl Default for CasterShape {
         Self {
             bounds: Bounds::ALL,
             opaque: Vec::new(),
-            tested: vec![0..u32::MAX],
+            tested: std::iter::once(0..u32::MAX).collect(),
         }
     }
 }
@@ -727,10 +727,10 @@ mod tests {
         }
         // A plain aircraft goes depth-only whole; glass keeps the test.
         let plain = batch(&[(0., false); 100]);
-        assert_eq!(CasterShape::of(&plain).opaque, [0..300]);
+        assert_eq!(CasterShape::of(&plain).opaque, vec![0..300; 1]);
         assert!(CasterShape::of(&plain).tested.is_empty());
         let glass = batch(&[(-5., false); 100]);
-        assert_eq!(CasterShape::of(&glass).tested, [0..300]);
+        assert_eq!(CasterShape::of(&glass).tested, vec![0..300; 1]);
         // The fragment test's layers, matched to the shader's.
         let shader = include_str!("surface_lighting.wgsl");
         assert!(shader.contains(

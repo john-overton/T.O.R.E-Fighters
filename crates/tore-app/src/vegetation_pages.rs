@@ -51,9 +51,9 @@ impl PageBounds {
             if !(p.iter().all(|v| v.is_finite()) && radius.is_finite()) {
                 return Self::ALL;
             }
-            for i in 0..3 {
-                b.min[i] = b.min[i].min(p[i]);
-                b.max[i] = b.max[i].max(p[i]);
+            for (i, v) in p.into_iter().enumerate() {
+                b.min[i] = b.min[i].min(v);
+                b.max[i] = b.max[i].max(v);
             }
             b.radius = b.radius.max(radius);
         }
