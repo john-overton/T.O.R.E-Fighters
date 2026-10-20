@@ -3163,7 +3163,11 @@ again with an observer; the capture format did not change for it.
   56 since the F-15C shoulder rails (slice v2-f15 follow-up): its twin
   shoulder Sidewinders sit and release 0.85 ft either side of the pylon
   instead of 1.75 ft, which changes where those rounds start, so an older game
-  must not join.
+  must not join;
+  57 since the F-15C wing pylons moved inboard (slice v2-f15 second follow-up):
+  the shoulder rails are back at 1.75 ft either side of their pylon, and the
+  whole wing pylon assembly sits 11 ft from the centreline instead of 16.7 ft,
+  which moves those stores' release points, so an older game must not join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
