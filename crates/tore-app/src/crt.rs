@@ -1026,9 +1026,11 @@ mod shader_tests {
                 assert!(
                     binding
                         < match *label {
-                            "opaque blades" | "blade list" => [9, 3, 3, 0],
+                            // Group 1 is the surface lighting: uniform,
+                            // shadow maps, comparison and gather samplers.
+                            "opaque blades" | "blade list" => [9, 4, 3, 0],
                             "blade candidates" => [9, 0, 3, 2],
-                            _ => [9, 3, 2, 0],
+                            _ => [9, 4, 2, 0],
                         }[group as usize],
                     "{label}: unavailable binding {binding}"
                 );
