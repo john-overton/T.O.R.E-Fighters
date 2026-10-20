@@ -140,7 +140,7 @@ Every number below is fitted (agent decision).
 | Rack | A bar 0.25 ft deep across the pylon's foot, reaching out to the centre lines of the stores beside it, 0.7 of the pylon's length (plus the racks one behind another) |
 | Fin roll | Every weapon shape is rolled about its body's centre line so its fins stand in an X, 45 degrees from straight out and straight up and down, so no fin points into the pylon, the wing or body above, or the store beside it (John 2026-10-13: "ordnance needs to be rotated 45 degrees to make sure fins don't clip and are perpendicular to pylons and the fuselage as best as possible"). The roll is measured per retail shape, not assumed: the fin tips' clock about the body (the corners more than 1.6 body half widths out, their angles averaged over a quarter turn). A "+" shape (clock 0) turns 45 degrees; a shape already in an X (clock about 45) is not turned; a shape whose tips agree on no clock (agreement under 0.5 of 1) is not turned. One roll serves every mount (under a pylon, beside a bar, on a wingtip, on a rail), since an X is the same seen from below or from the side. The rolled shape is the one drawn everywhere the store is: on the pylon, in flight after release (so it does not turn at release), for the player, AI aircraft, network peers, replays and previews. See [fin roll by shape](#fin-roll-by-shape). Opinionated, John 2026-10-13; the measuring rule and one roll per shape are agent decisions |
 | Wingtip | Nothing drawn under a wingtip store ([rules](#rules)) |
-| Shoulder rail | The pylon the store rides beside, from its foot into the surface above (drawn again for the shoulder store, so it stands when the station under it was left empty), and an arm 0.15 ft deep jutting off the pylon's side, above the main store, out along the shoulder store's top to its centre line, 0.6 store lengths long (3 to 6 ft), drawn as pylon structure. The F-15C's twin shoulder rails on one pylon (two Sidewinders, 0.85 ft either side of it, 1.7 ft apart) are a rail on top of each missile (0.28 ft wide, 0.25 ft deep) the pylon's whole length (0.6 of the missile's length, 3 to 6 ft) and two short cross pieces (0.4 ft) a quarter and three quarters along (John 2026-10-20: the wing pylons about half the width, the side rails the full length; the first fix, a 3 ft F/A-18-sized rail with one cross bar and 3.5 ft between the missiles, was too short and too wide) |
+| Shoulder rail | The pylon the store rides beside, from its foot into the surface above (drawn again for the shoulder store, so it stands when the station under it was left empty), and an arm 0.15 ft deep jutting off the pylon's side, above the main store, out along the shoulder store's top to its centre line, 0.6 store lengths long (3 to 6 ft), drawn as pylon structure. The F-15C's twin shoulder rails on one pylon (two Sidewinders, 1.75 ft either side of it) use the same arm, 3.5 ft wide across the pylon and 3 to 6 ft long, over both missiles. The 2026-10-20 attempts to narrow it to the F/A-18 bar's size, and then to half the width, were undone the same day: John moved the whole pylon inboard instead, below the paired pylon as on the real F-15 |
 | Edge rail | A wing station's store with nothing of the model above it, beside a wing's edge less than 4 ft inboard, hangs on a rail from 0.3 ft inside the tip's edge out over the store, as deep as both the tip's edge and the store's upper half, 0.6 store lengths long (3 to 9 ft). With no tip beside it, a 0.35 ft rail |
 | Colours | Pylons and racks grey (0.5, 0.52, 0.54), tanks light grey, pods grey-green; weapon shapes keep their palette colours |
 | Lighting | Exactly the airframe's: every pylon, rack, fitted body and weapon face carries a palette entry (a fitted colour takes the aircraft palette's nearest entry) with its fog mode, so the weather's time-of-day palette darkens it at night and at dusk, fog and haze fall on it, and the same sun, moon and ambient light it, as they do the untextured faces of the aircraft it hangs on; a released weapon in flight is lit the same way. Before 2026-10-13 they carried fixed colours and showed bright at night (John's report, an A-10 at night). The stepped compatibility lighting (`TORE_WEATHER_SMOOTH=0`), which picks a light row per airframe face, is not applied to stores | opinionated, John 2026-10-13; the nearest-entry rule is an agent decision |
@@ -508,7 +508,7 @@ conformal-tank station record exists in the supported roster.
 | Source row | Before, feet out / forward | Fitted station, feet out / forward | Rule |
 | --- | --- | --- | --- |
 | 4, fuselage missiles | 8.33 / 0 | 5 / -1 | Lower outer intake corners; four missiles form two tandem pairs with the existing 1 ft nose-to-tail gap |
-| 5, wing stores | 16.67 / 0 | 16.67 / -5.5 | Under the wing chord; four Sidewinders keep one small twin-rail bar per wing |
+| 5, wing stores | 16.67 / 0 | 11.0 / -5.5 (16.67 until 2026-10-20) | Under the wing chord; four Sidewinders keep one small twin-rail bar per wing |
 
 The duct bottom at 5 ft out is about 4.0 to 4.3 ft below the model's
 reference point between 14 ft forward and 6 ft aft. The old source height
@@ -564,6 +564,19 @@ bomb row), empty by default. A loadout saved before it has one station fewer
 and still restores, the new station empty (`stations::later_weapon_rows`).
 The station list, the checkpoint's station entries and a lobby loadout's
 station count for the F-15C change with it; see the report for the protocol.
+
+### The F-15C wing pylon moves inboard (2026-10-20)
+
+John, 2026-10-20: "the wing pylons were below the paired pylon; the whole
+thing needs to be moved inward, kind of like the real F-15". The wing pylon
+(rows 5 and 7: shoulder Sidewinders, the tank or the AIM-120/AIM-9 under
+it) was 16.67 ft out, at the wing's outer third. It is 11 ft out
+(`F15_WING_OUT`, **fitted**, from John's marks on the model's 22.8 ft
+semispan; the real Eagle's pylon is about 9 to 10 ft of 21 ft out), still
+5.5 ft (row 5) and 4.3 ft (row 7) aft of the reference point under the
+chord, its top on the wing's underside there. Both wings are symmetric.
+Store release points move with it (stores leave from where they are
+drawn); recorded replays keep the poses they recorded.
 
 ## The F-16C and fleet rail audit
 
@@ -695,15 +708,13 @@ start empty. Retail files are never edited.
 | Aircraft / appended row (zero based) | Real stations | Capacity | Origin, feet right / forward |
 | --- | --- | --- | --- |
 | F15.PT / 6 | Centreline 5 | One tank or up to three bombs, 4,500 lb | 0 / -3 |
-| F15.PT / 7 | Wing pylons 2 and 8 | Two tanks, or two AIM-120 or Sidewinders (one a pylon), 9,000 lb total ([wing pylon missiles](#the-f-15c-wing-pylons-2026-10-20)) | +/-16.67 / -4.3 |
+| F15.PT / 7 | Wing pylons 2 and 8 | Two tanks, or two AIM-120 or Sidewinders (one a pylon), 9,000 lb total ([wing pylon missiles](#the-f-15c-wing-pylons-2026-10-20)) | +/-11.0 / -4.3 (16.67 until 2026-10-20) |
 | F16C.PT / 9 | Inner wet 4 and 6 | Two stores, 6,000 lb total | +/-7 / -1 |
 
 The F-15 can retain its four fuselage AIM-7/AIM-120 and four wing
 Sidewinders while carrying three `F610.GAS` tanks. The Sidewinders sit
-above the shared pylon foot on its two side rails, each 0.85 ft from the
-pylon centre (1.75 ft until 2026-10-20, when John asked for the wing
-pylon about half as wide; the release points moved 0.9 ft inboard), the rolled
-fins clearing each other. The F-16 row accepts
+above the shared pylon foot on its two side rails, each 1.75 ft from the
+pylon centre to clear the tank and the rolled fins. The F-16 row accepts
 two `F370.GAS` tanks or compatible bombs/missiles, including Mk 82 and
 AGM-65G, with one store per wing. It uses the existing loading masks,
 not a separate release path. Tank and weapon selections exclude each

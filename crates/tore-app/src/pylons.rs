@@ -460,34 +460,14 @@ fn shoulder_rail(
             1,
             size,
         );
-        // Two narrow rails, one on top of each missile, running the pylon's
-        // whole length as the original plate did (0.6 of the missile, 3 to
-        // 6 ft), joined by two short cross pieces a quarter and three
-        // quarters along: the rails stand 1.7 ft apart, half the first
-        // plate's 3.5 ft (John 2026-10-20: the F-15's wing pylons about
-        // half the width, side rails the pylon's full length).
         let spread = tore_sim::combat::hardpoints::TWIN_SHOULDER_OUT;
-        let rail = (0.6 * dims.length).clamp(3., 6.);
-        let middle = p[2] + dims.middle;
-        let height = p[1] + dims.top + RACK_DEPTH / 2.;
-        for along in [-0.25, 0.25] {
-            block(
-                out,
-                at,
-                [p[0], height, middle + along * rail],
-                [2. * spread, RACK_DEPTH, CROSS],
-                PYLON,
-            );
-        }
-        for side in [-1., 1.] {
-            block(
-                out,
-                at,
-                [p[0] + side * spread, height, middle],
-                [PYLON_WIDTH, RACK_DEPTH, rail],
-                PYLON,
-            );
-        }
+        block(
+            out,
+            at,
+            [p[0], p[1] + dims.top + ARM / 2., p[2] + dims.middle],
+            [2. * spread, ARM, (0.6 * dims.length).clamp(3., 6.)],
+            PYLON,
+        );
         return;
     }
     let side = if p[0] < 0. { -1. } else { 1. };
@@ -518,9 +498,6 @@ fn shoulder_rail(
 
 /// A shoulder rail's arm's depth, feet (fitted).
 const ARM: f64 = 0.15;
-/// How long a twin shoulder rail's cross piece is along the pylon, feet
-/// (fitted).
-const CROSS: f64 = 0.4;
 
 /// The back and front ends of a pylon `length` long centred at `middle`
 /// (feet forward) under `right`, as [forward, surface height]: as far as
@@ -1172,74 +1149,6 @@ mod tests {
                 .all(|v| f64::from(v[1]) > up),
             "the arm is above the store's centre line"
         );
-    }
-
-    /// The Eagle's twin shoulder rails (two Sidewinders on one pylon): a
-    /// narrow rail on top of each missile the pylon's whole length (0.6 of
-    /// the missile, 3 to 6 ft), 1.7 ft apart, and two short cross pieces
-    /// between them (John 2026-10-20: about half the width, the side rails
-    /// full length).
-    #[test]
-    fn the_twin_shoulder_rails_are_narrow_and_full_length() {
-        use tore_sim::combat::hardpoints::{SHOULDER_BYTE, TWIN_SHOULDER_OUT};
-        let airframe = flat_wing();
-        let store = on_flat_wing(plain([8.75, -5., 0.], SHOULDER_BYTE, 4));
-        let places = hung(&store);
-        let right: Vec<&Hung> = places.iter().filter(|h| h.side == 0).collect();
-        assert_eq!(right.len(), 2, "two Sidewinders a wing");
-        assert_eq!(right[0].pylon.slots.len(), 2, "on one pylon");
-        assert!(
-            (right[0].centre[0] - right[1].centre[0]).abs() < 2. * TWIN_SHOULDER_OUT + 1e-9
-                && 2. * TWIN_SHOULDER_OUT < 1.8,
-            "the missiles stand about half the old 3.5 ft apart"
-        );
-        let out = draw(std::slice::from_ref(&store), &airframe);
-        // The structure level with the missiles' tops.
-        let top = right[0].centre[1] + PLAIN[1] / 2.;
-        let level: Vec<[f32; 3]> = grey(&out)
-            .into_iter()
-            .filter(|v| v[0] > 0.)
-            .filter(|v| {
-                (f64::from(v[1]) - top).abs() < 1e-4
-                    || (f64::from(v[1]) - top - RACK_DEPTH).abs() < 1e-4
-            })
-            .collect();
-        let extent = |axis: usize| {
-            let low = level.iter().map(|v| v[axis]).fold(f32::MAX, f32::min);
-            let high = level.iter().map(|v| v[axis]).fold(f32::MIN, f32::max);
-            f64::from(high - low)
-        };
-        let rail = (0.6 * PLAIN[0]).clamp(3., 6.);
-        assert!(
-            (extent(2) - rail).abs() < 1e-4,
-            "length {} vs {rail}",
-            extent(2)
-        );
-        assert!(
-            (extent(0) - (2. * TWIN_SHOULDER_OUT + PYLON_WIDTH)).abs() < 1e-4,
-            "width {}",
-            extent(0)
-        );
-        // Each rail reaches the missile's centre line it rides on.
-        for h in &right {
-            assert!(
-                level
-                    .iter()
-                    .any(|v| { (f64::from(v[0]) - h.centre[0]).abs() <= PYLON_WIDTH / 2. + 1e-4 })
-            );
-        }
-        // Two cross pieces between the rails, short along the pylon, a
-        // quarter and three quarters along (the rails' own ends are at
-        // plus and minus half).
-        for along in [-0.25, 0.25] {
-            let ends = [along * rail - CROSS / 2., along * rail + CROSS / 2.];
-            for end in ends {
-                assert!(
-                    level.iter().any(|v| (f64::from(v[2]) - end).abs() < 1e-4),
-                    "a cross piece edge at {end}"
-                );
-            }
-        }
     }
 
     /// Every pylon, rack, fitted body and weapon face is lit as the
