@@ -14832,7 +14832,21 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         flight.bay_open = value > 0.;
     }
 
-    if std::env::var_os("TORE_EFFECT_PREVIEW").is_some() {
+    if let Some(mode) = std::env::var_os("TORE_EFFECT_PREVIEW") {
+        if mode == "hill" {
+            // Start short of the nearest hillside, facing uphill, so the
+            // preview's craters lie on a slope.
+            let (site, yaw) =
+                combat::Combat::preview_hillside(&world, [flight.position[0], flight.position[2]])
+                    .ok_or("no hillside near the start")?;
+            let (sin, cos) = yaw.sin_cos();
+            flight.yaw = yaw;
+            flight.position = [site[0] - sin * 2600., site[1] + 700., site[2] - cos * 2600.];
+            println!(
+                "Effect preview hillside at {site:?}, facing {:.0} degrees",
+                yaw.to_degrees()
+            );
+        }
         combat.preview_effects(&flight, &world);
         combat.refresh_render(combat.own_id(), &flight, None);
     }

@@ -1626,6 +1626,11 @@ TORE_DATA_DIR=.local/effects-data TORE_EFFECT_PREVIEW=1 target/debug/tore-app --
 TORE_DATA_DIR=.local/effects-data TORE_EFFECT_PREVIEW=1 target/debug/tore-app --free-flight --capture-flight .local/effects/ground.ppm --flight-view 1 --flight-look 0,40 --flight-zoom 2.5 --no-audio
 ```
 
+`TORE_EFFECT_PREVIEW=hill` instead starts 2,600 feet short of the nearest even
+12 to 20 degree hillside, facing uphill, with six craters (sizes 3, 9 and 18) on
+it and nothing else, to check ground marks against sloping terrain
+(`--flight-view 1`; try `--flight-look 0,0` and `0,-35`).
+
 A cache made before the explosion sounds and sheets were added re-imports on
 first start, as any stale cache does. See [the evidence](baselines/explosions.md).
 

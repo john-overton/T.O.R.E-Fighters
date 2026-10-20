@@ -59,16 +59,23 @@ struct Solid {{ @builtin(position) clip:vec4<f32>, @location(0) color:vec3<f32> 
 #[test]
 #[ignore = "requires an offscreen GPU adapter"]
 fn gpu_ground_decals_preserve_vehicle_pixels() {
-    render_depth_cases(false);
+    render_depth_cases(0.);
 }
 
 #[test]
 #[ignore = "requires an offscreen GPU adapter"]
 fn gpu_hillside_decals_cover_ground_and_preserve_vehicle_pixels() {
-    render_depth_cases(true);
+    render_depth_cases(15.);
 }
 
-fn render_depth_cases(hillside: bool) {
+#[test]
+#[ignore = "requires an offscreen GPU adapter"]
+fn gpu_steep_hillside_decals_cover_ground_and_preserve_vehicle_pixels() {
+    render_depth_cases(30.);
+}
+
+fn render_depth_cases(slope_degrees: f64) {
+    let hillside = slope_degrees > 0.;
     pollster::block_on(async {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let adapter = instance
@@ -80,23 +87,32 @@ fn render_depth_cases(hillside: bool) {
             .await
             .unwrap();
         println!("decal adapter: {:?}", adapter.get_info());
-        for (name, range, fov) in [
-            ("external", 1_200_f32, 18_f32),
-            ("sensor", 30_000., 0.6),
-            ("long-sensor", 150_000., 0.12),
+        // Ranges from the external view to the longest sensor zoom, then
+        // the same ground seen from almost straight above.
+        // The last field says whether the old behaviour is expected to
+        // show its bug there (looking steeply down or along the ground it
+        // does not).
+        let mut failures = Vec::new();
+        for (name, range, fov, pitch, exposes, half) in [
+            ("external", 1_200_f32, 18_f32, -0.5_f32, true, 40_f64),
+            ("sensor", 30_000., 0.6, -0.5, true, 40.),
+            ("long-sensor", 150_000., 0.12, -0.5, true, 40.),
+            ("far-sensor", 600_000., 0.03, -0.5, true, 40.),
+            ("grazing", 30_000., 0.6, -0.12, false, 40.),
+            ("skimming", 30_000., 0.6, -0.06, false, 40.),
+            ("overhead", 1_200., 18., -1.5, false, 40.),
+            ("overhead-sensor", 30_000., 0.6, -1.5, false, 40.),
+            // A gun round's pock mark, a small crater, on the ground beside
+            // each vehicle as well as under it.
+            ("pock", 300., 18., -0.5, false, 8.),
         ] {
             let name = if hillside {
-                format!("hill15-{name}")
+                format!("hill{slope_degrees}-{name}")
             } else {
                 name.to_string()
             };
-            let slope = if hillside {
-                15_f64.to_radians().tan()
-            } else {
-                0.
-            };
+            let slope = slope_degrees.to_radians().tan();
             let ground = |x: f64, z: f64| slope * (0.6 * x + 0.8 * z);
-            let pitch = -0.5_f32;
             let (sin, cos) = pitch.sin_cos();
             let eye = [0., -sin * range, -cos * range];
             let values = [
@@ -179,10 +195,14 @@ fn render_depth_cases(hillside: bool) {
                 usage: wgpu::BufferUsages::VERTEX,
             });
             let mut sprites = Vec::new();
-            for x in [-55., 0., 55.] {
+            let spots: &[f64] = if half < 20. { &[0., 36.] } else { &[0.] };
+            for (x, z) in [-55., 0., 55.]
+                .into_iter()
+                .flat_map(|x| spots.iter().map(move |z| (x, *z)))
+            {
                 let mark = Sprite {
-                    position: [x, ground(x, 0.), 0.],
-                    extent: [40., 40.],
+                    position: [x, ground(x, z), z],
+                    extent: [half, half],
                     mode: Mode::Flat,
                     cell: [0., 0., 128., 128.],
                     layer: 0,
@@ -350,7 +370,7 @@ fn render_depth_cases(hillside: bool) {
                         pass.set_pipeline(&effect);
                         pass.set_bind_group(0, &effect_bind, &[]);
                         pass.set_vertex_buffer(0, marks.slice(..));
-                        pass.draw(0..6, 0..3);
+                        pass.draw(0..6, 0..(3 * spots.len() as u32));
                     }
                 }
                 encoder.copy_texture_to_buffer(
@@ -400,30 +420,27 @@ fn render_depth_cases(hillside: bool) {
                     .filter(|(a, b)| vehicle(a) && a != b)
                     .count()
             };
-            assert!(
-                roof_count > 100,
-                "{name}: fixture must resolve the vehicles"
-            );
-            if !hillside {
-                assert!(
+            let mut check = |ok: bool, what: String| {
+                if !ok {
+                    failures.push(format!("{name}: {what}"));
+                }
+            };
+            check(roof_count > 100, "fixture must resolve the vehicles".into());
+            if !hillside && exposes {
+                check(
                     lost(&outputs[1]) > roof_count / 2,
-                    "{name}: old pull must reproduce the bug"
+                    "old pull must reproduce the bug".into(),
                 );
             }
-            assert_eq!(
-                lost(&outputs[2]),
-                0,
-                "{name}: crater covered a live vehicle"
+            check(
+                lost(&outputs[2]) == 0,
+                format!("crater covered {} live vehicle pixels", lost(&outputs[2])),
             );
             let changed = outputs[0]
                 .chunks_exact(4)
                 .zip(outputs[2].chunks_exact(4))
                 .filter(|(a, b)| !vehicle(a) && a != b)
                 .count();
-            assert!(
-                changed > 1_800,
-                "{name}: craters must remain visible on terrain"
-            );
             let mut expected = 0;
             let mut missing = 0;
             let mut before_missing = 0;
@@ -439,24 +456,32 @@ fn render_depth_cases(hillside: bool) {
                     before_missing += usize::from(before != coverage);
                 }
             }
+            check(
+                changed * 10 >= expected * 9,
+                format!("craters must remain visible on terrain ({changed} marked of {expected})"),
+            );
             if hillside {
-                assert_eq!(
-                    missing, 0,
-                    "{name}: terrain must not clip any of {expected} crater pixels"
+                check(
+                    missing == 0,
+                    format!("terrain clipped {missing} of {expected} crater pixels"),
                 );
-                assert!(
-                    before_missing > expected / 3,
-                    "{name}: horizontal baseline must expose the hillside bug"
-                );
+                if exposes {
+                    check(
+                        before_missing > expected / 3,
+                        "horizontal baseline must expose the hillside bug".into(),
+                    );
+                }
             }
             println!(
                 "{name}: expected ground pixels {expected}, before missing {before_missing}, after missing {missing}"
             );
             println!(
-                "{name}: {roof_count} roof pixels, before lost {}, after lost 0, {changed} ground pixels marked",
-                lost(&outputs[1])
+                "{name}: {roof_count} roof pixels, before lost {}, after lost {}, {changed} ground pixels marked",
+                lost(&outputs[1]),
+                lost(&outputs[2])
             );
         }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     });
 }
 
@@ -528,3 +553,11 @@ fn corner_sampling_keeps_subfoot_precision_far_from_the_world_origin() {
         assert!((15.0..17.0).contains(&world.slope_degrees(x, z)));
     }
 }
+
+// The GPU cases above fit these two terms; this keeps either from being
+// dropped on a machine without an adapter.
+const _: () = {
+    assert!(GROUND_DEPTH_BIAS.constant > 0);
+    assert!(GROUND_DEPTH_BIAS.slope_scale >= 0.1 && GROUND_DEPTH_BIAS.slope_scale <= 4.5);
+    assert!(GROUND_DEPTH_BIAS.clamp == 0.);
+};

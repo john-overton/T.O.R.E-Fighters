@@ -809,9 +809,27 @@ fn glows_of(
 /// A fire this near a fitted fire's spot (feet, level) is that fire.
 const FIRE_FIT_FT: f64 = 2.;
 
-/// Fitted raster tolerance for independently triangulated coplanar ground.
-/// Sixteen reversed floating-point depth units, never a slope or world lift.
-const GROUND_DEPTH_BIAS: i32 = 16;
+/// Raster tolerance that lets a flat mark win against the independently
+/// triangulated terrain it lies on, never a world-space lift.
+///
+/// The depth buffer is `Depth32Float` with reversed Z on every backend, so
+/// the constant is in units of the float's own resolution at the primitive:
+/// sixteen of them are a fixed fraction of the mark's depth (about 2e-6),
+/// far under a vehicle's six feet at any range, and cover the rounding
+/// between coplanar triangles seen head on. They do not cover a tilted
+/// receiver: two triangulations of one slope disagree by more as depth
+/// changes faster across a pixel (a hillside, a grazing view, a long zoom),
+/// which lost one triangle of a crater on a 15 degree slope. The slope term
+/// adds half of the mark's steepest per-pixel depth change, so the lift is
+/// under one pixel's footprint of height at the mark at any range and zoom.
+/// Fitted by sweeping both terms in `depth_tests` (every case passes with
+/// the slope term from 0.1 to 4.5; 0.5 sits well inside, and above 5 a roof
+/// six feet up is covered at grazing views).
+const GROUND_DEPTH_BIAS: wgpu::DepthBiasState = wgpu::DepthBiasState {
+    constant: 16,
+    slope_scale: 0.5,
+    clamp: 0.,
+};
 
 /// `sprites` with every fire sprite that stands on one of `fires` drawn at
 /// that fire's width (the fire's sheet is as wide as it is tall by the
@@ -969,7 +987,14 @@ impl EffectRenderer {
         shader: &wgpu::ShaderModule,
         samples: u32,
     ) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
-        let pipeline = Self::pipeline(device, format, shader, samples, 0, None);
+        let pipeline = Self::pipeline(
+            device,
+            format,
+            shader,
+            samples,
+            wgpu::DepthBiasState::default(),
+            None,
+        );
         // Both passes use the same resources. Share the layout explicitly:
         // independently inferred layouts cannot share a bind group.
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -992,7 +1017,7 @@ impl EffectRenderer {
         format: wgpu::TextureFormat,
         shader: &wgpu::ShaderModule,
         samples: u32,
-        bias: i32,
+        bias: wgpu::DepthBiasState,
         layout: Option<&wgpu::PipelineLayout>,
     ) -> wgpu::RenderPipeline {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -1037,12 +1062,8 @@ impl EffectRenderer {
                 depth_write_enabled: false,
                 depth_compare: wgpu::CompareFunction::Greater,
                 stencil: Default::default(),
-                // A few reversed-depth raster units for flat marks, no slope
-                // bias and no world-space lift. Standing effects use zero.
-                bias: wgpu::DepthBiasState {
-                    constant: bias,
-                    ..Default::default()
-                },
+                // `GROUND_DEPTH_BIAS` for flat marks; standing effects use none.
+                bias,
             }),
             multisample: wgpu::MultisampleState {
                 count: samples,
