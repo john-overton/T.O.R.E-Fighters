@@ -9546,6 +9546,37 @@ Test builds compare the indexed incoming fire, the perceived-attack search,
 the shared selection pass, the surface fire contact lists, kept places and
 course rows with the replaced code on every AI and surface test.
 
+Exact AI and combat work for heavy fights (optimization round 2, 2026-10-19;
+same decisions and simulation bits, each guarded by a test against the code it
+replaced, kept test-only):
+
+- **The gun solve** (`combat/gunsight.rs`) returns at once for an unpowered
+  round that cannot reach the target in its flight time, and otherwise reads
+  the round's path from a per-thread list of kept paths
+  (`gunsight_trajectory.rs`, 16 kept). A path depends on the record, the
+  launch speed and, only while a motor drives the round, its 256-foot height
+  band (or its exact height when it falls before the motor lights), never on
+  the target. The first tick whose crossing could turn non-negative is found
+  by bisection over a running bound (the target is never nearer than its
+  distance less its own travel and the round's drop), and the crossings are
+  worked out from there as the old loop did. Every AI aircraft solves its guns
+  every tick at the same launch speed, so nearly every solve reads a kept path.
+- **Envelope bands** (`flight::RowSpeeds`): each envelope row's speed band at
+  one altitude is worked out once and read by every pass of the AI's speed
+  limits, G limits and approach floor; `RowSpeeds::of` keeps them per thread
+  (64 kept) by the configuration's shared allocation, which the entry holds so
+  it cannot be reused for another configuration, and the altitude's bits. A
+  configuration is never changed in place (`AircraftModel::configuration_arc`).
+- **The world bridge** finds actors and target rows by id from a sorted list
+  per walk (`AiMission::actor_places`, `Places`; the first place of a repeated
+  id answers, as a walk from the front did), and an AI aircraft's sensors read
+  the world's observables in place (`Sensors::step_with_refs`).
+- **The render snapshot** writes each target pose field by field into the
+  spare snapshot's slot and keeps each row's drawn attitude while its basis
+  bits stay the same (`RenderHistory::angles`, scratch like the stores cache).
+- **Smoke** keeps the quotients of the last drift, so puffs laid in one wind
+  skip the two divisions.
+
 A test-only copy of the unsplit observation code independently validates the
 serial extraction. Worker comparisons cover complete actor/mission state,
 flight bytes, outputs and bounded journal contents, including new damage

@@ -240,6 +240,81 @@ The probe's checksum is `416d3b1e5e8e4f05` serial, forced and by default.
 The lead's measurement of the new default is recorded with the run's final
 figures.
 
+## Heavy fights (optimization round 2, 2026-10-19)
+
+Exact work on the simulation's hot paths for large fights (the gun solve, the
+envelope bands, the bridge's id lookups, the AI's observables, the render
+snapshot, smoke; see [the architecture](../ARCHITECTURE.md#ai-observation-and-ordered-decisions)).
+Release builds of `optimization` (`fba0db05`) and of the round 2 branch, the
+same imported profile, the probe serial (`TORE_WORKERS=0`). Counts are
+user-space instructions and cycles read with `perf_event_open` (instructions
+barely move with the machine's load; cycles are the median of three runs on a
+quiet machine), each binary run once first so its caches are built. The
+120-tick run is the loading cost, taken off below.
+
+| Probe (15v15 unless noted, 5 nm, scripted attack) | Before cycles | After cycles | Simulation only (less loading) |
+| --- | --- | --- | --- |
+| 120 ticks (loading) | 2.06 G | 1.92 G | |
+| 2,400 ticks | 14.14 G | 12.32 G | 12.08 to 10.40 G (-14%) |
+| 21,600 ticks | 39.60 G | 33.62 G | 37.54 to 31.70 G (-16%) |
+| 2v2, 21,600 ticks | 14.45 G | 12.52 G | about -15% |
+
+Instructions for the same runs: 38.5 to 30.0 G, 110.9 to 88.6 G and 37.0 to
+30.3 G. Every checksum is unchanged (`416d3b1e5e8e4f05`, `1035a55da803a4db`,
+`3408da7166d2aa5a` serial, the 2,400-tick fight also with four workers), and
+the 240 fights of the rate matrix below gave the same checksum at 120 Hz before
+and after. Raw runs, profiles and the matrix are local under
+`.local/next-round/optimization/round2/prof/`.
+
+Windowed heavy fight at 8x (15v15, 1920x1080, uncapped, hidden workspace,
+`TORE_WORKERS=8`, recording on, 2,400 ticks, four runs each, alternating):
+7.0x to 7.5x achieved, frame interval mean 160 to 114 ms (p95 360 to 218 ms).
+The main thread was busy throughout: about 63% simulation, 13% the mission
+recorder (which works out the cockpit readout again), 14% drawing on the CPU,
+2% the tick presenter and 1% waiting. A dedicated server flying the 12 AI
+perf mission used 8.6% of a core before and 7.5% after (two 30-second windows
+each).
+
+What is left in a heavy fight's tick, from the profiles: the AI's own
+observation (about 18%, which a slower observation rate thins), the render
+snapshot (about 6% to 14%), the human's missile fly-out for the
+time-to-impact and launch range (in the first minutes of a fight up to 18%
+of a tick, and in the windowed game worked out again by the readout and the
+recorder), and many small lists built and dropped every tick.
+
+### AI observation rate matrix
+
+240 fights (head, rear and side geometries; 2, 5, 10, 20 and 50 nm; novice,
+average, experienced and ace enemies; 2v2, 4v4, 8v8 and 15v15; 21,600 ticks
+each) at every observation rate, plus each fight at 120 Hz and 60 Hz with the
+player's first shot 10 ticks later as a measure of how far one small change
+moves a chaotic fight. Each rate is compared with 120 Hz fight by fight
+(mean difference over its standard error).
+
+- **First pass** (held observations at their last-seen position): no outcome
+  moved beyond noise at 60 Hz, but the probe's "activity flapping" anomaly
+  appeared in 6 of 240 fights at 60 Hz, 5 at 40, 13 at 30 and 16 at 20, and in
+  none of 480 at 120 Hz. The gun tracking's aligned test flipped between the
+  fresh and the one-tick-old picture. Held observations are now carried on at
+  their observed velocity, which changes nothing at 120 Hz.
+- **Second pass**: flapping 0 at 60 and 40 Hz (1 at 30 and 20). At 60 Hz, of
+  117 comparisons (9 groups by 13 measures) three were beyond two standard
+  errors, about what chance gives, and none in kills, losses, ejections,
+  decoys, gun defense, mid-air collisions or the debrief over all fights;
+  the fight-by-fight spread was smaller than the chaos measure's in every
+  measure. The first visual sighting comes 0.48 ticks (4 ms) later on
+  average, the half observation interval. Close merges in big fights (2 nm,
+  8v8 and 15v15) showed no shift. At 40 Hz twelve comparisons were beyond two
+  standard errors (15v15 enemies lost -0.70, -2.8 SE; 8v8 destroyed +0.50;
+  more mid-air collisions in close merges), at 30 Hz seven and at 20 Hz six.
+
+So 60 Hz behaves as 120 Hz does within the fights' own chaos, and 40 Hz and
+below do not. CPU of the serial 15v15 probe at each rate (cycles, simulation
+only): 2,400 ticks 10.35 G at 120 Hz, 9.16 at 60 (-11%), 8.75 at 40, 8.43 at
+30, 8.29 at 20; 21,600 ticks 31.6 G, 28.7 (-9%), 27.2, 25.6, 25.6. The
+windowed heavy fight at 8x used 4.5% less CPU at 60 Hz (three runs each) and
+reached 7.66x against 7.58x.
+
 ## Unchanged behavior and capture correction
 
 The canonical `mp-67aa2b18` and fresh before recording
