@@ -3151,7 +3151,11 @@ again with an observer; the capture format did not change for it.
   empty visual, map and received-radar lists by default (lean sensors), the
   world checkpoint codes whether the world makes contrail puffs (a dedicated
   server's makes none), and the standby stream's Flight record carries that
-  bit, so an older game must not join.
+  bit, so an older game must not join;
+  54 since optimization round 2 (slice r2-prof): AI aircraft observe at 60 Hz
+  by default (staggered, held observations carried forward at their velocity),
+  so a standby replaying the journal at an older default would part from the
+  host, and an older game must not join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
