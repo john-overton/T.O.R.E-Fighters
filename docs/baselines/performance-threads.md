@@ -339,6 +339,39 @@ audio processing was about 0.5% of main-thread sampled CPU. No playback rule
 was changed. These CPU samples do not establish mixer wait times or callback
 silence counts, and do not rule out an audio issue in another workload.
 
+## Cockpit pages (round 2)
+
+Optimization round 2, 2026-10-19, branch `r2-cockpit` against `fba0db05`, on
+this Linux machine while other work shared it (load average 14 to 29), so
+single runs are noisy; before and after builds ran alternately, twice each.
+Windowed quick mission, 2 against 2 at 5 nmi, uncapped on a hidden workspace,
+no audio, 2,400 ticks at 1x, radar lock and target. The figure is the game's
+"UI composition" timer (from the end of the simulation to the GPU submit),
+mean milliseconds per frame. The mechanisms are in
+[the architecture notes](../ARCHITECTURE.md#first-simulation-renderer).
+
+| Case | before | after |
+| --- | --- | --- |
+| Large windows, 1920x1080 | 1.56, 1.56 | 1.00, 0.98 |
+| Small windows, 1920x1080 | 1.16, 0.92 | 1.16, 0.63 |
+| Large windows, 3840x2160 | 4.00, 2.52 | 2.02, 1.22 |
+| Map open (Shift+M), 1920x1080 | 27.22, 25.19 | 4.61, 3.65 |
+| AC-130 sensor console, 1920x1080 | 8.77, 7.99 | 2.63, 1.64 |
+
+With the map open the mean frame interval fell from about 34 ms to about 12 ms,
+and with the console from about 15 ms to about 6 ms. The other cases are held
+by the GPU and presentation (about 9.4 ms at 1080p, 23 to 24 ms at 4K). Sampled
+profiles put the large-window page rasters at 0.33 ms a frame before and 0.06
+after (plus 0.04 for the keys), all panel preparation at 1.7 and 0.5, the map
+layer at 28.1 and 2.3, and the console's outline pass at 5.0 and 2.3.
+
+Pixels: release builds run with `TORE_PAGE_KEY_CHECK=1` drew every kept page
+again and compared it, through scripted flights that opened every page in both
+layouts, the map, an AC-130 (its gunsight camera and console) and an A-10
+(targeting page): 40,000 kept pages, none different. Captured flight frames
+(large and small windows, the map, the AC-130, the A-10, the flight menu) are
+byte for byte the same before and after.
+
 ## Limits and remaining review
 
 Local implementation and Linux validation are complete. Review cleanup adds

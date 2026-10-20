@@ -161,7 +161,60 @@ aircraft can be the reference. [Behavior and fitted constants](spec/flight-views
 `flight_ui.rs` owns desktop command dispatch, the imported menu's flight actions, session presentation settings and pause state; the menu's navigation, hit geometry and drawing are `pause_menu.rs`, shared with the replay viewer. `hud.rs` draws the forward-flight HUD from state and source font glyphs, projecting the ladder/path through the renderer's 60-degree camera convention. Simulation remains independent of both. The full-canvas cockpit is transparent art over the world; instrument windows are independent rasters. Menu/focus pauses stop fixed ticks and engine loops, and input transitions clear held controls. Shader zoom is shared by terrain and sky projection; camera previews restore the main camera before drawing.
 
 
-`flight_canvas.rs` now composes the flight-only overlay at an aspect-responsive size (physical drawable, proportionally capped at 1920×1080). The separate GPU cockpit pass preserves uniform cover-fit in the centered forward view, and instrument layout rectangles anchor to actual edges. Native instrument rasters go directly to their destination sizes instead of passing through a reduced 640×480 composite. The original cockpit texture is uploaded once; unchanged scaled panel rasters are cached. Alpha-aware filtering prevents dark transparent borders. `renderer.rs` recreates its UI texture when dimensions change and uses the full viewport for flight; menus/viewer overlays retain their existing canvas. Pointer conversion uses the same responsive panel rectangles, while the centered pause menu retains menu coordinates. HUD metadata uses a 0.7225 layout scale, including the requested additional 15% reduction. Projection compensation preserves angular cues through resizing and portrait aspect.
+`flight_canvas.rs` now composes the flight-only overlay at an aspect-responsive size (physical drawable, proportionally capped at 1920×1080). The separate GPU cockpit pass preserves uniform cover-fit in the centered forward view, and instrument layout rectangles anchor to actual edges. Native instrument rasters go directly to their destination sizes instead of passing through a reduced 640×480 composite. The original cockpit texture is uploaded once; unchanged pages are neither drawn nor scaled again (see below). Alpha-aware filtering prevents dark transparent borders. `renderer.rs` recreates its UI texture when dimensions change and uses the full viewport for flight; menus/viewer overlays retain their existing canvas. Pointer conversion uses the same responsive panel rectangles, while the centered pause menu retains menu coordinates. HUD metadata uses a 0.7225 layout scale, including the requested additional 15% reduction. Projection compensation preserves angular cues through resizing and portrait aspect.
+
+How the canvas avoids redrawing what has not changed (optimization rounds 1
+and 2). Every rule here keeps the pixels exactly as a full redraw gives them.
+
+- **Page keys.** Each instrument page has a dependency key
+  (`Instruments::page_key`, `instruments/page_key.rs`, with the envelope's in
+  `instruments/envelope.rs`): the bytes of what the page draws, at the
+  precision it draws it. Text is keyed as formatted, symbols as their plotted
+  pixel positions, and blinks and the radar noise by their phase (the RWR's
+  120-tick blink, the link marks' blink, the noise's `tick / 12`, the envelope
+  marker's colour). The live palette, the held button and the camera pictures
+  are in the key too. Pages built from large readouts (the AC-130 gunsight,
+  the targeting page, the forward view symbology, aim marks) key those values
+  through their `Debug` text, which writes every field and every float
+  exactly. `flight_canvas::prepare_panel` keeps a page's raster and scaled
+  image while its key is unchanged, so the page is not drawn, compared or
+  scaled. The airframe's font, frame picture and HUD colours are left out of
+  the keys: `FlightCanvas::begin` drops every kept page when they change.
+  Debug builds (every test) and release builds run with
+  `TORE_PAGE_KEY_CHECK=1` draw a kept page anyway and compare. A debug build
+  panics on a difference; a release build prints it, draws the page and
+  prints a running count (`Page keys: N pages kept, N checked, 0 differed`).
+  A change to what a page draws needs the same change to its key; the key
+  tests (`flight_canvas/key_tests.rs`) catch a missing one.
+- **Partial rescale.** When a page did change, only the destination pixels
+  whose 2x2 filter taps read a changed source pixel are worked out again
+  (`flight_canvas/partial.rs`: `changed_spans`, `reach`, and
+  `FlightCanvas::blit_within`, which writes only given row segments and is the
+  same arithmetic as `blit`). The rest come from the kept image. A 640x480
+  layer that changes in place, such as the map with moving aircraft, does the
+  same over the picture beneath it (`legacy_layer`'s `redraw_changed`): the
+  kept result is copied, then only the reached pixels are put back to the
+  picture beneath and drawn again. Both fall back to a full scaling when half
+  the image or more would be redrawn.
+- **Composition.** A cached panel whose clear pixels are all zero goes onto
+  clear canvas rows as a plain row copy, which a test of every colour and
+  alpha shows is what `blit` gives there.
+- **Covered frames.** With the map open (an opaque letterbox over the whole
+  canvas) or the AC-130 sensor console up (which wipes the canvas), the frame
+  starts from `FlightCanvas::clear` and composes no instrument windows.
+- **Rows.** The canvas clears only the rows drawn on since the last clear, and
+  the renderer uploads only rows that differ from what the GPU holds
+  (`canvas_rows.rs`). An unchanged page is composed again each frame but
+  uploads nothing.
+- **Sensor console.** The outline pass (`sensor_console::Mask::pixels`) works
+  out, per row, the columns that can hold anything (cells set, or ink within
+  the outline width in the rows around) and fills the rest clear without
+  counting.
+
+The HUD (`hud::draw`, `weapon_hud::draw`) has no key: its inputs (attitude,
+speeds, the whole weapon readout) change on almost every flight frame, so a
+key would hit only while paused. Its texture is still uploaded by changed
+rows only. Measurements: [cockpit pages](baselines/performance-threads.md#cockpit-pages-round-2).
 
 `tore_sim::autopilot` owns captured heading/altitude, mode and an optional
 world-space navigation target, and the AC-130's orbit hold (`autopilot::orbit`:
