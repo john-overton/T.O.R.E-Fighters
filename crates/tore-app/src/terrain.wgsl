@@ -1,6 +1,6 @@
 struct Band { info:vec4<f32>, ramp:vec4<f32> }
 // scene.view.z is the shared CPU night factor (night_glow::night_factor).
-struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32>, ocean:vec4<f32>, cloud_reflection:vec4<f32>, view:vec4<f32>, quality:vec4<f32>, viewport:vec4<f32>, origin:vec4<f32>, local_eye:vec4<f32>, veg:vec4<f32>, canopy_area:vec4<f32>, canopy:vec4<f32>, canopy_detail:vec4<f32>, sky_mix:vec4<f32>, sky_mix_b:vec4<f32>, stars:vec4<f32>, moon:vec4<f32>, haze_rows:vec4<f32> }
+struct Scene { eye:vec4<f32>, right:vec4<f32>, up:vec4<f32>, forward:vec4<f32>, sky:vec4<f32>, fog:vec4<f32>, deck_a:vec4<f32>, deck_b:vec4<f32>, sun:vec4<f32>, circles:array<vec4<f32>,8>, ray:vec4<f32>, bands:array<Band,32>, ocean:vec4<f32>, cloud_reflection:vec4<f32>, view:vec4<f32>, quality:vec4<f32>, viewport:vec4<f32>, origin:vec4<f32>, local_eye:vec4<f32>, veg:vec4<f32>, canopy_area:vec4<f32>, canopy:vec4<f32>, canopy_detail:vec4<f32>, sky_mix:vec4<f32>, sky_mix_b:vec4<f32>, stars:vec4<f32>, moon:vec4<f32>, haze_rows:vec4<f32>, band_shades:array<vec4<f32>,32> }
 // veg: ground-detail mode (0 off, 1 on, 2 fine), detail distance in feet,
 // unused, climate (0 temperate, 1 desert, 2 arctic, 3 tropical).
 // quality: spotting aid strength (0 off), terrain filtering (0/1), thermal
@@ -190,8 +190,7 @@ fn continuous_row(info:vec4<f32>,r:vec4<f32>,distance:f32)->f32 {
  if distance>r.x {if distance>=r.z {density=r.w;}else {density=mix(r.y,r.w,(distance-r.x)/(r.z-r.x));}}
  return info.z+clamp(density/256.0*info.w,0.0,info.w-1.0);
 }
-fn ray_rows(distance:f32,altitude:f32)->vec2<f32>{
- if !smooth_weather() {return vec2<f32>(native_ray_rows(distance,altitude));}
+fn smooth_ray_rows(distance:f32,altitude:f32)->vec2<f32>{
  let view=max(scene.eye.y,0.0);let target_height=max(altitude,0.0);
  let vi=band_at(i32(view));let ti=band_at(i32(target_height));
  if vi<0 || ti<0 {return vec2<f32>(-1.0);}
@@ -212,7 +211,42 @@ fn ray_rows(distance:f32,altitude:f32)->vec2<f32>{
  var row=-1.0;if td>0.0 {row=continuous_row(scene.bands[ti].info,tr,td);}
  return vec2<f32>(continuous_row(scene.bands[vi].info,vr,vd),row);
 }
-fn remap_color(index:u32,rows:vec2<f32>)->vec3<f32>{
+// A remap seen through one band reads that band's colour rows
+// (scene.band_shades[band].w, from LUT_ROW of the palette texture): its shade
+// table's colours, crossed on the CPU with a second record's table while
+// smooth weather crosses records, so one load replaces the remap and colour
+// reads. ray_rows marks such rows with rows.y=-(LUT_CODE+offset), the
+// offset taking the band's shade row to its colour row, so rows.x and its
+// fraction stay exactly what the atlas path reads. A remap through two
+// bands keeps the atlas, and the crossing for it rides in ray_cross: the
+// second rows and their share. remap_color reads ray_cross set by the latest
+// ray_rows call, so take the rows and use them before calling ray_rows again.
+const LUT_CODE:f32=1000.0;
+const LUT_ROW:i32=12;
+var<private> ray_cross:vec4<f32>;
+fn second_row(row:f32,band:i32)->f32 {
+ let s=scene.band_shades[band];let info=scene.bands[band].info;
+ return s.x+(row-info.z)*max(s.y-1.0,0.0)/max(info.w-1.0,1.0);
+}
+fn ray_rows(distance:f32,altitude:f32)->vec2<f32>{
+ var rows=vec2<f32>(native_ray_rows(distance,altitude));
+ if smooth_weather() {rows=smooth_ray_rows(distance,altitude);}
+ ray_cross=vec4<f32>(0.0);
+ if rows.x<0.0 {return rows;}
+ // rows.x is seen through the eye's band, rows.y through the target's.
+ let bx=band_at(i32(max(scene.eye.y,0.0)));var by=-1;
+ if rows.y>=0.0 {by=band_at(i32(max(altitude,0.0)));}
+ if bx<0 {return rows;}
+ let sx=scene.band_shades[bx];
+ if rows.y<0.0 && sx.w>=0.0 {return vec2<f32>(rows.x,-(LUT_CODE+sx.w-scene.bands[bx].info.z));}
+ var sy=vec4<f32>(0.0);if by>=0 {sy=scene.band_shades[by];}
+ let share=max(sx.z,sy.z);
+ if share>0.0 {
+  ray_cross=vec4<f32>(select(rows.x,second_row(rows.x,bx),sx.z>0.0),select(rows.y,second_row(rows.y,max(by,0)),sy.z>0.0),share,0.0);
+ }
+ return rows;
+}
+fn remap_rows(index:u32,rows:vec2<f32>)->vec3<f32>{
  let lo=vec2<i32>(floor(rows));let hi=vec2<i32>(ceil(rows));let t=fract(rows);
  let a=shade(ray_index(index,lo),0).rgb;
  if all(lo==hi) {return a;}
@@ -220,6 +254,18 @@ fn remap_color(index:u32,rows:vec2<f32>)->vec3<f32>{
  let c=shade(ray_index(index,vec2<i32>(lo.x,hi.y)),0).rgb;
  let d=shade(ray_index(index,hi),0).rgb;
  return mix(mix(a,b,t.x),mix(c,d,t.x),t.y);
+}
+fn remap_color(index:u32,rows:vec2<f32>)->vec3<f32>{
+ if rows.y<-2.0 {
+  let offset=LUT_ROW+i32(-rows.y-LUT_CODE);
+  let lo=i32(floor(rows.x));let hi=i32(ceil(rows.x));
+  let a=linear(textureLoad(palette,vec2<i32>(i32(index),offset+lo),0).rgb);
+  if lo==hi {return a;}
+  return mix(a,linear(textureLoad(palette,vec2<i32>(i32(index),offset+hi),0).rgb),fract(rows.x));
+ }
+ let c=remap_rows(index,rows);
+ if ray_cross.z<=0.0 {return c;}
+ return mix(c,remap_rows(index,ray_cross.xy),ray_cross.z);
 }
 // Remap one original index before resolving RGB; transparency tests the source.
 fn texel(at:vec2<i32>,layer:i32,row:i32,sun_passes:i32,core:i32,remaps:vec2<f32>)->vec4<f32>{

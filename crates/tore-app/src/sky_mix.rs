@@ -14,23 +14,21 @@
 //! and visibility keep reading the native records; nothing here reaches them.
 //! See docs/spec/sun-glow.md, "Continuous dawn and dusk".
 use std::collections::BTreeMap;
-use tore_formats::weather::{Deck, Layer};
+use tore_formats::weather::{Deck, Layer, ShadeRemap};
 
 /// The weather record flag that draws the stars and the moon.
 pub const STARS_FLAG: u16 = 0x10;
 
-/// Each record's share of the picture at `seconds` (fractional time of day)
-/// and `altitude` feet, in record order; the shares sum to one, or the list is
-/// empty when no record covers the instant. Mirrors the colour blend of
-/// `Environment::visual_sample`: records sharing a floor cross over their
-/// time overlap, then bands cross over their altitude overlap.
-pub fn shares(records: &[Layer], seconds: f64, altitude: f64) -> Vec<(usize, f64)> {
-    struct Band {
-        low: i32,
-        high: i32,
-        end: i32,
-        shares: Vec<(usize, f64)>,
-    }
+/// Records crossing over in time on one floor, as
+/// `Environment::visual_sample` groups them into its active bands.
+struct Band {
+    low: i32,
+    high: i32,
+    end: i32,
+    shares: Vec<(usize, f64)>,
+}
+
+fn time_bands(records: &[Layer], seconds: f64) -> Vec<Band> {
     let whole = seconds.floor() as i32;
     let mut bands: Vec<Band> = Vec::new();
     for (index, record) in records.iter().enumerate() {
@@ -61,6 +59,89 @@ pub fn shares(records: &[Layer], seconds: f64, altitude: f64) -> Vec<(usize, f64
             });
         }
     }
+    bands
+}
+
+/// Each active weather band's records and their shares at `seconds`, in the
+/// order of `Sample::bands` (`Environment::visual_sample`): the ground and
+/// everything else seen through a band's haze cross its records' shade
+/// remaps by these weights instead of switching at the nearest table.
+pub fn band_shares(records: &[Layer], seconds: f64) -> Vec<Vec<(usize, f64)>> {
+    time_bands(records, seconds)
+        .into_iter()
+        .map(|band| band.shares)
+        .collect()
+}
+
+/// The heaviest of weighted `rows` (shade rows or tables; repeats across
+/// records add up), and the next heaviest with its share of the two: the
+/// pair a shader crosses. `None` when there are no rows.
+pub fn cross_rows<T: PartialEq + Copy>(
+    rows: impl IntoIterator<Item = (T, f32)>,
+) -> Option<(T, Option<(T, f32)>)> {
+    let mut merged: Vec<(T, f32)> = Vec::new();
+    for (row, weight) in rows {
+        match merged.iter_mut().find(|(r, _)| *r == row) {
+            Some(entry) => entry.1 += weight,
+            None => merged.push((row, weight)),
+        }
+    }
+    merged.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let &(row, weight) = merged.first()?;
+    let second = merged
+        .get(1)
+        .filter(|(_, share)| *share > 0.)
+        .map(|&(other, share)| (other, share / (weight + share)));
+    Some((row, second))
+}
+
+/// A band's haze colours, one row of 256 per level of `first`: each index's
+/// colour in `palette` after that level's remap. While the records cross,
+/// `second` (a table and its share) is read at the same haze, between its
+/// own levels when it has a different count, and mixed in. With no second
+/// table the rows are exactly the palette colours the remaps select.
+pub fn band_colours(
+    palette: &[[u8; 3]; 256],
+    first: &ShadeRemap,
+    second: Option<(&ShadeRemap, f32)>,
+) -> Vec<[[u8; 3]; 256]> {
+    let count = first.levels.len();
+    (0..count)
+        .map(|level| {
+            let own = first.levels[level].map(|i| palette[usize::from(i)]);
+            let Some((other, share)) = second.filter(|(t, s)| *s > 0. && !t.levels.is_empty())
+            else {
+                return own;
+            };
+            let span = other.levels.len() - 1;
+            let at = if count > 1 {
+                level as f32 * span as f32 / (count - 1) as f32
+            } else {
+                0.
+            };
+            let (low, t) = (at.floor() as usize, at.fract());
+            let high = (low + 1).min(span);
+            std::array::from_fn(|i| {
+                let a = palette[usize::from(other.levels[low][i])];
+                let b = palette[usize::from(other.levels[high][i])];
+                std::array::from_fn(|k| {
+                    let theirs = f32::from(a[k]) * (1. - t) + f32::from(b[k]) * t;
+                    (f32::from(own[i][k]) * (1. - share) + theirs * share)
+                        .round()
+                        .clamp(0., 255.) as u8
+                })
+            })
+        })
+        .collect()
+}
+
+/// Each record's share of the picture at `seconds` (fractional time of day)
+/// and `altitude` feet, in record order; the shares sum to one, or the list is
+/// empty when no record covers the instant. Mirrors the colour blend of
+/// `Environment::visual_sample`: records sharing a floor cross over their
+/// time overlap, then bands cross over their altitude overlap.
+pub fn shares(records: &[Layer], seconds: f64, altitude: f64) -> Vec<(usize, f64)> {
+    let bands = time_bands(records, seconds);
     let altitude = if altitude.is_finite() {
         altitude.max(0.)
     } else {
@@ -439,6 +520,74 @@ mod tests {
         // Stars arrive with the night record's weight, not at its midpoint.
         let night = sample(&layers, &textures, 68790.);
         assert!((night.night - 0.5).abs() < 1e-3);
+    }
+
+    #[test]
+    fn band_shares_follow_each_bands_records() {
+        let (layers, _) = day2();
+        // One band at a time in DAY2's shape, crossing at the overlaps.
+        let night = band_shares(&layers, 100.);
+        assert_eq!(night, vec![vec![(0, 1.)]]);
+        let dawn = band_shares(&layers, 25350.);
+        assert_eq!(dawn.len(), 1);
+        assert_eq!(dawn[0].iter().map(|s| s.0).collect::<Vec<_>>(), [0, 1]);
+        assert!((dawn[0][1].1 - 0.5).abs() < 1e-9);
+        // The same as the eye's shares when there is one band.
+        let eye = shares(&layers, 25350., 5000.);
+        assert_eq!(dawn[0], eye);
+    }
+
+    #[test]
+    fn cross_rows_adds_repeats_and_gives_the_second_its_share() {
+        assert_eq!(cross_rows::<usize>([]), None);
+        assert_eq!(cross_rows([(7, 1.)]), Some((7, None)));
+        assert_eq!(
+            cross_rows([(7, 0.75), (9, 0.25)]),
+            Some((7, Some((9, 0.25))))
+        );
+        // Two records on one table outweigh a third on another.
+        assert_eq!(
+            cross_rows([(3, 0.3), (5, 0.4), (3, 0.3)]),
+            Some((3, Some((5, 0.4))))
+        );
+        // A table with no weight left is not crossed.
+        assert_eq!(cross_rows([(3, 1.), (5, 0.)]), Some((3, None)));
+    }
+
+    fn table(color: u8, levels: &[u8]) -> ShadeRemap {
+        ShadeRemap {
+            color: [color; 3],
+            levels: levels.iter().map(|&to| [to; 256]).collect(),
+        }
+    }
+
+    #[test]
+    fn band_colours_are_the_remapped_palette_and_cross_smoothly() {
+        let palette: [[u8; 3]; 256] = std::array::from_fn(|i| [i as u8, 0, 255 - i as u8]);
+        let a = table(1, &[10, 20, 30]);
+        // Alone: exactly the colours the atlas remap selects, level by level.
+        let own = band_colours(&palette, &a, None);
+        assert_eq!(own.len(), 3);
+        assert_eq!(own[1][77], palette[20]);
+        assert_eq!(band_colours(&palette, &a, Some((&a, 0.))), own);
+        // Crossing a table of five levels: read at the same haze, mixed.
+        let b = table(2, &[110, 120, 130, 140, 150]);
+        let half = band_colours(&palette, &a, Some((&b, 0.5)));
+        assert_eq!(half[0][0], [60, 0, 195]);
+        assert_eq!(half[1][0][0], 75, "level 1 of 3 reads level 2 of 5");
+        assert_eq!(half[2][0][0], 90);
+        // Fully across: the second table's colours.
+        assert_eq!(
+            band_colours(&palette, &a, Some((&b, 1.)))[2][9],
+            palette[150]
+        );
+        // Small share steps move the colour by small steps.
+        let mut previous = own[1][0];
+        for step in 1..=100 {
+            let now = band_colours(&palette, &a, Some((&b, step as f32 / 100.)))[1][0];
+            assert!((0..3).all(|k| now[k].abs_diff(previous[k]) <= 2));
+            previous = now;
+        }
     }
 
     #[test]

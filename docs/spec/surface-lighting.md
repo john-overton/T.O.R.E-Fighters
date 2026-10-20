@@ -46,6 +46,18 @@ is added. The existing night/day blend phases out this change at night. These
 constants are agent decisions. Aircraft fill, water lighting and fog remain
 unchanged.
 
+John asked on 2026-10-20 for the ground to brighten in direct morning sun as
+the trees and objects on it do: under a low sun the weather palette already
+darkens the land, and the plain cosine gave a level field little light, so it
+read as shaded beside sunlit trees. In smooth weather, land (terrain, and rock
+lit as the ground) takes `cosine * (1 + 0.9 * low) + 0.12 * low *
+smoothstep(-0.05, 0.25, cosine)` in place of the cosine, where `low` is 1 at
+solar elevation 6 degrees and below and eases to 0 by 35 degrees (sine
+smoothstep). Slopes turned to the sun gain most, slopes turned away keep their
+shade, cast shadows remove the whole term, and the midday picture is
+unchanged. Stepped weather (original graphics) keeps the cosine. The constants
+are agent decisions, fitted by eye.
+
 
 Daylight strength is the visible area fraction of the original solid sun disc,
 including when its center is below the horizon. While partly visible, the light

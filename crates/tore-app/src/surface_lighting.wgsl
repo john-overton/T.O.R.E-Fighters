@@ -194,12 +194,31 @@ fn surface_normal(relative:vec3<f32>)->vec3<f32> {
 }
 // Any flares burning nearby. Guards the extra undarkened texture reads.
 fn flares_burning()->bool {return surface.sun.w>0.0 && surface.reserved.w>=1.0;}
+// Ground in a low sun (smooth weather only; original graphics keep the
+// plain cosine). The ground's weather palette already darkens it toward
+// dawn and dusk, and with the cosine alone a level field in a low sun took
+// little light and read as shaded beside the sunlit trees and objects on it
+// (John, 2026-10-20). Below 35 degrees of sun the cosine gains up to
+// GROUND_GAIN more, so slopes turned to the sun stand out from those turned
+// away, and sunlit ground takes GROUND_LIFT more besides, as foliage's wrap
+// does (veg_light); cast shadows (visibility) take both away. Both are
+// whole below 6 degrees and fade out by 35, so the midday look is
+// unchanged. Opinionated, fitted by eye.
+const GROUND_GAIN:f32=0.9;
+const GROUND_LIFT:f32=0.12;
+fn ground_facing(cosine:f32)->f32 {
+ let plain=max(cosine,0.0);
+ if !smooth_weather() {return plain;}
+ let low=1.0-smoothstep(0.104528,0.573576,surface.reserved.y);
+ return plain*(1.0+GROUND_GAIN*low)+GROUND_LIFT*low*smoothstep(-0.05,0.25,cosine);
+}
 // albedo: the art's color before the weather's shade remaps. Those remaps
 // darken it at night, but a flare shows the art's own colors.
 fn surface_color(color:vec3<f32>,relative:vec3<f32>,normal:vec3<f32>,panels:bool,receiver_normal:vec3<f32>,albedo:vec3<f32>)->vec3<f32> {
  if surface.sun.w<=0.0 {return color;}
  let day=smoothstep(-0.104528,0.0348995,surface.reserved.y);
- let facing=max(dot(normal,surface.sun.xyz),0.0);
+ var facing=max(dot(normal,surface.sun.xyz),0.0);
+ if !panels {facing=ground_facing(dot(normal,surface.sun.xyz));}
  // Only ever used as facing*visibility, so the shadow search is skipped
  // where the surface faces away from the sun.
  var visibility=0.0;

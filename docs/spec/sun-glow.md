@@ -140,6 +140,20 @@ the star flag. Nothing jumps between frames: a unit test steps a whole DAY2 day
 at 1/60 second through every transition and finds no step larger than the
 share's own rate.
 
+The ground, the buildings and every other surface seen through a weather band
+cross the same way (John, 2026-10-20: "at a certain time the ground texture
+color just flips"; seen at 01:35 of a dusk replay over a city, where the land
+went from a flat warm brown to a greener, darker palette in one frame). Each
+band resolved its haze through the nearest shade table to its blended haze
+colour, so the table switched part way through the overlap. Now each band
+takes its records' own tables by share: the heaviest and the next, crossed by
+the next one's share of the two (a table with fewer levels is read at the same
+haze, between its levels). The crossed colours are precomputed per band on the
+CPU, one row of 256 per haze level, so the ground reads one colour per level
+instead of a remap and a palette lookup (this made terrain cheaper, not
+dearer). A surface seen across two bands keeps the remap atlas and reads the
+second tables as well while they cross.
+
 The simulation, sensors, visibility effects and native weather records are
 untouched; only what is drawn reads the shares. The overlap spans are the
 original records' own. They are short at dusk (three minutes from pink to
