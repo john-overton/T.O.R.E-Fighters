@@ -10880,7 +10880,7 @@ continues from. Every player is sent the ready standbys and their addresses
 **The stream** is one ordered, reliable stream of
 [standby records](formats/net-protocol.md#the-standby-stream) on the standby's
 own connection: Appoint, Dismiss, Flight, Checkpoint begin and chunks, Ticks
-(a snapshot interval of journal ticks, sent with the snapshots), State,
+(the journal ticks of each host update, sent with their snapshots), State,
 Check, Ended and Handover. Order is what keeps it simple: any prefix of the
 stream a standby holds is consistent.
 
@@ -10937,7 +10937,7 @@ sequenceDiagram
   participant H as Host
   participant S as Standby 1
   participant C as Client
-  H->>S: Journal and state parts, every snapshot interval
+  H->>S: Journal and state parts, every update
   H->>C: Snapshots and the succession
   Note over H: The host is lost
   Note over S,C: 1.5 s without a packet from the host

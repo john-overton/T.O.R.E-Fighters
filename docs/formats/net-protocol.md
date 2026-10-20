@@ -2488,9 +2488,13 @@ choice below is an agent decision.
 - **The stream a host sends** (slice K3; protocol 14 only for the seat
   inputs' coding above). After the
   Appoint: a checkpoint when flying (no Flight record), then every state
-  part, holding after the last tick stepped. Ticks records carry a
-  snapshot interval of ticks (four at 30 snapshots a second); any other
-  record sends the waiting ticks first. A Check goes at the first update at
+  part, holding after the last tick stepped. A Ticks record carries the
+  ticks stepped in one host update (usually one), sent at the end of that
+  update with the snapshots of those ticks, so a host killed between two
+  updates has sent every tick it showed its players (*battery fix,
+  2026-10-20:* it used to carry a snapshot interval of ticks, and a host
+  killed with half an interval waiting lost it); any other record sends
+  the waiting ticks first. A Check goes at the first update at
   or after each 600th tick, to warm standbys only. A cold standby's next
   checkpoint begins 1,200 ticks after its last began, or as soon as its last
   has gone out. A checkpoint's chunks go at its bytes over 8 seconds, at
