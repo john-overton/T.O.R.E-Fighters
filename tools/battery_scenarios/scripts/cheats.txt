@@ -3,6 +3,9 @@ wait 1
 waittick 60 10
 key Escape
 wait 0.3
+# Left wraps from the first tab back through the strip: Debug, Pos, Multi,
+# Cheat (the Debug tab is the last one, after Pos).
+key Left
 key Left
 key Left
 key Left
