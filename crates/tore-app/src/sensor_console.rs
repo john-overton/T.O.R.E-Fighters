@@ -865,6 +865,16 @@ thread_local! {
     static SPARE: std::cell::RefCell<Spare> = std::cell::RefCell::new(Spare::default());
 }
 
+/// A cleared overlay buffer of `len` bytes, the spare one's memory when it
+/// has any: for the HUD camera's tape layer, which goes to the renderer and
+/// comes back through [`recycle`].
+pub fn spare_overlay(len: usize) -> Vec<u8> {
+    let mut out = SPARE.with(|spare| std::mem::take(&mut spare.borrow_mut().overlay));
+    out.clear();
+    out.resize(len, 0);
+    out
+}
+
 /// Gives an overlay returned by [`draw`], [`draw_pod`] or [`captions`] back
 /// for the next one to draw into.
 pub fn recycle(overlay: Vec<u8>) {
