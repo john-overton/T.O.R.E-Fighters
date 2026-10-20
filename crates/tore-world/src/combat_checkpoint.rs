@@ -22,8 +22,8 @@
 //!   mission recorder's command notes, which nothing in flight reads);
 //! - rebuilt: `RenderHistory::places` is each snapshot's target index by id,
 //!   built again from the coded snapshots, as `set_current` and `advance` do;
-//!   `RenderHistory::spare` and `ai_stores` are scratch the next snapshot is
-//!   written over and from, and start empty.
+//!   `RenderHistory::spare`, `ai_stores` and `angles` are scratch the next
+//!   snapshot is written over and from, and start empty.
 //!
 //! The wrapper's own fields are coded by [`Combat::save_wrapper`] and
 //! [`Combat::restore_wrapper`], apart from `state`, so they are tested before
@@ -66,6 +66,7 @@ impl Checkpoint for RenderHistory {
             // snapshot is written over and from; neither is read back.
             spare: _,
             ai_stores: _,
+            angles: _,
             restarts,
         } = self;
         plane.save(s, None)?;

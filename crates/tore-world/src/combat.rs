@@ -81,6 +81,36 @@ pub fn target_pose(target: &live::Target, ai_poses: bool) -> [f64; 3] {
         [target.velocity[0].atan2(target.velocity[2]), 0., 0.]
     }
 }
+/// A target row's attitude worked out from its basis (`Basis::angles`),
+/// with the bits of that basis.
+type KeptAngles = Option<([u64; 9], [f64; 3])>;
+
+/// [`target_pose`] with the kept angles of the row at `index`: a basis seen
+/// before, bit for bit, gives the angles it gave then, without the
+/// trigonometry.
+fn target_pose_kept(
+    target: &live::Target,
+    ai_poses: bool,
+    kept: &mut [KeptAngles],
+    index: usize,
+) -> [f64; 3] {
+    if !(ai_poses || target.hp <= 0) {
+        return target_pose(target, ai_poses);
+    }
+    let basis = target.basis;
+    let bits: [u64; 9] =
+        std::array::from_fn(|i| [basis.right, basis.up, basis.forward][i / 3][i % 3].to_bits());
+    match kept.get_mut(index) {
+        Some(Some((kept_bits, angles))) if *kept_bits == bits => *angles,
+        Some(slot) => {
+            let angles = basis.angles();
+            *slot = Some((bits, angles));
+            angles
+        }
+        None => basis.angles(),
+    }
+}
+
 /// An AI aircraft's drawn stores as last worked out, with what they were
 /// worked out from: the loadout (by identity) and the stations' loads.
 struct StoresEntry {
@@ -129,6 +159,10 @@ struct RenderHistory {
     /// The AI aircraft's drawn stores, worked out again only when their
     /// loads or their loadout change. A restart forgets them.
     ai_stores: Mutex<BTreeMap<u32, StoresEntry>>,
+    /// Each target row's drawn attitude as last worked out from its basis,
+    /// with the basis it was worked out from (a parked aircraft's or a ground
+    /// object's basis stays as it is, tick after tick).
+    angles: Mutex<Vec<KeptAngles>>,
     /// How many times the history has started over.
     restarts: u64,
 }
@@ -820,13 +854,15 @@ impl Combat {
             wings,
             RenderSnapshot::default(),
             &self.render.ai_stores,
+            &self.render.angles,
         )
     }
     /// [`Self::snapshot`] written over `spare`, a snapshot nobody needs any
     /// more, whose lists and strings it reuses where it can, so a tick builds
     /// few new ones. Every field of the result is written, so what `spare`
     /// held makes no difference. `ai_stores` keeps the AI aircraft's drawn
-    /// stores while their loads stay as they were; an empty one makes the
+    /// stores while their loads stay as they were, and `angles` each target
+    /// row's attitude while its basis stays as it was; empty ones make the
     /// snapshot work them all out.
     fn snapshot_reusing(
         &self,
@@ -835,6 +871,7 @@ impl Combat {
         wings: Option<&crate::ai_wings::AiWings>,
         mut spare: RenderSnapshot,
         ai_stores: &Mutex<BTreeMap<u32, StoresEntry>>,
+        angles: &Mutex<Vec<KeptAngles>>,
     ) -> RenderSnapshot {
         let ownship = self.dummies.is_empty();
         let own_id = plane;
@@ -1017,62 +1054,72 @@ impl Combat {
         // planes. A slot of the spare keeps its list of stores, which the new
         // pose's stores are written over.
         let mut targets = std::mem::take(&mut spare.targets);
+        let mut kept_angles = angles.lock().unwrap_or_else(|e| e.into_inner());
+        kept_angles.resize(self.state.targets.len(), None);
         let mut at = 0;
-        for t in &self.state.targets {
-            let mut stores = targets
-                .get_mut(at)
-                .map(|slot| std::mem::take(&mut slot.stores))
-                .unwrap_or_default();
+        for (index, t) in self.state.targets.iter().enumerate() {
+            if targets.len() == at {
+                targets.push(AircraftPose::default());
+            }
+            // Written field by field into the slot, which keeps its list of
+            // stores: every field is named, so none is left from before.
+            let AircraftPose {
+                id,
+                aircraft,
+                draw: drawn,
+                position,
+                attitude,
+                velocity,
+                devices,
+                engine,
+                damage,
+                airborne,
+                wreck,
+                crashed,
+                stores,
+            } = &mut targets[at];
             match actor_of(t.id).and_then(|actor| actor.stores.as_deref()) {
                 Some(poses) => stores.clone_from(poses),
                 None => stores.clear(),
             }
-            let pose = AircraftPose {
-                id: t.id,
-                aircraft: t.aircraft,
-                draw: draw(t.id),
-                position: t.position,
-                attitude: target_pose(t, self.ai_poses),
-                velocity: t.velocity,
-                devices: simulated(t.id),
-                engine: Engine {
-                    flame: t.airborne
-                        && t.hp > 0
-                        && actor_of(t.id).is_some_and(|actor| actor.burning),
-                    ..if ownship {
-                        Engine {
-                            afterburner: fixture_afterburner && t.hp > 0,
-                            ..player_engine
-                        }
-                    } else {
-                        match actor_of(t.id).and_then(|actor| actor.rotor) {
-                            Some(rotor) => Engine {
-                                rotor: rotor.rotor,
-                                rotor_turns: rotor.rotor_turns,
-                                rotor_tilt: rotor.rotor_tilt,
-                                ..model_engine
-                            },
-                            None => model_engine,
-                        }
+            *id = t.id;
+            *aircraft = t.aircraft;
+            *drawn = draw(t.id);
+            *position = t.position;
+            *attitude = target_pose_kept(t, self.ai_poses, &mut kept_angles, index);
+            *velocity = t.velocity;
+            *devices = simulated(t.id);
+            *engine = Engine {
+                flame: t.airborne && t.hp > 0 && actor_of(t.id).is_some_and(|actor| actor.burning),
+                ..if ownship {
+                    Engine {
+                        afterburner: fixture_afterburner && t.hp > 0,
+                        ..player_engine
                     }
-                },
-                damage: Damage {
-                    hp: t.hp,
-                    initial_hp: t.initial_hp,
-                    sections: t.localized_damage.amounts,
-                    structural: t.localized_damage.structural_section,
-                },
-                airborne: t.airborne,
-                wreck: t.wreck.as_ref().map(|wreck| wreck.phase),
-                crashed: t.hp <= 0,
-                stores,
+                } else {
+                    match actor_of(t.id).and_then(|actor| actor.rotor) {
+                        Some(rotor) => Engine {
+                            rotor: rotor.rotor,
+                            rotor_turns: rotor.rotor_turns,
+                            rotor_tilt: rotor.rotor_tilt,
+                            ..model_engine
+                        },
+                        None => model_engine,
+                    }
+                }
             };
-            match targets.get_mut(at) {
-                Some(slot) => *slot = pose,
-                None => targets.push(pose),
-            }
+            *damage = Damage {
+                hp: t.hp,
+                initial_hp: t.initial_hp,
+                sections: t.localized_damage.amounts,
+                structural: t.localized_damage.structural_section,
+            };
+            *airborne = t.airborne;
+            *wreck = t.wreck.as_ref().map(|wreck| wreck.phase);
+            *crashed = t.hp <= 0;
             at += 1;
         }
+        drop(kept_angles);
         for (own, pose) in &others {
             let pose = AircraftPose {
                 id: own.aircraft,
@@ -1269,7 +1316,14 @@ impl Combat {
         wings: Option<&crate::ai_wings::AiWings>,
     ) {
         let spare = self.render.take_spare();
-        let next = self.snapshot_reusing(plane, player, wings, spare, &self.render.ai_stores);
+        let next = self.snapshot_reusing(
+            plane,
+            player,
+            wings,
+            spare,
+            &self.render.ai_stores,
+            &self.render.angles,
+        );
         // Debug builds make the snapshot again from nothing and compare.
         #[cfg(debug_assertions)]
         {
@@ -1278,6 +1332,7 @@ impl Combat {
                 player,
                 wings,
                 RenderSnapshot::default(),
+                &Mutex::default(),
                 &Mutex::default(),
             );
             if next != fresh {
@@ -1301,7 +1356,14 @@ impl Combat {
         wings: Option<&crate::ai_wings::AiWings>,
     ) {
         let spare = self.render.take_spare();
-        let current = self.snapshot_reusing(plane, player, wings, spare, &self.render.ai_stores);
+        let current = self.snapshot_reusing(
+            plane,
+            player,
+            wings,
+            spare,
+            &self.render.ai_stores,
+            &self.render.angles,
+        );
         self.render.set_current(current);
     }
     /// An AI aircraft that flew into the ground with hit points left gets a
