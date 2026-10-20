@@ -358,7 +358,9 @@ def info_of(path: Path) -> str:
     import os
     import subprocess
 
-    binary = Path(__file__).resolve().parents[2] / "target" / "debug" / "tore-app"
+    # The binary under test (battery.py exports --bin); a debug build by default.
+    default = Path(__file__).resolve().parents[2] / "target" / "debug" / "tore-app"
+    binary = Path(os.environ.get("TORE_BATTERY_BIN", default))
     env = dict(os.environ, TORE_NO_ERROR_DIALOG="1")
     return subprocess.run([str(binary), "--recording-info", str(path)], capture_output=True, text=True, env=env).stdout
 

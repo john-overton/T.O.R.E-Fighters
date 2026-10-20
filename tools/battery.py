@@ -764,6 +764,8 @@ def main(argv: list[str]) -> int:
     if not Path(opts.bin).exists():
         print(f"binary not found: {opts.bin} (build it first)", file=sys.stderr)
         return 2
+    # Checks that run the app themselves (e.g. `--recording-info`) use the same binary.
+    os.environ["TORE_BATTERY_BIN"] = str(Path(opts.bin).resolve())
     for path in missing_binaries(scenarios, opts):
         print(f"binary not found: {path} (cargo build --locked -p tore-server -p tore-session)", file=sys.stderr)
         return 2
