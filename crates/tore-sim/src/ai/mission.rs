@@ -3668,7 +3668,7 @@ impl AiMission {
             })
             .map(|s| super::gunnery::Target {
                 id: s.target.id,
-                position: s.target.position,
+                position: awareness::held_position(s, tick),
                 velocity: s.velocity,
                 basis: world
                     .iter()
@@ -4541,7 +4541,10 @@ impl AiActor {
             .collect();
         self.awareness
             .current_observations()
-            .map(|snapshot| snapshot.target)
+            .map(|snapshot| TargetView {
+                position: awareness::held_position(snapshot, tick),
+                ..snapshot.target
+            })
             .filter(|target| {
                 world
                     .iter()

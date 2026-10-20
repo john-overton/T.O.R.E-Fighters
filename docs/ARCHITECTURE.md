@@ -9586,7 +9586,7 @@ missile threat service and the incoming fire service stay at 120 Hz.
 
 | Between two observations the aircraft | |
 | --- | --- |
-| holds | the awareness memory (the targets the controller and the engagement policy choose from, at the positions they were seen), the sensors' contacts, selection and track, the received emitters |
+| holds | the awareness memory (the targets the controller and the engagement policy choose from), the sensors' contacts, selection and track, the received emitters. The held targets, and the target the guns track, are placed where their observed velocity has carried them since they were seen (`awareness::held_position`; optimization round 2: without it the gun tracking's aligned test flipped between the fresh and the one-tick-old picture, which showed as activity flapping in about 3% of 60 Hz fights and never at 120 Hz). An observation made this tick is used as it is, so 120 Hz is unchanged |
 | refreshes | the lookout (its own pose and this tick's scan sector, with the attention point of the last observation), so missile warnings and incoming fire still react at 120 Hz; the decision frame's terrain flag for each held target (it depends on the aircraft's own position); the wing attackers count; held targets that have died are dropped |
 | counts as | `divisor` ticks for the sensors: a radar track still takes half a second to acquire, a lost plot goes stale after a second and a trail is sampled every half second (`Sensors::step_with`, `StepOptions::elapsed`) |
 
