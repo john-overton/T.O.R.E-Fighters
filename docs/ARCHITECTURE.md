@@ -9808,6 +9808,23 @@ wire bytes, each guarded by a test against the code it replaced):
   [a mission with no window](#a-mission-with-no-window)).
   This one changes checkpoint and standby-stream bytes.
 
+Host per-seat work (optimization round 2; the wire bytes are unchanged, shown
+by the host benchmark's hash of every datagram at 2, 15 and 30 humans and by
+tests against the code each change replaced):
+
+- A human's gun rounds no longer test every ground object of the mission each
+  tick (see [projectiles in flight](#projectiles-in-flight)). This was most of
+  the host's cost in a gun fight, and the reason that cost grew with the humans.
+- The readout record (`readout::write_record`) is coded against one copy of the
+  acknowledged readout, advanced in place, whose parts become what the client
+  holds as each is coded, instead of a copy for the advance, one for the
+  client's and one per list. A list's changed entries are coded into one writer
+  and appended by range (`flat::write_list_into`), and an entry's delta is written
+  straight from the two rows.
+- Entity groups and readout list entries are rows of numbers kept inline
+  (`wire::row::Row`, up to 24 numbers, longer ones on the heap), so flattening
+  a state or copying a readout allocates nothing per entry.
+
 The tick presenter reuses an identical camera scene instead of rebuilding it
 between unchanged simulation inputs. GPU and window work never moves to workers.
 

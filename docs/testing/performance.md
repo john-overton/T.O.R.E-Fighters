@@ -84,7 +84,11 @@ tore-session --test host_players --no-run`. Pass its executable under
 runs 0, 15 and 30 humans for 60 simulated seconds by default.
 
 The benchmark times the complete host call with `Instant`, including worker
-completion. Its separate Linux host-thread CPU figure excludes workers and
+completion. `TORE_MEASURE_DUMP=FILE` writes each ticking call's first tick,
+ticks stepped and elapsed nanoseconds, to find which ticks are heavy, and
+`TORE_MEASURE_HASH=1` prints a hash of every datagram the host sent, so two
+builds that must send the same bytes can be compared (the hashing adds to the
+measured time; leave it off for timings). Its separate Linux host-thread CPU figure excludes workers and
 cannot establish a threading speed-up. The simulated bots run outside the
 measured host calls. Deadline and frame contention must additionally be checked
 with a real hosting game; a fast-forwarded host-only test is not that check.
