@@ -148,7 +148,11 @@ const SKY_DEPTH_COMPARE: wgpu::CompareFunction = wgpu::CompareFunction::GreaterE
 const WORLD_FAR_FEET: f32 = 2_200_000.;
 /// The shared `Scene` uniform, ending with the graphics `quality` and
 /// `viewport` vectors.
-pub(crate) const UNIFORM_BYTES: u64 = 1568;
+pub(crate) const UNIFORM_BYTES: u64 = 2080;
+/// Rows of the live palette texture: the palette, ten fog rows, the
+/// daylight palette, then `LUT_ROWS` rows of band haze colours.
+const PALETTE_ROWS: u32 = 128;
+const LUT_ROWS: usize = PALETTE_ROWS as usize - 12;
 type AircraftBatch = (wgpu::BindGroup, wgpu::Buffer, u32);
 /// One other aircraft inside a geometry batch, for the spotting aid: its
 /// vertex range, presented position and airframe extent in feet.
@@ -976,11 +980,12 @@ impl SimRenderer {
         });
         let palette = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Live weather palette"),
-            // Weather palette, ten fog rows, then the daylight palette that
-            // flare light shows at night (BASE_ROW in terrain.wgsl).
+            // Weather palette, ten fog rows, the daylight palette that
+            // flare light shows at night (BASE_ROW in terrain.wgsl), then
+            // the bands' haze colours (LUT_ROW).
             size: wgpu::Extent3d {
                 width: 256,
-                height: 12,
+                height: PALETTE_ROWS,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -1963,20 +1968,19 @@ impl SimRenderer {
                 uniform[31] = celestial.shade_rows[&shade.color] as f32;
             }
             // Smooth weather: the two heaviest records' own rows, crossed.
-            let mut rows: Vec<(usize, f32)> = Vec::new();
-            for (shade, weight) in weather.sky.shades.iter().filter(|_| scenery.smooth_weather) {
-                let row =
-                    celestial.shade_rows[&world.weather.configuration().shade_remap(*shade).color];
-                match rows.iter_mut().find(|(r, _)| *r == row) {
-                    Some(entry) => entry.1 += weight,
-                    None => rows.push((row, *weight)),
-                }
-            }
-            rows.sort_by(|a, b| b.1.total_cmp(&a.1));
-            if let Some(&(row, weight)) = rows.first() {
+            let rows = weather
+                .sky
+                .shades
+                .iter()
+                .filter(|_| scenery.smooth_weather)
+                .map(|(shade, weight)| {
+                    let shade = world.weather.configuration().shade_remap(*shade);
+                    (celestial.shade_rows[&shade.color], *weight)
+                });
+            if let Some((row, second)) = crate::sky_mix::cross_rows(rows) {
                 uniform[31] = row as f32;
-                if let Some(&(other, share)) = rows.get(1) {
-                    haze_rows = [other as f32, share / (weight + share), 0., 0.];
+                if let Some((other, share)) = second {
+                    haze_rows = [other as f32, share, 0., 0.];
                 }
             }
             uniform.extend(celestial.sun_uniform(world, scenery, camera.position[1]));
@@ -1985,6 +1989,8 @@ impl SimRenderer {
         }
         // Band rows refer to the imported remap atlas; absent assets disable them.
         uniform.extend([0.; 4]);
+        let mut band_shades: Vec<f32> = Vec::with_capacity(32 * 4);
+        let mut band_colours: Vec<[[u8; 3]; 256]> = Vec::new();
         if let Some(celestial) = &scenery.celestial {
             let bands = if scenery.smooth_weather {
                 weather.visual_bands.as_slice()
@@ -1992,13 +1998,56 @@ impl SimRenderer {
                 world.weather.active()
             };
             uniform[68] = bands.len() as f32;
-            for layer in bands {
-                let shade = world.weather.configuration().shade_remap(layer.shade);
+            // Each band's haze colours go to the palette texture's LUT rows;
+            // smooth weather crosses a band's records' own shade tables there
+            // (docs/spec/sun-glow.md, "Continuous dawn and dusk"), so the
+            // ground's haze does not switch tables part way through.
+            let configuration = world.weather.configuration();
+            let records = configuration.layers();
+            let crossed = if scenery.smooth_weather {
+                crate::sky_mix::band_shares(records, world.weather.visual_seconds_of_day())
+            } else {
+                Vec::new()
+            };
+            let crossed = (crossed.len() == bands.len()).then_some(crossed);
+            for (index, layer) in bands.iter().enumerate() {
+                let mut first = configuration.shade_remap(layer.shade);
+                let mut second = None;
+                let pair = crossed.as_ref().and_then(|crossed| {
+                    crate::sky_mix::cross_rows(crossed[index].iter().map(|&(record, weight)| {
+                        (
+                            configuration.shade_remap(records[record].shade).color,
+                            weight as f32,
+                        )
+                    }))
+                });
+                if let Some((color, other)) = pair {
+                    first = configuration.shade_remap(color);
+                    second = other.map(|(c, share)| (configuration.shade_remap(c), share));
+                }
+                let colours = crate::sky_mix::band_colours(&weather.palette, first, second);
+                let start = band_colours.len();
+                let lut = if start + colours.len() <= LUT_ROWS {
+                    band_colours.extend(colours);
+                    start as f32
+                } else {
+                    -1.
+                };
+                band_shades.extend(second.map_or([0., 0., 0., lut], |(table, share)| {
+                    [
+                        celestial.shade_rows[&table.color] as f32,
+                        table.levels.len() as f32,
+                        share,
+                        lut,
+                    ]
+                }));
+                let row = celestial.shade_rows[&first.color];
+                let levels = first.levels.len();
                 uniform.extend([
                     layer.low_feet as f32,
                     layer.high_feet as f32,
-                    celestial.shade_rows[&shade.color] as f32,
-                    shade.levels.len() as f32,
+                    row as f32,
+                    levels as f32,
                     layer.fog_near as f32,
                     layer.fog_near_density as f32,
                     layer.fog_far as f32,
@@ -2129,6 +2178,11 @@ impl SimRenderer {
         uniform.extend(stars);
         uniform.extend(moon);
         uniform.extend(haze_rows);
+        // Unused bands: no second table and no colour rows.
+        while band_shades.len() < 32 * 4 {
+            band_shades.extend([0., 0., 0., -1.]);
+        }
+        uniform.extend(band_shades);
         debug_assert_eq!(uniform.len() * 4, UNIFORM_BYTES as usize);
         let view_clip = crate::terrain_chunks::Clip::perspective(
             [uniform[4], uniform[5], uniform[6]],
@@ -2206,6 +2260,13 @@ impl SimRenderer {
         for rgb in world.weather.daylight_palette() {
             entries.extend([rgb[0], rgb[1], rgb[2], 255]);
         }
+        for row in &band_colours {
+            for rgb in row {
+                entries.extend([rgb[0], rgb[1], rgb[2], 255]);
+            }
+        }
+        // Only the rows in use; rows past them are never read this frame.
+        let rows = (entries.len() / 1024) as u32;
         if entries != self.palette_uploaded {
             queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
@@ -2218,11 +2279,11 @@ impl SimRenderer {
                 wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(1024),
-                    rows_per_image: Some(12),
+                    rows_per_image: Some(rows),
                 },
                 wgpu::Extent3d {
                     width: 256,
-                    height: 12,
+                    height: rows,
                     depth_or_array_layers: 1,
                 },
             );
