@@ -121,8 +121,10 @@ pub const SHOULDER_OUT: f64 = 1.25;
 pub const SHOULDER_GAP: f64 = 0.05;
 
 /// Eagle twin shoulder rails, feet either side of the shared pylon. Fitted
-/// to clear the 610 gallon tank and rolled Sidewinder fins (2026-10-15).
-pub const TWIN_SHOULDER_OUT: f64 = 1.75;
+/// so the rolled Sidewinders' fins (0.73 ft across each side) clear each
+/// other: 1.75 until 2026-10-20, when John asked for the wing pylon about
+/// half as wide, 0.85 (the F/A-18 bar's half spacing).
+pub const TWIN_SHOULDER_OUT: f64 = 0.85;
 
 /// How far above its pylon's foot a store of `size` on the shoulder rail
 /// has its centre line, feet: its body's half depth and [`SHOULDER_GAP`].
