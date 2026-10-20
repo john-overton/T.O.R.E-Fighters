@@ -121,10 +121,8 @@ pub const SHOULDER_OUT: f64 = 1.25;
 pub const SHOULDER_GAP: f64 = 0.05;
 
 /// Eagle twin shoulder rails, feet either side of the shared pylon. Fitted
-/// so the rolled Sidewinders' fins (0.73 ft across each side) clear each
-/// other: 1.75 until 2026-10-20, when John asked for the wing pylon about
-/// half as wide, 0.85 (the F/A-18 bar's half spacing).
-pub const TWIN_SHOULDER_OUT: f64 = 0.85;
+/// to clear the 610 gallon tank and rolled Sidewinder fins (2026-10-15).
+pub const TWIN_SHOULDER_OUT: f64 = 1.75;
 
 /// How far above its pylon's foot a store of `size` on the shoulder rail
 /// has its centre line, feet: its body's half depth and [`SHOULDER_GAP`].
@@ -814,6 +812,13 @@ const F14_SHOULDER_FORWARD: f64 = 6.0;
 /// wing's chord, each rail's front at the leading edge, so the missiles'
 /// noses reach a little ahead of it ([`YAK141_INNER`], [`YAK141_OUTER`]).
 ///
+/// How far out the F-15C's wing pylon is, feet (John 2026-10-20: "the whole
+/// thing needs to be moved inward, kind of like the real F-15"). The source
+/// row is 16.67 ft out, at the wing's outer third; the real Eagle's pylon
+/// hangs about 9 to 10 ft of its 21 ft semispan out, and the model's
+/// semispan is 22.8 ft, so 11 ft lands on John's marks (fitted).
+pub const F15_WING_OUT: f64 = 11.;
+
 /// The F-15C (John 2026-10-15: "the fuselage mounts for the missiles appear
 /// under the wing instead of on the bottom of the fuselage", "the wing
 /// pylons are a little too far forward"): record 4's four AIM-7/AIM-120s
@@ -840,9 +845,9 @@ pub fn station_move(id: AircraftId, hardpoint: usize) -> Option<StationMove> {
         // F-15C, John 2026-10-15: lower outer intake corners, two missiles
         // in tandem per side; wing dual rails a little further aft.
         (AircraftId::F15, 4) => at(Location::Fuselage, 5., -1., Hang::FromBelow { up: -8. }),
-        (AircraftId::F15, 5) => at(Location::Wing, 50. / 3., -5.5, Hang::AsRecorded),
+        (AircraftId::F15, 5) => at(Location::Wing, F15_WING_OUT, -5.5, Hang::AsRecorded),
         (AircraftId::F15, 6) => at(Location::Centerline, 0., -3., Hang::FromBelow { up: -8. }),
-        (AircraftId::F15, 7) => at(Location::Wing, 50. / 3., -4.3, Hang::AsRecorded),
+        (AircraftId::F15, 7) => at(Location::Wing, F15_WING_OUT, -4.3, Hang::AsRecorded),
         (AircraftId::F22, 8) => at(Location::Wing, 12., -6., Hang::FromBelow { up: -6. }),
         (AircraftId::Mig29, 8) => at(Location::Centerline, 0., -2., Hang::FromBelow { up: -8. }),
         (AircraftId::Rafale, 9) => at(Location::Centerline, 0., -4., Hang::FromBelow { up: -8. }),
@@ -1855,12 +1860,12 @@ mod tests {
             assert!((points[2][2] + points[0][2] + 2.).abs() < 1e-9);
         }
         let (mount, rack) = placed_on(AircraftId::F15, 5, &row(4, [50, -20, 0]), Some(&model));
-        assert_eq!([mount[0], mount[2]], [50. / 3., -5.5]);
+        assert_eq!([mount[0], mount[2]], [F15_WING_OUT, -5.5]);
         let size = StoreSize::of_shape(Some("SIDEM.SH"));
         assert_eq!(rack.pylons(2), 1, "one twin-rail pylon per wing");
         for side in 0..2 {
             let pair = [0, 1].map(|slot| rack.store_point(mount, 4, side, slot, size));
-            assert!((pair[0][0].abs() + pair[1][0].abs() - 100. / 3.).abs() < 1e-9);
+            assert!((pair[0][0].abs() + pair[1][0].abs() - 2. * F15_WING_OUT).abs() < 1e-9);
             assert!(
                 pair.iter()
                     .all(|p| p[2] == -5.5 && (p[1] - shoulder_rise(size)).abs() < 1e-6)
