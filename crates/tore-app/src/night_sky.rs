@@ -83,15 +83,28 @@ fn about_pole(v: [f32; 3], latitude: f64, angle: f64) -> [f32; 3] {
     rotate(v.map(f64::from), [0., phi.sin(), phi.cos()], angle).map(|v| v as f32)
 }
 
-/// How visible the stars are from the sun alone: none while it is above the
-/// horizon, all by five degrees below it. The weather's star flag (which
-/// rises as the high cloud deck fades out at dusk), the sky's own brightness
-/// and each star's brightness order then decide which stars show
-/// (`starfield` in terrain.wgsl).
-pub fn twilight(sun_sine: f32) -> f32 {
+/// How visible the stars are from the sun alone. In the evening: none while
+/// it is above the horizon, all by five degrees below it. In the morning
+/// (after midnight, before noon) the sun lets them stay until it is two
+/// degrees up and takes them by ten, so at dawn it is the weather's star flag
+/// that fades them, as the high cloud deck fades in, just as it brings them
+/// at dusk as the deck fades out (John, 2026-10-20). The star flag, the
+/// sky's own brightness and each star's brightness order then decide which
+/// stars show (`starfield` in terrain.wgsl). Both rules give 1 at midnight
+/// and 0 at noon, so the switch between them is seamless.
+pub fn twilight(sun_sine: f32, morning: bool) -> f32 {
     let elevation = sun_sine.clamp(-1., 1.).asin().to_degrees();
-    let t = (-elevation / 5.).clamp(0., 1.);
+    let t = if morning {
+        ((10. - elevation) / 8.).clamp(0., 1.)
+    } else {
+        (-elevation / 5.).clamp(0., 1.)
+    };
     t * t * (3. - 2. * t)
+}
+
+/// Whether `elapsed` mission seconds fall between midnight and noon.
+pub fn morning(elapsed: f64) -> bool {
+    elapsed.rem_euclid(86_400.) < 43_200.
 }
 
 // The starfield's pixel art as the sky shader draws it (`starfield` in
@@ -185,7 +198,7 @@ impl NightSky {
                 phi.sin() as f32,
                 phi.cos() as f32,
                 turn(elapsed) as f32,
-                night * twilight(sun_sine),
+                night * twilight(sun_sine, morning(elapsed)),
             ],
             moon: [moon[0], moon[1], moon[2], night],
             moon_angles,
@@ -307,18 +320,84 @@ mod tests {
 
     #[test]
     fn stars_fade_through_twilight_without_a_step() {
-        assert_eq!(twilight(0.01), 0.);
-        assert_eq!(twilight(0.), 0.);
-        assert!((twilight(-5_f32.to_radians().sin()) - 1.).abs() < 1e-6);
-        assert_eq!(twilight(-1.), 1.);
-        let mut previous = twilight(0.1);
-        for i in 0..=20_000 {
-            // 0.25 degrees a minute: one 1/60 s frame is 0.00007 degrees.
-            let degrees = 6. - f64::from(i) * 0.001;
-            let now = twilight(degrees.to_radians().sin() as f32);
-            assert!((now - previous).abs() < 0.001);
+        let sine = |degrees: f32| degrees.to_radians().sin();
+        // Evening: none above the horizon, all by five degrees below.
+        assert_eq!(twilight(0.01, false), 0.);
+        assert_eq!(twilight(0., false), 0.);
+        assert!((twilight(sine(-5.), false) - 1.).abs() < 1e-6);
+        assert_eq!(twilight(-1., false), 1.);
+        // Morning: all until two degrees up, none by ten.
+        assert_eq!(twilight(sine(2.), true), 1.);
+        assert!(twilight(sine(10.), true) < 1e-6);
+        assert_eq!(twilight(1., true), 0.);
+        assert_eq!(twilight(-1., true), 1.);
+        assert!(morning(3. * 3600.) && morning(86_400. + 7. * 3600.));
+        assert!(!morning(19. * 3600.) && !morning(12. * 3600.));
+        for is_morning in [false, true] {
+            let mut previous = twilight(sine(12.), is_morning);
+            for i in 0..=20_000 {
+                // 0.25 degrees a minute: one 1/60 s frame is 0.00007 degrees.
+                let degrees = 12. - f64::from(i) * 0.001;
+                let now = twilight(degrees.to_radians().sin() as f32, is_morning);
+                assert!((now - previous).abs() < 0.001);
+                previous = now;
+            }
+        }
+    }
+
+    /// DAY2's sun: up at 07:00, down at 19:00, 0.25 degrees a minute.
+    fn day2_sun(seconds: f64) -> f32 {
+        let day = seconds.rem_euclid(86_400.);
+        let phase = if (7. * 3600.0..19. * 3600.).contains(&day) {
+            std::f64::consts::PI * (day - 7. * 3600.) / (12. * 3600.)
+        } else {
+            std::f64::consts::PI * (1. + (day - 19. * 3600.).rem_euclid(86_400.) / (12. * 3600.))
+        };
+        phase.sin() as f32
+    }
+
+    /// DAY2's star-flag share: the night records fade out over 07:00 to
+    /// 07:05 (as the dawn record's high cloud fades in) and in over 19:05 to
+    /// 19:08 (as dusk's fades out).
+    fn day2_night(seconds: f64) -> f32 {
+        let day = seconds.rem_euclid(86_400.);
+        let dawn = 1. - ((day - 7. * 3600.) / 300.).clamp(0., 1.);
+        let dusk = ((day - 19. * 3600. - 300.) / 180.).clamp(0., 1.);
+        (if day < 12. * 3600. { dawn } else { dusk }) as f32
+    }
+
+    fn day2_dark(seconds: f64) -> f32 {
+        day2_night(seconds) * twilight(day2_sun(seconds), morning(seconds))
+    }
+
+    #[test]
+    fn stars_stay_until_the_high_cloud_fades_in_at_dawn() {
+        // Step a whole DAY2 day at 1/60 s: no star's strength ever jumps,
+        // midnight and noon included.
+        let ranks = [0., 0.5, 0.9, 0.99, 1.];
+        let mut previous = ranks.map(|r| star_seen(r, day2_dark(0.)));
+        assert_eq!(previous, [1.; 5]);
+        let mut gone = [f64::NAN; 5];
+        for frame in 1..=(24 * 3600 * 60) {
+            let seconds = f64::from(frame) / 60.;
+            let now = ranks.map(|r| star_seen(r, day2_dark(seconds)));
+            for (i, (a, b)) in now.iter().zip(&previous).enumerate() {
+                assert!((a - b).abs() < 0.002, "{seconds} {i}");
+                if *a == 0. && gone[i].is_nan() {
+                    gone[i] = seconds;
+                }
+            }
             previous = now;
         }
+        // Every star is still full at 07:00 when the high cloud starts to
+        // fill in; the faintest go first, the brightest last, by 07:05.
+        assert!(
+            ranks
+                .iter()
+                .all(|r| star_seen(*r, day2_dark(7. * 3600.)) == 1.)
+        );
+        assert!(gone.windows(2).all(|w| w[1] > w[0]), "{gone:?}");
+        assert!(gone[0] > 7. * 3600. && gone[4] <= 7. * 3600. + 300.);
     }
 
     /// The night sky's grey behind the stars in the shader's linear light
@@ -458,7 +537,7 @@ mod tests {
             let since = seconds - 19. * 3600.;
             let sun = (-since / 240.).to_radians().sin() as f32;
             let night = ((since - 300.) / 180.).clamp(0., 1.) as f32;
-            night * twilight(sun)
+            night * twilight(sun, false)
         };
         let ranks = [0., 0.5, 0.9, 0.99, 1.];
         let mut previous = ranks.map(|r| star_seen(r, dark_at(18. * 3600.)));
