@@ -64,6 +64,34 @@ pub(crate) fn advance(schema: Schema, base: &[i64], ticks: u32) -> Vec<i64> {
     out
 }
 
+/// Whether no position's velocity is itself a position, so a row can be
+/// advanced in place ([`advance_in_place`]).
+fn velocities_hold(schema: Schema) -> bool {
+    schema.iter().all(|kind| match *kind {
+        Kind::Pos { vel, .. } => !matches!(schema.get(vel), Some(Kind::Pos { .. })),
+        _ => true,
+    })
+}
+
+/// `values` moved on by `ticks` where they are, as [`advance`] gives.
+pub(crate) fn advance_in_place(schema: Schema, values: &mut Vec<i64>, ticks: u32) {
+    if !velocities_hold(schema) {
+        *values = advance(schema, values, ticks);
+        return;
+    }
+    for (index, kind) in schema.iter().enumerate() {
+        if let Kind::Pos { vel, divisor } = *kind {
+            let moved = i128::from(values[index])
+                + div_round(
+                    i128::from(values[vel]) * i128::from(ticks),
+                    i128::from(divisor),
+                );
+            values[index] =
+                moved.clamp(-(bits::STEP_LIMIT as i128), bits::STEP_LIMIT as i128) as i64;
+        }
+    }
+}
+
 fn write_slow(w: &mut BitWriter, slow: Slow, value: i64) {
     match slow {
         Slow::Bits(width, _) => {
@@ -217,10 +245,19 @@ const ID_LADDER: [u32; 3] = [0, 4, 10];
 pub(crate) type List = BTreeMap<u32, Vec<i64>>;
 
 /// Every entry of `base` advanced by `ticks`.
+#[cfg(test)]
 pub(crate) fn advance_list(schema: Schema, base: &List, ticks: u32) -> List {
     base.iter()
         .map(|(id, values)| (*id, advance(schema, values, ticks)))
         .collect()
+}
+
+/// Every entry of `list` advanced by `ticks` where it is, as
+/// [`advance_list`] gives.
+pub(crate) fn advance_list_in_place(schema: Schema, list: &mut List, ticks: u32) {
+    for values in list.values_mut() {
+        advance_in_place(schema, values, ticks);
+    }
 }
 
 /// An entry of a list record.
@@ -257,6 +294,7 @@ fn read_id(r: &mut BitReader<'_>, previous: Option<u32>) -> WireResult<u32> {
 }
 
 /// What a list costs and holds once written.
+#[cfg(test)]
 pub(crate) struct ListWrite {
     /// The record's bits, or `None` when nothing changed or nothing fit.
     pub bits: Option<BitWriter>,
@@ -266,9 +304,9 @@ pub(crate) struct ListWrite {
     pub waiting: usize,
 }
 
-/// Codes `now` against `base` (already advanced) within `budget` bits:
-/// removals first, then new entries, then changed ones, the largest change
-/// first. What does not fit stays as `base` has it, and is counted.
+/// The coding [`write_list_into`] replaced (slice R2-host), kept to show it
+/// codes the same bits and leaves the same list.
+#[cfg(test)]
 pub(crate) fn write_list(schema: Schema, base: &List, now: &List, budget: usize) -> ListWrite {
     let mut removals: Vec<u32> = base
         .keys()
@@ -364,6 +402,103 @@ pub(crate) fn write_list(schema: Schema, base: &List, now: &List, budget: usize)
         after,
         waiting,
     }
+}
+
+/// Codes `now` against `base` (already advanced) within `budget` bits:
+/// removals first, then new entries, then changed ones, the largest change
+/// first. What does not fit stays as `base` has it, and is counted. `base`
+/// becomes what the client holds afterwards: the baseline with the sent
+/// changes. Returns the record's bits (`None` when nothing changed or
+/// nothing fit) and the changes left out for room.
+pub(crate) fn write_list_into(
+    schema: Schema,
+    base: &mut List,
+    now: &List,
+    budget: usize,
+) -> (Option<BitWriter>, usize) {
+    let mut removals: Vec<u32> = Vec::new();
+    for id in base.keys() {
+        if !now.contains_key(id) {
+            removals.push(*id);
+        }
+    }
+    let mut changes: Vec<(u32, bool, BitWriter)> = Vec::new();
+    for (id, values) in now {
+        match base.get(id) {
+            Some(old) if old == values => {}
+            Some(old) => {
+                let mut w = BitWriter::new();
+                w.write_bool(false);
+                write_delta(&mut w, schema, values, old);
+                changes.push((*id, false, w));
+            }
+            None => {
+                let mut w = BitWriter::new();
+                w.write_bool(true);
+                write_full(&mut w, schema, values);
+                changes.push((*id, true, w));
+            }
+        }
+    }
+    if removals.is_empty() && changes.is_empty() {
+        return (None, 0);
+    }
+    // New entries first, then the biggest changes.
+    changes.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then(b.2.bit_len().cmp(&a.2.bit_len()))
+            .then(a.0.cmp(&b.0))
+    });
+    let id_bits = |id: u32| bits::uladder_bits(u64::from(id), &ID_LADDER);
+    // Two counts of at most three bytes each.
+    let mut left = budget.saturating_sub(48);
+    let mut waiting = 0;
+    removals.retain(|&id| {
+        let cost = id_bits(id);
+        if cost <= left {
+            left -= cost;
+            true
+        } else {
+            waiting += 1;
+            false
+        }
+    });
+    let mut chosen: Vec<(u32, BitWriter)> = Vec::new();
+    for (id, _, w) in changes {
+        let cost = id_bits(id) + w.bit_len();
+        if cost <= left {
+            left -= cost;
+            chosen.push((id, w));
+        } else {
+            waiting += 1;
+        }
+    }
+    if removals.is_empty() && chosen.is_empty() {
+        return (None, waiting);
+    }
+    chosen.sort_by_key(|(id, _)| *id);
+    for id in &removals {
+        base.remove(id);
+    }
+    for (id, _) in &chosen {
+        match base.get_mut(id) {
+            Some(values) => values.clone_from(&now[id]),
+            None => {
+                base.insert(*id, now[id].clone());
+            }
+        }
+    }
+    let mut w = BitWriter::new();
+    write_ids(&mut w, &removals);
+    bits::write_count(&mut w, chosen.len());
+    let mut previous: Option<u32> = None;
+    for (id, body) in &chosen {
+        let step = previous.map_or(u64::from(*id), |p| u64::from(id - p - 1));
+        write_uladder(&mut w, step, &ID_LADDER);
+        bits::append(&mut w, body);
+        previous = Some(*id);
+    }
+    (Some(w), waiting)
 }
 
 /// Reads a list record of at most `limit` entries.

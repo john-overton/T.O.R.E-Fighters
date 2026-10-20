@@ -42,6 +42,8 @@ use super::{WireError, WireResult};
 use std::borrow::Cow;
 
 mod a2g;
+#[cfg(test)]
+mod record_tests;
 use std::collections::{BTreeMap, VecDeque};
 use tore_codec::{BitReader, BitWriter};
 use tore_formats::aircraft::AircraftId;
@@ -1894,6 +1896,16 @@ impl QReadout {
     fn advanced(&self, ticks: u32) -> Self {
         let mut out = self.clone();
         for (index, list) in out.lists.iter_mut().enumerate() {
+            flat::advance_list_in_place(schema(index), list, ticks);
+        }
+        out
+    }
+
+    /// The advance [`Self::advanced`] replaced (slice R2-host).
+    #[cfg(test)]
+    fn advanced_by_copy(&self, ticks: u32) -> Self {
+        let mut out = self.clone();
+        for (index, list) in out.lists.iter_mut().enumerate() {
             *list = flat::advance_list(schema(index), list, ticks);
         }
         out
@@ -1940,6 +1952,8 @@ struct TrailRaw {
 /// dropped from the front of the baseline's and the points it added (or in
 /// full), points as differences from the one before. Returns the bits and
 /// what the client holds afterwards; a trail that does not fit waits.
+/// The trail coding [`write_trails_into`] replaced (slice R2-host).
+#[cfg(test)]
 fn write_trails(
     base: &BTreeMap<u32, Vec<[i64; 3]>>,
     now: &BTreeMap<u32, Vec<[i64; 3]>>,
@@ -2012,6 +2026,84 @@ fn write_trails(
         bits::append(&mut w, body);
     }
     (Some(w), after)
+}
+
+/// Codes the trails `now` against `base` (already advanced) within
+/// `budget` bits, as [`write_trails`] does; `base` becomes what the client
+/// holds afterwards.
+fn write_trails_into(
+    base: &mut BTreeMap<u32, Vec<[i64; 3]>>,
+    now: &BTreeMap<u32, Vec<[i64; 3]>>,
+    budget: usize,
+) -> Option<BitWriter> {
+    let removed: Vec<u32> = base
+        .keys()
+        .filter(|id| !now.contains_key(id))
+        .copied()
+        .collect();
+    let mut changes: Vec<(u32, BitWriter)> = Vec::new();
+    for (id, points) in now.iter() {
+        let old = base.get(id);
+        if old == Some(points) {
+            continue;
+        }
+        let mut w = BitWriter::new();
+        let shift = old.and_then(|old| {
+            (0..=old.len()).find(|k| {
+                let kept = &old[*k..];
+                kept.len() <= points.len() && points[..kept.len()] == *kept
+            })
+        });
+        match (old, shift) {
+            (Some(old), Some(k)) if old.len() > k => {
+                w.write_bool(false);
+                w.write_varint(k as u64);
+                let added = &points[old.len() - k..];
+                bits::write_count(&mut w, added.len());
+                write_points(&mut w, old.last().copied(), added);
+            }
+            _ => {
+                w.write_bool(true);
+                bits::write_count(&mut w, points.len());
+                write_points(&mut w, None, points);
+            }
+        }
+        changes.push((*id, w));
+    }
+    // Nothing changed, or no room even for the removals and the counts: the
+    // trails wait (slice G7 found the counts sent with no room left).
+    if (removed.is_empty() && changes.is_empty()) || budget < 48 + 40 * removed.len() {
+        return None;
+    }
+    let mut left = budget - (48 + 40 * removed.len());
+    let mut chosen = Vec::new();
+    for (id, w) in changes {
+        let cost = 40 + w.bit_len();
+        if cost <= left {
+            left -= cost;
+            chosen.push((id, w));
+        }
+    }
+    if removed.is_empty() && chosen.is_empty() {
+        return None;
+    }
+    for id in &removed {
+        base.remove(id);
+    }
+    for (id, _) in &chosen {
+        base.insert(*id, now[id].clone());
+    }
+    let mut w = BitWriter::new();
+    bits::write_count(&mut w, removed.len());
+    for id in &removed {
+        w.write_varint(u64::from(*id));
+    }
+    bits::write_count(&mut w, chosen.len());
+    for (id, body) in &chosen {
+        w.write_varint(u64::from(*id));
+        bits::append(&mut w, body);
+    }
+    Some(w)
 }
 
 fn read_points(
@@ -2239,7 +2331,86 @@ pub(crate) fn write_record(
     ticks: u32,
     budget: usize,
 ) -> (BitWriter, QReadout, ReadoutReport) {
-    let base = base.advanced(ticks);
+    // Each part is coded against the advanced baseline's own part and then
+    // becomes what the client holds of it, so one copy serves both.
+    let mut after = base.advanced(ticks);
+    let mut w = BitWriter::new();
+    let _ = w.write_bits(u64::from(back), BASELINE_BACK_BITS);
+    let mut report = ReadoutReport::default();
+    // A bit for every part is spent whatever happens.
+    let mut left = budget.saturating_sub(BASELINE_BACK_BITS as usize + PARTS.len());
+    for (index, part) in PARTS.iter().enumerate() {
+        let start = w.bit_len();
+        match *part {
+            Part::Scalar(group) => {
+                let values = &now.scalars[group];
+                if *values == after.scalars[group] {
+                    w.write_bool(false);
+                } else {
+                    let mut body = BitWriter::new();
+                    bits::write_count(&mut body, values.len());
+                    for value in values {
+                        body.write_varint_signed(*value);
+                    }
+                    // The header always goes, so the client knows the plane.
+                    if body.bit_len() <= left || group == scalar::HEADER {
+                        left = left.saturating_sub(body.bit_len());
+                        w.write_bool(true);
+                        bits::append(&mut w, &body);
+                        after.scalars[group].clone_from(values);
+                        report.sent += 1;
+                    } else {
+                        w.write_bool(false);
+                        report.waiting += 1;
+                    }
+                }
+            }
+            Part::List(list) => {
+                let (body, waiting) = flat::write_list_into(
+                    schema(list),
+                    &mut after.lists[list],
+                    &now.lists[list],
+                    left,
+                );
+                report.waiting += waiting;
+                match body {
+                    Some(body) => {
+                        left = left.saturating_sub(body.bit_len());
+                        w.write_bool(true);
+                        bits::append(&mut w, &body);
+                        report.sent += 1;
+                    }
+                    None => w.write_bool(false),
+                }
+            }
+            Part::Trails => match write_trails_into(&mut after.trails, &now.trails, left) {
+                Some(body) => {
+                    left = left.saturating_sub(body.bit_len());
+                    w.write_bool(true);
+                    bits::append(&mut w, &body);
+                    report.sent += 1;
+                }
+                None => w.write_bool(false),
+            },
+        }
+        report.part_bits[index] = w.bit_len() - start;
+    }
+    report.bits = w.bit_len();
+    (w, after, report)
+}
+
+/// The record coding [`write_record`] replaced (slice R2-host), which cloned
+/// the baseline whole for what the client holds and again for every list.
+/// Kept to show the two code the same bits and leave the same readout.
+#[cfg(test)]
+pub(crate) fn write_record_cloning(
+    back: u8,
+    now: &QReadout,
+    base: &QReadout,
+    ticks: u32,
+    budget: usize,
+) -> (BitWriter, QReadout, ReadoutReport) {
+    let base = base.advanced_by_copy(ticks);
     let mut after = base.clone();
     let mut w = BitWriter::new();
     let _ = w.write_bits(u64::from(back), BASELINE_BACK_BITS);
