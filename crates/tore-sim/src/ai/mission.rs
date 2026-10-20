@@ -6350,6 +6350,8 @@ mod tests {
     #[test]
     fn lost_contact_inside_retention_distance_searches_without_firing_then_reacquires() {
         let mut mission = AiMission::new();
+        // Written for observation every tick.
+        mission.set_test_settings(AiTestSettings::every_tick());
         mission.push(perception_actor(Experience::Novice));
         let target = visible_object(mission.actor(1).unwrap(), 2, [0., 20000., 5000.]);
         mission

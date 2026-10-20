@@ -839,6 +839,10 @@ mod tests {
     fn contact_rules_journal_why_a_new_target_is_not_reported() {
         use tore_sim::ai::wing::{TargetId, TargetOrder, WingRequest};
         let mut wings = wings();
+        // Written for observation every tick.
+        wings
+            .mission
+            .set_test_settings(tore_sim::ai::test_settings::AiTestSettings::every_tick());
         let mut targets = spawned();
         let player = tore_sim::flight::State::new(&aircraft(), [0., 20000., -5000.]).unwrap();
         for id in [1, 2] {

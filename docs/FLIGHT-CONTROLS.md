@@ -255,8 +255,8 @@ thought,telemetry,guidance,comms,menu` also opens those panels, for captures.
 
 **Escape → Debug** is a tab after the retail ones with two AI test settings and
 a Back to defaults row, for measuring what the AI's observation costs and how it
-fights without part of it. *AI observation rate* cycles 120 Hz (the default), 60,
-40, 30 and 20: AI aircraft observe that often, staggered across ticks, while
+fights without part of it. *AI observation rate* cycles 120 Hz, 60 (the default
+since optimization round 2), 40, 30 and 20: AI aircraft observe that often, staggered across ticks, while
 their controllers and flight stay at 120 Hz. *Lean AI sensors* (On by default,
 and decisions are exactly those of the full sensors) leaves out the visual
 channel list and builds the received-radar list only when a missile warning

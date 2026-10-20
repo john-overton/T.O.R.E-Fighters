@@ -1,5 +1,5 @@
-//! The AI test settings (slice S7b): the default rate is the exact path, the
-//! actors are staggered evenly, serial and worker steps agree at a slow rate,
+//! The AI test settings (slice S7b): 120 Hz observes every actor every tick
+//! and the default 60 Hz every other tick, the actors are staggered evenly, serial and worker steps agree at a slow rate,
 //! lean sensors change nothing a decision reads, and a slow rate holds the
 //! sensor timings.
 use super::observation_tests::{compare_step, executors, fixture, scripted_changes, snapshot};
@@ -20,12 +20,27 @@ fn flight_bits(actor: &AiActor) -> Vec<u8> {
 }
 
 #[test]
-fn the_default_rate_observes_every_actor_every_tick() {
-    let mission = fixture(12, 3);
-    assert!(mission.test_settings().is_default());
+fn every_tick_observes_every_actor_every_tick() {
+    let mut mission = fixture(12, 3);
+    mission.set_test_settings(AiTestSettings::every_tick());
     for tick in 0..50 {
         for index in 0..12 {
             assert!(mission.observation_due(index, tick));
+        }
+    }
+}
+
+#[test]
+fn the_default_rate_observes_every_actor_every_other_tick() {
+    let mission = fixture(12, 3);
+    assert!(mission.test_settings().is_default());
+    assert_eq!(mission.test_settings().observation_hz(), 60);
+    for tick in 0..50 {
+        for index in 0..12 {
+            assert_eq!(
+                mission.observation_due(index, tick),
+                (tick + index as u64).is_multiple_of(2)
+            );
         }
     }
 }
@@ -252,7 +267,7 @@ fn lean_sensors_change_nothing_a_decision_reads() {
     let mut full = fixture(30, 21);
     full.set_test_settings(AiTestSettings::full());
     let mut lean = full.clone();
-    lean.set_test_settings(AiTestSettings::default());
+    lean.set_test_settings(AiTestSettings::every_tick());
     let (mut full_human, mut lean_human) = (None, None);
     let mut compared_emitters = 0;
     for tick in 0..60 {

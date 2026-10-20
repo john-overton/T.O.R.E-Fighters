@@ -309,7 +309,17 @@ moves a chaotic fight. Each rate is compared with 120 Hz fight by fight
   more mid-air collisions in close merges), at 30 Hz seven and at 20 Hz six.
 
 So 60 Hz behaves as 120 Hz does within the fights' own chaos, and 40 Hz and
-below do not. CPU of the serial 15v15 probe at each rate (cycles, simulation
+below do not: 60 Hz is the default since then. The probe's checksums at the
+new default are `6d7f0d87dc66bd00` (15v15, 2,400 ticks), `a185f08cc8427934`
+(15v15, 21,600) and `1b3ef475ed3772a4` (2v2, 21,600), serial and with four
+workers; `--ai-observe-hz 120` gives the earlier ones above.
+
+With the round's exact work and 60 Hz together, against `fba0db05` (same
+method): serial 15v15 simulation cycles 12.0 to 9.3 G at 2,400 ticks (-22%)
+and 37.6 to 28.5 G at 21,600 (-24%); 2v2 at 21,600 about -15%; the windowed
+heavy fight at 8x 7.1x to 7.7x achieved with frames of 151 to 102 ms mean
+(p95 347 to 216 ms, three runs each); the dedicated server flying the perf
+mission 8.6% to 7.2% of a core. CPU of the serial 15v15 probe at each rate (cycles, simulation
 only): 2,400 ticks 10.35 G at 120 Hz, 9.16 at 60 (-11%), 8.75 at 40, 8.43 at
 30, 8.29 at 20; 21,600 ticks 31.6 G, 28.7 (-9%), 27.2, 25.6, 25.6. The
 windowed heavy fight at 8x used 4.5% less CPU at 60 Hz (three runs each) and

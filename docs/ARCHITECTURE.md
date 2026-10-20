@@ -9587,12 +9587,17 @@ handoff and error partial state.
 
 Two settings for trying how much CPU the AI's observation takes and how the AI
 fights without part of it (optimization run, slice S7b; John, 2026-10-19).
-The observation rate defaults to 120 Hz and **lean sensors are on by
+The observation rate defaults to **60 Hz** since optimization round 2 (John,
+2026-10-19: lower if it behaves the same; a matrix of 240 fights behaved at
+60 Hz as at 120 Hz within the fights' own chaos and 40 Hz and below did not, see
+[the baseline](baselines/performance-threads.md#ai-observation-rate-matrix);
+`AiTestSettings::every_tick()` is 120 Hz, what the AI's unit tests written for
+observation every tick run at), and **lean sensors are on by
 default** since slice S9 (John, 2026-10-19: S7b measured the same decisions,
 journal and checksum with lean and full sensors at every rate, for about 2%
-less CPU). The 120 Hz default with either sensor setting is bit for bit the
-run of a build without the settings, apart from the values a checkpoint
-codes (see below). `tore_sim::ai::test_settings::AiTestSettings`
+less CPU). 120 Hz with either sensor setting is bit for bit the run of a
+build without the settings, apart from the values a checkpoint codes (see
+below). `tore_sim::ai::test_settings::AiTestSettings`
 holds them (`AiTestSettings::full()` is 120 Hz with full sensors, what tests
 compare against); `AiWings::set_ai_test` hands them to the mission before
 every step. They are host setup like the ground ceiling, not state: no
@@ -9607,7 +9612,7 @@ Where they are set:
 | `tore-app` | `--ai-observe-hz N`, `--ai-lean-sensors [on\|off]` (bare means on): the AI probe's settings, and the starting values of a windowed flight's Debug tab |
 | `tore-server` | `--ai-observe-hz N`, `--ai-lean-sensors [on\|off]` (`HostConfig::ai_test`) |
 
-**Observation rate.** 120 (the default), 60, 40, 30 or 20 Hz: an AI aircraft's
+**Observation rate.** 120, 60 (the default), 40, 30 or 20 Hz: an AI aircraft's
 observation, which is its sensors, its lookout over the world, its received
 emitters and the awareness memory they feed, runs once every 1, 2, 3, 4 or 6
 ticks. Aircraft are staggered by their place in the mission,
@@ -9649,7 +9654,7 @@ build without the setting wrote and not byte for byte theirs; the layout is
 unchanged. `--ai-lean-sensors off` (or the Debug tab) runs the full sensors
 for comparison.
 
-A host with either setting off its default (a slower rate, or lean sensors
+A host with either setting off its default (another rate, or lean sensors
 turned off) appoints no standby: a standby replays the journal with the
 defaults, which the journal does not say otherwise. Nothing is told to joined players, and no wire message carries the
 settings (no protocol change).
