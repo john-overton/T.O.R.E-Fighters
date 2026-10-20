@@ -460,14 +460,31 @@ fn shoulder_rail(
             1,
             size,
         );
+        // The twin launcher the F/A-18's bar is sized by: a short bar
+        // across the pylon (as long as the F/A-18's, 0.7 of 0.45 of the
+        // store) and a narrow rail on top of each missile, where one flat
+        // plate between the missiles was 3.5 ft by 5.7 ft (John 2026-10-20:
+        // the F-15's dual rails are huge, cut them to the F/A-18's size).
         let spread = tore_sim::combat::hardpoints::TWIN_SHOULDER_OUT;
+        let rail = 0.7 * (0.45 * dims.length).clamp(1.2, 8.);
+        let middle = p[2] + dims.middle;
+        let height = p[1] + dims.top + RACK_DEPTH / 2.;
         block(
             out,
             at,
-            [p[0], p[1] + dims.top + ARM / 2., p[2] + dims.middle],
-            [2. * spread, ARM, (0.6 * dims.length).clamp(3., 6.)],
+            [p[0], height, middle],
+            [2. * spread, RACK_DEPTH, 0.35 * rail],
             PYLON,
         );
+        for side in [-1., 1.] {
+            block(
+                out,
+                at,
+                [p[0] + side * spread, height, middle],
+                [PYLON_WIDTH, RACK_DEPTH, rail],
+                PYLON,
+            );
+        }
         return;
     }
     let side = if p[0] < 0. { -1. } else { 1. };
@@ -1149,6 +1166,57 @@ mod tests {
                 .all(|v| f64::from(v[1]) > up),
             "the arm is above the store's centre line"
         );
+    }
+
+    /// The Eagle's twin shoulder rails (two Sidewinders on one pylon) are
+    /// the F/A-18 bar's size: a rail on top of each missile 0.7 of 0.45 of
+    /// its length long and a short cross bar, not one flat plate between
+    /// them 3.5 by 5.7 ft (John 2026-10-20: the F-15's dual rails are huge).
+    #[test]
+    fn the_twin_shoulder_rails_are_a_bar_the_size_of_the_f18s() {
+        use tore_sim::combat::hardpoints::{SHOULDER_BYTE, TWIN_SHOULDER_OUT};
+        let airframe = flat_wing();
+        let store = on_flat_wing(plain([8.75, -5., 0.], SHOULDER_BYTE, 4));
+        let places = hung(&store);
+        let right: Vec<&Hung> = places.iter().filter(|h| h.side == 0).collect();
+        assert_eq!(right.len(), 2, "two Sidewinders a wing");
+        assert_eq!(right[0].pylon.slots.len(), 2, "on one pylon");
+        let out = draw(std::slice::from_ref(&store), &airframe);
+        // The structure level with the missiles' tops.
+        let top = right[0].centre[1] + PLAIN[1] / 2.;
+        let level: Vec<[f32; 3]> = grey(&out)
+            .into_iter()
+            .filter(|v| v[0] > 0.)
+            .filter(|v| {
+                (f64::from(v[1]) - top).abs() < 1e-4
+                    || (f64::from(v[1]) - top - RACK_DEPTH).abs() < 1e-4
+            })
+            .collect();
+        let extent = |axis: usize| {
+            let low = level.iter().map(|v| v[axis]).fold(f32::MAX, f32::min);
+            let high = level.iter().map(|v| v[axis]).fold(f32::MIN, f32::max);
+            f64::from(high - low)
+        };
+        let rail = 0.7 * (0.45 * PLAIN[0]).clamp(1.2, 8.);
+        assert!(
+            (extent(2) - rail).abs() < 1e-4,
+            "length {} vs {rail}",
+            extent(2)
+        );
+        assert!(
+            (extent(0) - (2. * TWIN_SHOULDER_OUT + PYLON_WIDTH)).abs() < 1e-4,
+            "width {}",
+            extent(0)
+        );
+        assert!(extent(2) < 4., "no plate of the old 6 ft");
+        // Each rail reaches the missile's centre line it rides on.
+        for h in &right {
+            assert!(
+                level
+                    .iter()
+                    .any(|v| (f64::from(v[0]) - h.centre[0]).abs() <= PYLON_WIDTH / 2. + 1e-4)
+            );
+        }
     }
 
     /// Every pylon, rack, fitted body and weapon face is lit as the

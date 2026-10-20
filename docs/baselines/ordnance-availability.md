@@ -112,6 +112,15 @@ F-4B and F-4J), and the pod is refused on every other station. A dedicated step
 600 logical units, taking it off, Guns only, the saved mission and the lobby rule,
 the Tab gun, a held trigger firing from the pod's nose and the jettison.
 
+The [F-15C wing pylons of 2026-10-20](../spec/stores-on-pylons.md#the-f-15c-wing-pylons-2026-10-20)
+(John, "a wing pylon that only accepts tanks") take an AIM-120 or an AIM-9B,
+AIM-9M or AIM-9X in place of the tank, one a pylon. The audit now pins 13
+recovered weapon rows, 3,407 weapon placements (+4 on `F15.PT` row 7) and 168
+Cheat-only novelty placements (+2, Boulder and Moose on that row); tank
+placements and records are unchanged. It checks the row's capacity of two for each, the exclusion with the tank, the refusal of the
+Sparrow, the Archer, bombs and the Maverick, a save and restore, and an older
+saved load (one or two weapon slots short) restoring with the new rows empty.
+
 The F-14 probe separately covers zero, one and two F250 tanks, external fuel,
 shell mass, total mass, consumption order and accepted-load restoration. It is
 the reviewed F-14 contract only: `--validate-tanks` refuses any other

@@ -7066,6 +7066,84 @@ mod tests {
     }
 
     #[test]
+    fn the_eagles_wing_pylons_take_a_tank_or_air_to_air_missiles_one_a_side() {
+        use crate::combat::loadout::Loadout;
+        use tore_formats::aircraft::{Hardpoint, stations};
+        // The appended row as the parser builds it: a tank, infrared or
+        // active radar, 90 class, two (one a pylon).
+        let mut rows = [
+            (1, 8, [0, 0, 0], "VIS340.SEE", 1, 0),
+            (1, 8, [0, 0, 0], "F15R.SEE", 1, 0),
+            (1, 8, [0, 0, -50], "F15.ECM", 1, 0),
+            (1, 8, [5, -5, -5], "M61.JT", 940, 0),
+            (1, 0x7e5, [25, -10, 0], "AIM120.JT", 4, 60),
+            (4, 0x7e5, [50, -20, 0], "AIM9M.JT", 4, 14),
+        ]
+        .map(
+            |(location, flags, position, store, count, weight_class)| Hardpoint {
+                location,
+                flags,
+                position,
+                store: Some(store.into()),
+                count,
+                weight_class,
+            },
+        )
+        .to_vec();
+        stations::append(AircraftId::F15, &mut rows);
+        let pylons = rows[7].clone();
+        assert_eq!((pylons.flags, pylons.count), (0x2a5, 2));
+        let mut config = fixture(false).own().configuration().clone();
+        let mut weapon = config.stations[0].weapon.clone();
+        config.stations.truncate(1);
+        config.hardpoint_slots = vec![None; 8];
+        config.hardpoint_slots[7] = Some(0);
+        config.tanks.clear();
+        let mut load = Loadout {
+            aircraft: AircraftId::F15,
+            configuration: config,
+            quantities: vec![0],
+            fuel_lbs: 0.,
+            internal_capacity_lbs: 5000.,
+            empty_lbs: 10000.,
+            maximum_lbs: 50000.,
+            hardpoints: vec![pylons],
+            tank_hardpoints: vec![],
+            cheat: false,
+        };
+        let set = |w: &mut Weapon, source: &str, flags, signature, weight| {
+            w.source = source.into();
+            w.flags = flags;
+            w.seeker.signature = signature;
+            w.weight = weight;
+            w.burst.projectiles_in_pod = 1;
+        };
+        // An AIM-120 or a Sidewinder of any mark, one a side.
+        set(&mut weapon, "AIM120.JT", 0x1204f, 3, 345);
+        assert_eq!(load.capacity(0, &weapon), 2);
+        for source in ["AIM9B.JT", "AIM9M.JT", "AIM9X.JT"] {
+            set(&mut weapon, source, 0x1204f, 2, 190);
+            assert_eq!(load.capacity(0, &weapon), 2, "{source}");
+        }
+        // Not the Sparrow, the Archer, bombs or the Maverick.
+        set(&mut weapon, "AIM7.JT", 0x1234f, 3, 505);
+        assert_eq!(load.capacity(0, &weapon), 0);
+        set(&mut weapon, "AA11.JT", 0x1204f, 2, 230);
+        assert_eq!(load.capacity(0, &weapon), 0);
+        set(&mut weapon, "MK82.JT", 0x22012, 0, 500);
+        assert_eq!(load.capacity(0, &weapon), 0);
+        set(&mut weapon, "AGM65G.JT", 0x1204f, 1, 675);
+        assert_eq!(load.capacity(0, &weapon), 0);
+        // The same row on another aircraft keeps the plain mask rule (the
+        // Sparrow's 0x40 class is not in the mask, nor are bombs).
+        set(&mut weapon, "AIM120.JT", 0x1204f, 3, 345);
+        load.aircraft = AircraftId::F18;
+        assert_eq!(load.capacity(0, &weapon), 2);
+        set(&mut weapon, "AA11.JT", 0x1204f, 2, 230);
+        assert_eq!(load.capacity(0, &weapon), 2);
+    }
+
+    #[test]
     fn the_f16c_wingtip_pair_takes_the_amraam_and_nothing_else_changes() {
         use crate::combat::loadout::Loadout;
         use tore_formats::aircraft::Hardpoint;

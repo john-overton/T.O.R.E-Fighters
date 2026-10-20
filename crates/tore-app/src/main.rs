@@ -14083,6 +14083,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     | "ordnance-pod-yellow"
                     | "ordnance-gun-pod"
                     | "ordnance-tip-amraam"
+                    | "ordnance-wing-amraam"
                     | "ordnance-authored-tank"
             ) {
                 quick.ordnance = Some(ordnance::Ordnance::new(

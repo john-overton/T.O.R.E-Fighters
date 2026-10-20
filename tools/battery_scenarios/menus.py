@@ -379,7 +379,7 @@ def scenarios() -> list[Scenario]:
             name="menus-ordnance-availability",
             lane="menus",
             args=["--validate-ordnance", "--no-audio"],
-            expect=[r"ordnance audit: 36 aircraft, 12 recovered weapon stations, 3403 weapon placements, 175 tank placements, 78 weapon and 9 tank records; passed"],
+            expect=[r"ordnance audit: 36 aircraft, 13 recovered weapon stations, 3407 weapon placements, 175 tank placements, 78 weapon and 9 tank records; passed"],
             notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration. The audit fails when a supported weapon or tank record is missing or a pinned count moves (ordnance_audit.rs).",
         )
     )
@@ -631,6 +631,8 @@ def scenarios() -> list[Scenario]:
     for a, state in (
         ("f16c", "ordnance-authored-tank"),
         ("f16c", "ordnance-tip-amraam"),
+        # The Eagle's wing pylons take an AIM-120 in place of a tank (John, 2026-10-20).
+        ("f15", "ordnance-wing-amraam"),
         ("f16c", "ordnance-pod"),
         ("f16c", "ordnance-pod-yellow"),
         # The F-4B's centreline gun pod (John, 2026-10-16), in place of its four Sidewinders.
