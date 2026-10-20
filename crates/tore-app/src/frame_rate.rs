@@ -47,10 +47,24 @@ impl Meter {
     }
     /// One continuously presented frame. The first call starts the clock.
     /// Slow frames count too. Disabling the counter resets its history.
+    ///
+    /// The counter measures continuous drawing. A gap longer than [`WORST`]
+    /// means frames were not being drawn (the window was hidden, or the
+    /// counter was off), so the clock restarts rather than counting the gap
+    /// as one very slow frame.
     pub fn tick(&mut self) {
-        let now = std::time::Instant::now();
+        self.tick_at(std::time::Instant::now());
+    }
+
+    /// [`Meter::tick`] at `now`.
+    pub fn tick_at(&mut self, now: std::time::Instant) {
         if let Some(last) = self.last.replace(now) {
-            self.push(now.saturating_duration_since(last).as_secs_f64());
+            let dt = now.saturating_duration_since(last).as_secs_f64();
+            if dt > WORST {
+                self.push(0.0);
+            } else {
+                self.push(dt);
+            }
         }
     }
 
@@ -315,16 +329,44 @@ mod tests {
         // the stopped flight's stillness), so the frame rate choice still
         // caps it.
         let main = include_str!("main.rs");
-        for function in ["fn pace(&mut self", "fn flight_want(&mut self"] {
+        for (function, needle) in [
+            ("fn pace(&mut self", "counted("),
+            ("fn flight_want(&mut self", "counter_shown()"),
+        ] {
             let body = main.split(function).nth(1).unwrap();
             assert!(
-                body.split("\n    }\n")
-                    .next()
-                    .unwrap()
-                    .contains("counter_shown()"),
+                body.split("\n    }\n").next().unwrap().contains(needle),
                 "{function}"
             );
         }
+    }
+
+    #[test]
+    fn real_continuous_frames_read_as_the_rate_and_a_gap_restarts_the_clock() {
+        use std::time::{Duration, Instant};
+        for hz in [60u32, 100, 200] {
+            let mut meter = Meter::default();
+            let start = Instant::now();
+            let period = Duration::from_secs_f64(1.0 / f64::from(hz));
+            for n in 0..(hz * 2) {
+                meter.tick_at(start + period * n);
+            }
+            let line = meter.line().unwrap();
+            assert!(line.starts_with(&format!("{hz} fps")), "{hz}: {line}");
+        }
+        // A long idle gap (no frames drawn) is not one slow frame.
+        let mut meter = Meter::default();
+        let start = Instant::now();
+        for n in 0..30 {
+            meter.tick_at(start + Duration::from_millis(16) * n);
+        }
+        let resumed = start + Duration::from_secs(30);
+        meter.tick_at(resumed);
+        assert_eq!(meter.line(), None, "the history restarts after a gap");
+        for n in 1..30 {
+            meter.tick_at(resumed + Duration::from_millis(10) * n);
+        }
+        assert!(meter.line().unwrap().starts_with("100 fps"));
     }
     #[test]
     fn the_average_is_half_a_second_and_low_is_the_slowest_frame() {

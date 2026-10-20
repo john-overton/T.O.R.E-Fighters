@@ -168,6 +168,8 @@ pub struct Renderer {
     pub mirror_frames: u64,
     mirror_cadence: crate::mirrors::Cadence,
     mirrors_enabled: bool,
+    /// When the counter's line was last logged (`TORE_SHOW_FPS=1` runs).
+    counter_logged: Option<std::time::Instant>,
     graphics: crate::graphics::Options,
     /// The present modes the surface offers, and the frame rate in effect
     /// (`crate::frame_pacing`), which picks one of them.
@@ -696,6 +698,7 @@ impl Renderer {
             device,
             queue,
             config,
+            counter_logged: None,
             present_modes,
             frame_limit,
             automated: false,
@@ -1247,6 +1250,17 @@ impl Renderer {
             self.frame_rate = Default::default();
         }
         let counter = if show_counter && let Some(line) = self.frame_rate.line() {
+            // A run with TORE_SHOW_FPS=1 also logs the line once a second, so
+            // a scripted window run can show the counter live without a
+            // screenshot.
+            if std::env::var("TORE_SHOW_FPS").is_ok_and(|v| v == "1")
+                && self
+                    .counter_logged
+                    .is_none_or(|at| at.elapsed().as_secs_f64() >= 1.0)
+            {
+                self.counter_logged = Some(std::time::Instant::now());
+                log::info!("Frame counter ({readout:?}): {line}");
+            }
             let place = crate::frame_rate::anchor([s.width, s.height], readout);
             let glyphs = crate::frame_rate::quads(&line, place, self.ui_text.linear());
             self.ui_text.prepare_window(

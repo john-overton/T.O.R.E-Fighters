@@ -45,6 +45,7 @@ advances within a stage asymptotically toward its next boundary; only worker
 completion reaches 100 percent. Progress never resets within a load; duplicate or late stage notifications
 cannot move it backward. No seconds counter is shown (John, 2026-10-19). There is no moving
 activity strip or moving bar highlight, requested by John on 2026-10-17.
+The screen redraws at 20 Hz; with the [frame-rate counter](graphics-options.md#frame-rate-counter) shown it redraws at the Frame rate setting instead, so the counter reads live numbers (John, 2026-10-19).
 [Measurement and limits](../baselines/loading-screen.md) give the source of the
 weights. Checking game content, Connecting to the host and Waiting for the host use a
 stationary bar, with no percentage, because their durations
