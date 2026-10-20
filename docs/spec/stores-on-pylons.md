@@ -508,7 +508,7 @@ conformal-tank station record exists in the supported roster.
 | Source row | Before, feet out / forward | Fitted station, feet out / forward | Rule |
 | --- | --- | --- | --- |
 | 4, fuselage missiles | 8.33 / 0 | 5 / -1 | Lower outer intake corners; four missiles form two tandem pairs with the existing 1 ft nose-to-tail gap |
-| 5, wing stores | 16.67 / 0 | 11.0 / -5.5 (16.67 until 2026-10-20) | Under the wing chord; four Sidewinders keep one small twin-rail bar per wing |
+| 5, wing stores | 16.67 / 0 | 11.0 / 1.5 (16.67 / -5.5 until 2026-10-20) | Under the wing chord; four Sidewinders keep one small twin-rail bar per wing |
 
 The duct bottom at 5 ft out is about 4.0 to 4.3 ft below the model's
 reference point between 14 ft forward and 6 ft aft. The old source height
@@ -523,7 +523,9 @@ front AIM-120 spans 2.83 to 14.83 ft forward, the rear -10.17 to 1.83 ft;
 the front Sparrow -0.5 to 11.5 ft, the rear -13.5 to -1.5 ft. Both keep
 the existing 1 ft nose-to-tail gap. The front pair leaves first.
 
-At the wing row's span the model chord runs approximately from 0 to 9 ft
+(Superseded on 2026-10-20: the pylon is now 11 ft out and forward, see
+[the F-15C wing pylon](#the-f-15c-wing-pylon-moves-inboard-2026-10-20).)
+At the 16.67 ft span the model chord runs approximately from 0 to 9 ft
 aft. The release origin is 5.5 ft aft. The Sidewinder mesh's centre
 is 1.21 ft forward of that origin, so the drawn pylon centre is 4.29 ft
 aft, near mid-chord. Pylon depth remains 1 ft, the twin bar
@@ -572,9 +574,14 @@ thing needs to be moved inward, kind of like the real F-15". The wing pylon
 (rows 5 and 7: shoulder Sidewinders, the tank or the AIM-120/AIM-9 under
 it) was 16.67 ft out, at the wing's outer third. It is 11 ft out
 (`F15_WING_OUT`, **fitted**, from John's marks on the model's 22.8 ft
-semispan; the real Eagle's pylon is about 9 to 10 ft of 21 ft out), still
-5.5 ft (row 5) and 4.3 ft (row 7) aft of the reference point under the
-chord, its top on the wing's underside there. Both wings are symmetric.
+semispan; the real Eagle's pylon is about 9 to 10 ft of 21 ft out), its top on the wing's underside there. John then asked for it forward,
+"almost to the tip of the front of the wing": `F15_WING_FORWARD` puts row 5 1.5
+ft ahead of the reference point (row 7's tank pylon 1.2 ft ahead of that, 2.7
+ft). The model's wing at 11 ft out reaches 5.25 ft forward, so the pylon's
+front (4.8 ft for the Sidewinder pylon, 5.2 ft for the tank's) stands just behind
+the leading edge and the Sidewinders' noses (7.4 ft) a little ahead of it; the
+tank's nose is about 5 ft ahead of the edge. Row 5 and 7 stand 7 ft further
+forward than before (fitted). Both wings are symmetric.
 Store release points move with it (stores leave from where they are
 drawn); recorded replays keep the poses they recorded.
 
@@ -708,7 +715,7 @@ start empty. Retail files are never edited.
 | Aircraft / appended row (zero based) | Real stations | Capacity | Origin, feet right / forward |
 | --- | --- | --- | --- |
 | F15.PT / 6 | Centreline 5 | One tank or up to three bombs, 4,500 lb | 0 / -3 |
-| F15.PT / 7 | Wing pylons 2 and 8 | Two tanks, or two AIM-120 or Sidewinders (one a pylon), 9,000 lb total ([wing pylon missiles](#the-f-15c-wing-pylons-2026-10-20)) | +/-11.0 / -4.3 (16.67 until 2026-10-20) |
+| F15.PT / 7 | Wing pylons 2 and 8 | Two tanks, or two AIM-120 or Sidewinders (one a pylon), 9,000 lb total ([wing pylon missiles](#the-f-15c-wing-pylons-2026-10-20)) | +/-11.0 / 2.7 (16.67 / -4.3 until 2026-10-20) |
 | F16C.PT / 9 | Inner wet 4 and 6 | Two stores, 6,000 lb total | +/-7 / -1 |
 
 The F-15 can retain its four fuselage AIM-7/AIM-120 and four wing
