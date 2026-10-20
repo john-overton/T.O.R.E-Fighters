@@ -2945,7 +2945,9 @@ impl<'a> LauncherView<'a> {
             .weapon;
         let profile = missiles::Profile::for_weapon(w)?;
         let observed = self.weapon_observation()?;
-        missiles::intercept(
+        // Repeated readers of exactly this launcher and observation share the
+        // fly-out. An interpolated frame launcher remains a separate key.
+        missiles::intercept_kept(
             &w.movement,
             Motion::launch(w, launcher.velocity, launcher.position[1]),
             launcher.position,
@@ -3064,7 +3066,7 @@ fn weapon_observation<'a>(
                     launcher.basis,
                     o.position,
                     None,
-                ) && missiles::intercept(
+                ) && missiles::intercept_kept(
                     &w.movement,
                     Motion::launch(w, launcher.velocity, launcher.position[1]),
                     launcher.position,

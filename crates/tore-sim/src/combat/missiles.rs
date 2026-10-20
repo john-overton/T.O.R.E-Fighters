@@ -737,9 +737,9 @@ pub fn steer(m: &Movement, age: u64, forward: Vector, desired: Vector) -> Vector
     }))
 }
 
-/// How often, in ticks, the coasting fly-out of [`intercept`] checks whether
-/// the target has fallen out of reach.
-const COAST_CHECK_TICKS: u64 = 16;
+/// How often, in ticks, the fly-out of [`intercept`] checks whether the
+/// target has fallen out of reach.
+const REACH_CHECK_TICKS: u64 = 16;
 
 /// Fitted 120 Hz flyout with observed constant-velocity target and shared physics.
 #[allow(clippy::too_many_arguments)]
@@ -756,6 +756,97 @@ pub fn intercept(
     intercept_with_terrain(
         m, motion, position, forward, target, velocity, age, lifetime, None,
     )
+}
+
+/// The answers of [`intercept_kept`] kept per thread: the launch-time
+/// fly-out of the selected weapon, asked by the release check, the cockpit
+/// readout and the mission recorder of the same state.
+const KEPT_SOLUTIONS: usize = 4;
+
+/// Everything a launch-time fly-out of [`intercept`] depends on, compared bit
+/// for bit, so a kept answer is only ever returned for the same question.
+#[derive(Clone, Copy, PartialEq)]
+struct FlyOut {
+    movement: Movement,
+    motion: [[u64; 3]; 2],
+    flags: [bool; 2],
+    cruise: Option<([[u64; 2]; 2], bool)>,
+    vectors: [[u64; 3]; 4],
+    age: u64,
+    lifetime: u64,
+}
+
+type KeptSolutions = (Vec<(FlyOut, Option<Solution>)>, usize);
+
+thread_local! {
+    static SOLUTIONS: std::cell::RefCell<KeptSolutions> =
+        const { std::cell::RefCell::new((Vec::new(), 0)) };
+}
+
+/// [`intercept`], kept: the same question asked again on this thread, by the
+/// release check, the cockpit readout or the recorder, reads the answer
+/// worked out the first time instead of flying it again. The answer is the
+/// same bit for bit, since the fly-out reads nothing but its arguments.
+/// Interpolated frame launchers remain distinct questions; never substitute
+/// a simulation-tick launcher to make their answers share this cache.
+#[allow(clippy::too_many_arguments)]
+pub fn intercept_kept(
+    m: &Movement,
+    motion: Motion,
+    position: Vector,
+    forward: Vector,
+    target: Vector,
+    velocity: Vector,
+    age: u64,
+    lifetime: u64,
+) -> Option<Solution> {
+    let bits = |v: Vector| v.map(f64::to_bits);
+    // Named field by field, so a field added to the motion joins the key.
+    let Motion {
+        velocity: speed,
+        gain,
+        budget,
+        sink,
+        sags,
+        cruise,
+        holds_path,
+    } = motion;
+    let key = FlyOut {
+        movement: *m,
+        motion: [bits(speed), [gain, budget, sink].map(f64::to_bits)],
+        flags: [sags, holds_path],
+        cruise: cruise.map(|Cruise { stages, lob }| {
+            (
+                stages.map(|(distance, above)| [distance, above].map(f64::to_bits)),
+                lob,
+            )
+        }),
+        vectors: [bits(position), bits(forward), bits(target), bits(velocity)],
+        age,
+        lifetime,
+    };
+    if let Some(kept) = SOLUTIONS.with(|kept| {
+        kept.borrow()
+            .0
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, solution)| *solution)
+    }) {
+        return kept;
+    }
+    let solution = intercept(
+        m, motion, position, forward, target, velocity, age, lifetime,
+    );
+    SOLUTIONS.with(|kept| {
+        let (entries, next) = &mut *kept.borrow_mut();
+        if entries.len() < KEPT_SOLUTIONS {
+            entries.push((key, solution));
+        } else {
+            entries[*next] = (key, solution);
+            *next = (*next + 1) % KEPT_SOLUTIONS;
+        }
+    });
+    solution
 }
 
 /// The same fly-out with cruise terrain clearance. The energy-only launch
@@ -779,16 +870,13 @@ pub fn intercept_with_terrain(
             aim = lead(position, length(motion.velocity), target, velocity).point;
         }
         let previous = sub(target, position);
-        // Once the motor is out the missile only slows, so the most the gap
-        // can still close is fixed by its speed now: a target farther off than
-        // that, plus the 25 feet that count as a hit, is never reached, and
-        // the rest of the fly-out could only say no. See `unreachable`.
-        if (tick - age).is_multiple_of(COAST_CHECK_TICKS)
-            && phase(m, tick) == EnginePhase::Coast
-            && unreachable(
-                length(previous),
-                coasting_reach(&motion, length(velocity), end - tick),
-            )
+        // The most the gap can still close is fixed by the missile's speed
+        // now, the motor's unspent push and the target's known straight line:
+        // a target farther off than that, plus the 25 feet that count as a
+        // hit, is never reached, and the rest of the fly-out could only say
+        // no. See `out_of_reach`.
+        if (tick - age).is_multiple_of(REACH_CHECK_TICKS)
+            && out_of_reach(m, &motion, previous, velocity, end - tick, tick)
         {
             #[cfg(test)]
             note_flown(tick - age);
@@ -831,18 +919,81 @@ pub fn intercept_with_terrain(
     None
 }
 
-/// The most a coasting missile and its target can still close the gap
-/// between them over `ticks` more ticks of fly-out (feet). The motor is out,
-/// so the missile's speed never rises (a turn only costs speed, the slowdown
-/// only takes it) and its sag never exceeds the largest the fly-out allows;
-/// the target keeps its speed.
-fn coasting_reach(motion: &Motion, target_speed: f64, ticks: u64) -> f64 {
+/// Whether the rest of a fly-out, `ticks` more ticks from `age`, provably
+/// never brings the missile within the 25 feet of the target that count as a
+/// hit, with `gap` the target's offset from the missile now and
+/// `target_velocity` its constant velocity.
+///
+/// Measured along the line to the target now, the gap after any number of
+/// ticks is at least its length now, plus the target's own movement along
+/// that line, less the most the missile can have moved: so the gap can only
+/// close by the sum, over the ticks, of how much the missile's greatest
+/// possible speed outruns the target's speed along the line. Each tick's
+/// speed is bounded by phase: before ignition it never rises (a turn only
+/// costs speed); while the motor burns it rises by no more than the push
+/// still unspent; once the motor is out it falls by the slowdown each tick
+/// to the final speed, as [`Motion::step`] flies it; the sag or ejection
+/// speed counts on top. The closest approach of each tick's segment, which
+/// is what [`intercept`] tests, lies between the ends' distances along the
+/// line, so it is bounded the same way. The margin covers rounding in the
+/// fly-out.
+fn out_of_reach(
+    m: &Movement,
+    motion: &Motion,
+    gap: Vector,
+    target_velocity: Vector,
+    ticks: u64,
+    age: u64,
+) -> bool {
+    let range = length(gap);
+    if range <= 25. {
+        return false;
+    }
+    let line = gap.map(|v| v / range);
+    // How fast the target draws away along the line (negative: closing),
+    // less the most the missile can drop toward it by sag or ejection.
     let sink = if motion.sags {
-        motion.sink.max(SAG_MAX_FPS)
+        motion.sink.abs().max(SAG_MAX_FPS)
     } else {
-        motion.sink
+        motion.sink.abs()
     };
-    (length(motion.velocity) + sink + target_speed) * ticks as f64 * DT
+    let away = dot(target_velocity, line) - sink;
+    // The ticks left in each phase.
+    let end = age + ticks;
+    let ignition = u64::from(m.ignite_t) * 30;
+    let burnout = u64::from(m.fuel_t) * 30;
+    let unlit = ignition.min(end).saturating_sub(age);
+    let burning = burnout.min(end).saturating_sub(age.max(ignition));
+    let coasting = ticks - unlit - burning;
+    let speed = length(motion.velocity);
+    let push = if burning > 0 {
+        (motion.budget - motion.gain).max(0.)
+    } else {
+        0.
+    };
+    let top = speed + push;
+    let outrun = |speed: f64| (speed - away).max(0.);
+    // Coasting from `top`: max(top - k slow, min(final, top)) on tick k.
+    let slow = f64::from(m.deceleration.max(0)) * DT;
+    let floor = f64::from(m.final_speed.max(0)).min(top);
+    let falling = top - floor.max(away);
+    let fall = if falling <= 0. || coasting == 0 {
+        0.
+    } else if slow <= 0. {
+        falling * coasting as f64
+    } else {
+        // The ticks on which the falling part is still positive, and their
+        // sum; two slowdowns cover rounding in the count.
+        let count = ((falling / slow).floor() + 1.).min(coasting as f64);
+        count * falling - slow * count * (count - 1.) * 0.5 + 2. * slow
+    };
+    let closing = (unlit as f64 * outrun(speed)
+        + burning as f64 * outrun(top)
+        + coasting as f64 * outrun(floor)
+        + fall)
+        * DT;
+    let travel = (top + sink.abs() + length(target_velocity)) * ticks as f64 * DT;
+    range > 25. + closing + 1e-6 * (range + travel) + 1e-3
 }
 
 #[cfg(test)]
@@ -1407,6 +1558,86 @@ mod tests {
         early.remove_t = 8;
         assert!(removed(&early, 240));
         assert_eq!(phase(&early, 240), EnginePhase::Powered);
+    }
+    /// A kept fly-out answers only the very same question, bit for bit: the
+    /// same question again reads the kept answer, and a question that differs
+    /// in any argument, by as little as a sign of zero or the last bit of a
+    /// position, or in the motor record or the motion, is flown afresh. Five
+    /// questions in turn outrun the four kept and still answer correctly.
+    #[test]
+    fn a_kept_fly_out_answers_only_the_same_question() {
+        SOLUTIONS.with(|kept| *kept.borrow_mut() = (Vec::new(), 0));
+        let m = movement();
+        let (phoenix, lob) = phoenix();
+        let motion = Motion::new(&m, [0., 0., 600.], 10000.);
+        let ask = |m: &Movement, motion: Motion, target: Vector, velocity: Vector, cached: bool| {
+            let args = ([0.; 3], [0., 0., 1.], target, velocity, 0, 2400);
+            let before = SOLUTIONS.with(|kept| kept.borrow().clone());
+            let kept = intercept_kept(m, motion, args.0, args.1, args.2, args.3, args.4, args.5);
+            assert_eq!(SOLUTIONS.with(|kept| *kept.borrow() == before), cached);
+            let flown = intercept(m, motion, args.0, args.1, args.2, args.3, args.4, args.5);
+            assert_eq!(kept, flown, "{target:?} {velocity:?}");
+            kept
+        };
+        let near = [0., 0., 3000.];
+        let first = ask(&m, motion, near, [0., 0., 300.], false);
+        assert!(first.is_some());
+        assert_eq!(ask(&m, motion, near, [0., 0., 300.], true), first);
+        let mut slower = m;
+        slower.acceleration -= 1;
+        let next = f64::from_bits(near[2].to_bits() + 1);
+        for _ in 0..2 {
+            ask(&m, motion, near, [0., -0., 300.], false);
+            ask(&m, motion, [0., 0., next], [0., 0., 300.], false);
+            ask(&slower, motion, near, [0., 0., 300.], false);
+            ask(
+                &m,
+                Motion {
+                    sags: true,
+                    ..motion
+                },
+                near,
+                [0., 0., 300.],
+                false,
+            );
+            ask(&phoenix, lob, [0., 0., 60000.], [0., 0., -900.], false);
+            ask(&m, motion, near, [0., 0., 300.], false);
+        }
+    }
+    /// Three readers of each tick share one fly-out, including a cached miss.
+    /// This measures a synthetic same-state workload, not a gameplay hit rate.
+    #[test]
+    fn repeated_readers_hit_the_cache_without_flying_again() {
+        SOLUTIONS.with(|kept| *kept.borrow_mut() = (Vec::new(), 0));
+        let m = movement();
+        let motion = Motion::new(&m, [0., 0., 600.], 10000.);
+        let mut hits = 0;
+        for tick in 0..120 {
+            let target = [0., 0., 3000. + f64::from(tick)];
+            let expected = intercept(&m, motion, [0.; 3], [0., 0., 1.], target, [0.; 3], 0, 2400);
+            assert!(expected.is_some());
+            for reader in 0..3 {
+                let before = flown_ticks();
+                let got =
+                    intercept_kept(&m, motion, [0.; 3], [0., 0., 1.], target, [0.; 3], 0, 2400);
+                assert_eq!(got, expected);
+                let cached = flown_ticks() == before;
+                assert_eq!(cached, reader > 0);
+                hits += usize::from(cached);
+            }
+        }
+        assert_eq!(hits, 240);
+        eprintln!("same-state cache: {hits}/360 hits (66.67%)");
+        let target = [0., 0., 1e9];
+        assert!(
+            intercept_kept(&m, motion, [0.; 3], [0., 0., 1.], target, [0.; 3], 0, 2400).is_none()
+        );
+        SOLUTIONS.with(|kept| assert!(kept.borrow().0.iter().any(|(_, answer)| answer.is_none())));
+        let before = flown_ticks();
+        assert!(
+            intercept_kept(&m, motion, [0.; 3], [0., 0., 1.], target, [0.; 3], 0, 2400).is_none()
+        );
+        assert_eq!(flown_ticks(), before);
     }
     #[test]
     fn independent_angles_and_wide_sentinel() {

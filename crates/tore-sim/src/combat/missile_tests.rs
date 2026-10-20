@@ -2428,6 +2428,52 @@ fn a_coasting_fly_out_that_gives_up_early_leaves_the_answer_unchanged() {
     eprintln!("hits {hit}, late hits {late_hit}, misses {miss}, flown {flown} of {full}");
 }
 
+/// A receding target can be impossible while the motor is still burning.
+/// Slower targets still get a full chance to intercept.
+#[test]
+fn a_powered_fly_out_only_stops_when_the_target_cannot_be_reached() {
+    let w = range_weapon();
+    let motion = Motion::launch(&w, [0., 0., 600.], 1000.);
+    let position = [0., 1000., 0.];
+    let target = [0., 1000., 20000.];
+    for speed in [2500., 2100., 1800., 0.] {
+        let velocity = [0., 0., speed];
+        let before = missiles::flown_ticks();
+        let got = missiles::intercept(
+            &w.movement,
+            motion,
+            position,
+            [0., 0., 1.],
+            target,
+            velocity,
+            0,
+            3600,
+        );
+        let ticks = missiles::flown_ticks() - before;
+        assert_eq!(
+            got,
+            reference_intercept(
+                &w.movement,
+                motion,
+                position,
+                [0., 0., 1.],
+                target,
+                velocity,
+                0,
+                3600
+            )
+        );
+        if speed == 2500. {
+            assert_eq!(ticks, 0);
+        } else if speed == 2100. {
+            assert!(ticks < 720, "must stop before burnout: {ticks}");
+        } else if speed == 0. {
+            assert!(got.is_some());
+        }
+        eprintln!("powered fly-out: target {speed} ft/s, flown {ticks} ticks");
+    }
+}
+
 /// A coasting missile that has stopped moving forward can still fall onto a
 /// target beneath it, by sag or by the ejection kick, so the check that ends a
 /// coasting fly-out has to count the fall as reach. The random comparison
@@ -2689,10 +2735,10 @@ fn a_range_estimate_flies_a_bounded_number_of_ticks() {
         }
     }
     eprintln!("total: flown {flown} ticks, whole flights {whole}");
-    // Measured: 1,231,686 ticks flown against 2,187,517 for the whole flights.
+    // Measured: 831,341 ticks flown against 2,187,517 for the whole flights.
     // The bound leaves room for last-digit differences between platforms'
     // maths, and sits well under what flying every sample out would cost.
-    assert!(flown <= 1_500_000, "{flown} ticks flown, over the bound");
+    assert!(flown <= 1_000_000, "{flown} ticks flown, over the bound");
     assert!(flown * 10 <= whole * 7, "{flown} of {whole} ticks flown");
 }
 

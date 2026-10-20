@@ -393,22 +393,28 @@ While a missile is selected and a target is designated, each ownship works out
 the weapon's maximum range and favourable firing band every 60 ticks
 (`maximum_range` and `firing_band` in `tore-sim/src/combat/missiles.rs`,
 called from the combat step). Both fly trial missiles through `intercept`, the
-same 120 Hz fly-out the guidance uses, about twenty trials in all, each up to
+same 120 Hz fly-out the guidance uses, up to 27 range trials and 17 band trials, each up to
 the weapon's whole flight (an AIM-120 about 3,600 ticks, an AIM-54 about
 10,200). PF1 measured that at 37 ms for one tick (AIM-120, default mission) to
 100 ms (AIM-54): a hitch every half second of mission time, every 62 ms of wall
 time at 8x.
 
-Three shortcuts skip only trials whose answer is already fixed, so every
+Four shortcuts skip only trials whose answer is already fixed, so every
 number the player sees is the same, bit for bit:
 
 | Shortcut | Why the answer cannot change |
 | --- | --- |
 | `maximum_range` does not fly a distance that the missile and the target cannot close within the weapon's whole flight (`travel_ceiling`: the speed the motor could reach with all its thrust spent in a line, the coast slowdown, the largest sag or ejection speed, and the target's own speed) | `intercept` succeeds only once the closest approach is within 25 ft, and a tick closes the gap by no more than the two objects move; the old code flew the whole trial to answer no |
 | `firing_band` stops a trial once a hit could no longer score 70 (a binary search for the latest hit time that still scores 70) | the band uses only `score >= 70`, and a later hit never scores higher than an earlier one |
-| `intercept` checks every 16 ticks while the missile coasts whether the gap is more than missile and target can still close, and stops with the answer it would have reached, no hit | out of fuel the missile only slows (a turn costs speed, the coast slowdown takes it), its sag is capped, and the target keeps its speed (`coasting_reach`) |
+| `intercept` checks every 16 ticks in every motor phase whether the target is out of reach, and stops with no hit | `out_of_reach` bounds closure along the current line of sight using the target's straight-line motion, inherited missile speed, unspent motor budget, coast slowdown and sag or ejection; the bound also covers the swept segment between ticks |
+| `intercept_kept` keeps the last four launch solutions per thread for the release check, mounted IR boresight check and repeated readouts | every motor field, every motion field, all four input vectors, age and lifetime must match exactly; floating-point fields compare by bits, including signed zero; misses are cached too |
 
-Each bound carries a small rounding margin (`unreachable`). The tests in
+The range and fly-out bounds carry a small rounding margin (`unreachable` and
+`out_of_reach`). The cache is a bounded round-robin replacement of answers,
+not simulation state, and is absent from checkpoints and recordings. Range
+and firing-band searches use uncached `intercept`. A frame still supplies its
+interpolated launcher: a different sub-tick position or velocity is a different
+question, never replaced by a simulation-tick answer. The tests in
 `missile_tests.rs` hold every shortcut to full-flight references: copies of
 `maximum_range`, `firing_band` and `intercept` retain the full loops with current
 path-holding steering and run beside the optimized versions on
@@ -419,11 +425,19 @@ missile reaches the target. A bound made 10% too small, or one that forgets
 the sag, fails them. The work is bounded without timing:
 `a_range_estimate_flies_a_bounded_number_of_ticks` counts the ticks
 `intercept` flew (a counter compiled only into test builds) for a fixed set of
-three missiles and six targets, and fails above 1,500,000 ticks. It flies
-1,231,686; the old code flew 2,187,517, so a change that brings the cost back
-goes over the bound. The shortcuts cut the ticks flown by about 44 percent.
+three missiles and six targets, and fails above 1,000,000 ticks. It flies
+831,341; the full-flight reference flies 2,187,517, so a change that brings the cost back
+goes over the bound. The shortcuts cut the ticks flown by about 62 percent. The powered-flight
+regression includes receding targets that can be rejected before burnout.
+The cache test measures 240 hits from 360 queries by three same-state readers
+across 120 distinct states (66.67%); this is a synthetic workload, not a measured
+gameplay hit rate.
+The [fly-out cost validation](baselines/missile-flyout-cost.md) records the
+headless CPU measurements, real recorded-probe cache rates and byte comparisons.
 
-The worst frame in the table is the estimate's cost: 41 to 26 ms and 115 to
+The earlier windowed measurements above cover the original three shortcuts,
+before the powered-phase bound and cache. The worst frame in the table is
+the estimate's cost: 41 to 26 ms and 115 to
 34 ms in the default mission at 1x and 8x, and 52 to 34 ms in the heavy one at
 1x. The mean frame improved by 0.1 to 0.2 ms and the rate reached did not
 change within the spread, because the estimate is one tick in sixty.
@@ -9956,6 +9970,11 @@ The tick presenter reuses an identical camera scene instead of rebuilding it
 between unchanged simulation inputs. GPU and window work never moves to workers.
 
 ### Projectiles in flight
+
+Missile launch solutions use the [exact firing-estimate shortcuts](#the-firing-estimate-and-its-exact-shortcuts):
+four answers per thread for identical questions, and a conservative reach check
+every 16 fly-out ticks, including powered flight. Neither changes live missile
+motion or the interpolated frame launcher.
 
 John raised the cap on rounds, missiles and bombs in flight from 256 to 5,000
 on 2026-10-09 (`live::MAX_PROJECTILES`), after a fight of four MiG-21s threw
