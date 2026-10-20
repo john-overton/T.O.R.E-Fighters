@@ -1173,6 +1173,27 @@ impl Ordnance {
                     }
                 }
             }
+            "ordnance-wing-amraam" => {
+                // An AIM-120 on the Eagle's wing pylons (the appended row 7,
+                // a tank or a missile a side), on the air-to-air page, with
+                // that station selected.
+                self.category = 0;
+                if let Some(weapon) = self
+                    .catalog
+                    .iter()
+                    .find(|w| w.source == "AIM120.JT")
+                    .cloned()
+                {
+                    let rows = self.loadout.editable_stations();
+                    if let Some((index, slot)) = rows.iter().enumerate().find_map(|(i, r)| {
+                        r.weapon.filter(|_| r.hardpoint == 7).map(|slot| (i, slot))
+                    }) && self.loadout.select(slot, weapon).is_ok()
+                    {
+                        self.station = index;
+                        self.reveal_station();
+                    }
+                }
+            }
             "lobby-ordnance-gaps" => {
                 // The catalog's first and third weapons are in a gap, and
                 // the first is the one the player just tried.

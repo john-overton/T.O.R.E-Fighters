@@ -26,6 +26,14 @@ pub fn gun_pod_row(id: AircraftId) -> Option<usize> {
     (id == AircraftId::F4B).then_some(F4B_POD_ROW)
 }
 
+/// How many of an aircraft's appended weapon rows came after a saved loadout
+/// could already have been made without them: the Eagle's wing pylons (row 7)
+/// took missiles on 2026-10-20, so a load saved with the one weapon row before
+/// it (the centreline bombs) still restores, the new row empty.
+pub fn later_weapon_rows(id: AircraftId) -> usize {
+    usize::from(id == AircraftId::F15)
+}
+
 /// These names have authored GAS records, generated in memory at pack load.
 /// Fuel uses the game's 6.6 lb/US gal convention; shell weights are fitted by
 /// scaling the 350 gallon class (248 lb), rounded to whole pounds.
@@ -186,7 +194,9 @@ pub fn append(id: AircraftId, rows: &mut Vec<Hardpoint>) {
     match id {
         AircraftId::F15 => {
             rows.push(row(0, 0x3c1, [0, -24, -9], 3, 45));
-            rows.push(row(4, 0x205, [50, -20, -16], 2, 90));
+            // The wing pylons: a tank, or an AIM-120 or Sidewinder in its
+            // place (0x2a5: tank, infrared and active radar), one a side.
+            rows.push(row(4, 0x2a5, [50, -20, -16], 2, 90));
         }
         AircraftId::F16C => rows.push(row(4, 0x3e5, [21, -18, -3], 2, 60)),
         AircraftId::F22 => rows.push(row(4, 0x2a5, [36, -18, -18], 4, 90)),
@@ -241,6 +251,35 @@ mod tests {
                 }
             }
         }
+    }
+    #[test]
+    fn the_eagles_wing_row_takes_tank_and_missile_masks_and_old_loads_still_fit() {
+        let mut rows: Vec<_> = signature(AircraftId::F15)
+            .iter()
+            .map(|s| Hardpoint {
+                location: s.0,
+                flags: s.1,
+                position: s.2,
+                store: Some(s.3.into()),
+                count: s.4,
+                weight_class: s.5,
+            })
+            .collect();
+        append(AircraftId::F15, &mut rows);
+        // Tank 0x200, infrared 0x80, active radar 0x20 and the base 0x5:
+        // not the Sparrow's 0x40, not bombs (0x100).
+        assert_eq!(rows[F15_WING_TANKS].flags, 0x2a5);
+        assert_eq!(
+            (
+                rows[F15_WING_TANKS].count,
+                rows[F15_WING_TANKS].weight_class
+            ),
+            (2, 90)
+        );
+        // One weapon slot was added after the bomb rack's save format.
+        assert_eq!(later_weapon_rows(AircraftId::F15), 1);
+        assert_eq!(later_weapon_rows(AircraftId::F18), 0);
+        assert_eq!(later_weapon_rows(AircraftId::F22), 0);
     }
     #[test]
     fn only_the_f4b_swaps_a_gun_pod_into_its_centreline_row() {

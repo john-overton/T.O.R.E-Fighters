@@ -34,6 +34,7 @@ pub(crate) fn run() -> AppResult<()> {
         check_load(id, resources, None)?;
     }
     check_load(AircraftId::F15, resources, Some((6, "MK82.JT")))?;
+    check_load(AircraftId::F15, resources, Some((7, "AIM120.JT")))?;
     check_load(AircraftId::F22, resources, Some((8, "AIM120.JT")))?;
     if let Some(file) = recording {
         check_recording(Path::new(file), resources, renders)?;
