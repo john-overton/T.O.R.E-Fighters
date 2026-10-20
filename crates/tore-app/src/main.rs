@@ -12258,7 +12258,8 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             flag @ ("--anti-aliasing" | "--render-scale" | "--spotting-aid"
             | "--terrain-filtering" | "--building-distance" | "--building-detail"
             | "--vegetation-texture" | "--vegetation-texture-distance"
-            | "--vegetation-distance" | "--vegetation-detail" | "--vegetation-density") => {
+            | "--vegetation-distance" | "--vegetation-detail" | "--vegetation-density"
+            | "--shadows") => {
                 let value = args.next().ok_or(format!("{flag} needs a value"))?;
                 graphics_flags.push((flag.to_owned(), value));
             }

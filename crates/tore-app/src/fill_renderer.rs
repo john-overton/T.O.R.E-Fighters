@@ -28,8 +28,8 @@
 //! in and writes one small uniform and the visible block list per view.
 //! Knocked-down buildings draw as a low stub (0.08 of their height, in the
 //! cull shader); a knock-down rewrites only the changed records.
-//! Buildings within [`SHADOW_NM`] cast their box's shadow into the shadow
-//! maps.
+//! Buildings within the shadow quality's building distance ([`SHADOW_NM`]
+//! at Med and High) cast their box's shadow into the shadow maps.
 
 #[path = "fill_blocks.rs"]
 pub mod blocks;
@@ -912,6 +912,15 @@ impl FillRenderer {
         self.tiers = Tiers::from_options(options);
     }
 
+    /// Takes the shadow quality's building shadow distance
+    /// (`TORE_CITY_FILL_SHADOW_NM` still overrides it).
+    pub fn set_shadows(&mut self, shadows: &crate::surface_lighting::Settings) {
+        self.shadow_nm = std::env::var("TORE_CITY_FILL_SHADOW_NM")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(shadows.buildings_nm);
+    }
+
     /// Replaces the tiers for every view until cleared (a measuring aid, as
     /// `TORE_CITY_FILL_TIERS`).
     pub fn set_tiers(&mut self, tiers: Option<Tiers>) {
@@ -1068,7 +1077,7 @@ impl FillRenderer {
         encoder: &mut wgpu::CommandEncoder,
         bind: &wgpu::BindGroup,
     ) {
-        if !self.prepared {
+        if !self.prepared || self.shadow_nm <= 0. {
             return;
         }
         let offset = (2 * self.art.ranges.len() as u64 + 1) * 16;

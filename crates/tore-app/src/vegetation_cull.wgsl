@@ -25,7 +25,8 @@ struct Params {
   up: vec4<f32>,
   // Half-view tangents, pixels per unit size, eye altitude (feet).
   view: vec4<f32>,
-  // Full density distance, draw distance, shadow distance, minimum pixels.
+  // Full density distance, draw distance, tree shadow distance (0 none),
+  // minimum pixels.
   tiers: vec4<f32>,
   // Instance count, mesh count.
   counts: vec4<u32>,
@@ -78,11 +79,6 @@ fn share(dist: f32, full: f32) -> f32 {
   let edge = 1.0 - smoothstep(params.tiers.x, max(params.tiers.x + 1.0, params.tiers.y), dist);
   let fade = select(edge, 1.0, dist <= params.tiers.x);
   if fade <= 0.0 { return; }
-  let r = max(inst.d.z, height * 0.5);
-  let z = dot(d, params.forward.xyz);
-  if z < -r { return; }
-  if abs(dot(d, params.right.xyz)) > z * params.view.x + r * 1.6 { return; }
-  if abs(dot(d, params.up.xyz)) > z * params.view.y + r * 1.6 { return; }
   var out: Drawn;
   out.place = vec4<f32>(rel, inst.d.w);
   out.turn = vec4<f32>(cos(inst.a.w), sin(inst.a.w), height, fade);
@@ -90,6 +86,21 @@ fn share(dist: f32, full: f32) -> f32 {
   out.tint = vec4<f32>(inst.c.xyz, m.info.z * 1.02);
   out.mean = m.mean;
   out.top = m.top;
+  // Shadow casters: the near foliage, in view or not (its shadow may be).
+  // The outer 30 percent thins by each object's hash, so the shadows end
+  // gradually rather than at a ring.
+  if params.tiers.z > 0.0 && m.info.y < 0.5 {
+    let reach = params.tiers.z * (0.7 + 0.3 * fract(inst.d.w * 7.31));
+    if dist < reach {
+      let c = atomicAdd(&counts[params.counts.y], 1u);
+      if c < capacity { casters[first + c] = out; }
+    }
+  }
+  let r = max(inst.d.z, height * 0.5);
+  let z = dot(d, params.forward.xyz);
+  if z < -r { return; }
+  if abs(dot(d, params.right.xyz)) > z * params.view.x + r * 1.6 { return; }
+  if abs(dot(d, params.up.xyz)) > z * params.view.y + r * 1.6 { return; }
   let k = atomicAdd(&counts[0], 1u);
   if k < capacity { drawn[first + k] = out; }
 }

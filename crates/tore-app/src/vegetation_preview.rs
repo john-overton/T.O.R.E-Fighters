@@ -16,7 +16,8 @@
 //!
 //! Every shot's camera is written to `cameras.txt`; `TORE_VEG_PREVIEW_CAMERAS`
 //! renders such a file's cameras instead, so another build can take the
-//! same pictures.
+//! same pictures; with `TORE_VEG_PREVIEW_STATIC=1` those pictures include
+//! the theater's static ground objects, and `=list` prints each one's box.
 
 use crate::{AppResult, camera::Camera, scenery::Scenery, terrain::Terrain};
 use std::{io::Write, path::Path, time::Instant};
@@ -1731,6 +1732,35 @@ fn replay_cameras(
             let mut view =
                 pollster::block_on(View::new(&scenery, size, options(density()?), false))?;
             view.set_shown(std::env::var("TORE_SEAM_SURFACE_ONLY").as_deref() != Ok("1"));
+            // The theater's static ground objects (airports, buildings,
+            // sites) standing, as a mission starts them.
+            if std::env::var("TORE_VEG_PREVIEW_STATIC").as_deref() == Ok("1") {
+                let geometry = std::sync::Arc::clone(
+                    scenery.static_geometry_where(&std::collections::BTreeSet::new()),
+                );
+                view.sim.airports(&view.device, &view.queue, &geometry);
+            }
+            // `list`: print each placement's box (feet), to find scenes.
+            if std::env::var("TORE_VEG_PREVIEW_STATIC").as_deref() == Ok("list") {
+                let geometry = std::sync::Arc::clone(
+                    scenery.static_geometry_where(&std::collections::BTreeSet::new()),
+                );
+                for range in &geometry.placements {
+                    let v = &geometry.vertices[range.start as usize * 10..range.end as usize * 10];
+                    let b = crate::terrain_chunks::Bounds::of_vertices(v);
+                    println!(
+                        "placement {} {:.0} {:.0} {:.0} {:.0} {:.0} {:.0} {}",
+                        cam.code,
+                        b.min[0],
+                        b.min[1],
+                        b.min[2],
+                        b.max[0],
+                        b.max[1],
+                        b.max[2],
+                        range.len() / 3
+                    );
+                }
+            }
             current = Some((cam.code.clone(), world, scenery, view));
         }
         let (_, world, scenery, view) = current.as_mut().expect("built above");

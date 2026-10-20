@@ -95,12 +95,30 @@ All opaque geometry submitted to the world renderer participates in the same
 directional depth-map pass. Terrain casts and receives shadows; objects shadow
 themselves, one another, terrain and visible water. Texture cutouts keep their
 holes. The player's aircraft still casts a shadow when hidden by cockpit view.
+Every ground object casts (John, 2026-10-20: "Airports should cast shadows
+(all ground objects should)"): the static placements (airport buildings,
+hangars and towers, theater buildings, bridges, SAM and AAA sites, parked
+aircraft, wrecks) as well as the moving units, men and ships. Agent decisions
+for the static placements: a triangle that lies on the ground does not cast,
+so pavement, aprons, markings and flat wrecks leave no rim where the rendered
+ground dips below them at a low sun. On the ground means lower than 2 ft above
+its placement's lowest point and within 15 degrees of level, or lower than
+0.5 ft whatever its slope. Glass, flame and emissive faces and the retail
+ground shadow decal (layer -9) do not cast either. City fill buildings cast
+their box, and at High and Ultra the near trees cast a sun-facing card of
+their sprite, thinning by a per-tree hash over the outer 30 percent of their
+reach so the tree shadows end gradually; a tree then takes its own sunlight
+from just sunward of its card (1.25 times its half-width), so it is not
+darkened by its own shadow. The
+[shadow quality](graphics-options.md#shadows) chooses the map size, how many
+maps, the soft-edge sample count and which of the city buildings and trees
+cast; the numbers below are the default Med level.
 Light direction follows the visible sun segment. Fully shadowed water retains
 30 percent of its unshadowed resolved color at full sun, blended by visible-disc
 strength, cloud transmission and fog. Moon shadows are not added.
 
 Three camera-centered maps use half-widths of 256, 8,192 and 131,072 feet,
-each 2,048 pixels square, with light-depth coverage of plus/minus 262,144 feet.
+each 2,048 pixels square (1,024 with two maps at Low, 4,096 at Ultra), with light-depth coverage of plus/minus 262,144 feet.
 The innermost map containing a receiver supplies detail; its outer 15 percent
 blends to the next map, and the outermost fades to unshadowed ambient/daylight.
 John requested visibility-proportional shadow strength and contact-dependent
@@ -116,7 +134,8 @@ caster-to-receiver distance along the light. Penumbra radius is that distance
 times the tangent of the apparent sun radius: aircraft close to a surface cast
 sharp shadows; distant casters cast broader shadows. The agent-selected bounded
 filter searches the center plus four directions at 1, 4, 16 and 64 texels, then
-uses 32 fixed, evenly distributed disc samples with bilinear comparisons.
+uses 32 fixed, evenly distributed disc samples (16 at Low) with bilinear
+comparisons.
 John requested less tile flicker and more diffuse near-view transitions on
 2026-09-18. Agent-selected stabilization uses four manually weighted depth
 neighbors per tap, each corrected to the receiving triangle's plane. A 0.125-foot

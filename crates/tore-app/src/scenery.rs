@@ -40,6 +40,9 @@ pub struct ViewWeather {
 pub struct StaticGeometry {
     pub vertices: Vec<f32>,
     pub lines: Vec<f32>,
+    /// Each placement's vertex range in `vertices`, in order, for the
+    /// shadow casters ([`crate::terrain_chunks::placements`]).
+    pub placements: Vec<std::ops::Range<u32>>,
 }
 
 struct StandingGeometry {
@@ -1005,7 +1008,9 @@ impl Scenery {
             // its buffer and nothing vanishes (B16).
             let intact: usize = self.static_vertices.values().map(Vec::len).sum();
             let mut room = surface_art::BUDGET.saturating_sub(intact);
+            let mut placements = Vec::new();
             for id in self.placement_ids() {
+                let start = (vertices.len() / 10) as u32;
                 let standing = self.static_vertices.get(&id).map_or(&[][..], Vec::as_slice);
                 let drawn = looks.get(&id).map(|look| self.surface.drawn(id, look));
                 match drawn {
@@ -1022,10 +1027,18 @@ impl Scenery {
                         );
                     }
                 }
+                let end = (vertices.len() / 10) as u32;
+                if end > start {
+                    placements.push(start..end);
+                }
             }
             self.standing_geometry = Some(StandingGeometry {
                 looks,
-                geometry: Arc::new(StaticGeometry { vertices, lines }),
+                geometry: Arc::new(StaticGeometry {
+                    vertices,
+                    lines,
+                    placements,
+                }),
             });
         }
         &self.standing_geometry.as_ref().unwrap().geometry

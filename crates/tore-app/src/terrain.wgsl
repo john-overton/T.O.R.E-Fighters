@@ -1047,7 +1047,8 @@ struct VegOut {
  @location(5) normal:vec3<f32>, @location(6) @interpolate(flat) fade:vec2<f32>, @location(7) @interpolate(flat) look:f32,
  @location(8) @interpolate(flat) mean:vec3<f32>, @location(9) height:f32, @location(10) altitude:f32,
  @location(11) @interpolate(flat) fog_enabled:u32,
- @location(12) @interpolate(flat) overhead:u32
+ @location(12) @interpolate(flat) overhead:u32,
+ @location(13) @interpolate(flat) reach:f32
 }
 // Foliage and rock share distance coverage without changing their size.
 fn veg_turn(turn:vec4<f32>,shape:vec4<f32>)->vec4<f32> {
@@ -1120,6 +1121,8 @@ fn veg_place(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,shape:vec4<f32>)-
  if shape.w>0.5 {out.normal=normalize(vec3<f32>(-shape.y,1.0,-shape.z));}
  if overhead {out.normal=vec3<f32>(0.0,1.0,0.0);}
  out.fade=vec2<f32>(coverage,place.w);out.look=shape.w;out.mean=mean.xyz;out.height=select(position.y,1.0,overhead);
+ // Half the tree's shadow card width; rocks cast no shadow card.
+ out.reach=select(0.5*turn.z*shape.x*tint.w,0.0,shape.w>0.5);
  // Untextured colour: a retail face's palette colour, or a drawn part.
  out.color=base.color;out.albedo=base.albedo;
  if part<0.0 {
@@ -1136,11 +1139,19 @@ fn veg_place(position:vec3<f32>,place:vec4<f32>,turn:vec4<f32>,shape:vec4<f32>)-
 }
 // Sun visibility for vegetation: one bilinear shadow tap instead of the
 // terrain's soft search, which would be too costly for overlapping cards.
-fn veg_visibility(relative:vec3<f32>)->f32 {
+// When trees cast (surface.quality.z), a tree looks up its light from just
+// sunward of its own shadow card (`reach` is half its width), so it is not
+// shadowed by itself; other trees and objects still shade it.
+fn veg_visibility(relative:vec3<f32>,reach:f32)->f32 {
  if surface.origin.w<=0.0 {return 1.0;}
+ var at=relative;
+ let level=length(surface.sun.xz);
+ if surface.quality.z>0.0 && reach>0.0 && level>0.0001 {
+  at+=vec3<f32>(surface.sun.x,0.0,surface.sun.z)/level*reach*1.25;
+ }
  for(var cascade=0;cascade<3;cascade++) {
   let m=surface.maps[cascade];
-  let p=shadow_project(relative+surface.sun.xyz*m.scale.x*1.5,cascade);
+  let p=shadow_project(at+surface.sun.xyz*m.scale.x*1.5,cascade);
   if max(abs(p.x),abs(p.y))<0.98 && p.z>0.0 && p.z<1.0 {
    let uv=p.xy*vec2<f32>(0.5,-0.5)+vec2<f32>(0.5);
    return 1.0-shadow_tap(uv,p.z,vec2<f32>(0.0),cascade).x;
@@ -1151,7 +1162,7 @@ fn veg_visibility(relative:vec3<f32>)->f32 {
 // Light on vegetation. Foliage takes its light mostly from above and
 // wraps around, so a leaf card edge-on to the sun is not black; `occlusion`
 // darkens the inside and the foot of a crown.
-fn veg_light(color:vec3<f32>,albedo:vec3<f32>,relative:vec3<f32>,normal:vec3<f32>,foliage:bool,occlusion:f32)->vec3<f32> {
+fn veg_light(color:vec3<f32>,albedo:vec3<f32>,relative:vec3<f32>,normal:vec3<f32>,foliage:bool,occlusion:f32,reach:f32)->vec3<f32> {
  if thermal_on() {return thermal_grey(thermal_ground(albedo,normal,relative,length(relative)));}
  if surface.sun.w<=0.0 {return color;}
  var n=normal;
@@ -1164,7 +1175,7 @@ fn veg_light(color:vec3<f32>,albedo:vec3<f32>,relative:vec3<f32>,normal:vec3<f32
   facing=clamp((dot(n,surface.sun.xyz)+0.4)/1.4,0.0,1.0);
  }
  let day=smoothstep(-0.104528,0.0348995,surface.reserved.y);
- let visibility=veg_visibility(relative)*sunlight_transmission(surface.origin.y+relative.y)*surface.reserved.x;
+ let visibility=veg_visibility(relative,reach)*sunlight_transmission(surface.origin.y+relative.y)*surface.reserved.x;
  let tint=mix(vec3<f32>(1.0),solar_tint(surface.reserved.y),0.65);
  let skyward=clamp(n.y*0.5+0.5,0.0,1.0);
  let ambient=mix(vec3<f32>(0.12,0.14,0.18),vec3<f32>(0.28,0.32,0.39),skyward);
@@ -1235,18 +1246,37 @@ fn veg_coverage(in:VegOut,alpha:f32)->u32 {
  if mask==0u {discard;}
  let foliage=in.look<0.5;
  let occlusion=select(1.0,mix(0.55,1.0,clamp(in.height*1.2,0.0,1.0)),foliage);
- var lit=veg_light(color,albedo,in.direction,in.normal,foliage,occlusion);
+ var lit=veg_light(color,albedo,in.direction,in.normal,foliage,occlusion,in.reach);
  if thermal_on() {return FillOut(vec4<f32>(lit,1.0),mask);}
  if in.fog_enabled!=0u {lit=aerial_perspective(lit,in.direction,in.altitude);}
  else {lit=cloud_occlusion(lit,in.direction,in.altitude);}
  return FillOut(scenery(lit),mask);
 }
-fn veg_shadow(position:vec3<f32>,uv:vec2<f32>,layer:f32,place:vec4<f32>,turn:vec4<f32>,shape:vec4<f32>,cascade:u32)->ShadowOut {
- return shadow_out(veg_place(position,place,veg_turn(turn,shape),shape)-scene.local_eye.xyz,uv,layer,cascade);
+// Tree shadow casters (vegetation_renderer.rs): each near tree's first card
+// turned to face the sun, showing the baked view nearest the sun's side, so
+// its shadow keeps one shape as the camera moves. One entry per cascade:
+// the instance index is the tree.
+fn veg_shadow(position:vec3<f32>,uv:vec2<f32>,place:vec4<f32>,spin:vec4<f32>,shape:vec4<f32>,tint:vec4<f32>,mean:vec4<f32>,cascade:u32)->ShadowOut {
+ let sun=surface.sun.xz;
+ let facing=select(vec2<f32>(0.0,1.0),normalize(sun),dot(sun,sun)>0.00000001);
+ let right=vec2<f32>(facing.y,-facing.x);
+ let offset=right*position.x*spin.z*shape.x*tint.w;
+ let p=place.xyz+vec3<f32>(offset.x,position.y*spin.z,offset.y);
+ let azimuth=atan2(facing.x,facing.y)-atan2(spin.y,spin.x);
+ let view=u32(floor(azimuth/1.570796327+0.5)+8.0)%4u;
+ var sprite=mean.w+f32(view);
+ var sprite_uv=uv;
+ if mean.w<0.0 {
+  let packed=u32(-mean.w-1.0);
+  sprite=f32(packed/4u);
+  let cell=packed%4u;
+  sprite_uv=(vec2<f32>(f32(cell%2u),f32(cell/2u))*128.0+vec2<f32>(2.5)+uv*123.0)/256.0;
+ }
+ return shadow_out(p-scene.local_eye.xyz,sprite_uv,sprite,cascade);
 }
-@vertex fn veg_shadow_vertex0(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(5) place:vec4<f32>,@location(6) turn:vec4<f32>,@location(7) shape:vec4<f32>)->ShadowOut {return veg_shadow(position,uv,layer,place,turn,shape,0u);}
-@vertex fn veg_shadow_vertex1(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(5) place:vec4<f32>,@location(6) turn:vec4<f32>,@location(7) shape:vec4<f32>)->ShadowOut {return veg_shadow(position,uv,layer,place,turn,shape,1u);}
-@vertex fn veg_shadow_vertex2(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(2) layer:f32,@location(5) place:vec4<f32>,@location(6) turn:vec4<f32>,@location(7) shape:vec4<f32>)->ShadowOut {return veg_shadow(position,uv,layer,place,turn,shape,2u);}
+@vertex fn veg_shadow_vertex0(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(5) place:vec4<f32>,@location(6) spin:vec4<f32>,@location(7) shape:vec4<f32>,@location(8) tint:vec4<f32>,@location(9) mean:vec4<f32>)->ShadowOut {return veg_shadow(position,uv,place,spin,shape,tint,mean,0u);}
+@vertex fn veg_shadow_vertex1(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(5) place:vec4<f32>,@location(6) spin:vec4<f32>,@location(7) shape:vec4<f32>,@location(8) tint:vec4<f32>,@location(9) mean:vec4<f32>)->ShadowOut {return veg_shadow(position,uv,place,spin,shape,tint,mean,1u);}
+@vertex fn veg_shadow_vertex2(@location(0) position:vec3<f32>,@location(1) uv:vec2<f32>,@location(5) place:vec4<f32>,@location(6) spin:vec4<f32>,@location(7) shape:vec4<f32>,@location(8) tint:vec4<f32>,@location(9) mean:vec4<f32>)->ShadowOut {return veg_shadow(position,uv,place,spin,shape,tint,mean,2u);}
 // Grass (vegetation_renderer.rs): one quad per tuft, its blades drawn
 // here. A patch is 32 ft square: `a` its centre relative to the render
 // origin and its cover, `b` the ground rise east and north, the style and
@@ -1328,7 +1358,7 @@ struct GrassOut {
  if style>1.5 && style<2.5 {color*=0.8;}
  if style>4.5 {color=mix(color,vec3<f32>(0.30,0.26,0.18)*mix(0.6,1.1,v),0.5);}
  let normal=normalize(vec3<f32>(0.0,1.0,0.0)-normalize(in.direction)*0.35);
- var lit=veg_light(color,color,in.direction,normal,true,mix(0.6,1.0,v));
+ var lit=veg_light(color,color,in.direction,normal,true,mix(0.6,1.0,v),0.0);
  if thermal_on() {return FillOut(vec4<f32>(lit,1.0),mask);}
  lit=aerial_perspective(lit,in.direction,in.altitude);
  return FillOut(scenery(lit),mask);

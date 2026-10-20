@@ -205,7 +205,7 @@ var<workgroup> blade_first:u32;
 }
 @fragment fn blade_fragment(in:BladeOut)->@location(0) vec4<f32> {
  let color=in.color*mix(0.55,1.15,in.height);
- var lit=veg_light(color,color,in.direction,in.normal,true,mix(0.6,1.0,in.height));
+ var lit=veg_light(color,color,in.direction,in.normal,true,mix(0.6,1.0,in.height),0.0);
  if thermal_on() {return vec4<f32>(lit,1.0);}
  lit=aerial_perspective(lit,in.direction,in.altitude);
  return scenery(lit);

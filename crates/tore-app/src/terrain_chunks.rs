@@ -361,6 +361,128 @@ impl CasterShape {
     }
 }
 
+/// Chunk side for the static ground objects' casters: one 8,192 ft
+/// terrain cell, so the near cascades draw only the objects around them.
+pub const PLACEMENT_CHUNK_FEET: f64 = 8_192.;
+/// A triangle lower than this above its placement's lowest point and
+/// within [`LEVEL_NORMAL_Y`] of level lies on the ground: pavement, apron,
+/// marking or a flat wreck. It casts no shadow; a shadow would only be a
+/// sliver where the rendered ground dips below it at a low sun.
+pub const GROUND_RISE_FEET: f32 = 2.;
+/// The cosine of 15 degrees: steeper triangles are walls and roofs' sides.
+pub const LEVEL_NORMAL_Y: f32 = 0.966;
+/// Anything lower than this above its placement's lowest point casts
+/// nothing whatever its slope (a kerb, a painted edge).
+pub const FLAT_FEET: f32 = 0.5;
+
+/// Whether a static object triangle of this layer never casts: glass,
+/// flame sheets and emissive effects (-5 to -8, as `shadow_fragment`
+/// discards them) and the retail ground shadow decal (-9, which is itself a
+/// drawn shadow).
+fn never_casts(layer: f32) -> bool {
+    (-9.0..=-5.0).contains(&layer)
+}
+
+/// The static ground objects as shadow casters: `vertices` (ten floats a
+/// vertex, world feet) holds the placements `placements` names (vertex
+/// ranges, whole triangles). Triangles that cannot cast (see
+/// [`GROUND_RISE_FEET`], [`FLAT_FEET`] and the glass and decal layers) are
+/// dropped; each placement goes whole to the chunk under its box's centre,
+/// in placement order. Inside a chunk the untextured triangles come first
+/// (depth only), then the textured ones, whose cut-out texels the shadow
+/// pass tests. A chunk's box holds all its vertices, so culling stays
+/// exact.
+pub fn placements(vertices: &[f32], placements: &[Range<u32>]) -> (Vec<f32>, Chunks) {
+    let mut keyed: Vec<((i64, i64), usize)> = Vec::with_capacity(placements.len());
+    let mut kept: Vec<(Vec<f32>, Vec<f32>, Bounds)> = Vec::with_capacity(placements.len());
+    for range in placements {
+        let start = (range.start as usize * FLOATS).min(vertices.len());
+        let end = (range.end as usize * FLOATS).min(vertices.len());
+        let source = &vertices[start..start + (end - start) / TRIANGLE * TRIANGLE];
+        let base = source
+            .chunks_exact(FLOATS)
+            .map(|v| v[1])
+            .fold(f32::INFINITY, f32::min);
+        let (mut solid, mut textured) = (Vec::new(), Vec::new());
+        let mut bounds = Bounds::EMPTY;
+        for t in source.chunks_exact(TRIANGLE) {
+            let layer = t[5];
+            if [t[5], t[15], t[25]].into_iter().any(never_casts) {
+                continue;
+            }
+            let p = |i: usize| [t[i * FLOATS], t[i * FLOATS + 1], t[i * FLOATS + 2]];
+            let (a, b, c) = (p(0), p(1), p(2));
+            if ![a, b, c].iter().flatten().all(|v| v.is_finite()) {
+                continue;
+            }
+            let rise = a[1].max(b[1]).max(c[1]) - base;
+            let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            let w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+            let n = [
+                u[1] * w[2] - u[2] * w[1],
+                u[2] * w[0] - u[0] * w[2],
+                u[0] * w[1] - u[1] * w[0],
+            ];
+            let length = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            if length <= 0. || rise < FLAT_FEET {
+                continue;
+            }
+            if rise < GROUND_RISE_FEET && n[1].abs() / length >= LEVEL_NORMAL_Y {
+                continue;
+            }
+            for v in [a, b, c] {
+                bounds.add(v.map(f64::from));
+            }
+            if layer >= 0. {
+                textured.extend_from_slice(t);
+            } else {
+                solid.extend_from_slice(t);
+            }
+        }
+        if bounds.is_empty() {
+            continue;
+        }
+        let cell = |axis: usize| {
+            let c = ((bounds.min[axis] + bounds.max[axis]) / 2. / PLACEMENT_CHUNK_FEET).floor();
+            if c.is_finite() { c as i64 } else { 0 }
+        };
+        keyed.push(((cell(2), cell(0)), kept.len()));
+        kept.push((solid, textured, bounds));
+    }
+    // Stable: placement order within each chunk.
+    keyed.sort_by_key(|(key, _)| *key);
+    let mut out = Chunks { chunks: Vec::new() };
+    let mut sorted = Vec::new();
+    let mut i = 0;
+    while i < keyed.len() {
+        let key = keyed[i].0;
+        let group: Vec<usize> = keyed[i..]
+            .iter()
+            .take_while(|(k, _)| *k == key)
+            .map(|(_, p)| *p)
+            .collect();
+        i += group.len();
+        let first = (sorted.len() / FLOATS) as u32;
+        let mut bounds = Bounds::EMPTY;
+        for &p in &group {
+            sorted.extend_from_slice(&kept[p].0);
+            bounds.add(kept[p].2.min);
+            bounds.add(kept[p].2.max);
+        }
+        let opaque = (sorted.len() / FLOATS) as u32 - first;
+        for &p in &group {
+            sorted.extend_from_slice(&kept[p].1);
+        }
+        out.chunks.push(Chunk {
+            first,
+            opaque,
+            count: (sorted.len() / FLOATS) as u32 - first,
+            bounds,
+        });
+    }
+    (sorted, out)
+}
+
 fn push_merged(ranges: &mut Vec<Range<u32>>, range: Range<u32>) {
     if range.is_empty() {
         return;
@@ -413,6 +535,60 @@ mod tests {
             }
         }
         v
+    }
+
+    fn tri(a: [f32; 3], b: [f32; 3], c: [f32; 3], layer: f32) -> Vec<f32> {
+        [a, b, c]
+            .into_iter()
+            .flat_map(|p| vertex(p[0], p[1], p[2], layer))
+            .collect()
+    }
+
+    /// A hangar on its apron: the wall casts, the apron, its marking, a kerb,
+    /// the glass and the retail shadow decal do not; a roof 20 ft up casts.
+    #[test]
+    fn ground_level_and_see_through_static_triangles_do_not_cast() {
+        let (x, z) = (100_000., 200_000.);
+        let apron = tri([x, 50., z], [x + 400., 50., z], [x, 50., z + 400.], -1.);
+        let marking = tri([x, 50.2, z], [x + 40., 50.2, z], [x, 50.2, z + 4.], 3.);
+        let kerb = tri([x, 50., z], [x + 40., 50.4, z], [x, 50., z + 4.], -1.);
+        let decal = tri([x, 50.1, z], [x + 40., 50.1, z], [x, 50.1, z + 40.], -9.);
+        let wall = tri([x, 50., z], [x + 80., 50., z], [x, 80., z], -1.);
+        let glass = tri([x, 55., z], [x + 8., 55., z], [x, 60., z], -5.);
+        let roof = tri([x, 70., z], [x + 80., 70., z], [x, 70., z + 60.], 2.);
+        let parts = [&apron, &marking, &kerb, &decal, &wall, &glass, &roof];
+        let vertices: Vec<f32> = parts.iter().flat_map(|p| p.iter().copied()).collect();
+        let whole = std::iter::once(0..21).collect::<Vec<_>>();
+        let (casters, chunks) = placements(&vertices, &whole);
+        assert_eq!(casters, [wall.clone(), roof.clone()].concat());
+        assert_eq!(chunks.chunks.len(), 1);
+        let chunk = &chunks.chunks[0];
+        assert_eq!((chunk.first, chunk.opaque, chunk.count), (0, 3, 6));
+        assert_eq!(chunk.bounds.min, [x as f64, 50., z as f64]);
+        assert_eq!(chunk.bounds.max, [x as f64 + 80., 80., z as f64 + 60.]);
+    }
+
+    /// Placements go whole to the chunk under their centre, in placement
+    /// order, untextured first; an empty placement makes no chunk.
+    #[test]
+    fn placements_chunk_by_their_centre_and_keep_their_order() {
+        let tower =
+            |x: f32, layer: f32| tri([x, 0., 10.], [x + 10., 0., 10.], [x, 50., 10.], layer);
+        let a = tower(100., -1.);
+        let b = tower(9_000., 4.);
+        let c = tower(200., 4.);
+        let d = tower(300., -1.);
+        let flat = tri([0., 0., 0.], [10., 0., 0.], [0., 0., 10.], -1.);
+        let vertices = [a.clone(), b.clone(), c.clone(), flat, d.clone()].concat();
+        let (casters, chunks) = placements(&vertices, &[0..3, 3..6, 6..9, 9..12, 12..15]);
+        assert_eq!(casters, [a, d, c, b].concat());
+        let spans: Vec<_> = chunks
+            .chunks
+            .iter()
+            .map(|c| (c.first, c.opaque, c.count))
+            .collect();
+        assert_eq!(spans, [(0, 6, 9), (9, 0, 3)]);
+        assert!(chunks.chunks[1].bounds.min[0] >= 9_000.);
     }
 
     /// Every triangle survives the split exactly once, with its own normals,

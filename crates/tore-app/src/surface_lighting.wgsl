@@ -1,10 +1,12 @@
 // Shared surface response and geometry shadows, docs/spec/surface-lighting.md.
 struct ShadowProjection { right:vec4<f32>, up:vec4<f32>, depth:vec4<f32>, scale:vec4<f32> }
 // reserved: visible sun fraction, sun elevation sine, tangent of the sun's
-// radius, burning flare count. flares: position relative to the view origin
-// and strength, docs/spec/countermeasures.md.
+// radius, burning flare count. quality: shadow map side in texels, soft-edge
+// disc samples, 1 when trees cast (surface_lighting.rs Settings). flares:
+// position relative to the view origin and strength,
+// docs/spec/countermeasures.md.
 struct AreaLight { source:vec4<f32>, extent:vec4<f32> }
-struct SurfaceLight { maps:array<ShadowProjection,3>, origin:vec4<f32>, sun:vec4<f32>, moon:vec4<f32>, reserved:vec4<f32>, flares:array<AreaLight,16> }
+struct SurfaceLight { maps:array<ShadowProjection,3>, origin:vec4<f32>, sun:vec4<f32>, moon:vec4<f32>, reserved:vec4<f32>, quality:vec4<f32>, flares:array<AreaLight,16> }
 @group(1) @binding(0) var<uniform> surface:SurfaceLight;
 @group(1) @binding(1) var shadows:texture_depth_2d_array;
 @group(1) @binding(2) var shadow_sampler:sampler_comparison;
@@ -52,19 +54,21 @@ fn shadow_cutout(uv:vec2<f32>,layer:i32) {
 // Hardware comparison filtering uses one depth for all four neighbors, which
 // causes sloped tiles to intermittently classify themselves as blockers.
 fn shadow_tap(uv:vec2<f32>,depth:f32,gradient:vec2<f32>,cascade:i32)->vec2<f32> {
- let m=surface.maps[cascade];let pixel=uv*2048.0-vec2<f32>(0.5);
+ // Map sizes and sample counts are powers of two, so multiplying by their
+ // reciprocals is exact and cheaper than dividing.
+ let m=surface.maps[cascade];let size=surface.quality.x;let texel=1.0/size;let pixel=uv*size-vec2<f32>(0.5);
  let base=vec2<i32>(floor(pixel));let f=fract(pixel);
  let tolerance=max(0.125,m.scale.x*0.002);
  var result=vec2<f32>(0.0);
  // One gather reads the four texels base..base+1 (the exact stored values).
  // Its point is the shared corner, so the footprint is base whatever the
  // sub-texel rounding; edge texels it clamps are skipped below as before.
- let quad=textureGather(shadows,shadow_point,(vec2<f32>(base)+vec2<f32>(1.0))/2048.0,cascade);
+ let quad=textureGather(shadows,shadow_point,(vec2<f32>(base)+vec2<f32>(1.0))*texel,cascade);
  let texels=array<f32,4>(quad.w,quad.z,quad.x,quad.y);
  for(var y=0;y<2;y++) {for(var x=0;x<2;x++) {
   let at=base+vec2<i32>(x,y);
-  if any(at<vec2<i32>(0)) || any(at>=vec2<i32>(2048)) {continue;}
-  let sample_uv=(vec2<f32>(at)+vec2<f32>(0.5))/2048.0;
+  if any(at<vec2<i32>(0)) || any(at>=vec2<i32>(i32(size))) {continue;}
+  let sample_uv=(vec2<f32>(at)+vec2<f32>(0.5))*texel;
   let stored=texels[y*2+x];
   let gap=(depth+dot(gradient,sample_uv-uv)-stored)*2.0*m.scale.z;
   let weight=select(1.0-f.x,f.x,x==1)*select(1.0-f.y,f.y,y==1);
@@ -84,6 +88,7 @@ fn shadow_sample(relative:vec3<f32>,normal:vec3<f32>,cascade:i32)->f32 {
  let light_dot=dot(normal,surface.sun.xyz);
  let denominator=select(-1.0,1.0,light_dot>=0.0)*max(abs(light_dot),0.0001);
  let gradient=vec2<f32>(dot(normal,m.right.xyz),-dot(normal,m.up.xyz))*m.scale.y*m.scale.y/(m.scale.z*denominator);
+ let texel=1.0/surface.quality.x;
  var separation=0.0;var blockers=0.0;
  for(var i=0;i<17;i++) {
   var offset=vec2<f32>(0.0);
@@ -91,7 +96,7 @@ fn shadow_sample(relative:vec3<f32>,normal:vec3<f32>,cascade:i32)->f32 {
    let ring=(i-1)/4;let axis=(i-1)%4;
    let radius=f32(1<<u32(2*ring));
    let directions=array<vec2<f32>,4>(vec2<f32>(1.0,0.0),vec2<f32>(-1.0,0.0),vec2<f32>(0.0,1.0),vec2<f32>(0.0,-1.0));
-   offset=directions[axis]*radius/2048.0;
+   offset=directions[axis]*radius*texel;
   }
   let tap=shadow_tap(uv+offset,p.z+dot(gradient,offset),gradient,cascade);
   separation+=tap.y;blockers+=tap.x;
@@ -102,14 +107,15 @@ fn shadow_sample(relative:vec3<f32>,normal:vec3<f32>,cascade:i32)->f32 {
  let physical=separation/max(blockers,0.000001)*surface.reserved.z/m.scale.x;
  let radius=clamp(mix(base_radius,max(base_radius,physical),smoothstep(0.0,1.0,blockers)),base_radius,64.0);
  var visibility=0.0;
- for(var i=0;i<32;i++) {
+ let samples=i32(surface.quality.y);let share=1.0/surface.quality.y;
+ for(var i=0;i<samples;i++) {
   let angle=f32(i)*2.39996323;
-  let offset=vec2<f32>(cos(angle),sin(angle))*sqrt((f32(i)+0.5)/32.0)*radius/2048.0;
+  let offset=vec2<f32>(cos(angle),sin(angle))*sqrt((f32(i)+0.5)*share)*radius*texel;
   let at=uv+offset;
   if any(at<vec2<f32>(0.0)) || any(at>vec2<f32>(1.0)) {visibility+=1.0;continue;}
   visibility+=1.0-shadow_tap(at,p.z+dot(gradient,offset),gradient,cascade).x;
  }
- return mix(1.0,visibility/32.0,smoothstep(0.0,1.0,blockers));
+ return mix(1.0,visibility*share,smoothstep(0.0,1.0,blockers));
 }
 fn geometric_visibility(relative:vec3<f32>,normal:vec3<f32>)->f32 {
  if surface.origin.w<=0.0 {return 1.0;}
