@@ -2,7 +2,7 @@
 //! evaluates each candidate blade once and an indirect draw shapes the
 //! grown ones; without compute, every candidate is drawn and each vertex
 //! evaluates its blade (the original path, `TORE_GRASS_PATH=vertex`).
-use super::{Map, PAGE, VERTICES, candidates, root_lift, side, spacing};
+use super::{Map, PAGE, VERTICES, candidates, grown_bound, root_lift, side, spacing};
 use crate::{graphics::VegDensity, terrain::Terrain};
 
 pub struct Blades {
@@ -36,12 +36,42 @@ struct Cull {
     /// Group 1 is not read by the pass; an empty group fills its slot.
     empty: wgpu::BindGroup,
     out_layout: wgpu::BindGroupLayout,
-    /// The indirect draw: five vertices, the grown count.
+    /// The indirect draw (five vertices, the grown count), then the list
+    /// slots the pass handed out.
     args: wgpu::Buffer,
     /// The grown blades, its bindings and capacity in blades.
     list: Option<(wgpu::Buffer, wgpu::BindGroup, u32)>,
     /// This view uses the pass (its candidates fit the device limits).
     active: bool,
+}
+
+/// A grown-blade list for `capacity` blades and its pass bindings.
+fn grown_list(
+    device: &wgpu::Device,
+    cull: &Cull,
+    capacity: u32,
+) -> (wgpu::Buffer, wgpu::BindGroup, u32) {
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Blade grass grown blades"),
+        size: u64::from(capacity) * BLADE_BYTES,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::VERTEX,
+        mapped_at_creation: false,
+    });
+    let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Blade grass candidate pass output"),
+        layout: &cull.out_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: cull.args.as_entire_binding(),
+            },
+        ],
+    });
+    (buffer, bind, capacity)
 }
 
 /// Whether the device runs the candidate pass: compute with a 64-thread
@@ -268,7 +298,7 @@ impl Blades {
             use wgpu::util::DeviceExt;
             let args = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Blade grass indirect draw"),
-                contents: &[VERTICES, 0, 0, 0]
+                contents: &[VERTICES, 0, 0, 0, 0]
                     .iter()
                     .flat_map(|v| v.to_le_bytes())
                     .collect::<Vec<u8>>(),
@@ -358,6 +388,21 @@ impl Blades {
         } else {
             0
         };
+        // The grown list holds the most blades this eye's circles can grow,
+        // with an eighth spare so small moves do not reallocate it.
+        let count = self.count;
+        let mut capacity = 0;
+        if let Some(cull) = &mut self.cull {
+            cull.active = count > 0 && !self.vertex_only && cull_fits(&device.limits(), count);
+            if cull.active {
+                let bound = grown_bound(density, radius, [eye[0], eye[2]]);
+                if cull.list.as_ref().is_none_or(|l| l.2 < bound) {
+                    let size = (bound + bound / 8).clamp(1, count);
+                    cull.list = Some(grown_list(device, cull, size));
+                }
+                capacity = cull.list.as_ref().map_or(0, |l| l.2);
+            }
+        }
         let values = [
             self.area[0],
             self.area[1],
@@ -372,7 +417,7 @@ impl Blades {
             wind[2] as f32,
             spacing(density),
             self.count as f32,
-            0.,
+            capacity as f32,
             0.,
             0.,
         ];
@@ -381,33 +426,6 @@ impl Blades {
             bytes[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
         }
         queue.write_buffer(&self.uniform, 0, &bytes);
-        let count = self.count;
-        if let Some(cull) = &mut self.cull {
-            cull.active = count > 0 && !self.vertex_only && cull_fits(&device.limits(), count);
-            if cull.active && cull.list.as_ref().is_none_or(|l| l.2 < count) {
-                let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("Blade grass grown blades"),
-                    size: u64::from(count) * BLADE_BYTES,
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::VERTEX,
-                    mapped_at_creation: false,
-                });
-                let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("Blade grass candidate pass output"),
-                    layout: &cull.out_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: buffer.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: cull.args.as_entire_binding(),
-                        },
-                    ],
-                });
-                cull.list = Some((buffer, bind, count));
-            }
-        }
     }
     /// Records the candidate pass for the prepared view (before its world
     /// pass): `material` is the view's world bind group, as the draw uses.
@@ -418,7 +436,7 @@ impl Blades {
         let Some((_, out, _)) = &cull.list else {
             return;
         };
-        encoder.clear_buffer(&cull.args, 4, Some(4));
+        encoder.clear_buffer(&cull.args, 4, Some(16));
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Blade grass candidates"),
             timestamp_writes: None,

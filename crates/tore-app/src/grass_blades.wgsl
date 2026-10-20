@@ -1,6 +1,7 @@
 // Original implementation for this engine. Fixed world-cell identity, no
 // instance data or alpha test. Appended to terrain.wgsl for shared lighting.
-// reserved.x: the candidate count (the candidate pass's bound).
+// reserved.x: the candidate count (the candidate pass's bound); reserved.y:
+// the grown list's capacity in blades.
 struct BladeParams { area:vec4<f32>, grid:vec4<f32>, wind:vec4<f32>, reserved:vec4<f32> }
 @group(2) @binding(0) var<uniform> blades:BladeParams;
 @group(2) @binding(1) var blade_habitat:texture_2d_array<u32>;
@@ -163,7 +164,10 @@ fn blade_shape(b:Blade,vertex:u32)->BladeOut {
 }
 // The candidate pass: one thread per candidate, the grown blades appended
 // to blade_list (four vec4 each) and counted into the indirect draw.
-struct BladeDraw { vertex_count:u32, instance_count:atomic<u32>, first_vertex:u32, first_instance:u32 }
+// claimed: list slots handed out; instance_count: the drawn count, never
+// above the list's capacity (reserved.y), so an overflow drops blades
+// instead of drawing past the list. Rust sizes the list so it cannot.
+struct BladeDraw { vertex_count:u32, instance_count:atomic<u32>, first_vertex:u32, first_instance:u32, claimed:atomic<u32> }
 @group(3) @binding(0) var<storage,read_write> blade_list:array<vec4<f32>>;
 @group(3) @binding(1) var<storage,read_write> blade_draw:BladeDraw;
 var<workgroup> blade_grown:atomic<u32>;
@@ -177,9 +181,14 @@ var<workgroup> blade_first:u32;
  var slot=0u;
  if b.ok {slot=atomicAdd(&blade_grown,1u);}
  workgroupBarrier();
- if local==0u {blade_first=atomicAdd(&blade_draw.instance_count,atomicLoad(&blade_grown));}
+ let capacity=u32(blades.reserved.y);
+ if local==0u {
+  let grown=atomicLoad(&blade_grown);
+  blade_first=atomicAdd(&blade_draw.claimed,grown);
+  atomicMax(&blade_draw.instance_count,min(blade_first+grown,capacity));
+ }
  let first=workgroupUniformLoad(&blade_first);
- if b.ok {
+ if b.ok && first+slot<capacity {
   let at=(first+slot)*4u;
   blade_list[at]=vec4<f32>(b.base,b.height);
   blade_list[at+1u]=vec4<f32>(b.color,b.width);
