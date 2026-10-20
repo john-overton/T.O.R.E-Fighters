@@ -9812,8 +9812,8 @@ Host per-seat work (optimization round 2; the wire bytes are unchanged, shown
 by the host benchmark's hash of every datagram at 2, 15 and 30 humans and by
 tests against the code each change replaced):
 
-- A human's gun rounds no longer test every ground object of the mission each
-  tick (see [projectiles in flight](#projectiles-in-flight)). This was most of
+- A human's gun rounds no longer test every ground object and aircraft of the
+  mission each tick (see [projectiles in flight](#projectiles-in-flight)). This was most of
   the host's cost in a gun fight, and the reason that cost grew with the humans.
 - The readout record (`readout::write_record`) is coded against one copy of the
   acknowledged readout, advanced in place, whose parts become what the client
@@ -9843,10 +9843,12 @@ affordable, each an agent decision that changes no answer:
   round's swept segment cannot reach this tick: each target's box over its
   move, widened by its largest volume, kept in order along x. The targets it
   keeps are tested exactly as before, in the same order. A human's gun round,
-  tested against the aircraft as the shooter saw them, keeps every aircraft
-  but still skips the ground objects' solid boxes it cannot reach, since those
-  are met by its own segment whatever the rewind (optimization round 2; before
-  it every such round tested every ground object of the mission each tick).
+  tested against the aircraft as the shooter saw them, skips the ground
+  objects' solid boxes it cannot reach, since those are met by its own segment
+  whatever the rewind, and the aircraft whose past volume it is tested
+  against lies outside the box that bounds that volume as the first pass
+  bounds a volume now (optimization round 2; before it every such round
+  tested every target of the mission each tick).
 - **The AI's sight lines to tracers** skip sampling the ground when the whole
   line is above the highest ground under it (`tore_sim::ground_ceiling`, built
   once from the terrain grid and runways by `Terrain::ground_ceiling`). Since

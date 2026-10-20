@@ -5632,6 +5632,21 @@ impl State {
                 f64::from(w.damage.fuze_radius.max(0)),
             );
             let reach = if rewind.is_none() { segment } else { None };
+            // A rewound round meets an aircraft's past volume, which the
+            // first pass bounds as it bounds a volume now: the round's
+            // segment that misses the box cannot touch it.
+            let past_missed = |id: u32| {
+                past(id).is_some_and(|v| {
+                    let body = broad::Body {
+                        previous: v.previous,
+                        position: v.position,
+                        basis: v.basis,
+                        radius: v.radius,
+                        solid: None,
+                    };
+                    matches!((body.bounds(), segment), (Some(b), Some(s)) if !b.overlaps(&s))
+                })
+            };
             // One search over every aircraft row and every ownship. A gun round
             // can hit any aircraft but the one that fired it; a missile or bomb
             // can hit any aircraft once its fuze has armed, even its launcher.
@@ -5643,6 +5658,9 @@ impl State {
                         continue;
                     }
                     let t = &r.target;
+                    if gun && past_missed(t.id) {
+                        continue;
+                    }
                     // Easy aiming widens the volume of the aircraft it shoots at,
                     // never the shooter's own.
                     let hitbox = if p.owner == t.id { 1. } else { hitbox };
@@ -5703,6 +5721,13 @@ impl State {
                         continue;
                     }
                     if t.hp > 0 && p.guidance.as_ref().is_some_and(|f| !f.eligible(w, t)) {
+                        continue;
+                    }
+                    if gun
+                        && (t.role == TargetRole::Aircraft || self.parked.contains_key(&t.id))
+                        && !self.ground_bounds.contains_key(&t.id)
+                        && past_missed(t.id)
+                    {
                         continue;
                     }
                     let hitbox = if p.owner == t.id { 1. } else { hitbox };
