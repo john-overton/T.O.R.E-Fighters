@@ -70,23 +70,51 @@ Peers must agree on the [network conventions](../formats/net-protocol.md#inert-j
 and [checkpoint layout](../formats/checkpoint.md#inert-stores). The lead assigns
 the protocol bump.
 
-AI jettison is opinionated behavior requested by John on 2026-10-15. The
-thresholds below are agent decisions, not recovered retail numbers. AI wingmen
-of humans and autonomous wings use the same rules on the authoritative host.
+AI jettison is opinionated behavior requested by John on 2026-10-15 and
+revised at his request on 2026-10-20: "Make sure AI preserve their weapons
+unless they need to shed weight to get home after being damaged or something
+like that." The thresholds below are agent decisions, not recovered retail
+numbers. AI wingmen of humans and autonomous wings use the same rules on the
+authoritative host.
 
-- Perceived missile defense or a defensive break drops all external tanks,
-  including empty tanks. A missile defense means a maneuver or countermeasure
-  response, not tracking a threat while waiting. A strike pilot in missile
-  defense or an actual defensive break also drops the external air-to-ground load.
+Entering a fight drops the external fuel tanks, empty or not, as a pilot drops
+tanks before a merge. Every weapon stays aboard.
+
+- Perceived missile defense or a defensive break drops all external tanks. A
+  missile defense means a maneuver or countermeasure response, not tracking a
+  threat while waiting.
 - A non-strike pilot pursuing, acquiring or attacking an aircraft within
-  3 nautical miles drops tanks and external air-to-ground stores.
-- A perceived attack on the aircraft itself drops that load when the observed
+  3 nautical miles drops its tanks.
+- A perceived attack on the aircraft itself drops the tanks when the observed
   attacker is within 3 nautical miles. Strike pilots instead use 4, 3, 2 and
   1 nautical miles for Novice, Average, Experienced and Ace. A nearby contact
-  alone never makes a strike pilot abandon the load.
-- Bombs, rocket pods, selectable designator pods and air-to-ground missiles are discarded. Guns and
-  air-to-air missiles remain, as do internal weapons. No cruise, ground,
-  ordinary strike or bingo-return trigger is added.
+  alone never makes a strike pilot drop anything.
+
+The external air-to-ground load (bombs, rocket pods, selectable designator
+pods and air-to-ground missiles) is shed only to save the aircraft:
+
+- **Damaged, going home.** A component failure that sends the pilot home
+  ([AI pilot response to faults](systems-damage.md#ai-aircraft):
+  fire, wounded pilot, fuel, engine, oil, hydraulics, controls or structure).
+  The strike is abandoned, so the load cannot be delivered, and its weight and
+  drag cost thrust, fuel and handling on the way home.
+- **Short of fuel, going home.** Bingo, critical or no fuel. The pilot is
+  flying home and the drag of the load shortens the range.
+- **Losing a close defensive fight.** In missile defense or a defensive break,
+  attacked from within the distance above, and already a quarter or more
+  damaged (damage fraction 0.25 or more, fitted).
+
+When it sheds the load for damage or fuel, the pilot keeps tanks that still
+hold fuel, since the fuel helps it home, and drops tanks that are dry. It sheds
+as soon as the reason holds, also while flying a landing route, and never on
+the ground. When a
+tank rule also applies, the tanks go with the load.
+
+Guns and air-to-air missiles are never jettisoned, nor are internal weapons;
+they leave only with the aircraft, when it is destroyed or the pilot ejects.
+Releasing bombs on a target is weapon delivery, not jettison. A bug out, a
+landing order, ordinary recovery or a completed strike sheds nothing by
+itself; a damaged or bingo pilot sheds under the rules above.
 
 One nautical mile is 6076.11549 feet. Distances use perceived aircraft contacts,
 not hidden enemy positions. No random draw is added. The decision uses the

@@ -11,10 +11,19 @@ pub(super) const CRATER_SCALE: u8 = 25;
 
 impl State {
     /// AI inventory bridge. Uses the player separation path, preserving the
-    /// cockpit selection. Empty stations and already removed tanks are no-ops.
-    pub fn jettison_ai(&mut self, own: &mut Ownship, launcher: Launcher, stations: &[usize]) {
+    /// cockpit selection. `tanks` also drops every external tank. Empty
+    /// stations and already removed tanks are no-ops.
+    pub fn jettison_ai(
+        &mut self,
+        own: &mut Ownship,
+        launcher: Launcher,
+        tanks: bool,
+        stations: &[usize],
+    ) {
         let selected = own.selected;
-        self.jettison(own, launcher, true);
+        if tanks {
+            self.jettison(own, launcher, true);
+        }
         for &station in stations {
             own.selected = station;
             self.jettison(own, launcher, false);

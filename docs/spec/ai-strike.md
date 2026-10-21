@@ -1227,3 +1227,6 @@ and is open to change.
 John requested AI defensive jettison on 2026-10-15. The shared
 [jettison contract](jettison.md#replay-network-and-ai) defines tank shedding,
 merge range, skill-dependent strike-load retention and inert recording behavior.
+Since John's 2026-10-20 revision a fight drops only the tanks; the
+air-to-ground load goes only when the pilot must save the aircraft (damaged or
+short of fuel going home, or losing a close defensive fight).

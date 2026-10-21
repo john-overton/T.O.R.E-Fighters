@@ -9970,6 +9970,30 @@ fn probe_fly(ticks: usize, script: &ProbeScript, run: ProbeFlight) -> AppResult<
                 flight.escape.is_some()
             );
         }
+        // What each aircraft still carries: AI jettison evidence
+        // (docs/spec/jettison.md). Output only; no decision reads it.
+        if let Some(config) = bridge.configuration(actor.id()) {
+            let stores: Vec<String> = actor
+                .stations()
+                .iter()
+                .filter_map(|s| {
+                    let station = config.stations.get(usize::from(s.station.0))?;
+                    let rounds = match s.rounds() {
+                        tore_sim::ai::weapon_service::Rounds::Finite(n) => n.to_string(),
+                        tore_sim::ai::weapon_service::Rounds::Unlimited => "inf".into(),
+                    };
+                    Some(format!("{} x{rounds}", station.weapon.hud_name))
+                })
+                .collect();
+            let tanks: u32 = config.tanks.iter().map(|t| u32::from(t.quantity)).sum();
+            println!(
+                "AI stores: actor={} tanks={tanks} external_fuel={:.0} payload={:.0} stations=[{}]",
+                actor.id(),
+                flight.systems.external_lbs(),
+                flight.payload_lbs,
+                stores.join(", ")
+            );
+        }
     }
     let report = debrief::capture(&mission, SEAT).expect("the probe's seat flies a plane");
     println!("AI probe debrief: {}", report.summary());

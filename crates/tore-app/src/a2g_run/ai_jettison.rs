@@ -1,4 +1,6 @@
-//! Recorded headless acceptance: a strike pilot perceives an attacking bandit.
+//! Recorded headless acceptance: a strike pilot perceives an attacking bandit
+//! and drops only its tanks, keeping its bombs; ten seconds later its engine
+//! is damaged and it sheds the bombs to get home (docs/spec/jettison.md).
 use super::{Options, SEAT, Scene};
 use crate::AppResult;
 
@@ -57,7 +59,22 @@ pub(super) fn run(
     }
     let mut seen = std::collections::BTreeSet::new();
     let mut drops = Vec::new();
+    // The damage tick: an engine power loss through the ordinary fault path.
+    const DAMAGE: u64 = 120 + 10 * 120;
     for tick in 0..(o.seconds * 120.) as u64 {
+        if tick == DAMAGE {
+            let target = scene
+                .world
+                .combat
+                .state
+                .targets
+                .iter_mut()
+                .find(|t| t.id == id)
+                .ok_or("striker row lost")?;
+            // Fault 5: engine power reduced.
+            target.faults.counts[5] = target.faults.counts[5].saturating_add(1);
+            println!("ai-jettison: damage tick={tick} fault=5");
+        }
         if tick == 120 {
             let wings = scene.world.ai_wings.as_mut().unwrap();
             let p = wings.mission().actor(id).unwrap().flight().position;
@@ -82,7 +99,7 @@ pub(super) fn run(
             {
                 let name = scene.world.combat.state.weapon(p).source.clone();
                 println!("ai-jettison: drop tick={tick} id={} store={name}", p.id);
-                drops.push(name);
+                drops.push((tick, name));
             }
         }
         if tick < 120 && !drops.is_empty() {
@@ -98,12 +115,28 @@ pub(super) fn run(
         .actor(id)
         .ok_or("striker lost")?;
     let after = actor.flight().payload_lbs;
-    if !drops.iter().any(|n| n.ends_with(".GAS"))
-        || !drops.iter().any(|n| n.contains("MK82"))
+    let attack: Vec<_> = drops.iter().filter(|(t, _)| *t < DAMAGE).collect();
+    if !attack.iter().any(|(_, n)| n.ends_with(".GAS")) {
+        return Err(format!("the attack dropped no tanks: {drops:?}").into());
+    }
+    if attack.iter().any(|(_, n)| !n.ends_with(".GAS")) {
+        return Err(format!("the attack shed weapons, not only tanks: {drops:?}").into());
+    }
+    if !drops
+        .iter()
+        .any(|(t, n)| *t >= DAMAGE && n.contains("MK82"))
         || after >= before
     {
-        return Err(format!("missing AI drops: {drops:?}, payload {before} -> {after}").into());
+        return Err(
+            format!("no bombs shed after damage: {drops:?}, payload {before} -> {after}").into(),
+        );
     }
+    println!(
+        "ai-jettison: attack drops={} (tanks only), damage drops={} return={:?}",
+        attack.len(),
+        drops.len() - attack.len(),
+        actor.damage_return()
+    );
     if scene
         .world
         .combat

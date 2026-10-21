@@ -232,9 +232,9 @@ mod tests {
         own.ammo[3] = 1;
         assert_eq!(own.external_stores().count, 5.);
         let mut state = state;
-        state.jettison_ai(&mut own, launcher(), &[]);
+        state.jettison_ai(&mut own, launcher(), true, &[]);
         assert_eq!(own.external_stores().count, 3.);
-        state.jettison_ai(&mut own, launcher(), &[2, 3]);
+        state.jettison_ai(&mut own, launcher(), true, &[2, 3]);
         assert_eq!(own.external_stores(), sensors::Stores::NONE);
         assert!((nose_on_nmi(&own) - 28.460_498_941_515_41).abs() < 1e-6);
         // An aircraft flying without external stores carries none.
