@@ -268,7 +268,13 @@ def drive_migrate_smoke(d: Drive) -> None:
          "--seconds", 20, "--token-file", token_file],
     )
     viper2.finish(120, 0)
-    for problem in rejoin_problems(viper2.text(), "Viper", 4):
+    # Viper asks for slot 4, Friendly Wing 2's lead. Since the guide's mission made that wing Player Choice
+    # (`wing-choice friendly 2`, 2026-10-16), a late join there replaces the AI aircraft with a new plane at
+    # revival placement (docs/MULTIPLAYER.md, "AI aircraft and Player Choice"), so the plane kept for Viper is the
+    # one it was first seated in, not plane 4 itself.
+    first = re.search(r"(?m)^Viper: seat \d+, plane (\d+), at tick \d+$", viper.text())
+    kept = int(first.group(1)) if first else 4
+    for problem in rejoin_problems(viper2.text(), "Viper", kept):
         d.problem(problem)
     pilots.finish(240, 0)
     relay.finish(240, 0)

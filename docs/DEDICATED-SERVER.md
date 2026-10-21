@@ -295,7 +295,8 @@ twice.
 When a player takes a Choice slot, the log identifies the accepted type:
 `Viper took plane 6 (Player choice): F-16C`. Late Choice joins replace the AI
 cleanly at revival placement. Departures return to the wing AI default under
-`ai-respawn`, at the original spawn. With `ai off`, no AI replacement appears.
+`ai-respawn`, at the original spawn; a dropped player's Choice aircraft is kept
+for it, flown by the AI, like any other. With `ai off`, no AI replacement appears.
 
 
 *Status of the ground target lines:* they are read, checked against the
