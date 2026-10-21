@@ -252,16 +252,16 @@ mod tests {
         tally.present(5);
         tally.present(3);
         assert!(tally.joined());
-        let report = tally.report_after(Duration::from_secs(61 * 60 + 5), 0xabc, "0.1.3");
+        let report = tally.report_after(Duration::from_secs(61 * 60 + 5), 0xabc, "0.2.0");
         assert_eq!(report.install_id, 0xabc);
         assert_eq!(report.role, Role::Player);
-        assert_eq!(report.game_version, "0.1.3");
+        assert_eq!(report.game_version, "0.2.0");
         assert_eq!(report.platform, Platform::current().code());
         assert_eq!((report.minutes, report.humans), (61, 5));
         assert_eq!(report.path, Path::ByAddress);
         tally.set_path(Path::Punched);
         assert_eq!(
-            tally.report_after(Duration::ZERO, 1, "0.1.3").path,
+            tally.report_after(Duration::ZERO, 1, "0.2.0").path,
             Path::Punched
         );
         assert_eq!(report.connect_tenths, 23);
@@ -289,7 +289,7 @@ mod tests {
             .unwrap();
         let port = socket.local_addr().unwrap().port();
         let tally = PlayerTally::begin("127.0.0.1:26900".parse().unwrap(), Duration::ZERO);
-        let report = tally.report(7, "0.1.3");
+        let report = tally.report(7, "0.2.0");
         let to = send_now(&format!("127.0.0.1:{port}"), &report).unwrap();
         assert_eq!(to.port(), port);
         let mut buf = [0u8; 2_000];

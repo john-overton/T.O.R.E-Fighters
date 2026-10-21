@@ -32,7 +32,7 @@ fn host_address() -> SocketAddr {
 
 fn build() -> BuildId {
     BuildId {
-        version: "0.1.3-1-gtest".into(),
+        version: "0.2.0-1-gtest".into(),
         commit: "test-commit".into(),
         release: false,
     }
@@ -891,21 +891,21 @@ fn the_players_own_words_name_the_item_its_import_and_what_to_do() {
     let lacking = without(resources(), "F18.PT");
     let own = content_of(&lacking, source::Build::V102F, "0.1.2");
     assert_eq!(
-        words::refusal(&own, &lacking, &mission, &["F18.PT".into()], "0.1.3"),
+        words::refusal(&own, &lacking, &mission, &["F18.PT".into()], "0.2.0"),
         "Your game has no F/A-18D Hornet, which this mission flies. Your import was made by an \
          earlier T.O.R.E (0.1.2). Re-import Fighters Anthology (Pref, Re-import) to add it."
     );
-    let current = content_of(&lacking, source::Build::V102F, "0.1.3");
+    let current = content_of(&lacking, source::Build::V102F, "0.2.0");
     assert_eq!(
-        words::refusal(&current, &lacking, &mission, &["F18.PT".into()], "0.1.3"),
+        words::refusal(&current, &lacking, &mission, &["F18.PT".into()], "0.2.0"),
         "Your game has no F/A-18D Hornet, which this mission flies. Re-import Fighters \
          Anthology (Pref, Re-import) to add it."
     );
     // A file of the aircraft differs.
     let map = changed(resources(), "F18R.SEE");
-    let own = content_of(&map, source::Build::V102F, "0.1.3");
+    let own = content_of(&map, source::Build::V102F, "0.2.0");
     assert_eq!(
-        words::refusal(&own, &map, &mission, &["F18R.SEE".into()], "0.1.3"),
+        words::refusal(&own, &map, &mission, &["F18R.SEE".into()], "0.2.0"),
         "Your F/A-18D Hornet's data differs from the host's."
     );
     // A file no mission item reads: the shared data.
@@ -914,7 +914,7 @@ fn the_players_own_words_name_the_item_its_import_and_what_to_do() {
         "TORE_RADIO_^BREAK1".into(),
     ];
     assert_eq!(
-        words::refusal(&own, &map, &mission, &names, "0.1.3"),
+        words::refusal(&own, &map, &mission, &names, "0.2.0"),
         "Your game's shared flight data differs from the host's (2 files, such as \
          TORE_RADIO_^BANDIT). Re-import Fighters Anthology with this version of T.O.R.E."
     );
@@ -923,17 +923,17 @@ fn the_players_own_words_name_the_item_its_import_and_what_to_do() {
         version: version.into(),
         commit: "c".into(),
     };
-    assert!(words::made_earlier(None, "0.1.3"));
+    assert!(words::made_earlier(None, "0.2.0"));
     assert!(words::made_earlier(
         Some(&importer("0.1.2")),
-        "0.1.3-4-gabc"
+        "0.2.0-4-gabc"
     ));
     assert!(!words::made_earlier(
-        Some(&importer("0.1.3-2-gdef")),
-        "0.1.3"
+        Some(&importer("0.2.0-2-gdef")),
+        "0.2.0"
     ));
-    assert!(!words::made_earlier(Some(&importer("0.2.0")), "0.1.3"));
-    assert!(!words::made_earlier(Some(&importer("dev")), "0.1.3"));
+    assert!(!words::made_earlier(Some(&importer("0.3.0")), "0.2.0"));
+    assert!(!words::made_earlier(Some(&importer("dev")), "0.2.0"));
 }
 
 #[test]

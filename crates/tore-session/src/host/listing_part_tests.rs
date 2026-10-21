@@ -19,7 +19,7 @@ fn config() -> HostConfig {
         start: StartMode::King,
         crown: CrownRule::FirstPlayer,
         ..HostConfig::new(BuildId {
-            version: "0.1.3-1-gtest".into(),
+            version: "0.2.0-1-gtest".into(),
             commit: "test-commit".into(),
             release: false,
         })

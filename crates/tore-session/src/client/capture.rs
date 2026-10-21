@@ -780,7 +780,7 @@ mod tests {
             "127.0.0.1:26900".parse().unwrap(),
             "Viper",
             BuildId {
-                version: "0.1.3".into(),
+                version: "0.2.0".into(),
                 commit: "abc".into(),
                 release: false,
             },
@@ -843,7 +843,7 @@ mod tests {
                 "203.0.113.5:26900".parse().unwrap(),
                 "Viper",
                 BuildId {
-                    version: "0.1.3".into(),
+                    version: "0.2.0".into(),
                     commit: "abc".into(),
                     release: false,
                 },

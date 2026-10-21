@@ -68,8 +68,8 @@ impl Build {
     }
 }
 
-/// The T.O.R.E that made an import: its version (`0.1.3`, or
-/// `0.1.3-4-gabc1234` between tags) and the commit it was built from.
+/// The T.O.R.E that made an import: its version (`0.2.0`, or
+/// `0.2.0-4-gabc1234` between tags) and the commit it was built from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Importer {
     pub version: String,

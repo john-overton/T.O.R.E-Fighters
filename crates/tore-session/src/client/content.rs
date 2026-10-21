@@ -21,7 +21,7 @@ use tore_world::mission::MissionSpec;
 /// What to do about an item the import lacks.
 const REIMPORT: &str = "Re-import Fighters Anthology (Pref, Re-import) to add it.";
 
-/// The numbers of a version's release part: `0.1.3` of `0.1.3-4-gabc`.
+/// The numbers of a version's release part: `0.2.0` of `0.2.0-4-gabc`.
 fn version_numbers(version: &str) -> Option<Vec<u64>> {
     let release = version.split('-').next()?;
     release.split('.').map(|part| part.parse().ok()).collect()

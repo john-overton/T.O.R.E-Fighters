@@ -42,7 +42,7 @@ fn house_address() -> SocketAddr {
 
 fn build() -> BuildId {
     BuildId {
-        version: "0.1.3-1-gtest".into(),
+        version: "0.2.0-1-gtest".into(),
         commit: "test-commit".into(),
         release: false,
     }

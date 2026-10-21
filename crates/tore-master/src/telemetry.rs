@@ -305,7 +305,7 @@ mod tests {
         Report {
             install_id,
             role,
-            game_version: "0.1.3".into(),
+            game_version: "0.2.0".into(),
             platform: 3,
             minutes: 20,
             humans: 4,
@@ -344,7 +344,7 @@ mod tests {
             "hosted-path.local\t1",
             "hosted-path.ipv6\t0",
             "hosted-path.punched\t3",
-            "version.0.1.3\t3",
+            "version.0.2.0\t3",
             "platform.3\t3",
             "mapping.same-port\t3",
             "port-mapping.upnp\t3",

@@ -32,7 +32,7 @@ fn game(
             nonce: 1,
             protocol_version: 3,
             game_version: if compat == Compat::Same {
-                "0.1.3".into()
+                "0.2.0".into()
             } else {
                 "0.1.2".into()
             },

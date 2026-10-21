@@ -24,7 +24,7 @@ fn ms(n: u64) -> Duration {
 fn build() -> Build {
     Build {
         protocol_version: 9,
-        game_version: "0.1.3".into(),
+        game_version: "0.2.0".into(),
         game_commit: "abc".into(),
         release: true,
     }

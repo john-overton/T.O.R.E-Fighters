@@ -224,7 +224,7 @@ Build the release binaries first, stamping the same version the package will
 carry:
 
 ```sh
-TORE_BUILD_VERSION=0.1.3 cargo build --release --locked -p tore-app -p tore-extract
+TORE_BUILD_VERSION=0.2.0 cargo build --release --locked -p tore-app -p tore-extract
 ```
 
 For the 32-bit Windows package, run `rustup target add i686-pc-windows-msvc`

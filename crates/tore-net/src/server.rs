@@ -891,7 +891,7 @@ mod tests {
         DiscoverAnswer {
             nonce,
             protocol_version: V,
-            game_version: "0.1.3".into(),
+            game_version: "0.2.0".into(),
             game_commit: "abc".into(),
             session_id: 7,
             name: "Game".into(),
@@ -994,7 +994,7 @@ mod tests {
         let request = Packet::ConnectRequest(packet::ConnectRequest {
             protocol_version: V,
             nonce: 5,
-            game_version: "0.1.3".into(),
+            game_version: "0.2.0".into(),
             game_commit: "abc".into(),
         })
         .encode(V)

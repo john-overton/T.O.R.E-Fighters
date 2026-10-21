@@ -933,7 +933,7 @@ import, and the items it lacks, has differently or has that the server lacks
 
 ```text
 content Hawk: Fighters Anthology 1.0, imported by T.O.R.E 0.1.4 (48d62dac); the same items as the host
-content Ace: Fighters Anthology 1.02F, imported by T.O.R.E 0.1.3 (9a1b2c3d); lacks aircraft SU27.PT, aircraft MIG29.PT
+content Ace: Fighters Anthology 1.02F, imported by T.O.R.E 0.2.0 (9a1b2c3d); lacks aircraft SU27.PT, aircraft MIG29.PT
 ```
 
 A `gaps` line says what not every player can use whenever that changes: a

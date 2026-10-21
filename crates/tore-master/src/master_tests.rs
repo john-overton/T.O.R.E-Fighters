@@ -110,7 +110,7 @@ fn received(socket: &mut SimSocket) -> Vec<(MasterPacket, usize)> {
 fn build() -> Build {
     Build {
         protocol_version: 7,
-        game_version: "0.1.3".into(),
+        game_version: "0.2.0".into(),
         game_commit: "abc".into(),
         release: true,
     }
@@ -132,7 +132,7 @@ fn summary(name: &str, players: u8, phase: DiscoverPhase) -> ListingSummary {
         capacity: 8,
         phase,
         session_id: 1,
-        game_version: "0.1.3".into(),
+        game_version: "0.2.0".into(),
         game_commit: "abc".into(),
         name: name.into(),
         mission: "UKR, clear".into(),
@@ -551,7 +551,7 @@ fn pages_list_every_match_once_filtered_by_build_and_fullness_in_order() {
                 .2;
             assert_eq!(entry.other_build.is_some(), other);
             if other {
-                assert_eq!(entry.other_build.as_deref(), Some("0.1.3"));
+                assert_eq!(entry.other_build.as_deref(), Some("0.2.0"));
             }
         }
     }
@@ -845,7 +845,7 @@ fn report(install_id: u64) -> MasterPacket {
     MasterPacket::Report(Report {
         install_id,
         role: Role::Player,
-        game_version: "0.1.3".into(),
+        game_version: "0.2.0".into(),
         platform: 3,
         minutes: 12,
         humans: 2,

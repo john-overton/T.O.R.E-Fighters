@@ -214,7 +214,7 @@ fn a_player_drops_what_only_a_host_takes_and_a_host_takes_everything() {
     let request = Packet::ConnectRequest(ConnectRequest {
         protocol_version: VERSION,
         nonce: 1,
-        game_version: "0.1.3".into(),
+        game_version: "0.2.0".into(),
         game_commit: "abc".into(),
     })
     .encode(VERSION)

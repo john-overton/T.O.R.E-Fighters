@@ -221,7 +221,7 @@ fn summary(players: u8) -> ListingSummary {
         players,
         capacity: 15,
         session_id: 99,
-        game_version: "0.1.3".into(),
+        game_version: "0.2.0".into(),
         game_commit: "abc".into(),
         name: "Friday night".into(),
         mission: "UKR, 2 v 2".into(),
@@ -235,7 +235,7 @@ fn config(install_id: Option<u64>) -> HostRendezvous {
     HostRendezvous {
         build: Build {
             protocol_version: 7,
-            game_version: "0.1.3".into(),
+            game_version: "0.2.0".into(),
             game_commit: "abc".into(),
             release: false,
         },
@@ -742,7 +742,7 @@ fn a_report_goes_only_with_an_install_id() {
     let report = tally.report(
         Duration::from_secs(600),
         Role::HostingGame,
-        "0.1.3",
+        "0.2.0",
         3,
         MappingType::SamePort,
     );
