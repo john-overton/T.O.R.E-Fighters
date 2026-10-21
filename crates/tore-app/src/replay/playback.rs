@@ -10,7 +10,7 @@
 //! around the playhead keep both directions smooth.
 use crate::aircraft::Airframe;
 use crate::flight;
-use crate::replay::convert::{self, EFFECT_LOOKBACK_TICKS, Identities, Presentation};
+use crate::replay::convert::{self, Identities, Presentation};
 use crate::snapshot::{self, RenderSnapshot, set_devices};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -266,9 +266,7 @@ impl Playback {
         let (frames, at) = self.frame(tick)?;
         let frame = &frames[at];
         let playing = if effects {
-            self.recording
-                .live_effects(frame.tick, EFFECT_LOOKBACK_TICKS)
-                .unwrap_or_default()
+            convert::playing_effects(&self.recording, frame.tick).unwrap_or_default()
         } else {
             Vec::new()
         };
@@ -727,7 +725,7 @@ mod tests {
         let snapshot = |playback: &Playback, tick: u64, effects: bool| {
             let frame = recording.frame(tick).unwrap().unwrap();
             let effects = if effects {
-                recording.live_effects(tick, EFFECT_LOOKBACK_TICKS).unwrap()
+                convert::playing_effects(&recording, tick).unwrap()
             } else {
                 Vec::new()
             };

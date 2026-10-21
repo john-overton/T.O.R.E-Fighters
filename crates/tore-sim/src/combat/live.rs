@@ -132,6 +132,11 @@ pub const MAX_HIT_RECORDS: usize = 128;
 /// The puff a dud bomb raises: the original's bullet-on-land explosion, its
 /// smallest dust burst (explosion type 15; docs/spec/explosions.md).
 const DUD_PUFF: u8 = 15;
+/// How long after its motor lights a drop-launched store keeps sparing its
+/// launcher, in the record's quarter-second steps: 1 s (fitted, agent
+/// decision 2026-10-20; a lofting AIM-54 is clear of the launcher's
+/// 128 ft box about 0.6 s after it lights).
+const DROP_SEPARATION_T: u64 = 4;
 /// Fitted: a trigger press waits this long, 3 seconds, for the bay to open.
 const BAY_RELEASE_TICKS: u64 = 360;
 /// Fitted: the bay stays open 1 second after a release so the weapon clears.
@@ -5618,6 +5623,17 @@ impl State {
             } else {
                 now.wrapping_sub(p.launched_t) >= w.damage.fuze_arm_t
             };
+            // Launch grace for a drop launch: a store whose motor lights after
+            // release falls below its launcher, lights at about the edge of the
+            // launcher's box and climbs ahead past it, so it spares its launcher
+            // until a second after its motor lights, wherever it is.
+            let separating = w.movement.ignite_t > 0
+                && if p.motion.is_some() {
+                    p.age < (u64::from(w.movement.ignite_t) + DROP_SEPARATION_T) * 30
+                } else {
+                    now.wrapping_sub(p.launched_t)
+                        < w.movement.ignite_t.saturating_add(DROP_SEPARATION_T as u16)
+                };
             p.age += 1;
             let mut first: Option<(f64, Option<Hit>)> = None;
             // With friendly fire off, no round damages an aircraft of its
@@ -5685,8 +5701,11 @@ impl State {
                             let start = sub(p.previous, r.previous);
                             // Launch grace: a round still inside its own launcher's
                             // volume (the aircraft sphere widened by the fuze)
-                            // neither hits nor fuzes on it.
-                            if p.owner == t.id && dot(start, start) <= radius * radius {
+                            // neither hits nor fuzes on it, nor does a separating
+                            // drop-launched store.
+                            if p.owner == t.id
+                                && (separating || dot(start, start) <= radius * radius)
+                            {
                                 None
                             } else {
                                 segment_sphere(start, sub(p.position, t.position), radius)
@@ -5763,8 +5782,9 @@ impl State {
                         let start = sub(p.previous, old_targets[i]);
                         // Launch grace: a round still inside its own launcher's
                         // volume (the aircraft sphere widened by the fuze)
-                        // neither hits nor fuzes on it.
-                        if p.owner == t.id && dot(start, start) <= radius * radius {
+                        // neither hits nor fuzes on it, nor does a separating
+                        // drop-launched store.
+                        if p.owner == t.id && (separating || dot(start, start) <= radius * radius) {
                             None
                         } else {
                             segment_sphere(start, sub(p.position, t.position), radius)

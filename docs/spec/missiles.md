@@ -882,13 +882,24 @@ What a player sees:
   and re-enters hits the launcher as any other target (its fuze fires at the
   widened box edge, before it is inside), and its blast outside the box still
   reaches the launcher.
+- A drop-launched store (one whose motor lights after release: the AIM-54,
+  AIM-7, AA-9 and PL-10 at 2 s, the AA-6, AIM-7E, AGM-65 and AS-7 at 1 s)
+  spares its launcher, wherever it is, until 1 s after its motor lights.
+  It falls about 124 ft under the aircraft, which leaves it at the very edge
+  of a 128 ft box, and a lofting AIM-54 then climbs ahead through the
+  launcher's height and is clear of the box about 0.6 s after it lights. Without
+  this a level F-14 fuzed every Phoenix it fired on itself (fitted, agent
+  decision 2026-10-20; the 1 s is the record's quarter-second steps, 4 of them).
+  A store whose motor lights on the rail, a rocket and a bomb have no such
+  window.
 - Another aircraft overlapping the launcher's box is hit as always, and a
   store of any other aircraft bursting inside the box still hurts it.
 - Guns are unchanged: a gun round never hits its shooter at all.
 
 How it is built (agent decision, no new state): the direct-hit and fuze test
 ignores the launcher for a store whose position at the start of the tick was
-inside the box widened by its fuze radius, and the splash step skips the
+inside the box widened by its fuze radius, or that is a drop-launched store
+within 1 s of its motor lighting (its age against the record's ignition time), and the splash step skips the
 launcher when an airburst's point is inside the box. Both read positions only, so
 there is nothing to store in a checkpoint or a replay and nothing on the wire.
 The arming time of a bomb or missile (`fuze_arm_t`) is unchanged and still

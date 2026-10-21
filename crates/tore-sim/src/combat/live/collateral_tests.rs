@@ -646,6 +646,74 @@ fn a_store_that_leaves_the_box_and_comes_back_is_treated_normally() {
     }
 }
 
+/// A store that has dropped just out of its launcher's box (128 ft with the
+/// 100 ft fuze) and now climbs straight back up through it, as a lofting
+/// AIM-54 does when its motor lights under the launcher. `ignite_t` is the
+/// record's motor delay in quarter seconds.
+fn climbing_back(ai: bool, ignite_t: u16) -> (Vec<Event>, i32, i32) {
+    let (mut s, own, id) = launch_scene(ai);
+    let mut w = sparrow();
+    w.movement.ignite_t = ignite_t;
+    let below = [LAUNCH_AT[0], LAUNCH_AT[1] - 130., LAUNCH_AT[2] + 10.];
+    let mut p = round(70, id, &w, below, [below[0], below[1] + 1., below[2]]);
+    p.launched_t = (s.tick / 30) as u16;
+    s.projectiles.push(p);
+    let before = launcher_hp(&s, id);
+    let events = run_from(&mut s, 60, own);
+    let after = launcher_hp(&s, id);
+    (events, before, after)
+}
+
+#[test]
+fn a_drop_launched_store_climbing_back_past_its_launcher_does_no_harm() {
+    for ai in [false, true] {
+        // Its motor lit a moment ago (2 s delay, the AIM-54's): it is still
+        // separating, so it passes its launcher and fuzes on nothing.
+        let (events, before, after) = climbing_back(ai, 8);
+        let id = if ai { SHOOTER } else { 0 };
+        assert_eq!(after, before, "ai {ai}: {events:?}");
+        assert!(!hurt(&events, id), "ai {ai}: {events:?}");
+        // The same path from a store that lit on the rail is a store that left
+        // the box and came back: its fuze fires on the launcher.
+        let (events, before, after) = climbing_back(ai, 0);
+        assert!(hurt(&events, id), "ai {ai}: {events:?}");
+        assert!(after < before, "ai {ai}");
+    }
+}
+
+#[test]
+fn a_drop_launched_store_that_turns_back_after_separating_is_treated_normally() {
+    for ai in [false, true] {
+        let (mut s, own, id) = launch_scene(ai);
+        let mut w = sparrow();
+        w.damage.fuze_radius = 0;
+        // Lights a quarter second after release; separated 1.25 s after it.
+        w.movement.ignite_t = 1;
+        let mut p = round(
+            70,
+            id,
+            &w,
+            LAUNCH_AT,
+            [LAUNCH_AT[0], LAUNCH_AT[1], LAUNCH_AT[2] + 1.],
+        );
+        p.launched_t = (s.tick / 30) as u16;
+        s.projectiles.push(p);
+        let before = launcher_hp(&s, id);
+        let events = run_from(&mut s, 180, own);
+        assert_eq!(launcher_hp(&s, id), before, "ai {ai}: {events:?}");
+        s.projectiles[0].direction = [0., 0., -1.];
+        let mut back = Vec::new();
+        for _ in 0..400 {
+            back.extend(tick_once(&mut s, own));
+            if hurt(&back, id) {
+                break;
+            }
+        }
+        assert!(hurt(&back, id), "ai {ai}: {back:?}");
+        assert!(launcher_hp(&s, id) < before, "ai {ai}");
+    }
+}
+
 #[test]
 fn a_store_bursting_inside_its_launchers_box_does_not_hurt_the_launcher() {
     for ai in [false, true] {

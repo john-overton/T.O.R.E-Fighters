@@ -212,6 +212,13 @@ its home airport at cruise speed.
   the 500 ft climb still levels the wings. On the lower 3 degree gates the
   12,000 ft sample reached hills beyond the gate, and holding the heading flew
   a pair away from its gates for 700 s at NSK 6 (now 284 s).
+  Past the first gate (fitted, agent decision 2026-10-20) a fixed-wing
+  aircraft flies down the extended centerline to gates on the path, and
+  while its wheels are no more than 150 ft below the path both rules stand
+  down, as on the final. Where ground rises toward the gates the path can
+  pass only 150 to 500 ft above it (VLA Petrovka from the south); holding
+  1,000 ft above that ground brought an F/A-18D to the last gate 900 ft
+  above the path, and it crossed the threshold 579 ft up and went around.
 - **Final** (opinionated path, fitted speed and flare): down the same 3 degree
   path to the landing point (retail 6 degrees), wings level below 50 ft. Retail flies at most 293 ft/s
   with the nose 17 degrees above the path and has no flare. The AI flies 1.1
