@@ -659,6 +659,30 @@ impl AiActor {
             .map(|v| v * super::launch::DUMMY_SPEED_FPS);
     }
 
+    /// The pilot's load-shedding picture without any fight in it: why it may
+    /// be flying home and what it carries (docs/spec/jettison.md).
+    fn load_situation(&self) -> super::jettison::Situation {
+        super::jettison::Situation {
+            skill: self.experience().level,
+            strike: self.strikes(),
+            missile_defense: false,
+            defensive_break: false,
+            engagement_ft: None,
+            attacker_ft: None,
+            damage_return: self.damage_return.is_some(),
+            fuel_home: matches!(
+                self.controller.fuel_state(),
+                Some(
+                    super::route::FuelState::Bingo
+                        | super::route::FuelState::Critical
+                        | super::route::FuelState::OutOfFuel
+                )
+            ),
+            damage: self.flight.damage_fraction,
+            tanks_dry: self.flight.systems.external_lbs() <= 0.,
+        }
+    }
+
     pub fn damage_return(&self) -> Option<super::damage::Reason> {
         self.damage_return
     }
@@ -3415,6 +3439,13 @@ impl AiMission {
         }
         if actor.airfield_tick(&clearance, &own, tick, ground, surface, height, output)? {
             actor.trace.path = ActorPath::Airfield;
+            // A damaged or bingo pilot flying a landing sheds its load on the
+            // way home, never on the ground (docs/spec/jettison.md).
+            if !actor.flight.research.as_ref().is_some_and(|r| r.on_ground)
+                && let Some(drop) = super::jettison::decide(actor.load_situation())
+            {
+                output.jettison.push((actor_id, drop));
+            }
             return Ok(());
         }
         actor.trace.path = ActorPath::Controller;
@@ -3892,8 +3923,6 @@ impl AiMission {
             .min_by(f64::total_cmp);
         let engagement_ft = actor.controller.target().and_then(range);
         if let Some(drop) = super::jettison::decide(super::jettison::Situation {
-            skill: actor.experience().level,
-            strike: actor.strikes(),
             missile_defense: actor
                 .last_defense
                 .is_some_and(|d| d.motion.is_some() || d.burst.is_some()),
@@ -3911,6 +3940,7 @@ impl AiMission {
                 None
             },
             attacker_ft,
+            ..actor.load_situation()
         }) {
             output.jettison.push((actor_id, drop));
         }

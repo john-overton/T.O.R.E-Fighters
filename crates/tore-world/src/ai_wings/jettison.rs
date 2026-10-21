@@ -17,11 +17,15 @@ pub(super) fn apply(
         let Some(config) = wings.configs.get_mut(&id) else {
             continue;
         };
-        let tanks = config
-            .tanks
-            .iter()
-            .any(|t| t.quantity > 0 && t.store.is_some());
-        let mut stations: Vec<usize> = if drop == Drop::CombatLoad {
+        // A tank drop takes every external tank; an ordnance drop leaves
+        // them (docs/spec/jettison.md).
+        let tanks = drop != Drop::Ordnance
+            && config
+                .tanks
+                .iter()
+                .any(|t| t.quantity > 0 && t.store.is_some());
+        let ordnance = drop != Drop::Tanks;
+        let mut stations: Vec<usize> = if ordnance {
             config
                 .stations
                 .iter()
@@ -42,7 +46,7 @@ pub(super) fn apply(
         } else {
             Vec::new()
         };
-        if drop == Drop::CombatLoad {
+        if ordnance {
             stations.extend(config.designator_pods.iter().map(|p| p.station));
             stations.sort_unstable();
             stations.dedup();
@@ -70,7 +74,12 @@ pub(super) fn apply(
             own.restore(kept, false, false);
         }
         let before = own.payload_lbs();
-        state.jettison_ai(&mut own, crate::combat::launcher(actor.flight()), &stations);
+        state.jettison_ai(
+            &mut own,
+            crate::combat::launcher(actor.flight()),
+            tanks,
+            &stations,
+        );
         let removed = before - own.payload_lbs();
         // The configuration counts full tank fuel; undo the burn offset when
         // removing that capacity, exactly as the human command does.
@@ -114,9 +123,11 @@ mod tests {
         live::{TankStation, TankStore},
     };
 
-    #[test]
-    fn drops_once_preserving_air_missiles_and_guns_and_removes_burned_tank_mass() {
-        let mut state = combat_fixture(true);
+    /// An AI aircraft (id 1) with an AAM, an A-G missile pair, a gun and a
+    /// 1,100 lb tank that has burned 300 lb: the state, the bridge and the
+    /// loaded payload.
+    fn loaded() -> (live::State, AiWings, f64) {
+        let state = combat_fixture(true);
         let mut config = state.own().configuration().clone();
         // Three distinct stores: an AAM, an A-G missile, and a gun.
         let mut ag = config.stations[0].clone();
@@ -159,10 +170,51 @@ mod tests {
             tore_sim::aircraft_systems::Fuel::new(config.external_fuel_lbs);
         a.flight_mut().systems.fuel.external[0] -= 300.;
         a.flight_mut().enable_research(1).unwrap();
+        wings.configs.insert(id, config);
+        (state, wings, mass)
+    }
+
+    #[test]
+    fn an_ordnance_drop_keeps_the_tanks_air_missiles_and_gun() {
+        let (mut state, mut wings, mass) = loaded();
+        let id = 1;
+        let fuel = wings
+            .mission
+            .actor(id)
+            .unwrap()
+            .flight()
+            .systems
+            .external_lbs();
+        apply(&mut wings, &mut state, &[(id, Drop::Ordnance)]).unwrap();
+        let a = wings.mission.actor(id).unwrap();
+        assert!(a.stations()[1].is_empty(), "the A-G pair goes");
+        assert!(!a.stations()[0].is_empty(), "the AAM stays");
+        assert!(!a.stations()[2].is_empty(), "the gun stays");
+        assert_eq!(a.flight().systems.external_lbs(), fuel, "the tank stays");
+        assert!((a.flight().payload_lbs - (mass - 300. - 1000.)).abs() < 1e-9);
+        let config = wings.configuration(id).unwrap();
+        assert!(config.tanks.iter().all(|t| t.quantity == 1));
+        assert!(
+            state
+                .projectiles
+                .iter()
+                .all(|p| !state.weapon(p).source.ends_with(".GAS"))
+        );
+        // Nothing left to shed: a repeated request is a no-op.
+        let count = state.projectiles.len();
+        assert_eq!(count, 2);
+        apply(&mut wings, &mut state, &[(id, Drop::Ordnance)]).unwrap();
+        assert_eq!(state.projectiles.len(), count);
+    }
+
+    #[test]
+    fn drops_once_preserving_air_missiles_and_guns_and_removes_burned_tank_mass() {
+        let (mut state, mut wings, mass) = loaded();
+        let id = 1;
+        let a = wings.mission.actor(id).unwrap();
         let loaded_stall = a.flight().target_stall_scale();
         let internal = a.flight().fuel;
         let ammo = a.stations()[0].rounds();
-        wings.configs.insert(id, config);
         // The radar signature follows the live loadout (docs/radar.md,
         // "External stores"): the tank, then the strike stores, stop counting.
         let mut rows = spawned();
