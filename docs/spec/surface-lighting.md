@@ -124,13 +124,16 @@ from just sunward of its card (1.25 times its half-width), so it is not
 darkened by its own shadow. The
 [shadow quality](graphics-options.md#shadows) chooses the map size, how many
 maps, the soft-edge sample count and which of the city buildings and trees
-cast; the numbers below are the default Med level.
+cast. The separate [shadow distance](graphics-options.md#shadows) chooses
+map reach and caster distances; the default follows vegetation distance.
 Light direction follows the visible sun segment. Fully shadowed water retains
 30 percent of its unshadowed resolved color at full sun, blended by visible-disc
 strength, cloud transmission and fog. Moon shadows are not added.
 
-Three camera-centered maps use half-widths of 256, 8,192 and 131,072 feet,
-each 2,048 pixels square (1,024 with two maps at Low, 4,096 at Ultra), with light-depth coverage of plus/minus 262,144 feet.
+Three camera-centered maps use the
+[distance-dependent half-widths](graphics-options.md#shadows), each 2,048
+pixels square (1,024 with two maps at Low, 4,096 at Ultra), with light-depth
+coverage of plus/minus 262,144 feet.
 The innermost map containing a receiver supplies detail; its outer 15 percent
 blends to the next map, and the outermost fades to unshadowed ambient/daylight.
 John requested visibility-proportional shadow strength and contact-dependent

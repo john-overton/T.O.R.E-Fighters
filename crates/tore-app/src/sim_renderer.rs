@@ -877,7 +877,7 @@ impl SimRenderer {
             device,
             &material_layout,
             &shader,
-            crate::surface_lighting::Settings::of(options.shadow_quality.effective()),
+            crate::surface_lighting::Settings::from_options(&options),
         );
         let pipelines = Pipelines::new(
             device,
@@ -1680,7 +1680,7 @@ impl SimRenderer {
         samples: u32,
     ) {
         self.options = options;
-        let shadows = crate::surface_lighting::Settings::of(options.shadow_quality.effective());
+        let shadows = crate::surface_lighting::Settings::from_options(&options);
         self.lighting.set_settings(device, shadows);
         if let Some(fill) = &mut self.fill {
             fill.set_options(&options);

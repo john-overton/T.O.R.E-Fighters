@@ -3,7 +3,8 @@
 use crate::{camera::Camera, scenery::Scenery, terrain::Terrain};
 use wgpu::util::DeviceExt;
 
-const EXTENTS: [f32; 3] = [256., 8192., 131072.];
+const NEAR_EXTENT: f32 = 256.;
+const MIDDLE_EXTENT: f32 = 8192.;
 const DEPTH: f32 = 262144.;
 /// Shadow projections, sun, moon, parameters and the shadow quality, then
 /// the flare lights.
@@ -11,16 +12,18 @@ const UNIFORM_BYTES: usize = 68 * 4 + crate::countermeasure_renderer::MAX_FLARE_
 
 /// What one [`crate::graphics::ShadowQuality`] draws. Every level that draws
 /// shadows has the terrain, the aircraft and every ground object (static
-/// placements and moving units) cast; the levels differ in map detail and
-/// reach, and in whether city buildings and trees cast too.
+/// placements and moving units) cast. Quality sets detail and caster classes;
+/// distance sets reach independently.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Settings {
     /// Geometric shadows at all.
     pub enabled: bool,
     /// Each cascade map's side, texels.
     pub map: u32,
-    /// How many of the [`EXTENTS`] cascades are drawn, nearest first.
+    /// How many cascades are drawn, nearest first.
     pub cascades: usize,
+    /// Light-space half-widths in feet. Unused entries are zero.
+    pub extents: [f32; 3],
     /// Soft-edge disc samples per receiver.
     pub disc_samples: u32,
     /// City buildings nearer than this cast their box (nautical miles; 0
@@ -31,40 +34,54 @@ pub struct Settings {
 }
 
 impl Settings {
-    /// The level's settings. Medium, the default, is the shadow look before
-    /// the setting existed plus the static ground objects; High adds the
-    /// nearby trees (agent choices, 2026-10-20).
-    pub fn of(quality: crate::graphics::ShadowQuality) -> Self {
+    /// Resolve run-only overrides on both initial creation and live changes.
+    pub fn from_options(options: &crate::graphics::Options) -> Self {
+        Self::of(
+            options.shadow_quality.effective(),
+            options
+                .shadow_distance
+                .effective()
+                .nautical_miles(options.vegetation_distance_nm),
+        )
+    }
+
+    /// Quality controls map detail and caster classes, distance controls reach.
+    /// Keep near detail fixed and bring the middle map in for short reaches.
+    fn of(quality: crate::graphics::ShadowQuality, distance_nm: u32) -> Self {
         use crate::graphics::ShadowQuality as Q;
+        let reach = (f64::from(distance_nm) * crate::vegetation::NM) as f32;
         let medium = Self {
             enabled: true,
             map: 2048,
             cascades: 3,
+            extents: [NEAR_EXTENT, MIDDLE_EXTENT.min(reach * 0.5), reach],
             disc_samples: 32,
-            buildings_nm: crate::fill_renderer::SHADOW_NM,
+            buildings_nm: f64::from(distance_nm),
             trees_ft: 0.,
         };
         match quality {
             Q::Off => Self {
                 enabled: false,
+                extents: [0.; 3],
+                buildings_nm: 0.,
                 ..medium
             },
             Q::Low => Self {
                 map: 1024,
                 cascades: 2,
+                extents: [NEAR_EXTENT, reach, 0.],
                 disc_samples: 16,
                 buildings_nm: 0.,
                 ..medium
             },
             Q::Medium => medium,
             Q::High => Self {
-                trees_ft: HIGH_TREES_FT,
+                trees_ft: reach,
                 ..medium
             },
             Q::Ultra => Self {
                 map: 4096,
-                buildings_nm: 2. * crate::fill_renderer::SHADOW_NM,
-                trees_ft: 2. * HIGH_TREES_FT,
+                trees_ft: reach,
                 ..medium
             },
         }
@@ -76,9 +93,6 @@ impl Settings {
 const UNUSED_CASCADE: [f32; 16] = [
     0., 0., 0., 4., 0., 0., 0., 4., 0., 0., 0., 0.5, 1., 1., DEPTH, 0.,
 ];
-
-/// How far trees cast at High, feet (agent choice, 2026-10-20).
-const HIGH_TREES_FT: f32 = 3000.;
 
 fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
     a.into_iter().zip(b).map(|(x, y)| x * y).sum()
@@ -518,8 +532,8 @@ impl SurfaceLighting {
         let (light, strength) = visible_sun(sun, radius);
         let active = scenery.smooth_weather && strength > 0. && self.settings.enabled;
         let mut values = Vec::with_capacity(68);
-        for (cascade, extent) in EXTENTS.into_iter().enumerate() {
-            self.cascades[cascade] = if cascade < self.settings.cascades {
+        for (cascade, extent) in self.settings.extents.into_iter().enumerate() {
+            self.cascades[cascade] = if self.settings.enabled && cascade < self.settings.cascades {
                 projection(
                     camera.position.map(|v| v as f32),
                     light,
@@ -748,6 +762,54 @@ mod tests {
     }
 
     #[test]
+    fn distance_controls_reach_without_changing_quality_or_near_detail() {
+        use crate::graphics::{ShadowDistance as D, ShadowQuality as Q};
+        for quality in Q::ALL {
+            let baseline = Settings::of(quality, 4);
+            for distance in D::ALL {
+                for trees in crate::graphics::VEGETATION_DISTANCES {
+                    let nm = distance.nautical_miles(trees);
+                    let settings = Settings::of(quality, nm);
+                    assert_eq!(settings.map, baseline.map);
+                    assert_eq!(settings.cascades, baseline.cascades);
+                    assert_eq!(settings.disc_samples, baseline.disc_samples);
+                    if quality == Q::Off {
+                        assert_eq!(settings, baseline, "Off ignores the distance");
+                        continue;
+                    }
+                    let reach = (f64::from(nm) * crate::vegetation::NM) as f32;
+                    assert_eq!(settings.extents[settings.cascades - 1], reach);
+                    assert_eq!(settings.extents[0], 256.);
+                    assert_eq!(
+                        settings.buildings_nm,
+                        if quality == Q::Low { 0. } else { f64::from(nm) }
+                    );
+                    assert_eq!(
+                        settings.trees_ft,
+                        if matches!(quality, Q::High | Q::Ultra) {
+                            reach
+                        } else {
+                            0.
+                        }
+                    );
+                    if settings.cascades == 3 {
+                        assert_eq!(settings.extents[1], 8192_f32.min(reach / 2.));
+                    }
+                    for pair in settings.extents[..settings.cascades].windows(2) {
+                        assert!(pair[1] > pair[0]);
+                    }
+                    // The actual projection must use the chosen half-width.
+                    let m = projection([0.; 3], [0., 1., 0.], reach, settings.map);
+                    assert!((m[0].hypot(m[2]) * reach - 1.).abs() < 1e-6);
+                }
+            }
+        }
+        let default = Settings::of(Q::Medium, crate::graphics::DEFAULT_VEGETATION_DISTANCE);
+        assert!((default.extents[2] - 24_304.462).abs() < 0.01);
+        assert_eq!(default.extents[..2], [256., 8192.]);
+    }
+
+    #[test]
     fn shadow_basis_does_not_switch_axes_near_overhead_sun() {
         let direction = |y: f32| [(1. - y * y).sqrt(), y, 0.];
         let a = projection([0.; 3], direction(0.94999), 256., 2048);
@@ -795,7 +857,7 @@ mod tests {
     #[test]
     fn shadow_projection_follows_light_and_stays_stable_in_large_worlds() {
         for sun in [[0., 1., 0.], unit([1., 0.1, 0.]), unit([-1., 1., 1.])] {
-            for extent in EXTENTS {
+            for extent in Settings::of(crate::graphics::ShadowQuality::Medium, 4).extents {
                 let origin = [1_000_000., 5000., 600_000.];
                 let m = projection(origin, sun, extent, 2048);
                 let project = |v| {

@@ -28,8 +28,8 @@
 //! in and writes one small uniform and the visible block list per view.
 //! Knocked-down buildings draw as a low stub (0.08 of their height, in the
 //! cull shader); a knock-down rewrites only the changed records.
-//! Buildings within the shadow quality's building distance ([`SHADOW_NM`]
-//! at Med and High) cast their box's shadow into the shadow maps.
+//! Buildings within the separate shadow distance cast their box into the
+//! shadow maps at Med, High and Ultra.
 
 #[path = "fill_blocks.rs"]
 pub mod blocks;
@@ -104,10 +104,8 @@ impl Tiers {
 /// The share of the building distance over which buildings fade in before
 /// it (fitted, 2026-10-11): 4.5 nm of the default 30.
 pub const FADE_SHARE: f64 = 0.15;
-/// Buildings nearer than this cast shadows (nautical miles, fitted). Measured
-/// at 4K over Cairo at 2,000 ft: 0.5 nm costs nothing measurable, 1 nm 1.3
-/// ms more and 3 nm 3.4 ms more, mostly in the middle and far cascades.
-/// `TORE_CITY_FILL_SHADOW_NM` changes it (a measuring aid).
+/// Initial fallback before the renderer applies the graphics settings.
+/// Run-only measuring override: `TORE_CITY_FILL_SHADOW_NM`.
 pub const SHADOW_NM: f64 = 0.5;
 /// Views that may draw in one submission, each with its own uniform.
 const SLOTS: usize = 8;
@@ -912,7 +910,7 @@ impl FillRenderer {
         self.tiers = Tiers::from_options(options);
     }
 
-    /// Takes the shadow quality's building shadow distance
+    /// Takes the resolved building shadow distance
     /// (`TORE_CITY_FILL_SHADOW_NM` still overrides it).
     pub fn set_shadows(&mut self, shadows: &crate::surface_lighting::Settings) {
         self.shadow_nm = std::env::var("TORE_CITY_FILL_SHADOW_NM")

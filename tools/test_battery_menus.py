@@ -20,6 +20,19 @@ def write_ppm(directory, name, width, height, pixel):
     return path
 
 
+class ShadowDistanceCoverageTests(unittest.TestCase):
+    def test_every_distance_has_a_window_capture(self):
+        covered = set()
+        scenarios = menus.scenarios()
+        for scenario in scenarios:
+            if "--shadow-distance" in scenario.args:
+                self.assertTrue(scenario.window)
+                self.assertIn("--capture-flight", scenario.args)
+                covered.add(scenario.args[scenario.args.index("--shadow-distance") + 1])
+        self.assertEqual(covered, {"trees", "1", "2", "4", "6", "8"})
+        self.assertTrue(any("graphics-shadows" in s.args for s in scenarios))
+
+
 class ImageCheckTests(unittest.TestCase):
     def check(self, condition, pixel):
         with tempfile.TemporaryDirectory() as d:

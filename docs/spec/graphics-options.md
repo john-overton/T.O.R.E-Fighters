@@ -38,7 +38,7 @@ applied and saved when the screen closes or the game quits.
 The rows sit under four headings in a list that scrolls: **Display**
 (anti-aliasing, render scale, spotting aid, frame rate), **Terrain and scenery** (terrain
 filtering, ground detail and its distance, building distance and detail,
-shadows),
+shadows and shadow distance),
 **Vegetation and grass** (vegetation distance, detail, density and cards,
 grass, grass density and distance) and **Performance** (the frame-rate
 counter). The scroll bar is the map's arrow bar, the one the multiplayer
@@ -63,6 +63,7 @@ resolutions); the group names and wording are agent decisions.
 | Building distance (city fill) | 10 nm, 20 nm, 30 nm | 30 nm |
 | Building detail (city fill) | 1 nm, 2 nm, 5 nm, 10 nm, 20 nm | 5 nm |
 | Shadows | Off, Low, Med, High, Ultra | Med |
+| Shadow distance | Trees, 1 nm, 2 nm, 4 nm, 6 nm, 8 nm | Trees |
 | Ground detail | Off, On, Fine | On |
 | Ground detail distance | 1 nm, 2 nm, 4 nm | 2 nm |
 | Vegetation distance | 2 nm, 4 nm, 6 nm, 8 nm | 4 nm |
@@ -79,7 +80,9 @@ preferences. The frame-rate line is written only when the counter is on
 written only when it is not V-sync (`frame-limit 60`, `100` or `200`); a file
 from before the choice existed reads as V-sync. The shadow quality is written
 only when it is not Med (`shadows off`, `low`, `high` or `ultra`); a file
-from before the choice existed reads as Med.
+from before the choice existed reads as Med. Shadow distance is written only
+for a fixed choice (`shadow-distance 1`, `2`, `4`, `6` or `8`); an omitted
+line or `shadow-distance trees` follows the vegetation distance.
 
 ## Frame rate
 
@@ -260,21 +263,51 @@ casts them. Every level but Off has the terrain, the aircraft and every
 ground object cast: airports, buildings, bridges, SAM and AAA sites, parked
 aircraft, vehicles, ships and men.
 
-| Level | Shadow maps | Reach | Soft edge samples | City buildings cast | Trees cast |
-| --- | --- | --- | --- | --- | --- |
-| Off | none | | | | |
-| Low | 1,024 texels | two maps, to 8,192 ft from the eye | 16 | no | no |
-| Med | 2,048 texels | three maps, to 131,072 ft | 32 | within 0.5 nm | no |
-| High | 2,048 texels | three maps, to 131,072 ft | 32 | within 0.5 nm | within about 3,000 ft |
-| Ultra | 4,096 texels | three maps, to 131,072 ft | 32 | within 1 nm | within about 6,000 ft |
+| Level | Shadow maps | Soft edge samples | City buildings cast | Trees cast |
+| --- | --- | --- | --- | --- |
+| Off | none | | no | no |
+| Low | two maps, 1,024 texels each | 16 | no | no |
+| Med | three maps, 2,048 texels each | 32 | yes | no |
+| High | three maps, 2,048 texels each | 32 | yes | yes |
+| Ultra | three maps, 4,096 texels each | 32 | yes | yes |
 
-Med, the default, is the shadow look from before the setting existed, with
-the static ground objects added. Tree shadows are left to High and Ultra
-because they cost the most: the ground under woods then runs the full soft
-shadow filter. A change applies at once. `--shadows
-off|low|medium|high|ultra` sets it for one run from the command line and
-`TORE_SHADOWS` does the same for one run of any tool, offscreen captures
-included, without saving.
+The separate **Shadow distance** row, next to Shadows, sets the outer map's
+half-width and the maximum caster distance for city buildings and trees.
+John requested a separate distance and a default following trees on 2026-10-21.
+**Trees**, the default, follows the current Vegetation distance even when that
+row changes live. At its default 4 nm this is 24,304.462 feet, using the same
+6,076.11549 feet per nautical mile as vegetation. Fixed choices of **1, 2, 4,
+6 and 8 nm** are agent decisions and do not move when vegetation changes.
+Off ignores distance. Trees still need High or Ultra. Only loaded vegetation
+on retained view pages and buildings drawn in the current view can cast.
+Terrain and ordinary ground objects
+are culled against each map's light-space volume. This is finite square
+coverage projected along sunlight, not an exact horizontal circular cutoff;
+altitude and sun angle affect the ground footprint.
+
+Cascade spacing is an agent decision: keep the first map's 256 ft half-width
+at every distance. With three maps the middle half-width is the smaller of
+8,192 ft and half the chosen reach; the last map reaches the chosen distance.
+Low uses 256 ft and the chosen reach. Thus longer reach never stretches the
+near map, and short settings bring the middle map closer. At the default the
+near and middle maps keep their previous dimensions and close-up look; the
+outer map shrinks from 131,072 ft to the tree distance. The existing outer
+15% map blending and tree-caster thinning over their last 30% remain.
+
+A change applies automatically, including in flight. `--shadows
+off|low|medium|high|ultra` and `TORE_SHADOWS` set quality for one run.
+`--shadow-distance trees|1|2|4|6|8` and `TORE_SHADOW_DISTANCE` set distance
+for one run. Environment overrides also work in offscreen tools and take
+precedence over command-line/saved choices without themselves being saved.
+The distance override uses the same accepted values as the row.
+
+Distance does not allocate larger maps or add filter samples. Greater reach
+includes more caster geometry and can shade more screen pixels, increasing
+GPU cost, especially with tree shadows at High/Ultra. Distant shadows also
+lose detail at a fixed map resolution. The older quality timings below
+predate the separate distance control and used quality-specific reaches.
+The current 1, 4 and 8 nm GPU costs, before/after pictures and live-application
+checks are in the [shadow distance validation](../baselines/shadow-distance.md).
 
 GPU time of a still offscreen frame at 3840 by 2160 on an RTX 4070
 (2026-10-20, morning sun, `--vegetation-preview` cameras with the static
@@ -290,7 +323,8 @@ objects did not cast):
 | Hanoi, 300 ft | 12.2 | 3.3 | 8.2 | 12.4 | 12.4 | 12.5 |
 | Hanoi, 2,000 ft | 11.8 | 6.7 | 8.9 | 11.9 | 12.1 | 13.1 |
 
-The ground objects' shadows cost under 0.2 ms; tree shadows cost 0.3 ms over
+In that older measurement the ground objects' shadows cost under 0.2 ms;
+tree shadows cost 0.3 ms over
 a city and up to 1.9 ms over woods, mostly the soft filter on the newly
 shaded ground. At 2560 by 1440 the same steps are about half as large.
 

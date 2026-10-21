@@ -408,7 +408,7 @@ impl Renderer {
         };
     }
 
-    /// Takes the shadow quality's tree shadow distance
+    /// Takes the resolved tree shadow distance
     /// (`TORE_TREE_SHADOW_FT` overrides it while shadows are on, a measuring
     /// aid).
     pub fn set_shadows(&mut self, shadows: &crate::surface_lighting::Settings) {

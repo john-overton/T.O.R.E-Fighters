@@ -18,7 +18,7 @@ NORMAL_STATES = [
     "loading", "loading-thunderbirds",
     "normal", "hover", "pressed", "help", "pref", "multi", "notice", "controls", "controls-keyboard",
     "controls-mouse", "controls-head", "controls-search", "controls-search-keys", "graphics", "graphics-middle",
-    "graphics-bottom", "graphics-scale", "sound",
+    "graphics-bottom", "graphics-scale", "graphics-shadows", "sound",
     "replays", "replays-settings", "replays-delete", "locate", "locate-importing", "locate-done",
     "direct", "direct-games", "direct-trying", "direct-refused", "direct-options",
     "internet", "internet-games", "internet-joining", "internet-options", "internet-unreachable",
@@ -934,6 +934,8 @@ def scenarios() -> list[Scenario]:
         "--anti-aliasing off", "--anti-aliasing 2x", "--anti-aliasing 4x", "--anti-aliasing 8x",
         "--render-scale 75", "--render-scale 125", "--render-scale 150", "--render-scale 200",
         "--spotting-aid off", "--spotting-aid strong", "--terrain-filtering off", "--original-graphics",
+        "--shadow-distance trees", "--shadow-distance 1", "--shadow-distance 2",
+        "--shadow-distance 4", "--shadow-distance 6", "--shadow-distance 8",
     ):
         out.append(
             Scenario(
