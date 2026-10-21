@@ -18,7 +18,9 @@ def _split_props(rest: str) -> list[str]:
     return re.split(r"(?<!\\),", rest)
 
 
-def check_acmi(text: str, *, need_objects: bool = True) -> list[str]:
+def check_acmi(text: str, *, need_objects: bool = True, need_span: bool = True) -> list[str]:
+    """Problems with a Tacview file. `need_span` asks for a time past 0, which a recording of one frame (a flight
+    that ended on its first tick) cannot have: its export is that one frame at #0."""
     problems: list[str] = []
     lines = text.split("\n")
     if lines and lines[-1] == "":
@@ -103,7 +105,7 @@ def check_acmi(text: str, *, need_objects: bool = True) -> list[str]:
             problems.append(f"object {oid} ends before it starts")
     if need_objects and not created:
         problems.append("ACMI has no objects")
-    if need_objects and last_time <= 0:
+    if need_objects and need_span and last_time <= 0:
         problems.append("ACMI has no time span")
     return problems
 

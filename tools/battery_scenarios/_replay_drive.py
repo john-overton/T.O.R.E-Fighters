@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Drives a windowed T.O.R.E run with key presses sent through Hyprland.
 
-    _replay_drive.py --data DIR [--bin PATH] [--cwd DIR] [--keys "wait 3;ctrl+P;Escape"] [--random SEED:COUNT:SET] -- GAME ARGS
+    _replay_drive.py --data DIR [--bin PATH (default $TORE_BATTERY_BIN)] [--await-recording] [--cwd DIR] [--keys "wait 3;ctrl+P;Escape"] [--random SEED:COUNT:SET] -- GAME ARGS
 
 The game is started through tools/agent-run.sh on a spare workspace. Keys go to
 that one window by its process id (found by the unique data folder in its
@@ -118,7 +118,11 @@ def main(argv: list[str]) -> int:
         print("driver: not running under Hyprland, nothing sent")
         return 0
     env = dict(os.environ, TORE_DATA_DIR=data, TORE_NO_ERROR_DIALOG="1", RUST_BACKTRACE="1")
-    binary = opts[opts.index("--bin") + 1] if "--bin" in opts else str(ROOT / "target" / "debug" / "tore-app")
+    # The battery's binary under test (TORE_BATTERY_BIN, set by tools/battery.py), else the checkout's debug build:
+    # the driver once always ran target/debug/tore-app, so a release battery's windowed flights ran a slow and
+    # possibly stale debug build (or none, in a checkout that never built one).
+    default = os.environ.get("TORE_BATTERY_BIN") or str(ROOT / "target" / "debug" / "tore-app")
+    binary = opts[opts.index("--bin") + 1] if "--bin" in opts else default
     cwd = opts[opts.index("--cwd") + 1] if "--cwd" in opts else ROOT
     proc = subprocess.Popen(
         [str(ROOT / "tools" / "agent-run.sh"), binary, *game], cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
@@ -142,6 +146,15 @@ def main(argv: list[str]) -> int:
         time.sleep(0.25)
         waited += 0.25
     print(f"driver: window {'up' if waited < WINDOW_WAIT else 'still missing'} after {waited:.1f} s")
+    # --await-recording: a recorded flight's keys wait for the flight itself (its recording's `.partial` file in
+    # the data folder's replays/), not only the window. A Quick Mission can take ten seconds or more past the
+    # window to build its scene, and keys sent meanwhile reach the loading screen, not the cockpit.
+    if "--await-recording" in opts:
+        began = 0.0
+        while proc.poll() is None and not list(Path(data, "replays").glob("*.partial")) and began < WINDOW_WAIT:
+            time.sleep(0.25)
+            began += 0.25
+        print(f"driver: flight {'recording' if began < WINDOW_WAIT else 'still not recording'} after {began:.1f} s more")
     time.sleep(float(os.environ.get("DRIVE_SETTLE", "4")))
     alive = True
     for step in steps:
