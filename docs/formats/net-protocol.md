@@ -3185,7 +3185,11 @@ again with an observer; the capture format did not change for it.
   launcher until a second after its motor lights, the AI's terrain look-ahead
   grows with excess speed, and an AI approach on its glide path no longer holds
   high over rising ground, which changes the simulation, so an older game must
-  not join.
+  not join;
+  61 since AI default loads carry fuel (slice bf-aifuel): AI aircraft on their
+  default load start with their tanks full and their real engine count, and AI
+  endurance counts external fuel, which changes the simulation, so an older
+  game must not join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
