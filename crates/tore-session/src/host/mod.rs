@@ -3628,11 +3628,10 @@ impl Host {
                 .and_then(|s| s.plane)
                 .and_then(|p| self.world.roster.plane(p))
                 .is_some_and(|p| {
+                    // A plane kept for its player (away or dropped) goes to
+                    // the AI; only a departure removes it.
                     self.spec.player_choice[MissionSpec::wing_index(p.slot.wing)]
-                        && !self
-                            .rejoin
-                            .reserved_plane(p.id)
-                            .is_some_and(|(_, kept)| kept.away)
+                        && self.rejoin.reserved_plane(p.id).is_none()
                 });
             if (!self.settings.ai() || choice_departure) && self.world.can_give_back(seat).is_ok() {
                 if let Some(plane) = self.world.roster.seat(seat).and_then(|s| s.plane) {
