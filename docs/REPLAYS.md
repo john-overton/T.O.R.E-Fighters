@@ -2605,7 +2605,10 @@ headless workflow.
   in `tore-app/src/replay/convert.rs`: `aircraft_state`, `projectile_state`,
   `debris_states`, `escapee_state` and `EffectWatch` (effects are recorded
   once, when they start) on the way in; `snapshot` on the way out, which
-  draws the same picture through the same helpers; `difference` names the
+  draws the same picture through the same helpers, with the effects
+  `playing_effects` finds by replaying the simulation's 64-effect cap over
+  the recorded starts (an effect the game cut short at the cap stays gone,
+  even after others run out); `difference` names the
   first thing two snapshots disagree on beyond the precision above. The
   draw rules that hold for a whole flight (which models are loaded, which
   aircraft draw with them) are header extras, read with

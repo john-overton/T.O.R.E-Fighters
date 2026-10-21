@@ -859,13 +859,61 @@ impl Identities {
     }
 }
 
-/// Longest an effect plays: an aircraft explosion's 240 ticks. Pass it to
-/// [`replay::Recording::live_effects`] as the look-back.
+/// Longest an effect plays: an aircraft explosion's 240 ticks.
 pub const EFFECT_LOOKBACK_TICKS: u64 = 240;
 
+/// The effects the game was drawing at `tick`, in its order. The simulation
+/// keeps at most [`live::MAX_EFFECTS`] and drops the oldest when a new one
+/// starts at that cap, even if the dropped one had time left, so this
+/// replays the cap over the recorded starts rather than keeping the newest
+/// of everything still within its time: an effect cut short in the game
+/// stays gone after other effects run out.
+///
+/// Starting from an empty list twice the longest effect back gives exactly
+/// the game's list. Effects missed by starting late sit at the front of the
+/// game's list, so the game drops them before any later one, and every one
+/// has run out a longest effect later; from then on both lists hold the
+/// same effects.
+pub fn playing_effects(
+    recording: &replay::Recording,
+    tick: u64,
+) -> replay::Result<Vec<replay::LiveEffect>> {
+    let spawns = recording.spawns(tick.saturating_sub(2 * EFFECT_LOOKBACK_TICKS), tick)?;
+    Ok(cap_effects(&spawns.effects, tick))
+}
+
+/// [`playing_effects`] over a list of recorded starts in tick order. Craters
+/// and fires share the effect stream but are marks, outside the list.
+fn cap_effects(spawns: &[(u64, replay::EffectSpawn)], tick: u64) -> Vec<replay::LiveEffect> {
+    let playing_at =
+        |at: u64, (start, e): &(u64, replay::EffectSpawn)| at - start < u64::from(e.duration_ticks);
+    let mut list: Vec<(u64, replay::EffectSpawn)> = Vec::new();
+    for spawn in spawns
+        .iter()
+        .filter(|(start, e)| *start <= tick && live_effect_kind(e.kind).is_some())
+    {
+        list.retain(|playing| playing_at(spawn.0, playing));
+        if list.len() == live::MAX_EFFECTS {
+            list.remove(0);
+        }
+        list.push(spawn.clone());
+    }
+    list.into_iter()
+        .filter(|playing| playing_at(tick, playing))
+        .map(|(spawn_tick, e)| replay::LiveEffect {
+            spawn_tick,
+            age_ticks: tick - spawn_tick,
+            kind: e.kind,
+            position: e.position,
+            duration_ticks: e.duration_ticks,
+            scale: e.scale,
+        })
+        .collect()
+}
+
 /// The picture one recorded frame draws. `effects` are the effects still
-/// playing at the frame's tick, from [`replay::Recording::live_effects`] with
-/// [`EFFECT_LOOKBACK_TICKS`]; everything else comes from the frame.
+/// playing at the frame's tick, from [`playing_effects`]; everything else
+/// comes from the frame.
 pub fn snapshot(
     frame: &replay::Frame,
     effects: &[replay::LiveEffect],
@@ -1624,6 +1672,49 @@ mod tests {
     }
 
     #[test]
+    fn an_effect_dropped_at_the_cap_stays_gone_after_others_run_out() {
+        let spawn = |x: f64, duration_ticks: u32| replay::EffectSpawn {
+            kind: replay::EffectKind::Destroyed,
+            position: [x, 0., 0.],
+            duration_ticks,
+            scale: replay::EffectSpawn::FULL_SCALE,
+        };
+        // A full list on tick 0, its newest lasting 5 ticks; a new effect on
+        // tick 1 drops the oldest, which still had 239 ticks to play.
+        let mut spawns: Vec<(u64, replay::EffectSpawn)> = (0..live::MAX_EFFECTS - 1)
+            .map(|i| (0, spawn(i as f64, 240)))
+            .collect();
+        spawns.push((0, spawn(100., 5)));
+        spawns.push((1, spawn(200., 240)));
+        // A crater recorded alongside is a mark: it drops nothing.
+        spawns.push((
+            1,
+            replay::EffectSpawn {
+                kind: replay::EffectKind::Crater(0),
+                duration_ticks: u32::MAX,
+                ..spawn(300., 0)
+            },
+        ));
+        let at = |tick| -> Vec<f64> {
+            cap_effects(&spawns, tick)
+                .iter()
+                .map(|e| e.position[0])
+                .collect()
+        };
+        // Tick 0 shows the full list, not the start still to come.
+        assert_eq!(at(0).len(), live::MAX_EFFECTS);
+        assert_eq!(at(0)[0], 0.);
+        let one = at(1);
+        assert_eq!(one.len(), live::MAX_EFFECTS);
+        assert_eq!((one[0], one[live::MAX_EFFECTS - 1]), (1., 200.));
+        // The short one ran out; the dropped one does not come back.
+        let ten = at(10);
+        assert_eq!(ten.len(), live::MAX_EFFECTS - 1);
+        assert!(!ten.contains(&0.) && !ten.contains(&100.));
+        assert_eq!(ten.last(), Some(&200.));
+    }
+
+    #[test]
     fn effects_are_recorded_once_when_they_start() {
         use live::EffectKind::{Destroyed, Flare, Hit};
         let mut watch = EffectWatch::default();
@@ -1741,9 +1832,7 @@ mod tests {
         let presentation = Presentation::from_header(recording.header());
         live.each_ref().map(|live| {
             let frame = recording.frame(live.tick).unwrap().unwrap();
-            let effects = recording
-                .live_effects(live.tick, EFFECT_LOOKBACK_TICKS)
-                .unwrap();
+            let effects = playing_effects(&recording, live.tick).unwrap();
             snapshot(&frame, &effects, &presentation, &identities)
         })
     }

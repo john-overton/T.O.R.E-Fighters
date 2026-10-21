@@ -404,7 +404,7 @@ pub fn verify(
             result.missing += 1;
             continue;
         };
-        let effects = recording.live_effects(snapshot.tick, convert::EFFECT_LOOKBACK_TICKS)?;
+        let effects = convert::playing_effects(&recording, snapshot.tick)?;
         let mut rebuilt = convert::snapshot(&frame, &effects, &presentation, &identities);
         rebuilt.marks = convert::marks_at(&marks, snapshot.tick);
         tore_session::client::convert::stores::put_recorded(
