@@ -13,6 +13,9 @@ image establishes the requested direction; the pixel positions below are
 agent-selected, opinionated layout fits. They apply to all selectable aircraft.
 Original HUD font and palette resources remain in use.
 
+HUD brightness, colour and the separate instrument and flood controls are
+described in [cockpit lighting](cockpit-lighting.md).
+
 ## Flight display
 
 Remove the fixed aircraft-datum bars at the center of the HUD. Keep the

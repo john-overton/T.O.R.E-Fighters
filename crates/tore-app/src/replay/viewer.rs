@@ -747,6 +747,7 @@ pub(crate) fn city_index(
 }
 
 pub struct Viewer {
+    local_lighting: (crate::cockpit_lighting::Lighting, i16),
     pub path: PathBuf,
     recording: Arc<Recording>,
     pub world: Terrain,
@@ -1006,6 +1007,13 @@ impl Viewer {
             options,
             growth,
         )?;
+        viewer.local_lighting = crate::assets::data_directory()
+            .ok()
+            .and_then(|path| crate::preferences::read(&path.join("preferences-v1.conf")).ok())
+            .and_then(|text| crate::preferences::Preferences::parse(&text).ok())
+            .map_or((Default::default(), 0), |prefs| {
+                (prefs.lighting, prefs.brightness)
+            });
         viewer.playback.add_motors(resources);
         viewer.load_sights(resources);
         // Other aircraft's launches name their weapon record.
@@ -1072,6 +1080,7 @@ impl Viewer {
             pause::Menu::new(&ownship.flight_menu)
         };
         let mut viewer = Self {
+            local_lighting: (Default::default(), 0),
             path: path.to_path_buf(),
             scanner: if growth.is_some() {
                 Scanner::start_live(Arc::clone(&recording))
@@ -3610,10 +3619,13 @@ impl Viewer {
         } else {
             Vec::new()
         };
-        let hud_color =
-            self.ownship
-                .cockpit_palette(&self.world, &self.scenery, camera.position[1], 0)
-                [usize::from(self.ownship.hud.primary_color)];
+        let hud_color = self.ownship.cockpit_palette(
+            &self.world,
+            &self.scenery,
+            camera.position[1],
+            self.local_lighting.1,
+        )[usize::from(self.ownship.hud.primary_color)];
+        let hud_color = self.local_lighting.0.hud(hud_color, self.local_lighting.1);
         let mut panel_rects = Vec::new();
         let mut menu_rect = None;
         let model = if self.ui.hidden {
@@ -4735,6 +4747,45 @@ mod tests {
 
     fn toast(v: &Viewer) -> String {
         v.toast.as_ref().map(|(t, _)| t.clone()).unwrap_or_default()
+    }
+
+    #[test]
+    fn replay_hud_camera_uses_local_ink_but_not_instrument_or_flood_levels() {
+        let dir = TempDir::new("viewer-local-lighting");
+        let mut v = viewer(&dir, &Options::default());
+        // The general viewer fixture carries no HUD font. Supply synthetic ink.
+        for model in std::iter::once(&mut v.ownship).chain(v.models.iter_mut()) {
+            model.hud_font = tore_formats::font::Font {
+                height: 7,
+                glyphs: (0..256)
+                    .map(|_| tore_formats::font::Glyph {
+                        advance: 6,
+                        pixels: vec![(0, 0)],
+                    })
+                    .collect(),
+            };
+        }
+        press(&mut v, "v");
+        let tick = v.recording.first_tick().unwrap();
+        let picture = v.playback.picture(tick, 1.);
+        let draw = |v: &mut Viewer| v.taped_view(&picture, tick, [640, 480]).unwrap().overlay;
+        let green = draw(&mut v);
+        v.local_lighting.0.colour = 3;
+        let cyan = draw(&mut v);
+        assert!(green != cyan, "HUD camera must use the local colour");
+        v.local_lighting.0.instruments = 1;
+        v.local_lighting.0.flood = 0;
+        assert!(
+            cyan == draw(&mut v),
+            "instrument/flood levels must leave HUD ink unchanged"
+        );
+        v.local_lighting.1 = -256;
+        let dim = draw(&mut v);
+        v.local_lighting.1 = 256;
+        assert!(
+            dim != draw(&mut v),
+            "HUD camera must use the local brightness"
+        );
     }
 
     #[test]

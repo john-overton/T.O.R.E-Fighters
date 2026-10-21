@@ -13,6 +13,9 @@ instrument window (Envelope, RWR, Radar, Target Cam and the rest): which art is
 used, where it sits, how big it is, and why its colour changes with the
 aircraft being flown.
 
+Local brightness and red flood illumination follow the
+[cockpit lighting spec](cockpit-lighting.md), independently of HUD ink.
+
 ## What the player sees
 
 - Every instrument window is framed by a bezel painted for the cockpit the

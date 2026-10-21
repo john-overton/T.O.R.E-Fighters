@@ -26,6 +26,11 @@ model, the writer, the bounded reader and every export. It knows nothing
 about the simulation or the renderer; the app converts its own state into
 the crate's model once per tick.
 
+The replay HUD camera uses the current locally saved HUD colour and brightness
+when the viewer opens. Its existing tape whitening and softness still apply.
+Lighting changes during a flight are not recorded, and
+old recordings remain unchanged. [Cockpit lighting](spec/cockpit-lighting.md).
+
 ## Recording
 
 ### When

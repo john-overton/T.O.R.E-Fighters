@@ -15,6 +15,14 @@ through those same actions. This layer adds no external screen export, no window
 rearrangement, no sensor behaviour of its own and no fabricated readings; the
 shared [sensor component](radar.md) decides what the scopes show.
 
+## Cockpit lighting
+
+Ctrl+I then -/+ adjusts instruments and cockpit art. Ctrl+Shift+F then -/+ adjusts
+red flood lighting. These chords expire after four seconds or another key;
+Ctrl may stay held. Ctrl+H cycles HUD colour, while Shift+[ / Shift+] retain
+retail HUD brightness. Controls > View lists the selectors and separate
+bindable dim/bright actions. [Levels and defaults](spec/cockpit-lighting.md).
+
 ## Quick start
 
 Every default key, mouse input and gamepad button is in the
@@ -346,11 +354,11 @@ design drawn with the imported raster font. Every default is listed in the
   Weapons group: commands to bind. **Keys** (Inputs on other devices) lists
   the actions an input is already bound to. Type its name as the rows show it
   (`page` finds Page Up and Page Down; a short name such as `f` or `lb` must be
-  a whole word, so `f` finds F and Ctrl+F but not F1), or click **Press** and
+  a whole word, so `f` finds F and Ctrl+Shift+F but not F1), or click **Press** and
   press it. A pressed keyboard key matches exactly, modifiers included. A
   pressed button, D-pad direction or axis on a controller matches every
   binding that uses it, including combinations where it is the modifier.
-  Folded groups open while a search is active. Ctrl+F jumps to the field;
+  Folded groups open while a search is active. Ctrl+Shift+F jumps to the field;
   Backspace edits, Delete or **Clear** empties it, and Esc empties it before
   it backs out of the screen. Typed text stays when you change device; a
   pressed input is dropped, because it names a control on the old device.

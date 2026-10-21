@@ -302,6 +302,10 @@ impl Action {
                 | "airport-cancel"
                 | "cockpit"
                 | "hud"
+                | "instruments-dim"
+                | "instruments-brighten"
+                | "flood-dim"
+                | "flood-brighten"
                 | "zoom-in"
                 | "zoom-out"
                 | "menu-up"
@@ -349,7 +353,10 @@ impl Action {
         Err(format!("unknown action {s}"))
     }
     fn allowed_paused(&self) -> bool {
-        matches!(self, Self::Ui(s) if s == "pause" || s == "menu" || s.starts_with("menu-"))
+        matches!(self, Self::Ui(s) if s == "pause" || s == "menu" || s.starts_with("menu-")
+            || matches!(s.as_str(), "key:Ctrl-i" | "key:Ctrl-Shift-f" | "key:Ctrl-h"
+                | "key:Shift-[" | "key:Shift-]" | "instruments-dim" | "instruments-brighten"
+                | "flood-dim" | "flood-brighten"))
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq)]

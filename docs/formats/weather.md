@@ -838,8 +838,8 @@ cockpit palette. Authored HUD geometry and other instrument colors are separate.
 0x4b2f24 initializes it to zero. The palette worker at 0x4b3f74 changes just
 index 40: positive `c += (63-c)*amount >> 8`, negative
 `c = c*(256+amount) >> 8`. Endpoints give white/black. This occurs before sun
-whitening, and index 40 is outside fog's 47..60 / 64..254 tint ranges. The app
-now shares one resolved palette between cockpit artwork and primary HUD ink.
+whitening, and index 40 is outside fog's 47..60 / 64..254 tint ranges. The app resolves neutral cockpit artwork separately from primary HUD ink so
+HUD brightness cannot recolour bezels. [Local lighting controls](../spec/cockpit-lighting.md).
 Brightness controls use the recovered range/step instead of the fitted green
 formula. Preferences version 2 stores the signed amount; version 1 is accepted
 with explicit host migration `(old-7)*16`, preserving step distance from the old

@@ -186,7 +186,7 @@ impl CockpitRenderer {
         let hud = texture(device, 640, 480);
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Cockpit projection"),
-            size: 112,
+            size: 128,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -375,7 +375,10 @@ impl CockpitRenderer {
             ],
         }));
     }
-    /// Upload the palette shared with the CPU HUD raster.
+    pub fn lighting(&self, queue: &wgpu::Queue, gain: f32, flood: f32) {
+        crate::sim_renderer::write_floats(queue, &self.uniform, 112, &[gain - 1., flood, 0., 0.]);
+    }
+    /// Upload the neutral HUD-brightness cockpit art palette.
     pub fn weather(&mut self, queue: &wgpu::Queue, colors: &[[u8; 3]; 256]) {
         if self.palette_uploaded.as_ref() == Some(colors) {
             return;
