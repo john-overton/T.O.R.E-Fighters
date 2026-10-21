@@ -14,9 +14,11 @@ the two stay in step. See docs/testing/lane-net.md.
 from __future__ import annotations
 
 import errno
+import os
 import re
 import shutil
 import socket
+import subprocess
 import time
 from pathlib import Path
 
@@ -2097,8 +2099,34 @@ def drive_convert(d: Drive) -> None:
 # Stage L: content and gaps (slice L3)
 # --------------------------------------------------------------------------
 
-# The 1.0 disc, which net-content-builds imports for its bot.
+# The 1.0 disc, which net-content-builds imports for its bot. A git worktree has no gameassets/ of its own (it is
+# local-only and untracked), so the checkout's folder is not the only place looked: `TORE_DISC_DIR` (as the
+# surface_data import test takes it), then the `disc1` folder beside the installed copy found the way
+# _replay_tools.retail_source finds it: TORE_GAME_DIR, the profile's remembered media source (media-source.txt),
+# this checkout's gameassets/, the main checkout's gameassets/ (the parent of the shared .git directory).
 DISC_10 = ROOT / "gameassets" / "fighters-anthology" / "disc1"
+
+
+def disc_10(d: Drive) -> Path:
+    """The 1.0 disc folder this run imports (read only), or the first place looked when none holds it."""
+    places = [Path(os.environ["TORE_DISC_DIR"])] if os.environ.get("TORE_DISC_DIR") else []
+    installs = [Path(os.environ["TORE_GAME_DIR"])] if os.environ.get("TORE_GAME_DIR") else []
+    source = d.data / "media-source.txt"
+    if source.exists():
+        m = re.search(r"(?m)^path=(.+)$", source.read_text(errors="replace"))
+        if m:
+            installs.append(Path(m.group(1).strip()))
+    installs.append(DISC_10.parent)
+    try:
+        common = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        installs.append(Path(common).parent / "gameassets" / "fighters-anthology")
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    places += [install / "disc1" for install in installs]
+    return next((p for p in places if (p / "SETUP.ESA").exists()), places[0])
 
 
 def content_item_lines(text: str) -> list[str]:
@@ -2109,10 +2137,14 @@ def content_item_lines(text: str) -> list[str]:
 def drive_content_builds(d: Drive) -> None:
     """A server on the profile's 1.02F import and a bot on a 1.0 import made here: every item is the same, the bot
     says nothing about the build (John, 2026-10-06: the audit found no difference a player sees), and flies."""
-    if not (DISC_10 / "SETUP.ESA").exists():
-        raise DriveError(f"the 1.0 disc is missing: {DISC_10} (net-content-builds needs it)")
+    disc = disc_10(d)
+    if not (disc / "SETUP.ESA").exists():
+        raise DriveError(
+            f"the 1.0 disc is missing: {disc} (net-content-builds needs it; set TORE_DISC_DIR or TORE_GAME_DIR, "
+            "or import the profile from media whose folder holds disc1)"
+        )
     fa10 = d.work / "fa10"
-    d.run("import", [d.server, "--import", DISC_10, "--data-dir", fa10], timeout=600)
+    d.run("import", [d.server, "--import", disc, "--data-dir", fa10], timeout=600)
     report = d.run("report", [d.bot, "--content-report", "--data-dir", fa10], timeout=120)
     report.expect(r"^Content: Fighters Anthology 1\.0, imported by T\.O\.R\.E ", "the 1.0 import's source")
     port = d.port()
@@ -2597,7 +2629,8 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="net-content-builds", lane="net", args=[], driver=drive_content_builds, uses=("server", "bot"),
             timeout=900,
-            notes="a server on the profile's 1.02F import and a bot on a 1.0 import of gameassets' disc1 made in the "
+            notes="a server on the profile's 1.02F import and a bot on a 1.0 import of the 1.0 disc (TORE_DISC_DIR, the "
+            "gameassets link or the profile's media source's disc1) made in the "
             "run: every content item is the same, the bot says nothing about the build and flies (slices L3, L5)",
         ),
         Scenario(
