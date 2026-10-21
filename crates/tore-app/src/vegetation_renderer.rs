@@ -812,10 +812,9 @@ impl Renderer {
         let mesh_count = lib.meshes.len();
         let mut table = Vec::with_capacity(mesh_count * 12);
         for mesh in &lib.meshes {
-            let look = match (mesh.look, mesh.recolour.is_some()) {
-                (Look::Foliage, _) => 0.,
-                (Look::Solid, false) => 1.,
-                (Look::Solid, true) => 3.,
+            let look = match mesh.look {
+                Look::Foliage => 0.,
+                Look::Solid => 1.,
             };
             let mean = mesh.recolour.unwrap_or([1.; 3]);
             table.extend([
@@ -824,8 +823,7 @@ impl Renderer {
                 mesh.radius,
                 f32::from_bits(self.capacity as u32),
             ]);
-            // Negative page codes carry a generated atlas cell without enlarging
-            // the instance or mesh record. Retail still selects four views.
+            // Negative page codes carry an original material atlas cell.
             let page = mesh.sprite_tile.map_or(mesh.sprite_layer as f32, |tile| {
                 -((mesh.sprite_layer * 4 + usize::from(tile) + 1) as f32)
             });

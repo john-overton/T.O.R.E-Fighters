@@ -410,7 +410,8 @@ Set `TORE_VEG_GPU_TIMING=1` to also emit `GPU` lines using timestamp queries.
 These measure the GPU commands without CPU placement/submission or readback.
 An adapter without the required timestamp features returns an explicit error.
 Use repeated runs and compare medians, with the same camera and settings.
-Compare `TORE_VEGETATION_SPRITES=retail`, `pack` and `mixed`. The pass 4 acceptance
+Use the shipped original material art and record `TORE_VEG_TINT` (default
+`theater`). Retail/mixed art selectors are retired. The pass 4 acceptance
 target is added GPU cost below 2 ms in woods and 1 ms in open country at 4K High.
 These are targets, not measurements for the current density and pack.
 The placement rules and presentation scope are in the

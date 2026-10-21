@@ -101,26 +101,22 @@ def scenarios():
 
 
 def check_top_crowns(work, output):
-    if 'the import predates the retail vegetation art' in output:
-        # The profile was imported before vegetation pass 3 (3804ce10) kept
-        # the retail shapes and textures: an environment limit, not a bug.
-        return ['environment: the profile\'s import predates the retail vegetation art; re-import media into it']
     report = work/'art'/'top-crowns.tsv'
     if not report.exists():
-        return ['no retail grove crown audit']
+        return ['no original sprite crown audit']
     rows=report.read_text().splitlines()[1:]
     if not rows:
-        return ['no retail grove crown audit']
+        return ['no original sprite crown audit']
     errors=[]
     for row in rows:
         source,count,grove,crown,transparent=row.split('\t')
-        if int(count) != 1 or '-crown-' not in source:
-            errors.append(f'{source}: a retail card still contains multiple plants')
+        if int(count) != 1 or source.rsplit('-', 1)[-1] not in ('1', '2', '3'):
+            errors.append(f'{source}: an original card does not identify one plant')
         if not 0 < float(crown) == float(grove):
             errors.append(f'{source}: individual top does not match its own crown')
         if not 0 < int(transparent) < 124 * 124:
             errors.append(f'{source}: missing top cutouts')
     index = work/'art'/'index.tsv'
     if not index.exists() or len(index.read_text().splitlines()) != len(rows) + 1:
-        errors.append('individual retail size index is incomplete')
+        errors.append('individual original size index is incomplete')
     return errors

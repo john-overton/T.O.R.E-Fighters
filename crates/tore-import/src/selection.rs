@@ -186,14 +186,9 @@ pub const MULTIPLAYER_DATA: &[&str] = &[
     // delay, Revive distance) is what opens the `MC_*` dialogs above.
     "MC_MENU.MNU",
 ];
-/// The retail tree, bush, grove and palm grove shapes and their textures,
-/// kept from `FA_2.LIB` for the exploratory vegetation. No OT, mission or
-/// layout names them (`TREE1.OT` and `TREE2.OT` name a `TREE1.SH` and a
-/// `TREE2.SH` the media does not hold), so the surface data never keeps
-/// them. The game keeps them apart from the theater resources, so the combat
-/// tapes' fingerprint does not move when an import gains them; an import
-/// without them draws generated shapes instead.
-pub const VEGETATION_ART: &[&str] = &[
+/// Legacy vegetation art names, retained only to exclude old cached art from
+/// theater fingerprints. New imports do not select these resources.
+pub const LEGACY_VEGETATION_ART: &[&str] = &[
     "TREEA.SH",
     "TREEB.SH",
     "TREEC.SH",
@@ -253,7 +248,7 @@ mod tests {
             MULTIPLAYER_ART,
             MULTIPLAYER_DATA,
             SLIDER_ART,
-            VEGETATION_ART,
+            LEGACY_VEGETATION_ART,
         ];
         for list in lists {
             let unique: BTreeSet<_> = list.iter().collect();

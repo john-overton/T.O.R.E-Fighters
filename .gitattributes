@@ -1,0 +1,2 @@
+# Material IDs are raw bytes. Never convert line endings on any platform.
+crates/tore-app/assets/vegetation/pack.materials binary

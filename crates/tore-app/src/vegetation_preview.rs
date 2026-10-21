@@ -162,6 +162,21 @@ pub fn run() -> AppResult<()> {
     }
     let assets = crate::reel::load_assets()?;
     let resources = &assets.theater_resources;
+    if jobs.iter().any(|job| job == "material-cameras") {
+        let world = Terrain::for_mission(resources, "KURILE", Some(0), &overrides([12, 0])?)?;
+        let mut lines = String::new();
+        for (name, x, z, pitch) in [
+            ("KURILE-top-500ft", 788480., 624640., -1.5697963267948967),
+            ("KURILE-low-500ft", 787692., 623515., -0.3490658503988659),
+        ] {
+            let y = world.height(x as f32, z as f32) + 500.;
+            lines.push_str(&format!(
+                "{name} KURILE 0 12 0 {x} {y} {z} 0.61086524 {pitch}\n"
+            ));
+        }
+        std::fs::write(out.join("material-cameras.txt"), lines)?;
+        return Ok(());
+    }
     if jobs.iter().any(|job| job == "limits-check") {
         return limits_check(resources, out);
     }
@@ -1785,193 +1800,82 @@ fn replay_cameras(
     Ok(())
 }
 
-/// What `--vegetation-art` says for an import made before the retail
-/// vegetation shapes and textures were kept (vegetation pass 3, 3804ce10).
-const VEGETATION_ART_MISSING: &str =
-    "vegetation art: the import predates the retail vegetation art; re-import media";
-
-/// `--vegetation-art OUT`: every retail vegetation and rock texture of the
-/// import as a PNG through the Ukraine reference palette, the cutout (index
-/// 255) in magenta. A look at what the import holds; nothing is committed.
+/// Export the original material sprites without reading an import.
 pub fn art() -> AppResult<()> {
     let out = std::env::args()
         .nth(2)
         .ok_or("--vegetation-art needs an output directory")?;
     let out = Path::new(&out);
     std::fs::create_dir_all(out)?;
-    let assets = crate::reel::load_assets()?;
-    let resources = &assets.theater_resources;
-    let environment =
-        tore_formats::theater::Environment::parse(resources.get("UKR.MM").ok_or("no UKR.MM")?)?;
-    let palette = tore_world::city::mask::reference_palette(resources, &environment.map)
-        .ok_or("no reference palette")?;
-    let art = crate::vegetation::art();
-    if art.is_empty() {
-        // The game falls back without them; this audit has nothing to read.
-        return Err(VEGETATION_ART_MISSING.into());
-    }
-    std::fs::create_dir_all(out.join("source"))?;
-    let mut names: Vec<(&String, &Vec<u8>)> = art.iter().collect();
-    names.extend(
-        resources
-            .iter()
-            .filter(|(n, _)| n.starts_with("_ROCK") && n.ends_with(".PIC")),
-    );
-    println!("vegetation art: {} resources in the import", art.len());
-    for (name, bytes) in names {
-        if !name.ends_with(".PIC") {
-            continue;
-        }
-        let pic = tore_formats::Pic::parse(bytes)?;
-        let mut rgba = Vec::with_capacity(pic.width * pic.height * 4);
-        let mut cut = 0usize;
-        for (p, m) in pic.pixels.iter().zip(&pic.mask) {
-            if !*m || *p == 255 {
-                cut += 1;
-                rgba.extend([255, 0, 255, 255]);
-            } else {
-                let c = palette[usize::from(*p)];
-                rgba.extend([c[0], c[1], c[2], 255]);
-            }
-        }
-        println!("  {name}: {}x{}, cutout {cut}", pic.width, pic.height);
-        let png = crate::replay::png::encode_rgba(pic.width as u32, pic.height as u32, &rgba)?;
-        std::fs::write(
-            out.join("source")
-                .join(format!("{}.png", name.trim_end_matches(".PIC"))),
-            png,
-        )?;
-    }
-    let mut shapes: Vec<(&String, &Vec<u8>)> = art.iter().collect();
-    shapes.extend(
-        resources
-            .iter()
-            .filter(|(n, _)| n.starts_with("ROCK") && n.ends_with(".SH")),
-    );
-    for (name, bytes) in shapes {
-        if !name.ends_with(".SH") {
-            continue;
-        }
-        let shape = tore_formats::shape::Shape::scenery(bytes)?;
-        let scale = tore_formats::shape::object_scale(bytes).unwrap_or(1.);
-        let mut lo = [f32::INFINITY; 3];
-        let mut hi = [f32::NEG_INFINITY; 3];
-        let mut textures = std::collections::BTreeSet::new();
-        let mut textured = 0;
-        for face in &shape.faces {
-            for p in &face.positions {
-                for k in 0..3 {
-                    lo[k] = lo[k].min(p[k]);
-                    hi[k] = hi[k].max(p[k]);
-                }
-            }
-            if !face.texture.is_empty() {
-                textured += 1;
-                textures.insert(face.texture.to_ascii_uppercase());
-            }
-        }
-        println!(
-            "  {name}: {} faces ({textured} textured), scale {scale}, x {:.0}..{:.0} y {:.0}..{:.0} up {:.0}..{:.0}, {:?}",
-            shape.faces.len(),
-            lo[0],
-            hi[0],
-            lo[1],
-            hi[1],
-            lo[2],
-            hi[2],
-            textures
-        );
-        if std::env::var_os("TORE_VEGETATION_FACES").is_some() {
-            for face in &shape.faces {
-                let c = face
-                    .positions
-                    .iter()
-                    .fold([0f32; 3], |a, p| [a[0] + p[0], a[1] + p[1], a[2] + p[2]]);
-                let n = face.positions.len() as f32;
-                println!(
-                    "    face {} pts centre {:.0},{:.0},{:.0} tex {} colour {:?}",
-                    face.positions.len(),
-                    c[0] / n,
-                    c[1] / n,
-                    c[2] / n,
-                    face.texture,
-                    face.colors.first()
-                );
-            }
-        }
-    }
     let mut pages = Vec::new();
     let lib =
-        crate::vegetation_shapes::Library::build(&art, resources, &palette, &mut pages, |p| {
-            p.len() / 65536
-        });
-    let mut index = String::from(
-        "name\tshape\tcrown\treference_height_ft\treference_width_ft\taspect\theight_scale\n",
-    );
-    let mut crown_report =
+        crate::vegetation_shapes::Library::build(crate::vegetation::region("UKR"), &mut pages, 0);
+    let mut index = String::from("name\treference_height_ft\treference_width_ft\taspect\n");
+    let mut crowns =
         String::from("source\tcrowns\tgrove_width\tmax_crown_width\ttransparent_pixels\n");
     for mesh in &lib.meshes {
-        let (shape, crown) = mesh
-            .source
-            .split_once("-crown-")
-            .ok_or("unnamed retail crown")?;
-        // Fitted reference feet only. Original in-game vegetation scale is unknown.
-        let reference = if shape.starts_with("BUSH") {
-            4.
-        } else if shape.starts_with("ROCK") {
+        let name = mesh.source.trim_start_matches("original/");
+        let reference = if mesh.look == crate::vegetation_shapes::Look::Solid {
             12.
+        } else if name.contains("bush")
+            || name.contains("scrub")
+            || name.contains("fern")
+            || name.contains("yucca")
+        {
+            4.
         } else {
             57.
         };
-        let h = reference * mesh.height_scale;
         index.push_str(&format!(
-            "{}\t{shape}.SH\t{crown}\t{h:.5}\t{:.5}\t{:.5}\t{:.5}\n",
-            mesh.source,
-            h * 2. * mesh.radius,
-            2. * mesh.radius,
-            mesh.height_scale
+            "{name}\t{reference}\t{:.5}\t{:.5}\n",
+            reference * 2. * mesh.radius,
+            2. * mesh.radius
         ));
         for top in [false, true] {
-            let (layer, tile) = if top {
-                let packed = (-mesh.top[0] - 1.) as usize;
-                (packed / 4, packed % 4)
+            let slot = if top {
+                (-mesh.top[0] - 1.) as usize
             } else {
-                (mesh.sprite_layer, usize::from(mesh.sprite_tile.unwrap()))
+                mesh.sprite_layer * 4 + usize::from(mesh.sprite_tile.unwrap())
             };
-            let page = &pages[layer * 65536..][..65536];
+            let cell = crate::vegetation_shapes::cell(&pages, slot);
             let width = if top {
                 124
             } else {
                 (248. * mesh.radius).round().clamp(1., 2048.) as usize
             };
-            let mut rgba = Vec::with_capacity(width * 124 * 4);
+            let mut rgba = Vec::new();
             let mut transparent = 0;
             for y in 0..124 {
                 for x in 0..width {
-                    let p =
-                        page[(tile / 2 * 128 + 2 + y) * 256 + tile % 2 * 128 + 2 + x * 124 / width];
+                    let p = cell[(y + 2) * 128 + 2 + x * 124 / width];
                     if p == 255 {
                         rgba.extend([0, 0, 0, 0]);
                         transparent += 1;
                     } else {
-                        let c = palette[usize::from(p)];
-                        rgba.extend([c[0], c[1], c[2], 255]);
+                        let tint = match p / 32 {
+                            1 => mesh.recolour.unwrap(),
+                            2 => crate::vegetation::lin([139, 130, 114]),
+                            3 => crate::vegetation::lin([124, 104, 72]),
+                            _ => crate::vegetation::lin([78, 103, 44]),
+                        };
+                        let rgb = tint.map(|c| {
+                            (c * crate::vegetation_shapes::shading(p))
+                                .clamp(0., 1.)
+                                .powf(1. / 2.2)
+                                * 255.
+                        });
+                        rgba.extend([rgb[0] as u8, rgb[1] as u8, rgb[2] as u8, 255]);
                     }
                 }
             }
             let png = crate::replay::png::encode_cutout_rgba(width as u32, 124, &rgba)?;
             std::fs::write(
-                out.join(format!(
-                    "{}{}.png",
-                    mesh.source,
-                    if top { "-top" } else { "" }
-                )),
+                out.join(format!("{name}{}.png", if top { "-top" } else { "" })),
                 png,
             )?;
             if top {
-                crown_report.push_str(&format!(
-                    "{}\t1\t{:.5}\t{:.5}\t{transparent}\n",
-                    mesh.source,
+                crowns.push_str(&format!(
+                    "{name}\t1\t{:.5}\t{:.5}\t{transparent}\n",
                     2. * mesh.top[2],
                     2. * mesh.top[2]
                 ));
@@ -1979,9 +1883,9 @@ pub fn art() -> AppResult<()> {
         }
     }
     std::fs::write(out.join("index.tsv"), index)?;
-    std::fs::write(out.join("top-crowns.tsv"), crown_report)?;
+    std::fs::write(out.join("top-crowns.tsv"), crowns)?;
     println!(
-        "individual retail sprites: {} independent side/top pairs",
+        "original sprites: {} independent side/top material pairs",
         lib.meshes.len()
     );
     Ok(())

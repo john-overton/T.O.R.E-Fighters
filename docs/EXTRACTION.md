@@ -41,6 +41,11 @@ records why each tank icon is included. See the
 
 The app does not need a full extraction. It reads the original archives directly through the same format library and imports its menu and all defined theater profiles. Full extraction is for research and future format development.
 
+The optional vegetation system uses shipped original art. Selective imports no
+longer retain the extra retail tree/bush/grove/palm resources for it. Existing
+imports remain readable. Terrain tiles and explicitly placed scenery still
+come from the player's media. See the [vegetation specification](spec/terrain-detail.md#sprites-and-cached-placement).
+
 ## Common commands
 
 From the repository root on macOS or Linux:

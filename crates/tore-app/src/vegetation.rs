@@ -54,24 +54,46 @@ const WATER_CELL: i64 = 512;
 #[path = "vegetation_cache.rs"]
 pub(crate) mod cache;
 
-type Art = Arc<BTreeMap<String, Vec<u8>>>;
-
-static ART: std::sync::RwLock<Option<Art>> = std::sync::RwLock::new(None);
-
-/// The retail vegetation shapes and textures of the loaded import
-/// (`tore_import::selection::VEGETATION_ART`), set each time an import is
-/// decoded. Empty for an import made before they were kept.
-pub fn set_art(art: BTreeMap<String, Vec<u8>>) {
-    if let Ok(mut slot) = ART.write() {
-        *slot = Some(Arc::new(art));
+/// Original material sprites are the only art set. The debug tint is part of
+/// the cache identity because distant canopy carries the same colours.
+pub fn tint_mode() -> crate::AppResult<String> {
+    let mode = std::env::var("TORE_VEG_TINT").unwrap_or_else(|_| "theater".into());
+    if ![
+        "theater",
+        "spring",
+        "summer",
+        "autumn",
+        "winter-dry",
+        "desert",
+    ]
+    .contains(&mode.as_str())
+    {
+        return Err(
+            "TORE_VEG_TINT must be theater, spring, summer, autumn, winter-dry or desert".into(),
+        );
     }
+    if let Ok(old) = std::env::var("TORE_VEGETATION_SPRITES")
+        && old != "original"
+    {
+        return Err(
+            "TORE_VEGETATION_SPRITES only accepts original; retail, mixed and pack were retired"
+                .into(),
+        );
+    }
+    Ok(mode)
 }
 
-pub fn art() -> Arc<BTreeMap<String, Vec<u8>>> {
-    ART.read()
-        .ok()
-        .and_then(|slot| slot.clone())
-        .unwrap_or_default()
+fn debug_leaf() -> Option<[u8; 3]> {
+    static COLOR: std::sync::LazyLock<Option<[u8; 3]>> =
+        std::sync::LazyLock::new(|| match std::env::var("TORE_VEG_TINT").as_deref() {
+            Ok("spring") => Some([103, 143, 56]),
+            Ok("summer") => Some([58, 100, 43]),
+            Ok("autumn") => Some([176, 110, 35]),
+            Ok("winter-dry") => Some([119, 110, 83]),
+            Ok("desert") => Some([134, 126, 67]),
+            _ => None,
+        });
+    *COLOR
 }
 
 /// Developer switch. Unset and `1` are on. `0` is off.
@@ -1100,7 +1122,7 @@ impl Atlas {
                     },
                     height: 48. + 18. * unit(roll >> 9),
                     width: 1.,
-                    tint: leaf_tint(s.color, roll),
+                    tint: leaf_tint(s.color, roll, self.region.climate),
                 })
             });
         }
@@ -1119,7 +1141,7 @@ impl Atlas {
                 species: Species::PalmGrove,
                 height: 45. + 22. * unit(roll >> 9),
                 width: 0.75,
-                tint: leaf_tint(s.color, roll),
+                tint: leaf_tint(s.color, roll, self.region.climate),
             })
         });
         if climate == 1 {
@@ -1246,7 +1268,7 @@ impl Atlas {
                             species: Species::GreenBush,
                             height: 9. + 5. * unit(roll >> 12),
                             width: 1.3,
-                            tint: leaf_tint(site.color, roll),
+                            tint: leaf_tint(site.color, roll, self.region.climate),
                         }
                     };
                     if u >= p * kept(plant.species) {
@@ -1272,13 +1294,17 @@ impl Atlas {
     fn tree(&self, s: &Site, roll: u32) -> Plant {
         let pick = unit(roll >> 3);
         let size = unit(roll >> 11);
-        let tint = leaf_tint(s.color, roll);
+        let tint = leaf_tint(s.color, roll, self.region.climate);
         let plant = |species, height: f32, width| Plant {
             p: 1.,
             species,
             height,
             width,
-            tint,
+            tint: if species == Species::Autumn && debug_leaf().is_none() {
+                lin([167, 125, 40]).map(|c| c * (0.85 + 0.25 * size))
+            } else {
+                tint
+            },
         };
         if self.region.climate == 1 {
             let green = matches!(s.kind, Kind::Scrub | Kind::Forest | Kind::Grass);
@@ -1342,7 +1368,7 @@ impl Atlas {
                 species: Species::DryBush,
                 height: 1.5 + 2.5 * size,
                 width: 1.2,
-                tint: [0.55, 0.43, 0.28],
+                tint: [0.20, 0.14, 0.065],
             }
         } else {
             Plant {
@@ -1350,7 +1376,7 @@ impl Atlas {
                 species: Species::GreenBush,
                 height: 6. + 7. * size,
                 width: 1.1,
-                tint: leaf_tint(s.color, roll),
+                tint: leaf_tint(s.color, roll, self.region.climate),
             }
         }
     }
@@ -1639,8 +1665,7 @@ struct Plant {
     tint: [f32; 3],
 }
 
-/// What an object is. The renderer maps each to a retail shape when the
-/// import has one, or to a drawn fallback.
+/// What an object is. Every species selects shipped original material sprites.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub enum Species {
@@ -2144,20 +2169,34 @@ fn sprite_ground(terrain: f32, height: f32) -> f32 {
     terrain - (*BOTTOM as f32) * height
 }
 
-fn leaf_tint(ground: [u8; 3], roll: u32) -> [f32; 3] {
-    // Leaves lean a little toward the ground's own green, so a theater's
-    // palette carries into its trees, and vary in brightness.
-    let g = lin(ground);
-    let mean = (g[0] + g[1] + g[2]) / 3.;
+fn leaf_tint(ground: [u8; 3], roll: u32, climate: u8) -> [f32; 3] {
+    let mut base = match climate {
+        1 => [104, 111, 57],
+        2 => [69, 89, 65],
+        3 => [48, 91, 43],
+        _ => [78, 103, 44],
+    };
+    // Warm woodland tile colours may support golden groves as well as the
+    // independently selected Autumn species. This is colour only, not placement.
+    if climate == 0
+        && ground[0] >= ground[1]
+        && ground[1] > 55
+        && u16::from(ground[1]) > u16::from(ground[2]) + 20
+    {
+        base = [154, 133, 45];
+    }
+    // Only colour changes. Tile classification, species and seeded placement
+    // remain untouched. Clamping keeps bright sand or snow from bleaching trees.
+    let local = ground.map(|c| c.clamp(35, 150));
+    let color = debug_leaf().unwrap_or_else(|| mix(base, local, 0.28));
     let vary = 0.86 + 0.24 * unit(roll >> 13);
-    std::array::from_fn(|k| {
-        let rel = if mean > 0.002 {
-            (g[k] / mean / [0.8, 1.35, 0.85][k]).clamp(0.75, 1.3)
-        } else {
-            1.
-        };
-        vary * (1. + (rel - 1.) * 0.35)
-    })
+    let hue = (unit(roll >> 7) - 0.5) * 0.12;
+    let rgb = lin(color);
+    [
+        rgb[0] * vary * (1. + hue),
+        rgb[1] * vary,
+        rgb[2] * vary * (1. - hue),
+    ]
 }
 
 fn rock_tint(ground: [u8; 3], roll: u32) -> [f32; 3] {
@@ -3279,5 +3318,29 @@ mod tests {
         for code in tore_formats::quick_template::tables::THEATERS {
             assert_eq!(region(code).code, code);
         }
+    }
+}
+
+#[cfg(test)]
+mod material_tint_tests {
+    use super::*;
+
+    #[test]
+    fn tile_tints_are_bounded_deterministic_and_keep_theater_hues() {
+        for climate in 0..4 {
+            for ground in [[0; 3], [255; 3], [76, 105, 40], [150, 130, 45]] {
+                for roll in [0, 12345, u32::MAX] {
+                    let tint = leaf_tint(ground, roll, climate);
+                    assert_eq!(tint, leaf_tint(ground, roll, climate));
+                    assert!(tint.iter().all(|c| c.is_finite() && *c > 0. && *c < 0.6));
+                }
+            }
+        }
+        let green = leaf_tint([76, 105, 40], 12345, 0);
+        let golden = leaf_tint([150, 130, 45], 12345, 0);
+        assert!(green[1] > green[0]);
+        assert!(golden[0] > golden[1]);
+        assert_ne!(green, leaf_tint([76, 105, 40], 12345, 3));
+        assert_ne!(green, leaf_tint([76, 105, 40], 54321, 0));
     }
 }

@@ -1,5 +1,5 @@
 //! Runtime, palette-indexed forest coverage. Generated from the very same
-//! site exclusions, tree probabilities, species choices and supplied/retail art
+//! site exclusions, tree probabilities, species choices and original material art
 //! used by placement. Cached locally, never part of game state.
 use super::{Atlas, Species, WATER_CELL, hash, lin};
 use crate::{terrain::Terrain, vegetation_shapes::Library};
@@ -116,7 +116,7 @@ impl Map {
                         let weight = p * crown.min(4.);
                         cover += weight;
                         for (k, c) in color.iter_mut().enumerate() {
-                            *c += mesh.mean_color[k] * tree.tint[k] * weight;
+                            *c += mesh.mean_tinted(tree.tint)[k] * weight;
                         }
                     }
                     let key = if cover > 0. {
@@ -169,14 +169,7 @@ mod tests {
         atlas.water.dist.resize(129 * 257, 255);
         let palette = [[80; 3]; 256];
         let mut art = Vec::new();
-        let mut lib = Library::build(
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &palette,
-            &mut art,
-            |p| p.len() / 65536,
-        );
-        lib.add_pack("pack", super::super::region("UKR"), &palette, &mut art, 0);
+        let lib = Library::build(super::super::region("UKR"), &mut art, 0);
         let mut serial = Vec::new();
         let mut parallel = Vec::new();
         let a = Map::build_with(
@@ -209,14 +202,7 @@ mod tests {
         }
         let palette = [[80; 3]; 256];
         let mut art = Vec::new();
-        let mut lib = Library::build(
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &palette,
-            &mut art,
-            |p| p.len() / 65536,
-        );
-        lib.add_pack("pack", super::super::region("UKR"), &palette, &mut art, 0);
+        let lib = Library::build(super::super::region("UKR"), &mut art, 0);
         for (index, covered) in [(10, true), (20, false), (255, false)] {
             let atlas = Atlas::synthetic(vec![index; 65536], 0);
             let mut pages = Vec::new();

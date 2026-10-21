@@ -13,7 +13,7 @@ use tore_codec::{Fnv1a64, fnv1a64};
 
 static PROFILE: RwLock<Option<(PathBuf, Vec<u8>)>> = RwLock::new(None);
 const MAX_BYTES: usize = 256 * 1024 * 1024;
-const MAGIC: &[u8; 8] = b"TOREVEG7";
+const MAGIC: &[u8; 8] = b"TOREVEG8";
 
 pub fn configure(directory: &Path) {
     // The successful import loader has already pruned older good generations.
@@ -35,65 +35,6 @@ pub fn configure(directory: &Path) {
         directory.join("vegetation-cache"),
         format!("{generations:?}").into_bytes(),
     ));
-}
-
-const MAX_OVERRIDE: u64 = 16 * 1024 * 1024;
-
-fn override_bytes(path: &Path) -> std::io::Result<Vec<u8>> {
-    use std::io::Read;
-    let mut bytes = Vec::new();
-    std::fs::File::open(path)?
-        .take(MAX_OVERRIDE + 1)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > MAX_OVERRIDE {
-        return Err(std::io::Error::other("top PNG exceeds 16 MiB"));
-    }
-    Ok(bytes)
-}
-
-fn override_directory(cache_directory: &Path) -> PathBuf {
-    cache_directory.with_file_name("vegetation-overrides")
-}
-
-fn hash_overrides(hash: &mut Fnv1a64, cache_directory: &Path) {
-    let mut paths: Vec<_> = std::fs::read_dir(override_directory(cache_directory))
-        .into_iter()
-        .flatten()
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| {
-            p.file_name()
-                .is_some_and(|n| n.to_string_lossy().ends_with("-top.png"))
-        })
-        .collect();
-    paths.sort();
-    for path in paths {
-        hash.update(path.file_name().unwrap().to_string_lossy().as_bytes());
-        match override_bytes(&path) {
-            Ok(bytes) => hash.update(&bytes),
-            Err(error) => hash.update(error.to_string().as_bytes()),
-        }
-    }
-}
-
-pub(crate) fn top_override(name: &str, palette: &[[u8; 3]; 256]) -> Option<(Vec<u8>, f32)> {
-    let directory = PROFILE.read().ok()?.as_ref()?.0.clone();
-    let path = override_directory(&directory).join(format!("{name}-top.png"));
-    let bytes = match override_bytes(&path) {
-        Ok(bytes) => bytes,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(e) => {
-            eprintln!("vegetation override {}: {e}", path.display());
-            return None;
-        }
-    };
-    match crate::vegetation_shapes::override_cell(&bytes, palette) {
-        Ok(cell) => Some(cell),
-        Err(e) => {
-            eprintln!("vegetation override {}: {e}", path.display());
-            None
-        }
-    }
 }
 
 pub struct Cache {
@@ -144,17 +85,14 @@ impl Cache {
         ] {
             hash.update(bytes);
         }
-        hash_overrides(&mut hash, &profile.0);
         hash.update(&(first as u64).to_le_bytes());
         for rgb in palette {
             hash.update(rgb);
         }
-        for source in [resources, &super::art()] {
-            for (name, bytes) in source {
-                hash.update(name.as_bytes());
-                hash.update(&(bytes.len() as u64).to_le_bytes());
-                hash.update(bytes);
-            }
+        for (name, bytes) in resources {
+            hash.update(name.as_bytes());
+            hash.update(&(bytes.len() as u64).to_le_bytes());
+            hash.update(bytes);
         }
         // Effective terrain and exclusion geometry, including runtime airport
         // choices and city-fill switches, are inputs too.
@@ -702,30 +640,6 @@ fn decode_atlas(bytes: &[u8]) -> Option<super::Atlas> {
 mod tests {
     use super::*;
     #[test]
-    fn override_content_changes_and_removal_change_cache_key() {
-        let root = std::env::temp_dir().join(format!("tore-top-overrides-{}", std::process::id()));
-        let cache = root.join("vegetation-cache");
-        let directory = override_directory(&cache);
-        std::fs::create_dir_all(&directory).unwrap();
-        let fingerprint = || {
-            let mut hash = Fnv1a64::new();
-            hash_overrides(&mut hash, &cache);
-            hash.finish()
-        };
-        let empty = fingerprint();
-        let path = directory.join("SYNTHETIC-crown-01-top.png");
-        std::fs::write(&path, b"first").unwrap();
-        let first = fingerprint();
-        std::fs::write(&path, b"other").unwrap();
-        let other = fingerprint();
-        assert_ne!(first, other, "same-length edits invalidate the cache");
-        assert_ne!(empty, first);
-        std::fs::remove_file(path).unwrap();
-        assert_eq!(empty, fingerprint());
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
     fn grass_cache_roundtrip_is_bounded_and_rejects_truncation() {
         let atlas = super::super::Atlas::synthetic(vec![12; 65536], 0);
         let world = tore_world::test_support::terrain();
@@ -759,7 +673,7 @@ mod tests {
                 world,
                 &palette,
                 0,
-                "mixed",
+                "original",
                 version,
             )
         };
@@ -767,21 +681,7 @@ mod tests {
         let _ = std::fs::remove_file(&cache.path);
         assert!(cache.read().is_none());
         let mut pages = Vec::new();
-        let mut library = Library::build(
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &palette,
-            &mut pages,
-            |p| p.len() / 65536,
-        );
-        let first = pages.len() / 65536;
-        library.add_pack(
-            "pack",
-            super::super::region("UKR"),
-            &palette,
-            &mut pages,
-            first,
-        );
+        let library = Library::build(super::super::region("UKR"), &mut pages, 0);
         let map = Map {
             area: [0., 0., 128., 128.],
             first: pages.len() / 65536,
