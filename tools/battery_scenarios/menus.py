@@ -188,6 +188,35 @@ def menu_picture(size=(640, 480)):
     return lambda output: picture_problems(output, r"(?:Menu|Locate) preview:", size, min_colors=8)
 
 
+def replays_bar_picture(offset=0):
+    """The shared 'l' in Multi and Replays must have identical ink placement.
+
+    Compare only the blue letter core, so the artwork and hover fill behind
+    it cannot hide a baseline regression. Coordinates are on the 640x480
+    canvas; all five backgrounds use one of the three bar origins.
+    """
+    def check(output):
+        problems = menu_picture()(output)
+        if problems:
+            return problems
+        path = Path(re.search(r"Menu preview:\s*(\S+)", output).group(1))
+        width, _, pixels = read_ppm(path)
+
+        def ink(left):
+            return {(x, y) for y in range(38, 57) for x in range(5)
+                    if pixels[(y * width + left + x) * 3] < 80
+                    and pixels[(y * width + left + x) * 3 + 2] > 100}
+
+        multi, replays = ink(160 + offset), ink(210 + offset)
+        if not multi or not replays:
+            return ["Multi or Replays letter core is missing"]
+        if multi != replays:
+            return ["Replays baseline or letter weight differs from Multi"]
+        return []
+
+    return check
+
+
 def map_plot_filled():
     """The creator's Map snapshot is a menu picture whose plot (x 12 to 470,
     y 30 to 420) has no void: the planning map's cell for "off the theater" is
@@ -523,6 +552,19 @@ def scenarios() -> list[Scenario]:
                 check=menu_picture(),
             )
         )
+    for background, offset in (("CHOOSEV", 0), ("CHOOSEU", 0), ("CHOOSEM", 0),
+                               ("CHOOSEAC", -6), ("CHOOSE3", 109)):
+        for state in ("normal", "bar-multi-hover", "bar-replays-hover",
+                      "bar-replays-pressed", "bar-replays-focus", "multi"):
+            out.append(Scenario(
+                name=f"menus-replays-bar-{background.lower()}-{state}",
+                lane="menus",
+                args=["--background", background, "--snapshot", "{work}/shot.ppm",
+                      "--snapshot-state", state, "--no-audio"],
+                timeout=120,
+                expect=[r"Menu preview:"],
+                check=replays_bar_picture(offset),
+            ))
     for state in QUICK_STATES:
         out.append(
             Scenario(
