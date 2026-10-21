@@ -1085,7 +1085,7 @@ fn tracer_night()->f32 {
 // Vegetation objects (vegetation_renderer.rs). A mesh is normalised to a
 // height of 1; `turn` holds the yaw's cosine and sine, the height in feet
 // and the fade, `shape` the width, the ground rise east and north and the
-// look (0 foliage, 1 solid, 3 recoloured retail rock). Solid objects lean
+// look (0 foliage, 1 solid). Solid objects lean
 // with the ground; trees stand upright.
 struct VegOut {
  @builtin(position) @invariant clip:vec4<f32>, @location(0) uv:vec2<f32>, @location(1) @interpolate(flat) layer:f32,
@@ -1265,34 +1265,33 @@ fn veg_coverage(in:VegOut,alpha:f32)->u32 {
  if mask==0u {discard;}
  return FillOut(vec4<f32>(0.0),mask);
 }
+// Original art: bits 0..4 are shading, bits 5..6 are material, 255 is cutout.
+// Bark is independent of the per-instance foliage/rock colour. This function
+// is the material input hook for future weather/season palette parameters.
+fn veg_material(pixel:u32,tint:vec3<f32>,bark:vec3<f32>)->vec3<f32> {
+ let material=pixel/32u;
+ let light=0.25+1.25*f32(pixel%32u)/31.0;
+ var color=tint;
+ if material==1u {color=bark;}
+ return color*light;
+}
+fn veg_sample(uv:vec2<f32>,layer:i32,tint:vec3<f32>,bark:vec3<f32>)->vec4<f32> {
+ let size=vec2<i32>(tile_size());
+ let at=clamp(vec2<i32>(floor(uv*vec2<f32>(size))),vec2<i32>(0),size-vec2<i32>(1));
+ let pixel=read_tile(at,layer);
+ // Nearest colour retains authored pixels; the existing bilinear alpha keeps
+ // depth, colour and shadow silhouettes on the same multisample coverage.
+ let alpha=veg_alpha(uv,layer);
+ return vec4<f32>(veg_material(pixel,tint,bark),alpha);
+}
 @fragment fn veg_fragment(in:VegOut)->FillOut {
- var color=in.color;
- var albedo=in.albedo;
- var alpha=in.fade.x;
- if in.layer>=0.0 {
-  var remaps=vec2<f32>(-1.0);
-  if in.fog_enabled!=0u {remaps=ray_rows(length(in.direction),in.altitude);}
-  let tex=sample_tile(in.uv,i32(in.layer),0,-1,-1,remaps);
-  // Cut-out edges resolve through the sample mask, not a hard step.
-  let edge=clamp((tex.a-0.5)/max(fwidth(tex.a),0.0001)+0.5,0.0,1.0);
-  alpha*=edge;
-  var base=tex.rgb;
-  var bare=base;
-  if flares_burning() || thermal_on() {bare=sample_tile(in.uv,i32(in.layer),base_row(),-1,-1,vec2<f32>(-1.0)).rgb;}
-  if in.look>2.5 {
-   // Retail rock in the local ground's colour, keeping its shading.
-   let k=dot(base,vec3<f32>(0.2126,0.7152,0.0722))/max(dot(in.mean,vec3<f32>(0.2126,0.7152,0.0722)),0.0001);
-   base=in.color*k;bare=in.albedo*k;
-  } else {
-   base*=in.color;bare*=in.albedo;
-  }
-  color=base;albedo=bare;
- }
- let mask=veg_coverage(in,alpha);
+ let tex=veg_sample(in.uv,i32(in.layer),in.color,in.mean);
+ let edge=clamp((tex.a-0.5)/max(fwidth(tex.a),0.0001)+0.5,0.0,1.0);
+ let mask=veg_coverage(in,in.fade.x*edge);
  if mask==0u {discard;}
  let foliage=in.look<0.5;
  let occlusion=select(1.0,mix(0.55,1.0,clamp(in.height*1.2,0.0,1.0)),foliage);
- var lit=veg_light(color,albedo,in.direction,in.normal,foliage,occlusion,in.reach);
+ var lit=veg_light(tex.rgb,tex.rgb,in.direction,in.normal,foliage,occlusion,in.reach);
  if thermal_on() {return FillOut(vec4<f32>(lit,1.0),mask);}
  if in.fog_enabled!=0u {lit=aerial_perspective(lit,in.direction,in.altitude);}
  else {lit=cloud_occlusion(lit,in.direction,in.altitude);}

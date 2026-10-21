@@ -68,11 +68,10 @@ fn is_multiplayer_resource(name: &str) -> bool {
         || name == tore_import::source::RESOURCE
 }
 
-/// The retail vegetation shapes and textures (`VEGETATION_ART`). Like the
-/// multiplayer art they stay out of `theater_resources`, so an import that
-/// gains them keeps the same combat tapes.
+/// Legacy vegetation names are ignored when reading old imports. Keeping them
+/// out of theater_resources preserves existing combat-tape fingerprints.
 fn is_vegetation_resource(name: &str) -> bool {
-    tore_import::selection::VEGETATION_ART.contains(&name)
+    tore_import::selection::LEGACY_VEGETATION_ART.contains(&name)
 }
 
 impl Assets {
@@ -250,13 +249,6 @@ impl Assets {
                 .get("TORE_CREATOR_V1")
                 .ok_or("cache predates creator options; re-import media")?,
         )?;
-        crate::vegetation::set_art(
-            resources
-                .iter()
-                .filter(|(name, _)| is_vegetation_resource(name))
-                .map(|(n, b)| (n.clone(), b.clone()))
-                .collect(),
-        );
         Ok(Self {
             creator_options,
             theater_resources: resources

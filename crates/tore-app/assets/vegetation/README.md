@@ -1,84 +1,62 @@
-# Generated vegetation experiment
+# Original tintable vegetation
 
-Provenance: **generated sprite pack supplied by John, 2026-10-16**.
-This is John's second, cleaner pixel-art pack, `john-sprite-pack-v2.png`.
-Source SHA-256: `54bcb54d641c22b2ad8619dc9765ecdfabfef9f22e18934ba4ab45f4731d9941`.
-The first pack is an unused local reference and is not shipped.
-No retail art or retail derivatives are stored here.
+Implementation mode. John requested replacement art on 2026-10-21.
+The artwork and material fitting are agent decisions. This is not a claim of
+original retail silhouettes, scale, palette or placement parity.
 
-`tools/slice_vegetation.py SOURCE OUTPUT` rebuilds these assets using Pillow.
-The source remains in the local pass4-refs folder. Crop coordinates are recorded
-in the tool; `sprites.json` records names, cells and original aspect ratios.
-The tool also writes `pack_layout.rs`, which the runtime includes.
-Black below RGB maximum 24 or source alpha below 128 becomes transparent.
-Remaining pixels have binary opaque alpha, matching indexed cutouts. Generator red, green and yellow
-chroma is removed with explicit thresholds, followed by a 3 px morphological
-opening and removal of tiny disconnected debris. Natural greens and autumn
-orange are retained. Individual PNGs are trimmed; four sprites occupy each
-256 px atlas page, with two transparent pixels around each 124 px cell.
-Nearest-neighbour resizing preserves the pixel style. Runtime restores each
-sprite's original aspect ratio. The last page contains three sprites.
+All 54 individual plants and rocks were generated with the built-in image_gen
+tool from text only. No retail picture, retail derivative, previous sprite pack,
+or image reference was supplied. Every exact prompt is in `prompts.json`.
+Each generation contains one side and one matching vertical overhead view.
+`sprites.json` records the source PNG SHA-256, measured proportions and cells.
+Full generated PNGs remain in the task scratch directory, not the runtime pack.
 
-`pack.rgba` is eight consecutive 256 by 256 RGBA pages. It is embedded generated
-art, not an extracted game resource. At load, the app clears side-cell islands that lie
-wholly above or below the sprite's main body, plus border specks (crop strips
-from neighbouring sheet sprites, such as the red bush's ground under the
-conifer's top edge); the committed pages still contain them. PNG pages and individual PNGs are review
-and authoring artifacts. The app maps RGB at 78% brightness into the theater's
-palette once on scene construction. Live palette/weather lighting, local tint,
-fog and shadows are the same as for retail vegetation.
+There are three variants each of broadleaf, dead tree, conifer, palm, acacia,
+birch, jungle tree, green bush, dry bush, fern, banana, yucca, dry scrub, stone,
+boulder, outcrop, desert rock and tropical shrub. Autumn reuses the broadleaf
+and birch forms with autumn tint. Groves select individual trees. Every selected
+species has at least three variants, including matching conifer tops.
 
-`TORE_VEGETATION_SPRITES=retail|pack|mixed` selects art at scene construction.
-Mixed is this branch's default: retail conifers and groves, pack broadleaf,
-palms, shrubs and rocks. Pack replaces all available equivalents, including
-groves with large tree silhouettes. Sahara supplies dead trees and acacias. Every missing retail species now uses a
-supplied cutout, including conifers; no code-drawn fallback remains. Tropical broadleaf
-uses the jungle tree; desert rocks use the dry rock cells. The saguaro, small
-cactus and prickly pear are sliced for completeness but never selected. No
-Old World theater receives them. Agave/yucca and dry scrub are the experimental
-Old World desert choices requested by John, not a surveyed botanical claim.
+`python3 tools/pack_vegetation_materials.py GENERATED OUTPUT` rebuilds the pack
+using Pillow, an authoring dependency only. GENERATED holds `KIND-1.png` through
+`KIND-3.png` for the 18 kinds listed in the tool. The generated alpha is the only
+background key. Alpha below 128 is cut out. Each half is trimmed independently,
+nearest-neighbour sampled to 80 by 80, then to a 124 by 124 usable cell inside a
+two-pixel transparent gutter. Measured aspect is restored in world geometry.
+No tracing, retail palette copying or image-derived generation is involved.
 
-Tests: `python3 -m unittest discover -s tools -p test_slice_vegetation.py`.
-Pillow is needed for the synthetic slicer test, but not the atlas integrity test
-or the game. No runtime dependency was added.
+The generation prompts use neutral grayscale foliage/stone/straw and warm
+orange bark as material identification colours. The packer classifies bark when
+red exceeds 1.2 times green and red minus blue exceeds 16. Dead wood is always
+bark, named rock types always stone, and dry scrub always straw. Remaining
+pixels are foliage. Bark shade uses maximum RGB, other materials average RGB;
+the normalized value is rounded to one of 32 levels.
 
+`pack.materials` contains 27 consecutive 256 by 256 one-byte pages, 1,769,472
+bytes. Each byte is `material * 32 + shade`: 0 foliage, 1 bark, 2 stone, 3 straw.
+255 is transparent. Transparent RGB does not exist in this encoding. The shader
+uses `0.25 + 1.25 * shade / 31` as a linear colour multiplier. `pack_layout.rs`
+is generated metadata included by Rust. Runtime needs no image decoder or
+retail shape extraction for this pack.
 
-Pass 5 adds **generated Sahara and top-view sprite sheets supplied by John,
-2026-10-17**. Source identities:
+The per-instance colour input supplies local foliage or stone/straw tint;
+the mesh input supplies independent theater bark. `veg_material` is the shader
+material input hook. A future weather system may provide new linear RGB colours
+for these materials, a wetness multiplier (1 dry, smaller values darker), and
+snow coverage (0 none, 1 fully snow-coloured). Those future inputs are a design
+contract only; no wetness or snow behaviour is implemented here. Current
+climate/tile fitting and `TORE_VEG_TINT=theater|spring|summer|autumn|winter-dry|desert`
+are specified once in the
+[terrain specification](../../../../docs/spec/terrain-detail.md#sprites-and-cached-placement).
+The debug override is process-wide; restart the mission process to change it.
 
-- `john-sahara-sprites.png`, 1536 by 1024, SHA-256
-  `7b0516ae7489678ede80835629a30232080bba9cf5bddf7d3cdd220976c84b73`.
-- `john-topdown-tileset.png`, 2172 by 724, SHA-256
-  `8fa71c2dcfd24beadc7c2d6c407a80e0a9b65dd7f8c3018779fb7a3ec3949ea5`.
+The old retail/mixed/pack selector and retail top PNG overrides are retired.
+Only `TORE_VEGETATION_SPRITES=original` is accepted when explicitly set. Existing
+profile `vegetation-overrides` files are ignored and left untouched. The old
+John-supplied pack is archived locally, with no old image deleted by this task.
+`--vegetation-art OUT` exports the new pairs without loading any retail art.
 
-`tools/slice_vegetation_pass5.py SAHARA TOP OUTPUT` rebuilds the `pass5/` folder.
-It requires Pillow and numpy for authoring only, adding no game dependency.
-The tool records every crop. Sahara segmentation fits a robust local cubic RGB
-background to low-gradient pixels, then keeps foreground residuals connected to
-strong cores and textured outlines. Smooth residual blobs are rejected, including
-those beside trunks; small disconnected debris is removed. It does not assume a
-black background or subtract glow colours from valid bark. The top sheet's black
-matte and white/grey/black outline are removed separately. In a four-source-pixel
-edge band, bright neutral pixels (minimum RGB above 155, spread below 38) and
-dark neutral pixels (maximum below 100, spread below 16) become transparent.
-A one-pixel erosion removes the remaining mixed matte edge. Bright stone faces
-and dark bark away from that band are retained. This is a conservative authoring
-choice; thin leaf tips may be lost. Side sheets are unchanged by this cleanup.
-All output alpha is binary;
-transparent RGB is zero. Conservative edge cleanup can lose faint leaf tips.
-
-There are 21 Sahara side sprites, their 21 matching top views, and 31 v2 top
-views. `pass5/pack.rgba` contains 19 RGBA pages, with the same 124 px cells and
-2 px gutters as v2. Top cells are retrimmed after nearest-neighbour downsampling
-until opaque bounds fill the 124 px usable area, since thin tips can disappear
-during the resize. This does not alter side cells. Individual PNGs, page PNGs, `review.png`, JSON metadata and
-`layout.rs` are review/rebuild artifacts. The Sahara palms, acacias, bare trees,
-shrubs and rocks are selected for desert equivalents. Saguaro remains excluded.
-Supplied sprites use their corresponding supplied top cells. Retail shapes are
-split into independent plants and use locally baked procedural tops, with optional
-PNG replacements under `<profile>/vegetation-overrides/`. See the
-[vegetation specification](../../../../docs/spec/terrain-detail.md#sprites-and-cached-placement)
-for naming, limits, palette handling, sizing and cache invalidation. Extracted
-retail sides and AI tops derived from them must never be added to this pack.
-The whole contact sheet was reviewed against a contrasting background and the
-synthetic glow test passed. In-game GPU appearance still requires lead review.
+Validation: `python3 -m unittest discover -s tools -p test_slice_vegetation.py`
+and the Rust vegetation tests check IDs, shading, alpha, gutters, proportions,
+three variants per species and valid top cards in every climate. Use the task
+report for contact sheets, GPU captures, timing and visual limitations.

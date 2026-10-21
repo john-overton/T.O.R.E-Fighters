@@ -491,7 +491,7 @@ impl Scenery {
         );
         out.build_static_geometry(resources, terrain, code)?;
         let first = (out.texture_indices.len() + out.sky_indices.len()) / 65536;
-        let mode = std::env::var("TORE_VEGETATION_SPRITES").unwrap_or_else(|_| "mixed".into());
+        let mode = crate::vegetation::tint_mode()?;
         let cache = if flight && crate::vegetation::enabled()? {
             let _timing = crate::loading::timing("vegetation cache key");
             crate::vegetation::cache::Cache::for_scene(
@@ -582,18 +582,9 @@ impl Scenery {
                 #[cfg(test)]
                 eprintln!("vegetation cache: miss theater={code}");
                 let started = std::time::Instant::now();
-                let mut library = crate::vegetation_shapes::Library::build(
-                    &crate::vegetation::art(),
-                    resources,
-                    &out.palette,
-                    &mut out.sky_indices,
-                    |pages| (terrain_bytes + pages.len()) / 65536,
-                );
                 let first = (terrain_bytes + out.sky_indices.len()) / 65536;
-                library.add_pack(
-                    &mode,
+                let library = crate::vegetation_shapes::Library::build(
                     crate::vegetation::region(code),
-                    &out.palette,
                     &mut out.sky_indices,
                     first,
                 );

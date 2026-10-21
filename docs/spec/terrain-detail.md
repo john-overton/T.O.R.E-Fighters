@@ -155,12 +155,11 @@ available in Graphics and through `TORE_VEGETATION_CARDS`: `billboard`,
 fixed seeded cross has four. Top modes add two triangles for a horizontal card
 at the visual crown centre, spanning the side silhouette's opaque crown width.
 The centre is the opaque-pixel-weighted height of rows at least 45% as wide as
-the broadest opaque row, excluding narrow trunks. Retail cards average their
-four side views. Heights clamp to 5% through 95% of the grounded instance.
+the broadest opaque row, excluding narrow trunks. Each original side has its own measured crown. Heights clamp to 5% through 95% of the grounded instance.
 These are **fitted agent choices** for John's 2026-10-17 request.
 Side and top use the same instance height and seeded width multiplier.
-Supplied tops fill the 124 by 124 usable cell inside a two-pixel gutter;
-retail top widths come from the two orthogonal opaque side views.
+Original side and top cells fill a 124 by 124 usable area inside a two-pixel
+gutter. Side aspect and top aspect are restored from their individual metadata.
 
 Top coverage is zero through 35 degrees down from the horizon. Smoothstep of
 the crown-to-eye ray's vertical component reaches full coverage at 65 degrees.
@@ -174,60 +173,61 @@ at oblique angles and cost more covered pixels; no speed advantage is claimed.
 Every side card starts at the base supplied through `tore_world::grounding`.
 Top cards are part of that grounded instance, never separately terrain-snapped.
 
-On the mission loading worker a CPU rasterizer bakes four horizontal retail
-views, 90 degrees apart, into indexed 256 by 256 pages. Imported PIC transparency
-and live weather palettes remain. The menu omits vegetation. Bakes, placement
-classification, coast masks and canopy maps have a disposable local disk cache;
-[architecture](../ARCHITECTURE.md#exploratory-vegetation-rendering) defines its
-invalidation. Nothing derived from retail media is committed. John's v2, Sahara and
-matching top-view sheets supply tightly cropped cutouts in 128 px cells with
-transparent gutters, sharing the same indexed texture array. Source RGB is
-reduced to 78% before matching the theater palette. The supplied-art provenance,
-crop boxes and cleanup process are in the
+John requested original, tintable replacement art on 2026-10-21 (**opinionated**).
+Only the shipped original pack is used. It has 54 individual plants and rocks,
+three variants of 18 kinds, each with a matching side and vertical overhead view.
+Broadleaf and birch variants also serve autumn trees and woodland groves;
+conifers and palms serve their respective grove species. Groves remain individual
+plants on the existing 80 ft woodland and 110 ft palm candidate grids.
+The unchanged species height ranges and seeded width variation scale each
+sprite's own measured aspect. All conifers now have matching top views and use
+the common transition. There is no multi-tree card or procedural crown top.
+
+The built-in image generator received text only, with no retail image or derivative
+as input. Generic descriptions, original silhouettes and colour rules are
+**fitted agent choices**, not recovered original art or scale. Exact prompts,
+source hashes, packing rules and material IDs are in the
 [asset README](../../crates/tore-app/assets/vegetation/README.md).
+No retail vegetation shape, texture or local top override is loaded. New imports
+stop selecting the extra retail tree resources. Old imports remain readable;
+legacy tree resources remain excluded from the theater fingerprint. Explicitly
+placed retail scenery rocks still belong to the static scene, not this vegetation
+system. Runtime tile classification and placement still read the player's terrain.
 
-`TORE_VEGETATION_SPRITES=retail|pack|mixed` is read at scene construction; `mixed`
-is the branch default. Mixed keeps usable retail conifers and groves. Missing
-species in every mode use supplied cutouts. Sahara supplies acacias and bare
-trees, and desert palms, shrubs and rocks. No code-drawn tree, shrub or rock
-fallback remains. No current theater selects saguaro, cactus or prickly pear.
-John requested individual retail plants on 2026-10-21 (**opinionated**).
-Every retail grove is split into its constituent plants. Face centres within
-18 source units form a plant, retaining every group rather than just the three
-largest palms. Each plant gets a stable `SHAPE-crown-NN` name, its own aspect
-ratio and height relative to its source grove. The common seeded placement,
-card modes, distance coverage and shadow pass apply to each individual.
-Grove candidates use the same density-scaled jittered grid as other plants:
-80 ft for woodland and 110 ft for palms, replacing 160/220 ft clump spacing.
-These **fitted agent choices** replace about four crowns per old clump; the
-existing object quotas still cap the population. No source row offsets survive.
+One byte stores each pixel: material times 32 plus a shade from 0 to 31;
+255 is transparent. Materials are foliage, bark, stone and straw. The shader
+multiplies its material colour by `0.25 + 1.25 * shade / 31`. Colours are linear
+RGB; nearest colour samples preserve coarse pixels, while the existing alpha
+coverage, grounding, surface lighting, fog and shadow passes remain.
 
-The largest opaque horizontal projection supplies each retail side cutout.
-It is trimmed and packed into a 124 px cell with a two-pixel transparent gutter,
-using nearest-neighbour samples and the import's palette. A procedural top
-samples the region bounded by broad leafy rows (at least 45% of maximum
-width) into a rounded footprint. Its edge radius is 0.96 + 0.025 sin(7 angle) + 0.015 cos(11 angle),
-relative to the measured crown half-width. This is **fitted** crown geometry,
-not recovered original artwork. Two-dimensional texture sampling avoids rings;
-it keeps source colours and transparent margins. Retail tops
-use the common 35 to 65 degree transition, including conifers; supplied conifer
-art retains its existing upright-only treatment.
+Foliage starts from sRGB temperate (78,103,44), desert (104,111,57), arctic
+(69,89,65) or tropical (48,91,43). It mixes 28% local tile colour, with each
+channel clamped to 35..150, then converts to linear RGB. Temperate tiles with
+red at least green, green above 55 and green more than 20 above blue use a
+golden (154,133,45) base. This colours suitable groves without changing placement.
+Seeded brightness is
+0.86..1.10, with opposite red/blue hue jitter up to 6%. Autumn species use
+(167,125,40), with brightness 0.85..1.10. Dry shrubs use linear
+(0.20,0.14,0.065). Existing stone colour still follows local ground, including
+its seeded brightness and varnish. Bark has an independent theater colour:
+(102,78,53), (116,91,60), (95,88,76), or (88,69,48), in the same climate order.
+Distant canopy integrates the sprite's material shading with these same colours.
+These constants are **fitted agent decisions** and remain open to art review.
 
-An optional `<profile>/vegetation-overrides/SHAPE-crown-NN-top.png` replaces
-that plant's procedural top. Files are non-interlaced PNGs, at most 2048 by 2048
-pixels and 16 MiB each. Alpha below 128 is transparent; visible bounds are
-trimmed, nearest-neighbour sampled and matched to the theater palette without
-the supplied pack's brightness reduction. The opaque width/height ratio is
-preserved inside the measured crown span, so wide tops are not stretched square. Invalid files warn and retain the
-procedural top. Overrides are read on scene construction and their contents
-invalidate the local cache. Restart the mission after editing them. Extracted
-sides and generated tops are retail derivatives and remain local, never embedded
-or committed. `--vegetation-art OUT` writes the individual PNGs and size index;
-its reference sizes are fitted presentation feet, not original scale evidence.
-The index uses a 57 ft tree, 4 ft shrub or 12 ft rock before the measured
-relative height and transparent trim. Placed instances keep the existing
-seeded species heights instead.
-Rocks retain visible-pixel mean normalization and slope lighting.
+`TORE_VEG_TINT=theater|spring|summer|autumn|winter-dry|desert` is a debug colour
+preview read when the process starts. Theater is the default. Other choices
+replace the foliage base with (103,143,56), (58,100,43), (176,110,35),
+(119,110,83), or (134,126,67), respectively; seeded variation stays. They affect
+neither species selection nor placement. Restart after changing the variable.
+The tint mode participates in the local canopy cache key. This is a future
+season/weather input hook, not a season or snow simulation. Future wetness or
+snow should adjust material colours/shading at the material input, leaving
+cutouts, world scale and placement intact. No weather values are active today.
+
+The old `TORE_VEGETATION_SPRITES` art selector is retired; if explicitly supplied,
+only `original` is accepted. The obsolete profile `vegetation-overrides` directory
+is ignored, not deleted. `--vegetation-art OUT` exports all shipped side/top
+pairs and fitted reference sizes without requiring retail vegetation media.
 
 Each 2,048 ft patch has a fixed candidate set for its density and draw-distance
 settings. A patch's quota is the object budget divided by the number of patches

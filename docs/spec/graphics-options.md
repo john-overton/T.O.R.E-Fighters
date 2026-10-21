@@ -358,9 +358,9 @@ how far every configured instance stays at full distance opacity and density.
 The setting is used directly for all species, including small stones and clumps.
 Only the band from detail to draw distance fades, with matching distant-canopy
 coverage. The trees, bushes, palms and rocks are the
-cutout sprites from retail art and John's supplied v2/Sahara packs. The developer
-switch `TORE_VEGETATION_SPRITES=retail|pack|mixed` selects art at scene startup,
-with `mixed` the branch default. Missing retail species use supplied art.
+original, tintable cutout sprites with matched side and top views. The shipped
+pack is the only art set. `TORE_VEG_TINT` previews foliage colours; see the
+[vegetation specification](terrain-detail.md#sprites-and-cached-placement).
 **Vegetation cards** switches live between Facing, Cross, Cross+top and Face+top.
 Face+top (camera-facing sides with angle-gated tops) is the default, requested by
 John on 2026-10-17. Missing saved card settings take that default; explicit saved
@@ -369,10 +369,9 @@ preset retains Facing.
 `TORE_VEGETATION_CARDS=billboard|cross|cross-top|billboard-top` overrides that row
 for a run and is not saved. Sprites have full distance opacity inside detail range. Distant forest coverage
 continues on the terrain. Top modes use complementary side/top coverage from
-35 to 65 degrees down, at the measured visual crown centre. Supplied conifers
-and pine groves retain upright cards at all angles, with no horizontal top disk.
-Individual retail conifers use their own procedural or locally overridden tops;
-see the [sprite specification](terrain-detail.md#sprites-and-cached-placement).
+35 to 65 degrees down, at the measured visual crown centre. All species, including conifers,
+use their own matched top view and the common angular transition.
+
 
 **Vegetation density** is Low, Med, High or Ultra. John requested a one-step
 reduction on 2026-10-17: new Ultra equals previous High, High equals previous

@@ -160,16 +160,9 @@ class GroundStartFieldTests(unittest.TestCase):
 
 
 class TopCrownAuditTests(unittest.TestCase):
-    def test_an_import_without_vegetation_art_is_an_environment_problem(self):
-        output = "vegetation art: the import predates the retail vegetation art; re-import media\n"
-        with tempfile.TemporaryDirectory() as d:
-            problems = vegetation.check_top_crowns(Path(d), output)
-        self.assertEqual(len(problems), 1)
-        self.assertTrue(problems[0].startswith("environment:"), problems)
-
     def test_a_missing_audit_without_a_reason_is_still_a_failure(self):
         with tempfile.TemporaryDirectory() as d:
-            self.assertEqual(vegetation.check_top_crowns(Path(d), ""), ["no retail grove crown audit"])
+            self.assertEqual(vegetation.check_top_crowns(Path(d), ""), ["no original sprite crown audit"])
 
 
 if __name__ == "__main__":

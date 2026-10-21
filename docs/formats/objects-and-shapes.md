@@ -1448,6 +1448,7 @@ camera rotation, world scale, draw distance and size transitions remain
 resource references and decode its distance/size tables. Do not infer those
 rules from these filenames or screenshots.
 
-The exploratory renderer uses this artwork in newly baked impostors. Its
-camera-facing, distance and density rules are agent choices in the
+This artwork is research evidence only. The exploratory vegetation renderer
+uses original text-generated material sprites. Its camera-facing, distance and
+density rules are agent choices in the
 [vegetation specification](../spec/terrain-detail.md#sprites-and-cached-placement).
