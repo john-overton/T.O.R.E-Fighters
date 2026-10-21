@@ -21,6 +21,7 @@ pub fn roster_probe(
     use tore_sim::ai::{
         Experience,
         launch::{self, WingId, WingSelection, resolve_wings},
+        weapon_service::Rounds,
     };
     for id in AircraftId::ALL {
         let aircraft = Aircraft::parse(
@@ -102,7 +103,10 @@ pub fn roster_probe(
                     .mission()
                     .actors()
                     .iter()
-                    .map(|a| (a.alive(), a.flight().clone()))
+                    .map(|a| {
+                        let rounds: Vec<_> = a.stations().iter().map(|s| s.rounds()).collect();
+                        (a.alive(), a.flight().clone(), rounds)
+                    })
                     .collect();
                 player.step(&flight::PilotInput::default(), |x, z| {
                     f64::from(world.height(x as f32, z as f32))
@@ -118,7 +122,8 @@ pub fn roster_probe(
                 let own = combat.own();
                 let human = HumanAircraft::new(HumanSlot::SINGLE_PLAYER, &player, own);
                 bridge.step(&mut combat, &[human], world)?;
-                for (actor, (was_alive, mut replay)) in bridge.mission().actors().iter().zip(before)
+                for (actor, (was_alive, mut replay, rounds)) in
+                    bridge.mission().actors().iter().zip(before)
                 {
                     let bank = replay.bank;
                     let yaw = replay.yaw;
@@ -141,7 +146,28 @@ pub fn roster_probe(
                     });
                     if was_alive && actor.alive() && !struck && !shed {
                         replay.damage_fraction = actor.flight().damage_fraction;
-                        replay.payload_lbs = actor.flight().payload_lbs;
+                        // A release this tick lightens the aircraft before
+                        // it flies (the mission's weapons step). With dry
+                        // tanks the payload after the tick is that payload.
+                        // Tanks with fuel in them (every AI aircraft's start
+                        // full since 2026-10-20, docs/spec/ai.md) burn first
+                        // in the flight step, so the payload it flew with is
+                        // the one before less each release, debited as the
+                        // mission debits it (`AiActor::release`).
+                        if replay.systems.external_lbs() == actor.flight().systems.external_lbs() {
+                            replay.payload_lbs = actor.flight().payload_lbs;
+                        } else {
+                            for (station, before) in actor.stations().iter().zip(&rounds) {
+                                if let (Rounds::Finite(before), Rounds::Finite(after)) =
+                                    (*before, station.rounds())
+                                    && after < before
+                                {
+                                    replay.payload_lbs = (replay.payload_lbs
+                                        - f64::from(before - after) * station.external_round_lbs)
+                                        .max(0.0);
+                                }
+                            }
+                        }
                         // A researched actor (a rotorcraft since slice H1)
                         // flies on the surface the bridge gives it, runways
                         // and wind included; a legacy one on the terrain.
