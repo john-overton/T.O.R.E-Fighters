@@ -49,6 +49,9 @@ def problems(work: Path, output: str) -> list[str]:
             out.append(f"the {name} still differs between two draws of the same tick")
     if len(set(first)) != len(first):
         out.append("two views drew the same picture")
+    jet = _events(work / "jet-log" / "log.jsonl", "aircraft.hud")
+    if not any("target_x" in (row.get("fields") or {}) and row.get("object", 0) >= 0x50000000 for row in jet):
+        out.append("the F-16C ground designation never reached the recorded HUD")
     return out
 
 
@@ -127,6 +130,17 @@ def hud_state_problems(work: Path, output: str) -> list[str]:
         for row in sights
     ):
         out.append("the AC-130 recording has no sight sample with rounds left")
+    player_sights = [row for row in sights if row.get("subject") == 0]
+    ticks = [row["tick"] for row in player_sights]
+    if len(ticks) < 24 or any(b - a != 5 for a, b in zip(ticks, ticks[1:])):
+        out.append("the player sensor was not recorded at a steady 24 Hz")
+    if not any("impact0_x" in (row.get("fields") or {}) for row in player_sights):
+        out.append("the sensor never recorded its live gun impact")
+    if not any((row.get("fields") or {}).get("radar_dots") for row in player_sights):
+        out.append("the console never recorded its A-G radar contacts")
+    ground_hud = _events(work / "ac130" / "log.jsonl", "aircraft.hud")
+    if not any("target_x" in (row.get("fields") or {}) and row.get("object", 0) >= 0x50000000 for row in ground_hud):
+        out.append("the ground designation never reached the recorded HUD")
     for name in ("hud", "sight"):
         stills = list((work / name).glob("still-*.png"))
         if len(stills) != 1 or stills[0].stat().st_size < 10_000:
@@ -152,7 +166,7 @@ def scenarios() -> list[Scenario]:
                 Step([
                     "--a2g-run", "UKR", "QUCOL", "--aircraft", "ac130", "--load", "C_25.JT",
                     "--attack", "orbit", "--altitude", "4000", "--speed", "200", "--from", "3",
-                    "--console-fire", "55,75", "--seconds", "90",
+                    "--console-cycle", "55", "--console-fire", "60,68", "--orbit-slew", "70", "--seconds", "120",
                     "--record", "{work}/ac130.tore-replay",
                 ], timeout=500),
                 Step(["--recording-log", "{work}/ac130.tore-replay", "--out", "{work}/ac130"], timeout=180),
@@ -169,6 +183,7 @@ def scenarios() -> list[Scenario]:
             args=ARGS,
             timeout=600,
             then=[
+                Step(["--recording-log", "{work}/laser.tore-replay", "--out", "{work}/jet-log"], timeout=180),
                 Step(["python3", "-c", PLAN, "{work}/plan.txt"], app=False, timeout=30),
                 Step(["--replay-stills", "{work}/laser.tore-replay", "{work}/plan.txt", "{work}/a"], timeout=600),
                 Step(["--replay-stills", "{work}/laser.tore-replay", "{work}/plan.txt", "{work}/b"], timeout=600),

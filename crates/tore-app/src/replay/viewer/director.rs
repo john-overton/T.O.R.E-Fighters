@@ -149,7 +149,7 @@ impl Viewer {
                 crate::replay::tape_views::SENSOR
             };
             let taped = self
-                .taped_view(&picture, tick, [crate::reel::WIDTH, crate::reel::HEIGHT])
+                .taped_view(&picture, tick, 0., [crate::reel::WIDTH, crate::reel::HEIGHT])
                 .ok_or_else(|| {
                     format!(
                         "the HUD camera or Sensor View cannot be shown on aircraft {} at tick {tick}: {}",

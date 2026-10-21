@@ -2501,13 +2501,13 @@ pub fn header(
         replay::model::FUEL_WITH_EXTERNAL.into(),
     ));
     replay::Header {
+        format_version: replay::FORMAT_VERSION,
         game_version: crate::version::version().into(),
         game_commit: crate::version::commit().into(),
         recorded_at: super::library::utc_text(recorded_at),
         mission,
         world: crate::replay::identity::of(world),
         extra,
-        ..replay::Header::default()
     }
 }
 

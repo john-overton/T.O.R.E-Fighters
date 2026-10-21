@@ -12,10 +12,9 @@
 //! keys, the framing, the order the sight line is chosen in, the recorder
 //! lines) is an agent decision.
 //!
-//! A recording holds no sight pointing (where a pod looked, its zoom or its
-//! picture mode): the Sensor View works the line of sight out from what it
-//! does hold (the laser spot, the designation, a guided weapon's aim, the
-//! AC-130's orbit point, a landing) and says which on the picture.
+//! Current recordings hold the sight's pointing and zoom at 24 Hz. Older
+//! recordings can lack these: the fallback derives a line from their laser,
+//! designation, weapon aim, orbit point or impact and labels its source.
 use super::ground_marks::{Scene, Timed};
 use crate::sensor_console::SensorMode;
 use tore_formats::aircraft::AircraftId;

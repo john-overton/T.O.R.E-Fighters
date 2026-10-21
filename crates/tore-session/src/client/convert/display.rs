@@ -11,14 +11,17 @@ use std::collections::BTreeMap;
 use std::f64::consts::{FRAC_PI_2, PI};
 
 use tore_replay::Event;
-use tore_replay::display::{HudSample, SIGHT_GAP_TICKS, SightSample};
+use tore_replay::display::{
+    DISPLAY_TICKS, HudSample, ImpactSample, RadarContact, SIGHT_GAP_TICKS, SightDetail,
+    SightSample, TargetSample,
+};
 use tore_sim::combat::gunship::{self, Sight as GunSight};
 use tore_sim::combat::missiles::LaunchMode;
 use tore_sim::combat::sight::SightMode;
 use tore_sim::sensors::DEFAULT_RANGE_INDEX;
 use tore_world::readout::CockpitReadout;
 
-/// What a capture has already reduced to change events, one seat.
+/// Fixed-rate cockpit samples and legacy sparse samples, indexed by aircraft.
 #[derive(Clone, Debug, Default)]
 pub struct Seen {
     last: BTreeMap<u32, Held>,
@@ -41,7 +44,7 @@ struct Change {
 }
 
 impl Seen {
-    /// Fold one decoded readout into the change list. `nav` is the HUD's
+    /// Sample a decoded readout once per five-tick interval. `nav` is the HUD's
     /// NAV flag (the readout's own, or the strike cockpit's armed bit
     /// inverted when the world cockpit was not part of the readout).
     /// `range_index` is the scope step; pass [`DEFAULT_RANGE_INDEX`] when
@@ -60,8 +63,27 @@ impl Seen {
         S: Fn(usize) -> Option<String>,
         M: Fn(usize) -> Option<[f64; 3]>,
     {
+        if self
+            .last
+            .get(&aircraft)
+            .is_some_and(|last| last.sight_at / DISPLAY_TICKS == tick / DISPLAY_TICKS)
+        {
+            return;
+        }
         let (hud, sight) = from_readout(readout, nav, range_index, weapon_at, mount_at);
-        self.note(aircraft, tick, hud, sight);
+        self.changes.entry(tick).or_default().push(Change {
+            aircraft,
+            hud: Some(hud.clone()),
+            sight: sight.clone(),
+        });
+        self.last.insert(
+            aircraft,
+            Held {
+                hud,
+                sight,
+                sight_at: tick,
+            },
+        );
     }
 
     /// The HUD and sight changes written on `tick`, owned so a caller can
@@ -177,8 +199,7 @@ pub fn default_range_index() -> u8 {
 }
 
 /// The HUD sample and, when the aircraft has a gunsight or a targeting
-/// sight, the sight sample. The sight may be a free look, which the recorder
-/// does not write.
+/// sight, the sight sample, including free look.
 pub fn from_readout<S, M>(
     readout: &CockpitReadout,
     nav: bool,
@@ -209,6 +230,10 @@ where
             .as_ref()
             .map(|row| row.id)
             .or(readout.targets.designated),
+        display_target: readout.targets.display.as_ref().map(|row| TargetSample {
+            position: row.position,
+            velocity: row.velocity,
+        }),
         delivery: delivery_word(readout),
         readiness: readout.estimates.readiness.label().into(),
         guidance: readout.estimates.guidance_available,
@@ -229,14 +254,29 @@ where
             el: sight.look[1],
             zoom: sight.zoom,
             mode: mode_word(sight.mode, sight.returning),
-            // A free look's ground point moves with the aircraft and is
-            // worked out again on playback, so a free sight stays unwritten.
+            // Keep the actual ground intersection even during free slew.
             point: match sight.mode {
                 SightMode::Pinned(point) => Some(point),
                 SightMode::Tracked(_) => sight.aim,
-                SightMode::Free => None,
+                SightMode::Free => sight.aim,
             },
             tracked: sight.mode.tracked(),
+            detail: Some(SightDetail {
+                gimbal_limit: match sight.sensor.gimbal {
+                    tore_sim::combat::sight::Gimbal::Hemisphere => {
+                        sight.look[1].to_degrees() >= -0.5
+                    }
+                    tore_sim::combat::sight::Gimbal::Cone { search, .. } => {
+                        sight.look[0].hypot(sight.look[1]).to_degrees() >= search.to_degrees() - 0.5
+                    }
+                } || sight.notice.is_some_and(|n| {
+                    n.notice == gunship::Notice::GimbalLimit
+                        && n.tick <= readout.tick
+                        && readout.tick - n.tick < 30
+                }),
+                mark: sight.aim,
+                ..SightDetail::default()
+            }),
             ..SightSample::default()
         })
     };
@@ -335,6 +375,48 @@ where
         radar: readout.sensors.air_ground,
         range: range_index,
         gun_lock: guns.gun_lock,
+        detail: Some(SightDetail {
+            impacts: guns.impacts.map(|impact| {
+                impact.map(|impact| ImpactSample {
+                    point: impact.point(),
+                    range_ft: impact.range_ft(),
+                    spent: matches!(
+                        impact,
+                        tore_sim::combat::gunship_impact::Impact::Spent { .. }
+                    ),
+                })
+            }),
+            gimbal_limit: guns.look[1].to_degrees() >= gunship::GIMBAL_TOP.to_degrees() - 0.5
+                || guns.notice.is_some_and(|notice| {
+                    notice.notice == gunship::Notice::GimbalLimit
+                        && notice.tick <= guns.impacts_tick + 1
+                        && guns.impacts_tick + 1 - notice.tick < 30
+                }),
+            mark: match guns.sight {
+                GunSight::Pinned(point) => Some(point),
+                GunSight::Tracked(_) => readout.targets.display.as_ref().map(|row| row.position),
+                GunSight::Free => None,
+            },
+            radar: readout
+                .sensors
+                .ground
+                .iter()
+                .filter(|g| {
+                    readout.sensors.air_ground
+                        && g.contact.channel == tore_sim::sensors::Channel::Radar
+                })
+                .take(128)
+                .map(|g| RadarContact {
+                    position: g.contact.position,
+                    symbol: match g.symbol() {
+                        tore_sim::sensors::track::GroundSymbol::Dot => 0,
+                        tore_sim::sensors::track::GroundSymbol::Cross => 1,
+                        tore_sim::sensors::track::GroundSymbol::Square => 2,
+                    },
+                    selected: readout.targets.designated == Some(g.id()),
+                })
+                .collect(),
+        }),
     }
 }
 
@@ -342,6 +424,125 @@ where
 mod tests {
     use super::*;
     use tore_replay::vocab::kind;
+
+    #[test]
+    fn human_display_samples_are_24_hz_idle_slewing_and_firing() {
+        use tore_world::readout::GunsightReadout;
+        let (combat, flight) = tore_world::combat::fixtures::loaded([200, 2]);
+        let mut readout = combat
+            .cockpit_readout(0, tore_world::combat::launcher(&flight), None, None)
+            .unwrap();
+        readout.gunsight = Some(GunsightReadout {
+            sight: GunSight::Free,
+            look: [-1.5, -0.5],
+            returning: false,
+            aim: Some([100., 0., 200.]),
+            impacts: [None; 3],
+            impacts_tick: 0,
+            status: [tore_sim::combat::live::Readiness::Ready; 3],
+            notice: None,
+            zoom: 3,
+            gun_lock: None,
+        });
+        let mut seen = Seen::default();
+        let mut ticks = Vec::new();
+        for tick in 0..360 {
+            let guns = readout.gunsight.as_mut().unwrap();
+            guns.impacts_tick = tick;
+            if tick >= 120 {
+                guns.look[0] += 0.0001;
+            }
+            if tick >= 240 {
+                readout.stores.ammo[0] = 560 - tick as u16;
+            }
+            seen.observe(
+                0,
+                tick,
+                &readout,
+                false,
+                1,
+                |_| Some("C_25.JT".into()),
+                |_| None,
+            );
+            let events = seen.take_events(tick, |_, _| None);
+            if !events.is_empty() {
+                assert_eq!(events.len(), 2);
+                assert!(SightSample::parse(&events[1]).unwrap().detail.is_some());
+                ticks.push(tick);
+            }
+        }
+        assert_eq!(ticks, (0..360).step_by(5).collect::<Vec<_>>());
+        assert!(seen.changes.is_empty());
+    }
+
+    #[test]
+    fn a_human_free_fighter_sight_keeps_its_look_aim_and_gimbal_limit() {
+        use tore_sim::combat::sight::{Gimbal, SightSensor};
+        let (combat, flight) = tore_world::combat::fixtures::loaded([200, 2]);
+        let mut readout = combat
+            .cockpit_readout(0, tore_world::combat::launcher(&flight), None, None)
+            .unwrap();
+        readout.sight = Some(tore_world::readout::SightReadout {
+            mode: SightMode::Free,
+            look: [0.3, 0.],
+            returning: false,
+            aim: Some([1000., 0., 5000.]),
+            notice: None,
+            zoom: 4,
+            sensor: SightSensor {
+                laser: true,
+                range_ft: 60_000.,
+                gimbal: Gimbal::Hemisphere,
+                eye: [0., -4., 0.],
+                default_look: [0., -0.2],
+            },
+        });
+        let mut seen = Seen::default();
+        seen.observe(0, 0, &readout, false, 1, |_| None, |_| None);
+        let events = seen.take_events(0, |_, _| None);
+        let sight = events.iter().find_map(SightSample::parse).unwrap();
+        assert_eq!(sight.mode, "free");
+        assert_eq!([sight.az, sight.el], [0.3, 0.]);
+        assert_eq!(sight.point, Some([1000., 0., 5000.]));
+        assert_eq!(sight.zoom, 4);
+        assert!(sight.detail.unwrap().gimbal_limit);
+    }
+
+    #[test]
+    fn a_ground_display_target_survives_sampling_and_clears() {
+        let (combat, flight) = tore_world::combat::fixtures::loaded([200, 2]);
+        let mut readout = combat
+            .cockpit_readout(0, tore_world::combat::launcher(&flight), None, None)
+            .unwrap();
+        let target = tore_world::readout::TargetRow {
+            id: 0x50000000,
+            aircraft: None,
+            position: [12_345.5, 4., 6789.25],
+            velocity: [2., 0., 1.],
+            damage: tore_world::snapshot::Damage {
+                hp: 10,
+                initial_hp: 10,
+                sections: [0; tore_sim::combat::live::DAMAGE_SECTIONS],
+                structural: None,
+            },
+        };
+        readout.targets.designated = Some(target.id);
+        readout.targets.display = Some(target.clone());
+        let (hud, _) = from_readout(&readout, false, 1, |_| None, |_| None);
+        let back = HudSample::parse(&hud.event(0)).unwrap();
+        assert_eq!(back.target, Some(target.id));
+        assert_eq!(
+            back.display_target.unwrap(),
+            TargetSample {
+                position: target.position,
+                velocity: target.velocity
+            }
+        );
+        readout.targets.designated = None;
+        readout.targets.display = None;
+        let (cleared, _) = from_readout(&readout, false, 1, |_| None, |_| None);
+        assert!(cleared.display_target.is_none());
+    }
 
     fn sights(events: &[Event]) -> usize {
         events
@@ -369,7 +570,7 @@ mod tests {
     }
 
     #[test]
-    fn a_free_fighter_sight_is_not_written() {
+    fn a_sparse_non_cockpit_free_fighter_sight_is_not_written() {
         let mut seen = Seen::default();
         for tick in 0..24u64 {
             let sight = SightSample {
