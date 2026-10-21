@@ -3175,7 +3175,12 @@ again with an observer; the capture format did not change for it.
   58 since the F-15C wing pylons moved forward (slice v2-f15 forward pass): the
   whole wing assembly sits 7 ft further forward, just behind the leading edge,
   which moves those stores' release points again, so an older game must not
-  join.
+  join;
+  59 since the AI jettison policy (slice bf-aijett): AI aircraft drop only
+  their external tanks entering a fight and keep their weapons, shedding
+  air-to-ground loads only to get home damaged, on fuel, or when losing a close
+  fight, which changes AI behaviour and the simulation, so an older game must
+  not join.
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
