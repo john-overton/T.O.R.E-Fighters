@@ -303,14 +303,19 @@ pub fn is_target_info(label: &str) -> bool {
 /// hazards (VTOL overhaul, design 4.12). Retail has no such row; opinionated,
 /// requested by John on 2026-10-08 (the label is the design's).
 pub const EASY_PHYSICS: &str = "Easy flight physics?";
-/// Append the authored rows to the imported menu tree: three to Pref and the
+/// Append the authored display and lighting rows to Pref and the
 /// Easy flight physics row after the imported Cheat rows. The retail rows
 /// and their order are unchanged.
 pub fn add_authored_rows(tree: &mut [MenuNode]) {
     let authored = [
         (
             "Pref",
-            &[WEAPON_DIAGNOSTICS, DEBUG_PANELS, STABILITY_LEVEL][..],
+            &[
+                WEAPON_DIAGNOSTICS,
+                DEBUG_PANELS,
+                STABILITY_LEVEL,
+                "HUD colour",
+            ][..],
         ),
         ("Cheat", &[EASY_PHYSICS][..]),
     ];
@@ -327,6 +332,31 @@ pub fn add_authored_rows(tree: &mut [MenuNode]) {
                 });
             }
         }
+    }
+    // Keep Pref above its bottom buttons. Level controls have their own page.
+    if let Some(pref) = tree.iter_mut().find(|node| node.label == "Pref")
+        && !pref
+            .children
+            .iter()
+            .any(|node| node.label == "Cockpit lighting")
+    {
+        pref.children.push(MenuNode {
+            label: "Cockpit lighting".into(),
+            shortcut: String::new(),
+            children: [
+                "Dim instruments",
+                "Brighten instruments",
+                "Dim flood",
+                "Brighten flood",
+            ]
+            .into_iter()
+            .map(|label| MenuNode {
+                label: label.into(),
+                shortcut: String::new(),
+                children: vec![],
+            })
+            .collect(),
+        });
     }
 }
 pub struct FlightUi {
@@ -351,6 +381,8 @@ pub struct FlightUi {
     /// follows it (VTOL overhaul, design 5.2).
     pub stability: tore_input::StabilityLevel,
     pub brightness: i16,
+    pub lighting: crate::cockpit_lighting::Lighting,
+    lighting_chord: Option<(bool, Instant)>,
     pub zoom: f32,
     pub look: [f32; 2],
     pub time_scale: f64,
@@ -391,6 +423,8 @@ impl Default for FlightUi {
             target_info: false,
             cheats: Default::default(),
             brightness: 0,
+            lighting: Default::default(),
+            lighting_chord: None,
             zoom: 1.,
             look: [0.; 2],
             time_scale: 1.,
@@ -778,12 +812,29 @@ impl FlightUi {
                 });
                 Command::Click
             }
+            "HUD colour" => {
+                self.lighting.colour = (self.lighting.colour + 1) % 4;
+                self.message(format!(
+                    "HUD {}",
+                    crate::cockpit_lighting::Lighting::COLOURS[usize::from(self.lighting.colour)]
+                ));
+                Command::Click
+            }
+            "Dim instruments" | "Brighten instruments" | "Dim flood" | "Brighten flood" => {
+                self.adjust_lighting(
+                    label.ends_with("flood"),
+                    if label.starts_with("Dim") { -1 } else { 1 },
+                );
+                Command::Click
+            }
             "Dim HUD" => {
                 self.brightness = (self.brightness - 16).max(-256);
+                self.message(format!("HUD {}/33", (self.brightness + 256) / 16 + 1));
                 Command::Click
             }
             "Brighten HUD" => {
                 self.brightness = (self.brightness + 16).min(256);
+                self.message(format!("HUD {}/33", (self.brightness + 256) / 16 + 1));
                 Command::Click
             }
             AI_OBSERVATION_RATE | LEAN_AI_SENSORS | DEBUG_DEFAULTS => {
@@ -850,6 +901,32 @@ impl FlightUi {
             Command::None
         }
     }
+    fn adjust_lighting(&mut self, flood: bool, delta: i8) {
+        self.lighting.step(flood, delta);
+        self.message(if flood {
+            format!("FLOOD {}/5", self.lighting.flood)
+        } else {
+            format!("INSTRUMENTS {}/5", self.lighting.instruments)
+        });
+    }
+    /// Called before ordinary bindings so the chord's +/- cannot also zoom.
+    pub fn lighting_key(&mut self, key: &str, alt: bool) -> bool {
+        let Some((flood, at)) = self.lighting_chord else {
+            return false;
+        };
+        if self.menu
+            || self.map.open
+            || alt
+            || at.elapsed().as_secs_f32() > 4.
+            || !matches!(key, "-" | "_" | "+" | "=")
+        {
+            self.lighting_chord = None;
+            return false;
+        }
+        self.adjust_lighting(flood, if matches!(key, "-" | "_") { -1 } else { 1 });
+        self.lighting_chord = Some((flood, Instant::now()));
+        true
+    }
     pub fn key(
         &mut self,
         key: &str,
@@ -903,6 +980,23 @@ impl FlightUi {
                 Event::Switched(index) => Self::switched(tree, index),
                 _ => Command::None,
             };
+        }
+        if ctrl
+            && !alt
+            && ((key.eq_ignore_ascii_case("i") && !shift)
+                || (key.eq_ignore_ascii_case("f") && shift))
+        {
+            let flood = key.eq_ignore_ascii_case("f");
+            self.lighting_chord = Some((flood, Instant::now()));
+            self.message(if flood {
+                "FLOOD: -/+ TO ADJUST"
+            } else {
+                "INSTRUMENTS: -/+ TO ADJUST"
+            });
+            return Command::Click;
+        }
+        if ctrl && !shift && !alt && key.eq_ignore_ascii_case("h") {
+            return self.activate("HUD colour", "");
         }
         if alt && !ctrl && !shift && key == "F4" {
             return Command::Exit;
@@ -1841,7 +1935,24 @@ mod tests {
                 "HUD pitch ladder?",
                 WEAPON_DIAGNOSTICS,
                 DEBUG_PANELS,
-                STABILITY_LEVEL
+                STABILITY_LEVEL,
+                "HUD colour",
+                "Cockpit lighting"
+            ]
+        );
+        assert_eq!(
+            t[1].children
+                .last()
+                .unwrap()
+                .children
+                .iter()
+                .map(|node| node.label.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "Dim instruments",
+                "Brighten instruments",
+                "Dim flood",
+                "Brighten flood"
             ]
         );
         // Other roots are untouched.
@@ -2013,6 +2124,31 @@ mod tests {
         assert!(!ui.cheats.no_sun_whiteout);
     }
 
+    #[test]
+    fn lighting_chords_expire_cancel_and_never_zoom() {
+        let mut ui = FlightUi::default();
+        assert_eq!(ui.key("f", false, true, false, &[]), Command::None);
+        assert_eq!(ui.key("i", false, true, false, &[]), Command::Click);
+        assert!(ui.lighting_key("-", false));
+        assert_eq!(ui.lighting.instruments, 3);
+        assert!(ui.lighting_key("+", false));
+        assert_eq!(ui.lighting.instruments, 4);
+        assert_eq!(ui.zoom, 1.);
+        ui.key("f", true, true, false, &[]);
+        assert!(ui.lighting_key("=", false));
+        assert_eq!(ui.lighting.flood, 4);
+        assert!(!ui.lighting_key("x", false));
+        assert!(!ui.lighting_key("-", false));
+        ui.lighting_chord = Some((false, Instant::now() - std::time::Duration::from_secs(5)));
+        assert!(!ui.lighting_key("-", false));
+        ui.key("i", false, true, false, &[]);
+        ui.menu = true;
+        assert!(!ui.lighting_key("-", false));
+        ui.menu = false;
+        ui.key("h", false, true, false, &[]);
+        assert_eq!(ui.lighting.colour, 1);
+        assert_eq!(ui.brightness, 0);
+    }
     #[test]
     fn hud_brightness_uses_source_steps_and_saturates() {
         let mut ui = FlightUi::default();

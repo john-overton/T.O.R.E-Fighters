@@ -327,6 +327,9 @@ impl Renderer {
         );
     }
     #[allow(clippy::too_many_arguments)]
+    pub fn cockpit_lighting(&self, gain: f32, flood: f32) {
+        self.cockpit.lighting(&self.queue, gain, flood);
+    }
     pub fn cockpit(
         &mut self,
         state: &crate::flight::State,

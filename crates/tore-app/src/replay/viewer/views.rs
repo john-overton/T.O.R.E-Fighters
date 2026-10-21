@@ -547,8 +547,16 @@ impl Viewer {
         camera.roll = -state.bank as f32;
         camera.hidden_target = Some(id);
         camera.zoom = tape_views::hud_camera_zoom() * self.zoom;
-        let palette = model.cockpit_palette(&self.world, &self.scenery, camera.position[1], 0);
-        let color = palette[usize::from(model.hud.primary_color)];
+        let palette = model.cockpit_palette(
+            &self.world,
+            &self.scenery,
+            camera.position[1],
+            self.local_lighting.1,
+        );
+        let color = self.local_lighting.0.hud(
+            palette[usize::from(model.hud.primary_color)],
+            self.local_lighting.1,
+        );
         // The HUD's own projection at the cockpit's unmagnified scale; the
         // raster is then scaled with the camera, as the cockpit pass does.
         let [w, h] = size.map(f64::from);

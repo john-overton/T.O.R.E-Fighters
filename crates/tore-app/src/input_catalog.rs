@@ -933,6 +933,23 @@ pub const ENTRIES: &[Entry] = &[
     mouse("zoom-out", "Zoom out", View, &["-"], &["wheel:down"]),
     cmd("cockpit", "Cockpit art", View, &["Backspace"]),
     cmd("hud", "HUD", View, &["Shift-u"]),
+    cmd(
+        "key:Ctrl-i",
+        "Instrument brightness: then -/+",
+        View,
+        &["Ctrl-i"],
+    ),
+    cmd(
+        "key:Ctrl-Shift-f",
+        "Flood brightness: then -/+",
+        View,
+        &["Ctrl-Shift-f"],
+    ),
+    cmd("key:Ctrl-h", "HUD colour", View, &["Ctrl-h"]),
+    cmd("instruments-dim", "Dim instruments", View, &[]),
+    cmd("instruments-brighten", "Brighten instruments", View, &[]),
+    cmd("flood-dim", "Dim flood", View, &[]),
+    cmd("flood-brighten", "Brighten flood", View, &[]),
     cmd("key:Shift-[", "Dim HUD", View, &["Shift-["]),
     cmd("key:Shift-]", "Brighten HUD", View, &["Shift-]"]),
     cmd("key:Shift-m", "Live map", View, &["Shift-m"]),
@@ -1453,6 +1470,29 @@ pub fn control_label(device: &str, control: &str, mode: Mode, gamepad: bool) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn lighting_actions_and_rebound_keys_roundtrip() {
+        let profile = tore_input::Profile::parse("tore-input 1\nbind keyboard Ctrl-i key:Ctrl-i press\nbind keyboard Ctrl-Shift-f key:Ctrl-Shift-f press\nbind keyboard Ctrl-f key:Ctrl-Shift-f press\nbind keyboard Ctrl-h key:Ctrl-h press\nbind keyboard F9 instruments-dim press\nbind keyboard F10 instruments-brighten press\nbind keyboard F11 flood-dim press\nbind keyboard F12 flood-brighten press\n").unwrap();
+        let text = profile.to_text().unwrap();
+        assert_eq!(
+            tore_input::Profile::parse(&text)
+                .unwrap()
+                .to_text()
+                .unwrap(),
+            text
+        );
+        assert_eq!(profile.bindings.len(), 8);
+        for chord in [
+            "Ctrl+I",
+            "Ctrl+Shift+F",
+            "Ctrl+H",
+            "Ctrl+-",
+            "Ctrl+=",
+            "Shift+[",
+        ] {
+            assert!(crate::input_script::key_spec(chord).is_ok(), "{chord}");
+        }
+    }
     #[test]
     fn every_bindable_entry_parses_and_labels_are_unique() {
         let mut labels = std::collections::BTreeSet::new();

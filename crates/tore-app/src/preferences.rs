@@ -37,6 +37,7 @@ pub struct Preferences {
     /// by default.
     pub debug_panels: bool,
     pub brightness: i16,
+    pub lighting: crate::cockpit_lighting::Lighting,
     /// Borderless fullscreen, the default for an interactive start. A future
     /// Pref menu row hooks into this `fullscreen` field; `menu.rs` owns that
     /// row.
@@ -77,6 +78,7 @@ impl Preferences {
             weapon_diagnostics: ui.weapon_diagnostics,
             debug_panels: ui.debug_panels,
             brightness: ui.brightness,
+            lighting: ui.lighting,
             fullscreen,
             stability: ui.stability,
         }
@@ -106,6 +108,7 @@ impl Preferences {
         ui.weapon_diagnostics = self.weapon_diagnostics;
         ui.debug_panels = self.debug_panels;
         ui.brightness = self.brightness;
+        ui.lighting = self.lighting;
         ui.stability = self.stability;
     }
     pub fn text(&self) -> String {
@@ -117,7 +120,7 @@ impl Preferences {
             }
         }
         format!(
-            "tore-preferences 8\nzoom {}\nradar-range {}\nrcs-range {}\nradar-channel {}\nradar-history {}\nselected {}\nsmall {}\nlarge-pages {}\nsmall-pages {}\ncockpit {}\nhud {}\nladder {}\nweapon-diagnostics {}\ndebug-panels {}\nbrightness {}\nfullscreen {}\nstability {}\n",
+            "tore-preferences 9\nzoom {}\nradar-range {}\nrcs-range {}\nradar-channel {}\nradar-history {}\nselected {}\nsmall {}\nlarge-pages {}\nsmall-pages {}\ncockpit {}\nhud {}\nladder {}\nweapon-diagnostics {}\ndebug-panels {}\nbrightness {}\nfullscreen {}\nstability {}\nhud-colour {}\ninstrument-light {}\nflood-light {}\n",
             self.zoom,
             self.radar_range,
             self.rcs_range,
@@ -134,7 +137,10 @@ impl Preferences {
             self.debug_panels,
             self.brightness,
             self.fullscreen,
-            stability_word(self.stability)
+            stability_word(self.stability),
+            self.lighting.colour,
+            self.lighting.instruments,
+            self.lighting.flood
         )
     }
     pub fn parse(text: &str) -> Result<Self, String> {
@@ -152,6 +158,7 @@ impl Preferences {
             Some("tore-preferences 6") => 6,
             Some("tore-preferences 7") => 7,
             Some("tore-preferences 8") => 8,
+            Some("tore-preferences 9") => 9,
             _ => return Err("unsupported preferences version".into()),
         };
         for line in lines {
@@ -199,7 +206,8 @@ impl Preferences {
             // settings file.
             7 => 16,
             // Version 8 added the stability level.
-            _ => 17,
+            8 => 17,
+            _ => 20,
         };
         if values.len() != expected {
             return Err("unknown preference".into());
@@ -286,6 +294,19 @@ impl Preferences {
             weapon_diagnostics: diagnostics_saved && boolean("weapon-diagnostics")?,
             debug_panels: version >= 6 && boolean("debug-panels")?,
             brightness,
+            lighting: if version < 9 {
+                Default::default()
+            } else {
+                let instruments = integer("instrument-light", 5)? as u8;
+                if instruments == 0 {
+                    return Err("instrument-light outside bounds".into());
+                }
+                crate::cockpit_lighting::Lighting {
+                    colour: integer("hud-colour", 3)? as u8,
+                    instruments,
+                    flood: integer("flood-light", 5)? as u8,
+                }
+            },
             // Files written before version 4 predate the window mode, and
             // borderless fullscreen is the default, so they start fullscreen.
             fullscreen: if version < 4 {
@@ -326,6 +347,11 @@ mod tests {
         ui.weapon_diagnostics = true;
         ui.debug_panels = true;
         ui.zoom = 1.7;
+        ui.lighting = crate::cockpit_lighting::Lighting {
+            colour: 2,
+            instruments: 1,
+            flood: 0,
+        };
         i.pages = vec![9, 5];
         i.other_pages = vec![7, 8, 4];
         i.radar_range = 1;
@@ -351,6 +377,7 @@ mod tests {
         assert_eq!(i.pages, vec![7, 8, 4]);
         assert!(!ui.cockpit);
         assert_eq!(ui.zoom, 1.7);
+        assert_eq!(ui.lighting, saved.lighting);
         assert_eq!(i.radar_range, 1);
         assert!(!loaded.fullscreen);
     }
@@ -372,16 +399,44 @@ mod tests {
             weapon_diagnostics: true,
             debug_panels: true,
             brightness: 3,
+            lighting: Default::default(),
             fullscreen: false,
             stability: tore_input::StabilityLevel::Damper,
         };
         assert_eq!(Preferences::parse(&p.text()).unwrap(), p);
-        assert!(p.text().starts_with("tore-preferences 8\n"));
+        assert!(p.text().starts_with("tore-preferences 9\n"));
         assert_eq!(legacy_sound(&p.text()), None);
+        for broken in [
+            "hud-colour 4",
+            "instrument-light 0",
+            "instrument-light 6",
+            "flood-light 6",
+        ] {
+            let key = broken.split_whitespace().next().unwrap();
+            let bad = p
+                .text()
+                .lines()
+                .map(|line| {
+                    if line.starts_with(&format!("{key} ")) {
+                        broken
+                    } else {
+                        line
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(Preferences::parse(&bad).is_err());
+        }
+        let eight = p
+            .text()
+            .replace("tore-preferences 9", "tore-preferences 8")
+            .replace("hud-colour 0\ninstrument-light 4\nflood-light 3\n", "");
+        assert_eq!(Preferences::parse(&eight).unwrap(), p);
         // Version 7 predates the stability level: Damper.
         let seven = p
             .text()
-            .replace("tore-preferences 8", "tore-preferences 7")
+            .replace("tore-preferences 9", "tore-preferences 7")
+            .replace("hud-colour 0\ninstrument-light 4\nflood-light 3\n", "")
             .replace("stability damper\n", "");
         assert_eq!(Preferences::parse(&seven).unwrap(), p);
         assert!(Preferences::parse(&(seven.clone() + "stability off\n")).is_err());

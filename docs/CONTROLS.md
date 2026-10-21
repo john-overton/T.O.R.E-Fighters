@@ -299,6 +299,13 @@ and a gamepad's View+stick defaults avoid the problem.
 | Zoom out | Minus | Wheel down | - |
 | Cockpit art | Backspace | - | - |
 | HUD | Shift+U | - | - |
+| Instrument brightness: then -/+ | Ctrl+I | - | - |
+| Flood brightness: then -/+ | Ctrl+Shift+F | - | - |
+| HUD colour | Ctrl+H | - | - |
+| Dim instruments | - | - | - |
+| Brighten instruments | - | - | - |
+| Dim flood | - | - | - |
+| Brighten flood | - | - | - |
 | Dim HUD | Shift+[ | - | - |
 | Brighten HUD | Shift+] | - | - |
 | Live map | Shift+M | - | - |

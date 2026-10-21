@@ -193,7 +193,8 @@ the window title and number, +0x2a9 for button letters and +0x2aa for the button
 press square. For every flyable aircraft the frame is `~<cockpit stem>_P.PIC`;
 loading checks that the HUD names exactly that picture. Per-aircraft values are
 in the [instrument bezel spec](../spec/instrument-bezel.md).
-The app shares weather/sunlight/brightness palette resolution with cockpit art;
+The app shares weather/sunlight palette resolution with cockpit art, but
+[HUD brightness and colour](../spec/cockpit-lighting.md) affect only HUD ink;
 HUD geometry remains authored. Source brightness and palette ordering are in
 [weather.md](weather.md#hud-palette-consumer-continuation-2026-09-15).
 

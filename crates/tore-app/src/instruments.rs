@@ -504,6 +504,8 @@ pub struct Instruments {
     pub aim_shown: std::collections::BTreeMap<u8, crate::aim_box::Layout>,
     /// The HUD's primary color, shared by the forward-view symbology.
     pub hud_color: [u8; 3],
+    pub light_gain: f32,
+    pub flood: f32,
     /// The live cockpit palette, set by the host each frame. It colours the
     /// window frame and its labels, as it colours the cockpit art.
     pub palette: [[u8; 3]; 256],
@@ -551,6 +553,8 @@ impl Default for Instruments {
             aim_pending: Default::default(),
             aim_shown: Default::default(),
             hud_color: [GREEN[0], GREEN[1], GREEN[2]],
+            light_gain: 1.,
+            flood: 0.,
             palette: [[0; 3]; 256],
             target_preview: None,
             camera_target: None,
@@ -976,6 +980,37 @@ impl Instruments {
         r
     }
     pub fn page(&self, id: u8, h: &Airframe, s: &State) -> Raster {
+        let mut r = self.unlit_page(id, h, s);
+        for (at, pixel) in r.pixels.chunks_exact_mut(4).enumerate() {
+            let (x, y) = ((at % WIDTH) as i32, (at / WIDTH) as i32);
+            let screen = x >= SCREEN.0
+                && x < SCREEN.0 + SCREEN.2
+                && y >= SCREEN.1
+                && y < SCREEN.1 + SCREEN.3;
+            if !screen && self.flood > 0. {
+                crate::cockpit_lighting::flood_pixel(pixel, self.flood * 0.65);
+            }
+            if self.light_gain != 1. {
+                for channel in &mut pixel[..3] {
+                    *channel = (f32::from(*channel) * self.light_gain).min(255.) as u8;
+                }
+            }
+        }
+        if matches!(id, 2 | 3) && self.cameras.contains_key(&id) {
+            let f = &h.font;
+            if id == 2
+                && !s.systems.has(31)
+                && let Some(symbology) = &self.front_shown
+            {
+                front_view::draw(&mut r, f, symbology, self.hud_color);
+            }
+            if let Some(layout) = self.aim_shown.get(&id) {
+                aim_marks::draw(&mut r, layout, self.hud_color);
+            }
+        }
+        r
+    }
+    fn unlit_page(&self, id: u8, h: &Airframe, s: &State) -> Raster {
         let f = &h.font;
         let mut r = self.window(id, &h.panel, f, &h.hud);
         let text = |r: &mut Raster, t: &str, x, y| r.text(f, t, x, y, GREEN);
@@ -1575,15 +1610,6 @@ impl Instruments {
                         SCREEN.2,
                         SCREEN.3,
                     );
-                    if id == 2
-                        && !s.systems.has(31)
-                        && let Some(symbology) = &self.front_shown
-                    {
-                        front_view::draw(&mut r, f, symbology, self.hud_color);
-                    }
-                    if let Some(layout) = self.aim_shown.get(&id) {
-                        aim_marks::draw(&mut r, layout, self.hud_color);
-                    }
                 } else {
                     text(&mut r, "CAMERA LOADING", 19, 52);
                 }
@@ -2440,6 +2466,48 @@ mod link_cue_tests {
             glyphs: Vec::new(),
         };
         airframe
+    }
+
+    #[test]
+    fn lighting_preserves_screen_colours_and_dims_the_complete_instrument() {
+        let h = airframe();
+        let state = h.start(&tore_world::test_support::terrain());
+        let mut panels = Instruments {
+            palette: [[90, 100, 110]; 256],
+            ..Default::default()
+        };
+        let plain = panels.page(7, &h, &state);
+        assert_eq!(plain.pixels, panels.unlit_page(7, &h, &state).pixels);
+        let key = panels.page_key(7, &state);
+        panels.flood = 0.6;
+        assert_ne!(key, panels.page_key(7, &state));
+        let flooded = panels.page(7, &h, &state);
+        let mut changed = 0;
+        for (at, (before, after)) in plain
+            .pixels
+            .chunks_exact(4)
+            .zip(flooded.pixels.chunks_exact(4))
+            .enumerate()
+        {
+            let (x, y) = ((at % WIDTH) as i32, (at / WIDTH) as i32);
+            if x >= SCREEN.0 && x < SCREEN.0 + SCREEN.2 && y >= SCREEN.1 && y < SCREEN.1 + SCREEN.3
+            {
+                assert_eq!(before, after, "flood reached display at {x},{y}");
+            } else if before != after {
+                changed += 1;
+            }
+        }
+        assert!(changed > 100);
+        panels.flood = 0.;
+        panels.light_gain = 0.5;
+        let dim = panels.page(7, &h, &state);
+        for (before, after) in plain.pixels.chunks_exact(4).zip(dim.pixels.chunks_exact(4)) {
+            assert_eq!(
+                after[..3],
+                before[..3].iter().map(|c| c / 2).collect::<Vec<_>>()
+            );
+            assert_eq!(before[3], after[3]);
+        }
     }
 
     fn marked_contact(id: u32) -> scope::Contact {

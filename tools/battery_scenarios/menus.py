@@ -923,6 +923,19 @@ def scenarios() -> list[Scenario]:
                 expect=[r"window size outside 640x480\.\.3840x2160"],
             )
         )
+    for label, clock, lighting in [("day", "12:00", "4,0,0,0"), ("night", "00:00", "1,5,1,-64")]:
+        out.append(
+            Scenario(
+                name=f"menus-window-cockpit-lighting-{label}",
+                lane="menus",
+                window=True,
+                args=["--aircraft", "f16c", "--capture-flight", "{work}/flight.ppm", "--window-size", "960x720", "--no-audio"],
+                env={"TORE_WEATHER_TIME": clock, "TORE_COCKPIT_LIGHTING": lighting},
+                timeout=120,
+                expect=[r"Smoke test: requested screen presented successfully"],
+                check=flight_picture((960, 720)),
+            )
+        )
     for a in AIRCRAFT:
         out.append(
             Scenario(

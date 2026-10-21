@@ -135,7 +135,10 @@ gear is fixed. The Hind retains retractable gear. This is an explicit
 | + / - | Zoom view | USNF manual; authored 0.5–4× projection |
 | Backspace | Toggle cockpit art, retain HUD/windows | FA menu (`BS`) |
 | Shift-U | Toggle HUD | Development shortcut |
-| Shift-[ / Shift-] | Dim / brighten HUD | FA menu |
+| Shift-[ / Shift-] | Dim / brighten HUD, 33 settings | FA menu |
+| Ctrl-H | Cycle HUD green / amber / white / cyan | Authored |
+| Ctrl-I then -/+ | Instrument and cockpit brightness, five levels, default 4 | Requested, authored chord |
+| Ctrl-Shift-F then -/+ | Red cockpit flood, Off and five levels, default 3 | Requested, authored chord |
 | D | Report ownship and systems damage in the sim log | Manual p. 161; requested summary |
 | Shift-0…9 | Toggle instrument windows (four large or six small) | FA menu; oldest open window is replaced |
 | Comma / period | Decrease/increase scope range | USNF manual; applies to the RWR or the RCS page if either is the last opened window, and to the radar scope otherwise |
@@ -163,6 +166,10 @@ Heading hold shows `AUTO` above `HDG ALT`, beside the heading tape.
 Small places six windows across the bottom in two groups of three. Their reference size is 96×95, with six-pixel gaps and eight-pixel outer margins. Each group anchors to its screen edge; the center gutter grows on wider displays. Its initial pages are Systems/RWR/Nav on the left and Radar/Visual/Radar/Weapons on the right. Each layout remembers its own selected pages for the session. Shift-0…9 toggles pages; opening beyond a layout's capacity replaces its oldest page. Launching a seeker weapon also opens the target camera (Shift-4) if it is closed: at the top right in the small layout, to the left of the top-right window in the large one, without closing any window ([seeker window](spec/target-window.md#seeker-window)). Switching layouts cancels any pending instrument click. Button hit testing uses the same scaling and rectangles as rendering.
 
 The Envelope window (Shift-1) uses U for the current G curve, A for all positive-G curves, and C for locked-target comparison. Red marks the target's advantage. It shows clean-aircraft capability, with live altitude, G and speed readouts and a color-cycling square. Each aircraft sets its own chart scale. Missing comparison data is labeled explicitly. See the [envelope spec](spec/envelope.md) for fitted colors, scale and marker timing.
+
+Lighting choices are saved between flights. Adjustment chords expire after four seconds
+or another key; Ctrl may remain held. All commands are bindable in Controls > View,
+and PREF > Cockpit lighting provides individual adjustment rows. See [cockpit lighting](spec/cockpit-lighting.md).
 
 Each window is a 162×160 raster: the flying aircraft's own original frame at double size, with its title, number and button letters in the aircraft's HUD colours ([bezel spec](spec/instrument-bezel.md)). It is resampled directly to the flight overlay resolution. There is no intermediate 96×95 reduction, so small-window text retains source strokes on larger displays. These are fitted layouts, not the original placement, which uses 10- and 14-pixel margins and an 81×80 small window ([window placement](spec/instrument-bezel.md#window-placement)). Sizes and margins scale by the smaller of width/640 and height/480. Use `--instrument-layout large` or `--instrument-layout small` for startup or repeatable GPU captures.
 

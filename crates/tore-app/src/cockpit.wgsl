@@ -1,6 +1,6 @@
 // Aircraft-forward datum translates the flat art and HUD together during head-look.
 struct Cockpit {
- placement:vec4<f32>, size:vec4<f32>, art:vec4<f32>, hud:vec4<f32>, mirrors:array<vec4<f32>,3>
+ placement:vec4<f32>, size:vec4<f32>, art:vec4<f32>, hud:vec4<f32>, mirrors:array<vec4<f32>,3>, lighting:vec4<f32>
 }
 @group(0) @binding(0) var frame:texture_2d<u32>;
 @group(0) @binding(1) var symbols:texture_2d<f32>;
@@ -21,6 +21,12 @@ fn frame_sample(uv:vec2<f32>)->vec4<f32> {
  }}
  return color;
 }
+fn srgb(c:vec3<f32>)->vec3<f32> {
+ return select(c*12.92,1.055*pow(c,vec3(1./2.4))-vec3(.055),c>vec3(.0031308));
+}
+fn linear_rgb(c:vec3<f32>)->vec3<f32> {
+ return select(c/12.92,pow((c+vec3(.055))/1.055,vec3(2.4)),c>vec3(.04045));
+}
 struct Output { @builtin(position) position:vec4<f32>, @location(0) screen:vec2<f32> }
 @vertex fn vertex(@builtin(vertex_index) index:u32)->Output {
  let p=array<vec2<f32>,3>(vec2(-1.,-1.),vec2(3.,-1.),vec2(-1.,3.));
@@ -38,6 +44,18 @@ struct Output { @builtin(position) position:vec4<f32>, @location(0) screen:vec2<
  var aperture=0.;
  if cockpit.art.z>0. && all(art_uv>=vec2(0.)) && all(art_uv<=vec2(1.)) {
      art_color=frame_sample(art_uv);
+     // Two soft reflected pools on covered artwork. Glass has zero alpha.
+     let left=(art_uv-vec2(.16,.72))/vec2(.32,.55);
+     let right=(art_uv-vec2(.84,.72))/vec2(.32,.55);
+     let pool=min(1.,exp(-dot(left,left)*2.)+exp(-dot(right,right)*2.))*cockpit.lighting.y;
+     if art_color.a>0. && (cockpit.lighting.x!=0. || pool>0.) {
+         // Match the display raster's channel gains, then return to linear light.
+         let base=srgb(art_color.rgb/art_color.a);
+         let lit=min(vec3(1.),vec3(
+             base.r+(22./255.+base.r*.35)*pool,
+             base.g*(1.-.12*pool),base.b*(1.-.16*pool))*(1.+cockpit.lighting.x));
+         art_color=vec4(linear_rgb(lit)*art_color.a,art_color.a);
+     }
      let source=art_uv*cockpit.art.xy;
      let source_pixel=clamp(vec2<i32>(source),vec2(0),vec2<i32>(cockpit.art.xy)-vec2(1));
      aperture=f32(textureLoad(hud_aperture,source_pixel,0).r);

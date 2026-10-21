@@ -8,6 +8,12 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
+Cockpit lighting captures may set `TORE_COCKPIT_LIGHTING=4,3,0,0`: instrument
+level 1..5, flood 0..5, HUD colour 0..3 (green, amber, white, cyan), and HUD
+brightness -256..256. This overrides local preferences for the run. Use
+`TORE_WEATHER_TIME=12:00` or `00:00` with `--capture-flight`, through
+`tools/agent-run.sh`. [Lighting spec](spec/cockpit-lighting.md).
+
 ## Baseline
 
 Clone this repository and enter its root before running Cargo commands. Source code is under `crates/`, project documentation under `docs/`, and developer scripts under `tools/`. User-owned media belongs under ignored `gameassets/`; optional reference code under ignored `USNF-ATF/`; research output under ignored `.local/`. See [README](../README.md) for the short run workflow and [EXTRACTION](EXTRACTION.md) for the shared extraction script.

@@ -420,7 +420,13 @@ impl Viewer {
             }
             let palette =
                 watched_model.cockpit_palette(&self.world, &self.scenery, camera.position[1], 0);
-            let color = palette[usize::from(watched_model.hud.primary_color)];
+            let green = watched_model.cockpit_palette(
+                &self.world,
+                &self.scenery,
+                camera.position[1],
+                self.local_lighting.1,
+            )[usize::from(watched_model.hud.primary_color)];
+            let color = self.local_lighting.0.hud(green, self.local_lighting.1);
             let mut pixels = vec![0; 640 * 480 * 4];
             let zoom = (1. / crate::flight_canvas::HUD_SCALE) as f32;
             crate::hud::draw(

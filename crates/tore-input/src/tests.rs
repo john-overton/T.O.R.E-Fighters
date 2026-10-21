@@ -797,3 +797,28 @@ fn the_gun_key_is_a_hold_that_follows_its_key() {
     // Like the trigger, it is only ever a hold.
     assert!(Profile::parse("tore-input 1\nbind keyboard Tab fire-gun press").is_err());
 }
+
+#[test]
+fn cockpit_lighting_is_local_and_adjustable_while_paused() {
+    for action in [
+        "key:Ctrl-i",
+        "key:Ctrl-Shift-f",
+        "key:Ctrl-h",
+        "key:Shift-[",
+        "key:Shift-]",
+        "instruments-dim",
+        "instruments-brighten",
+        "flood-dim",
+        "flood-brighten",
+    ] {
+        let mut r = resolver(&format!("bind keyboard x {action} press"));
+        event(&mut r, "keyboard", "x", 0., true);
+        r.context(true, true);
+        event(&mut r, "keyboard", "x", 1., false);
+        assert_eq!(
+            r.drain(),
+            vec![("keyboard".into(), Action::Ui(action.into()))]
+        );
+        assert!(frame(&mut r).commands.is_empty());
+    }
+}

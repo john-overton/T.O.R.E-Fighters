@@ -34,6 +34,7 @@ mod celestial;
 mod city_fill_dump;
 mod city_fires;
 mod clouds;
+mod cockpit_lighting;
 mod cockpit_renderer;
 mod cockpit_sheet;
 mod combat_smoke;
@@ -1454,7 +1455,21 @@ impl App {
             );
             return self.flight_command(command);
         }
-        if self.flight_ui.frozen() {
+        let lighting_action = matches!(
+            name.as_str(),
+            "key:Ctrl-i"
+                | "key:Ctrl-Shift-f"
+                | "key:Ctrl-h"
+                | "key:Shift-["
+                | "key:Shift-]"
+                | "instruments-dim"
+                | "instruments-brighten"
+                | "flood-dim"
+                | "flood-brighten"
+        );
+        if self.flight_ui.frozen()
+            && !(lighting_action && !self.flight_ui.menu && !self.flight_ui.map.open)
+        {
             return Action::None;
         }
         if let Some(mut key) = name.strip_prefix("key:") {
@@ -1487,6 +1502,10 @@ impl App {
             return self.flight_command(Command::SightZoom(steps));
         }
         let command = match name.as_str() {
+            "instruments-dim" => self.flight_ui.activate("Dim instruments", ""),
+            "instruments-brighten" => self.flight_ui.activate("Brighten instruments", ""),
+            "flood-dim" => self.flight_ui.activate("Dim flood", ""),
+            "flood-brighten" => self.flight_ui.activate("Brighten flood", ""),
             "weapon-next" => Command::NextWeapon,
             "weapon-group-next" => Command::Combat(tore_sim::combat::live::Command::NextGunGroup),
             "weapon-group-toggle" => {
@@ -3719,6 +3738,16 @@ impl App {
             return Action::None;
         }
         if self.screen == Screen::Flight
+            && event.pressed
+            && !event.repeat
+            && self.flight_ui.lighting_key(
+                &name,
+                self.modifiers.alt_key() || self.modifiers.super_key(),
+            )
+        {
+            return Action::None;
+        }
+        if self.screen == Screen::Flight
             && !(event.pressed
                 && self.flight_ui.map.open
                 && !self.modifiers.control_key()
@@ -5827,11 +5856,34 @@ impl ApplicationHandler for App {
                             &self.world.terrain,
                             &self.scenery,
                             self.camera.position[1],
-                            self.flight_ui.brightness,
+                            0,
                         );
-                        self.instruments.hud_color =
-                            cockpit_palette[usize::from(self.hornet.hud.primary_color)];
+                        let green = self.hornet.cockpit_palette(
+                            &self.world.terrain,
+                            &self.scenery,
+                            self.camera.position[1],
+                            self.flight_ui.brightness,
+                        )[usize::from(self.hornet.hud.primary_color)];
+                        let hud_ink = self
+                            .flight_ui
+                            .lighting
+                            .hud(green, self.flight_ui.brightness);
+                        let sun_height = self
+                            .world
+                            .terrain
+                            .weather
+                            .sample(self.camera.position[1])
+                            .as_ref()
+                            .and_then(|sample| {
+                                celestial::visual_sun_direction(sample, &self.world.terrain.weather)
+                            })
+                            .map_or(-1., |sun| sun[1]);
+                        let flood = self.flight_ui.lighting.flood_strength(sun_height);
+                        self.instruments.hud_color = hud_ink;
                         self.instruments.palette = cockpit_palette;
+                        self.instruments.light_gain = self.flight_ui.lighting.instrument_gain();
+                        self.instruments.flood = flood;
+                        renderer.cockpit_lighting(self.instruments.light_gain, flood);
                         // The map's opaque letterbox and the sensor console's
                         // blank canvas, both below, cover every instrument window:
                         // those frames start from a clear canvas without them.
@@ -5899,7 +5951,7 @@ impl ApplicationHandler for App {
                                 self.flight_ui.ladder,
                                 !frame.readout.airport.nav_mode
                                     && (weapon_hud::active(&frame) || self.gun_key_sent),
-                                cockpit_palette[usize::from(self.hornet.hud.primary_color)],
+                                hud_ink,
                                 self.flight_canvas.hud_zoom(1.),
                                 ils,
                                 airport_wind(&self.world.terrain, presented, guidance.as_ref())
@@ -5969,7 +6021,7 @@ impl ApplicationHandler for App {
                                 &mut self.menu.pixels,
                                 &frame,
                                 &self.hornet.hud_font,
-                                cockpit_palette[usize::from(self.hornet.hud.primary_color)],
+                                hud_ink,
                                 hud_zoom,
                                 target_friendly,
                                 easy_square.is_none(),
@@ -6003,12 +6055,12 @@ impl ApplicationHandler for App {
                                 &frame,
                                 &self.world.combat.state,
                                 &self.hornet.hud_font,
-                                cockpit_palette[usize::from(self.hornet.hud.primary_color)],
+                                hud_ink,
                             );
                             self.flight_canvas.weapon_debug(&self.menu.pixels);
                             self.menu.pixels.fill(0);
                         }
-                        let aim_color = cockpit_palette[usize::from(self.hornet.hud.primary_color)];
+                        let aim_color = hud_ink;
                         if let Some(point) = easy_square {
                             self.flight_canvas.target_square(
                                 point,
@@ -15604,6 +15656,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         app.instruments.preview_window_layout(mode);
         // No seeker weapon is flying here, so keep the window up.
         app.instruments.keep_seeker_window();
+    }
+    if let Ok(value) = std::env::var("TORE_COCKPIT_LIGHTING") {
+        (app.flight_ui.lighting, app.flight_ui.brightness) = cockpit_lighting::preview(&value)?;
     }
     app.preference_saved = preferences::Preferences::capture(
         &app.flight_ui,
