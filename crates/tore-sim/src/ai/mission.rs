@@ -5175,8 +5175,14 @@ impl AiActor {
     /// `State::endurance_flow_lbs_per_second`). The spec's own definition
     /// needs the throttle search that holds cruise speed, which the host does
     /// not yet perform.
+    ///
+    /// All remaining fuel counts, external tanks included: they burn first
+    /// (`Fuel::consume`), so an AI aircraft with full tanks has their fuel to
+    /// fly on before its internal fuel falls, as the player's fuel state
+    /// counts it (docs/spec/cockpit-voice.md).
     fn endurance_s(&self) -> f64 {
-        self.flight.fuel / self.flight.endurance_flow_lbs_per_second()
+        (self.flight.fuel + self.flight.systems.external_lbs())
+            / self.flight.endurance_flow_lbs_per_second()
     }
 
     /// Seconds a full internal tank lasts at the flow `endurance_s` uses.
@@ -7606,6 +7612,31 @@ mod tests {
             out.fallbacks
                 .iter()
                 .any(|(id, f)| *id == 1 && *f == Fallback::LeaderReturnToBase)
+        );
+    }
+
+    #[test]
+    fn external_tank_fuel_counts_toward_the_actors_endurance() {
+        // The bingo actor above, with a full tank: its fuel burns first, so
+        // the actor has it to fly on and its endurance counts it.
+        let mut mission = one_v_one();
+        let actor = mission.actor_mut(1).unwrap();
+        actor.flight_mut().position = [0.0, 20000.0, 400_000.0];
+        actor.set_internal_fuel(120.0);
+        let dry = actor.endurance_s();
+        actor.flight_mut().systems = crate::aircraft_systems::Systems::new(1, [10_000.0; 9]);
+        let wet = actor.endurance_s();
+        assert!(dry > 0.0);
+        assert!(
+            (wet / dry - (120.0 + 90_000.0) / 120.0).abs() < 1e-9,
+            "{dry} {wet}"
+        );
+        let out = run(&mut mission, 240);
+        assert!(
+            !out.activities
+                .iter()
+                .any(|(id, a)| *id == 1 && *a == Activity::ReturningToBase),
+            "an actor with full tanks went home on bingo"
         );
     }
 

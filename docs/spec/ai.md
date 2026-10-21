@@ -1226,7 +1226,12 @@ leader's airport, joins the landing.
 
 Fuel: with a home airport the aircraft computes time to reach it at a cruise
 speed (minimum plus one fifth of the envelope, or half if that is under
-75 ft/s) and its endurance at the lowest throttle that holds that speed. It is
+75 ft/s) and its endurance at the lowest throttle that holds that speed. The
+endurance counts all remaining fuel, external tanks included: every AI
+aircraft starts with its tanks full, a default load's as well as a given
+one's, and burns them first, as the player does (fixed 2026-10-20; before, a
+default load's tank, such as the F/A-18's or F-16C's centreline tank, was
+carried at full weight with no fuel in it). It is
 out of fuel at zero, critical below four minutes of endurance, on bingo when
 endurance is under time-to-home plus five minutes, and on caution at or
 under time-to-home plus ten minutes. An AI wingman whose leader is AI-controlled

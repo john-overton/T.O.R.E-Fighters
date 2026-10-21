@@ -1129,11 +1129,15 @@ impl AiWings {
             };
             if let Some(load) = loaded {
                 actor.flight_mut().fuel = load.fuel_lbs;
-                actor.flight_mut().systems = tore_sim::aircraft_systems::Systems::new(
-                    config.engines,
-                    config.external_fuel_lbs,
-                );
             }
+            // Every AI aircraft starts with its tanks full and its engine
+            // count, the player's rule, whether a loadout was given or it
+            // flies its aircraft's default load (which can hang a tank: the
+            // F/A-18's and F-16C's centreline). Before 2026-10-20 only a
+            // given loadout did this, so a default tank was carried full
+            // weight with no fuel in it and a twin flew one engine's systems.
+            actor.flight_mut().systems =
+                tore_sim::aircraft_systems::Systems::new(config.engines, config.external_fuel_lbs);
             for (index, station) in config.stations.iter().enumerate() {
                 bridge
                     .weapons
