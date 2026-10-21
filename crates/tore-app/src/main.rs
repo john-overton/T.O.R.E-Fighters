@@ -13001,7 +13001,12 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         let catalog = tore_formats::theater::map_catalog(&assets.theater_resources)?;
         for (code, _) in &catalog {
             let world = scenery::launch_terrain(&assets.theater_resources, code, None)?;
-            let scenery = scenery::Scenery::build(&assets.theater_resources, &world)?;
+            // The layout's own art, without the flight vegetation: baking
+            // vegetation for 75 layouts took 5 to 15 s each on a cold cache
+            // and pushed this past the battery's 10 minutes. The vegetation
+            // pages are checked against the device limits, through the real
+            // mission loader, by `--vegetation-preview DIR limits-check`.
+            let scenery = scenery::Scenery::build_for(&assets.theater_resources, &world, false)?;
             let bytes = scenery.texture_indices.len() + scenery.sky_indices.len();
             if bytes / 65536 > 4096 {
                 return Err("map artwork exceeds GPU page budget".into());

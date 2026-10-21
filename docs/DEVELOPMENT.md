@@ -2028,7 +2028,9 @@ TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --theater '~U
 
 `--airport-allegiance` (imported media, no display) lists, for every base theater and for Blue and for Redfor, the ground-start airports the creator offers and checks them, the automatic ground start and the AI's home runway against the built world: none may be the other side's ([allegiance](spec/airports.md#allegiance)). `--validate-ils` (imported media, no display) measures the ILS at every airport of every base theater, and of the `--theater ~CODE` variant if one is named: the datum against the runway plane, the glide path crossing the threshold, the bars reading zero with the right signs down the ideal path, and any terrain above the final 5 nm of it. See [ILS alignment](testing/ils.md). `--validate-maps` needs imported media but no display. It constructs every
 imported layout, reports source identity, placement/body counts, geometry and
-indexed artwork size, and exits with an error on construction failure. The
+indexed artwork size (without the flight vegetation, whose pages
+`--vegetation-preview DIR limits-check` checks through the mission loader), and
+exits with an error on construction failure. The
 other two commands need a display. Older caches require re-import for the
 `TORE_TERRAIN_V2` dependency set. Use the existing isolated import workflow
 above; never write extracted retail resources into tracked assets.
