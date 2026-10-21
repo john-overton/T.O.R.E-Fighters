@@ -169,7 +169,10 @@ The Envelope window (Shift-1) uses U for the current G curve, A for all positive
 
 Lighting choices are saved between flights. Adjustment chords expire after four seconds
 or another key; Ctrl may remain held. All commands are bindable in Controls > View,
-and PREF > Cockpit lighting provides individual adjustment rows. See [cockpit lighting](spec/cockpit-lighting.md).
+and PREF > Cockpit lighting provides individual adjustment rows. Cockpit paint and
+bezels fade with the world sunlight and moonlight; screens stay self-lit. The red
+flood lights the darkened paint at night. Generated bezel legends have a subtle
+backlight controlled by instrument brightness. See [cockpit lighting](spec/cockpit-lighting.md).
 
 Each window is a 162×160 raster: the flying aircraft's own original frame at double size, with its title, number and button letters in the aircraft's HUD colours ([bezel spec](spec/instrument-bezel.md)). It is resampled directly to the flight overlay resolution. There is no intermediate 96×95 reduction, so small-window text retains source strokes on larger displays. These are fitted layouts, not the original placement, which uses 10- and 14-pixel margins and an 81×80 small window ([window placement](spec/instrument-bezel.md#window-placement)). Sizes and margins scale by the smaller of width/640 and height/480. Use `--instrument-layout large` or `--instrument-layout small` for startup or repeatable GPU captures.
 

@@ -91,7 +91,10 @@ impl Instruments {
     pub fn page_key(&self, id: u8, s: &State) -> Option<PageKey> {
         let mut k = Key::default();
         // The window: frame and labels through the palette, the press square.
-        k.tag(id).debug(&self.light_gain).debug(&self.flood);
+        k.tag(id)
+            .debug(&self.light_gain)
+            .debug(&self.flood)
+            .debug(&self.ambient);
         for colour in &self.palette {
             k.0.extend_from_slice(colour);
         }

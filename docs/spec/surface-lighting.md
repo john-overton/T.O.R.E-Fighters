@@ -14,6 +14,9 @@ All constants and rendering choices below are agent decisions, not recovered
 original behavior. Original shadow and surface-light calibration remain unknown;
 retail comparison is unavailable.
 
+The [cockpit ambient consumer](cockpit-lighting.md) shares the sun/moon directions,
+night/day blend and dense-band transmission, with a fitted flat-art exposure.
+
 ## Surface response
 
 Smooth weather uses continuous diffuse lighting on all opaque world triangles:

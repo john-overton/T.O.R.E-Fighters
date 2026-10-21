@@ -5868,22 +5868,18 @@ impl ApplicationHandler for App {
                             .flight_ui
                             .lighting
                             .hud(green, self.flight_ui.brightness);
-                        let sun_height = self
-                            .world
-                            .terrain
-                            .weather
-                            .sample(self.camera.position[1])
-                            .as_ref()
-                            .and_then(|sample| {
-                                celestial::visual_sun_direction(sample, &self.world.terrain.weather)
-                            })
-                            .map_or(-1., |sun| sun[1]);
-                        let flood = self.flight_ui.lighting.flood_strength(sun_height);
+                        let ambient = cockpit_lighting::ambient(
+                            &self.world.terrain,
+                            &self.scenery,
+                            self.camera.position[1],
+                        );
+                        let flood = self.flight_ui.lighting.flood_strength(ambient);
                         self.instruments.hud_color = hud_ink;
                         self.instruments.palette = cockpit_palette;
                         self.instruments.light_gain = self.flight_ui.lighting.instrument_gain();
                         self.instruments.flood = flood;
-                        renderer.cockpit_lighting(self.instruments.light_gain, flood);
+                        self.instruments.ambient = ambient;
+                        renderer.cockpit_lighting(self.instruments.light_gain, flood, ambient);
                         // The map's opaque letterbox and the sensor console's
                         // blank canvas, both below, cover every instrument window:
                         // those frames start from a clear canvas without them.

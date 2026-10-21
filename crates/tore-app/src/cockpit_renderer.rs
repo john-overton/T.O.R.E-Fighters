@@ -375,8 +375,13 @@ impl CockpitRenderer {
             ],
         }));
     }
-    pub fn lighting(&self, queue: &wgpu::Queue, gain: f32, flood: f32) {
-        crate::sim_renderer::write_floats(queue, &self.uniform, 112, &[gain - 1., flood, 0., 0.]);
+    pub fn lighting(&self, queue: &wgpu::Queue, gain: f32, flood: f32, ambient: f32) {
+        crate::sim_renderer::write_floats(
+            queue,
+            &self.uniform,
+            112,
+            &[gain - 1., flood, ambient - 1., 0.],
+        );
     }
     /// Upload the neutral HUD-brightness cockpit art palette.
     pub fn weather(&mut self, queue: &wgpu::Queue, colors: &[[u8; 3]; 256]) {

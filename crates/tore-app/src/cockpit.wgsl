@@ -48,12 +48,13 @@ struct Output { @builtin(position) position:vec4<f32>, @location(0) screen:vec2<
      let left=(art_uv-vec2(.16,.72))/vec2(.32,.55);
      let right=(art_uv-vec2(.84,.72))/vec2(.32,.55);
      let pool=min(1.,exp(-dot(left,left)*2.)+exp(-dot(right,right)*2.))*cockpit.lighting.y;
-     if art_color.a>0. && (cockpit.lighting.x!=0. || pool>0.) {
+     if art_color.a>0. && (cockpit.lighting.x!=0. || pool>0. || cockpit.lighting.z!=0.) {
          // Match the display raster's channel gains, then return to linear light.
          let base=srgb(art_color.rgb/art_color.a);
+         let ambient=1.+cockpit.lighting.z;
          let lit=min(vec3(1.),vec3(
-             base.r+(22./255.+base.r*.35)*pool,
-             base.g*(1.-.12*pool),base.b*(1.-.16*pool))*(1.+cockpit.lighting.x));
+             base.r*ambient+(22./255.+base.r*.35)*pool,
+             base.g*ambient*(1.-.12*pool),base.b*ambient*(1.-.16*pool))*(1.+cockpit.lighting.x));
          art_color=vec4(linear_rgb(lit)*art_color.a,art_color.a);
      }
      let source=art_uv*cockpit.art.xy;

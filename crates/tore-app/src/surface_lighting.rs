@@ -148,8 +148,40 @@ fn projection(origin: [f32; 3], sun: [f32; 3], extent: f32, map: u32) -> [f32; 1
     ]
 }
 
+/// Sun and moon inputs shared by outside surfaces and cockpit ambient light.
+pub(crate) fn sky_directions(
+    world: &Terrain,
+    scenery: &Scenery,
+    altitude: f64,
+) -> ([f32; 3], [f32; 3]) {
+    let layer = world.weather.sample(altitude);
+    let sun = layer
+        .as_ref()
+        .and_then(|l| crate::celestial::visual_sun_direction(l, &world.weather))
+        .unwrap_or([0., -1., 0.]);
+    // Smooth weather's moon moves across the sky; its light follows it
+    // and fades as it sets ([`crate::night_sky`]).
+    let moon = match scenery.smooth_weather {
+        true => crate::night_sky::NightSky::for_view(
+            world,
+            1.,
+            altitude,
+            scenery
+                .celestial
+                .as_ref()
+                .map_or([0., 0., 1.], |c| c.moon_center()),
+        )
+        .map(|sky| sky.moon_light()),
+        false => layer
+            .as_ref()
+            .map(|l| crate::celestial::rotate([0., 0., 1.], [l.moon_azimuth, l.moon_elevation])),
+    }
+    .unwrap_or([0., 1., 0.]);
+    (sun, moon)
+}
+
 // Visible circular-segment area and centroid, matching the rendered solid disc.
-fn visible_sun(sun: [f32; 3], radius: f32) -> ([f32; 3], f32) {
+pub(crate) fn visible_sun(sun: [f32; 3], radius: f32) -> ([f32; 3], f32) {
     let elevation = sun[1].clamp(-1., 1.).asin();
     let x = (elevation / radius).clamp(-1., 1.);
     if x <= -1. {
@@ -501,29 +533,7 @@ impl SurfaceLighting {
         scenery: &Scenery,
         flares: &[crate::countermeasure_renderer::FlareLight],
     ) -> bool {
-        let layer = world.weather.sample(camera.position[1]);
-        let sun = layer
-            .as_ref()
-            .and_then(|l| crate::celestial::visual_sun_direction(l, &world.weather))
-            .unwrap_or([0., -1., 0.]);
-        // Smooth weather's moon moves across the sky; its light follows it
-        // and fades as it sets ([`crate::night_sky`]).
-        let moon = match scenery.smooth_weather {
-            true => crate::night_sky::NightSky::for_view(
-                world,
-                1.,
-                camera.position[1],
-                scenery
-                    .celestial
-                    .as_ref()
-                    .map_or([0., 0., 1.], |c| c.moon_center()),
-            )
-            .map(|sky| sky.moon_light()),
-            false => layer.as_ref().map(|l| {
-                crate::celestial::rotate([0., 0., 1.], [l.moon_azimuth, l.moon_elevation])
-            }),
-        }
-        .unwrap_or([0., 1., 0.]);
+        let (sun, moon) = sky_directions(world, scenery, camera.position[1]);
         let radius = scenery
             .celestial
             .as_ref()
